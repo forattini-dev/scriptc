@@ -1,0 +1,6 @@
+{
+  "name": "workspace-js-specifiers-root",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"]
+}

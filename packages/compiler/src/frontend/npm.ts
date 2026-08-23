@@ -90,6 +90,7 @@ import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { resolveExports } from "./resolve.js";
+import { workspacePackageOfPath } from "./shared.js";
 
 const NODE_IMPORT_CONDITIONS = new Set(["import", "node", "default"]);
 const NODE_REQUIRE_CONDITIONS = new Set(["require", "node", "default"]);
@@ -1336,6 +1337,27 @@ export class NpmGraphBuilder {
     return null;
   }
 
+  /** A workspace package can expose TypeScript source whose relative
+   * specifiers use the emitted-JavaScript spelling (`./value.js` beside
+   * `value.ts`). TypeScript's bundler resolver substitutes the source
+   * extension there; published npm graphs keep resolveFile's strict Node
+   * runtime rules. */
+  private resolveWorkspaceFile(path: string): string | null {
+    const substitutions = path.endsWith(".js")
+      ? [path.slice(0, -3) + ".ts", path.slice(0, -3) + ".tsx"]
+      : path.endsWith(".jsx")
+        ? [path.slice(0, -4) + ".tsx", path.slice(0, -4) + ".ts"]
+        : path.endsWith(".mjs")
+          ? [path.slice(0, -4) + ".mts"]
+          : path.endsWith(".cjs")
+            ? [path.slice(0, -4) + ".cts"]
+            : [path + ".ts", path + ".tsx"];
+    for (const candidate of substitutions) {
+      if (this.host.isFile(candidate)) return candidate;
+    }
+    return this.resolveFile(path);
+  }
+
   /** "a → b → c" — the package chain from the user's import to the point
    * of failure, for diagnostics. */
   private static chainOf(chain: readonly string[], last?: string): string {
@@ -1585,7 +1607,10 @@ export class NpmGraphBuilder {
         // for import()/static-in-lazy sites — require-reached specs embed
         // NO edge and the island's require shim throws Node's
         // MODULE_NOT_FOUND with the live require stack at the call.
-        const file = this.resolveFile(resolve(dirname(key), spec));
+        const absolute = resolve(dirname(key), spec);
+        const file = workspacePackageOfPath(key) === null
+          ? this.resolveFile(absolute)
+          : this.resolveWorkspaceFile(absolute);
         const to = file === null ? null : this.host.realpath(file);
         if (!to) {
           if (eager) {
