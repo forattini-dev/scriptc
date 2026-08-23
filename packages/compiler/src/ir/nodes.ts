@@ -6278,6 +6278,37 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
   ]);
+  const records = new Map((mod.records ?? []).map((r) => [r.id, r]));
+  const unions = new Map((mod.unions ?? []).map((u) => [u.id, u]));
+  const needsDynPromiseRuntime = (t: IrType, visiting = new Set<string>()): boolean => {
+    switch (t.kind) {
+      case "promise":
+        return true;
+      case "func":
+        return needsDynPromiseRuntime(t.ret, visiting);
+      case "array":
+        return needsDynPromiseRuntime(t.elem, visiting);
+      case "record": {
+        if (visiting.has(t.shapeId)) return false;
+        const shape = records.get(t.shapeId);
+        if (!shape) return false;
+        const next = new Set(visiting).add(t.shapeId);
+        return (
+          shape.fields.some((field) => needsDynPromiseRuntime(field.type, next)) ||
+          (shape.indexValue !== undefined && needsDynPromiseRuntime(shape.indexValue, next))
+        );
+      }
+      case "union": {
+        if (visiting.has(t.unionId)) return false;
+        const union = unions.get(t.unionId);
+        if (!union) return false;
+        const next = new Set(visiting).add(t.unionId);
+        return union.arms.some((arm) => needsDynPromiseRuntime(arm, next));
+      }
+      default:
+        return false;
+    }
+  };
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
@@ -6285,7 +6316,7 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; fn?: unknown; type?: { kind?: unknown } };
+    const node = v as { kind?: unknown; fn?: unknown; type?: IrType; value?: { type?: IrType } };
     if (node.kind === "libCall" && typeof node.fn === "string" && fns.has(node.fn)) {
       found = true;
       return;
@@ -6297,11 +6328,16 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
       found = true;
       return;
     }
-    // Promise values crossing the checked-dynamic boundary are boxed by
-    // emit-walkers through scr_dyn_new_promise_adapting(). That constructor
-    // lives in scr_async_dyn.c, so promise-typed IR must pull that TU in even
-    // when the program never awaits a dyn value.
-    if (node.type !== undefined && node.type.kind === "promise") {
+    // A promise crossing INTO dyn is boxed by emit-walkers through
+    // scr_dyn_new_promise[_adapting](). Restrict the gate to the conversion
+    // node: ordinary static promises need none of scr_async_dyn.c. A boxed
+    // function may reach the same helpers through its return type, including
+    // when that function is nested in a converted composite.
+    if (
+      node.kind === "dynFrom" &&
+      node.value?.type !== undefined &&
+      needsDynPromiseRuntime(node.value.type)
+    ) {
       found = true;
       return;
     }
