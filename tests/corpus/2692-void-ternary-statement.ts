@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions -- this corpus intentionally exercises discarded conditional expressions */
+
 // A conditional expression over two `void` calls carries no value — it only
 // compiles where JS discards it: statement position and void-returning
 // concise arrow bodies. Those lower as if/else over the taken arm; a

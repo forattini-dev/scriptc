@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions -- this diagnostic fixture intentionally consumes invalid conditional expressions */
+
 // A conditional expression over two `void` calls has no value — statement
 // position and void-returning arrow bodies compile (corpus 2692), but a
 // CONSUMED void ternary has no IR representation: fence by name instead of
@@ -15,3 +17,4 @@ console.log(typeof x);
 // keeps expression form, so the void arm fences too.
 const flag = process.argv.length > 99;
 flag ? (flag ? a() : b()) : 0;
+export {};
