@@ -161,6 +161,17 @@ describe(`typed-callback boundary (scriptc-only${sanitize ? ", sanitized" : ""})
   }, 120_000);
 });
 
+describe(`workspace package resolution (scriptc-only${sanitize ? ", sanitized" : ""})`, () => {
+  test("TypeScript sources resolve relative .js and extensionless specifiers", async () => {
+    const binary = await build(join(fixturesRoot, "npm/scriptc-only/workspace-js-specifiers/main.ts"));
+    const res = await runBinary(binary, []);
+    expect(res.stdout.toString("utf8")).toBe(
+      "workspace .js specifier workspace extensionless specifier\n",
+    );
+    expect(res.exitCode).toBe(0);
+  }, 120_000);
+});
+
 describe(`npm differential (${cases.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
     const binary = await build(c.entry);
