@@ -1,3 +1,4 @@
+import { InternalCompilerError } from "../errors.js";
 import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
@@ -2414,7 +2415,7 @@ async function localizeLibraryObjects(
       );
     }
   } else {
-    throw new Error(
+    throw new InternalCompilerError(
       `runtime symbol localization (abi.localize_runtime) has no ${platform} arm; compileLibrary admits darwin, linux, and win32 builds only`,
     );
   }
