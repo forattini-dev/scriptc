@@ -12,9 +12,8 @@ The best near-term inputs for this fork are:
 
 1. [#204 — void ternaries in discarded-value positions](https://github.com/vercel-labs/scriptc/pull/204): comprehensive differential and diagnostic regressions; supersedes the narrower #72; synthetic merge is clean.
 2. [#117 — dynamic Promise runtime gating](https://github.com/vercel-labs/scriptc/pull/117): small linker correctness fix with a focused regression; synthetic merge is clean and current `main` still lacks its promise-type gate.
-3. [#197 — tsconfig `paths` adoption for tsgo](https://github.com/vercel-labs/scriptc/pull/197): focused checker-side fix with a regression test; synthetic merge is clean. It should be followed by a separately tested resolver-side implementation informed by #200, not by importing the old stacked #42 branch.
-4. [#51 — differential oracle cache keyed by environment](https://github.com/vercel-labs/scriptc/pull/51): test-infrastructure correctness with dedicated regression coverage; synthetic merge is clean.
-5. [#146 — static DSP math](https://github.com/vercel-labs/scriptc/pull/146): useful general feature with differential and full-lane evidence, but broad enough to land only after the smaller correctness fixes.
+3. [#51 — differential oracle cache keyed by environment](https://github.com/vercel-labs/scriptc/pull/51): test-infrastructure correctness with dedicated regression coverage; synthetic merge is clean.
+4. [#146 — static DSP math](https://github.com/vercel-labs/scriptc/pull/146): useful general feature with differential and full-lane evidence, but broad enough to land only after the smaller correctness fixes.
 
 The fork should study but rewrite/test independently: #41, #43, #48–#50, #130, #200, #201, and #225.
 
@@ -35,7 +34,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 
 - [Top implementation candidate: #204](https://github.com/vercel-labs/scriptc/pull/204)
 - [Small linker fix: #117](https://github.com/vercel-labs/scriptc/pull/117)
-- [Modern tsconfig paths adoption: #197](https://github.com/vercel-labs/scriptc/pull/197)
+- [Checker-only tsconfig paths input: #197](https://github.com/vercel-labs/scriptc/pull/197)
 - [Resolver follow-up input: #200](https://github.com/vercel-labs/scriptc/pull/200)
 - [Oracle cache correctness: #51](https://github.com/vercel-labs/scriptc/pull/51)
 - [Static math feature: #146](https://github.com/vercel-labs/scriptc/pull/146)
@@ -48,7 +47,6 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 |---|---|---|
 | [#204](https://github.com/vercel-labs/scriptc/pull/204) | Fixes an open ICE while preserving lazy branch evaluation, narrowing, constant folding, and the IR invariant against void-valued ternaries. Adds corpus and diagnostic tests. | Cherry-pick onto a fork branch, run focused plain/sanitized tests, then the available full gate. Treat [#72](https://github.com/vercel-labs/scriptc/pull/72) as superseded. |
 | [#117](https://github.com/vercel-labs/scriptc/pull/117) | Prevents valid checked-dynamic Promise programs from linking without `scr_async_dyn.c`. Adds a focused linker regression. | Re-run the regression on current main and audit whether every promise-typed IR node truly requires the gated translation unit. |
-| [#197](https://github.com/vercel-labs/scriptc/pull/197) | Preserves project `paths` semantics when synthesizing tsgo configuration. Includes a red/green regression and applies cleanly. | Land checker adoption first; then cover lowering/dynamic-import resolution separately using lessons from #200. |
 | [#51](https://github.com/vercel-labs/scriptc/pull/51) | Prevents stale Node-oracle cache hits when inherited environment changes output. Adds focused key-invalidation tests. | Rebase conceptually onto the current cache format and ensure the complete environment does not leak into logs or artifacts. |
 | [#146](https://github.com/vercel-labs/scriptc/pull/146) | Adds static lowering for broadly useful scalar math with C/LLVM differential coverage and reported full plain/sanitized validation. | Land after correctness fixes; rebase manifest/snapshot changes onto current surfaces rather than accepting them mechanically. |
 
@@ -61,6 +59,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 | [#48](https://github.com/vercel-labs/scriptc/pull/48), [#49](https://github.com/vercel-labs/scriptc/pull/49), [#50](https://github.com/vercel-labs/scriptc/pull/50) | Well-scoped lowering improvements with focused C/LLVM tests. They are hundreds of upstream commits old; retain tests and re-derive implementation against current representations. |
 | [#43](https://github.com/vercel-labs/scriptc/pull/43) | Compile-time two-argument `URL` resolution is small and useful, but the PR adds no test. Add valid, invalid, and non-literal diagnostics before porting. |
 | [#130](https://github.com/vercel-labs/scriptc/pull/130) | Honest partial-shim coverage is valuable and tested, but review identified stale documentation. Update docs and re-audit the current builtin inventory. |
+| [#197](https://github.com/vercel-labs/scriptc/pull/197) | Correctly forwards `paths` to tsgo, but its regression asserts only that `SC0001` disappears. A real build of the same alias still fails with `SC1090` because lowering cannot resolve the imported binding. Keep the configuration logic as input to a complete checker-plus-lowering implementation. |
 | [#200](https://github.com/vercel-labs/scriptc/pull/200) | Identifies genuine drift between checker and lowering resolvers, but mixes self-name/directory fixes with a paths registry and conflicts in current lowering. Split it into independently tested slices after #197. |
 | [#201](https://github.com/vercel-labs/scriptc/pull/201) | Avoiding `RangeError` on huge diagnostic sets is useful, but a fixed count of 1000 has no direct regression and is only an indirect size bound. Prefer a deterministic rendered-byte budget with tests. |
 | [#196](https://github.com/vercel-labs/scriptc/pull/196) | Correctly spots tsgo option-serialization gaps, but JSX typechecking does not establish that scriptc can lower TSX. Adopt only with a clear TSX policy and end-to-end diagnostics. |
@@ -73,7 +72,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 | [#141](https://github.com/vercel-labs/scriptc/pull/141) | The NaN false-edge bug was subsequently fixed in merged [#160](https://github.com/vercel-labs/scriptc/pull/160); current main already uses branch-aware NaN clearing. |
 | [#157](https://github.com/vercel-labs/scriptc/pull/157) | The failure-detail behavior was subsequently incorporated into merged [#159](https://github.com/vercel-labs/scriptc/pull/159); current main already retains stderr, stdout, and process-message fallback. |
 | [#72](https://github.com/vercel-labs/scriptc/pull/72) | Same issue as #204, with narrower coverage and an earlier rewrite point. Prefer #204. |
-| [#42](https://github.com/vercel-labs/scriptc/pull/42) | Old stacked branch contains unrelated URL, crypto, and ambient-type commits. Prefer focused #197 plus a new resolver slice informed by #200. |
+| [#42](https://github.com/vercel-labs/scriptc/pull/42) | Old stacked branch contains unrelated URL, crypto, and ambient-type commits. Prefer a new end-to-end resolver change informed selectively by #197 and #200. |
 | [#24](https://github.com/vercel-labs/scriptc/pull/24) | README output examples have since evolved; the old one-line patch conflicts with current documentation and has no present value. |
 
 ### Tier D — do not adopt as written
@@ -91,7 +90,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 
 ## API / CLI / Config Details
 
-- #197 changes the synthesized tsgo configuration, not the entire module-resolution pipeline. Bare/dynamic lowering still needs its own parity coverage.
+- #197 changes the synthesized tsgo configuration, not the entire module-resolution pipeline. Its own fixture passes the narrow preflight assertion but still fails an end-to-end compile with `SC1090`; do not ship it without lowering/resolver parity.
 - #200 touches self-name exports, directory targets, and tsconfig paths in one PR; those are separate resolution contracts and should be tested independently.
 - #204 preserves the public behavior of discarded `void` expressions while keeping consumed void ternaries fenced with a diagnostic.
 - #117 changes runtime translation-unit gating only; it should not alter emitted program semantics or the public API.
@@ -121,7 +120,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 
 - [#204](https://github.com/vercel-labs/scriptc/pull/204): strongest open correctness PR by test depth and semantic explanation; clean synthetic merge.
 - [#117](https://github.com/vercel-labs/scriptc/pull/117): smallest high-confidence missing fix; current `moduleUsesDynAsync` lacks the proposed promise-type branch.
-- [#197](https://github.com/vercel-labs/scriptc/pull/197): modern focused replacement for the checker half of old #42.
+- [#197](https://github.com/vercel-labs/scriptc/pull/197): useful checker-side input, but not independently adoptable after the end-to-end `SC1090` reproduction.
 - [#51](https://github.com/vercel-labs/scriptc/pull/51): durable harness correctness; needs rebasing onto the current cache schema.
 - [#146](https://github.com/vercel-labs/scriptc/pull/146): broad but coherent feature with cross-backend coverage.
 - [#141](https://github.com/vercel-labs/scriptc/pull/141) / [#160](https://github.com/vercel-labs/scriptc/pull/160): example of an open PR superseded by a later merged solution.
@@ -132,7 +131,7 @@ Avoid adopting as written: #198, #213, #217–#224, and the Windows pair #27/#20
 1. Finish the fork-local #176 `process.argv` correctness fix already under diagnosis.
 2. Port #204 into a dedicated fork branch, preserve original authorship, and run its focused corpus/diagnostic tests in plain and sanitized lanes.
 3. Port #117 with its linker regression and inspect static-size impact.
-4. Adopt #197, then create a separate resolver-parity change for the independently reproducible parts of #200.
-5. Rebase #51's tests onto the current oracle-cache format.
+4. Rebase #51's tests onto the current oracle-cache format.
+5. Design one end-to-end `paths` change using #197 and the independently reproducible parts of #200 as input; require a successful native build, not only a missing checker diagnostic.
 6. Re-evaluate #146 only after the correctness queue is green.
 7. Keep all resulting branches and PRs inside `forattini-dev/scriptc`; do not open or modify PRs in `vercel-labs/scriptc`.
