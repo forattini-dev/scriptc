@@ -10,6 +10,7 @@ All notable changes to scriptc will be documented in this file.
 - **Rust containers now cover array identity searches plus insertion-ordered `Map` and `Set`.** Strict-equality `indexOf`, SameValueZero `includes`, number/string keys, seeded construction, live mutation during iteration, reference values, cycle tracing, and first-class constructor registries preserve Node behavior in safe Rust.
 - **Rust gains type-directed JSON serialization and parsing.** `JSON.stringify` now preserves Node formatting for scalars, nested arrays, records, unions, optional-field omission, declared property order, and catchable circular-structure errors. A `JSON.parse` result immediately checked into a static JSON-safe type validates and builds that value without exposing unchecked dynamic data; string inclusion and upper-case conversion cover the supporting class and JSON corpora.
 - **Rust string operations now use JavaScript's UTF-16 indexing model.** `charCodeAt`, `charAt`, `indexOf`, `includes`, `slice`, length, prefix/suffix checks, repeat, trimming, and case conversion preserve Node behavior across ASCII, BMP, astral, combining-mark, and ECMAScript-whitespace corpora.
+- **Rust array callbacks cover the practical higher-order surface.** Mapping, filtering, iteration, search predicates, flat-mapping, left/right reduction, and sorting preserve callback arguments, mutation timing, nested references, cycle collection, and native `TypeError` identity for empty reductions.
 
 <!-- release:start -->
 

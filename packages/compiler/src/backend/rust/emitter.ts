@@ -1209,17 +1209,22 @@ class RustEmitter {
         return `(${this.emitExpr(expr.obj)}).with(|record| ${result})`;
       }
       case "caughtTest":
-        if (expr.test !== "instanceof" || expr.className !== "%Error") {
+        if (expr.test !== "instanceof" || expr.className === undefined || !RUNTIME_ERROR_CLASSES.has(expr.className)) {
           this.unsupported(`caught test '${expr.test}:${expr.className ?? ""}'`, expr.loc);
         }
-        return `runtime::caught_is_error(&(${this.emitExpr(expr.value)}))`;
+        {
+          const error = RUNTIME_ERROR_CLASSES.get(expr.className);
+          if (error === undefined) this.unsupported(`caught test '${expr.test}:${expr.className}'`, expr.loc);
+          const test = `runtime::caught_is_error_class(&(${this.emitExpr(expr.value)}), "${this.rustString(error.lib)}")`;
+          return expr.negated ? `!(${test})` : test;
+        }
       case "caughtNarrow":
-        if (expr.type.kind !== "object" || expr.type.className !== "%Error") {
+        if (expr.type.kind !== "object" || !RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
           this.unsupported("caught narrowing outside Error", expr.loc);
         }
         return this.emitExpr(expr.value);
       case "fieldGet":
-        if (expr.className === "%Error" && (expr.field === "name" || expr.field === "message")) {
+        if (RUNTIME_ERROR_CLASSES.has(expr.className) && (expr.field === "name" || expr.field === "message")) {
           return `runtime::caught_error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
         }
         {

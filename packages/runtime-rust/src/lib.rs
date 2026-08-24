@@ -450,6 +450,13 @@ pub fn caught_is_error(caught: &Caught) -> bool {
     caught.value.is::<JsError>()
 }
 
+pub fn caught_is_error_class(caught: &Caught, name: &str) -> bool {
+    caught
+        .value
+        .downcast_ref::<JsError>()
+        .is_some_and(|error| name == "Error" || error.name == name)
+}
+
 pub fn caught_error_name(caught: &Caught) -> JsString {
     let error = caught
         .value

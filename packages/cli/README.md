@@ -38,8 +38,9 @@ The current subset includes classes with constructors, fields, accessors,
 monomorphic and virtual methods, generic specializations, abstract dispatch,
 first-class constructor values, lexical `this` captures, object identity,
 single inheritance, runtime `instanceof`, composition, collectable cycles,
-array identity searches, and insertion-ordered `Map` and `Set` containers with
-live iteration. Compact type-directed `JSON.stringify` covers scalars, nested
+array identity searches and higher-order callbacks, and insertion-ordered
+`Map` and `Set` containers with live iteration. Compact type-directed
+`JSON.stringify` covers scalars, nested
 arrays, records, unions, optional fields, and circular-value errors. Typed
 `JSON.parse(...) as T` boundaries validate and build the same JSON-safe types.
 Common string searches, slicing, trimming, repetition, case conversion, and

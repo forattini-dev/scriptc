@@ -160,6 +160,46 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
   }
 }, 120_000);
 
+test("Rust array higher-order methods preserve callbacks, references, reductions, and sorting", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-array-hofs-"));
+  for (const fixture of [
+    "503-array-functions.ts",
+    "510-array-map-filter-foreach.ts",
+    "513-array-methods-rc-stress.ts",
+    "514-array-find-some-every.ts",
+    "515-array-flatmap.ts",
+    "516-array-reduce.ts",
+    "517-array-hof-index-args.ts",
+    "518-array-sort.ts",
+    "531-record-array-hofs.ts",
+    "532-record-arrays-rc-stress.ts",
+    "533-array-element-cycles.ts",
+    "534-record-width-subtyping.ts",
+    "542-union-element-arrays.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-instanceof-"));
   const entryPath = join(dir, "instanceof.ts");
