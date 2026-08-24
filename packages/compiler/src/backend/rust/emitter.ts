@@ -487,6 +487,7 @@ class RustEmitter {
         case "array":
         case "map":
         case "set":
+        case "stats":
         case "record":
         case "object":
         case "func":
@@ -685,6 +686,7 @@ class RustEmitter {
           break;
         case "array":
         case "bytes":
+        case "stats":
         case "map":
         case "set":
         case "record":
@@ -1623,6 +1625,17 @@ class RustEmitter {
         if (expr.fn === "buffer.concat" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::buffer_concat(&(${this.emitExpr(arg)}))`;
         }
+        if ((expr.fn === "fs.statSync" || expr.fn === "fs.lstatSync") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_stat(&(${this.emitExpr(arg)}), ${expr.fn === "fs.statSync"})`;
+        }
+        if (expr.fn === "stats.isFile" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_is_file(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.isDirectory" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_is_directory(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.isSymbolicLink" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_is_symlink(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.size" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_size(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.blocks" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_blocks(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.nlink" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_nlink(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.atimeMs" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_atime_ms(&(${this.emitExpr(arg)}))`;
+        if (expr.fn === "stats.mtimeMs" && expr.args.length === 1 && arg !== undefined) return `runtime::stats_mtime_ms(&(${this.emitExpr(arg)}))`;
         if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::path_join(&(${this.emitExpr(arg)}))`;
         }
@@ -1899,6 +1912,7 @@ class RustEmitter {
       }
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
       case "bytes": return `runtime::JsBytes<${this.rustBytesElement(type.elem)}>`;
+      case "stats": return "runtime::JsStats";
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
@@ -2133,7 +2147,7 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "record" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "record" ||
       (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 

@@ -58,7 +58,8 @@ array identity searches and higher-order callbacks, and insertion-ordered
 arrays, records, unions, optional fields, and circular-value errors. Typed
 `JSON.parse(...) as T` boundaries validate and build the same JSON-safe types.
 Common string searches, slicing, trimming, repetition, case conversion, and
-UTF-16 indexed access are also available.
+UTF-16 indexed access are also available. Basic synchronous filesystem,
+process, POSIX path, typed-array, and `Buffer` workflows are supported too.
 
 ## Use Node APIs
 

@@ -773,8 +773,12 @@ test("Rust synchronous text filesystem operations match Node and throw catchably
   }
   const realpathEntry = join(dir, "realpath.ts");
   await writeFile(realpathEntry, `
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 console.log(realpathSync(".") === process.cwd());
+const stats = statSync(".");
+console.log(stats.isDirectory(), stats.isFile(), stats.isSymbolicLink());
+console.log(stats.size >= 0, stats.blocks >= 0, stats.nlink >= 1, stats.atimeMs > 0, stats.mtimeMs > 0);
+console.log(lstatSync(".").isSymbolicLink());
 try { realpathSync("scriptc-rust-definitely-missing"); }
 catch (error) {
   if (error instanceof Error) {

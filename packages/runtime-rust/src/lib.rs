@@ -1959,6 +1959,96 @@ pub fn fs_access(path: &JsString, mode: f64) {
     }
 }
 
+pub struct StatsData {
+    is_file: bool,
+    is_directory: bool,
+    is_symlink: bool,
+    size: f64,
+    blocks: f64,
+    nlink: f64,
+    atime_ms: f64,
+    mtime_ms: f64,
+}
+
+impl Trace for StatsData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for StatsData {
+    fn clear_edges(&mut self) {}
+}
+
+pub type JsStats = Gc<StatsData>;
+
+fn system_time_ms(value: std::io::Result<std::time::SystemTime>) -> f64 {
+    match value {
+        Ok(value) => match value.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs_f64() * 1000.0,
+            Err(error) => -error.duration().as_secs_f64() * 1000.0,
+        },
+        Err(_) => 0.0,
+    }
+}
+
+#[cfg(unix)]
+fn stats_platform_fields(metadata: &std::fs::Metadata) -> (f64, f64) {
+    use std::os::unix::fs::MetadataExt;
+    (metadata.blocks() as f64, metadata.nlink() as f64)
+}
+
+#[cfg(not(unix))]
+fn stats_platform_fields(_metadata: &std::fs::Metadata) -> (f64, f64) {
+    (0.0, 1.0)
+}
+
+pub fn fs_stat(path: &JsString, follow: bool) -> JsStats {
+    let result = if follow {
+        std::fs::metadata(path.as_ref())
+    } else {
+        std::fs::symlink_metadata(path.as_ref())
+    };
+    let metadata = match result {
+        Ok(metadata) => metadata,
+        Err(error) => throw_fs_error(if follow { "stat" } else { "lstat" }, path, error),
+    };
+    let (blocks, nlink) = stats_platform_fields(&metadata);
+    Gc::new(StatsData {
+        is_file: metadata.is_file(),
+        is_directory: metadata.is_dir(),
+        is_symlink: metadata.file_type().is_symlink(),
+        size: metadata.len() as f64,
+        blocks,
+        nlink,
+        atime_ms: system_time_ms(metadata.accessed()),
+        mtime_ms: system_time_ms(metadata.modified()),
+    })
+}
+
+pub fn stats_is_file(stats: &JsStats) -> bool {
+    stats.with(|stats| stats.is_file)
+}
+pub fn stats_is_directory(stats: &JsStats) -> bool {
+    stats.with(|stats| stats.is_directory)
+}
+pub fn stats_is_symlink(stats: &JsStats) -> bool {
+    stats.with(|stats| stats.is_symlink)
+}
+pub fn stats_size(stats: &JsStats) -> f64 {
+    stats.with(|stats| stats.size)
+}
+pub fn stats_blocks(stats: &JsStats) -> f64 {
+    stats.with(|stats| stats.blocks)
+}
+pub fn stats_nlink(stats: &JsStats) -> f64 {
+    stats.with(|stats| stats.nlink)
+}
+pub fn stats_atime_ms(stats: &JsStats) -> f64 {
+    stats.with(|stats| stats.atime_ms)
+}
+pub fn stats_mtime_ms(stats: &JsStats) -> f64 {
+    stats.with(|stats| stats.mtime_ms)
+}
+
 fn normalize_posix(path: &str) -> String {
     if path.is_empty() {
         return ".".to_owned();
