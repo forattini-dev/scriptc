@@ -3133,6 +3133,20 @@ class RustEmitter {
         if (expr.fn === "fs.writeFileSyncBytes" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_write_file_bytes(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
+        if (expr.fn === "fsp.readFileBytes" && expr.args.length === 1 && arg !== undefined) {
+          const path = `sc_rt_${this.temporary++}`;
+          return `{ let ${path} = ${this.emitExpr(arg)}; runtime::promise_from_sync(move || runtime::fs_read_file_bytes(&${path})) }`;
+        }
+        if (expr.fn === "fsp.readFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const path = `sc_rt_${this.temporary++}`;
+          const encoding = `sc_rt_${this.temporary++}`;
+          return `{ let ${path} = ${this.emitExpr(arg)}; let ${encoding} = ${this.emitExpr(expr.args[1])}; runtime::promise_from_sync(move || { let _ = ${encoding}; runtime::fs_read_file(&${path}) }) }`;
+        }
+        if (expr.fn === "fsp.writeFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const path = `sc_rt_${this.temporary++}`;
+          const data = `sc_rt_${this.temporary++}`;
+          return `{ let ${path} = ${this.emitExpr(arg)}; let ${data} = ${this.emitExpr(expr.args[1])}; runtime::promise_from_sync(move || runtime::fs_write_file(&${path}, &${data})) }`;
+        }
         if (expr.fn === "fs.appendFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_append_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }

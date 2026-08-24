@@ -865,6 +865,21 @@ pub fn promise_rejected<T: HeapValue>(reason: Caught) -> JsPromise<T> {
     promise
 }
 
+pub fn promise_from_sync<T, F>(operation: F) -> JsPromise<T>
+where
+    T: HeapValue,
+    F: FnOnce() -> T + 'static,
+{
+    let result = promise_new();
+    let guard = result.clone();
+    let target = result.clone();
+    promise_run_segment(&guard, move || {
+        let value = operation();
+        let _ = promise_fulfill(&target, value);
+    });
+    result
+}
+
 pub fn promise_timeout(delay_ms: f64) -> JsPromise<()> {
     let promise = promise_new();
     let result = promise.clone();
@@ -4808,6 +4823,42 @@ mod tests {
             run_event_loop();
             assert_eq!(values.borrow().as_slice(), &[string("6")]);
             assert!(saw_rejection.get());
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promise_from_sync_fulfills_values_and_converts_throws_to_rejections() {
+        let baseline = live_heap_objects();
+        {
+            let fulfilled = promise_from_sync(|| 42.0_f64);
+            let fulfilled_values = Rc::new(RefCell::new(Vec::new()));
+            let observed_values = fulfilled_values.clone();
+            promise_then(
+                &fulfilled,
+                Box::new(move |outcome| observed_values.borrow_mut().push(promise_unwrap(outcome))),
+            );
+
+            let rejected = promise_from_sync::<f64, _>(|| {
+                throw_type_error("sync operation failed".to_owned())
+            });
+            let rejection = Rc::new(RefCell::new(None));
+            let observed_rejection = rejection.clone();
+            promise_then(
+                &rejected,
+                Box::new(move |outcome| {
+                    if let Err(reason) = outcome {
+                        *observed_rejection.borrow_mut() = Some(caught_to_string(&reason));
+                    }
+                }),
+            );
+
+            run_event_loop();
+            assert_eq!(fulfilled_values.borrow().as_slice(), &[42.0]);
+            assert_eq!(
+                rejection.borrow().as_deref(),
+                Some("TypeError: sync operation failed")
+            );
         }
         assert_eq!(live_heap_objects(), baseline);
     }

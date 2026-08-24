@@ -1344,6 +1344,8 @@ export {};
     ["promise-union", resolve("tests/corpus/1369-promise-union.ts")],
     ["promise-all-array", resolve("tests/corpus/1438-promise-all.ts")],
     ["promise-race", resolve("tests/corpus/1430-promise-race.ts")],
+    ["promise-all-tuple-literal", resolve("tests/corpus/1574-promise-all-tuple-literal.ts")],
+    ["promise-try", resolve("tests/corpus/2369-promise-try.ts")],
     ["map-promise-values", resolve("tests/corpus/1542-map-promise-values.ts")],
     ["params-async-generics", resolve("tests/corpus/409-params-async-generics.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],
