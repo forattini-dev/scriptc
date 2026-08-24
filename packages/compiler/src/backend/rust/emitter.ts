@@ -1656,6 +1656,13 @@ class RustEmitter {
           if (value === undefined || position === undefined || encoding === undefined) this.unsupported("fs.writeStrSync arguments", expr.loc);
           return `runtime::fs_write_str_sync(${this.emitExpr(arg)}, &(${this.emitExpr(value)}), ${this.emitExpr(position)}, &(${this.emitExpr(encoding)}))`;
         }
+        if (expr.fn === "cp.execSync" && expr.args.length === 11 && arg !== undefined) {
+          const [argv, shell, input, hasInput, cwd, hasEnv, envPairs, timeout, stdoutMode, stderrMode] = expr.args.slice(1);
+          if (argv === undefined || shell === undefined || input === undefined || hasInput === undefined ||
+              cwd === undefined || hasEnv === undefined || envPairs === undefined || timeout === undefined ||
+              stdoutMode === undefined || stderrMode === undefined) this.unsupported("cp.execSync arguments", expr.loc);
+          return `runtime::child_exec_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(shell)}, &(${this.emitExpr(input)}), ${this.emitExpr(hasInput)}, &(${this.emitExpr(cwd)}), ${this.emitExpr(hasEnv)}, &(${this.emitExpr(envPairs)}), ${this.emitExpr(timeout)}, ${this.emitExpr(stdoutMode)}, ${this.emitExpr(stderrMode)})`;
+        }
         if (expr.fn === "buffer.fromStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::buffer_from_string(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }

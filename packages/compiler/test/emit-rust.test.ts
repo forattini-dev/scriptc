@@ -809,6 +809,74 @@ catch (error) {
   }
 }, 180_000);
 
+test("Rust synchronous child processes capture output and throw catchably", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-child-sync-"));
+  const fixture = resolve("tests/corpus/1552-exec-options-record.ts");
+  const fixtureResult = await compile(fixture, {
+    outDir: dir,
+    outPath: join(dir, "exec-options-record"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    fixtureResult.ok,
+    fixtureResult.ok ? fixture : fixtureResult.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (fixtureResult.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [fixture]),
+      execFileAsync(fixtureResult.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+
+  const errorsEntry = join(dir, "exec-errors.ts");
+  await writeFile(errorsEntry, `
+import { execFileSync, execSync } from "node:child_process";
+console.log(JSON.stringify(execFileSync("/usr/bin/printf", ["%s", "direct ok"], { encoding: "utf8" })));
+console.log(JSON.stringify(execSync("printf 'shell ok'", { encoding: "utf8", stdio: "pipe" })));
+console.log(JSON.stringify(execFileSync("/bin/cat", [], { encoding: "utf8", input: "fed input" })));
+try {
+  execFileSync("/bin/sh", ["-c", "echo failed-line 1>&2; exit 3"], { encoding: "utf8", stdio: "pipe" });
+} catch (error) {
+  if (error instanceof Error) console.log(JSON.stringify(error.message));
+}
+try {
+  execFileSync("scriptc-rust-definitely-missing", [], { encoding: "utf8", stdio: "pipe" });
+} catch (error) {
+  if (error instanceof Error) console.log(error.message, (error as NodeJS.ErrnoException).code);
+}
+try {
+  execFileSync("/bin/sleep", ["1"], { encoding: "utf8", stdio: "pipe", timeout: 20 });
+} catch (error) {
+  if (error instanceof Error) console.log(error.message, (error as NodeJS.ErrnoException).code);
+}
+`);
+  const errorsResult = await compile(errorsEntry, {
+    outDir: dir,
+    outPath: join(dir, "exec-errors"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    errorsResult.ok,
+    errorsResult.ok ? undefined : errorsResult.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (errorsResult.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [errorsEntry]),
+      execFileAsync(errorsResult.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [

@@ -2320,6 +2320,169 @@ pub fn fs_read_fd(fd: f64, _encoding: &JsString) -> JsString {
     bytes_to_string(&bytes, &string("utf8"))
 }
 
+pub fn child_exec_sync(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    shell: bool,
+    input: &JsString,
+    has_input: bool,
+    cwd: &JsString,
+    has_env: bool,
+    env_pairs: &JsArray<JsString>,
+    timeout_ms: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+) -> JsString {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+
+    let mut child_command = Command::new(command.as_ref());
+    arguments.with(|arguments| {
+        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+    });
+    if !cwd.is_empty() {
+        child_command.current_dir(cwd.as_ref());
+    }
+    if has_env {
+        child_command.env_clear();
+        env_pairs.with(|pairs| {
+            for pair in pairs.elements.chunks_exact(2) {
+                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            }
+        });
+    }
+
+    let stdout_mode = to_int32(stdout_mode);
+    let stdin_inherit = stdout_mode & 4 != 0;
+    let stdout_mode = stdout_mode & 3;
+    child_command.stdin(if has_input {
+        Stdio::piped()
+    } else if stdin_inherit {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    });
+    child_command.stdout(match stdout_mode {
+        0 => Stdio::null(),
+        2 => Stdio::inherit(),
+        _ => Stdio::piped(),
+    });
+    let stderr_mode = to_int32(stderr_mode);
+    child_command.stderr(match stderr_mode {
+        2 => Stdio::null(),
+        3 => Stdio::inherit(),
+        _ => Stdio::piped(),
+    });
+
+    let mut child = match child_command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let code = fs_error_code(&error);
+            throw_value(JsError {
+                name: "Error".to_owned(),
+                message: format!("spawnSync {command} {code}"),
+                code: Some(code.to_owned()),
+            })
+        }
+    };
+    let stdout_reader = child.stdout.take().map(|mut stdout| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).map(|_| bytes)
+        })
+    });
+    let stderr_reader = child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes).map(|_| bytes)
+        })
+    });
+    if has_input {
+        let write_result = child
+            .stdin
+            .take()
+            .expect("scriptc: piped child stdin missing")
+            .write_all(input.as_bytes());
+        if let Err(error) = write_result {
+            let _ = child.kill();
+            let _ = child.wait();
+            throw_fs_fd_io_error("write", error);
+        }
+    }
+    let timeout = if timeout_ms.is_finite() && timeout_ms > 0.0 {
+        Some(std::time::Duration::from_secs_f64(timeout_ms / 1000.0))
+    } else {
+        None
+    };
+    let started = std::time::Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if timeout.is_some_and(|timeout| started.elapsed() >= timeout) => {
+                timed_out = true;
+                let _ = child.kill();
+                break child
+                    .wait()
+                    .unwrap_or_else(|error| throw_fs_fd_io_error("wait", error));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                throw_fs_fd_io_error("wait", error)
+            }
+        }
+    };
+    let join_reader = |reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>| {
+        reader.map_or_else(Vec::new, |reader| {
+            reader
+                .join()
+                .expect("scriptc: child output reader panicked")
+                .unwrap_or_else(|error| throw_fs_fd_io_error("read", error))
+        })
+    };
+    let stdout = join_reader(stdout_reader);
+    let stderr = join_reader(stderr_reader);
+    if stderr_mode == 0 {
+        let _ = std::io::stderr().write_all(&stderr);
+    }
+    if timed_out {
+        throw_value(JsError {
+            name: "Error".to_owned(),
+            message: format!("spawnSync {command} ETIMEDOUT"),
+            code: Some("ETIMEDOUT".to_owned()),
+        });
+    }
+    if !status.success() {
+        let display = if shell {
+            arguments.with(|arguments| {
+                arguments
+                    .elements
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| command.clone())
+            })
+        } else {
+            let mut display = command.to_string();
+            arguments.with(|arguments| {
+                for argument in &arguments.elements {
+                    display.push(' ');
+                    display.push_str(argument);
+                }
+            });
+            Rc::from(display)
+        };
+        let stderr = String::from_utf8_lossy(&stderr);
+        throw_value(JsError {
+            name: "Error".to_owned(),
+            message: format!("Command failed: {display}\n{stderr}"),
+            code: None,
+        });
+    }
+    Rc::from(String::from_utf8_lossy(&stdout).as_ref())
+}
+
 pub struct StatsData {
     is_file: bool,
     is_directory: bool,
