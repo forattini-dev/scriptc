@@ -1340,6 +1340,7 @@ export {};
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
     ["async-eager-chains", resolve("tests/corpus/1029-async-eager-chains.ts")],
     ["async-promise-cycle", resolve("tests/corpus/755-cycle-async-promise.ts")],
+    ["promise-union-await-values", resolve("tests/corpus/519-promise-union-await-values.ts")],
     ["promise-union", resolve("tests/corpus/1369-promise-union.ts")],
     ["promise-all-array", resolve("tests/corpus/1438-promise-all.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],

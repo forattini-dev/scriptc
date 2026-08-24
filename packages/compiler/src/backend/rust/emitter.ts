@@ -1550,6 +1550,62 @@ class RustEmitter {
     this.line("}));");
   }
 
+  private emitAsyncProtectedValue(
+    expr: IrExpr,
+    exitLocals: ReadonlySet<string>,
+    handlers: RustAsyncHandlers,
+    consume: (value: string) => void,
+  ): void {
+    const awaited = this.awaitExpression(expr);
+    if (awaited !== null) {
+      this.emitAsyncProtectedContinuation(this.emitAwaitDependency(awaited), exitLocals, handlers, consume);
+      return;
+    }
+    if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {
+      const union = this.union(expr.unionId, expr.loc);
+      const arm = union.arms[expr.tag];
+      if (arm === undefined || this.isUnit(arm)) {
+        this.unsupported(`protected async union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
+      }
+      const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
+      this.emitAsyncProtectedValue(
+        expr.value,
+        exitLocals,
+        handlers,
+        (value) => consume(`${variant}(${value})`),
+      );
+      return;
+    }
+    if (expr.kind === "bin") {
+      this.emitAsyncProtectedValue(expr.left, exitLocals, handlers, (left) => {
+        this.emitAsyncProtectedValue(
+          expr.right,
+          exitLocals,
+          handlers,
+          (right) => consume(this.emitBinaryValues(expr, left, right)),
+        );
+      });
+      return;
+    }
+    if (expr.kind === "strConcat") {
+      this.emitAsyncProtectedValue(expr.left, exitLocals, handlers, (left) => {
+        this.emitAsyncProtectedValue(
+          expr.right,
+          exitLocals,
+          handlers,
+          (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`),
+        );
+      });
+      return;
+    }
+    if (this.containsAsyncSuspension(expr)) {
+      this.unsupported("nested async value inside a Rust protected segment", expr.loc);
+    }
+    const value = `sc_async_value_${this.temporary++}`;
+    this.line(`let ${value} = ${this.emitExpr(expr)};`);
+    consume(value);
+  }
+
   private emitAsyncProtectedForOf(
     stmt: Extract<IrStmt, { kind: "forOf" }>,
     remaining: readonly IrStmt[],
@@ -1645,10 +1701,9 @@ class RustEmitter {
       this.emitAsyncProtectedSequence(remaining, exitLocals, handlers, loc);
       return;
     }
-    const awaited = this.awaitExpression(arg);
-    if (awaited !== null) {
-      this.emitAsyncProtectedContinuation(
-        this.emitAwaitDependency(awaited),
+    if (this.containsAsyncSuspension(arg)) {
+      this.emitAsyncProtectedValue(
+        arg,
         exitLocals,
         handlers,
         (value) => {
@@ -1659,9 +1714,6 @@ class RustEmitter {
         },
       );
       return;
-    }
-    if (this.containsAsyncSuspension(arg)) {
-      this.unsupported("nested async console value inside a Rust protected segment", arg.loc);
     }
     const value = `sc_async_argument_${this.temporary++}`;
     this.line(`let ${value} = ${this.emitExpr(arg)};`);
