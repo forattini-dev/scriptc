@@ -929,7 +929,9 @@ console.log("hasRef", unreffed.hasRef());
 clearTimeout(unreffed);
 const refreshed = setTimeout(() => console.log("refreshed"), 4);
 refreshed.refresh();
-setTimeout(() => console.log("later"), 8);
+setTimeout(() => console.log("later"), 25);
+const timerBarrier = new Int32Array(new SharedArrayBuffer(4));
+Atomics.wait(timerBarrier, 0, 0, 5);
 value = "after";
 console.log("sync", value);
 `);
@@ -1099,27 +1101,34 @@ await sleep(5);
 console.log("promise timer");
 await tick();
 console.log("promise immediate");
+queueMicrotask(() => console.log("before value hop"));
+await null;
+console.log("after value hop");
 export {};
 `);
-  const result = await compile(entry, {
-    outDir: dir,
-    outPath: join(dir, "async-resolve"),
-    backend: "rust",
-    optimization: "dev",
-  });
-  expect(
-    result.ok,
-    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
-  ).toBe(true);
-  if (result.ok) {
+  for (const [name, entryPath] of [
+    ["async-resolve", entry],
+    ["top-level-await", resolve("tests/corpus/2673-top-level-await-implicit-module.ts")],
+  ] as const) {
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, name),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? name : `${name}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entry]),
+      execFileAsync(process.execPath, [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
     ]);
-    expect(rust.stdout).toBe(node.stdout);
-    expect(rust.stderr).toBe(node.stderr);
+    expect(rust.stdout, name).toBe(node.stdout);
+    expect(rust.stderr, name).toBe(node.stderr);
   }
 }, 120_000);
 

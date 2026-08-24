@@ -797,6 +797,22 @@ class RustEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const stmt = statements[index];
       if (stmt === undefined) break;
+      const hop = stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr"
+        ? stmt.expr.stmts.findIndex((candidate) =>
+          candidate.kind === "exprStmt" && candidate.expr.kind === "libCall" && candidate.expr.fn === "async.hop")
+        : -1;
+      if (hop >= 0 && stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr") {
+        if (hop !== stmt.expr.stmts.length - 1 || stmt.expr.result.kind !== "varRef") {
+          this.unsupported("non-canonical await-value hop", stmt.loc);
+        }
+        for (const prelude of stmt.expr.stmts.slice(0, hop)) this.emitStatement(prelude);
+        this.emitAsyncContinuation(
+          "runtime::promise_resolved(())",
+          (value) => this.line(`let _ = ${value};`),
+          statements.slice(index + 1),
+        );
+        return;
+      }
       const awaited =
         stmt.kind === "assign" && stmt.value.kind === "awaitExpr" ? stmt.value
         : stmt.kind === "varDecl" && stmt.init?.kind === "awaitExpr" ? stmt.init
@@ -811,39 +827,23 @@ class RustEmitter {
         continue;
       }
 
-      const dependency = `sc_async_dependency_${this.temporary++}`;
-      const nextResult = `sc_async_result_${this.temporary++}`;
-      const outcome = `sc_async_outcome_${this.temporary++}`;
-      const guard = `sc_async_guard_${this.temporary++}`;
-      const value = `sc_async_value_${this.temporary++}`;
-      this.line(`let ${dependency} = ${this.emitExpr(awaited.value)};`);
-      this.line(`let ${nextResult} = ${result}.clone();`);
-      this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
-      this.indent += 1;
-      this.line(`let ${guard} = ${nextResult}.clone();`);
-      this.line(`runtime::promise_run_segment(&${guard}, move || {`);
-      this.indent += 1;
-      this.line(`let ${result} = ${nextResult};`);
-      this.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
-
-      if (stmt.kind === "assign") {
-        this.emitAssignment(stmt.localId, value, stmt.loc);
-      } else if (stmt.kind === "varDecl") {
-        const local = this.local(stmt.localId, stmt.loc);
-        this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
-      } else if (stmt.kind === "exprStmt") {
-        this.line(`let _ = ${value};`);
-      } else {
-        this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
-        this.line("return;");
-      }
-
-      if (stmt.kind !== "return") this.emitAsyncStatements(statements.slice(index + 1));
-      this.indent -= 1;
-      this.line("});");
-      this.indent -= 1;
-      this.line("}));");
-      this.line("return;");
+      this.emitAsyncContinuation(
+        this.emitExpr(awaited.value),
+        (value) => {
+          if (stmt.kind === "assign") {
+            this.emitAssignment(stmt.localId, value, stmt.loc);
+          } else if (stmt.kind === "varDecl") {
+            const local = this.local(stmt.localId, stmt.loc);
+            this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+          } else if (stmt.kind === "exprStmt") {
+            this.line(`let _ = ${value};`);
+          } else {
+            this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+            this.line("return;");
+          }
+        },
+        stmt.kind === "return" ? null : statements.slice(index + 1),
+      );
       return;
     }
 
@@ -852,6 +852,36 @@ class RustEmitter {
     } else {
       this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
     }
+  }
+
+  private emitAsyncContinuation(
+    dependencyExpr: string,
+    consume: (value: string) => void,
+    remaining: readonly IrStmt[] | null,
+  ): void {
+    const result = this.currentAsyncResult;
+    if (result === null) this.unsupported("async continuation without a result promise", this.currentFunction?.loc);
+    const dependency = `sc_async_dependency_${this.temporary++}`;
+    const nextResult = `sc_async_result_${this.temporary++}`;
+    const outcome = `sc_async_outcome_${this.temporary++}`;
+    const guard = `sc_async_guard_${this.temporary++}`;
+    const value = `sc_async_value_${this.temporary++}`;
+    this.line(`let ${dependency} = ${dependencyExpr};`);
+    this.line(`let ${nextResult} = ${result}.clone();`);
+    this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
+    this.indent += 1;
+    this.line(`let ${guard} = ${nextResult}.clone();`);
+    this.line(`runtime::promise_run_segment(&${guard}, move || {`);
+    this.indent += 1;
+    this.line(`let ${result} = ${nextResult};`);
+    this.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
+    consume(value);
+    if (remaining !== null) this.emitAsyncStatements(remaining);
+    this.indent -= 1;
+    this.line("});");
+    this.indent -= 1;
+    this.line("}));");
+    this.line("return;");
   }
 
   private emitStatements(statements: readonly IrStmt[]): void {
