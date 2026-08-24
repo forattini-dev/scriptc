@@ -1680,13 +1680,16 @@ class RustEmitter {
             : expr.fn === "timers.setTimeoutHandle" ? "timer_set_timeout_handle" : "timer_set_interval";
           return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::${runtimeFn}(Box::new(move || { ${dispatch}; }), ${this.emitExpr(expr.args[1])}) }`;
         }
-        if ((expr.fn === "timers.setImmediate" || expr.fn === "timers.queueMicrotask") && expr.args.length === 1 && arg !== undefined) {
+        if ((expr.fn === "timers.setImmediate" || expr.fn === "timers.queueMicrotask" || expr.fn === "process.nextTick") &&
+            expr.args.length === 1 && arg !== undefined) {
           if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {
             this.unsupported(`${expr.fn} callback shape`, expr.loc);
           }
           const callback = `sc_rt_${this.temporary++}`;
           const dispatch = this.emitClosureDispatch(callback, arg.type, [], expr.loc);
-          const runtimeFn = expr.fn === "timers.setImmediate" ? "timer_set_immediate" : "timer_queue_microtask";
+          const runtimeFn = expr.fn === "timers.setImmediate"
+            ? "timer_set_immediate"
+            : expr.fn === "timers.queueMicrotask" ? "timer_queue_microtask" : "process_next_tick";
           return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::${runtimeFn}(Box::new(move || { ${dispatch}; })) }`;
         }
         if (expr.fn === "timers.clearImmediate" && expr.args.length === 1 && arg !== undefined) {

@@ -34,6 +34,7 @@ thread_local! {
     static IMMEDIATE_TASKS: RefCell<Vec<ImmediateTask>> = const { RefCell::new(Vec::new()) };
     static NEXT_IMMEDIATE_ID: Cell<u64> = const { Cell::new(1) };
     static MICROTASKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
+    static NEXT_TICKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
     static EVENT_TURN: Cell<u64> = const { Cell::new(0) };
     static EVENT_PHASE: Cell<u8> = const { Cell::new(0) };
     static FIRING_TIMER_ID: Cell<u64> = const { Cell::new(0) };
@@ -290,6 +291,7 @@ pub fn finish() {
     TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
     MICROTASKS.with(|tasks| tasks.borrow_mut().clear());
+    NEXT_TICKS.with(|tasks| tasks.borrow_mut().clear());
     collect_cycles();
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();
@@ -462,14 +464,27 @@ pub fn timer_queue_microtask(callback: Box<dyn FnOnce()>) {
     MICROTASKS.with(|tasks| tasks.borrow_mut().push_back(callback));
 }
 
+pub fn process_next_tick(callback: Box<dyn FnOnce()>) {
+    NEXT_TICKS.with(|tasks| tasks.borrow_mut().push_back(callback));
+}
+
 pub fn run_event_loop() {
     let mut turn = 0_u64;
     loop {
         EVENT_TURN.with(|current| current.set(turn));
-        let microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
-        if let Some(microtask) = microtask {
-            EVENT_PHASE.with(|phase| phase.set(3));
-            microtask();
+        let next_tick = NEXT_TICKS.with(|tasks| tasks.borrow_mut().pop_front());
+        if let Some(next_tick) = next_tick {
+            EVENT_PHASE.with(|phase| phase.set(4));
+            next_tick();
+            continue;
+        }
+        let mut microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
+        if microtask.is_some() {
+            while let Some(callback) = microtask {
+                EVENT_PHASE.with(|phase| phase.set(3));
+                callback();
+                microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
+            }
             continue;
         }
 

@@ -894,7 +894,12 @@ test("Rust timers, immediates, and microtasks preserve ordering and liveness", a
   const entry = join(dir, "timers.ts");
   await writeFile(entry, `
 let value = "before";
-queueMicrotask(() => console.log("micro", value));
+queueMicrotask(() => {
+  console.log("micro", value);
+  process.nextTick(() => console.log("tick-from-micro"));
+});
+queueMicrotask(() => console.log("micro-two"));
+process.nextTick(() => console.log("nextTick", value));
 setTimeout(() => {
   console.log("zero", value);
   setTimeout(() => console.log("nested"), 0);
