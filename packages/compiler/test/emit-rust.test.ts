@@ -1201,8 +1201,13 @@ export {};
     ["timers-promises", resolve("tests/corpus/2093-timers-promises.ts")],
     ["settled-await-order", resolve("tests/corpus/1428-settled-await-order.ts")],
     ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
+    ["async-ordering", resolve("tests/corpus/1021-async-ordering.ts")],
+    ["throw-promise", resolve("tests/corpus/1026-throw-promise.ts")],
+    ["async-return-promise", resolve("tests/corpus/1027-async-return-promise.ts")],
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
+    ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],
+    ["async-methods", resolve("tests/corpus/2351-async-methods.ts")],
     ["promise-reject-all", resolve("tests/corpus/1572-promise-reject-all-tuple.ts")],
   ] as const) {
     const result = await compile(entryPath, {

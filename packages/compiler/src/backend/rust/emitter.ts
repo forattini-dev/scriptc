@@ -263,20 +263,25 @@ class RustEmitter {
         const promiseType = node.type as IrType | undefined;
         const executor = node.executor as { type?: IrType } | undefined;
         const resolverType = executor?.type?.kind === "func" ? executor.type.params[0] : undefined;
-        if (promiseType?.kind !== "promise" || resolverType?.kind !== "func") {
+        if (promiseType?.kind !== "promise" || executor?.type?.kind !== "func") {
           this.unsupported("malformed new Promise IR");
         }
-        const key = typeKey(resolverType);
-        let shape = this.closureShapes.get(key);
-        if (shape === undefined) {
-          shape = { index: this.closureShapes.size, type: resolverType, targets: [] };
-          this.closureShapes.set(key, shape);
+        if (resolverType === undefined) {
+          if (executor.type.params.length !== 0) this.unsupported("malformed new Promise resolver IR");
+        } else {
+          if (resolverType.kind !== "func") this.unsupported("malformed new Promise resolver IR");
+          const key = typeKey(resolverType);
+          let shape = this.closureShapes.get(key);
+          if (shape === undefined) {
+            shape = { index: this.closureShapes.size, type: resolverType, targets: [] };
+            this.closureShapes.set(key, shape);
+          }
+          const existing = this.promiseResolverTypes.get(key);
+          if (existing !== undefined && typeKey(existing) !== typeKey(promiseType.inner)) {
+            this.unsupported(`Promise resolver signature '${key}' with multiple value types`);
+          }
+          this.promiseResolverTypes.set(key, promiseType.inner);
         }
-        const existing = this.promiseResolverTypes.get(key);
-        if (existing !== undefined && typeKey(existing) !== typeKey(promiseType.inner)) {
-          this.unsupported(`Promise resolver signature '${key}' with multiple value types`);
-        }
-        this.promiseResolverTypes.set(key, promiseType.inner);
       }
       for (const child of Object.values(node)) visit(child);
     };
@@ -2311,11 +2316,18 @@ class RustEmitter {
         if (expr.type.kind !== "promise" || expr.executor.type.kind !== "func") {
           this.unsupported("new Promise shape", expr.loc);
         }
+        const promise = `sc_rt_${this.temporary++}`;
+        const executor = `sc_rt_${this.temporary++}`;
+        if (expr.executor.type.params.length === 0) {
+          const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [], expr.loc);
+          return `{ let ${promise} = runtime::promise_new::<${this.rustType(expr.type.inner, expr.loc)}>(); let ${executor} = ${this.emitExpr(expr.executor)}; runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
+        }
+        if (expr.executor.type.params.length !== 1) {
+          this.unsupported("new Promise reject resolver in the Rust backend", expr.loc);
+        }
         const resolverType = expr.executor.type.params[0];
         if (resolverType?.kind !== "func") this.unsupported("new Promise resolver shape", expr.loc);
         const shape = this.closureShapeForType(resolverType, expr.loc);
-        const promise = `sc_rt_${this.temporary++}`;
-        const executor = `sc_rt_${this.temporary++}`;
         const resolver = `sc_rt_${this.temporary++}`;
         const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [resolver], expr.loc);
         return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
