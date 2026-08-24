@@ -1132,6 +1132,18 @@ class RustEmitter {
         this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
         return;
       }
+      if (stmt.kind === "block" && this.containsAsyncSuspension(stmt.body)) {
+        const outerLocals = new Set(this.currentAsyncLocals ?? []);
+        const resume = this.emitAsyncResumeHelper(
+          statements.slice(index + 1),
+          onComplete,
+          outerLocals,
+          stmt.loc,
+          "block_continue",
+        );
+        this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.body, resume));
+        return;
+      }
       if (stmt.kind === "if" && this.containsAsyncSuspension(stmt)) {
         this.emitAsyncIf(stmt, statements.slice(index + 1), onComplete);
         return;

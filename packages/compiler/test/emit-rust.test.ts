@@ -1345,6 +1345,7 @@ export {};
     ["promise-all-array", resolve("tests/corpus/1438-promise-all.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],
     ["promise-reject", resolve("tests/corpus/1478-promise-reject.ts")],
+    ["destructuring-assign", resolve("tests/corpus/1479-destructuring-assign.ts")],
     ["return-through-finally", resolve("tests/corpus/1452-return-through-finally.ts")],
     ["await-promiselike-return", resolve("tests/corpus/1538-await-promiselike-return.ts")],
     ["promise-then", resolve("tests/corpus/1561-promise-then.ts")],
