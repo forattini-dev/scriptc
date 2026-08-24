@@ -803,3 +803,64 @@ catch (error) {
     expect(rust.stderr).toBe(node.stderr);
   }
 }, 180_000);
+
+test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
+  for (const fixture of [
+    "1400-typedarray-basics.ts",
+    "1401-typedarray-slice-set.ts",
+    "1402-buffer-encodings.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+  const fsEntry = join(dir, "bytes-fs.ts");
+  await writeFile(fsEntry, `
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+const path = "tmp-rust-bytes-" + process.pid + ".bin";
+writeFileSync(path, Buffer.from("00ff80eda0bd0a", "hex"));
+const back = readFileSync(path);
+console.log(back.length, back[0], back[1], back.toString("hex"));
+writeFileSync(path, new Uint8Array([1, 0, 2]));
+console.log(readFileSync(path).toString("hex"));
+rmSync(path);
+`);
+  const fsResult = await compile(fsEntry, {
+    outDir: dir,
+    outPath: join(dir, "bytes-fs"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    fsResult.ok,
+    fsResult.ok ? undefined : fsResult.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (fsResult.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [fsEntry]),
+      execFileAsync(fsResult.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);

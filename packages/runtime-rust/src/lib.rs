@@ -430,6 +430,14 @@ pub fn throw_syntax_error(message: String) -> ! {
     })
 }
 
+pub fn throw_range_error(message: String) -> ! {
+    throw_value(JsError {
+        name: "RangeError".to_owned(),
+        message,
+        code: None,
+    })
+}
+
 pub fn caught_from_panic(payload: Box<dyn Any + Send>) -> Caught {
     match payload.downcast::<ScriptThrow>() {
         Ok(_) => EXCEPTION_SLOT.with(|slot| Caught {
@@ -640,6 +648,433 @@ pub fn array_pop<T: ArrayElement>(array: &JsArray<T>) -> T {
 
 pub fn array_ptr_eq<T: ArrayElement>(left: &JsArray<T>, right: &JsArray<T>) -> bool {
     left.ptr_eq(right)
+}
+
+pub trait ByteElement: Copy + Default + 'static {
+    fn from_number(value: f64) -> Self;
+    fn to_number(self) -> f64;
+}
+
+impl ByteElement for u8 {
+    fn from_number(value: f64) -> Self {
+        to_uint32(value) as u8
+    }
+    fn to_number(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+impl ByteElement for u32 {
+    fn from_number(value: f64) -> Self {
+        to_uint32(value)
+    }
+    fn to_number(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+impl ByteElement for i32 {
+    fn from_number(value: f64) -> Self {
+        to_int32(value)
+    }
+    fn to_number(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+impl ByteElement for f32 {
+    fn from_number(value: f64) -> Self {
+        value as f32
+    }
+    fn to_number(self) -> f64 {
+        f64::from(self)
+    }
+}
+
+pub struct BytesData<T: ByteElement> {
+    storage: Rc<RefCell<Vec<T>>>,
+    offset: usize,
+    length: usize,
+}
+
+impl<T: ByteElement> Trace for BytesData<T> {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl<T: ByteElement> ClearEdges for BytesData<T> {
+    fn clear_edges(&mut self) {
+        self.storage = Rc::new(RefCell::new(Vec::new()));
+        self.offset = 0;
+        self.length = 0;
+    }
+}
+
+pub type JsBytes<T> = Gc<BytesData<T>>;
+
+pub fn bytes_empty<T: ByteElement>() -> JsBytes<T> {
+    Gc::new(BytesData {
+        storage: Rc::new(RefCell::new(Vec::new())),
+        offset: 0,
+        length: 0,
+    })
+}
+
+pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
+    let length = if length.is_nan() { 0.0 } else { length.trunc() };
+    if length < 0.0 || !length.is_finite() || length > usize::MAX as f64 {
+        throw_range_error(format!("Invalid typed array length: {length}"));
+    }
+    let length = length as usize;
+    Gc::new(BytesData {
+        storage: Rc::new(RefCell::new(vec![T::default(); length])),
+        offset: 0,
+        length,
+    })
+}
+
+pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
+    bytes.with(|data| {
+        let copied = data.storage.borrow()[data.offset..data.offset + data.length].to_vec();
+        Gc::new(BytesData {
+            length: copied.len(),
+            storage: Rc::new(RefCell::new(copied)),
+            offset: 0,
+        })
+    })
+}
+
+pub fn bytes_from_array<T: ByteElement>(array: &JsArray<f64>) -> JsBytes<T> {
+    let elements: Vec<T> =
+        array.with(|data| data.elements.iter().copied().map(T::from_number).collect());
+    Gc::new(BytesData {
+        length: elements.len(),
+        storage: Rc::new(RefCell::new(elements)),
+        offset: 0,
+    })
+}
+
+pub fn bytes_len<T: ByteElement>(bytes: &JsBytes<T>) -> f64 {
+    bytes.with(|data| data.length as f64)
+}
+
+pub fn bytes_byte_len<T: ByteElement>(bytes: &JsBytes<T>) -> f64 {
+    bytes.with(|data| (data.length * std::mem::size_of::<T>()) as f64)
+}
+
+fn bytes_index<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> usize {
+    assert!(
+        index.is_finite() && index >= 0.0 && index.fract() == 0.0,
+        "scriptc: bytes index out of bounds"
+    );
+    let index = index as usize;
+    assert!(
+        index < bytes.with(|data| data.length),
+        "scriptc: bytes index out of bounds"
+    );
+    index
+}
+
+pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
+    let index = bytes_index(bytes, index);
+    bytes.with(|data| data.storage.borrow()[data.offset + index].to_number())
+}
+
+pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
+    let index = bytes_index(bytes, index);
+    bytes.with(|data| data.storage.borrow_mut()[data.offset + index] = T::from_number(value));
+}
+
+fn bytes_relative_index(index: f64, length: usize, default: usize) -> usize {
+    if index.is_nan() {
+        return 0;
+    }
+    if index == f64::INFINITY {
+        return length;
+    }
+    if index == f64::NEG_INFINITY {
+        return 0;
+    }
+    let index = index.trunc();
+    if index < 0.0 {
+        (length as f64 + index).max(0.0) as usize
+    } else if index.is_finite() {
+        index.min(length as f64) as usize
+    } else {
+        default
+    }
+}
+
+pub fn bytes_slice<T: ByteElement>(
+    bytes: &JsBytes<T>,
+    start: f64,
+    end: f64,
+    view: bool,
+) -> JsBytes<T> {
+    bytes.with(|data| {
+        let start = bytes_relative_index(start, data.length, 0);
+        let end = bytes_relative_index(end, data.length, data.length).max(start);
+        if view {
+            Gc::new(BytesData {
+                storage: data.storage.clone(),
+                offset: data.offset + start,
+                length: end - start,
+            })
+        } else {
+            let copied = data.storage.borrow()[data.offset + start..data.offset + end].to_vec();
+            Gc::new(BytesData {
+                length: copied.len(),
+                storage: Rc::new(RefCell::new(copied)),
+                offset: 0,
+            })
+        }
+    })
+}
+
+pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, offset: f64) {
+    let offset = if offset.is_nan() { 0.0 } else { offset.trunc() };
+    let target_length = target.with(|data| data.length);
+    let source_values =
+        source.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    if offset < 0.0
+        || !offset.is_finite()
+        || offset > target_length as f64
+        || source_values.len() > target_length - offset as usize
+    {
+        throw_range_error("offset is out of bounds".to_owned());
+    }
+    target.with(|data| {
+        let start = data.offset + offset as usize;
+        data.storage.borrow_mut()[start..start + source_values.len()]
+            .copy_from_slice(&source_values);
+    });
+}
+
+pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
+    bytes.with(|data| {
+        let storage = data.storage.borrow();
+        let values = &storage[data.offset..data.offset + data.length];
+        match encoding.as_ref() {
+            "hex" => {
+                let mut output = String::with_capacity(values.len() * 2);
+                for byte in values {
+                    use std::fmt::Write;
+                    let _ = write!(output, "{byte:02x}");
+                }
+                Rc::from(output)
+            }
+            "base64" => Rc::from(bytes_base64_encode(values)),
+            "utf8" | "utf-8" => Rc::from(String::from_utf8_lossy(values).as_ref()),
+            other => throw_type_error(format!("Unknown encoding: {other}")),
+        }
+    })
+}
+
+fn bytes_from_vec(values: Vec<u8>) -> JsBytes<u8> {
+    Gc::new(BytesData {
+        length: values.len(),
+        storage: Rc::new(RefCell::new(values)),
+        offset: 0,
+    })
+}
+
+fn bytes_hex_decode(text: &str) -> Vec<u8> {
+    fn nibble(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    let mut output = Vec::with_capacity(text.len() / 2);
+    for pair in text.as_bytes().chunks_exact(2) {
+        let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
+            break;
+        };
+        output.push((high << 4) | low);
+    }
+    output
+}
+
+fn bytes_base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' | b'-' => Some(62),
+        b'/' | b'_' => Some(63),
+        _ => None,
+    }
+}
+
+fn bytes_base64_decode(text: &str) -> Vec<u8> {
+    let values: Vec<u8> = text
+        .bytes()
+        .take_while(|byte| *byte != b'=')
+        .filter_map(bytes_base64_value)
+        .collect();
+    let mut output = Vec::with_capacity(values.len() * 3 / 4);
+    for chunk in values.chunks(4) {
+        if chunk.len() < 2 {
+            break;
+        }
+        output.push((chunk[0] << 2) | (chunk[1] >> 4));
+        if chunk.len() >= 3 {
+            output.push((chunk[1] << 4) | (chunk[2] >> 2));
+        }
+        if chunk.len() == 4 {
+            output.push((chunk[2] << 6) | chunk[3]);
+        }
+    }
+    output
+}
+
+fn bytes_base64_encode(values: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(values.len().div_ceil(3) * 4);
+    for chunk in values.chunks(3) {
+        output.push(char::from(ALPHABET[(chunk[0] >> 2) as usize]));
+        output.push(char::from(
+            ALPHABET[((chunk[0] & 3) << 4 | chunk.get(1).copied().unwrap_or(0) >> 4) as usize],
+        ));
+        if let Some(second) = chunk.get(1) {
+            output.push(char::from(
+                ALPHABET[((second & 15) << 2 | chunk.get(2).copied().unwrap_or(0) >> 6) as usize],
+            ));
+        } else {
+            output.push('=');
+        }
+        if let Some(third) = chunk.get(2) {
+            output.push(char::from(ALPHABET[(third & 63) as usize]));
+        } else {
+            output.push('=');
+        }
+    }
+    output
+}
+
+pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> {
+    bytes_from_vec(match encoding.as_ref() {
+        "hex" => bytes_hex_decode(value),
+        "base64" | "base64url" => bytes_base64_decode(value),
+        "utf8" | "utf-8" => value.as_bytes().to_vec(),
+        other => throw_type_error(format!("Unknown encoding: {other}")),
+    })
+}
+
+pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
+    let mut output = Vec::new();
+    values.with(|array| {
+        for bytes in &array.elements {
+            bytes.with(|data| {
+                output.extend_from_slice(
+                    &data.storage.borrow()[data.offset..data.offset + data.length],
+                );
+            });
+        }
+    });
+    bytes_from_vec(output)
+}
+
+fn bytes_num_width(kind: &str) -> usize {
+    match kind {
+        "u8" | "i8" => 1,
+        "u16be" | "u16le" | "i16be" | "i16le" => 2,
+        "u32be" | "u32le" | "i32be" | "i32le" | "f32be" | "f32le" => 4,
+        "f64be" | "f64le" => 8,
+        _ => panic!("scriptc: invalid bytes numeric kind"),
+    }
+}
+
+fn bytes_num_offset(bytes: &JsBytes<u8>, offset: f64, width: usize, reading: bool) -> usize {
+    let length = bytes.with(|data| data.length);
+    if width > length
+        || !offset.is_finite()
+        || offset.fract() != 0.0
+        || offset < 0.0
+        || offset > length.saturating_sub(width) as f64
+    {
+        if reading {
+            throw_range_error("Attempt to access memory outside buffer bounds".to_owned());
+        }
+        throw_range_error(format!(
+            "The value of \"offset\" is out of range. It must be >= 0 and <= {}. Received {}",
+            length.saturating_sub(width),
+            format_number(offset)
+        ));
+    }
+    offset as usize
+}
+
+pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
+    let width = bytes_num_width(kind);
+    let offset = bytes_num_offset(bytes, offset, width, true);
+    bytes.with(|data| {
+        let storage = data.storage.borrow();
+        let input = &storage[data.offset + offset..data.offset + offset + width];
+        match kind {
+            "u8" => f64::from(input[0]),
+            "i8" => f64::from(input[0] as i8),
+            "u16be" => f64::from(u16::from_be_bytes([input[0], input[1]])),
+            "u16le" => f64::from(u16::from_le_bytes([input[0], input[1]])),
+            "i16be" => f64::from(i16::from_be_bytes([input[0], input[1]])),
+            "i16le" => f64::from(i16::from_le_bytes([input[0], input[1]])),
+            "u32be" => f64::from(u32::from_be_bytes(input.try_into().expect("four bytes"))),
+            "u32le" => f64::from(u32::from_le_bytes(input.try_into().expect("four bytes"))),
+            "i32be" => f64::from(i32::from_be_bytes(input.try_into().expect("four bytes"))),
+            "i32le" => f64::from(i32::from_le_bytes(input.try_into().expect("four bytes"))),
+            "f32be" => f64::from(f32::from_be_bytes(input.try_into().expect("four bytes"))),
+            "f32le" => f64::from(f32::from_le_bytes(input.try_into().expect("four bytes"))),
+            "f64be" => f64::from_be_bytes(input.try_into().expect("eight bytes")),
+            "f64le" => f64::from_le_bytes(input.try_into().expect("eight bytes")),
+            _ => unreachable!(),
+        }
+    })
+}
+
+pub fn bytes_write_num(bytes: &JsBytes<u8>, kind: &str, value: f64, offset: f64) -> f64 {
+    let width = bytes_num_width(kind);
+    let offset = bytes_num_offset(bytes, offset, width, false);
+    let bits = match kind {
+        "u8" | "u16be" | "u16le" | "u32be" | "u32le" => {
+            let max = 2_f64.powi((width * 8) as i32) - 1.0;
+            if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > max {
+                throw_range_error(format!(
+                    "The value of \"value\" is out of range. It must be >= 0 and <= {}. Received {}",
+                    format_number(max),
+                    format_number(value)
+                ));
+            }
+            (value as u64).to_be_bytes()
+        }
+        "i8" | "i16be" | "i16le" | "i32be" | "i32le" => {
+            let max = 2_f64.powi((width * 8 - 1) as i32) - 1.0;
+            let min = -max - 1.0;
+            if !value.is_finite() || value.fract() != 0.0 || value < min || value > max {
+                throw_range_error(format!(
+                    "The value of \"value\" is out of range. Received {}",
+                    format_number(value)
+                ));
+            }
+            (value as i64 as u64).to_be_bytes()
+        }
+        "f32be" | "f32le" => u64::from((value as f32).to_bits()).to_be_bytes(),
+        "f64be" | "f64le" => value.to_bits().to_be_bytes(),
+        _ => unreachable!(),
+    };
+    let source = &bits[8 - width..];
+    bytes.with(|data| {
+        let mut storage = data.storage.borrow_mut();
+        let output = &mut storage[data.offset + offset..data.offset + offset + width];
+        if kind.ends_with("le") {
+            for (target, source) in output.iter_mut().zip(source.iter().rev()) {
+                *target = *source;
+            }
+        } else {
+            output.copy_from_slice(source);
+        }
+    });
+    (offset + width) as f64
 }
 
 pub struct MapData<K: Clone + 'static, V: HeapValue> {
@@ -1235,6 +1670,26 @@ pub fn fs_read_file(path: &JsString) -> JsString {
 
 pub fn fs_write_file(path: &JsString, data: &JsString) {
     if let Err(error) = std::fs::write(path.as_ref(), data.as_bytes()) {
+        throw_fs_error("open", path, error);
+    }
+}
+
+pub fn fs_read_file_bytes(path: &JsString) -> JsBytes<u8> {
+    match std::fs::read(path.as_ref()) {
+        Ok(bytes) => bytes_from_vec(bytes),
+        Err(error) => throw_fs_error("open", path, error),
+    }
+}
+
+pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {
+    let result = data.with(|data| {
+        let storage = data.storage.borrow();
+        std::fs::write(
+            path.as_ref(),
+            &storage[data.offset..data.offset + data.length],
+        )
+    });
+    if let Err(error) = result {
         throw_fs_error("open", path, error);
     }
 }

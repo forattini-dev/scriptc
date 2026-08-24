@@ -684,6 +684,7 @@ class RustEmitter {
           this.line(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
           break;
         case "array":
+        case "bytes":
         case "map":
         case "set":
         case "record":
@@ -868,6 +869,14 @@ class RustEmitter {
         const index = `sc_rt_${this.temporary++}`;
         const value = `sc_rt_${this.temporary++}`;
         this.line(`{ let ${array} = ${this.emitExpr(stmt.arr)}; let ${index} = ${this.emitExpr(stmt.index)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::array_set(&${array}, ${index}, ${value}); }`);
+        return;
+      }
+      case "bytesSet": {
+        if (stmt.arr.type.kind !== "bytes") this.unsupported("bytesSet on non-bytes", stmt.loc);
+        const bytes = `sc_rt_${this.temporary++}`;
+        const index = `sc_rt_${this.temporary++}`;
+        const value = `sc_rt_${this.temporary++}`;
+        this.line(`{ let ${bytes} = ${this.emitExpr(stmt.arr)}; let ${index} = ${this.emitExpr(stmt.index)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::bytes_set(&${bytes}, ${index}, ${value}); }`);
         return;
       }
       case "recordSet": {
@@ -1199,6 +1208,59 @@ class RustEmitter {
         return `runtime::array_get(&(${this.emitExpr(expr.arr)}), ${this.emitExpr(expr.index)})`;
       case "arrIntrinsic":
         return this.emitArrayIntrinsic(expr);
+      case "bytesNew": {
+        if (expr.type.kind !== "bytes") this.unsupported("bytes construction result", expr.loc);
+        const elem = this.rustBytesElement(expr.type.elem);
+        if (expr.source === null) return `runtime::bytes_empty::<${elem}>()`;
+        if (expr.source.type.kind === "f64") {
+          return `runtime::bytes_alloc::<${elem}>(${this.emitExpr(expr.source)})`;
+        }
+        if (expr.source.type.kind === "bytes") {
+          return `runtime::bytes_copy(&(${this.emitExpr(expr.source)}))`;
+        }
+        if (expr.source.type.kind === "array" && expr.source.type.elem.kind === "f64") {
+          return `runtime::bytes_from_array::<${elem}>(&(${this.emitExpr(expr.source)}))`;
+        }
+        this.unsupported(`bytes construction from '${expr.source.type.kind}'`, expr.loc);
+      }
+      case "bytesIntrinsic": {
+        if (expr.receiver.type.kind !== "bytes") this.unsupported("bytes intrinsic receiver", expr.loc);
+        if (expr.method === "readNum" && expr.args.length === 2) {
+          const kind = expr.args[0];
+          const offset = expr.args[1];
+          if (kind?.kind !== "strLit" || offset === undefined) this.unsupported("bytes readNum arguments", expr.loc);
+          return `runtime::bytes_read_num(&(${this.emitExpr(expr.receiver)}), "${this.rustString(kind.value)}", ${this.emitExpr(offset)})`;
+        }
+        if (expr.method === "writeNum" && expr.args.length === 3) {
+          const kind = expr.args[0];
+          const value = expr.args[1];
+          const offset = expr.args[2];
+          if (kind?.kind !== "strLit" || value === undefined || offset === undefined) this.unsupported("bytes writeNum arguments", expr.loc);
+          return `runtime::bytes_write_num(&(${this.emitExpr(expr.receiver)}), "${this.rustString(kind.value)}", ${this.emitExpr(value)}, ${this.emitExpr(offset)})`;
+        }
+        if (expr.method === "length" && expr.args.length === 0) {
+          return `runtime::bytes_len(&(${this.emitExpr(expr.receiver)}))`;
+        }
+        if (expr.method === "byteLength" && expr.args.length === 0) {
+          return `runtime::bytes_byte_len(&(${this.emitExpr(expr.receiver)}))`;
+        }
+        if (expr.method === "get" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::bytes_get(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
+        }
+        if (expr.method === "slice" || expr.method === "subarray") {
+          const start = expr.args[0] === undefined ? "0.0" : this.emitExpr(expr.args[0]);
+          const end = expr.args[1] === undefined ? "f64::INFINITY" : this.emitExpr(expr.args[1]);
+          return `runtime::bytes_slice(&(${this.emitExpr(expr.receiver)}), ${start}, ${end}, ${expr.method === "subarray"})`;
+        }
+        if (expr.method === "setFrom" && expr.args[0] !== undefined) {
+          const offset = expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1]);
+          return `runtime::bytes_set_from(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${offset})`;
+        }
+        if (expr.method === "toString" && expr.args.length === 1 && expr.args[0] !== undefined && expr.receiver.type.elem === "u8") {
+          return `runtime::bytes_to_string(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        }
+        this.unsupported(`bytes intrinsic '${expr.method}'`, expr.loc);
+      }
       case "mapNew": {
         if (expr.type.kind !== "map") this.unsupported("mapNew with a non-map type", expr.loc);
         const type = expr.type;
@@ -1482,8 +1544,14 @@ class RustEmitter {
           const path = `sc_rt_${this.temporary++}`;
           return `{ let ${path} = ${this.emitExpr(arg)}; let _ = ${this.emitExpr(expr.args[1])}; runtime::fs_read_file(&${path}) }`;
         }
+        if ((expr.fn === "fs.readFileSyncBuf" || expr.fn === "fs.readFileSyncBytes") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_read_file_bytes(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "fs.writeFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_write_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.writeFileSyncBytes" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_write_file_bytes(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
         if (expr.fn === "fs.appendFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_append_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
@@ -1548,6 +1616,12 @@ class RustEmitter {
         }
         if (expr.fn === "fs.accessSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_access(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.fn === "buffer.fromStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::buffer_from_string(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "buffer.concat" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::buffer_concat(&(${this.emitExpr(arg)}))`;
         }
         if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::path_join(&(${this.emitExpr(arg)}))`;
@@ -1747,6 +1821,7 @@ class RustEmitter {
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
       case "array": return "true";
+      case "bytes": return "true";
       case "map": return "true";
       case "set": return "true";
       case "record": return "true";
@@ -1808,6 +1883,10 @@ class RustEmitter {
     return index >= 0 && index < boundary;
   }
 
+  private rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
+    return elem;
+  }
+
   private rustType(type: IrType, loc?: SrcLoc): string {
     switch (type.kind) {
       case "void": return "()";
@@ -1819,6 +1898,7 @@ class RustEmitter {
         return "usize";
       }
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
+      case "bytes": return `runtime::JsBytes<${this.rustBytesElement(type.elem)}>`;
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
@@ -1851,6 +1931,7 @@ class RustEmitter {
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "array": return "runtime::array_new(Vec::new())";
+      case "bytes": return `runtime::bytes_empty::<${this.rustBytesElement(type.elem)}>()`;
       case "map": return "runtime::map_new()";
       case "set": return "runtime::set_new()";
       case "classval": return "0";
@@ -2052,7 +2133,7 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "map" || type.kind === "set" || type.kind === "record" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "record" ||
       (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 
