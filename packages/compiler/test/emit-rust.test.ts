@@ -811,31 +811,33 @@ catch (error) {
 
 test("Rust synchronous child processes capture output and throw catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-child-sync-"));
-  const fixture = resolve("tests/corpus/1552-exec-options-record.ts");
-  const fixtureResult = await compile(fixture, {
-    outDir: dir,
-    outPath: join(dir, "exec-options-record"),
-    backend: "rust",
-    optimization: "dev",
-  });
-  expect(
-    fixtureResult.ok,
-    fixtureResult.ok ? fixture : fixtureResult.diagnostics.map((diag) => diag.message).join("; "),
-  ).toBe(true);
-  if (fixtureResult.ok) {
-    const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [fixture]),
-      execFileAsync(fixtureResult.binaryPath, [], {
-        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
-      }),
-    ]);
-    expect(rust.stdout).toBe(node.stdout);
-    expect(rust.stderr).toBe(node.stderr);
+  for (const fixtureName of ["1552-exec-options-record.ts", "1360-spawn-sync.ts"]) {
+    const fixture = resolve("tests/corpus", fixtureName);
+    const fixtureResult = await compile(fixture, {
+      outDir: dir,
+      outPath: join(dir, fixtureName.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      fixtureResult.ok,
+      fixtureResult.ok ? fixture : fixtureResult.diagnostics.map((diag) => diag.message).join("; "),
+    ).toBe(true);
+    if (fixtureResult.ok) {
+      const [node, rust] = await Promise.all([
+        execFileAsync(process.execPath, [fixture]),
+        execFileAsync(fixtureResult.binaryPath, [], {
+          env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+        }),
+      ]);
+      expect(rust.stdout, fixtureName).toBe(node.stdout);
+      expect(rust.stderr, fixtureName).toBe(node.stderr);
+    }
   }
 
   const errorsEntry = join(dir, "exec-errors.ts");
   await writeFile(errorsEntry, `
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 console.log(JSON.stringify(execFileSync("/usr/bin/printf", ["%s", "direct ok"], { encoding: "utf8" })));
 console.log(JSON.stringify(execSync("printf 'shell ok'", { encoding: "utf8", stdio: "pipe" })));
 console.log(JSON.stringify(execFileSync("/bin/cat", [], { encoding: "utf8", input: "fed input" })));
@@ -853,6 +855,16 @@ try {
   execFileSync("/bin/sleep", ["1"], { encoding: "utf8", stdio: "pipe", timeout: 20 });
 } catch (error) {
   if (error instanceof Error) console.log(error.message, (error as NodeJS.ErrnoException).code);
+}
+const missing = spawnSync("scriptc-rust-definitely-missing", [], { encoding: "utf8" });
+if (missing.error) {
+  const error = missing.error as NodeJS.ErrnoException;
+  console.log(missing.status === null, error.message, error.code);
+}
+const timed = spawnSync("/bin/sleep", ["1"], { encoding: "utf8", stdio: "pipe", timeout: 20 });
+if (timed.error) {
+  const error = timed.error as NodeJS.ErrnoException;
+  console.log(timed.status === null, timed.signal, error.message, error.code);
 }
 `);
   const errorsResult = await compile(errorsEntry, {

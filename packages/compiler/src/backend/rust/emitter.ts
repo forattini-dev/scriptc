@@ -488,10 +488,13 @@ class RustEmitter {
         case "map":
         case "set":
         case "stats":
+        case "spawnRes":
         case "record":
-        case "object":
         case "func":
           comparison = "left.ptr_eq(right)";
+          break;
+        case "object":
+          comparison = RUNTIME_ERROR_CLASSES.has(arm.className) ? "std::ptr::eq(left, right)" : "left.ptr_eq(right)";
           break;
         default:
           this.unsupported(`union equality arm '${arm.kind}'`);
@@ -687,6 +690,7 @@ class RustEmitter {
         case "array":
         case "bytes":
         case "stats":
+        case "spawnRes":
         case "map":
         case "set":
         case "record":
@@ -1663,6 +1667,37 @@ class RustEmitter {
               stdoutMode === undefined || stderrMode === undefined) this.unsupported("cp.execSync arguments", expr.loc);
           return `runtime::child_exec_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(shell)}, &(${this.emitExpr(input)}), ${this.emitExpr(hasInput)}, &(${this.emitExpr(cwd)}), ${this.emitExpr(hasEnv)}, &(${this.emitExpr(envPairs)}), ${this.emitExpr(timeout)}, ${this.emitExpr(stdoutMode)}, ${this.emitExpr(stderrMode)})`;
         }
+        if (expr.fn === "cp.spawnSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::child_spawn_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}), 0.0, &runtime::string(""), 0.0, 0.0, 0.0)`;
+        }
+        if (expr.fn === "cp.spawnSyncOpts" && expr.args.length === 7 && arg !== undefined) {
+          const [argv, timeout, signal, stdinMode, stdoutMode, stderrMode] = expr.args.slice(1);
+          if (argv === undefined || timeout === undefined || signal === undefined || stdinMode === undefined ||
+              stdoutMode === undefined || stderrMode === undefined) this.unsupported("cp.spawnSyncOpts arguments", expr.loc);
+          return `runtime::child_spawn_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(timeout)}, &(${this.emitExpr(signal)}), ${this.emitExpr(stdinMode)}, ${this.emitExpr(stdoutMode)}, ${this.emitExpr(stderrMode)})`;
+        }
+        if (expr.fn === "cp.spawnSyncStdioStr" && expr.args.length === 5 && arg !== undefined) {
+          const [argv, timeout, signal, stdio] = expr.args.slice(1);
+          if (argv === undefined || timeout === undefined || signal === undefined || stdio === undefined) {
+            this.unsupported("cp.spawnSyncStdioStr arguments", expr.loc);
+          }
+          return `runtime::child_spawn_sync_stdio(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(timeout)}, &(${this.emitExpr(signal)}), &(${this.emitExpr(stdio)}))`;
+        }
+        if ((expr.fn === "spawnRes.stdout" || expr.fn === "spawnRes.stderr") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::spawn_result_${expr.fn === "spawnRes.stdout" ? "stdout" : "stderr"}(&(${this.emitExpr(arg)}))`;
+        }
+        if ((expr.fn === "spawnRes.status" || expr.fn === "spawnRes.signal" || expr.fn === "spawnRes.error") && expr.args.length === 1 && arg !== undefined) {
+          if (expr.type.kind !== "union") this.unsupported(`${expr.fn} without a union result`, expr.loc);
+          const union = this.union(expr.type.unionId, expr.loc);
+          const valueKind = expr.fn === "spawnRes.status" ? "f64" : expr.fn === "spawnRes.signal" ? "string" : "object";
+          const emptyKind = expr.fn === "spawnRes.error" ? "undefinedT" : "nullT";
+          const valueTag = union.arms.findIndex((arm) => arm.kind === valueKind);
+          const emptyTag = union.arms.findIndex((arm) => arm.kind === emptyKind);
+          if (valueTag < 0 || emptyTag < 0) this.unsupported(`${expr.fn} result union shape`, expr.loc);
+          const name = this.unionName(union.id);
+          const accessor = expr.fn.slice("spawnRes.".length);
+          return `match runtime::spawn_result_${accessor}(&(${this.emitExpr(arg)})) { Some(value) => ${name}::${this.unionVariant(valueTag)}(value), None => ${name}::${this.unionVariant(emptyTag)}, }`;
+        }
         if (expr.fn === "buffer.fromStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::buffer_from_string(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
@@ -1881,10 +1916,27 @@ class RustEmitter {
       case "bytes": return "true";
       case "map": return "true";
       case "set": return "true";
+      case "stats": return "true";
+      case "spawnRes": return "true";
       case "record": return "true";
       case "object": return "true";
       case "func": return "true";
       case "classval": return "true";
+      case "union": {
+        const union = this.union(type.unionId, loc);
+        const name = this.unionName(union.id);
+        const arms = union.arms.map((arm, tag) => {
+          const variant = `${name}::${this.unionVariant(tag)}`;
+          if (this.isUnit(arm)) return `${variant} => false`;
+          if (arm.kind === "bool") return `${variant}(inner) => *inner`;
+          if (arm.kind === "f64") return `${variant}(inner) => *inner != 0.0 && !inner.is_nan()`;
+          if (arm.kind === "string") return `${variant}(inner) => !inner.is_empty()`;
+          if (arm.kind === "classval") return `${variant}(inner) => *inner != 0`;
+          if (arm.kind === "union") this.unsupported("nested union truthiness", loc);
+          return `${variant}(..) => true`;
+        }).join(", ");
+        return `match &${value} { ${arms} }`;
+      }
       default: this.unsupported(`truthiness for '${type.kind}'`, loc);
     }
   }
@@ -1957,6 +2009,7 @@ class RustEmitter {
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
       case "bytes": return `runtime::JsBytes<${this.rustBytesElement(type.elem)}>`;
       case "stats": return "runtime::JsStats";
+      case "spawnRes": return "runtime::JsSpawnResult";
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
@@ -2191,7 +2244,7 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "record" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "spawnRes" || type.kind === "record" ||
       (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 

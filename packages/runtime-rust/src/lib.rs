@@ -2320,6 +2320,80 @@ pub fn fs_read_fd(fd: f64, _encoding: &JsString) -> JsString {
     bytes_to_string(&bytes, &string("utf8"))
 }
 
+struct SyncChildOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+}
+
+fn run_sync_child(
+    mut command: std::process::Command,
+    input: Option<&[u8]>,
+    timeout_ms: f64,
+) -> std::io::Result<SyncChildOutput> {
+    use std::io::{Read, Write};
+
+    let mut child = command.spawn()?;
+    let stdout_reader = child.stdout.take().map(|mut stdout| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes).map(|_| bytes)
+        })
+    });
+    let stderr_reader = child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes).map(|_| bytes)
+        })
+    });
+    if let Some(input) = input {
+        if let Err(error) = child
+            .stdin
+            .take()
+            .expect("scriptc: piped child stdin missing")
+            .write_all(input)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    }
+    let timeout = if timeout_ms.is_finite() && timeout_ms > 0.0 {
+        Some(std::time::Duration::from_secs_f64(timeout_ms / 1000.0))
+    } else {
+        None
+    };
+    let started = std::time::Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if timeout.is_some_and(|timeout| started.elapsed() >= timeout) => {
+                timed_out = true;
+                let _ = child.kill();
+                break child.wait()?;
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(1)),
+        }
+    };
+    let join_reader = |reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>| {
+        reader.map_or_else(
+            || Ok(Vec::new()),
+            |reader| match reader.join() {
+                Ok(result) => result,
+                Err(_) => Err(std::io::Error::other("child output reader panicked")),
+            },
+        )
+    };
+    Ok(SyncChildOutput {
+        status,
+        stdout: join_reader(stdout_reader)?,
+        stderr: join_reader(stderr_reader)?,
+        timed_out,
+    })
+}
+
 pub fn child_exec_sync(
     command: &JsString,
     arguments: &JsArray<JsString>,
@@ -2333,7 +2407,7 @@ pub fn child_exec_sync(
     stdout_mode: f64,
     stderr_mode: f64,
 ) -> JsString {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::process::{Command, Stdio};
 
     let mut child_command = Command::new(command.as_ref());
@@ -2374,8 +2448,12 @@ pub fn child_exec_sync(
         _ => Stdio::piped(),
     });
 
-    let mut child = match child_command.spawn() {
-        Ok(child) => child,
+    let output = match run_sync_child(
+        child_command,
+        has_input.then_some(input.as_bytes()),
+        timeout_ms,
+    ) {
+        Ok(output) => output,
         Err(error) => {
             let code = fs_error_code(&error);
             throw_value(JsError {
@@ -2385,76 +2463,17 @@ pub fn child_exec_sync(
             })
         }
     };
-    let stdout_reader = child.stdout.take().map(|mut stdout| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            stdout.read_to_end(&mut bytes).map(|_| bytes)
-        })
-    });
-    let stderr_reader = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            stderr.read_to_end(&mut bytes).map(|_| bytes)
-        })
-    });
-    if has_input {
-        let write_result = child
-            .stdin
-            .take()
-            .expect("scriptc: piped child stdin missing")
-            .write_all(input.as_bytes());
-        if let Err(error) = write_result {
-            let _ = child.kill();
-            let _ = child.wait();
-            throw_fs_fd_io_error("write", error);
-        }
-    }
-    let timeout = if timeout_ms.is_finite() && timeout_ms > 0.0 {
-        Some(std::time::Duration::from_secs_f64(timeout_ms / 1000.0))
-    } else {
-        None
-    };
-    let started = std::time::Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if timeout.is_some_and(|timeout| started.elapsed() >= timeout) => {
-                timed_out = true;
-                let _ = child.kill();
-                break child
-                    .wait()
-                    .unwrap_or_else(|error| throw_fs_fd_io_error("wait", error));
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                throw_fs_fd_io_error("wait", error)
-            }
-        }
-    };
-    let join_reader = |reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>| {
-        reader.map_or_else(Vec::new, |reader| {
-            reader
-                .join()
-                .expect("scriptc: child output reader panicked")
-                .unwrap_or_else(|error| throw_fs_fd_io_error("read", error))
-        })
-    };
-    let stdout = join_reader(stdout_reader);
-    let stderr = join_reader(stderr_reader);
     if stderr_mode == 0 {
-        let _ = std::io::stderr().write_all(&stderr);
+        let _ = std::io::stderr().write_all(&output.stderr);
     }
-    if timed_out {
+    if output.timed_out {
         throw_value(JsError {
             name: "Error".to_owned(),
             message: format!("spawnSync {command} ETIMEDOUT"),
             code: Some("ETIMEDOUT".to_owned()),
         });
     }
-    if !status.success() {
+    if !output.status.success() {
         let display = if shell {
             arguments.with(|arguments| {
                 arguments
@@ -2473,14 +2492,178 @@ pub fn child_exec_sync(
             });
             Rc::from(display)
         };
-        let stderr = String::from_utf8_lossy(&stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         throw_value(JsError {
             name: "Error".to_owned(),
             message: format!("Command failed: {display}\n{stderr}"),
             code: None,
         });
     }
-    Rc::from(String::from_utf8_lossy(&stdout).as_ref())
+    Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())
+}
+
+pub struct SpawnResultData {
+    status: Option<f64>,
+    signal: Option<JsString>,
+    stdout: JsString,
+    stderr: JsString,
+    error: Option<JsError>,
+}
+
+impl Trace for SpawnResultData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for SpawnResultData {
+    fn clear_edges(&mut self) {}
+}
+
+pub type JsSpawnResult = Gc<SpawnResultData>;
+
+#[cfg(unix)]
+fn child_exit_signal(status: &std::process::ExitStatus) -> Option<JsString> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map(|signal| {
+        string(match signal {
+            1 => "SIGHUP",
+            2 => "SIGINT",
+            3 => "SIGQUIT",
+            4 => "SIGILL",
+            6 => "SIGABRT",
+            9 => "SIGKILL",
+            11 => "SIGSEGV",
+            13 => "SIGPIPE",
+            14 => "SIGALRM",
+            15 => "SIGTERM",
+            _ => "SIGUNKNOWN",
+        })
+    })
+}
+
+#[cfg(not(unix))]
+fn child_exit_signal(_status: &std::process::ExitStatus) -> Option<JsString> {
+    None
+}
+
+pub fn child_spawn_sync(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    timeout_ms: f64,
+    kill_signal: &JsString,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+) -> JsSpawnResult {
+    use std::process::{Command, Stdio};
+
+    let mut child_command = Command::new(command.as_ref());
+    arguments.with(|arguments| {
+        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+    });
+    child_command.stdin(if to_int32(stdin_mode) == 2 {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    });
+    child_command.stdout(match to_int32(stdout_mode) {
+        1 => Stdio::null(),
+        2 => Stdio::inherit(),
+        _ => Stdio::piped(),
+    });
+    child_command.stderr(match to_int32(stderr_mode) {
+        1 => Stdio::null(),
+        2 => Stdio::inherit(),
+        _ => Stdio::piped(),
+    });
+
+    match run_sync_child(child_command, None, timeout_ms) {
+        Err(error) => {
+            let code = fs_error_code(&error);
+            Gc::new(SpawnResultData {
+                status: None,
+                signal: None,
+                stdout: string(""),
+                stderr: string(""),
+                error: Some(JsError {
+                    name: "Error".to_owned(),
+                    message: format!("spawnSync {command} {code}"),
+                    code: Some(code.to_owned()),
+                }),
+            })
+        }
+        Ok(output) => {
+            let signal = if output.timed_out {
+                Some(if kill_signal.is_empty() {
+                    string("SIGTERM")
+                } else {
+                    kill_signal.clone()
+                })
+            } else {
+                child_exit_signal(&output.status)
+            };
+            Gc::new(SpawnResultData {
+                status: if output.timed_out {
+                    None
+                } else {
+                    output.status.code().map(f64::from)
+                },
+                signal,
+                stdout: Rc::from(String::from_utf8_lossy(&output.stdout).as_ref()),
+                stderr: Rc::from(String::from_utf8_lossy(&output.stderr).as_ref()),
+                error: output.timed_out.then(|| JsError {
+                    name: "Error".to_owned(),
+                    message: format!("spawnSync {command} ETIMEDOUT"),
+                    code: Some("ETIMEDOUT".to_owned()),
+                }),
+            })
+        }
+    }
+}
+
+pub fn child_spawn_sync_stdio(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    timeout_ms: f64,
+    kill_signal: &JsString,
+    stdio: &JsString,
+) -> JsSpawnResult {
+    let (stdin_mode, stdout_mode, stderr_mode) = match stdio.as_ref() {
+        "pipe" => (0.0, 0.0, 0.0),
+        "ignore" => (0.0, 1.0, 1.0),
+        "inherit" => (2.0, 2.0, 2.0),
+        other => throw_type_error(format!(
+            "spawnSync stdio \"{other}\" has no static lowering"
+        )),
+    };
+    child_spawn_sync(
+        command,
+        arguments,
+        timeout_ms,
+        kill_signal,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+    )
+}
+
+pub fn spawn_result_status(result: &JsSpawnResult) -> Option<f64> {
+    result.with(|result| result.status)
+}
+
+pub fn spawn_result_signal(result: &JsSpawnResult) -> Option<JsString> {
+    result.with(|result| result.signal.clone())
+}
+
+pub fn spawn_result_stdout(result: &JsSpawnResult) -> JsString {
+    result.with(|result| result.stdout.clone())
+}
+
+pub fn spawn_result_stderr(result: &JsSpawnResult) -> JsString {
+    result.with(|result| result.stderr.clone())
+}
+
+pub fn spawn_result_error(result: &JsSpawnResult) -> Option<JsError> {
+    result.with(|result| result.error.clone())
 }
 
 pub struct StatsData {
