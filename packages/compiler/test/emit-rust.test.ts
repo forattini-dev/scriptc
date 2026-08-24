@@ -1136,6 +1136,16 @@ const pendingAll: number[] = await Promise.all([
 console.log("pending all", pendingAll.join(","));
 await Promise.all([sleep(1), sleep(2)]);
 console.log("all void");
+console.log("inline await", await Promise.resolve(9));
+const left = Promise.resolve(10);
+const right = Promise.resolve(11);
+console.log("multiple awaits", await left, await right);
+function argument(value: number): number {
+  console.log("argument", value);
+  return value;
+}
+console.log("ordered", argument(12), await Promise.resolve(13), argument(14));
+console.error("inline error", await Promise.resolve(15));
 export {};
 `);
   for (const [name, entryPath] of [
@@ -1143,6 +1153,8 @@ export {};
     ["top-level-await", resolve("tests/corpus/2673-top-level-await-implicit-module.ts")],
     ["top-level-await-promise", resolve("tests/corpus/2646-top-level-await.ts")],
     ["timers-promises", resolve("tests/corpus/2093-timers-promises.ts")],
+    ["settled-await-order", resolve("tests/corpus/1428-settled-await-order.ts")],
+    ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,

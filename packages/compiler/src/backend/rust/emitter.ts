@@ -846,6 +846,12 @@ class RustEmitter {
         );
         return;
       }
+      if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
+        (stmt.expr.name === "console.log" || stmt.expr.name === "console.error") &&
+        stmt.expr.args.some((arg) => arg.kind === "awaitExpr")) {
+        this.emitAsyncConsole(stmt.expr, statements.slice(index + 1));
+        return;
+      }
       const awaited =
         stmt.kind === "assign" && stmt.value.kind === "awaitExpr" ? stmt.value
         : stmt.kind === "varDecl" && stmt.init?.kind === "awaitExpr" ? stmt.init
@@ -885,6 +891,39 @@ class RustEmitter {
     } else {
       this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
     }
+  }
+
+  private emitAsyncConsole(
+    expr: Extract<IrExpr, { kind: "intrinsic" }>,
+    remaining: readonly IrStmt[],
+    index = 0,
+    values: { name: string; type: IrType; loc: SrcLoc }[] = [],
+  ): void {
+    const arg = expr.args[index];
+    if (arg === undefined) {
+      const method = expr.name === "console.log" ? "console_log" : "console_error";
+      this.line(`runtime::${method}(&[${values.map((value) =>
+        this.displayValue(value.name, value.type, value.loc)).join(", ")}]);`);
+      this.emitAsyncStatements(remaining);
+      return;
+    }
+    if (arg.kind === "awaitExpr") {
+      this.emitAsyncContinuation(
+        this.emitExpr(arg.value),
+        (value) => this.emitAsyncConsole(expr, remaining, index + 1, [
+          ...values,
+          { name: value, type: arg.type, loc: arg.loc },
+        ]),
+        null,
+      );
+      return;
+    }
+    if (this.containsAsyncSuspension(arg)) {
+      this.unsupported("nested console argument suspension in the Rust state-machine subset", arg.loc);
+    }
+    const value = `sc_async_argument_${this.temporary++}`;
+    this.line(`let ${value} = ${this.emitExpr(arg)};`);
+    this.emitAsyncConsole(expr, remaining, index + 1, [...values, { name: value, type: arg.type, loc: arg.loc }]);
   }
 
   private emitAsyncContinuation(
@@ -2219,12 +2258,15 @@ class RustEmitter {
   }
 
   private displayExpr(expr: IrExpr): string {
-    const emitted = this.emitExpr(expr);
-    switch (expr.type.kind) {
-      case "f64": return `runtime::display_number(${emitted})`;
-      case "bool": return `runtime::display_bool(${emitted})`;
-      case "string": return `runtime::display_string(&(${emitted}))`;
-      default: this.unsupported(`console display type '${expr.type.kind}'`, expr.loc);
+    return this.displayValue(this.emitExpr(expr), expr.type, expr.loc);
+  }
+
+  private displayValue(value: string, type: IrType, loc: SrcLoc): string {
+    switch (type.kind) {
+      case "f64": return `runtime::display_number(${value})`;
+      case "bool": return `runtime::display_bool(${value})`;
+      case "string": return `runtime::display_string(&(${value}))`;
+      default: this.unsupported(`console display type '${type.kind}'`, loc);
     }
   }
 
