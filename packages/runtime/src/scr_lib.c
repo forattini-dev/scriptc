@@ -106,7 +106,7 @@ extern char **environ; /* env snapshot (scr_env_pairs) */
 
 static SCR_TL int scr_lib_argc = 0;
 static SCR_TL char **scr_lib_argv = NULL;
-static SCR_TL bool scr_lib_skip_reexec_arg = false;
+static SCR_TL bool scr_lib_self_reexec = false;
 static SCR_TL ScrArr *scr_argv_arr = NULL;    /* interned process.argv */
 static SCR_TL ScrStr *scr_platform_str = NULL; /* interned process.platform */
 static SCR_TL ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
@@ -134,7 +134,7 @@ static void scr_lib_cleanup(void) {
  * atexit handlers (the emitted library init never calls this; keeping it out
  * the archive's objects free of any atexit reference — the K8 ambient
  * audit's bar). */
-static bool scr_lib_same_executable_arg(const char *a, const char *b) {
+static bool scr_lib_same_executable_path(const char *a, const char *b) {
   if (strcmp(a, b) == 0) return true;
   char resolved_a[PATH_MAX], resolved_b[PATH_MAX];
 #ifdef _WIN32
@@ -151,11 +151,10 @@ static bool scr_lib_same_executable_arg(const char *a, const char *b) {
 void scr_lib_init(int argc, char **argv) {
   scr_lib_argc = argc;
   scr_lib_argv = argv;
-  /* Node self-reexecution spells `spawn(process.execPath,
-   * [process.argv[1], ...args])`. In a native binary argv[0] already IS the
-   * entry executable, so collapse that repeated first argument before
-   * exposing Node's [exec, script, ...args] process.argv shape. */
-  scr_lib_skip_reexec_arg = argc >= 2 && scr_lib_same_executable_arg(argv[0], argv[1]);
+  /* child_process stamps argv[0] only for a native self-reexecution. Keep
+   * the repeated first argument as Node's script slot and hide the marker.
+   * In particular, never infer reexecution from ordinary user arguments. */
+  scr_lib_self_reexec = argc >= 2 && strcmp(argv[0], SCR_SELF_REEXEC_ARGV0) == 0;
   atexit(scr_lib_cleanup);
 }
 #endif /* !SCR_LIB */
@@ -171,9 +170,9 @@ void scr_lib_session_cleanup(void) { scr_lib_cleanup(); }
 /* Raw argv accessors for the island's process shim (scr_island.c): the
  * island's process.argv must match the static world's ["scriptc",
  * argv[0], ...] shape exactly, so both build from the same stash. */
-int scr_lib_arg_count(void) { return scr_lib_argc - (scr_lib_skip_reexec_arg ? 1 : 0); }
+int scr_lib_arg_count(void) { return scr_lib_argc - (scr_lib_self_reexec ? 1 : 0); }
 const char *scr_lib_arg(int i) {
-  return scr_lib_argv[i + (scr_lib_skip_reexec_arg && i > 0 ? 1 : 0)];
+  return scr_lib_argv[i + (scr_lib_self_reexec ? 1 : 0)];
 }
 
 ScrArr *scr_process_argv(void) {
@@ -291,6 +290,21 @@ ScrStr *scr_process_exec_path(void) {
     scr_exec_path_str = scr_str_new(use, strlen(use));
   }
   return scr_str_retain(scr_exec_path_str);
+}
+
+bool scr_lib_should_mark_self_reexec(const ScrStr *cmd, const ScrStr *first_arg) {
+#ifdef SCR_LIB
+  (void)cmd;
+  (void)first_arg;
+  return false;
+#else
+  ScrStr *exec_path = scr_process_exec_path();
+  bool should_mark =
+      scr_lib_same_executable_path(exec_path->data, cmd->data) &&
+      scr_lib_same_executable_path(exec_path->data, first_arg->data);
+  scr_str_release(exec_path);
+  return should_mark;
+#endif
 }
 
 ScrStr *scr_env_get(const ScrStr *name) {
