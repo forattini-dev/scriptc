@@ -1684,6 +1684,7 @@ class RustEmitter {
         if (expr.fn === "process.uptime" && expr.args.length === 0) return "runtime::process_uptime()";
         if (expr.fn === "perf.now" && expr.args.length === 0) return "runtime::performance_now()";
         if (expr.fn === "date.now" && expr.args.length === 0) return "runtime::date_now()";
+        if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
         if (expr.fn === "atomics.wait" && expr.args.length === 4 && arg !== undefined) {
           const [index, expected, timeout] = expr.args.slice(1);
           if (index === undefined || expected === undefined || timeout === undefined) {

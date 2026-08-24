@@ -1016,6 +1016,44 @@ test("Rust monotonic clocks and Atomics.wait match Node invariants", async () =>
   }
 }, 120_000);
 
+test("Rust active resource snapshots track timer and Immediate lifetimes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-active-resources-"));
+  const entry = join(dir, "active-resources.ts");
+  await writeFile(entry, `
+const count = (kind: string): number =>
+  process.getActiveResourcesInfo().filter((value) => value === kind).length;
+console.log("empty", count("Timeout"), count("Immediate"));
+const timer = setTimeout(() => {
+  console.log("timer firing", count("Timeout"));
+  clearTimeout(timer);
+  console.log("timer cleared", count("Timeout"));
+  setImmediate(() => console.log("immediate firing", count("Immediate")));
+  console.log("immediate armed", count("Immediate"));
+}, 0);
+console.log("timer armed", count("Timeout"));
+`);
+  const result = await compile(entry, {
+    outDir: dir,
+    outPath: join(dir, "active-resources"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (result.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entry]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [

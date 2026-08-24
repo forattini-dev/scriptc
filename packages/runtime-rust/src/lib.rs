@@ -522,6 +522,19 @@ pub fn process_next_tick(callback: Box<dyn FnOnce()>) {
     NEXT_TICKS.with(|tasks| tasks.borrow_mut().push_back(callback));
 }
 
+pub fn process_active_resources() -> JsArray<JsString> {
+    let timer_count = TIMER_TASKS.with(|tasks| tasks.borrow().len())
+        + usize::from(
+            FIRING_TIMER_ID.with(|id| id.get() != 0)
+                && FIRING_TIMER_CLEARED.with(|cleared| !cleared.get()),
+        );
+    let immediate_count = IMMEDIATE_TASKS.with(|tasks| tasks.borrow().len());
+    let mut resources = Vec::with_capacity(timer_count + immediate_count);
+    resources.extend((0..timer_count).map(|_| string("Timeout")));
+    resources.extend((0..immediate_count).map(|_| string("Immediate")));
+    array_new(resources)
+}
+
 pub fn run_event_loop() {
     let mut turn = 0_u64;
     loop {
