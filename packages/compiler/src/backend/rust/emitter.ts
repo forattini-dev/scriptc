@@ -3213,6 +3213,33 @@ class RustEmitter {
         if (expr.fn === "fileHandle.close" && expr.args.length === 1 && arg !== undefined) {
           return this.emitPromiseFromSync([arg], (value) => `runtime::file_handle_close(&${value(0)})`);
         }
+        if (expr.fn === "fileHandle.read" || expr.fn === "fileHandle.writeBytes" || expr.fn === "fileHandle.writeStr") {
+          return this.emitFileHandleTransferPromise(expr);
+        }
+        if (expr.fn === "fileHandle.readFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::file_handle_read_file(&${value(0)}, &${value(1)})`,
+          );
+        }
+        if (expr.fn === "fileHandle.readFileBytes" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::file_handle_read_file_bytes(&${value(0)}, &${value(1)})`,
+          );
+        }
+        if (expr.fn === "fileHandle.writeFile" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1], expr.args[2]],
+            (value) => `runtime::file_handle_write_file(&${value(0)}, &${value(1)}, &${value(2)})`,
+          );
+        }
+        if (expr.fn === "fileHandle.writeFileBytes" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1], expr.args[2]],
+            (value) => `runtime::file_handle_write_file_bytes(&${value(0)}, &${value(1)}, &${value(2)})`,
+          );
+        }
         if (expr.fn === "fileHandle.stat" && expr.args.length === 1 && arg !== undefined) {
           return this.emitPromiseFromSync([arg], (value) => `runtime::file_handle_stat(&${value(0)})`);
         }
@@ -3808,8 +3835,52 @@ class RustEmitter {
       if (result === undefined) this.unsupported(`missing synchronous promise argument ${index}`);
       return result;
     };
-    const bindings = args.map((arg, index) => `let ${value(index)} = ${this.emitExpr(arg)};`).join(" ");
+    const bindings = args.map((arg, index) => {
+      if (arg.kind !== "seqExpr") return `let ${value(index)} = ${this.emitExpr(arg)};`;
+      // A sequence may declare a hidden local whose value is deliberately
+      // consumed by a later argument (FileHandle's optional length marker is
+      // one example). Keep every argument left-to-right, but let those
+      // declarations live in this shared expression block rather than an
+      // argument-private Rust block.
+      const start = this.lines.length;
+      const previousIndent = this.indent;
+      this.indent = 0;
+      this.emitStatements(arg.stmts);
+      const result = this.emitExpr(arg.result);
+      const statements = this.lines.splice(start).join(" ");
+      this.indent = previousIndent;
+      return `${statements} let ${value(index)} = ${result};`;
+    }).join(" ");
     return `{ ${bindings} runtime::promise_from_sync(move || ${operation(value)}) }`;
+  }
+
+  private emitFileHandleTransferPromise(expr: Extract<IrExpr, { kind: "libCall" }>): string {
+    if (expr.type.kind !== "promise" || expr.type.inner.kind !== "record") {
+      this.unsupported(`${expr.fn} result without a record promise`, expr.loc);
+    }
+    const recordType = expr.type.inner;
+    const shape = this.records.get(recordType.shapeId);
+    if (shape === undefined) this.unsupported(`unknown FileHandle result shape '${recordType.shapeId}'`, expr.loc);
+    const countField = expr.fn === "fileHandle.read" ? "bytesRead" : "bytesWritten";
+    const expectedArgs = expr.fn === "fileHandle.writeStr" ? 4 : 6;
+    if (expr.args.length !== expectedArgs || expr.args[1] === undefined) {
+      this.unsupported(`${expr.fn} argument shape`, expr.loc);
+    }
+    const fields = shape.fields.map((field) => {
+      if (field.name === countField) return `${mangleField(field.name)}: sc_count`;
+      if (field.name === "buffer") {
+        return `${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? "Some(sc_buffer)" : "sc_buffer"}`;
+      }
+      this.unsupported(`unexpected FileHandle result field '${field.name}'`, expr.loc);
+    }).join(", ");
+    return this.emitPromiseFromSync(expr.args, (value) => {
+      const operation = expr.fn === "fileHandle.read"
+        ? `runtime::file_handle_read(&${value(0)}, &${value(1)}, ${value(2)}, ${value(3)}, ${value(4)}, ${value(5)})`
+        : expr.fn === "fileHandle.writeBytes"
+          ? `runtime::file_handle_write_bytes(&${value(0)}, &${value(1)}, ${value(2)}, ${value(3)}, ${value(4)}, ${value(5)})`
+          : `runtime::file_handle_write_str(&${value(0)}, &${value(1)}, ${value(2)}, &${value(3)})`;
+      return `{ let sc_count = ${operation}; let sc_buffer = ${value(1)}; runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
+    });
   }
 
   private emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string {

@@ -2639,6 +2639,14 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
 }
 
 fn fs_error_code(error: &std::io::Error) -> &'static str {
+    #[cfg(unix)]
+    if error.raw_os_error() == Some(9) {
+        return "EBADF";
+    }
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(6) {
+        return "EBADF";
+    }
     match error.kind() {
         std::io::ErrorKind::NotFound => "ENOENT",
         std::io::ErrorKind::PermissionDenied => "EACCES",
@@ -2653,6 +2661,9 @@ fn fs_error_code(error: &std::io::Error) -> &'static str {
 }
 
 fn fs_error_text(error: &std::io::Error) -> String {
+    if fs_error_code(error) == "EBADF" {
+        return "bad file descriptor".to_owned();
+    }
     let text = match error.kind() {
         std::io::ErrorKind::NotFound => "no such file or directory",
         std::io::ErrorKind::PermissionDenied => "permission denied",
@@ -2697,7 +2708,8 @@ fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
 
 fn throw_fs_fd_io_error(operation: &str, error: std::io::Error) -> ! {
     let code = fs_error_code(&error);
-    throw_fs_fd_error(operation, code, &error.to_string())
+    let text = fs_error_text(&error);
+    throw_fs_fd_error(operation, code, &text)
 }
 
 fn throw_out_of_range(message: String) -> ! {
@@ -2705,6 +2717,61 @@ fn throw_out_of_range(message: String) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+    })
+}
+
+fn inspected_argument(value: &str) -> String {
+    let quote = if !value.contains('\'') {
+        '\''
+    } else if !value.contains('"') {
+        '"'
+    } else if !value.contains('`') && !value.contains("${") {
+        '`'
+    } else {
+        '\''
+    };
+    let mut inspected = String::new();
+    inspected.push(quote);
+    for character in value.chars() {
+        match character {
+            '\\' => inspected.push_str("\\\\"),
+            '\'' if quote == '\'' => inspected.push_str("\\'"),
+            '\u{0008}' => inspected.push_str("\\b"),
+            '\t' => inspected.push_str("\\t"),
+            '\n' => inspected.push_str("\\n"),
+            '\u{000c}' => inspected.push_str("\\f"),
+            '\r' => inspected.push_str("\\r"),
+            '\u{0000}'..='\u{001f}' | '\u{007f}'..='\u{009f}' => {
+                use std::fmt::Write;
+                let _ = write!(inspected, "\\x{:02X}", character as u32);
+            }
+            _ => inspected.push(character),
+        }
+    }
+    inspected.push(quote);
+
+    let mut units = 0;
+    let mut boundary = inspected.len();
+    for (index, character) in inspected.char_indices() {
+        let next = units + character.len_utf16();
+        if next > 128 {
+            boundary = index;
+            break;
+        }
+        units = next;
+    }
+    if boundary < inspected.len() {
+        inspected.truncate(boundary);
+        inspected.push_str("...");
+    }
+    inspected
+}
+
+fn throw_invalid_arg_value(prefix: &str, value: &str) -> ! {
+    throw_value(JsError {
+        name: "TypeError".to_owned(),
+        message: format!("{prefix}{}", inspected_argument(value)),
+        code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
     })
 }
 
@@ -3060,9 +3127,7 @@ fn fs_open_options(flags: &str) -> std::fs::OpenOptions {
         "ax+" | "xa+" => {
             options.read(true).create_new(true).append(true);
         }
-        _ => throw_type_error(format!(
-            "The argument 'flags' is invalid. Received '{flags}'"
-        )),
+        _ => throw_invalid_arg_value("The argument 'flags' is invalid. Received ", flags),
     }
     #[cfg(unix)]
     {
@@ -3130,6 +3195,12 @@ impl Drop for FileHandleData {
 pub type JsFileHandle = Gc<FileHandleData>;
 
 pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileHandle {
+    if path.contains('\0') {
+        throw_invalid_arg_value(
+            "The argument 'path' must be a string, Uint8Array, or URL without null bytes. Received ",
+            path,
+        );
+    }
     let mode = fs_creation_mode(mode);
     let mut options = fs_open_options(flags);
     #[cfg(unix)]
@@ -3179,6 +3250,98 @@ pub fn file_handle_close(handle: &JsFileHandle) {
     if file.is_none() {
         throw_fs_fd_error("close", "EBADF", "bad file descriptor");
     }
+}
+
+pub fn file_handle_read(
+    handle: &JsFileHandle,
+    bytes: &JsBytes<u8>,
+    offset: f64,
+    mut length: f64,
+    position: f64,
+    length_default: bool,
+) -> f64 {
+    let fd = file_handle_require_open(handle);
+    let byte_length = bytes.with(|data| data.length);
+    if byte_length == 0 {
+        let checked = fs_read_sync(fd, bytes, offset, 0.0, position);
+        if (!length_default && length >= 0.0 && length < 1.0) || (length_default && offset == 0.0) {
+            return checked;
+        }
+        throw_value(JsError {
+            name: "TypeError".to_owned(),
+            message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >"
+                .to_owned(),
+            code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+        });
+    }
+    if length_default
+        && offset.is_finite()
+        && offset.fract() == 0.0
+        && (0.0..=byte_length as f64).contains(&offset)
+    {
+        length = byte_length as f64 - offset;
+    }
+    fs_read_sync(fd, bytes, offset, length, position)
+}
+
+pub fn file_handle_write_bytes(
+    handle: &JsFileHandle,
+    bytes: &JsBytes<u8>,
+    offset: f64,
+    mut length: f64,
+    position: f64,
+    length_default: bool,
+) -> f64 {
+    let fd = file_handle_require_open(handle);
+    let byte_length = bytes.with(|data| data.length);
+    if byte_length == 0 {
+        return 0.0;
+    }
+    if length_default
+        && offset.is_finite()
+        && offset.fract() == 0.0
+        && (0.0..=byte_length as f64).contains(&offset)
+    {
+        length = byte_length as f64 - offset;
+    }
+    fs_write_sync(fd, bytes, offset, length, position)
+}
+
+pub fn file_handle_write_str(
+    handle: &JsFileHandle,
+    data: &JsString,
+    position: f64,
+    encoding: &JsString,
+) -> f64 {
+    let fd = file_handle_require_open(handle);
+    fs_write_str_sync(fd, data, position, encoding)
+}
+
+pub fn file_handle_read_file_bytes(handle: &JsFileHandle, _encoding: &JsString) -> JsBytes<u8> {
+    fs_read_fd_bytes(file_handle_require_open(handle))
+}
+
+pub fn file_handle_read_file(handle: &JsFileHandle, encoding: &JsString) -> JsString {
+    let bytes = file_handle_read_file_bytes(handle, encoding);
+    bytes_to_string(&bytes, encoding)
+}
+
+pub fn file_handle_write_file(handle: &JsFileHandle, data: &JsString, _encoding: &JsString) {
+    let fd = file_handle_require_open(handle);
+    use std::io::Write;
+    with_open_file(fd, "write", |file| file.write_all(data.as_bytes()));
+}
+
+pub fn file_handle_write_file_bytes(
+    handle: &JsFileHandle,
+    data: &JsBytes<u8>,
+    _encoding: &JsString,
+) {
+    let fd = file_handle_require_open(handle);
+    let input =
+        data.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    use std::io::Write;
+    with_open_file(fd, "write", |file| file.write_all(&input));
 }
 
 fn with_open_file<T>(
@@ -4779,6 +4942,75 @@ mod tests {
 
         std::fs::remove_file(path).expect("the FileHandle fixture must be removable");
         assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn file_handle_data_operations_preserve_descriptor_position() {
+        let baseline = live_heap_objects();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the test clock must follow the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "scriptc-runtime-file-handle-data-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"abcdef").expect("the FileHandle fixture must be writable");
+        let path_string: JsString = Rc::from(path.to_string_lossy().as_ref());
+
+        {
+            let handle = file_handle_open(&path_string, &string("r+"), 0o666 as f64);
+            let current = bytes_alloc::<u8>(3.0);
+            assert_eq!(
+                file_handle_read(&handle, &current, 0.0, -1.0, -1.0, true),
+                3.0
+            );
+            assert_eq!(bytes_to_string(&current, &string("utf8")).as_ref(), "abc");
+
+            let positioned = bytes_alloc::<u8>(2.0);
+            assert_eq!(
+                file_handle_read(&handle, &positioned, 0.0, 2.0, 4.0, false),
+                2.0
+            );
+            assert_eq!(bytes_to_string(&positioned, &string("utf8")).as_ref(), "ef");
+            assert_eq!(
+                file_handle_write_str(&handle, &string("XY"), -1.0, &string("utf8")),
+                2.0
+            );
+            let source = buffer_from_string(&string("QZ"), &string("utf8"));
+            assert_eq!(
+                file_handle_write_bytes(&handle, &source, 0.0, 2.0, 1.0, false),
+                2.0
+            );
+            assert_eq!(
+                file_handle_read_file(&handle, &string("utf8")).as_ref(),
+                "f"
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("fixture must be readable"),
+                b"aQZXYf"
+            );
+            file_handle_close(&handle);
+        }
+
+        std::fs::remove_file(path).expect("the FileHandle fixture must be removable");
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn file_handle_invalid_argument_inspection_matches_node() {
+        assert_eq!(inspected_argument("bad"), "'bad'");
+        assert_eq!(inspected_argument("w'bad"), "\"w'bad\"");
+        assert_eq!(inspected_argument("w\"bad"), "'w\"bad'");
+        assert_eq!(inspected_argument("w'\"bad"), "`w'\"bad`");
+        assert_eq!(inspected_argument("w\\bad"), "'w\\\\bad'");
+        assert_eq!(inspected_argument("w\nbad"), "'w\\nbad'");
+        assert_eq!(inspected_argument("w\u{0080}bad"), "'w\\x80bad'");
+        assert_eq!(inspected_argument("w\0not-a-flag"), "'w\\x00not-a-flag'");
+        let long = inspected_argument(&"x".repeat(256));
+        assert_eq!(long.encode_utf16().count(), 131);
+        assert!(long.starts_with('\''));
+        assert!(long.ends_with("..."));
     }
 
     #[test]
