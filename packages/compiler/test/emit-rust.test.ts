@@ -1160,6 +1160,7 @@ export {};
     ["settled-await-order", resolve("tests/corpus/1428-settled-await-order.ts")],
     ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
+    ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,

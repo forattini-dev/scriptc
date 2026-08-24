@@ -865,7 +865,7 @@ class RustEmitter {
           : stmt.kind === "exprStmt" ? stmt.expr
           : stmt.kind === "return" ? stmt.value
           : null;
-        if (nested?.kind === "bin" && this.containsAsyncSuspension(nested)) {
+        if ((nested?.kind === "bin" || nested?.kind === "recordLit") && this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
               this.emitAssignment(stmt.localId, value, stmt.loc);
@@ -929,12 +929,43 @@ class RustEmitter {
       });
       return;
     }
+    if (expr.kind === "recordLit") {
+      this.emitAsyncRecord(expr, consume);
+      return;
+    }
     if (this.containsAsyncSuspension(expr)) {
       this.unsupported("nested async value in the Rust state-machine subset", expr.loc);
     }
     const value = `sc_async_value_${this.temporary++}`;
     this.line(`let ${value} = ${this.emitExpr(expr)};`);
     consume(value);
+  }
+
+  private emitAsyncRecord(
+    expr: Extract<IrExpr, { kind: "recordLit" }>,
+    consume: (value: string) => void,
+    index = 0,
+    values = new Map<string, string>(),
+  ): void {
+    if (expr.type.kind !== "record") this.unsupported("async record literal with a non-record type", expr.loc);
+    const shape = this.records.get(expr.type.shapeId);
+    if (shape === undefined) this.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
+    const entry = expr.fields[index];
+    if (entry !== undefined) {
+      if (entry.overflow || entry.drop) this.unsupported("async record overflow/drop fields", expr.loc);
+      this.emitAsyncValue(entry.value, (value) => {
+        const next = new Map(values);
+        next.set(entry.name, value);
+        this.emitAsyncRecord(expr, consume, index + 1, next);
+      });
+      return;
+    }
+    const fields = shape.fields.map((field) => {
+      const value = values.get(field.name);
+      if (value === undefined) this.unsupported(`missing async record field '${shape.id}.${field.name}'`, expr.loc);
+      return `${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? `Some(${value})` : value}`;
+    }).join(", ");
+    consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
   }
 
   private emitAsyncConsole(
