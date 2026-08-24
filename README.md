@@ -48,10 +48,12 @@ hello, ctate
 
 Rust builds emit `#![forbid(unsafe_code)]`, do not translate through C, and
 report unsupported constructs instead of falling back to another backend. The
-current subset includes classes with constructors, fields, monomorphic and
-virtual methods, lexical `this` captures, object identity, single inheritance,
-runtime `instanceof`, composition, collectable cycles, array identity searches,
-and insertion-ordered `Map` and `Set` containers with live iteration.
+current subset includes classes with constructors, fields, accessors,
+monomorphic and virtual methods, generic specializations, abstract dispatch,
+first-class constructor values, lexical `this` captures, object identity,
+single inheritance, runtime `instanceof`, composition, collectable cycles,
+array identity searches, and insertion-ordered `Map` and `Set` containers with
+live iteration.
 
 ## Use Node APIs
 

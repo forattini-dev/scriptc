@@ -430,12 +430,38 @@ test("Rust class inheritance, dispatch, instanceof, accessors, and cycles match 
   }
 }, 120_000);
 
-test("Rust first-class constructors preserve identity, names, construction, and dispatch", async () => {
-  const entryPath = resolve("tests/corpus/1940-class-values-basics.ts");
-  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-values-"));
+test("Rust abstract class slots dispatch through concrete descendants", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-abstract-classes-"));
+  const entryPath = join(dir, "abstract-classes.ts");
+  await writeFile(entryPath, `
+abstract class Shape {
+  name: string;
+  constructor(name: string) { this.name = name; }
+  abstract area(): number;
+  abstract get scale(): number;
+  describe(): string { return this.name + "=" + this.area() * this.scale; }
+}
+abstract class Polygon extends Shape {
+  abstract area(): number;
+}
+class Square extends Polygon {
+  private side: number;
+  constructor(side: number) { super("square"); this.side = side; }
+  area(): number { return this.side * this.side; }
+  get scale(): number { return 2; }
+}
+class Circle extends Shape {
+  private radius: number;
+  constructor(radius: number) { super("circle"); this.radius = radius; }
+  area(): number { return 3 * this.radius * this.radius; }
+  get scale(): number { return 1; }
+}
+const shapes: Shape[] = [new Square(4), new Circle(2)];
+for (const shape of shapes) console.log(shape.describe(), shape instanceof Polygon);
+`);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "class-values"),
+    outPath: join(dir, "abstract-classes"),
     backend: "rust",
     optimization: "dev",
   });
@@ -443,7 +469,7 @@ test("Rust first-class constructors preserve identity, names, construction, and 
     result.ok,
     result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
   ).toBe(true);
-  if (!result.ok || result.backend !== "rust") return;
+  if (!result.ok) return;
   const [node, rust] = await Promise.all([
     execFileAsync(process.execPath, [entryPath]),
     execFileAsync(result.binaryPath, [], {
@@ -452,6 +478,37 @@ test("Rust first-class constructors preserve identity, names, construction, and 
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
+}, 120_000);
+
+test("Rust class values and generic classes preserve identity, statics, hierarchy, and dispatch", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-values-"));
+  for (const fixture of [
+    "1940-class-values-basics.ts",
+    "1951-generic-classes-basics.ts",
+    "1952-generic-class-statics-values.ts",
+    "1953-generic-class-hierarchy.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok || result.backend !== "rust") continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
 }, 120_000);
 
 test("Rust Map and Set containers preserve equality, live iteration, references, and class registries", async () => {

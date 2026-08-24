@@ -121,6 +121,7 @@ class RustEmitter {
     this.emitClassDefinitions();
     this.emitGlobals();
     for (const fn of this.mod.functions) {
+      if (fn.captures !== undefined && !this.closureTargets.has(fn.name)) continue;
       this.emitFunction(fn);
       this.line("");
     }
@@ -151,8 +152,6 @@ class RustEmitter {
       if (cls.base !== undefined && !this.classes.has(cls.base)) {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
-      if (cls.abstract) this.unsupported(`abstract class '${cls.name}'`, cls.loc);
-      if (cls.genericOf !== undefined) this.unsupported(`generic class '${cls.name}'`, cls.loc);
     }
     if ((this.mod.ffiImports?.length ?? 0) > 0) this.unsupported("native FFI");
     if (this.mod.embedded !== undefined) this.unsupported("embedded dynamic modules");
@@ -190,8 +189,22 @@ class RustEmitter {
           inherited ||= declares(ancestor, method);
         }
         if (!inherited && declaredBelow(meta, method)) {
-          const fn = this.functions.get(`%${meta.def.name}.${method}`);
-          if (fn === undefined) this.unsupported(`abstract virtual method '${meta.def.name}.${method}'`, meta.def.loc);
+          let fn = this.functions.get(`%${meta.def.name}.${method}`);
+          if (fn === undefined && meta.def.abstractMethods?.includes(method)) {
+            const findImplementation = (candidate: RustClassMeta): IrFunction | undefined => {
+              for (const child of candidate.children) {
+                const implementation = child.def.methods?.includes(method) && !child.def.abstractMethods?.includes(method)
+                  ? this.functions.get(`%${child.def.name}.${method}`)
+                  : undefined;
+                const found = implementation ?? findImplementation(child);
+                if (found !== undefined) return found;
+              }
+              return undefined;
+            };
+            fn = findImplementation(meta);
+            if (fn === undefined) continue;
+          }
+          if (fn === undefined) this.unsupported(`missing virtual method '${meta.def.name}.${method}'`, meta.def.loc);
           root.slots.push({ method, declarer: meta, fn });
         }
       }
@@ -946,6 +959,9 @@ class RustEmitter {
         if (expr.method === "toLowerCase" && expr.args.length === 0) {
           return `runtime::string_to_lower_case(&(${this.emitExpr(expr.receiver)}))`;
         }
+        if (expr.method === "toUpperCase" && expr.args.length === 0) {
+          return `runtime::string_to_upper_case(&(${this.emitExpr(expr.receiver)}))`;
+        }
         if (expr.method === "charAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
@@ -1141,7 +1157,7 @@ class RustEmitter {
         const pre = `sc_rt_${this.temporary++}`;
         const implementations = new Map<string, { fn: IrFunction; tags: number[] }>();
         for (const dynamic of this.classMeta.values()) {
-          if (dynamic.root !== meta.root || dynamic.pre < meta.pre || dynamic.pre > meta.post) continue;
+          if (dynamic.def.abstract || dynamic.root !== meta.root || dynamic.pre < meta.pre || dynamic.pre > meta.post) continue;
           const implementation = this.virtualImplementation(dynamic, slot);
           const entry = implementations.get(implementation.name);
           if (entry === undefined) implementations.set(implementation.name, { fn: implementation, tags: [dynamic.pre] });
@@ -1204,7 +1220,7 @@ class RustEmitter {
           `let ${callee} = ${this.emitExpr(expr.callee)};`,
           ...expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`),
         ].join(" ");
-        const arms = this.classSubtree(staticMeta).map((dynamic) =>
+        const arms = this.classSubtree(staticMeta).filter((dynamic) => !dynamic.def.abstract).map((dynamic) =>
           `${dynamic.pre} => ${this.classAllocation(dynamic, args, expr.loc)},`
         ).join(" ");
         return `{ ${bindings} match ${callee} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;

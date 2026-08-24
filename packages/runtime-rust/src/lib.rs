@@ -873,6 +873,10 @@ pub fn string_to_lower_case(value: &JsString) -> JsString {
     Rc::<str>::from(value.to_lowercase())
 }
 
+pub fn string_to_upper_case(value: &JsString) -> JsString {
+    Rc::<str>::from(value.to_uppercase())
+}
+
 pub fn number_to_string(value: f64) -> JsString {
     Rc::from(format_number(value))
 }
@@ -1017,6 +1021,13 @@ mod tests {
         assert_eq!(string_char_at(&value, 4.0).as_ref(), "Z");
         assert_eq!(string_char_at(&value, -1.0).as_ref(), "");
         assert_eq!(string_char_at(&value, f64::INFINITY).as_ref(), "");
+    }
+
+    #[test]
+    fn string_case_conversion_handles_ascii() {
+        let value = string("ScriptC 42");
+        assert_eq!(string_to_lower_case(&value).as_ref(), "scriptc 42");
+        assert_eq!(string_to_upper_case(&value).as_ref(), "SCRIPTC 42");
     }
 
     #[test]
