@@ -1695,6 +1695,12 @@ class RustEmitter {
         if (expr.fn === "timers.clearImmediate" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::timer_clear_immediate(${this.emitExpr(arg)})`;
         }
+        if ((expr.fn === "timers.immediateUnref" || expr.fn === "timers.immediateRef") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_set_immediate_ref(${this.emitExpr(arg)}, ${expr.fn === "timers.immediateRef"})`;
+        }
+        if (expr.fn === "timers.immediateHasRef" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_immediate_has_ref(${this.emitExpr(arg)})`;
+        }
         if ((expr.fn === "timers.clearTimeout" || expr.fn === "timers.clearInterval") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::timer_clear(${this.emitExpr(arg)})`;
         }

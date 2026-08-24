@@ -312,6 +312,7 @@ struct TimerTask {
 struct ImmediateTask {
     id: u64,
     turn: u64,
+    referenced: bool,
     callback: Box<dyn FnOnce()>,
 }
 
@@ -447,6 +448,7 @@ pub fn timer_set_immediate(callback: Box<dyn FnOnce()>) -> f64 {
         tasks.borrow_mut().push(ImmediateTask {
             id,
             turn: if phase == 2 { turn + 1 } else { turn },
+            referenced: true,
             callback,
         });
     });
@@ -458,6 +460,32 @@ pub fn timer_clear_immediate(id: f64) {
         return;
     }
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().retain(|task| task.id != id as u64));
+}
+
+pub fn timer_set_immediate_ref(id: f64, referenced: bool) -> f64 {
+    if id.is_finite() && id.fract() == 0.0 && id >= 1.0 && id <= u64::MAX as f64 {
+        let id = id as u64;
+        IMMEDIATE_TASKS.with(|tasks| {
+            if let Some(task) = tasks.borrow_mut().iter_mut().find(|task| task.id == id) {
+                task.referenced = referenced;
+            }
+        });
+    }
+    id
+}
+
+pub fn timer_immediate_has_ref(id: f64) -> bool {
+    if !id.is_finite() || id.fract() != 0.0 || id < 1.0 || id > u64::MAX as f64 {
+        return false;
+    }
+    let id = id as u64;
+    IMMEDIATE_TASKS.with(|tasks| {
+        tasks
+            .borrow()
+            .iter()
+            .find(|task| task.id == id)
+            .is_some_and(|task| task.referenced)
+    })
 }
 
 pub fn timer_queue_microtask(callback: Box<dyn FnOnce()>) {
@@ -490,7 +518,7 @@ pub fn run_event_loop() {
 
         let has_referenced_work = TIMER_TASKS
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
-            || IMMEDIATE_TASKS.with(|tasks| !tasks.borrow().is_empty());
+            || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced));
         if !has_referenced_work {
             break;
         }

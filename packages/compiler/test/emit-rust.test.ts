@@ -907,6 +907,12 @@ setTimeout(() => {
 const cancelled = setImmediate(() => console.log("cancelled"));
 clearImmediate(cancelled);
 setImmediate(() => console.log("immediate"));
+const immediateHandle = setImmediate(() => console.log("handled immediate"));
+console.log("immediate hasRef", immediateHandle.hasRef());
+immediateHandle.unref();
+console.log("immediate hasRef", immediateHandle.hasRef());
+immediateHandle.ref();
+console.log("immediate hasRef", immediateHandle.hasRef());
 const dead = setTimeout(() => console.log("dead"), 0);
 clearTimeout(dead);
 let ticks = 0;
@@ -930,6 +936,41 @@ console.log("sync", value);
   const result = await compile(entry, {
     outDir: dir,
     outPath: join(dir, "timers"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (result.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entry]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);
+
+test("Rust Immediate references control event-loop liveness", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-immediate-ref-"));
+  const entry = join(dir, "immediate-ref.ts");
+  await writeFile(entry, `
+setImmediate(() => console.log("unreffed neighbor")).unref();
+setImmediate(() => {
+  console.log("keeper");
+  const orphan = setImmediate(() => console.log("orphan"));
+  orphan.unref();
+  console.log("orphan hasRef", orphan.hasRef());
+});
+console.log("main");
+`);
+  const result = await compile(entry, {
+    outDir: dir,
+    outPath: join(dir, "immediate-ref"),
     backend: "rust",
     optimization: "dev",
   });
