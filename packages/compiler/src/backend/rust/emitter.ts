@@ -136,6 +136,7 @@ class RustEmitter {
     this.emitUnionDefinitions();
     this.emitRecordDefinitions();
     this.emitClassDefinitions();
+    this.emitErrorValueDefinition();
     this.emitGlobals();
     for (const fn of this.mod.functions) {
       if (fn.captures !== undefined && !this.closureTargets.has(fn.name)) continue;
@@ -793,6 +794,116 @@ class RustEmitter {
       this.line("}");
       this.line("");
     }
+  }
+
+  private emitErrorValueDefinition(): void {
+    const roots = this.errorClassRoots();
+    if (roots.length === 0) return;
+    const name = this.errorValueName();
+    this.line("#[derive(Clone)]");
+    this.line(`enum ${name} {`);
+    this.indent += 1;
+    this.line("Builtin(runtime::JsError),");
+    for (const root of roots) {
+      this.line(`${this.errorValueVariant(root)}(runtime::Gc<${this.classStructName(root.def.name)}>),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::Trace for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
+    this.indent += 1;
+    this.line("match self {");
+    this.indent += 1;
+    this.line("Self::Builtin(_) => {},");
+    for (const root of roots) this.line(`Self::${this.errorValueVariant(root)}(value) => tracer.edge(value),`);
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::HeapValue for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::ArrayElement for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_error_is_class(value: &${name}, target: &str) -> bool {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Builtin(error) => runtime::error_is_class(error, target),`);
+    for (const root of roots) {
+      const classes = this.runtimeErrorClassNames(root.def.name);
+      this.line(`${name}::${this.errorValueVariant(root)}(_) => matches!(target, ${classes.map((value) => `"${this.rustString(value)}"`).join(" | ")}),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.emitErrorValueStringHelper("name");
+    this.emitErrorValueStringHelper("message");
+    this.line(`fn sc_error_to_string(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Builtin(error) => runtime::error_to_string(error),`);
+    for (const root of roots) {
+      const nameField = this.classFieldName(root.def.name, "name");
+      const messageField = this.classFieldName(root.def.name, "message");
+      this.line(`${name}::${this.errorValueVariant(root)}(value) => value.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref())),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_caught_error_value(caught: &runtime::Caught) -> ${name} {`);
+    this.indent += 1;
+    this.line(`if runtime::caught_is::<${name}>(caught) { return runtime::caught_narrow::<${name}>(caught); }`);
+    this.line(`if runtime::caught_is::<runtime::JsError>(caught) { return ${name}::Builtin(runtime::caught_narrow::<runtime::JsError>(caught)); }`);
+    for (const root of roots) {
+      const typeName = `runtime::Gc<${this.classStructName(root.def.name)}>`;
+      this.line(`if runtime::caught_is::<${typeName}>(caught) { return ${name}::${this.errorValueVariant(root)}(runtime::caught_narrow::<${typeName}>(caught)); }`);
+    }
+    this.line("unreachable!(\"scriptc invariant: caught value is not an Error\")");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_caught_is_error_class(caught: &runtime::Caught, target: &str) -> bool {`);
+    this.indent += 1;
+    this.line(`if runtime::caught_is::<${name}>(caught) { return sc_error_is_class(&runtime::caught_narrow::<${name}>(caught), target); }`);
+    this.line("if runtime::caught_is::<runtime::JsError>(caught) { return runtime::caught_is_error_class(caught, target); }");
+    for (const root of roots) {
+      const typeName = `runtime::Gc<${this.classStructName(root.def.name)}>`;
+      const classes = this.runtimeErrorClassNames(root.def.name);
+      this.line(`if runtime::caught_is::<${typeName}>(caught) { return matches!(target, ${classes.map((value) => `"${this.rustString(value)}"`).join(" | ")}); }`);
+    }
+    this.line("false");
+    this.indent -= 1;
+    this.line("}");
+    this.line("");
+  }
+
+  private emitErrorValueStringHelper(field: "name" | "message"): void {
+    const roots = this.errorClassRoots();
+    const name = this.errorValueName();
+    this.line(`fn sc_error_${field}(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Builtin(error) => runtime::error_${field}(error),`);
+    for (const root of roots) {
+      const fieldName = this.classFieldName(root.def.name, field);
+      this.line(`${name}::${this.errorValueVariant(root)}(value) => value.with(|object| object.${fieldName}.clone()),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
   }
 
   private emitGlobals(): void {
@@ -2042,9 +2153,17 @@ class RustEmitter {
           const object = `sc_rt_${this.temporary++}`;
           const type = this.rustType({ kind: "object", className: meta.def.name }, expr.loc);
           const sameHierarchy = `runtime::caught_is::<${type}>(&${caught})`;
-          const test = meta.hierarchy
+          let test = meta.hierarchy
             ? `${sameHierarchy} && { let ${object} = runtime::caught_narrow::<${type}>(&${caught}); ${object}.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}) }`
             : sameHierarchy;
+          if (this.runtimeErrorAncestor(meta.def.name) !== null) {
+            const value = `sc_rt_${this.temporary++}`;
+            const variant = `${this.errorValueName()}::${this.errorValueVariant(meta)}`;
+            const narrowed = meta.hierarchy
+              ? `object.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post})`
+              : "true";
+            test = `(${test}) || (runtime::caught_is::<${this.errorValueName()}>(&${caught}) && { let ${value} = runtime::caught_narrow::<${this.errorValueName()}>(&${caught}); match &${value} { ${variant}(object) => ${narrowed}, _ => false, } })`;
+          }
           const result = expr.negated ? `!(${test})` : test;
           return `{ let ${caught} = ${this.emitExpr(expr.value)}; ${result} }`;
         }
@@ -2052,6 +2171,11 @@ class RustEmitter {
           const error = RUNTIME_ERROR_CLASSES.get(expr.className);
           if (error === undefined) this.unsupported(`caught test '${expr.test}:${expr.className}'`, expr.loc);
           const caught = `sc_rt_${this.temporary++}`;
+          if (this.errorClassRoots().length > 0) {
+            const test = `sc_caught_is_error_class(&${caught}, "${this.rustString(error.lib)}")`;
+            const result = expr.negated ? `!(${test})` : test;
+            return `{ let ${caught} = ${this.emitExpr(expr.value)}; ${result} }`;
+          }
           const subclassTests = [...this.classMeta.values()]
             .filter((meta) => meta === meta.root && this.runtimeErrorAncestor(meta.def.name) !== null)
             .filter((meta) => error.lib === "Error" || this.runtimeErrorAncestor(meta.def.name) === expr.className)
@@ -2068,7 +2192,8 @@ class RustEmitter {
         if (expr.type.kind === "bool") return `runtime::caught_narrow::<bool>(&(${this.emitExpr(expr.value)}))`;
         if (expr.type.kind === "string") return `runtime::caught_narrow::<runtime::JsString>(&(${this.emitExpr(expr.value)}))`;
         if (expr.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
-          return `runtime::caught_error_value(&(${this.emitExpr(expr.value)}))`;
+          const helper = this.errorClassRoots().length === 0 ? "runtime::caught_error_value" : "sc_caught_error_value";
+          return `${helper}(&(${this.emitExpr(expr.value)}))`;
         }
         if (expr.type.kind === "object" && this.classMeta.has(expr.type.className)) {
           return `runtime::caught_narrow::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(expr.value)}))`;
@@ -2082,7 +2207,8 @@ class RustEmitter {
       }
       case "fieldGet":
         if (RUNTIME_ERROR_CLASSES.has(expr.className) && (expr.field === "name" || expr.field === "message")) {
-          return `runtime::error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
+          const helper = this.errorClassRoots().length === 0 ? `runtime::error_${expr.field}` : `sc_error_${expr.field}`;
+          return `${helper}(&(${this.emitExpr(expr.obj)}))`;
         }
         {
           const cls = this.classDef(expr.className, expr.loc);
@@ -2195,12 +2321,19 @@ class RustEmitter {
             return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; ${this.runtimeErrorIsA(ancestor, expr.className)} }`;
           }
           if (RUNTIME_ERROR_CLASSES.has(expr.value.type.className)) {
-            return `{ let ${value} = ${this.emitExpr(expr.value)}; runtime::error_is_class(&${value}, "${this.rustString(runtimeTarget.lib)}") }`;
+            const helper = this.errorClassRoots().length === 0 ? "runtime::error_is_class" : "sc_error_is_class";
+            return `{ let ${value} = ${this.emitExpr(expr.value)}; ${helper}(&${value}, "${this.rustString(runtimeTarget.lib)}") }`;
           }
           return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; false }`;
         }
         if (RUNTIME_ERROR_CLASSES.has(expr.value.type.className)) {
-          this.unsupported("polymorphic built-in Error narrowing to a user subclass", expr.loc);
+          const target = this.classMetaOf(expr.className, expr.loc);
+          const value = `sc_rt_${this.temporary++}`;
+          const variant = `${this.errorValueName()}::${this.errorValueVariant(target)}`;
+          const test = target.hierarchy
+            ? `object.with(|object| ${target.pre} <= object.sc_class_pre && object.sc_class_pre <= ${target.post})`
+            : "true";
+          return `{ let ${value} = ${this.emitExpr(expr.value)}; match &${value} { ${variant}(object) => ${test}, _ => false, } }`;
         }
         const target = this.classMetaOf(expr.className, expr.loc);
         const value = `sc_rt_${this.temporary++}`;
@@ -2259,13 +2392,20 @@ class RustEmitter {
       case "upcast":
         if (expr.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.type.className) &&
           expr.value.type.kind === "object" && this.classMeta.has(expr.value.type.className)) {
-          this.unsupported("polymorphic built-in Error storage for a user subclass", expr.loc);
+          const meta = this.classMetaOf(expr.value.type.className, expr.loc);
+          return `${this.errorValueName()}::${this.errorValueVariant(meta)}(${this.emitExpr(expr.value)})`;
         }
         return this.emitExpr(expr.value);
       case "downcast":
         if (expr.value.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.value.type.className) &&
           expr.type.kind === "object" && this.classMeta.has(expr.type.className)) {
-          this.unsupported("polymorphic built-in Error narrowing to a user subclass", expr.loc);
+          const meta = this.classMetaOf(expr.type.className, expr.loc);
+          const value = `sc_rt_${this.temporary++}`;
+          const variant = `${this.errorValueName()}::${this.errorValueVariant(meta)}`;
+          const check = meta.hierarchy
+            ? `if !object.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}) { unreachable!("scriptc invariant: invalid Error subclass downcast"); }`
+            : "";
+          return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${variant}(object) => { ${check} object }, _ => unreachable!("scriptc invariant: invalid Error subclass downcast"), } }`;
         }
         return this.emitExpr(expr.value);
       case "libCall": {
@@ -2311,6 +2451,9 @@ class RustEmitter {
             const nameField = this.classFieldName(receiverExpr.type.className, "name", expr.loc);
             const messageField = this.classFieldName(receiverExpr.type.className, "message", expr.loc);
             return `{ let ${receiver} = ${this.emitExpr(receiverExpr)}; ${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref())) }`;
+          }
+          if (this.errorClassRoots().length > 0) {
+            return `sc_error_to_string(&(${this.emitExpr(arg)}))`;
           }
           return `runtime::error_to_string(&(${this.emitExpr(arg)}))`;
         }
@@ -2616,7 +2759,8 @@ class RustEmitter {
         if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
           const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);
           if (error === undefined) this.unsupported(`error.new result '${expr.type.className}'`, expr.loc);
-          return `runtime::error_new("${this.rustString(error.lib)}", ${this.emitExpr(arg)})`;
+          const value = `runtime::error_new("${this.rustString(error.lib)}", ${this.emitExpr(arg)})`;
+          return this.errorClassRoots().length === 0 ? value : `${this.errorValueName()}::Builtin(${value})`;
         }
         if (expr.fn === "class.name" && expr.args.length === 1 && arg !== undefined && arg.type.kind === "classval") {
           const value = `sc_rt_${this.temporary++}`;
@@ -3023,7 +3167,9 @@ class RustEmitter {
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
       }
       case "object": {
-        if (RUNTIME_ERROR_CLASSES.has(type.className)) return "runtime::JsError";
+        if (RUNTIME_ERROR_CLASSES.has(type.className)) {
+          return this.errorClassRoots().length === 0 ? "runtime::JsError" : this.errorValueName();
+        }
         if (!this.classes.has(type.className)) this.unsupported(`object type '${type.className}'`, loc);
         return `runtime::Gc<${this.classStructName(type.className, loc)}>`;
       }
@@ -3262,7 +3408,8 @@ class RustEmitter {
 
   private isTracedHandle(type: IrType): boolean {
     return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
-      (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
+      (type.kind === "object" && (this.classes.has(type.className) ||
+        (RUNTIME_ERROR_CLASSES.has(type.className) && this.errorClassRoots().length > 0))) || type.kind === "func";
   }
 
   private isEdgeValue(type: IrType): boolean {
@@ -3354,6 +3501,34 @@ class RustEmitter {
       cls = this.classes.get(cls.base);
     }
     return null;
+  }
+
+  private errorClassRoots(): RustClassMeta[] {
+    return [...this.classMeta.values()].filter((meta) =>
+      meta === meta.root && this.runtimeErrorAncestor(meta.def.name) !== null
+    );
+  }
+
+  private errorValueName(): string {
+    return "sc_error_value";
+  }
+
+  private errorValueVariant(meta: RustClassMeta): string {
+    return `User${meta.root.pre}`;
+  }
+
+  private runtimeErrorClassNames(name: string): string[] {
+    const ancestor = this.runtimeErrorAncestor(name);
+    if (ancestor === null) return [];
+    const names: string[] = [];
+    let current: string | null = ancestor;
+    while (current !== null) {
+      const error = RUNTIME_ERROR_CLASSES.get(current);
+      if (error === undefined) break;
+      names.push(error.lib);
+      current = error.base;
+    }
+    return names;
   }
 
   private runtimeErrorIsA(source: string, target: string): boolean {
