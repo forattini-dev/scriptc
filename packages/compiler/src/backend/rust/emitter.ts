@@ -2041,6 +2041,22 @@ class RustEmitter {
           }
           return `runtime::promise_resolved(${expr.args[0] === undefined ? "()" : this.emitExpr(expr.args[0])})`;
         }
+        if (expr.name === "promise.all") {
+          if (expr.type.kind !== "promise") this.unsupported("Promise.all result shape", expr.loc);
+          const entries = expr.args[0];
+          if (entries === undefined || entries.type.kind !== "array" || entries.type.elem.kind !== "promise") {
+            this.unsupported("Promise.all argument shape", expr.loc);
+          }
+          if (expr.type.inner.kind === "void") {
+            if (entries.type.elem.inner.kind !== "void") this.unsupported("Promise.all void entry shape", expr.loc);
+            return `runtime::promise_all_void(&(${this.emitExpr(entries)}))`;
+          }
+          if (expr.type.inner.kind !== "array" ||
+            typeKey(entries.type.elem.inner) !== typeKey(expr.type.inner.elem)) {
+            this.unsupported("Promise.all with differing Rust value types", expr.loc);
+          }
+          return `runtime::promise_all(&(${this.emitExpr(entries)}))`;
+        }
         if (expr.name === "promise.race") {
           if (expr.type.kind !== "promise") this.unsupported("Promise.race result shape", expr.loc);
           const raceInner = expr.type.inner;

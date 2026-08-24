@@ -1127,6 +1127,15 @@ const pendingRace = await Promise.race([
   new Promise<number>((resolveRace) => setTimeout(() => resolveRace(4), 1)),
 ]);
 console.log("pending race", pendingRace);
+const all: number[] = await Promise.all([Promise.resolve(5), Promise.resolve(6)]);
+console.log("all", all.join(","));
+const pendingAll: number[] = await Promise.all([
+  new Promise<number>((resolveAll) => setTimeout(() => resolveAll(7), 5)),
+  new Promise<number>((resolveAll) => setTimeout(() => resolveAll(8), 1)),
+]);
+console.log("pending all", pendingAll.join(","));
+await Promise.all([sleep(1), sleep(2)]);
+console.log("all void");
 export {};
 `);
   for (const [name, entryPath] of [

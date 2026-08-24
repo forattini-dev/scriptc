@@ -870,6 +870,134 @@ pub fn promise_race<T: HeapValue>(entries: Vec<JsPromise<T>>) -> JsPromise<T> {
     result
 }
 
+pub fn promise_all<T>(entries: &JsArray<JsPromise<T>>) -> JsPromise<JsArray<T>>
+where
+    T: HeapValue + ArrayElement,
+{
+    let entries = entries.with(|data| data.elements.clone());
+    if entries.is_empty() {
+        return promise_resolved(array_new(Vec::new()));
+    }
+
+    struct State<T>
+    where
+        T: HeapValue + ArrayElement,
+    {
+        result: JsPromise<JsArray<T>>,
+        values: Vec<Option<T>>,
+        remaining: usize,
+        settled: bool,
+    }
+
+    let result = promise_new();
+    let state = Rc::new(RefCell::new(State {
+        result: result.clone(),
+        values: vec![None; entries.len()],
+        remaining: entries.len(),
+        settled: false,
+    }));
+    for (index, entry) in entries.into_iter().enumerate() {
+        let state = state.clone();
+        promise_then(
+            &entry,
+            Box::new(move |outcome| {
+                let action = {
+                    let mut state = state.borrow_mut();
+                    if state.settled {
+                        return;
+                    }
+                    match outcome {
+                        Ok(value) => {
+                            state.values[index] = Some(value);
+                            state.remaining -= 1;
+                            if state.remaining != 0 {
+                                return;
+                            }
+                            state.settled = true;
+                            let values = std::mem::take(&mut state.values)
+                                .into_iter()
+                                .map(|value| value.expect("scriptc: missing Promise.all value"))
+                                .collect();
+                            (state.result.clone(), Ok(array_new(values)))
+                        }
+                        Err(reason) => {
+                            state.settled = true;
+                            state.values.clear();
+                            (state.result.clone(), Err(reason))
+                        }
+                    }
+                };
+                match action {
+                    (result, Ok(values)) => {
+                        let _ = promise_fulfill(&result, values);
+                    }
+                    (result, Err(reason)) => {
+                        let _ = promise_reject(&result, reason);
+                    }
+                }
+            }),
+        );
+    }
+    result
+}
+
+pub fn promise_all_void(entries: &JsArray<JsPromise<()>>) -> JsPromise<()> {
+    let entries = entries.with(|data| data.elements.clone());
+    if entries.is_empty() {
+        return promise_resolved(());
+    }
+
+    struct State {
+        result: JsPromise<()>,
+        remaining: usize,
+        settled: bool,
+    }
+
+    let result = promise_new();
+    let state = Rc::new(RefCell::new(State {
+        result: result.clone(),
+        remaining: entries.len(),
+        settled: false,
+    }));
+    for entry in entries {
+        let state = state.clone();
+        promise_then(
+            &entry,
+            Box::new(move |outcome| {
+                let action = {
+                    let mut state = state.borrow_mut();
+                    if state.settled {
+                        return;
+                    }
+                    match outcome {
+                        Ok(()) => {
+                            state.remaining -= 1;
+                            if state.remaining != 0 {
+                                return;
+                            }
+                            state.settled = true;
+                            (state.result.clone(), Ok(()))
+                        }
+                        Err(reason) => {
+                            state.settled = true;
+                            (state.result.clone(), Err(reason))
+                        }
+                    }
+                };
+                match action {
+                    (result, Ok(())) => {
+                        let _ = promise_fulfill(&result, ());
+                    }
+                    (result, Err(reason)) => {
+                        let _ = promise_reject(&result, reason);
+                    }
+                }
+            }),
+        );
+    }
+    result
+}
+
 fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<T, Caught>) {
     timer_queue_microtask(Box::new(move || reaction(outcome)));
 }
@@ -4419,6 +4547,54 @@ mod tests {
 
         drop(promise);
         drop(rejected);
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promise_all_preserves_order_and_rejects_on_the_first_failure() {
+        let baseline = live_heap_objects();
+        {
+            let first = promise_new::<f64>();
+            let second = promise_new::<f64>();
+            let entries = array_new(vec![first.clone(), second.clone()]);
+            let combined = promise_all(&entries);
+            let values = Rc::new(RefCell::new(Vec::new()));
+            let observed = values.clone();
+            promise_then(
+                &combined,
+                Box::new(move |outcome| {
+                    let array = promise_unwrap(outcome);
+                    observed
+                        .borrow_mut()
+                        .extend([array_get(&array, 0.0), array_get(&array, 1.0)]);
+                }),
+            );
+
+            assert!(promise_fulfill(&second, 2.0));
+            assert!(promise_fulfill(&first, 1.0));
+            run_event_loop();
+            assert_eq!(values.borrow().as_slice(), &[1.0, 2.0]);
+
+            let rejected_entry = promise_new::<f64>();
+            let ignored_entry = promise_new::<f64>();
+            let rejected_entries = array_new(vec![rejected_entry.clone(), ignored_entry.clone()]);
+            let rejected_all = promise_all(&rejected_entries);
+            let rejected = Rc::new(Cell::new(false));
+            let observed_rejection = rejected.clone();
+            promise_then(
+                &rejected_all,
+                Box::new(move |outcome| {
+                    observed_rejection.set(matches!(outcome, Err(reason)
+                        if caught_error_name(&reason).as_ref() == "TypeError"));
+                }),
+            );
+            promise_run_segment(&rejected_entry, || {
+                throw_type_error("Promise.all failure".to_owned())
+            });
+            assert!(promise_fulfill(&ignored_entry, 9.0));
+            run_event_loop();
+            assert!(rejected.get());
+        }
         assert_eq!(live_heap_objects(), baseline);
     }
 }
