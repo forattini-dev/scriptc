@@ -301,6 +301,39 @@ class RustEmitter {
           this.promiseRejectorTypes.set(key, promiseTypes);
         }
       }
+      if (node.kind === "promiseWithResolvers") {
+        const valueType = node.type as IrType | undefined;
+        const record = valueType?.kind === "record" ? this.records.get(valueType.shapeId) : undefined;
+        const promiseType = record?.fields.find((field) => field.name === "promise")?.type;
+        const resolverType = record?.fields.find((field) => field.name === "resolve")?.type;
+        const rejectorType = record?.fields.find((field) => field.name === "reject")?.type;
+        if (promiseType?.kind !== "promise" || resolverType?.kind !== "func" || rejectorType?.kind !== "func") {
+          this.unsupported("malformed Promise.withResolvers IR");
+        }
+        const resolverKey = typeKey(resolverType);
+        let resolverShape = this.closureShapes.get(resolverKey);
+        if (resolverShape === undefined) {
+          resolverShape = { index: this.closureShapes.size, type: resolverType, targets: [] };
+          this.closureShapes.set(resolverKey, resolverShape);
+        }
+        const existing = this.promiseResolverTypes.get(resolverKey);
+        if (existing !== undefined && typeKey(existing) !== typeKey(promiseType.inner)) {
+          this.unsupported(`Promise resolver signature '${resolverKey}' with multiple value types`);
+        }
+        this.promiseResolverTypes.set(resolverKey, promiseType.inner);
+
+        const rejectorKey = typeKey(rejectorType);
+        let rejectorShape = this.closureShapes.get(rejectorKey);
+        if (rejectorShape === undefined) {
+          rejectorShape = { index: this.closureShapes.size, type: rejectorType, targets: [] };
+          this.closureShapes.set(rejectorKey, rejectorShape);
+        }
+        const promiseTypes = this.promiseRejectorTypes.get(rejectorKey) ?? [];
+        if (!promiseTypes.some((candidate) => typeKey(candidate) === typeKey(promiseType.inner))) {
+          promiseTypes.push(promiseType.inner);
+        }
+        this.promiseRejectorTypes.set(rejectorKey, promiseTypes);
+      }
       for (const child of Object.values(node)) visit(child);
     };
     for (const fn of this.mod.functions) visit(fn.body);
@@ -2424,6 +2457,34 @@ class RustEmitter {
       case "awaitExpr":
       case "awaitUnionExpr":
         this.unsupported("async suspension outside the Rust state-machine subset", expr.loc);
+      case "promiseWithResolvers": {
+        if (expr.type.kind !== "record") this.unsupported("Promise.withResolvers result shape", expr.loc);
+        const record = this.records.get(expr.type.shapeId);
+        const promiseType = record?.fields.find((field) => field.name === "promise")?.type;
+        const resolverType = record?.fields.find((field) => field.name === "resolve")?.type;
+        const rejectorType = record?.fields.find((field) => field.name === "reject")?.type;
+        if (record === undefined || record.fields.length !== 3 || promiseType?.kind !== "promise" ||
+          resolverType?.kind !== "func" || rejectorType?.kind !== "func") {
+          this.unsupported("Promise.withResolvers record shape", expr.loc);
+        }
+        const resolverShape = this.closureShapeForType(resolverType, expr.loc);
+        const rejectorShape = this.closureShapeForType(rejectorType, expr.loc);
+        const rejectorVariant = this.promiseRejectorVariant(rejectorType, promiseType.inner, expr.loc);
+        const promise = `sc_rt_${this.temporary++}`;
+        const resolver = `sc_rt_${this.temporary++}`;
+        const rejector = `sc_rt_${this.temporary++}`;
+        const values = new Map([
+          ["promise", promise],
+          ["resolve", resolver],
+          ["reject", rejector],
+        ]);
+        const fields = record.fields.map((field) => {
+          const value = values.get(field.name);
+          if (value === undefined) this.unsupported(`Promise.withResolvers field '${field.name}'`, expr.loc);
+          return `${mangleField(field.name)}: Some(${value})`;
+        }).join(", ");
+        return `{ let ${promise} = runtime::promise_new::<${this.rustType(promiseType.inner, expr.loc)}>(); let ${resolver} = runtime::Gc::new(${this.closureName(resolverShape)}::PromiseResolver { promise: Some(${promise}.clone()) }); let ${rejector} = runtime::Gc::new(${this.closureName(rejectorShape)}::${rejectorVariant} { promise: Some(${promise}.clone()) }); runtime::Gc::new(${mangleRecordStruct(record.id)} { ${fields} }) }`;
+      }
       case "newPromise": {
         if (expr.type.kind !== "promise" || expr.executor.type.kind !== "func") {
           this.unsupported("new Promise shape", expr.loc);

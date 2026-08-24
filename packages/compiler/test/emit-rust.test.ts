@@ -1245,6 +1245,7 @@ export {};
     ["async-methods", resolve("tests/corpus/2351-async-methods.ts")],
     ["async-never", resolve("tests/corpus/1434-async-never.ts")],
     ["promise-catch-finally", resolve("tests/corpus/1429-promise-catch-finally.ts")],
+    ["promise-with-resolvers", resolve("tests/corpus/1726-promise-with-resolvers.ts")],
     ["promise-reject-all", resolve("tests/corpus/1572-promise-reject-all-tuple.ts")],
   ] as const) {
     const result = await compile(entryPath, {
