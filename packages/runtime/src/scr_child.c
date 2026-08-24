@@ -202,7 +202,14 @@ static WCHAR *scr_child_cmdline(ScrStr *cmd, ScrArr *args) {
   size_t argc = n + 1;
   WCHAR **wargs = malloc(argc * sizeof(WCHAR *));
   if (!wargs) scr_child_oom();
-  wargs[0] = scr_child_wide(cmd->data, cmd->len);
+  bool mark_self_reexec = false;
+  if (n > 0) {
+    ScrStr *first = (ScrStr *)scr_arr_get_ref(args, 0);
+    mark_self_reexec = scr_lib_should_mark_self_reexec(cmd, first);
+    scr_str_release(first);
+  }
+  const char *argv0 = mark_self_reexec ? SCR_SELF_REEXEC_ARGV0 : cmd->data;
+  wargs[0] = scr_child_wide(argv0, strlen(argv0));
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)i);
     wargs[i + 1] = scr_child_wide(s->data, s->len);
@@ -822,7 +829,13 @@ char **scr_child_argv(ScrStr *cmd, ScrArr *args) {
   size_t n = (size_t)scr_arr_len(args);
   char **argv = malloc((n + 2) * sizeof(char *));
   if (!argv) scr_child_oom();
-  argv[0] = cmd->data;
+  bool mark_self_reexec = false;
+  if (n > 0) {
+    ScrStr *first = (ScrStr *)scr_arr_get_ref(args, 0);
+    mark_self_reexec = scr_lib_should_mark_self_reexec(cmd, first);
+    scr_str_release(first);
+  }
+  argv[0] = mark_self_reexec ? SCR_SELF_REEXEC_ARGV0 : cmd->data;
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)i);
     argv[i + 1] = s->data;
@@ -1877,7 +1890,13 @@ char **scr_child_argv(ScrStr *cmd, ScrArr *args) {
   size_t n = (size_t)scr_arr_len(args);
   char **argv = malloc((n + 2) * sizeof(char *));
   if (!argv) scr_child_oom();
-  argv[0] = cmd->data;
+  bool mark_self_reexec = false;
+  if (n > 0) {
+    ScrStr *first = (ScrStr *)scr_arr_get_ref(args, 0);
+    mark_self_reexec = scr_lib_should_mark_self_reexec(cmd, first);
+    scr_str_release(first);
+  }
+  argv[0] = mark_self_reexec ? SCR_SELF_REEXEC_ARGV0 : cmd->data;
   for (size_t i = 0; i < n; i++) {
     ScrStr *s = (ScrStr *)scr_arr_get_ref(args, (double)i);
     argv[i + 1] = s->data;

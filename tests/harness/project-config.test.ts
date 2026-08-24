@@ -75,6 +75,29 @@ test("node-types: the supported process surface lowers statically under @types/n
   expect(stdout).toBe("2\nalpha\nbeta\nhi from env\nwritten without newline <- flushed in order\n");
 });
 
+test("node-types: an argument resolving to the binary is preserved", async () => {
+  const outDir = outDirFor("node-argv-binary-argument");
+  const entry = join(nodeTypesDir, "argv-env.ts");
+  const result = await compile(entry, {
+    outPath: join(outDir, "argv-env"),
+    outDir,
+    sanitize,
+  });
+  expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
+  if (!result.ok) return;
+
+  // From outDir, this ordinary user argument resolves to the native binary.
+  // It still occupies argv[2], just as the same argument does under Node.
+  const env = { ...process.env, SCRIPTC_FIXTURE_GREETING: "argument preserved" };
+  for (const argv of [["argv-env"], [result.binaryPath]]) {
+    const [node, native] = await Promise.all([
+      execFileAsync(process.execPath, [entry, ...argv], { cwd: outDir, env }),
+      execFileAsync(result.binaryPath, argv, { cwd: outDir, env }),
+    ]);
+    expect(native.stdout).toBe(node.stdout);
+  }
+});
+
 test("node-types: captured NodeJS.WritableStream values write through the procStream scalar", async () => {
   const outDir = outDirFor("node-stream-capture");
   const result = await compile(join(nodeTypesDir, "stream-capture.ts"), {

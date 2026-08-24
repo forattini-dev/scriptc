@@ -2060,6 +2060,13 @@ void scr_exc_print_uncaught(void);
  */
 void scr_lib_init(int argc, char **argv);
 
+/* Native self-reexecution protocol. child_process replaces argv[0] with
+ * this private marker only for process.execPath + process.argv[1]; the
+ * child then removes the marker while retaining the repeated script slot.
+ * Ordinary invocations never infer reexecution from user arguments. */
+#define SCR_SELF_REEXEC_ARGV0 "\x1fscriptc-self-reexec"
+bool scr_lib_should_mark_self_reexec(const ScrStr *cmd, const ScrStr *first_arg);
+
 /* +1 on the ONE interned argv array (identity and mutation semantics match
  * Node's stable process.argv). */
 ScrArr *scr_process_argv(void);
