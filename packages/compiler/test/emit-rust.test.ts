@@ -1336,6 +1336,7 @@ export {};
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
     ["async-eager-chains", resolve("tests/corpus/1029-async-eager-chains.ts")],
+    ["promise-union", resolve("tests/corpus/1369-promise-union.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],
     ["void-statement", resolve("tests/corpus/1540-void-statement.ts")],
     ["await-unit", resolve("tests/corpus/2320-await-unit.ts")],

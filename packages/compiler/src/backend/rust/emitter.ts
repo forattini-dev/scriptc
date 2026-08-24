@@ -1132,6 +1132,10 @@ class RustEmitter {
         this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
         return;
       }
+      if (stmt.kind === "if" && this.containsAsyncSuspension(stmt)) {
+        this.emitAsyncIf(stmt, statements.slice(index + 1), onComplete);
+        return;
+      }
       if (stmt.kind === "tryCatch" && this.containsAsyncSuspension(stmt)) {
         this.emitAsyncTryCatch(stmt, statements.slice(index + 1), onComplete);
         return;
@@ -1257,6 +1261,35 @@ class RustEmitter {
       returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
       thrown: (reason) => this.emitAsyncCatch(stmt, remaining, outerLocals, reason, onComplete),
     }, stmt.loc);
+  }
+
+  private emitAsyncIf(
+    stmt: Extract<IrStmt, { kind: "if" }>,
+    remaining: readonly IrStmt[],
+    onComplete: (() => void) | null,
+  ): void {
+    if (this.containsAsyncSuspension(stmt.cond)) {
+      this.unsupported("async suspension in an if condition", stmt.loc);
+    }
+    const outerLocals = new Set(this.currentAsyncLocals ?? []);
+    const resume = () => this.withAsyncLocals(
+      new Set(outerLocals),
+      () => this.emitAsyncStatements(remaining, onComplete),
+    );
+    this.line(`if ${this.emitExpr(stmt.cond)} {`);
+    this.indent += 1;
+    this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
+    this.indent -= 1;
+    this.line("} else {");
+    this.indent += 1;
+    const elseBody = stmt.else_;
+    if (elseBody === null) {
+      resume();
+    } else {
+      this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(elseBody, resume));
+    }
+    this.indent -= 1;
+    this.line("}");
   }
 
   private emitAsyncFor(
