@@ -1104,7 +1104,7 @@ class RustEmitter {
     return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
   }
 
-  private emitAsyncStatements(statements: readonly IrStmt[]): void {
+  private emitAsyncStatements(statements: readonly IrStmt[], onComplete: (() => void) | null = null): void {
     const result = this.currentAsyncResult;
     const fn = this.currentFunction;
     if (result === null || fn?.async !== true) this.unsupported("async continuation outside an async function", fn?.loc);
@@ -1112,8 +1112,12 @@ class RustEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const stmt = statements[index];
       if (stmt === undefined) break;
+      if (stmt.kind === "for" && this.containsAsyncSuspension(stmt.body)) {
+        this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
+        return;
+      }
       if (stmt.kind === "tryCatch" && this.containsAsyncSuspension(stmt)) {
-        this.emitAsyncTryCatch(stmt, statements.slice(index + 1));
+        this.emitAsyncTryCatch(stmt, statements.slice(index + 1), onComplete);
         return;
       }
       const hop = stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr"
@@ -1129,13 +1133,14 @@ class RustEmitter {
           "runtime::promise_resolved(())",
           (value) => this.line(`let _ = ${value};`),
           statements.slice(index + 1),
+          onComplete,
         );
         return;
       }
       if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
         (stmt.expr.name === "console.log" || stmt.expr.name === "console.error") &&
         stmt.expr.args.some((arg) => this.awaitExpression(arg) !== null)) {
-        this.emitAsyncConsole(stmt.expr, statements.slice(index + 1));
+        this.emitAsyncConsole(stmt.expr, statements.slice(index + 1), 0, [], onComplete);
         return;
       }
       const awaited = this.awaitedValue(
@@ -1157,15 +1162,15 @@ class RustEmitter {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
               this.emitAssignment(stmt.localId, value, stmt.loc);
-              this.emitAsyncStatements(statements.slice(index + 1));
+              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
             } else if (stmt.kind === "varDecl") {
               const local = this.local(stmt.localId, stmt.loc);
               this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
               this.currentAsyncLocals?.add(local.id);
-              this.emitAsyncStatements(statements.slice(index + 1));
+              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
             } else if (stmt.kind === "exprStmt") {
               this.line(`let _ = ${value};`);
-              this.emitAsyncStatements(statements.slice(index + 1));
+              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
             } else {
               this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
               this.line("return;");
@@ -1199,11 +1204,14 @@ class RustEmitter {
           }
         },
         stmt.kind === "return" ? null : statements.slice(index + 1),
+        onComplete,
       );
       return;
     }
 
-    if (fn.returnType.kind === "void") {
+    if (onComplete !== null) {
+      onComplete();
+    } else if (fn.returnType.kind === "void") {
       this.line(`let _ = runtime::promise_fulfill(&${result}, ());`);
     } else {
       this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
@@ -1213,13 +1221,81 @@ class RustEmitter {
   private emitAsyncTryCatch(
     stmt: Extract<IrStmt, { kind: "tryCatch" }>,
     remaining: readonly IrStmt[],
+    onComplete: (() => void) | null,
   ): void {
     const outerLocals = new Set(this.currentAsyncLocals ?? []);
     this.emitAsyncProtectedSequence(stmt.tryBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }),
-      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }),
-      thrown: (reason) => this.emitAsyncCatch(stmt, remaining, outerLocals, reason),
+      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }, onComplete),
+      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
+      thrown: (reason) => this.emitAsyncCatch(stmt, remaining, outerLocals, reason, onComplete),
     }, stmt.loc);
+  }
+
+  private emitAsyncFor(
+    stmt: Extract<IrStmt, { kind: "for" }>,
+    remaining: readonly IrStmt[],
+    onComplete: (() => void) | null,
+  ): void {
+    const result = this.currentAsyncResult;
+    const fn = this.currentFunction;
+    if (result === null || fn?.async !== true) this.unsupported("async for outside an async function", stmt.loc);
+    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async for", stmt.loc);
+    if (this.containsAsyncSuspension(stmt.init) || this.containsAsyncSuspension(stmt.cond) ||
+      this.containsAsyncSuspension(stmt.update)) {
+      this.unsupported("async suspension in for init, condition, or update", stmt.loc);
+    }
+    if (this.containsLoopControl(stmt.body)) {
+      this.unsupported("break or continue in a suspended async for", stmt.loc);
+    }
+    if (stmt.init !== null) {
+      this.emitStatement(stmt.init);
+      if (stmt.init.kind === "varDecl") this.currentAsyncLocals?.add(stmt.init.localId);
+    }
+    const loopLocals = new Set(this.currentAsyncLocals ?? []);
+    const helper = `sc_async_loop_${this.temporary++}`;
+    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
+    const resultType = this.rustType(fn.returnType, stmt.loc);
+    const params = [
+      `${result}: runtime::JsPromise<${resultType}>`,
+      ...locals.map((local) =>
+        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}>`
+      ),
+    ];
+    const call = () => `${helper}(${[
+      `${result}.clone()`,
+      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
+    ].join(", ")});`;
+    this.line(`fn ${helper}(${params.join(", ")}) {`);
+    this.indent += 1;
+    this.withAsyncLocals(new Set(loopLocals), () => {
+      this.line(`if ${stmt.cond === null ? "true" : this.emitExpr(stmt.cond)} {`);
+      this.indent += 1;
+      this.emitAsyncStatements(stmt.body, () => {
+        this.withAsyncLocals(new Set(loopLocals), () => {
+          if (stmt.update !== null) this.emitStatement(stmt.update);
+          this.line(call());
+          this.line("return;");
+        });
+      });
+      this.indent -= 1;
+      this.line("} else {");
+      this.indent += 1;
+      this.emitAsyncStatements(remaining, onComplete);
+      this.indent -= 1;
+      this.line("}");
+    });
+    this.indent -= 1;
+    this.line("}");
+    this.line(call());
+    this.line("return;");
+  }
+
+  private containsLoopControl(value: unknown): boolean {
+    if (value === null || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => this.containsLoopControl(item));
+    const node = value as { kind?: unknown };
+    if (node.kind === "break" || node.kind === "continue") return true;
+    return Object.values(value).some((item) => this.containsLoopControl(item));
   }
 
   private emitAsyncProtectedSequence(
@@ -1338,7 +1414,12 @@ class RustEmitter {
       this.withAsyncLocals(new Set(exitLocals), handlers.fallthrough);
       this.indent -= 1;
       this.line("},");
-      this.line("Ok(runtime::AsyncCompletion::Return(_)) | Ok(runtime::AsyncCompletion::Suspended) => unreachable!(\"scriptc invariant: invalid async fallthrough completion\"),");
+      this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
+      this.indent += 1;
+      this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("value"));
+      this.indent -= 1;
+      this.line("},");
+      this.line("Ok(runtime::AsyncCompletion::Suspended) => unreachable!(\"scriptc invariant: invalid async fallthrough completion\"),");
     } else if (terminal === "return") {
       this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
       this.indent += 1;
@@ -1348,7 +1429,12 @@ class RustEmitter {
       this.line("Ok(runtime::AsyncCompletion::Fallthrough) | Ok(runtime::AsyncCompletion::Suspended) => unreachable!(\"scriptc invariant: invalid async return completion\"),");
     } else {
       this.line("Ok(runtime::AsyncCompletion::Suspended) => {},");
-      this.line("Ok(runtime::AsyncCompletion::Fallthrough) | Ok(runtime::AsyncCompletion::Return(_)) => unreachable!(\"scriptc invariant: invalid async suspension completion\"),");
+      this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
+      this.indent += 1;
+      this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("value"));
+      this.indent -= 1;
+      this.line("},");
+      this.line("Ok(runtime::AsyncCompletion::Fallthrough) => unreachable!(\"scriptc invariant: invalid async suspension completion\"),");
     }
     this.line("Err(reason) => {");
     this.indent += 1;
@@ -1365,9 +1451,10 @@ class RustEmitter {
     remaining: readonly IrStmt[],
     outerLocals: ReadonlySet<string>,
     reason: string,
+    onComplete: (() => void) | null,
   ): void {
     if (stmt.catchBody === null) {
-      this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason });
+      this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason }, onComplete);
       return;
     }
     if (stmt.catchLocalId === null) {
@@ -1378,9 +1465,9 @@ class RustEmitter {
       this.currentAsyncLocals?.add(local.id);
     }
     this.emitAsyncProtectedSequence(stmt.catchBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }),
-      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }),
-      thrown: (catchReason) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason: catchReason }),
+      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }, onComplete),
+      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
+      thrown: (catchReason) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason: catchReason }, onComplete),
     }, stmt.loc);
   }
 
@@ -1389,23 +1476,28 @@ class RustEmitter {
     remaining: readonly IrStmt[],
     outerLocals: ReadonlySet<string>,
     pending: RustAsyncCompletion,
+    onComplete: (() => void) | null,
   ): void {
     if (stmt.finallyBody === null) {
-      this.emitAsyncCompletion(remaining, pending);
+      this.emitAsyncCompletion(remaining, pending, onComplete);
       return;
     }
     this.emitAsyncProtectedSequence(stmt.finallyBody, outerLocals, {
-      fallthrough: () => this.emitAsyncCompletion(remaining, pending),
-      returned: (value) => this.emitAsyncCompletion(remaining, { kind: "return", value }),
-      thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason }),
+      fallthrough: () => this.emitAsyncCompletion(remaining, pending, onComplete),
+      returned: (value) => this.emitAsyncCompletion(remaining, { kind: "return", value }, onComplete),
+      thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason }, onComplete),
     }, stmt.loc);
   }
 
-  private emitAsyncCompletion(remaining: readonly IrStmt[], completion: RustAsyncCompletion): void {
+  private emitAsyncCompletion(
+    remaining: readonly IrStmt[],
+    completion: RustAsyncCompletion,
+    onComplete: (() => void) | null,
+  ): void {
     const result = this.currentAsyncResult;
     if (result === null) this.unsupported("async completion without a result promise", this.currentFunction?.loc);
     if (completion.kind === "fallthrough") {
-      this.emitAsyncStatements(remaining);
+      this.emitAsyncStatements(remaining, onComplete);
     } else if (completion.kind === "return") {
       this.line(`let _ = runtime::promise_fulfill(&${result}, ${completion.value});`);
     } else {
@@ -1513,13 +1605,14 @@ class RustEmitter {
     remaining: readonly IrStmt[],
     index = 0,
     values: { name: string; type: IrType; loc: SrcLoc }[] = [],
+    onComplete: (() => void) | null = null,
   ): void {
     const arg = expr.args[index];
     if (arg === undefined) {
       const method = expr.name === "console.log" ? "console_log" : "console_error";
       this.line(`runtime::${method}(&[${values.map((value) =>
         this.displayValue(value.name, value.type, value.loc)).join(", ")}]);`);
-      this.emitAsyncStatements(remaining);
+      this.emitAsyncStatements(remaining, onComplete);
       return;
     }
     const awaited = this.awaitExpression(arg);
@@ -1529,7 +1622,7 @@ class RustEmitter {
         (value) => this.emitAsyncConsole(expr, remaining, index + 1, [
           ...values,
           { name: value, type: arg.type, loc: arg.loc },
-        ]),
+        ], onComplete),
         null,
       );
       return;
@@ -1539,13 +1632,20 @@ class RustEmitter {
     }
     const value = `sc_async_argument_${this.temporary++}`;
     this.line(`let ${value} = ${this.emitExpr(arg)};`);
-    this.emitAsyncConsole(expr, remaining, index + 1, [...values, { name: value, type: arg.type, loc: arg.loc }]);
+    this.emitAsyncConsole(
+      expr,
+      remaining,
+      index + 1,
+      [...values, { name: value, type: arg.type, loc: arg.loc }],
+      onComplete,
+    );
   }
 
   private emitAsyncContinuation(
     dependencyExpr: string,
     consume: (value: string) => void,
     remaining: readonly IrStmt[] | null,
+    onComplete: (() => void) | null = null,
   ): void {
     const result = this.currentAsyncResult;
     if (result === null) this.unsupported("async continuation without a result promise", this.currentFunction?.loc);
@@ -1564,7 +1664,7 @@ class RustEmitter {
     this.line(`let ${result} = ${nextResult};`);
     this.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
     consume(value);
-    if (remaining !== null) this.emitAsyncStatements(remaining);
+    if (remaining !== null) this.emitAsyncStatements(remaining, onComplete);
     this.indent -= 1;
     this.line("});");
     this.indent -= 1;
