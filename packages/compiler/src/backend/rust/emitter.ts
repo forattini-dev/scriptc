@@ -787,7 +787,7 @@ class RustEmitter {
       }
     }
     if (fn.async) {
-      if (fn.captures !== undefined) this.unsupported(`capturing async function '${fn.name}'`, fn.loc);
+      if ((fn.captures?.length ?? 0) > 0) this.unsupported(`capturing async function '${fn.name}'`, fn.loc);
       const result = `sc_async_result_${this.temporary++}`;
       const bodyResult = `sc_async_result_${this.temporary++}`;
       const guard = `sc_async_guard_${this.temporary++}`;

@@ -1109,12 +1109,15 @@ const firstSettle = await new Promise<number>((resolvePromise) => {
   resolvePromise(4);
 });
 console.log("first settle", firstSettle);
+const mapped = await Promise.resolve(5).then((value) => value + 1);
+console.log("mapped", mapped);
 export {};
 `);
   for (const [name, entryPath] of [
     ["async-resolve", entry],
     ["top-level-await", resolve("tests/corpus/2673-top-level-await-implicit-module.ts")],
     ["top-level-await-promise", resolve("tests/corpus/2646-top-level-await.ts")],
+    ["timers-promises", resolve("tests/corpus/2093-timers-promises.ts")],
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,
