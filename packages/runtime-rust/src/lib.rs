@@ -291,7 +291,9 @@ pub trait HeapValue: Clone + 'static {
 
 impl HeapValue for f64 {}
 impl HeapValue for bool {}
+impl HeapValue for usize {}
 impl HeapValue for JsString {}
+impl HeapValue for JsError {}
 
 impl<T> HeapValue for Gc<T>
 where
@@ -357,6 +359,17 @@ pub fn cell_set<T: HeapValue>(cell: &JsCell<T>, value: T) {
 pub struct JsError {
     name: String,
     message: String,
+}
+
+impl Trace for JsError {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+pub fn error_new(name: &str, message: JsString) -> JsError {
+    JsError {
+        name: name.to_owned(),
+        message: message.to_string(),
+    }
 }
 
 #[derive(Clone)]
@@ -446,6 +459,7 @@ pub trait JoinElement: ArrayElement {
 
 impl ArrayElement for f64 {}
 impl ArrayElement for bool {}
+impl ArrayElement for usize {}
 impl ArrayElement for JsString {}
 
 impl JoinElement for f64 {
@@ -586,6 +600,32 @@ pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
 
 pub fn string_len(value: &JsString) -> f64 {
     value.encode_utf16().count() as f64
+}
+
+pub fn string_char_at(value: &JsString, index: f64) -> JsString {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
+        return empty_string();
+    }
+    let target = index as usize;
+    let mut position = 0usize;
+    for ch in value.chars() {
+        let width = ch.len_utf16();
+        if target == position {
+            return if width == 1 {
+                Rc::from(ch.to_string())
+            } else {
+                // Like the C runtime, safe UTF-8 storage cannot represent
+                // the lone surrogate JavaScript returns for an astral half.
+                string("\u{fffd}")
+            };
+        }
+        if width == 2 && target == position + 1 {
+            return string("\u{fffd}");
+        }
+        position += width;
+    }
+    empty_string()
 }
 
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
@@ -731,6 +771,18 @@ mod tests {
         assert_eq!(format_number(f64::NEG_INFINITY), "-Infinity");
         assert_eq!(format_number(-0.0), "0");
         assert_eq!(display_number(-0.0), "-0");
+    }
+
+    #[test]
+    fn char_at_uses_javascript_utf16_indexes() {
+        let value = string("Aé🎉Z");
+        assert_eq!(string_char_at(&value, f64::NAN).as_ref(), "A");
+        assert_eq!(string_char_at(&value, 1.9).as_ref(), "é");
+        assert_eq!(string_char_at(&value, 2.0).as_ref(), "�");
+        assert_eq!(string_char_at(&value, 3.0).as_ref(), "�");
+        assert_eq!(string_char_at(&value, 4.0).as_ref(), "Z");
+        assert_eq!(string_char_at(&value, -1.0).as_ref(), "");
+        assert_eq!(string_char_at(&value, f64::INFINITY).as_ref(), "");
     }
 
     #[test]

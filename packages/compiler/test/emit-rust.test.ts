@@ -48,6 +48,72 @@ test("TypeScript lowers through the Rust backend to a rustc executable", async (
   expect(stdout).toBe("hello world\n");
 }, 120_000);
 
+test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-instanceof-"));
+  const entryPath = join(dir, "instanceof.ts");
+  await writeFile(entryPath, `
+class Token { value: number = 1; }
+class Other {}
+const token = new Token();
+console.log(token instanceof Token, token instanceof Other, token.value);
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "instanceof"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+}, 120_000);
+
+test("class field increment and decrement preserve value and receiver evaluation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-incdec-"));
+  const entryPath = join(dir, "field-incdec.ts");
+  await writeFile(entryPath, `
+class Counter {
+  value: number = 1;
+  postIncrement(): number { return this.value++; }
+  preIncrement(): number { return ++this.value; }
+}
+const counter = new Counter();
+let receiverCalls = 0;
+function receiver(): Counter {
+  receiverCalls++;
+  return counter;
+}
+console.log(counter.postIncrement(), counter.value);
+console.log(counter.preIncrement(), counter.value);
+console.log(receiver().value++, ++receiver().value, counter.value, receiverCalls);
+console.log(counter.value--, --counter.value, counter.value);
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "field-incdec"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  expect(await readFile(result.sourcePath, "utf8")).toContain("with_mut(|object|");
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+}, 120_000);
+
 test("generated record and array cycles are collected by the safe Rust heap", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-cycles-"));
   const entryPath = join(dir, "cycles.ts");
@@ -262,8 +328,13 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "603-closures-rc-stress.ts",
     "604-closures-for-of.ts",
     "605-closures-forward-capture-tdz.ts",
+    "700-classes-basic.ts",
+    "701-classes-composition.ts",
+    "702-classes-this-capture.ts",
+    "703-classes-rc-stress.ts",
     "750-cycle-closure-box.ts",
     "751-cycle-records-mutual.ts",
+    "752-cycle-classes.ts",
     "970-unions-basics.ts",
     "975-unions-undefined.ts",
     "980-exceptions-basics.ts",
@@ -287,6 +358,12 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     if (!result.ok) continue;
     if (fixture === "2483-recursive-record-cycles.ts" && result.backend === "rust") {
       expect(await readFile(result.sourcePath, "utf8")).toContain("enum sc_u_u0");
+    }
+    if (fixture === "700-classes-basic.ts" && result.backend === "rust") {
+      const generated = await readFile(result.sourcePath, "utf8");
+      expect(generated).toContain("struct sc_o_Point");
+      expect(generated).toContain("runtime::Gc<sc_o_Point>");
+      expect(generated).not.toContain("extern \"C\"");
     }
     const [node, rust] = await Promise.all([
       execFileAsync(process.execPath, [entryPath]),
@@ -312,4 +389,66 @@ test("unsupported Rust IR refuses instead of falling back to C or LLVM", async (
   if (result.ok) return;
   expect(result.diagnostics[0]?.code).toBe("SC3001");
   expect(result.diagnostics[0]?.message).toContain("rust backend does not support");
+}, 120_000);
+
+test("Rust class inheritance, dispatch, instanceof, accessors, and cycles match Node", async () => {
+  for (const fixture of [
+    "710-inheritance-basics.ts",
+    "711-inheritance-dispatch.ts",
+    "712-inheritance-instanceof.ts",
+    "713-inheritance-rc-stress.ts",
+    "720-accessors-basics.ts",
+    "721-accessors-eval-order.ts",
+    "722-accessors-inheritance.ts",
+    "723-accessors-rc-stress.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-hierarchy-"));
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, "class-hierarchy"),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok || result.backend !== "rust") continue;
+    const generated = await readFile(result.sourcePath, "utf8");
+    if (fixture.startsWith("71")) expect(generated, fixture).toContain("sc_class_pre");
+    expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 120_000);
+
+test("Rust first-class constructors preserve identity, names, construction, and dispatch", async () => {
+  const entryPath = resolve("tests/corpus/1940-class-values-basics.ts");
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-values-"));
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "class-values"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
 }, 120_000);

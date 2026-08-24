@@ -4,6 +4,10 @@ All notable changes to scriptc will be documented in this file.
 
 ## Unreleased
 
+### Features
+
+- **The memory-safe Rust backend now supports classes vertically.** Constructors, field initialization and expression-position mutation, monomorphic and virtual methods, lexical `this` captures, object identity, single inheritance, runtime `instanceof`, composition, and cyclic class graphs compile to traced safe-Rust heap objects.
+
 <!-- release:start -->
 
 ## 0.0.36-rust.0

@@ -47,7 +47,10 @@ hello, ctate
 ```
 
 Rust builds emit `#![forbid(unsafe_code)]`, do not translate through C, and
-report unsupported constructs instead of falling back to another backend.
+report unsupported constructs instead of falling back to another backend. The
+current subset includes classes with constructors, fields, monomorphic and
+virtual methods, lexical `this` captures, object identity, single inheritance,
+runtime `instanceof`, composition, and collectable cycles.
 
 ## Use Node APIs
 

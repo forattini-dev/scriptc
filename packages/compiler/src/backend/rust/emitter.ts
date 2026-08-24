@@ -1,4 +1,5 @@
 import type {
+  IrClassDef,
   IrExpr,
   IrFunction,
   IrGlobal,
@@ -9,8 +10,9 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import {
+  mangleClassStruct,
   mangleField,
   mangleFnClosure,
   mangleFunction,
@@ -26,6 +28,23 @@ interface RustClosureShape {
   readonly index: number;
   readonly type: IrFuncType;
   readonly targets: IrFunction[];
+}
+
+interface RustClassMeta {
+  readonly def: IrClassDef;
+  base: RustClassMeta | null;
+  readonly children: RustClassMeta[];
+  root: RustClassMeta;
+  pre: number;
+  post: number;
+  hierarchy: boolean;
+  readonly slots: RustVtSlot[];
+}
+
+interface RustVtSlot {
+  readonly method: string;
+  readonly declarer: RustClassMeta;
+  readonly fn: IrFunction;
 }
 
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
@@ -47,6 +66,8 @@ export function emitRustModule(mod: IrModule): string {
 class RustEmitter {
   private readonly lines: string[] = [];
   private readonly functions = new Map<string, IrFunction>();
+  private readonly classes = new Map<string, IrClassDef>();
+  private readonly classMeta = new Map<string, RustClassMeta>();
   private readonly globals = new Map<string, IrGlobal>();
   private readonly records = new Map<string, IrRecordShape>();
   private readonly unions = new Map<string, IrUnionDef>();
@@ -63,9 +84,25 @@ class RustEmitter {
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.functions.set(fn.name, fn);
+    for (const cls of mod.classes ?? []) {
+      if (!cls.runtime) {
+        this.classes.set(cls.name, cls);
+        this.classMeta.set(cls.name, {
+          def: cls,
+          base: null,
+          children: [],
+          root: undefined as unknown as RustClassMeta,
+          pre: 0,
+          post: 0,
+          hierarchy: false,
+          slots: [],
+        });
+      }
+    }
     for (const global of mod.globals ?? []) this.globals.set(global.id, global);
     for (const record of mod.records ?? []) this.records.set(record.id, record);
     for (const union of mod.unions ?? []) this.unions.set(union.id, union);
+    this.buildClassGraph();
     this.discoverClosures();
   }
 
@@ -81,6 +118,7 @@ class RustEmitter {
     this.emitClosureDefinitions();
     this.emitUnionDefinitions();
     this.emitRecordDefinitions();
+    this.emitClassDefinitions();
     this.emitGlobals();
     for (const fn of this.mod.functions) {
       this.emitFunction(fn);
@@ -109,11 +147,59 @@ class RustEmitter {
   }
 
   private checkModuleSurface(): void {
-    const userClass = (this.mod.classes ?? []).find((cls) => !cls.runtime);
-    if (userClass !== undefined) this.unsupported(`class '${userClass.name}'`, userClass.loc);
+    for (const cls of this.classes.values()) {
+      if (cls.base !== undefined && !this.classes.has(cls.base)) {
+        this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
+      }
+      if (cls.abstract) this.unsupported(`abstract class '${cls.name}'`, cls.loc);
+      if (cls.genericOf !== undefined) this.unsupported(`generic class '${cls.name}'`, cls.loc);
+    }
     if ((this.mod.ffiImports?.length ?? 0) > 0) this.unsupported("native FFI");
     if (this.mod.embedded !== undefined) this.unsupported("embedded dynamic modules");
     if (this.mod.lib !== undefined) this.unsupported("library mode");
+  }
+
+  private buildClassGraph(): void {
+    for (const meta of this.classMeta.values()) {
+      if (meta.def.base === undefined) continue;
+      const base = this.classMeta.get(meta.def.base);
+      if (base === undefined) continue;
+      meta.base = base;
+      base.children.push(meta);
+    }
+    let pre = 0;
+    const number = (meta: RustClassMeta, root: RustClassMeta): void => {
+      meta.root = root;
+      meta.pre = pre++;
+      for (const child of meta.children) number(child, root);
+      meta.post = pre - 1;
+    };
+    for (const meta of this.classMeta.values()) {
+      if (meta.base === null) number(meta, meta);
+    }
+    for (const meta of this.classMeta.values()) {
+      meta.hierarchy = meta.base !== null || meta.children.length > 0;
+    }
+    const declares = (meta: RustClassMeta, method: string): boolean => meta.def.methods?.includes(method) ?? false;
+    const declaredBelow = (meta: RustClassMeta, method: string): boolean =>
+      meta.children.some((child) => declares(child, method) || declaredBelow(child, method));
+    const collectSlots = (meta: RustClassMeta, root: RustClassMeta): void => {
+      for (const method of meta.def.methods ?? []) {
+        let inherited = false;
+        for (let ancestor = meta.base; ancestor !== null; ancestor = ancestor.base) {
+          inherited ||= declares(ancestor, method);
+        }
+        if (!inherited && declaredBelow(meta, method)) {
+          const fn = this.functions.get(`%${meta.def.name}.${method}`);
+          if (fn === undefined) this.unsupported(`abstract virtual method '${meta.def.name}.${method}'`, meta.def.loc);
+          root.slots.push({ method, declarer: meta, fn });
+        }
+      }
+      for (const child of meta.children) collectSlots(child, root);
+    };
+    for (const meta of this.classMeta.values()) {
+      if (meta.base === null && meta.hierarchy) collectSlots(meta, meta);
+    }
   }
 
   private discoverClosures(): void {
@@ -311,6 +397,7 @@ class RustEmitter {
           break;
         case "array":
         case "record":
+        case "object":
         case "func":
           comparison = "left.ptr_eq(right)";
           break;
@@ -371,6 +458,53 @@ class RustEmitter {
     }
   }
 
+  private emitClassDefinitions(): void {
+    for (const meta of this.classMeta.values()) {
+      if (meta.hierarchy && meta !== meta.root) continue;
+      const cls = meta.def;
+      const struct = mangleClassStruct(cls.name);
+      const fields = meta.hierarchy ? this.hierarchyFields(meta) : cls.fields.map((field) => ({ owner: meta, field }));
+      this.line(`struct ${struct} {`);
+      this.indent += 1;
+      if (meta.hierarchy) this.line("sc_class_pre: usize,");
+      for (const { owner, field } of fields) {
+        const fieldType = this.isEdgeValue(field.type)
+          ? `Option<${this.rustType(field.type, cls.loc)}>`
+          : this.rustType(field.type, cls.loc);
+        this.line(`${this.classFieldStorageName(owner, field.name)}: ${fieldType},`);
+      }
+      this.indent -= 1;
+      this.line("}");
+      this.line(`impl runtime::Trace for ${struct} {`);
+      this.indent += 1;
+      this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
+      this.indent += 1;
+      for (const { owner, field } of fields) {
+        if (!this.isEdgeValue(field.type)) continue;
+        const name = this.classFieldStorageName(owner, field.name);
+        this.line(this.isTracedHandle(field.type)
+          ? `if let Some(edge) = &self.${name} { tracer.edge(edge); }`
+          : `if let Some(edge) = &self.${name} { runtime::Trace::trace(edge, tracer); }`);
+      }
+      this.indent -= 1;
+      this.line("}");
+      this.indent -= 1;
+      this.line("}");
+      this.line(`impl runtime::ClearEdges for ${struct} {`);
+      this.indent += 1;
+      this.line("fn clear_edges(&mut self) {");
+      this.indent += 1;
+      for (const { owner, field } of fields) {
+        if (this.isEdgeValue(field.type)) this.line(`self.${this.classFieldStorageName(owner, field.name)} = None;`);
+      }
+      this.indent -= 1;
+      this.line("}");
+      this.indent -= 1;
+      this.line("}");
+      this.line("");
+    }
+  }
+
   private emitGlobals(): void {
     if (this.globals.size === 0 && this.internedClosureTargets.size === 0) return;
     this.line("std::thread_local! {");
@@ -384,11 +518,15 @@ class RustEmitter {
         case "bool":
           this.line(`static ${name}: Cell<bool> = const { Cell::new(false) };`);
           break;
+        case "classval":
+          this.line(`static ${name}: Cell<usize> = const { Cell::new(0) };`);
+          break;
         case "string":
           this.line(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
           break;
         case "array":
         case "record":
+        case "object":
         case "union":
         case "func":
           this.line(`static ${name}: RefCell<Option<${this.rustType(global.type)}>> = const { RefCell::new(None) };`);
@@ -581,6 +719,17 @@ class RustEmitter {
         this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${value} = ${this.emitExpr(stmt.value)}; ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`);
         return;
       }
+      case "fieldSet": {
+        const cls = this.classDef(stmt.className, stmt.loc);
+        const field = cls.fields.find((candidate) => candidate.name === stmt.field);
+        if (field === undefined) this.unsupported(`unknown class field '${stmt.className}.${stmt.field}'`, stmt.loc);
+        const name = this.classFieldName(stmt.className, field.name, stmt.loc);
+        const object = `sc_rt_${this.temporary++}`;
+        const value = `sc_rt_${this.temporary++}`;
+        const stored = this.isEdgeValue(field.type) ? `Some(${value})` : value;
+        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${value} = ${this.emitExpr(stmt.value)}; ${object}.with_mut(|object| object.${name} = ${stored}); }`);
+        return;
+      }
       case "throw":
         this.line(`runtime::throw_value(${this.emitExpr(stmt.value)});`);
         return;
@@ -761,6 +910,25 @@ class RustEmitter {
         const takeRight = expr.op === "&&" ? truthy : `!(${truthy})`;
         return `{ let ${temp} = ${left}; if ${takeRight} { ${this.emitExpr(expr.right)} } else { ${temp} } }`;
       }
+      case "nullish": {
+        if (expr.left.type.kind !== "union") this.unsupported("nullish over a non-union", expr.loc);
+        const union = this.union(expr.left.type.unionId, expr.loc);
+        const left = `sc_rt_${this.temporary++}`;
+        const unitPatterns = union.arms.flatMap((arm, tag) =>
+          this.isUnit(arm) ? [`${this.unionName(union.id)}::${this.unionVariant(tag)}`] : []
+        );
+        if (unitPatterns.length === 0) this.unsupported("nullish union without a unit arm", expr.loc);
+        if (expr.type.kind === "union" && expr.type.unionId === union.id) {
+          return `{ let ${left} = ${this.emitExpr(expr.left)}; if matches!(&${left}, ${unitPatterns.join(" | ")}) { ${this.emitExpr(expr.right)} } else { ${left} } }`;
+        }
+        const arms = union.arms.map((arm, tag) => {
+          const variant = `${this.unionName(union.id)}::${this.unionVariant(tag)}`;
+          return this.isUnit(arm)
+            ? `${variant} => ${this.emitExpr(expr.right)}`
+            : `${variant}(payload) => payload`;
+        }).join(", ");
+        return `{ let ${left} = ${this.emitExpr(expr.left)}; match ${left} { ${arms} } }`;
+      }
       case "toBool": {
         const operand = this.emitExpr(expr.operand);
         const temp = `sc_rt_${this.temporary++}`;
@@ -772,6 +940,9 @@ class RustEmitter {
         if (expr.method === "length") return `runtime::string_len(&(${this.emitExpr(expr.receiver)}))`;
         if (expr.method === "toLowerCase" && expr.args.length === 0) {
           return `runtime::string_to_lower_case(&(${this.emitExpr(expr.receiver)}))`;
+        }
+        if (expr.method === "charAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_char_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
         if (expr.method === "repeat" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_repeat(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
@@ -851,7 +1022,16 @@ class RustEmitter {
         if (expr.className === "%Error" && (expr.field === "name" || expr.field === "message")) {
           return `runtime::caught_error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
         }
-        this.unsupported(`field get '${expr.className}.${expr.field}'`, expr.loc);
+        {
+          const cls = this.classDef(expr.className, expr.loc);
+          const field = cls.fields.find((candidate) => candidate.name === expr.field);
+          if (field === undefined) this.unsupported(`unknown class field '${expr.className}.${expr.field}'`, expr.loc);
+          const access = `object.${this.classFieldName(expr.className, field.name, expr.loc)}`;
+          const result = this.isEdgeValue(field.type)
+            ? `${access}.as_ref().expect("scriptc: cleared live class field").clone()`
+            : this.needsClone(field.type) ? `${access}.clone()` : access;
+          return `(${this.emitExpr(expr.obj)}).with(|object| ${result})`;
+        }
       case "unionWrap": {
         const union = this.union(expr.unionId, expr.loc);
         const arm = union.arms[expr.tag];
@@ -918,10 +1098,107 @@ class RustEmitter {
         if (callee.captures !== undefined) this.unsupported(`direct call to lifted closure '${callee.name}'`, expr.loc);
         return `${mangleFunction(callee.name)}(${expr.args.map((arg) => this.emitExpr(arg)).join(", ")})`;
       }
+      case "virtualCall": {
+        const meta = this.classMetaOf(expr.className, expr.loc);
+        const slot = meta.root.slots.find((candidate) =>
+          candidate.method === expr.method && candidate.declarer.pre <= meta.pre && meta.pre <= candidate.declarer.post
+        );
+        if (slot === undefined) this.unsupported(`virtual method '${expr.className}.${expr.method}'`, expr.loc);
+        const args = expr.args.map(() => `sc_rt_${this.temporary++}`);
+        const bindings = expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`).join(" ");
+        const receiver = args[0];
+        if (receiver === undefined) this.unsupported(`virtual call '${expr.className}.${expr.method}' without receiver`, expr.loc);
+        const pre = `sc_rt_${this.temporary++}`;
+        const implementations = new Map<string, { fn: IrFunction; tags: number[] }>();
+        for (const dynamic of this.classMeta.values()) {
+          if (dynamic.root !== meta.root || dynamic.pre < meta.pre || dynamic.pre > meta.post) continue;
+          const implementation = this.virtualImplementation(dynamic, slot);
+          const entry = implementations.get(implementation.name);
+          if (entry === undefined) implementations.set(implementation.name, { fn: implementation, tags: [dynamic.pre] });
+          else entry.tags.push(dynamic.pre);
+        }
+        const callArgs = args.join(", ");
+        const arms = [...implementations.values()].map(({ fn, tags }) =>
+          `${tags.join(" | ")} => ${mangleFunction(fn.name)}(${callArgs}),`
+        ).join(" ");
+        return `{ ${bindings} let ${pre} = ${receiver}.with(|object| object.sc_class_pre); match ${pre} { ${arms} _ => unreachable!("scriptc invariant: invalid dynamic class"), } }`;
+      }
+      case "instanceOf": {
+        if (expr.value.type.kind !== "object") this.unsupported("instanceof on a non-object", expr.loc);
+        const target = this.classMetaOf(expr.className, expr.loc);
+        const value = `sc_rt_${this.temporary++}`;
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; ${value}.with(|object| ${target.pre} <= object.sc_class_pre && object.sc_class_pre <= ${target.post}) }`;
+      }
+      case "instanceOfValue": {
+        if (expr.value.type.kind !== "object" || expr.classValue.type.kind !== "classval") {
+          this.unsupported("dynamic instanceof operands", expr.loc);
+        }
+        const value = `sc_rt_${this.temporary++}`;
+        const target = `sc_rt_${this.temporary++}`;
+        const pre = `sc_rt_${this.temporary++}`;
+        const staticTarget = this.classMetaOf(expr.classValue.type.className, expr.loc);
+        const arms = this.classSubtree(staticTarget).map((candidate) =>
+          `${candidate.pre} => ${candidate.pre} <= ${pre} && ${pre} <= ${candidate.post},`
+        ).join(" ");
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; let ${target} = ${this.emitExpr(expr.classValue)}; let ${pre} = ${value}.with(|object| object.sc_class_pre); match ${target} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
+      }
+      case "classRef":
+        return String(this.classMetaOf(expr.className, expr.loc).pre);
+      case "new": {
+        const cls = this.classDef(expr.className, expr.loc);
+        if (expr.type.kind !== "object" || expr.type.className !== cls.name) {
+          this.unsupported(`constructor result for '${cls.name}'`, expr.loc);
+        }
+        const constructor = this.functions.get(`%${cls.name}.constructor`);
+        if (constructor === undefined) this.unsupported(`missing constructor for '${cls.name}'`, expr.loc);
+        const meta = this.classMetaOf(cls.name, expr.loc);
+        const object = `sc_rt_${this.temporary++}`;
+        const args = expr.args.map(() => `sc_rt_${this.temporary++}`);
+        const shapeFields = meta.hierarchy
+          ? this.hierarchyFields(meta.root)
+          : cls.fields.map((field) => ({ owner: meta, field }));
+        const fields = shapeFields.map(({ owner, field }) => {
+          const value = this.isEdgeValue(field.type) ? "None" : this.defaultValue(field.type, cls.loc);
+          return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
+        }).join(", ");
+        const classTag = meta.hierarchy ? `sc_class_pre: ${meta.pre}, ` : "";
+        const bindings = expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`).join(" ");
+        return `{ let ${object} = runtime::Gc::new(${this.classStructName(cls.name, expr.loc)} { ${classTag}${fields} }); ${bindings} ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+      }
+      case "newValue": {
+        if (expr.callee.type.kind !== "classval") this.unsupported("newValue with non-class callee", expr.loc);
+        const staticMeta = this.classMetaOf(expr.callee.type.className, expr.loc);
+        const callee = `sc_rt_${this.temporary++}`;
+        const args = expr.args.map(() => `sc_rt_${this.temporary++}`);
+        const bindings = [
+          `let ${callee} = ${this.emitExpr(expr.callee)};`,
+          ...expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`),
+        ].join(" ");
+        const arms = this.classSubtree(staticMeta).map((dynamic) =>
+          `${dynamic.pre} => ${this.classAllocation(dynamic, args, expr.loc)},`
+        ).join(" ");
+        return `{ ${bindings} match ${callee} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
+      }
+      case "upcast":
+      case "downcast":
+        return this.emitExpr(expr.value);
       case "libCall": {
         const arg = expr.args[0];
         if (expr.fn === "math.floor" && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).floor()`;
+        }
+        if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
+          const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);
+          if (error === undefined) this.unsupported(`error.new result '${expr.type.className}'`, expr.loc);
+          return `runtime::error_new("${this.rustString(error.lib)}", ${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "class.name" && expr.args.length === 1 && arg !== undefined && arg.type.kind === "classval") {
+          const value = `sc_rt_${this.temporary++}`;
+          const meta = this.classMetaOf(arg.type.className, expr.loc);
+          const arms = this.classSubtree(meta).map((candidate) =>
+            `${candidate.pre} => runtime::string("${this.rustString(candidate.def.jsName ?? "")}"),`
+          ).join(" ");
+          return `{ let ${value} = ${this.emitExpr(arg)}; match ${value} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
         }
         this.unsupported(`library call '${expr.fn}'`, expr.loc);
       }
@@ -943,6 +1220,21 @@ class RustEmitter {
         const operation = expr.op === "+" ? "+" : "-";
         const result = expr.prefix ? next : old;
         return `{ let ${old} = ${read}; let ${next} = ${old} ${operation} 1.0; ${this.assignmentExpr(expr.localId, next, expr.loc)} ${result} }`;
+      }
+      case "fieldIncDec": {
+        const cls = this.classDef(expr.className, expr.loc);
+        const field = cls.fields.find((candidate) => candidate.name === expr.field);
+        if (field === undefined) this.unsupported(`unknown class field '${expr.className}.${expr.field}'`, expr.loc);
+        if (expr.fieldDyn || field.type.kind !== "f64") {
+          this.unsupported(`increment/decrement of checked-dynamic class field '${expr.className}.${expr.field}'`, expr.loc);
+        }
+        const object = `sc_rt_${this.temporary++}`;
+        const old = `sc_rt_${this.temporary++}`;
+        const next = `sc_rt_${this.temporary++}`;
+        const operation = expr.op === "+" ? "+" : "-";
+        const result = expr.prefix ? next : old;
+        const name = this.classFieldName(expr.className, field.name, expr.loc);
+        return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with_mut(|object| { let ${old} = object.${name}; let ${next} = ${old} ${operation} 1.0; object.${name} = ${next}; ${result} }) }`;
       }
       default:
         this.unsupported(`expression '${expr.kind}'`, expr.loc);
@@ -1054,7 +1346,9 @@ class RustEmitter {
       case "string": return `!${value}.is_empty()`;
       case "array": return "true";
       case "record": return "true";
+      case "object": return "true";
       case "func": return "true";
+      case "classval": return "true";
       default: this.unsupported(`truthiness for '${type.kind}'`, loc);
     }
   }
@@ -1067,7 +1361,7 @@ class RustEmitter {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
-      if (type.kind === "f64" || type.kind === "bool") return `${name}.with(Cell::get)`;
+      if (type.kind === "f64" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
       this.unsupported(`global read type '${type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -1089,7 +1383,7 @@ class RustEmitter {
       const name = mangleGlobal(id);
       if (this.isHeapRoot(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
-      if (global.type.kind === "f64" || global.type.kind === "bool") return `${name}.with(|slot| slot.set(${value}));`;
+      if (global.type.kind === "f64" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -1116,10 +1410,19 @@ class RustEmitter {
       case "f64": return "f64";
       case "bool": return "bool";
       case "string": return "runtime::JsString";
+      case "classval": {
+        this.classMetaOf(type.className, loc);
+        return "usize";
+      }
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
       case "record": {
         if (!this.records.has(type.shapeId)) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
+      }
+      case "object": {
+        if (RUNTIME_ERROR_CLASSES.has(type.className)) return "runtime::JsError";
+        if (!this.classes.has(type.className)) this.unsupported(`object type '${type.className}'`, loc);
+        return `runtime::Gc<${this.classStructName(type.className, loc)}>`;
       }
       case "union": {
         if (!this.unions.has(type.unionId)) this.unsupported(`unknown union type '${type.unionId}'`, loc);
@@ -1140,6 +1443,7 @@ class RustEmitter {
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "array": return "runtime::array_new(Vec::new())";
+      case "classval": return "0";
       default: this.unsupported(`uninitialized '${type.kind}' local`, loc);
     }
   }
@@ -1194,7 +1498,8 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "record" || type.kind === "func";
+    return type.kind === "array" || type.kind === "record" ||
+      (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 
   private isEdgeValue(type: IrType): boolean {
@@ -1216,6 +1521,8 @@ class RustEmitter {
       case "string":
       case "array":
       case "record":
+      case "object":
+      case "classval":
       case "func":
       case "undefinedT":
       case "nullT":
@@ -1229,6 +1536,78 @@ class RustEmitter {
     const shape = this.closureShapes.get(typeKey(type));
     if (shape === undefined) this.unsupported(`function signature '${typeKey(type)}' without closure targets`, loc);
     return shape;
+  }
+
+  private classDef(name: string, loc?: SrcLoc): IrClassDef {
+    const cls = this.classes.get(name);
+    if (cls === undefined) this.unsupported(`class '${name}'`, loc);
+    return cls;
+  }
+
+  private classMetaOf(name: string, loc?: SrcLoc): RustClassMeta {
+    const meta = this.classMeta.get(name);
+    if (meta === undefined) this.unsupported(`class '${name}'`, loc);
+    return meta;
+  }
+
+  private classStructName(name: string, loc?: SrcLoc): string {
+    const meta = this.classMetaOf(name, loc);
+    return mangleClassStruct(meta.hierarchy ? meta.root.def.name : name);
+  }
+
+  private hierarchyFields(root: RustClassMeta): { owner: RustClassMeta; field: IrClassDef["fields"][number] }[] {
+    const fields: { owner: RustClassMeta; field: IrClassDef["fields"][number] }[] = [];
+    const visit = (meta: RustClassMeta): void => {
+      const inherited = meta.base?.def.fields.length ?? 0;
+      for (const field of meta.def.fields.slice(inherited)) fields.push({ owner: meta, field });
+      for (const child of meta.children) visit(child);
+    };
+    visit(root);
+    return fields;
+  }
+
+  private classSubtree(meta: RustClassMeta): RustClassMeta[] {
+    return [...this.classMeta.values()].filter((candidate) =>
+      candidate.root === meta.root && meta.pre <= candidate.pre && candidate.pre <= meta.post
+    );
+  }
+
+  private classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string {
+    const constructor = this.functions.get(`%${meta.def.name}.constructor`);
+    if (constructor === undefined) this.unsupported(`missing constructor for '${meta.def.name}'`, loc);
+    const object = `sc_rt_${this.temporary++}`;
+    const shapeFields = meta.hierarchy
+      ? this.hierarchyFields(meta.root)
+      : meta.def.fields.map((field) => ({ owner: meta, field }));
+    const fields = shapeFields.map(({ owner, field }) => {
+      const value = this.isEdgeValue(field.type) ? "None" : this.defaultValue(field.type, meta.def.loc);
+      return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
+    }).join(", ");
+    const classTag = meta.hierarchy ? `sc_class_pre: ${meta.pre}, ` : "";
+    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+  }
+
+  private classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {
+    let owner = this.classMetaOf(className, loc);
+    const index = owner.def.fields.findIndex((field) => field.name === fieldName);
+    if (index < 0) this.unsupported(`unknown class field '${className}.${fieldName}'`, loc);
+    while (owner.base !== null && index < owner.base.def.fields.length) owner = owner.base;
+    return this.classFieldStorageName(owner, fieldName);
+  }
+
+  private classFieldStorageName(owner: RustClassMeta, fieldName: string): string {
+    return owner.hierarchy ? `sc_hf_${owner.pre}_${mangleField(fieldName)}` : mangleField(fieldName);
+  }
+
+  private virtualImplementation(meta: RustClassMeta, slot: RustVtSlot): IrFunction {
+    for (let current: RustClassMeta | null = meta; current !== null; current = current.base) {
+      if (current.def.methods?.includes(slot.method) && !current.def.abstractMethods?.includes(slot.method)) {
+        const fn = this.functions.get(`%${current.def.name}.${slot.method}`);
+        if (fn === undefined) this.unsupported(`missing virtual implementation '${current.def.name}.${slot.method}'`, current.def.loc);
+        return fn;
+      }
+    }
+    this.unsupported(`missing virtual implementation '${meta.def.name}.${slot.method}'`, meta.def.loc);
   }
 
   private closureName(shape: RustClosureShape): string {
