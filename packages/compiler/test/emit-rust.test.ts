@@ -1342,6 +1342,7 @@ export {};
     ["promise-union", resolve("tests/corpus/1369-promise-union.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],
     ["promise-reject", resolve("tests/corpus/1478-promise-reject.ts")],
+    ["return-through-finally", resolve("tests/corpus/1452-return-through-finally.ts")],
     ["void-statement", resolve("tests/corpus/1540-void-statement.ts")],
     ["await-unit", resolve("tests/corpus/2320-await-unit.ts")],
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],
