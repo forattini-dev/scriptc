@@ -171,6 +171,9 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
       result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
     ).toBe(true);
     if (!result.ok) continue;
+    if (name === "promise-reject") {
+      expect((await readFile(result.sourcePath)).length).toBeLessThan(200_000);
+    }
     const [node, rust] = await Promise.all([
       execFileAsync(process.execPath, [entryPath]),
       execFileAsync(result.binaryPath, [], {
@@ -1338,6 +1341,7 @@ export {};
     ["async-eager-chains", resolve("tests/corpus/1029-async-eager-chains.ts")],
     ["promise-union", resolve("tests/corpus/1369-promise-union.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],
+    ["promise-reject", resolve("tests/corpus/1478-promise-reject.ts")],
     ["void-statement", resolve("tests/corpus/1540-void-statement.ts")],
     ["await-unit", resolve("tests/corpus/2320-await-unit.ts")],
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],

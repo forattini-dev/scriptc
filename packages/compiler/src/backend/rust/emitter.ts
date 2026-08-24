@@ -1177,7 +1177,7 @@ class RustEmitter {
       }
       if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
         (stmt.expr.name === "console.log" || stmt.expr.name === "console.error") &&
-        stmt.expr.args.some((arg) => this.awaitExpression(arg) !== null)) {
+        stmt.expr.args.some((arg) => this.containsAsyncSuspension(arg))) {
         this.emitAsyncConsole(stmt.expr, statements.slice(index + 1), 0, [], onComplete);
         return;
       }
@@ -1189,7 +1189,8 @@ class RustEmitter {
         : null,
       );
       if (awaited === null) {
-        if ((nested?.kind === "bin" || nested?.kind === "recordLit" || nested?.kind === "arrIntrinsic") &&
+        if ((nested?.kind === "bin" || nested?.kind === "strConcat" || nested?.kind === "recordLit" ||
+          nested?.kind === "arrIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
@@ -1256,10 +1257,11 @@ class RustEmitter {
     onComplete: (() => void) | null,
   ): void {
     const outerLocals = new Set(this.currentAsyncLocals ?? []);
+    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "try_continue");
     this.emitAsyncProtectedSequence(stmt.tryBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }, onComplete),
-      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
-      thrown: (reason) => this.emitAsyncCatch(stmt, remaining, outerLocals, reason, onComplete),
+      fallthrough: () => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "fallthrough" }, resume),
+      returned: (value) => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "return", value }, resume),
+      thrown: (reason) => this.emitAsyncCatch(stmt, [], outerLocals, reason, resume),
     }, stmt.loc);
   }
 
@@ -1272,10 +1274,7 @@ class RustEmitter {
       this.unsupported("async suspension in an if condition", stmt.loc);
     }
     const outerLocals = new Set(this.currentAsyncLocals ?? []);
-    const resume = () => this.withAsyncLocals(
-      new Set(outerLocals),
-      () => this.emitAsyncStatements(remaining, onComplete),
-    );
+    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "if_continue");
     this.line(`if ${this.emitExpr(stmt.cond)} {`);
     this.indent += 1;
     this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
@@ -1576,6 +1575,41 @@ class RustEmitter {
     }
   }
 
+  private emitAsyncResumeHelper(
+    statements: readonly IrStmt[],
+    onComplete: (() => void) | null,
+    liveLocals: ReadonlySet<string>,
+    loc: SrcLoc,
+    prefix: string,
+  ): () => void {
+    const result = this.currentAsyncResult;
+    const fn = this.currentFunction;
+    if (result === null || fn?.async !== true) {
+      this.unsupported("async continuation helper outside an async function", loc);
+    }
+    const helper = `sc_async_${prefix}_${this.temporary++}`;
+    const locals = [...liveLocals].map((localId) => this.local(localId, loc));
+    const params = [
+      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, loc)}>`,
+      ...locals.map((local) =>
+        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, loc)}>`
+      ),
+    ];
+    const call = `${helper}(${[
+      `${result}.clone()`,
+      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
+    ].join(", ")});`;
+    this.line(`fn ${helper}(${params.join(", ")}) {`);
+    this.indent += 1;
+    this.withAsyncLocals(new Set(liveLocals), () => this.emitAsyncStatements(statements, onComplete));
+    this.indent -= 1;
+    this.line("}");
+    return () => {
+      this.line(call);
+      this.line("return;");
+    };
+  }
+
   private emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
     const awaited = this.awaitExpression(expr);
     if (awaited !== null) {
@@ -1595,6 +1629,12 @@ class RustEmitter {
     if (expr.kind === "bin") {
       this.emitAsyncValue(expr.left, (left) => {
         this.emitAsyncValue(expr.right, (right) => consume(this.emitBinaryValues(expr, left, right)));
+      });
+      return;
+    }
+    if (expr.kind === "strConcat") {
+      this.emitAsyncValue(expr.left, (left) => {
+        this.emitAsyncValue(expr.right, (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`));
       });
       return;
     }
@@ -1676,20 +1716,15 @@ class RustEmitter {
       this.emitAsyncStatements(remaining, onComplete);
       return;
     }
-    const awaited = this.awaitExpression(arg);
-    if (awaited !== null) {
-      this.emitAsyncContinuation(
-        this.emitAwaitDependency(awaited),
+    if (this.containsAsyncSuspension(arg)) {
+      this.emitAsyncValue(
+        arg,
         (value) => this.emitAsyncConsole(expr, remaining, index + 1, [
           ...values,
           { name: value, type: arg.type, loc: arg.loc },
         ], onComplete),
-        null,
       );
       return;
-    }
-    if (this.containsAsyncSuspension(arg)) {
-      this.unsupported("nested console argument suspension in the Rust state-machine subset", arg.loc);
     }
     const value = `sc_async_argument_${this.temporary++}`;
     this.line(`let ${value} = ${this.emitExpr(arg)};`);
@@ -2385,7 +2420,14 @@ class RustEmitter {
           return `${helper}(&(${this.emitExpr(expr.value)}))`;
         }
         if (expr.type.kind === "object" && this.classMeta.has(expr.type.className)) {
-          return `runtime::caught_narrow::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(expr.value)}))`;
+          const meta = this.classMetaOf(expr.type.className, expr.loc);
+          const type = this.rustType(expr.type, expr.loc);
+          if (this.runtimeErrorAncestor(meta.def.name) !== null) {
+            const caught = `sc_rt_${this.temporary++}`;
+            const variant = `${this.errorValueName()}::${this.errorValueVariant(meta)}`;
+            return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${type}>(&${caught}) { runtime::caught_narrow::<${type}>(&${caught}) } else { match runtime::caught_narrow::<${this.errorValueName()}>(&${caught}) { ${variant}(value) => value, _ => unreachable!("scriptc invariant: narrowed caught Error has the wrong subclass"), } } }`;
+          }
+          return `runtime::caught_narrow::<${type}>(&(${this.emitExpr(expr.value)}))`;
         }
         this.unsupported("caught narrowing outside scalar and Error values", expr.loc);
       case "caughtCheck": {
