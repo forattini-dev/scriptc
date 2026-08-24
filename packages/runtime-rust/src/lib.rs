@@ -789,6 +789,121 @@ where
     }
 }
 
+type PromiseReaction<T> = Box<dyn FnOnce(Result<T, Caught>)>;
+
+enum PromiseState<T: HeapValue> {
+    Pending(Vec<PromiseReaction<T>>),
+    Fulfilled(Option<T>),
+    Rejected(Option<Caught>),
+}
+
+pub struct PromiseData<T: HeapValue> {
+    state: PromiseState<T>,
+}
+
+impl<T: HeapValue> Trace for PromiseData<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let PromiseState::Fulfilled(Some(value)) = &self.state {
+            value.trace_value(tracer);
+        }
+    }
+}
+
+impl<T: HeapValue> ClearEdges for PromiseData<T> {
+    fn clear_edges(&mut self) {
+        self.state = PromiseState::Pending(Vec::new());
+    }
+}
+
+pub type JsPromise<T> = Gc<PromiseData<T>>;
+
+pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
+    Gc::new(PromiseData {
+        state: PromiseState::Pending(Vec::new()),
+    })
+}
+
+pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
+    Gc::new(PromiseData {
+        state: PromiseState::Fulfilled(Some(value)),
+    })
+}
+
+fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<T, Caught>) {
+    timer_queue_microtask(Box::new(move || reaction(outcome)));
+}
+
+pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
+    let mut reaction = Some(reaction);
+    let settled = promise.with_mut(|data| match &mut data.state {
+        PromiseState::Pending(reactions) => {
+            reactions.push(reaction.take().expect("scriptc: missing promise reaction"));
+            None
+        }
+        PromiseState::Fulfilled(value) => Some(Ok(value
+            .as_ref()
+            .expect("scriptc: cleared fulfilled promise")
+            .clone())),
+        PromiseState::Rejected(reason) => Some(Err(reason
+            .as_ref()
+            .expect("scriptc: cleared rejected promise")
+            .clone())),
+    });
+    if let Some(outcome) = settled {
+        promise_schedule(
+            reaction.expect("scriptc: settled promise consumed its reaction"),
+            outcome,
+        );
+    }
+}
+
+pub fn promise_fulfill<T: HeapValue>(promise: &JsPromise<T>, value: T) -> bool {
+    let reactions = promise.with_mut(|data| match &mut data.state {
+        PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
+        PromiseState::Fulfilled(_) | PromiseState::Rejected(_) => None,
+    });
+    let Some(reactions) = reactions else {
+        return false;
+    };
+    promise.with_mut(|data| data.state = PromiseState::Fulfilled(Some(value.clone())));
+    for reaction in reactions {
+        promise_schedule(reaction, Ok(value.clone()));
+    }
+    true
+}
+
+pub fn promise_reject<T: HeapValue>(promise: &JsPromise<T>, reason: Caught) -> bool {
+    let reactions = promise.with_mut(|data| match &mut data.state {
+        PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
+        PromiseState::Fulfilled(_) | PromiseState::Rejected(_) => None,
+    });
+    let Some(reactions) = reactions else {
+        return false;
+    };
+    promise.with_mut(|data| data.state = PromiseState::Rejected(Some(reason.clone())));
+    for reaction in reactions {
+        promise_schedule(reaction, Err(reason.clone()));
+    }
+    true
+}
+
+pub fn promise_unwrap<T: HeapValue>(outcome: Result<T, Caught>) -> T {
+    match outcome {
+        Ok(value) => value,
+        Err(reason) => rethrow_caught(reason),
+    }
+}
+
+pub fn promise_run_segment<T, F>(promise: &JsPromise<T>, segment: F)
+where
+    T: HeapValue,
+    F: FnOnce(),
+{
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(segment)) {
+        let _ = promise_reject(promise, caught_from_panic(payload));
+    }
+}
+
 /// Payload of a shared lexical binding captured by one or more closures.
 pub struct CellData<T: HeapValue> {
     value: Option<T>,
@@ -4216,6 +4331,53 @@ mod tests {
 
         drop(rooted);
         assert_eq!(collect_cycles(), 1);
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promises_queue_reactions_and_settle_only_once() {
+        let baseline = live_heap_objects();
+        let promise = promise_new::<f64>();
+        let events = Rc::new(RefCell::new(Vec::new()));
+
+        let pending_events = events.clone();
+        promise_then(
+            &promise,
+            Box::new(move |outcome| pending_events.borrow_mut().push(promise_unwrap(outcome))),
+        );
+        assert!(promise_fulfill(&promise, 7.0));
+        assert!(!promise_fulfill(&promise, 9.0));
+        assert!(events.borrow().is_empty());
+
+        let settled_events = events.clone();
+        promise_then(
+            &promise,
+            Box::new(move |outcome| settled_events.borrow_mut().push(promise_unwrap(outcome))),
+        );
+        run_event_loop();
+        assert_eq!(events.borrow().as_slice(), &[7.0, 7.0]);
+
+        let rejected = promise_new::<f64>();
+        let rejected_events = events.clone();
+        promise_then(
+            &rejected,
+            Box::new(move |outcome| match outcome {
+                Ok(_) => panic!("scriptc: rejected promise fulfilled"),
+                Err(reason) => rejected_events.borrow_mut().push(
+                    if caught_error_name(&reason).as_ref() == "TypeError" {
+                        -1.0
+                    } else {
+                        -2.0
+                    },
+                ),
+            }),
+        );
+        promise_run_segment(&rejected, || throw_type_error("async failure".to_owned()));
+        run_event_loop();
+        assert_eq!(events.borrow().as_slice(), &[7.0, 7.0, -1.0]);
+
+        drop(promise);
+        drop(rejected);
         assert_eq!(live_heap_objects(), baseline);
     }
 }
