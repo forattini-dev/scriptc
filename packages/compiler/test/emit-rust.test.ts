@@ -1146,6 +1146,10 @@ function argument(value: number): number {
 }
 console.log("ordered", argument(12), await Promise.resolve(13), argument(14));
 console.error("inline error", await Promise.resolve(15));
+const awaitRight = argument(16) + await Promise.resolve(17);
+console.log("await right", awaitRight);
+const awaitLeft = await Promise.resolve(18) + argument(19);
+console.log("await left", awaitLeft);
 export {};
 `);
   for (const [name, entryPath] of [
@@ -1155,6 +1159,7 @@ export {};
     ["timers-promises", resolve("tests/corpus/2093-timers-promises.ts")],
     ["settled-await-order", resolve("tests/corpus/1428-settled-await-order.ts")],
     ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
+    ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,

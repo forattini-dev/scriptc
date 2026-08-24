@@ -859,6 +859,31 @@ class RustEmitter {
         : stmt.kind === "return" && stmt.value?.kind === "awaitExpr" ? stmt.value
         : null;
       if (awaited === null) {
+        const nested =
+          stmt.kind === "assign" ? stmt.value
+          : stmt.kind === "varDecl" ? stmt.init
+          : stmt.kind === "exprStmt" ? stmt.expr
+          : stmt.kind === "return" ? stmt.value
+          : null;
+        if (nested?.kind === "bin" && this.containsAsyncSuspension(nested)) {
+          this.emitAsyncValue(nested, (value) => {
+            if (stmt.kind === "assign") {
+              this.emitAssignment(stmt.localId, value, stmt.loc);
+              this.emitAsyncStatements(statements.slice(index + 1));
+            } else if (stmt.kind === "varDecl") {
+              const local = this.local(stmt.localId, stmt.loc);
+              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+              this.emitAsyncStatements(statements.slice(index + 1));
+            } else if (stmt.kind === "exprStmt") {
+              this.line(`let _ = ${value};`);
+              this.emitAsyncStatements(statements.slice(index + 1));
+            } else {
+              this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+              this.line("return;");
+            }
+          });
+          return;
+        }
         if (this.containsAsyncSuspension(stmt)) {
           this.unsupported("nested async suspension in the Rust state-machine subset", stmt.loc);
         }
@@ -891,6 +916,25 @@ class RustEmitter {
     } else {
       this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
     }
+  }
+
+  private emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
+    if (expr.kind === "awaitExpr") {
+      this.emitAsyncContinuation(this.emitExpr(expr.value), consume, null);
+      return;
+    }
+    if (expr.kind === "bin") {
+      this.emitAsyncValue(expr.left, (left) => {
+        this.emitAsyncValue(expr.right, (right) => consume(this.emitBinaryValues(expr, left, right)));
+      });
+      return;
+    }
+    if (this.containsAsyncSuspension(expr)) {
+      this.unsupported("nested async value in the Rust state-machine subset", expr.loc);
+    }
+    const value = `sc_async_value_${this.temporary++}`;
+    this.line(`let ${value} = ${this.emitExpr(expr)};`);
+    consume(value);
   }
 
   private emitAsyncConsole(
@@ -2232,6 +2276,10 @@ class RustEmitter {
   private emitBinary(expr: Extract<IrExpr, { kind: "bin" }>): string {
     const left = this.emitExpr(expr.left);
     const right = this.emitExpr(expr.right);
+    return this.emitBinaryValues(expr, left, right);
+  }
+
+  private emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string {
     if (this.isTracedHandle(expr.left.type) && (expr.op === "===" || expr.op === "!==")) {
       const compare = `((${left}).ptr_eq(&(${right})))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
