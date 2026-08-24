@@ -26,6 +26,9 @@ thread_local! {
     static CYCLE_CANDIDATES: RefCell<Vec<DynNodeWeak>> = const { RefCell::new(Vec::new()) };
     static EXCEPTION_SLOT: RefCell<Option<Rc<dyn Any>>> = const { RefCell::new(None) };
     static PROCESS_ARGV: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
+    static OPEN_FILES: RefCell<HashMap<i32, std::fs::File>> = RefCell::new(HashMap::new());
+    #[cfg(not(unix))]
+    static NEXT_FILE_ID: Cell<i32> = const { Cell::new(3) };
 }
 
 /// Visitor used by generated heap payloads to expose owning edges.
@@ -472,11 +475,19 @@ pub fn caught_is_error_class(caught: &Caught, name: &str) -> bool {
         .is_some_and(|error| name == "Error" || error.name == name)
 }
 
-pub fn caught_check_error(caught: &Caught, name: &str) -> Caught {
+pub fn caught_check_error(caught: &Caught, name: &str) -> JsError {
     if !caught_is_error_class(caught, name) {
         throw_type_error(format!("caught value is not a {name}"));
     }
-    caught.clone()
+    caught_error_value(caught)
+}
+
+pub fn caught_error_value(caught: &Caught) -> JsError {
+    caught
+        .value
+        .downcast_ref::<JsError>()
+        .expect("scriptc: narrowed non-Error caught value")
+        .clone()
 }
 
 pub fn caught_error_name(caught: &Caught) -> JsString {
@@ -503,6 +514,18 @@ pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
         .code
         .as_deref()
         .map(Rc::<str>::from)
+}
+
+pub fn error_name(error: &JsError) -> JsString {
+    Rc::from(error.name.as_str())
+}
+
+pub fn error_message(error: &JsError) -> JsString {
+    Rc::from(error.message.as_str())
+}
+
+pub fn error_code(error: &JsError) -> Option<JsString> {
+    error.code.as_deref().map(Rc::from)
 }
 
 /// A value that may be stored in a traced JavaScript array.
@@ -849,23 +872,50 @@ pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, 
     });
 }
 
-pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
-    bytes.with(|data| {
-        let storage = data.storage.borrow();
-        let values = &storage[data.offset..data.offset + data.length];
-        match encoding.as_ref() {
-            "hex" => {
-                let mut output = String::with_capacity(values.len() * 2);
-                for byte in values {
-                    use std::fmt::Write;
-                    let _ = write!(output, "{byte:02x}");
-                }
-                Rc::from(output)
+fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
+    match encoding {
+        "hex" => {
+            let mut output = String::with_capacity(values.len() * 2);
+            for byte in values {
+                use std::fmt::Write;
+                let _ = write!(output, "{byte:02x}");
             }
-            "base64" => Rc::from(bytes_base64_encode(values)),
-            "utf8" | "utf-8" => Rc::from(String::from_utf8_lossy(values).as_ref()),
-            other => throw_type_error(format!("Unknown encoding: {other}")),
+            Rc::from(output)
         }
+        "base64" => Rc::from(bytes_base64_encode(values)),
+        "utf8" | "utf-8" => Rc::from(String::from_utf8_lossy(values).as_ref()),
+        other => throw_type_error(format!("Unknown encoding: {other}")),
+    }
+}
+
+fn bytes_decode_index(index: f64, length: usize) -> usize {
+    if index.is_nan() || index <= 0.0 {
+        0
+    } else if index >= length as f64 {
+        length
+    } else {
+        index.trunc() as usize
+    }
+}
+
+pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
+    bytes_to_string_range(bytes, encoding, 0.0, f64::INFINITY)
+}
+
+pub fn bytes_to_string_range(
+    bytes: &JsBytes<u8>,
+    encoding: &JsString,
+    start: f64,
+    end: f64,
+) -> JsString {
+    bytes.with(|data| {
+        let start = bytes_decode_index(start, data.length);
+        let end = bytes_decode_index(end, data.length).max(start);
+        let storage = data.storage.borrow();
+        decode_bytes(
+            &storage[data.offset + start..data.offset + end],
+            encoding.as_ref(),
+        )
     })
 }
 
@@ -1661,6 +1711,27 @@ fn throw_fs_error2(operation: &str, from: &JsString, to: &JsString, error: std::
     })
 }
 
+fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
+    throw_value(JsError {
+        name: "Error".to_owned(),
+        message: format!("{code}: {description}, {operation}"),
+        code: Some(code.to_owned()),
+    })
+}
+
+fn throw_fs_fd_io_error(operation: &str, error: std::io::Error) -> ! {
+    let code = fs_error_code(&error);
+    throw_fs_fd_error(operation, code, &error.to_string())
+}
+
+fn throw_out_of_range(message: String) -> ! {
+    throw_value(JsError {
+        name: "RangeError".to_owned(),
+        message,
+        code: Some("ERR_OUT_OF_RANGE".to_owned()),
+    })
+}
+
 pub fn fs_read_file(path: &JsString) -> JsString {
     match std::fs::read(path.as_ref()) {
         Ok(bytes) => Rc::from(String::from_utf8_lossy(&bytes).as_ref()),
@@ -1957,6 +2028,296 @@ pub fn fs_access(path: &JsString, mode: f64) {
             );
         }
     }
+}
+
+fn fs_open_options(flags: &str) -> std::fs::OpenOptions {
+    let mut options = std::fs::OpenOptions::new();
+    match flags {
+        "r" | "rs" | "sr" => {
+            options.read(true);
+        }
+        "r+" | "rs+" | "sr+" => {
+            options.read(true).write(true);
+        }
+        "w" => {
+            options.write(true).create(true).truncate(true);
+        }
+        "wx" | "xw" => {
+            options.write(true).create_new(true).truncate(true);
+        }
+        "w+" => {
+            options.read(true).write(true).create(true).truncate(true);
+        }
+        "wx+" | "xw+" => {
+            options
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .truncate(true);
+        }
+        "a" | "as" | "sa" => {
+            options.write(true).create(true).append(true);
+        }
+        "ax" | "xa" => {
+            options.write(true).create_new(true).append(true);
+        }
+        "a+" | "as+" | "sa+" => {
+            options.read(true).create(true).append(true);
+        }
+        "ax+" | "xa+" => {
+            options.read(true).create_new(true).append(true);
+        }
+        _ => throw_type_error(format!(
+            "The argument 'flags' is invalid. Received '{flags}'"
+        )),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o666);
+    }
+    options
+}
+
+#[cfg(unix)]
+fn file_id(file: &std::fs::File) -> i32 {
+    use std::os::fd::AsRawFd;
+    file.as_raw_fd()
+}
+
+#[cfg(not(unix))]
+fn file_id(_file: &std::fs::File) -> i32 {
+    NEXT_FILE_ID.with(|next| {
+        let id = next.get();
+        next.set(id.checked_add(1).expect("scriptc: exhausted file ids"));
+        id
+    })
+}
+
+pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
+    let options = fs_open_options(flags);
+    let file = match options.open(path.as_ref()) {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    let id = file_id(&file);
+    OPEN_FILES.with(|files| {
+        let previous = files.borrow_mut().insert(id, file);
+        assert!(
+            previous.is_none(),
+            "scriptc: duplicate open file descriptor"
+        );
+    });
+    f64::from(id)
+}
+
+fn with_open_file<T>(
+    fd: f64,
+    operation: &str,
+    use_file: impl FnOnce(&mut std::fs::File) -> std::io::Result<T>,
+) -> T {
+    let id =
+        if fd.is_finite() && fd.fract() == 0.0 && fd >= i32::MIN as f64 && fd <= i32::MAX as f64 {
+            fd as i32
+        } else {
+            throw_fs_fd_error(operation, "EBADF", "bad file descriptor")
+        };
+    OPEN_FILES.with(|files| {
+        let mut files = files.borrow_mut();
+        let Some(file) = files.get_mut(&id) else {
+            throw_fs_fd_error(operation, "EBADF", "bad file descriptor")
+        };
+        use_file(file).unwrap_or_else(|error| throw_fs_fd_io_error(operation, error))
+    })
+}
+
+fn with_preserved_position<T>(
+    file: &mut std::fs::File,
+    position: f64,
+    operation: impl FnOnce(&mut std::fs::File) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    use std::io::{Seek, SeekFrom};
+    if position == -1.0 {
+        return operation(file);
+    }
+    let original = file.stream_position()?;
+    file.seek(SeekFrom::Start(position as u64))?;
+    let result = operation(file);
+    let restore = file.seek(SeekFrom::Start(original));
+    match (result, restore) {
+        (Ok(value), Ok(_)) => Ok(value),
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+pub fn fs_close(fd: f64) {
+    let id =
+        if fd.is_finite() && fd.fract() == 0.0 && fd >= i32::MIN as f64 && fd <= i32::MAX as f64 {
+            fd as i32
+        } else {
+            throw_fs_fd_error("close", "EBADF", "bad file descriptor")
+        };
+    let file = OPEN_FILES.with(|files| files.borrow_mut().remove(&id));
+    if file.is_none() {
+        throw_fs_fd_error("close", "EBADF", "bad file descriptor");
+    }
+}
+
+fn validate_write_fd(fd: f64) {
+    if !fd.is_finite() || fd.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"fd\" is out of range. It must be an integer. Received {}",
+            format_number(fd)
+        ));
+    }
+    if !(0.0..=f64::from(i32::MAX)).contains(&fd) {
+        throw_out_of_range(format!(
+            "The value of \"fd\" is out of range. It must be >= 0 && <= 2147483647. Received {}",
+            format_number(fd)
+        ));
+    }
+}
+
+fn validate_write_window(length: usize, offset: f64, count: f64) -> (usize, usize) {
+    if !offset.is_finite() || offset.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be an integer. Received {}",
+            format_number(offset)
+        ));
+    }
+    if !(0.0..=9_007_199_254_740_991.0).contains(&offset) {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
+            format_number(offset)
+        ));
+    }
+    if offset > length as f64 {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be <= {length}. Received {}",
+            format_number(offset)
+        ));
+    }
+    let offset = offset as usize;
+    if count < 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be >= 0. Received {}",
+            format_number(count)
+        ));
+    }
+    let remaining = length - offset;
+    if count > remaining as f64 {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be <= {remaining}. Received {}",
+            format_number(count)
+        ));
+    }
+    if !count.is_finite() || count.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be an integer. Received {}",
+            format_number(count)
+        ));
+    }
+    (offset, count as usize)
+}
+
+fn normalized_write_position(position: f64) -> f64 {
+    if position.is_finite()
+        && position.fract() == 0.0
+        && (0.0..=9_007_199_254_740_991.0).contains(&position)
+    {
+        position
+    } else {
+        -1.0
+    }
+}
+
+pub fn fs_write_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
+    let byte_length = bytes.with(|data| data.length);
+    let (offset, length) = validate_write_window(byte_length, offset, length);
+    validate_write_fd(fd);
+    let input = bytes.with(|data| {
+        data.storage.borrow()[data.offset + offset..data.offset + offset + length].to_vec()
+    });
+    let position = normalized_write_position(position);
+    use std::io::Write;
+    with_open_file(fd, "write", |file| {
+        with_preserved_position(file, position, |file| file.write(&input))
+    }) as f64
+}
+
+pub fn fs_write_str_sync(fd: f64, text: &JsString, position: f64, _encoding: &JsString) -> f64 {
+    validate_write_fd(fd);
+    let position = normalized_write_position(position);
+    use std::io::Write;
+    with_open_file(fd, "write", |file| {
+        with_preserved_position(file, position, |file| file.write(text.as_bytes()))
+    }) as f64
+}
+
+pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, position: f64) -> f64 {
+    if !offset.is_finite() || offset.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be an integer. Received {}",
+            format_number(offset)
+        ));
+    }
+    if !(0.0..=9_007_199_254_740_991.0).contains(&offset) {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
+            format_number(offset)
+        ));
+    }
+    if !position.is_finite() || position.fract() != 0.0 {
+        throw_out_of_range(format!(
+            "The value of \"position\" is out of range. It must be an integer. Received {}",
+            format_number(position)
+        ));
+    }
+    if !(-1.0..=9_007_199_254_740_991.0).contains(&position) {
+        throw_out_of_range(format!(
+            "The value of \"position\" is out of range. It must be >= -1 && <= 9007199254740991. Received {}",
+            format_number(position)
+        ));
+    }
+    if (0.0..1.0).contains(&length) {
+        return 0.0;
+    }
+    let byte_length = bytes.with(|data| data.length);
+    if offset > byte_length as f64 {
+        throw_out_of_range(format!(
+            "The value of \"offset\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
+            format_number(offset)
+        ));
+    }
+    let offset = offset as usize;
+    let remaining = byte_length - offset;
+    if length < 0.0 || length > remaining as f64 {
+        throw_out_of_range(format!(
+            "The value of \"length\" is out of range. It must be <= {remaining}. Received {}",
+            format_number(length)
+        ));
+    }
+    let length = length as usize;
+    use std::io::Read;
+    bytes.with(|data| {
+        let mut storage = data.storage.borrow_mut();
+        let output = &mut storage[data.offset + offset..data.offset + offset + length];
+        with_open_file(fd, "read", |file| {
+            with_preserved_position(file, position, |file| file.read(output))
+        }) as f64
+    })
+}
+
+pub fn fs_read_fd_bytes(fd: f64) -> JsBytes<u8> {
+    use std::io::Read;
+    let mut output = Vec::new();
+    with_open_file(fd, "read", |file| file.read_to_end(&mut output));
+    bytes_from_vec(output)
+}
+
+pub fn fs_read_fd(fd: f64, _encoding: &JsString) -> JsString {
+    let bytes = fs_read_fd_bytes(fd);
+    bytes_to_string(&bytes, &string("utf8"))
 }
 
 pub struct StatsData {

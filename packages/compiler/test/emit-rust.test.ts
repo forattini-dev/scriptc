@@ -741,7 +741,7 @@ test("Rust process reads and POSIX path operations match Node", async () => {
   }
 }, 180_000);
 
-test("Rust synchronous text filesystem operations match Node and throw catchably", async () => {
+test("Rust synchronous filesystem operations match Node and throw catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-fs-sync-"));
   for (const fixture of [
     "992-fs-roundtrip.ts",
@@ -749,6 +749,7 @@ test("Rust synchronous text filesystem operations match Node and throw catchably
     "994-fs-errors.ts",
     "1006-json-fs-config.ts",
     "1520-fs-wider-surface.ts",
+    "2685-fs-write-sync.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
@@ -838,13 +839,17 @@ test("Rust typed-array construction, coercion, copies, views, and set match Node
   }
   const fsEntry = join(dir, "bytes-fs.ts");
   await writeFile(fsEntry, `
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 const path = "tmp-rust-bytes-" + process.pid + ".bin";
 writeFileSync(path, Buffer.from("00ff80eda0bd0a", "hex"));
 const back = readFileSync(path);
 console.log(back.length, back[0], back[1], back.toString("hex"));
+console.log(back.toString("hex", 1, 4), JSON.stringify(back.toString("utf8", 3, 2)));
 writeFileSync(path, new Uint8Array([1, 0, 2]));
 console.log(readFileSync(path).toString("hex"));
+const fd = openSync(path, "r");
+console.log(readFileSync(fd).toString("hex"));
+closeSync(fd);
 rmSync(path);
 `);
   const fsResult = await compile(fsEntry, {

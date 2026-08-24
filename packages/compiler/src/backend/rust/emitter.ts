@@ -1258,8 +1258,15 @@ class RustEmitter {
           const offset = expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1]);
           return `runtime::bytes_set_from(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${offset})`;
         }
-        if (expr.method === "toString" && expr.args.length === 1 && expr.args[0] !== undefined && expr.receiver.type.elem === "u8") {
-          return `runtime::bytes_to_string(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        if (expr.method === "toString" && expr.args[0] !== undefined) {
+          const encoding = this.emitExpr(expr.args[0]);
+          if (expr.args.length === 1) {
+            return `runtime::bytes_to_string(&(${this.emitExpr(expr.receiver)}), &(${encoding}))`;
+          }
+          const start = expr.args[1];
+          const end = expr.args[2];
+          if (start === undefined || expr.args.length > 3) this.unsupported("bytes toString arguments", expr.loc);
+          return `runtime::bytes_to_string_range(&(${this.emitExpr(expr.receiver)}), &(${encoding}), ${this.emitExpr(start)}, ${end === undefined ? "f64::INFINITY" : this.emitExpr(end)})`;
         }
         this.unsupported(`bytes intrinsic '${expr.method}'`, expr.loc);
       }
@@ -1332,7 +1339,7 @@ class RustEmitter {
         if (expr.type.kind !== "object" || !RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
           this.unsupported("caught narrowing outside Error", expr.loc);
         }
-        return this.emitExpr(expr.value);
+        return `runtime::caught_error_value(&(${this.emitExpr(expr.value)}))`;
       case "caughtCheck": {
         if (expr.type.kind !== "object") this.unsupported("caught check outside an object", expr.loc);
         const error = RUNTIME_ERROR_CLASSES.get(expr.className);
@@ -1341,7 +1348,7 @@ class RustEmitter {
       }
       case "fieldGet":
         if (RUNTIME_ERROR_CLASSES.has(expr.className) && (expr.field === "name" || expr.field === "message")) {
-          return `runtime::caught_error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
+          return `runtime::error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
         }
         {
           const cls = this.classDef(expr.className, expr.loc);
@@ -1540,7 +1547,7 @@ class RustEmitter {
           const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
           if (stringTag < 0 || undefinedTag < 0) this.unsupported("error.code result union shape", expr.loc);
           const name = this.unionName(union.id);
-          return `match runtime::caught_error_code(&(${this.emitExpr(arg)})) { Some(value) => ${name}::${this.unionVariant(stringTag)}(value), None => ${name}::${this.unionVariant(undefinedTag)}, }`;
+          return `match runtime::error_code(&(${this.emitExpr(arg)})) { Some(value) => ${name}::${this.unionVariant(stringTag)}(value), None => ${name}::${this.unionVariant(undefinedTag)}, }`;
         }
         if (expr.fn === "fs.readFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           const path = `sc_rt_${this.temporary++}`;
@@ -1548,6 +1555,12 @@ class RustEmitter {
         }
         if ((expr.fn === "fs.readFileSyncBuf" || expr.fn === "fs.readFileSyncBytes") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::fs_read_file_bytes(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.readFdSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_read_fd(${this.emitExpr(arg)}, &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.readFdSyncBytes" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_read_fd_bytes(${this.emitExpr(arg)})`;
         }
         if (expr.fn === "fs.writeFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_write_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
@@ -1618,6 +1631,30 @@ class RustEmitter {
         }
         if (expr.fn === "fs.accessSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_access(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.fn === "fs.openSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_open(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.closeSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_close(${this.emitExpr(arg)})`;
+        }
+        if ((expr.fn === "fs.readSync" || expr.fn === "fs.writeSync") && expr.args.length === 5 && arg !== undefined) {
+          const bytes = expr.args[1];
+          const offset = expr.args[2];
+          const length = expr.args[3];
+          const position = expr.args[4];
+          if (bytes === undefined || offset === undefined || length === undefined || position === undefined) {
+            this.unsupported(`${expr.fn} arguments`, expr.loc);
+          }
+          const runtimeFn = expr.fn === "fs.readSync" ? "fs_read_sync" : "fs_write_sync";
+          return `runtime::${runtimeFn}(${this.emitExpr(arg)}, &(${this.emitExpr(bytes)}), ${this.emitExpr(offset)}, ${this.emitExpr(length)}, ${this.emitExpr(position)})`;
+        }
+        if (expr.fn === "fs.writeStrSync" && expr.args.length === 4 && arg !== undefined) {
+          const value = expr.args[1];
+          const position = expr.args[2];
+          const encoding = expr.args[3];
+          if (value === undefined || position === undefined || encoding === undefined) this.unsupported("fs.writeStrSync arguments", expr.loc);
+          return `runtime::fs_write_str_sync(${this.emitExpr(arg)}, &(${this.emitExpr(value)}), ${this.emitExpr(position)}, &(${this.emitExpr(encoding)}))`;
         }
         if (expr.fn === "buffer.fromStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::buffer_from_string(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
