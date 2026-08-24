@@ -549,6 +549,27 @@ pub fn array_extend<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) ->
     })
 }
 
+pub fn array_index_of_by<T, F>(array: &JsArray<T>, needle: &T, equal: F) -> f64
+where
+    T: ArrayElement,
+    F: Fn(&T, &T) -> bool,
+{
+    array.with(|data| {
+        data.elements
+            .iter()
+            .position(|element| equal(element, needle))
+            .map_or(-1.0, |index| index as f64)
+    })
+}
+
+pub fn array_includes_by<T, F>(array: &JsArray<T>, needle: &T, equal: F) -> bool
+where
+    T: ArrayElement,
+    F: Fn(&T, &T) -> bool,
+{
+    array.with(|data| data.elements.iter().any(|element| equal(element, needle)))
+}
+
 pub fn array_join<T: JoinElement>(array: &JsArray<T>, separator: &JsString) -> JsString {
     array.with(|data| {
         let mut output = String::new();
@@ -570,6 +591,219 @@ pub fn array_pop<T: ArrayElement>(array: &JsArray<T>) -> T {
 
 pub fn array_ptr_eq<T: ArrayElement>(left: &JsArray<T>, right: &JsArray<T>) -> bool {
     left.ptr_eq(right)
+}
+
+pub struct MapData<K: Clone + 'static, V: HeapValue> {
+    entries: Vec<Option<(K, V)>>,
+    live: usize,
+    iteration_depth: usize,
+}
+
+impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for entry in &self.entries {
+            if let Some((_, value)) = entry {
+                value.trace_value(tracer);
+            }
+        }
+    }
+}
+
+impl<K: Clone + 'static, V: HeapValue> ClearEdges for MapData<K, V> {
+    fn clear_edges(&mut self) {
+        self.entries.clear();
+    }
+}
+
+pub type JsMap<K, V> = Gc<MapData<K, V>>;
+
+pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
+    Gc::new(MapData {
+        entries: Vec::new(),
+        live: 0,
+        iteration_depth: 0,
+    })
+}
+
+pub fn map_set_by<K, V, F>(map: &JsMap<K, V>, key: K, value: V, equal: F)
+where
+    K: Clone + 'static,
+    V: HeapValue,
+    F: Fn(&K, &K) -> bool,
+{
+    map.with_mut(|data| {
+        if let Some((_, stored)) = data
+            .entries
+            .iter_mut()
+            .flatten()
+            .find(|(stored, _)| equal(stored, &key))
+        {
+            *stored = value;
+        } else {
+            data.entries.push(Some((key, value)));
+            data.live += 1;
+        }
+    });
+}
+
+pub fn map_get_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> Option<V>
+where
+    K: Clone + 'static,
+    V: HeapValue,
+    F: Fn(&K, &K) -> bool,
+{
+    map.with(|data| {
+        data.entries
+            .iter()
+            .flatten()
+            .find(|(stored, _)| equal(stored, key))
+            .map(|(_, value)| value.clone())
+    })
+}
+
+pub fn map_has_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> bool
+where
+    K: Clone + 'static,
+    V: HeapValue,
+    F: Fn(&K, &K) -> bool,
+{
+    map.with(|data| {
+        data.entries
+            .iter()
+            .flatten()
+            .any(|(stored, _)| equal(stored, key))
+    })
+}
+
+pub fn map_delete_by<K, V, F>(map: &JsMap<K, V>, key: &K, equal: F) -> bool
+where
+    K: Clone + 'static,
+    V: HeapValue,
+    F: Fn(&K, &K) -> bool,
+{
+    map.with_mut(|data| {
+        let Some(index) = data
+            .entries
+            .iter()
+            .position(|entry| entry.as_ref().is_some_and(|(stored, _)| equal(stored, key)))
+        else {
+            return false;
+        };
+        data.entries[index] = None;
+        data.live -= 1;
+        if data.iteration_depth == 0 {
+            data.entries.retain(Option::is_some);
+        }
+        true
+    })
+}
+
+pub fn map_size<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+    map.with(|data| data.live as f64)
+}
+
+pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    map.with_mut(|data| {
+        data.live = 0;
+        if data.iteration_depth == 0 {
+            data.entries.clear();
+        } else {
+            for entry in &mut data.entries {
+                *entry = None;
+            }
+        }
+    });
+}
+
+pub fn map_iter_count<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+    map.with(|data| data.entries.len() as f64)
+}
+
+pub fn map_iter_live<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> bool {
+    let index = array_index(index, false, map.with(|data| data.entries.len()));
+    map.with(|data| data.entries[index].is_some())
+}
+
+pub fn map_iter_key<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> K {
+    let index = array_index(index, false, map.with(|data| data.entries.len()));
+    map.with(|data| {
+        data.entries[index]
+            .as_ref()
+            .expect("scriptc: map key read from a tombstone")
+            .0
+            .clone()
+    })
+}
+
+pub fn map_iter_value<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> V {
+    let index = array_index(index, false, map.with(|data| data.entries.len()));
+    map.with(|data| {
+        data.entries[index]
+            .as_ref()
+            .expect("scriptc: map value read from a tombstone")
+            .1
+            .clone()
+    })
+}
+
+pub fn map_iter_enter<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    map.with_mut(|data| data.iteration_depth += 1);
+}
+
+pub fn map_iter_exit<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    map.with_mut(|data| {
+        data.iteration_depth = data
+            .iteration_depth
+            .checked_sub(1)
+            .expect("scriptc: unbalanced map iteration exit");
+        if data.iteration_depth == 0 {
+            data.entries.retain(Option::is_some);
+        }
+    });
+}
+
+pub type JsSet<T> = JsMap<T, bool>;
+
+pub fn set_new<T: Clone + 'static>() -> JsSet<T> {
+    map_new()
+}
+
+pub fn set_from_array_by<T, N, F>(source: &JsArray<T>, normalize: N, equal: F) -> JsSet<T>
+where
+    T: ArrayElement,
+    N: Fn(T) -> T,
+    F: Fn(&T, &T) -> bool + Copy,
+{
+    let set = set_new();
+    let values = source.with(|data| data.elements.clone());
+    for value in values {
+        map_set_by(&set, normalize(value), true, equal);
+    }
+    set
+}
+
+pub fn set_add_by<T, F>(set: &JsSet<T>, value: T, equal: F)
+where
+    T: Clone + 'static,
+    F: Fn(&T, &T) -> bool,
+{
+    map_set_by(set, value, true, equal);
+}
+
+pub fn set_has_by<T, F>(set: &JsSet<T>, value: &T, equal: F) -> bool
+where
+    T: Clone + 'static,
+    F: Fn(&T, &T) -> bool,
+{
+    map_has_by(set, value, equal)
+}
+
+pub fn set_delete_by<T, F>(set: &JsSet<T>, value: &T, equal: F) -> bool
+where
+    T: Clone + 'static,
+    F: Fn(&T, &T) -> bool,
+{
+    map_delete_by(set, value, equal)
 }
 
 fn array_index(index: f64, allow_end: bool, len: usize) -> usize {

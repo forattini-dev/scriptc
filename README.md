@@ -50,7 +50,8 @@ Rust builds emit `#![forbid(unsafe_code)]`, do not translate through C, and
 report unsupported constructs instead of falling back to another backend. The
 current subset includes classes with constructors, fields, monomorphic and
 virtual methods, lexical `this` captures, object identity, single inheritance,
-runtime `instanceof`, composition, and collectable cycles.
+runtime `instanceof`, composition, collectable cycles, array identity searches,
+and insertion-ordered `Map` and `Set` containers with live iteration.
 
 ## Use Node APIs
 

@@ -322,6 +322,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "500-array-basics.ts",
     "501-array-push-pop.ts",
     "504-array-rc-stress.ts",
+    "511-array-indexof-includes.ts",
     "600-closures-basic.ts",
     "601-closures-loops.ts",
     "602-closures-identity-recursion.ts",
@@ -379,7 +380,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-refusal-"));
   const sourcePath = join(dir, "unsupported.ts");
-  await writeFile(sourcePath, "console.log([1, 2, 3].includes(2));\n");
+  await writeFile(sourcePath, "console.log([1, 2, 3].slice(1));\n");
   const result = await compile(sourcePath, {
     outDir: dir,
     outPath: join(dir, "unsupported"),
@@ -452,3 +453,44 @@ test("Rust first-class constructors preserve identity, names, construction, and 
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 }, 120_000);
+
+test("Rust Map and Set containers preserve equality, live iteration, references, and class registries", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-map-set-"));
+  for (const fixture of [
+    "520-map-basics.ts",
+    "521-map-number-keys.ts",
+    "522-map-foreach.ts",
+    "523-map-ref-values.ts",
+    "524-map-cycles.ts",
+    "525-map-rc-stress.ts",
+    "526-set-basics.ts",
+    "527-set-foreach.ts",
+    "528-set-seeded.ts",
+    "529-map-seeded.ts",
+    "536-map-seed-array.ts",
+    "537-map-iter-drains.ts",
+    "538-map-set-for-of.ts",
+    "1941-class-values-registry.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 240_000);

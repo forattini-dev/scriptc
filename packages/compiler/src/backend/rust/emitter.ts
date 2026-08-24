@@ -390,12 +390,15 @@ class RustEmitter {
           comparison = "if same_value { runtime::number_same_value(*left, *right) } else { left == right }";
           break;
         case "bool":
+        case "classval":
           comparison = "left == right";
           break;
         case "string":
           comparison = "left.as_ref() == right.as_ref()";
           break;
         case "array":
+        case "map":
+        case "set":
         case "record":
         case "object":
         case "func":
@@ -525,6 +528,8 @@ class RustEmitter {
           this.line(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
           break;
         case "array":
+        case "map":
+        case "set":
         case "record":
         case "object":
         case "union":
@@ -978,6 +983,31 @@ class RustEmitter {
         return `runtime::array_get(&(${this.emitExpr(expr.arr)}), ${this.emitExpr(expr.index)})`;
       case "arrIntrinsic":
         return this.emitArrayIntrinsic(expr);
+      case "mapNew": {
+        if (expr.type.kind !== "map") this.unsupported("mapNew with a non-map type", expr.loc);
+        const type = expr.type;
+        const map = `sc_rt_${this.temporary++}`;
+        const equality = this.mapKeyEquality("left", "right", type.key, expr.loc);
+        const entries = (expr.seed ?? []).map(({ key, value }) => {
+          const keyTemp = `sc_rt_${this.temporary++}`;
+          const valueTemp = `sc_rt_${this.temporary++}`;
+          return `let ${keyTemp} = ${this.emitExpr(key)}; let ${valueTemp} = ${this.emitExpr(value)}; runtime::map_set_by(&${map}, ${this.mapStoredKey(keyTemp, type.key)}, ${valueTemp}, |left, right| ${equality});`;
+        }).join(" ");
+        return `{ let ${map}: ${this.rustType(expr.type, expr.loc)} = runtime::map_new(); ${entries} ${map} }`;
+      }
+      case "mapIntrinsic":
+        return this.emitMapIntrinsic(expr);
+      case "setNew": {
+        if (expr.type.kind !== "set") this.unsupported("setNew with a non-set type", expr.loc);
+        const equality = this.mapKeyEquality("left", "right", expr.type.elem, expr.loc);
+        if (expr.seed === undefined) return `runtime::set_new::<${this.rustType(expr.type.elem, expr.loc)}>()`;
+        const seed = `sc_rt_${this.temporary++}`;
+        const value = "value";
+        const normalized = this.mapStoredKey(value, expr.type.elem);
+        return `{ let ${seed} = ${this.emitExpr(expr.seed)}; runtime::set_from_array_by(&${seed}, |${value}| ${normalized}, |left, right| ${equality}) }`;
+      }
+      case "setIntrinsic":
+        return this.emitSetIntrinsic(expr);
       case "recordLit": {
         if (expr.type.kind !== "record") this.unsupported("record literal with a non-record type", expr.loc);
         const shape = this.records.get(expr.type.shapeId);
@@ -1345,6 +1375,8 @@ class RustEmitter {
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
       case "array": return "true";
+      case "map": return "true";
+      case "set": return "true";
       case "record": return "true";
       case "object": return "true";
       case "func": return "true";
@@ -1415,6 +1447,8 @@ class RustEmitter {
         return "usize";
       }
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
+      case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
+      case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
         if (!this.records.has(type.shapeId)) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
@@ -1443,6 +1477,8 @@ class RustEmitter {
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "array": return "runtime::array_new(Vec::new())";
+      case "map": return "runtime::map_new()";
+      case "set": return "runtime::set_new()";
       case "classval": return "0";
       default: this.unsupported(`uninitialized '${type.kind}' local`, loc);
     }
@@ -1467,6 +1503,15 @@ class RustEmitter {
         return `runtime::array_len(&(${this.emitExpr(expr.receiver)}))`;
       case "pop":
         return `runtime::array_pop(&(${this.emitExpr(expr.receiver)}))`;
+      case "indexOf":
+      case "includes": {
+        const needleExpr = expr.args[0];
+        if (needleExpr === undefined) this.unsupported(`array ${expr.method} without a needle`, expr.loc);
+        const needle = `sc_rt_${this.temporary++}`;
+        const equality = this.arrayElementEquality("left", "right", expr.receiver.type.elem, expr.method === "includes", expr.loc);
+        const helper = expr.method === "indexOf" ? "array_index_of_by" : "array_includes_by";
+        return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${needle} = ${this.emitExpr(needleExpr)}; runtime::${helper}(&${receiver}, &${needle}, |left, right| ${equality}) }`;
+      }
       case "push": {
         const values = expr.args.map(() => `sc_rt_${this.temporary++}`);
         const bindings = expr.args.map((arg, index) => `let ${values[index]} = ${this.emitExpr(arg)};`).join(" ");
@@ -1493,12 +1538,147 @@ class RustEmitter {
     }
   }
 
+  private emitMapIntrinsic(expr: Extract<IrExpr, { kind: "mapIntrinsic" }>): string {
+    if (expr.receiver.type.kind !== "map") this.unsupported("map intrinsic on a non-map", expr.loc);
+    const type = expr.receiver.type;
+    const receiver = `sc_rt_${this.temporary++}`;
+    const receiverBinding = `let ${receiver} = ${this.emitExpr(expr.receiver)};`;
+    if (expr.method === "size") return `{ ${receiverBinding} runtime::map_size(&${receiver}) }`;
+    if (expr.method === "clear") return `{ ${receiverBinding} runtime::map_clear(&${receiver}) }`;
+    if (expr.method === "iterCount") return `{ ${receiverBinding} runtime::map_iter_count(&${receiver}) }`;
+    if (expr.method === "iterEnter") return `{ ${receiverBinding} runtime::map_iter_enter(&${receiver}) }`;
+    if (expr.method === "iterExit") return `{ ${receiverBinding} runtime::map_iter_exit(&${receiver}) }`;
+    if (expr.method === "iterLive" || expr.method === "iterKey" || expr.method === "iterValue") {
+      const indexExpr = expr.args[0];
+      if (indexExpr === undefined) this.unsupported(`map ${expr.method} without an index`, expr.loc);
+      const index = `sc_rt_${this.temporary++}`;
+      const helper = expr.method === "iterLive"
+        ? "map_iter_live"
+        : expr.method === "iterKey" ? "map_iter_key" : "map_iter_value";
+      return `{ ${receiverBinding} let ${index} = ${this.emitExpr(indexExpr)}; runtime::${helper}(&${receiver}, ${index}) }`;
+    }
+    const keyExpr = expr.args[0];
+    if (keyExpr === undefined) this.unsupported(`map ${expr.method} without a key`, expr.loc);
+    const key = `sc_rt_${this.temporary++}`;
+    const equality = this.mapKeyEquality("left", "right", type.key, expr.loc);
+    const bindings = `${receiverBinding} let ${key} = ${this.emitExpr(keyExpr)};`;
+    switch (expr.method) {
+      case "set": {
+        const valueExpr = expr.args[1];
+        if (valueExpr === undefined) this.unsupported("map set without a value", expr.loc);
+        const value = `sc_rt_${this.temporary++}`;
+        return `{ ${bindings} let ${value} = ${this.emitExpr(valueExpr)}; runtime::map_set_by(&${receiver}, ${this.mapStoredKey(key, type.key)}, ${value}, |left, right| ${equality}) }`;
+      }
+      case "get": {
+        if (expr.type.kind !== "union") this.unsupported("map get without an optional result union", expr.loc);
+        const union = this.union(expr.type.unionId, expr.loc);
+        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        if (undefinedTag < 0) this.unsupported("map get result union shape", expr.loc);
+        const name = this.unionName(union.id);
+        let present: string;
+        if (type.value.kind === "union") {
+          if (type.value.unionId === union.id) {
+            present = "value";
+          } else {
+            const stored = this.union(type.value.unionId, expr.loc);
+            const arms = stored.arms.map((arm, tag) => {
+              const resultTag = union.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
+              if (resultTag < 0) this.unsupported("map get union retag", expr.loc);
+              const from = `${this.unionName(stored.id)}::${this.unionVariant(tag)}`;
+              const to = `${name}::${this.unionVariant(resultTag)}`;
+              return this.isUnit(arm) ? `${from} => ${to}` : `${from}(payload) => ${to}(payload)`;
+            }).join(", ");
+            present = `match value { ${arms} }`;
+          }
+        } else {
+          const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(type.value));
+          if (valueTag < 0) this.unsupported("map get result union shape", expr.loc);
+          present = `${name}::${this.unionVariant(valueTag)}(value)`;
+        }
+        return `{ ${bindings} match runtime::map_get_by(&${receiver}, &${key}, |left, right| ${equality}) { Some(value) => ${present}, None => ${name}::${this.unionVariant(undefinedTag)}, } }`;
+      }
+      case "has":
+        return `{ ${bindings} runtime::map_has_by(&${receiver}, &${key}, |left, right| ${equality}) }`;
+      case "delete":
+        return `{ ${bindings} runtime::map_delete_by(&${receiver}, &${key}, |left, right| ${equality}) }`;
+      default:
+        this.unsupported(`map intrinsic '${expr.method}'`, expr.loc);
+    }
+  }
+
+  private emitSetIntrinsic(expr: Extract<IrExpr, { kind: "setIntrinsic" }>): string {
+    if (expr.receiver.type.kind !== "set") this.unsupported("set intrinsic on a non-set", expr.loc);
+    const type = expr.receiver.type;
+    const receiver = `sc_rt_${this.temporary++}`;
+    const receiverBinding = `let ${receiver} = ${this.emitExpr(expr.receiver)};`;
+    if (expr.method === "size") return `{ ${receiverBinding} runtime::map_size(&${receiver}) }`;
+    if (expr.method === "clear") return `{ ${receiverBinding} runtime::map_clear(&${receiver}) }`;
+    if (expr.method === "iterCount") return `{ ${receiverBinding} runtime::map_iter_count(&${receiver}) }`;
+    if (expr.method === "iterEnter") return `{ ${receiverBinding} runtime::map_iter_enter(&${receiver}) }`;
+    if (expr.method === "iterExit") return `{ ${receiverBinding} runtime::map_iter_exit(&${receiver}) }`;
+    if (expr.method === "iterLive" || expr.method === "iterKey") {
+      const indexExpr = expr.args[0];
+      if (indexExpr === undefined) this.unsupported(`set ${expr.method} without an index`, expr.loc);
+      const index = `sc_rt_${this.temporary++}`;
+      const helper = expr.method === "iterLive" ? "map_iter_live" : "map_iter_key";
+      return `{ ${receiverBinding} let ${index} = ${this.emitExpr(indexExpr)}; runtime::${helper}(&${receiver}, ${index}) }`;
+    }
+    const valueExpr = expr.args[0];
+    if (valueExpr === undefined) this.unsupported(`set ${expr.method} without a value`, expr.loc);
+    const value = `sc_rt_${this.temporary++}`;
+    const equality = this.mapKeyEquality("left", "right", type.elem, expr.loc);
+    const bindings = `${receiverBinding} let ${value} = ${this.emitExpr(valueExpr)};`;
+    switch (expr.method) {
+      case "add":
+        return `{ ${bindings} runtime::set_add_by(&${receiver}, ${this.mapStoredKey(value, type.elem)}, |left, right| ${equality}) }`;
+      case "has":
+        return `{ ${bindings} runtime::set_has_by(&${receiver}, &${value}, |left, right| ${equality}) }`;
+      case "delete":
+        return `{ ${bindings} runtime::set_delete_by(&${receiver}, &${value}, |left, right| ${equality}) }`;
+      default:
+        this.unsupported(`set intrinsic '${expr.method}'`, expr.loc);
+    }
+  }
+
   private needsClone(type: IrType): boolean {
     return type.kind === "string" || type.kind === "union" || type.kind === "caught" || this.isTracedHandle(type);
   }
 
+  private arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string {
+    switch (type.kind) {
+      case "f64":
+        return sameValueZero
+          ? `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`
+          : `*${left} == *${right}`;
+      case "bool":
+      case "classval":
+        return `${left} == ${right}`;
+      case "string":
+        return `${left}.as_ref() == ${right}.as_ref()`;
+      case "array":
+      case "record":
+      case "func":
+        return `${left}.ptr_eq(${right})`;
+      case "object":
+        if (this.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
+        this.unsupported(`array identity for runtime object '${type.className}'`, loc);
+      default:
+        this.unsupported(`array ${sameValueZero ? "includes" : "indexOf"} element '${type.kind}'`, loc);
+    }
+  }
+
+  private mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
+    if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
+    this.unsupported(`map key '${type.kind}'`, loc);
+  }
+
+  private mapStoredKey(value: string, type: IrType): string {
+    return type.kind === "f64" ? `if ${value} == 0.0 { 0.0 } else { ${value} }` : value;
+  }
+
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "record" ||
+    return type.kind === "array" || type.kind === "map" || type.kind === "set" || type.kind === "record" ||
       (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 
