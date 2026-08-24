@@ -634,6 +634,7 @@ class RustEmitter {
         case "map":
         case "set":
         case "stats":
+        case "fileHandle":
         case "spawnRes":
         case "record":
         case "func":
@@ -953,6 +954,7 @@ class RustEmitter {
         case "array":
         case "bytes":
         case "stats":
+        case "fileHandle":
         case "spawnRes":
         case "map":
         case "set":
@@ -3199,6 +3201,21 @@ class RustEmitter {
         if (expr.fn === "fsp.stat" && expr.args.length === 1 && arg !== undefined) {
           return this.emitPromiseFromSync([arg], (value) => `runtime::fs_stat(&${value(0)}, true)`);
         }
+        if (expr.fn === "fsp.open" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1], expr.args[2]],
+            (value) => `runtime::file_handle_open(&${value(0)}, &${value(1)}, ${value(2)})`,
+          );
+        }
+        if (expr.fn === "fileHandle.fd" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::file_handle_fd(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fileHandle.close" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::file_handle_close(&${value(0)})`);
+        }
+        if (expr.fn === "fileHandle.stat" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::file_handle_stat(&${value(0)})`);
+        }
         if (expr.fn === "fs.appendFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_append_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
@@ -3845,6 +3862,7 @@ class RustEmitter {
       case "map": return "true";
       case "set": return "true";
       case "stats": return "true";
+      case "fileHandle": return "true";
       case "spawnRes": return "true";
       case "record": return "true";
       case "object": return "true";
@@ -3942,6 +3960,7 @@ class RustEmitter {
       case "array": return `runtime::JsArray<${this.rustType(type.elem, loc)}>`;
       case "bytes": return `runtime::JsBytes<${this.rustBytesElement(type.elem)}>`;
       case "stats": return "runtime::JsStats";
+      case "fileHandle": return "runtime::JsFileHandle";
       case "spawnRes": return "runtime::JsSpawnResult";
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
@@ -4230,7 +4249,7 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.classes.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.errorClassRoots().length > 0))) || type.kind === "func";
   }

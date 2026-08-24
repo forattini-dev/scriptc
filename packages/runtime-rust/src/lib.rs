@@ -3104,6 +3104,83 @@ pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
     f64::from(id)
 }
 
+pub struct FileHandleData {
+    fd: Cell<i32>,
+}
+
+impl Trace for FileHandleData {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for FileHandleData {
+    fn clear_edges(&mut self) {}
+}
+
+impl Drop for FileHandleData {
+    fn drop(&mut self) {
+        let fd = self.fd.replace(-1);
+        if fd >= 0 {
+            OPEN_FILES.with(|files| {
+                files.borrow_mut().remove(&fd);
+            });
+        }
+    }
+}
+
+pub type JsFileHandle = Gc<FileHandleData>;
+
+pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileHandle {
+    let mode = fs_creation_mode(mode);
+    let mut options = fs_open_options(flags);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let file = match options.open(path.as_ref()) {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    let fd = file_id(&file);
+    OPEN_FILES.with(|files| {
+        let previous = files.borrow_mut().insert(fd, file);
+        assert!(
+            previous.is_none(),
+            "scriptc: duplicate FileHandle descriptor"
+        );
+    });
+    Gc::new(FileHandleData { fd: Cell::new(fd) })
+}
+
+pub fn file_handle_fd(handle: &JsFileHandle) -> f64 {
+    f64::from(handle.with(|handle| handle.fd.get()))
+}
+
+fn file_handle_require_open(handle: &JsFileHandle) -> f64 {
+    let fd = file_handle_fd(handle);
+    if fd >= 0.0 {
+        return fd;
+    }
+    throw_value(JsError {
+        name: "Error".to_owned(),
+        message: "file closed".to_owned(),
+        code: Some("EBADF".to_owned()),
+    })
+}
+
+pub fn file_handle_close(handle: &JsFileHandle) {
+    let fd = handle.with(|handle| handle.fd.replace(-1));
+    if fd < 0 {
+        return;
+    }
+    let file = OPEN_FILES.with(|files| files.borrow_mut().remove(&fd));
+    if file.is_none() {
+        throw_fs_fd_error("close", "EBADF", "bad file descriptor");
+    }
+}
+
 fn with_open_file<T>(
     fd: f64,
     operation: &str,
@@ -3711,17 +3788,27 @@ pub fn fs_stat(path: &JsString, follow: bool) -> JsStats {
         Ok(metadata) => metadata,
         Err(error) => throw_fs_error(if follow { "stat" } else { "lstat" }, path, error),
     };
+    stats_from_metadata(metadata, !follow)
+}
+
+fn stats_from_metadata(metadata: std::fs::Metadata, is_symlink: bool) -> JsStats {
     let (blocks, nlink) = stats_platform_fields(&metadata);
     Gc::new(StatsData {
         is_file: metadata.is_file(),
         is_directory: metadata.is_dir(),
-        is_symlink: metadata.file_type().is_symlink(),
+        is_symlink: is_symlink && metadata.file_type().is_symlink(),
         size: metadata.len() as f64,
         blocks,
         nlink,
         atime_ms: system_time_ms(metadata.accessed()),
         mtime_ms: system_time_ms(metadata.modified()),
     })
+}
+
+pub fn file_handle_stat(handle: &JsFileHandle) -> JsStats {
+    let fd = file_handle_require_open(handle);
+    let metadata = with_open_file(fd, "fstat", |file| file.metadata());
+    stats_from_metadata(metadata, false)
 }
 
 pub fn stats_is_file(stats: &JsStats) -> bool {
@@ -4654,6 +4741,44 @@ mod tests {
         }
         assert_eq!(fs_creation_mode(0o600 as f64), 0o600);
         assert_eq!(fs_creation_mode(4_294_967_295.0), u32::MAX);
+    }
+
+    #[test]
+    fn file_handle_aliases_share_close_state_and_last_drop_closes() {
+        let baseline = live_heap_objects();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the test clock must follow the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "scriptc-runtime-file-handle-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"handle").expect("the FileHandle fixture must be writable");
+        let path_string: JsString = Rc::from(path.to_string_lossy().as_ref());
+
+        {
+            let handle = file_handle_open(&path_string, &string("r"), 0o666 as f64);
+            let alias = handle.clone();
+            let fd = file_handle_fd(&handle);
+            assert!(fd >= 0.0);
+            assert_eq!(file_handle_fd(&alias), fd);
+            assert_eq!(stats_size(&file_handle_stat(&handle)), 6.0);
+            file_handle_close(&alias);
+            assert_eq!(file_handle_fd(&handle), -1.0);
+            file_handle_close(&handle);
+        }
+
+        {
+            let handle = file_handle_open(&path_string, &string("r"), 0o666 as f64);
+            let fd = file_handle_fd(&handle) as i32;
+            assert!(OPEN_FILES.with(|files| files.borrow().contains_key(&fd)));
+            drop(handle);
+            assert!(!OPEN_FILES.with(|files| files.borrow().contains_key(&fd)));
+        }
+
+        std::fs::remove_file(path).expect("the FileHandle fixture must be removable");
+        assert_eq!(live_heap_objects(), baseline);
     }
 
     #[test]
