@@ -1054,6 +1054,22 @@ class RustEmitter {
     return expr?.kind === "awaitExpr" || expr?.kind === "awaitUnionExpr" ? expr : null;
   }
 
+  private asyncHopSequence(expr: IrExpr | null): {
+    prelude: readonly IrStmt[];
+    result: IrExpr;
+  } | null {
+    if (expr?.kind !== "seqExpr") return null;
+    const hop = expr.stmts.findIndex((candidate) =>
+      candidate.kind === "exprStmt" && candidate.expr.kind === "libCall" && candidate.expr.fn === "async.hop"
+    );
+    if (hop < 0) return null;
+    if (hop !== expr.stmts.length - 1 || expr.result.kind !== "varRef" ||
+      this.containsAsyncSuspension(expr.stmts.slice(0, hop))) {
+      this.unsupported("non-canonical await-value hop", expr.loc);
+    }
+    return { prelude: expr.stmts.slice(0, hop), result: expr.result };
+  }
+
   private awaitedValue(expr: IrExpr | null): { awaited: IrAwaitExpr; wrap: (value: string) => string } | null {
     const awaited = this.awaitExpression(expr);
     if (awaited !== null) return { awaited, wrap: (value) => value };
@@ -1120,19 +1136,37 @@ class RustEmitter {
         this.emitAsyncTryCatch(stmt, statements.slice(index + 1), onComplete);
         return;
       }
-      const hop = stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr"
-        ? stmt.expr.stmts.findIndex((candidate) =>
-          candidate.kind === "exprStmt" && candidate.expr.kind === "libCall" && candidate.expr.fn === "async.hop")
-        : -1;
-      if (hop >= 0 && stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr") {
-        if (hop !== stmt.expr.stmts.length - 1 || stmt.expr.result.kind !== "varRef") {
-          this.unsupported("non-canonical await-value hop", stmt.loc);
+      const nested =
+        stmt.kind === "assign" ? stmt.value
+        : stmt.kind === "varDecl" ? stmt.init
+        : stmt.kind === "exprStmt" ? stmt.expr
+        : stmt.kind === "return" ? stmt.value
+        : null;
+      const hop = this.asyncHopSequence(nested);
+      if (hop !== null) {
+        for (const prelude of hop.prelude) {
+          this.emitStatement(prelude);
+          if (prelude.kind === "varDecl") this.currentAsyncLocals?.add(prelude.localId);
         }
-        for (const prelude of stmt.expr.stmts.slice(0, hop)) this.emitStatement(prelude);
         this.emitAsyncContinuation(
           "runtime::promise_resolved(())",
-          (value) => this.line(`let _ = ${value};`),
-          statements.slice(index + 1),
+          (rawValue) => {
+            this.line(`let _ = ${rawValue};`);
+            const value = this.emitExpr(hop.result);
+            if (stmt.kind === "assign") {
+              this.emitAssignment(stmt.localId, value, stmt.loc);
+            } else if (stmt.kind === "varDecl") {
+              const local = this.local(stmt.localId, stmt.loc);
+              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+              this.currentAsyncLocals?.add(local.id);
+            } else if (stmt.kind === "exprStmt") {
+              this.line(`let _ = ${value};`);
+            } else {
+              this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+              this.line("return;");
+            }
+          },
+          stmt.kind === "return" ? null : statements.slice(index + 1),
           onComplete,
         );
         return;
@@ -1151,12 +1185,6 @@ class RustEmitter {
         : null,
       );
       if (awaited === null) {
-        const nested =
-          stmt.kind === "assign" ? stmt.value
-          : stmt.kind === "varDecl" ? stmt.init
-          : stmt.kind === "exprStmt" ? stmt.expr
-          : stmt.kind === "return" ? stmt.value
-          : null;
         if ((nested?.kind === "bin" || nested?.kind === "recordLit" || nested?.kind === "arrIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
