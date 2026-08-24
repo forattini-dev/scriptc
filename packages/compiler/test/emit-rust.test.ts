@@ -1227,6 +1227,45 @@ const optionalMissing = await optionalNumber(false);
 console.log("optional missing", optionalMissing === undefined);
 await optionalVoid(false);
 console.log("optional void");
+async function finallyAfterAwait(): Promise<string> {
+  let trace = "";
+  try {
+    await Promise.resolve(1);
+    trace = trace + "try";
+  } finally {
+    await Promise.resolve(2);
+    trace = trace + "-finally";
+  }
+  return trace;
+}
+console.log("finally await", await finallyAfterAwait());
+async function returnThroughFinally(): Promise<string> {
+  try {
+    await Promise.resolve(0);
+    return "pending return";
+  } finally {
+    console.log("return finally");
+  }
+}
+console.log("finally return", await returnThroughFinally());
+async function finallyOverridesReturn(): Promise<string> {
+  try {
+    await Promise.resolve(0);
+    return "discarded return";
+  } finally {
+    throw new RangeError("finally failed");
+  }
+}
+async function recoverFinallyThrow(): Promise<string> {
+  try {
+    await finallyOverridesReturn();
+    return "unreachable";
+  } catch (error) {
+    if (error instanceof RangeError) return error.message;
+    return "unknown";
+  }
+}
+console.log("finally throw", await recoverFinallyThrow());
 export {};
 `);
   for (const [name, entryPath] of [

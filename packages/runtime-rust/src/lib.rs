@@ -1106,15 +1106,15 @@ where
     }
 }
 
-pub enum AsyncSegment {
+pub enum AsyncCompletion<T> {
     Fallthrough,
     Suspended,
-    Completed,
+    Return(T),
 }
 
-pub fn promise_try_segment<F>(segment: F) -> Result<AsyncSegment, Caught>
+pub fn promise_try_segment<T, F>(segment: F) -> Result<AsyncCompletion<T>, Caught>
 where
-    F: FnOnce() -> AsyncSegment,
+    F: FnOnce() -> AsyncCompletion<T>,
 {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(segment)) {
         Ok(completion) => Ok(completion),
