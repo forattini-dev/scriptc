@@ -704,3 +704,39 @@ test("Rust Map and Set containers preserve equality, live iteration, references,
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
 }, 240_000);
+
+test("Rust process reads and POSIX path operations match Node", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-node-basics-"));
+  const env = { ...process.env, SCRIPTC_TEST_ENV: "from-harness" };
+  for (const fixture of [
+    "990-process-basics.ts",
+    "998-process-env.ts",
+    "1350-path-normalize-join.ts",
+    "1351-path-parts.ts",
+    "1352-path-resolve-relative.ts",
+    "1520-string-split-static.ts",
+    "1522-parseint-static.ts",
+    "1531-process-arch-versions.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath], { env }),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 180_000);

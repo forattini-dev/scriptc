@@ -25,6 +25,7 @@ thread_local! {
     static LIVE_NODES: Cell<usize> = const { Cell::new(0) };
     static CYCLE_CANDIDATES: RefCell<Vec<DynNodeWeak>> = const { RefCell::new(Vec::new()) };
     static EXCEPTION_SLOT: RefCell<Option<Rc<dyn Any>>> = const { RefCell::new(None) };
+    static PROCESS_ARGV: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
 }
 
 /// Visitor used by generated heap payloads to expose owning edges.
@@ -271,6 +272,7 @@ pub fn collect_cycles() -> usize {
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     collect_cycles();
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();
@@ -989,6 +991,340 @@ fn javascript_whitespace(ch: char) -> bool {
 
 pub fn string_trim(value: &JsString) -> JsString {
     Rc::from(value.trim_matches(javascript_whitespace))
+}
+
+pub fn string_split(value: &JsString, separator: &JsString, limit: f64) -> JsArray<JsString> {
+    let limit = to_uint32(limit) as usize;
+    if limit == 0 {
+        return array_new(Vec::new());
+    }
+    let parts = if separator.is_empty() {
+        value
+            .encode_utf16()
+            .take(limit)
+            .map(|unit| Rc::from(String::from_utf16_lossy(&[unit])))
+            .collect()
+    } else {
+        value
+            .split(separator.as_ref())
+            .take(limit)
+            .map(Rc::<str>::from)
+            .collect()
+    };
+    array_new(parts)
+}
+
+pub fn process_argv() -> JsArray<JsString> {
+    PROCESS_ARGV.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(argv) = slot.as_ref() {
+            return argv.clone();
+        }
+        let mut native = std::env::args();
+        let executable = native.next().unwrap_or_else(|| "scriptc".to_owned());
+        let mut values = vec![Rc::from(executable.as_str()), Rc::from(executable.as_str())];
+        values.extend(native.map(Rc::<str>::from));
+        let argv = array_new(values);
+        *slot = Some(argv.clone());
+        argv
+    })
+}
+
+pub fn process_platform() -> JsString {
+    string(if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(target_os = "windows") {
+        "win32"
+    } else {
+        "linux"
+    })
+}
+
+pub fn process_cwd() -> JsString {
+    Rc::from(
+        std::env::current_dir()
+            .expect("scriptc: current directory is unavailable")
+            .to_string_lossy()
+            .as_ref(),
+    )
+}
+
+pub fn process_pid() -> f64 {
+    f64::from(std::process::id())
+}
+
+fn process_status_id(prefix: &str, id_flag: &str) -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                line.strip_prefix(prefix)?
+                    .split_whitespace()
+                    .next()?
+                    .parse::<f64>()
+                    .ok()
+            })
+        })
+        .or_else(|| {
+            let output = std::process::Command::new("id")
+                .arg(id_flag)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<f64>()
+                .ok()
+        })
+        .unwrap_or(0.0)
+}
+
+pub fn process_getuid() -> f64 {
+    process_status_id("Uid:", "-u")
+}
+
+pub fn process_getgid() -> f64 {
+    process_status_id("Gid:", "-g")
+}
+
+pub fn process_exec_path() -> JsString {
+    Rc::from(
+        std::env::current_exe()
+            .expect("scriptc: executable path is unavailable")
+            .to_string_lossy()
+            .as_ref(),
+    )
+}
+
+pub fn process_arch() -> JsString {
+    string(if cfg!(target_arch = "x86_64") {
+        "x64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else if cfg!(target_arch = "x86") {
+        "ia32"
+    } else {
+        std::env::consts::ARCH
+    })
+}
+
+pub fn process_env_get(name: &JsString) -> Option<JsString> {
+    std::env::var_os(name.as_ref()).map(|value| Rc::from(value.to_string_lossy().as_ref()))
+}
+
+pub fn process_versions_node() -> JsString {
+    string("24.0.0")
+}
+
+pub fn process_versions_openssl() -> JsString {
+    string("3.5.5")
+}
+
+pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
+    let trimmed = value.trim_start_matches(javascript_whitespace);
+    let (negative, mut digits) = if let Some(rest) = trimmed.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, trimmed)
+    };
+    let requested = to_int32(radix);
+    if requested != 0 && !(2..=36).contains(&requested) {
+        return f64::NAN;
+    }
+    let mut base = if requested == 0 { 10 } else { requested };
+    if (requested == 0 || requested == 16) && (digits.starts_with("0x") || digits.starts_with("0X"))
+    {
+        digits = &digits[2..];
+        base = 16;
+    }
+    let mut result = 0.0;
+    let mut consumed = false;
+    let mut consumed_bytes = 0;
+    for byte in digits.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => i32::from(byte - b'0'),
+            b'a'..=b'z' => i32::from(byte - b'a') + 10,
+            b'A'..=b'Z' => i32::from(byte - b'A') + 10,
+            _ => break,
+        };
+        if digit >= base {
+            break;
+        }
+        consumed = true;
+        consumed_bytes += 1;
+        result = result * f64::from(base) + f64::from(digit);
+    }
+    if !consumed {
+        return f64::NAN;
+    }
+    // Rust's decimal parser performs correctly-rounded conversion over the
+    // full digit sequence; repeated f64 multiplication can drift by one ULP
+    // for large decimal integers (unlike JavaScript's parseInt result).
+    if base == 10 {
+        result = digits[..consumed_bytes]
+            .parse::<f64>()
+            .unwrap_or(f64::INFINITY);
+    }
+    if negative { -result } else { result }
+}
+
+fn normalize_posix(path: &str) -> String {
+    if path.is_empty() {
+        return ".".to_owned();
+    }
+    let absolute = path.starts_with('/');
+    let trailing = path.ends_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else if !absolute {
+                    parts.push(part);
+                }
+            }
+            _ => parts.push(part),
+        }
+    }
+    let mut result = parts.join("/");
+    if result.is_empty() && !absolute {
+        result.push('.');
+    }
+    if trailing && !result.is_empty() && result != "/" {
+        result.push('/');
+    }
+    if absolute {
+        result.insert(0, '/');
+    }
+    result
+}
+
+pub fn path_normalize(path: &JsString) -> JsString {
+    Rc::from(normalize_posix(path))
+}
+
+pub fn path_join(parts: &JsArray<JsString>) -> JsString {
+    let joined = parts.with(|data| {
+        data.elements
+            .iter()
+            .filter(|part| !part.is_empty())
+            .map(|part| part.as_ref())
+            .collect::<Vec<_>>()
+            .join("/")
+    });
+    Rc::from(normalize_posix(&joined))
+}
+
+pub fn path_resolve(parts: &JsArray<JsString>) -> JsString {
+    let mut inputs = parts.with(|data| {
+        data.elements
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+    });
+    inputs.insert(0, process_cwd().to_string());
+    let mut combined = String::new();
+    for part in inputs.iter().rev() {
+        if part.is_empty() {
+            continue;
+        }
+        combined = if combined.is_empty() {
+            part.clone()
+        } else {
+            format!("{part}/{combined}")
+        };
+        if part.starts_with('/') {
+            break;
+        }
+    }
+    let mut normalized = normalize_posix(&combined);
+    if normalized.len() > 1 {
+        normalized.truncate(normalized.trim_end_matches('/').len());
+    }
+    Rc::from(if normalized.starts_with('/') {
+        normalized
+    } else {
+        format!("/{normalized}")
+    })
+}
+
+pub fn path_is_absolute(path: &JsString) -> bool {
+    path.starts_with('/')
+}
+
+pub fn path_dirname(path: &JsString) -> JsString {
+    let bytes = path.as_bytes();
+    if bytes.is_empty() {
+        return string(".");
+    }
+    let root = bytes[0] == b'/';
+    let mut end = None;
+    let mut matched_slash = true;
+    for index in (1..bytes.len()).rev() {
+        if bytes[index] == b'/' {
+            if !matched_slash {
+                end = Some(index);
+                break;
+            }
+        } else {
+            matched_slash = false;
+        }
+    }
+    match end {
+        None => string(if root { "/" } else { "." }),
+        Some(1) if root => string("//"),
+        Some(end) => Rc::from(&path[..end]),
+    }
+}
+
+pub fn path_basename(path: &JsString, suffix: &JsString) -> JsString {
+    let trimmed = path.trim_end_matches('/');
+    if !suffix.is_empty() && trimmed == suffix.as_ref() {
+        return empty_string();
+    }
+    let mut basename = trimmed.rsplit('/').next().unwrap_or("");
+    if !suffix.is_empty() && suffix.len() < basename.len() && basename.ends_with(suffix.as_ref()) {
+        basename = &basename[..basename.len() - suffix.len()];
+    }
+    Rc::from(basename)
+}
+
+pub fn path_extname(path: &JsString) -> JsString {
+    let basename = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let Some(dot) = basename.rfind('.') else {
+        return empty_string();
+    };
+    if dot == 0 || basename == ".." {
+        return empty_string();
+    }
+    Rc::from(&basename[dot..])
+}
+
+pub fn path_relative(from: &JsString, to: &JsString) -> JsString {
+    let from_parts = path_resolve(&array_new(vec![from.clone()]));
+    let to_parts = path_resolve(&array_new(vec![to.clone()]));
+    let from_parts: Vec<_> = from_parts
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let to_parts: Vec<_> = to_parts
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let common = from_parts
+        .iter()
+        .zip(&to_parts)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut result = vec![".."; from_parts.len() - common];
+    result.extend(to_parts[common..].iter().copied());
+    Rc::from(result.join("/"))
 }
 
 pub fn number_to_string(value: f64) -> JsString {

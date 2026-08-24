@@ -122,6 +122,10 @@ class RustEmitter {
     this.emitGlobals();
     for (const fn of this.mod.functions) {
       if (fn.captures !== undefined && !this.closureTargets.has(fn.name)) continue;
+      // The frontend may intern this helper while probing process.env as a
+      // receiver, even when every actual read becomes process.envGet. Its
+      // indexed-record body is irrelevant unless a whole env value escapes.
+      if (fn.name.startsWith("%env.snapshot.") && !this.isFunctionReferenced(fn.name)) continue;
       this.emitFunction(fn);
       this.line("");
     }
@@ -250,6 +254,27 @@ class RustEmitter {
       for (const child of Object.values(node)) visit(child);
     };
     for (const fn of this.mod.functions) visit(fn.body);
+  }
+
+  private isFunctionReferenced(name: string): boolean {
+    let found = false;
+    const visit = (value: unknown): void => {
+      if (found || value === null || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      const node = value as Record<string, unknown>;
+      if ((node.kind === "call" && node.callee === name) || (node.kind === "closure" && node.fnName === name)) {
+        found = true;
+        return;
+      }
+      for (const child of Object.values(node)) visit(child);
+    };
+    for (const fn of this.mod.functions) {
+      if (fn.name !== name) visit(fn.body);
+    }
+    return found;
   }
 
   private emitClosureDefinitions(): void {
@@ -481,7 +506,11 @@ class RustEmitter {
 
   private emitRecordDefinitions(): void {
     for (const shape of this.records.values()) {
-      if (shape.indexValue !== undefined) this.unsupported(`indexed record shape '${shape.id}'`);
+      // Some intrinsic-only surfaces, notably process.env, carry an indexed
+      // record type through the IR even though every operation lowers to a
+      // dedicated libCall. Do not reject those unused nominal shapes here;
+      // rustType still fences an indexed record if a value actually escapes.
+      if (shape.indexValue !== undefined) continue;
       const struct = mangleRecordStruct(shape.id);
       this.line(`struct ${struct} {`);
       this.indent += 1;
@@ -1101,6 +1130,9 @@ class RustEmitter {
         if (expr.method === "trim" && expr.args.length === 0) {
           return `runtime::string_trim(&(${this.emitExpr(expr.receiver)}))`;
         }
+        if (expr.method === "split" && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
+          return `runtime::string_split(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${this.emitExpr(expr.args[1])})`;
+        }
         this.unsupported(`string intrinsic '${expr.method}'`, expr.loc);
       case "strEq": {
         const compare = `(${this.emitExpr(expr.left)}).as_ref() == (${this.emitExpr(expr.right)}).as_ref()`;
@@ -1392,6 +1424,58 @@ class RustEmitter {
         if (expr.fn === "math.floor" && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).floor()`;
         }
+        if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
+        if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
+        if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";
+        if (expr.fn === "process.pid" && expr.args.length === 0) return "runtime::process_pid()";
+        if (expr.fn === "process.getuid" && expr.args.length === 0) return "runtime::process_getuid()";
+        if (expr.fn === "process.getgid" && expr.args.length === 0) return "runtime::process_getgid()";
+        if (expr.fn === "process.execPath" && expr.args.length === 0) return "runtime::process_exec_path()";
+        if (expr.fn === "process.arch" && expr.args.length === 0) return "runtime::process_arch()";
+        if (expr.fn === "process.versionsNode" && expr.args.length === 0) return "runtime::process_versions_node()";
+        if (expr.fn === "process.versionsOpenssl" && expr.args.length === 0) return "runtime::process_versions_openssl()";
+        if (expr.fn === "process.envGet" && expr.args.length === 1 && arg !== undefined) {
+          if (expr.type.kind !== "union") this.unsupported("process.envGet without an optional result union", expr.loc);
+          const union = this.union(expr.type.unionId, expr.loc);
+          const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+          const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+          if (stringTag < 0 || undefinedTag < 0) this.unsupported("process.envGet result union shape", expr.loc);
+          const name = this.unionName(union.id);
+          return `match runtime::process_env_get(&(${this.emitExpr(arg)})) { Some(value) => ${name}::${this.unionVariant(stringTag)}(value), None => ${name}::${this.unionVariant(undefinedTag)}, }`;
+        }
+        if (expr.fn === "num.parseInt" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::number_parse_int(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
+        }
+        if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
+          return `(${this.emitExpr(arg)}).is_nan()`;
+        }
+        if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_join(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.resolve" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_resolve(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.normalize" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_normalize(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.dirname" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_dirname(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.extname" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_extname(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.isAbsolute" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::path_is_absolute(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "path.toNamespacedPath" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitExpr(arg);
+        }
+        if (expr.fn === "path.basename" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::path_basename(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "path.relative" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::path_relative(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
         if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
           const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);
           if (error === undefined) this.unsupported(`error.new result '${expr.type.className}'`, expr.loc);
@@ -1417,6 +1501,19 @@ class RustEmitter {
         const temp = `sc_rt_${this.temporary++}`;
         const clone = this.needsClone(expr.type) ? `${temp}.clone()` : temp;
         return `{ let ${temp} = ${value}; ${this.assignmentExpr(expr.localId, clone, expr.loc)} ${temp} }`;
+      }
+      case "seqExpr": {
+        // Keep the straight-line statements inside the expression block.
+        // Hoisting them into the surrounding Rust statement would run a
+        // right-hand sequence before effects in the containing left side.
+        const start = this.lines.length;
+        const previousIndent = this.indent;
+        this.indent = 0;
+        this.emitStatements(expr.stmts);
+        const result = this.emitExpr(expr.result);
+        const statements = this.lines.splice(start).join(" ");
+        this.indent = previousIndent;
+        return `{ ${statements} ${result} }`;
       }
       case "incDec": {
         const old = `sc_rt_${this.temporary++}`;
@@ -1625,7 +1722,9 @@ class RustEmitter {
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
-        if (!this.records.has(type.shapeId)) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
+        const shape = this.records.get(type.shapeId);
+        if (shape === undefined) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
+        if (shape.indexValue !== undefined) this.unsupported(`indexed record value '${type.shapeId}'`, loc);
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
       }
       case "object": {
