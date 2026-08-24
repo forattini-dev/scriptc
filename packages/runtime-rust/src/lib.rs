@@ -905,6 +905,26 @@ pub fn promise_race<T: HeapValue>(entries: Vec<JsPromise<T>>) -> JsPromise<T> {
     result
 }
 
+pub fn promise_race_add<T, U, F>(result: &JsPromise<U>, entry: &JsPromise<T>, adapt: F)
+where
+    T: HeapValue,
+    U: HeapValue,
+    F: FnOnce(T) -> U + 'static,
+{
+    let target = result.clone();
+    promise_then(
+        entry,
+        Box::new(move |outcome| match outcome {
+            Ok(value) => {
+                let _ = promise_fulfill(&target, adapt(value));
+            }
+            Err(reason) => {
+                let _ = promise_reject(&target, reason);
+            }
+        }),
+    );
+}
+
 pub fn promise_all<T>(entries: &JsArray<JsPromise<T>>) -> JsPromise<JsArray<T>>
 where
     T: HeapValue + ArrayElement,
@@ -4788,6 +4808,31 @@ mod tests {
             run_event_loop();
             assert_eq!(values.borrow().as_slice(), &[string("6")]);
             assert!(saw_rejection.get());
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promise_race_add_adapts_heterogeneous_fulfillments() {
+        let baseline = live_heap_objects();
+        {
+            let result = promise_new::<JsString>();
+            let number = promise_new::<f64>();
+            let text = promise_new::<JsString>();
+            promise_race_add(&result, &number, number_to_string);
+            promise_race_add(&result, &text, |value| value);
+
+            let values = Rc::new(RefCell::new(Vec::new()));
+            let observed = values.clone();
+            promise_then(
+                &result,
+                Box::new(move |outcome| observed.borrow_mut().push(promise_unwrap(outcome))),
+            );
+
+            assert!(promise_fulfill(&number, 7.0));
+            assert!(promise_fulfill(&text, string("late")));
+            run_event_loop();
+            assert_eq!(values.borrow().as_slice(), &[string("7")]);
         }
         assert_eq!(live_heap_objects(), baseline);
     }

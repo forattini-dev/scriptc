@@ -3514,11 +3514,17 @@ class RustEmitter {
         if (expr.name === "promise.race") {
           if (expr.type.kind !== "promise") this.unsupported("Promise.race result shape", expr.loc);
           const raceInner = expr.type.inner;
-          if (expr.args.length === 0 || expr.args.some((arg) =>
-            arg.type.kind !== "promise" || typeKey(arg.type.inner) !== typeKey(raceInner))) {
-            this.unsupported("Promise.race with differing Rust value types", expr.loc);
+          if (expr.args.length === 0 || expr.args.some((arg) => arg.type.kind !== "promise")) {
+            this.unsupported("Promise.race entry shape", expr.loc);
           }
-          return `runtime::promise_race(vec![${expr.args.map((arg) => this.emitExpr(arg)).join(", ")}])`;
+          const result = `sc_rt_${this.temporary++}`;
+          const entries = expr.args.map((arg) => {
+            if (arg.type.kind !== "promise") this.unsupported("Promise.race entry shape", expr.loc);
+            const entry = `sc_rt_${this.temporary++}`;
+            const adapted = this.emitPromiseRaceValue(arg.type.inner, raceInner, "value", expr.loc);
+            return `let ${entry} = ${this.emitExpr(arg)}; runtime::promise_race_add(&${result}, &${entry}, |value| ${adapted});`;
+          }).join(" ");
+          return `{ let ${result}: runtime::JsPromise<${this.rustType(raceInner, expr.loc)}> = runtime::promise_new(); ${entries} ${result} }`;
         }
         if (expr.name !== "console.log" && expr.name !== "console.error") {
           this.unsupported(`intrinsic '${expr.name}'`, expr.loc);
@@ -3707,6 +3713,33 @@ class RustEmitter {
       return `match ${operand} { ${arms} }`;
     }
     this.unsupported(`toString from '${type.kind}'`, loc);
+  }
+
+  private emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string {
+    if (typeKey(from) === typeKey(to)) return value;
+    if (to.kind !== "union") this.unsupported("Promise.race adapter to a non-union", loc);
+    const target = this.union(to.unionId, loc);
+    const targetTag = (type: IrType): number => {
+      const tag = target.arms.findIndex((arm) => typeKey(arm) === typeKey(type));
+      if (tag < 0) this.unsupported(`Promise.race result union missing '${typeKey(type)}'`, loc);
+      return tag;
+    };
+    const targetName = this.unionName(target.id);
+    if (from.kind !== "union") {
+      const tag = targetTag(from);
+      const variant = `${targetName}::${this.unionVariant(tag)}`;
+      return this.isUnit(from) ? `{ let _ = ${value}; ${variant} }` : `${variant}(${value})`;
+    }
+    const source = this.union(from.unionId, loc);
+    const sourceName = this.unionName(source.id);
+    const arms = source.arms.map((arm, tag) => {
+      const sourceVariant = `${sourceName}::${this.unionVariant(tag)}`;
+      const targetVariant = `${targetName}::${this.unionVariant(targetTag(arm))}`;
+      return this.isUnit(arm)
+        ? `${sourceVariant} => ${targetVariant}`
+        : `${sourceVariant}(payload) => ${targetVariant}(payload)`;
+    }).join(", ");
+    return `match ${value} { ${arms} }`;
   }
 
   private displayExpr(expr: IrExpr): string {
