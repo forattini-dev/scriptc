@@ -1348,6 +1348,7 @@ export {};
     ["promise-try", resolve("tests/corpus/2369-promise-try.ts")],
     ["fsp-roundtrip", resolve("tests/corpus/1357-fsp-roundtrip.ts")],
     ["fsp-mkdir-unlink-chmod", resolve("tests/corpus/1569-fsp-mkdir-unlink-chmod.ts")],
+    ["fsp-write-file-options", resolve("tests/corpus/2687-fsp-write-file-options.ts")],
     ["buffer-fs", resolve("tests/corpus/1403-buffer-fs.ts")],
     ["map-promise-values", resolve("tests/corpus/1542-map-promise-values.ts")],
     ["params-async-generics", resolve("tests/corpus/409-params-async-generics.ts")],

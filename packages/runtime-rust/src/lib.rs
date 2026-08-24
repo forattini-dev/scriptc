@@ -2708,6 +2708,21 @@ fn throw_out_of_range(message: String) -> ! {
     })
 }
 
+fn fs_creation_mode(mode: f64) -> u32 {
+    let received = format_number(mode);
+    if !mode.is_finite() || mode.trunc() != mode {
+        throw_out_of_range(format!(
+            "The value of \"mode\" is out of range. It must be an integer. Received {received}"
+        ));
+    }
+    if !(0.0..=4_294_967_295.0).contains(&mode) {
+        throw_out_of_range(format!(
+            "The value of \"mode\" is out of range. It must be >= 0 && <= 4294967295. Received {received}"
+        ));
+    }
+    mode as u32
+}
+
 pub fn fs_read_file(path: &JsString) -> JsString {
     match std::fs::read(path.as_ref()) {
         Ok(bytes) => Rc::from(String::from_utf8_lossy(&bytes).as_ref()),
@@ -2944,11 +2959,12 @@ pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
 pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+    let mode = fs_creation_mode(mode);
     let mut file = match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(to_uint32(mode))
+        .mode(mode)
         .open(path.as_ref())
     {
         Ok(file) => file,
@@ -2960,7 +2976,8 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
 }
 
 #[cfg(not(unix))]
-pub fn fs_write_file_mode(path: &JsString, data: &JsString, _mode: f64) {
+pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
+    let _ = fs_creation_mode(mode);
     fs_write_file(path, data);
 }
 
@@ -4620,6 +4637,23 @@ mod tests {
             fs_error_text(&std::io::Error::from(std::io::ErrorKind::IsADirectory)),
             "illegal operation on a directory"
         );
+    }
+
+    #[test]
+    fn filesystem_creation_modes_reject_non_integer_and_out_of_range_values() {
+        for mode in [-1.0, 1.5, f64::NAN, f64::INFINITY, 4_294_967_296.0] {
+            let payload =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fs_creation_mode(mode)))
+                    .expect_err("an invalid creation mode must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+            assert_eq!(
+                caught_error_code(&caught).as_deref(),
+                Some("ERR_OUT_OF_RANGE")
+            );
+        }
+        assert_eq!(fs_creation_mode(0o600 as f64), 0o600);
+        assert_eq!(fs_creation_mode(4_294_967_295.0), u32::MAX);
     }
 
     #[test]
