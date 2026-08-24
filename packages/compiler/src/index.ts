@@ -4,6 +4,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { buildCacheRoot, CcCompileError, clearCcCaches, compileC, compileLibArchive, executableNativeEnvironmentFingerprint, mobileLibraryTarget, mobileTargetRefusal, prepareBuildCacheRoot, pruneBuildCache, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule } from "./backend/emission/emitter.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
+import { compileRust, RustCompileError } from "./backend/rust/compile.js";
+import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
 import { rebaseLibrarySourceComments, replaceLibraryIdentity, stripLibraryIdentity, stripLibrarySourceComments } from "./backend/library-identity.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -164,8 +166,10 @@ export interface CompileOptions {
    * program is diagnostic SC3001 naming the first unsupported construct,
    * never a silent lane change. Explicit `c` pins the debugging C backend.
    * wasm32-wasi is a production LLVM target and never takes the automatic
-   * C fallback; a missing LLVM lowering there is SC3001. */
-  backend?: "c" | "llvm";
+   * C fallback; a missing LLVM lowering there is SC3001. The Rust lane is an
+   * explicitly selected, native-only experimental subset. Every gap is SC3001
+   * and never falls back to C/LLVM. */
+  backend?: "c" | "llvm" | "rust";
   /** Native optimization posture. Release is the shipped -O2 default; dev
    * uses -O0 and stable multi-TU object caching for large LLVM programs. */
   optimization?: "release" | "dev";
@@ -192,7 +196,8 @@ export type CompileResult =
    * the code generator that ACTUALLY emitted the TU; `llvmRefusal` is
    * present iff the default lane fell back to C, carrying the tier
    * refusal's machine-readable kind tag ("stmt:...", "libCall:...", ...). */
-  | { ok: true; binaryPath: string; cPath: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string }
+  | { ok: true; binaryPath: string; cPath: string; sourcePath?: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string }
+  | { ok: true; binaryPath: string; cPath: string; sourcePath: string; irPath?: string; backend: "rust"; safetyProfile: "rust-only" | "rust+external-ffi"; llvmRefusal?: never }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
 /** The LLVM backend's tier refusal as a diagnostic. SC3xxx = backend
@@ -207,18 +212,26 @@ function llvmRefusalDiag(err: LlvmUnsupportedError, entryPath: string): ScrDiagn
   };
 }
 
+function rustRefusalDiag(err: RustUnsupportedError, entryPath: string): ScrDiagnostic {
+  return {
+    code: "SC3001",
+    message: err.message,
+    loc: err.loc ?? { file: entryPath, start: 0, end: 0 },
+  };
+}
+
 /** A valid IR surface the explicitly-selected code generator cannot host.
  * SC3001 is backend coverage (as with an LLVM tier refusal), not a target
  * capability gap: wasm32-wasi's production LLVM lane still accepts it. */
 function backendRefusalDiag(
-  backend: "c" | "llvm",
+  backend: "c" | "llvm" | "rust",
   target: string,
   surface: string,
   loc: SrcLoc,
 ): ScrDiagnostic {
   return {
     code: "SC3001",
-    message: `${backend} backend does not support ${surface} for ${target}; use --backend llvm`,
+    message: `${backend} backend does not support ${surface} for ${target}${backend === "rust" ? "" : "; use --backend llvm"}`,
     loc,
   };
 }
@@ -981,6 +994,7 @@ async function compileTracked(
   frontendInputs: FrontendInputTracker,
 ): Promise<CompileResult> {
   entryPath = resolve(entryPath);
+  const rustBackend = opts.backend === "rust";
   let ffi: FfiProfile | null = null;
   let ffiProfileBytes: Uint8Array | null = null;
   if (opts.ffiProfilePath !== undefined) {
@@ -1023,7 +1037,9 @@ async function compileTracked(
       };
     }
   }
-  const cacheRoot = provenanceSources() === null
+  // The incremental Rust lane deliberately bypasses the whole-program C/LLVM
+  // cache until its artifact identity includes rustc and Cargo inputs.
+  const cacheRoot = !rustBackend && provenanceSources() === null
     ? await prepareBuildCacheRoot(buildCacheRoot())
     : null;
   const implementation = await compilerImplementationIdentity();
@@ -1034,7 +1050,7 @@ async function compileTracked(
     emitIr: opts.emitIr ?? false,
     sanitize: opts.sanitize ?? false,
     dynamic: opts.dynamic ?? false,
-    backend: opts.backend ?? "auto",
+    backend: opts.backend === "rust" ? "auto" : opts.backend ?? "auto",
     ...(opts.optimization === "dev" ? { optimization: "dev" as const } : {}),
     npmStatic: opts.npmStatic ?? null,
     ffiProfile:
@@ -1042,13 +1058,17 @@ async function compileTracked(
         ? null
         : { path: opts.ffiProfilePath, bytes: ffiProfileBytes },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}`,
-    compiler: [process.env["SCRIPTC_CC"] ?? "clang"],
-    nativeEnvironment: await executableNativeEnvironmentFingerprint(),
+    compiler: rustBackend ? ["rustc"] : [process.env["SCRIPTC_CC"] ?? "clang"],
+    nativeEnvironment: rustBackend
+      ? `rustc:${process.env["RUSTUP_TOOLCHAIN"] ?? "default"}`
+      : await executableNativeEnvironmentFingerprint(),
     nodeVersion: process.version,
     implementation: implementation.digest,
     implementationDependencies: implementation.dependencies,
   };
-  const earlyHit = await readEarlyExecutableCache(cacheRoot, earlyCacheOptions);
+  const earlyHit = rustBackend
+    ? null
+    : await readEarlyExecutableCache(cacheRoot, earlyCacheOptions);
   if (earlyHit !== null) {
     // Route/proof metadata is independently evictable. A full-compiler
     // fallback that still finds the validated payload repairs that lightweight
@@ -1174,6 +1194,70 @@ async function compileTracked(
 
   await mkdir(opts.outDir, { recursive: true });
   const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
+  if (rustBackend) {
+    const rustTarget = process.env["SCRIPTC_TARGET"];
+    if (rustTarget !== undefined && rustTarget !== "" && rustTarget !== "native") {
+      return {
+        ok: false,
+        diagnostics: [backendRefusalDiag("rust", rustTarget, "this target", {
+          file: entryPath,
+          start: 0,
+          end: 0,
+        })],
+        sourceTexts,
+      };
+    }
+    if (opts.sanitize) {
+      return {
+        ok: false,
+        diagnostics: [{
+          code: "SC3001",
+          message: "rust backend sanitizer support is not wired to the pinned nightly lane yet",
+          loc: { file: entryPath, start: 0, end: 0 },
+        }],
+        sourceTexts,
+      };
+    }
+    let rustSource: string;
+    try {
+      rustSource = emitRustModule(lowered.module!);
+    } catch (error) {
+      if (!(error instanceof RustUnsupportedError)) throw error;
+      return { ok: false, diagnostics: [rustRefusalDiag(error, entryPath)], sourceTexts };
+    }
+    const sourcePath = join(opts.outDir, `${stem}.rs`);
+    await writeFile(sourcePath, rustSource);
+    await Promise.all([
+      rm(join(opts.outDir, `${stem}.c`), { force: true }),
+      rm(join(opts.outDir, `${stem}.ll`), { force: true }),
+    ]);
+    let irPath: string | undefined;
+    if (opts.emitIr) {
+      irPath = join(opts.outDir, `${stem}.ir.json`);
+      await writeFile(irPath, serializeModule(lowered.module));
+    }
+    try {
+      await compileRust({
+        sourcePath,
+        outPath: opts.outPath,
+        optimization: opts.optimization ?? "release",
+      });
+    } catch (error) {
+      if (!(error instanceof RustCompileError)) throw error;
+      throw new InternalCompilerError(
+        `${error.message}${error.stderr === "" ? "" : `\n${error.stderr}`}`,
+      );
+    }
+    return {
+      ok: true,
+      binaryPath: opts.outPath,
+      cPath: sourcePath,
+      sourcePath,
+      backend: "rust",
+      safetyProfile: ffi === null ? "rust-only" : "rust+external-ffi",
+      ...(irPath === undefined ? {} : { irPath }),
+    };
+  }
   // Both backends hang off the same in-memory IrModule (never the JSON
   // dump); the LLVM backend's .ll takes the .c's seat on the exact clang
   // command line below — compileC accepts either. The default lane tries

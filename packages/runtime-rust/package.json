@@ -1,22 +1,23 @@
 {
-  "name": "@scriptc/runtime",
+  "name": "@scriptc/runtime-rust",
   "version": "0.0.36-rust.0",
-  "description": "scriptc native runtime — C sources, compiled into every scriptc binary",
+  "description": "Memory-safe Rust runtime for the scriptc Rust backend",
   "license": "Apache-2.0",
   "homepage": "https://scriptc.dev",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vercel-labs/scriptc.git",
-    "directory": "packages/runtime"
+    "directory": "packages/runtime-rust"
   },
   "files": [
-    "src",
-    "vendor"
+    "Cargo.lock",
+    "Cargo.toml",
+    "src"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "true"
+    "build": "cargo check --manifest-path Cargo.toml"
   }
 }

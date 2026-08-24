@@ -37,15 +37,12 @@ jobs:
           LOCAL_VERSION=$(node -p "require('./packages/cli/package.json').version")
           echo "Local version: $LOCAL_VERSION"
 
-          NPM_VERSION=$(npm view scriptc version 2>/dev/null || echo "0.0.0")
-          echo "npm version: $NPM_VERSION"
-
-          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
-            echo "Version changed: $NPM_VERSION -> $LOCAL_VERSION"
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Version unchanged on npm, skipping publish"
+          if NPM_VERSION=$(npm view "scriptc@$LOCAL_VERSION" version 2>/dev/null); then
+            echo "npm already has: $NPM_VERSION"
             echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm does not have scriptc@$LOCAL_VERSION"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -76,8 +73,9 @@ jobs:
 
       # Publishing uses npm trusted publishing (OIDC): the job's id-token
       # permission lets npm mint short-lived credentials, so no npm token
-      # secret exists anywhere in this repo. All three packages —
-      # @scriptc/runtime, @scriptc/compiler, scriptc — must each be
+      # secret exists anywhere in this repo. All four packages —
+      # @scriptc/runtime, @scriptc/runtime-rust, @scriptc/compiler, and
+      # scriptc — must each be
       # configured on npmjs.com with a GitHub Actions trusted publisher
       # pointing at repository vercel-labs/scriptc, workflow release.yml,
       # environment Release. A package missing that configuration fails
@@ -92,7 +90,7 @@ jobs:
       - name: Check version sync
         run: |
           VERSION="${{ needs.check-release.outputs.version }}"
-          for pkg in packages/runtime packages/compiler packages/cli; do
+          for pkg in packages/runtime packages/runtime-rust packages/compiler packages/cli; do
             V=$(node -p "require('./$pkg/package.json').version")
             if [ "$V" != "$VERSION" ]; then
               echo "Version mismatch: $pkg is $V, expected $VERSION"
@@ -104,6 +102,12 @@ jobs:
       - name: Publish to npm
         run: |
           VERSION="${{ needs.check-release.outputs.version }}"
+
+          if [[ "$VERSION" == *-* ]]; then
+            DIST_TAG="next"
+          else
+            DIST_TAG="latest"
+          fi
 
           # npm accepts --provenance only from PUBLIC source repositories;
           # while this repo is internal the flag is dropped, and the same
@@ -129,10 +133,11 @@ jobs:
               return 0
             fi
             tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
-            npm publish "$dir/$tarball" $PROVENANCE --access public
+            npm publish "$dir/$tarball" $PROVENANCE --access public --tag "$DIST_TAG"
           }
 
           publish_dir packages/runtime
+          publish_dir packages/runtime-rust
           publish_dir packages/compiler
           publish_dir packages/cli
         env:
@@ -195,6 +200,12 @@ jobs:
           VERSION="${{ needs.check-release.outputs.version }}"
           TAG="v$VERSION"
 
+          if [[ "$VERSION" == *-* ]]; then
+            RELEASE_KIND="--prerelease"
+          else
+            RELEASE_KIND=""
+          fi
+
           if gh release view "$TAG" &>/dev/null; then
             echo "Release $TAG already exists, skipping creation"
           else
@@ -202,6 +213,7 @@ jobs:
             gh release create "$TAG" \
               --target "$GITHUB_SHA" \
               --title "$TAG" \
+              $RELEASE_KIND \
               --notes-file /tmp/release-notes.md
           fi
 

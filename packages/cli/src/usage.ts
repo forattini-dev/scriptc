@@ -18,10 +18,12 @@ Usage:
 
 Options:
   -o, --out <path>   output path (default: .scriptc/<name>[.exe|.wasm])
-      --backend <b>  code generator. llvm is the default and the output that
-                     ships; c emits readable C for inspecting what the
-                     compiler produced, and program behavior is identical
-                     either way. On native targets, a program outside the LLVM tier still
+      --backend <b>  code generator. llvm is the default; c emits readable C,
+                     and rust emits memory-safe Rust and invokes rustc directly
+                     without a C translation or compiler fallback. Rust is an
+                     experimental native-only subset and reports unsupported
+                     constructs instead of changing backend. On native targets,
+                     a program outside the LLVM tier still
                      builds — the default lane emits C for it and a one-line
                      stderr note names the construct — while an explicit
                      --backend llvm fails with that construct named
@@ -33,8 +35,7 @@ Options:
                      edits of large programs
       --from-c       treat input as a C (or .ll) file (toolchain plumbing/debugging)
       --keep-c       keep the generated program TU next to the executable
-                     (default; the .ll — or the .c under --backend=c or
-                     when the build fell back)
+                     (default; the .ll, .c, or .rs source selected by backend)
       --no-keep-c    delete the generated program TU after compiling
       --emit-ir      also write the IR as JSON next to the executable
       --sanitize     build with ASan + runtime RC audit

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Stamps the version from packages/cli/package.json into packages/runtime
-// and packages/compiler, so the three published packages move in lockstep.
+// Stamps the version from packages/cli/package.json into every runtime and
+// compiler package, so all published packages move in lockstep.
 // Usage: node scripts/sync-versions.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ if (typeof version !== "string" || version.length === 0) {
   process.exit(1);
 }
 
-for (const pkg of ["runtime", "compiler"]) {
+for (const pkg of ["runtime", "runtime-rust", "compiler"]) {
   const path = manifest(pkg);
   const json = read(path);
   if (json.version === version) {

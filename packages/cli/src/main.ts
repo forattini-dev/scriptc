@@ -177,8 +177,8 @@ async function main(): Promise<number> {
   }
   const ffiProfilePath = values.ffi !== undefined ? resolve(values.ffi) : undefined;
   const backend = values.backend;
-  if (backend !== undefined && backend !== "c" && backend !== "llvm") {
-    fail(`unknown backend "${backend}" (supported: c, llvm)\n\n${USAGE}`);
+  if (backend !== undefined && backend !== "c" && backend !== "llvm" && backend !== "rust") {
+    fail(`unknown backend "${backend}" (supported: c, llvm, rust)\n\n${USAGE}`);
   }
   const optimization = values.optimization;
   if (optimization !== undefined && optimization !== "release" && optimization !== "dev") {

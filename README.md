@@ -1,6 +1,6 @@
 # scriptc
 
-scriptc compiles TypeScript and JavaScript to native executables and WebAssembly modules. It uses the TypeScript compiler for parsing and type checking, then emits LLVM IR for clang to compile. A readable C backend remains available for debugging.
+scriptc compiles TypeScript and JavaScript to native executables and WebAssembly modules. It uses the TypeScript compiler for parsing and type checking, then emits LLVM IR for clang to compile. A readable C backend remains available for debugging, and the experimental native-only Rust backend emits memory-safe Rust and invokes `rustc` directly.
 
 Static builds include a small native runtime, but no Node or JavaScript engine. Code that cannot compile statically is reported as a diagnostic. For npm packages and `any`-typed code, `--dynamic` embeds [quickjs-ng](https://github.com/quickjs-ng/quickjs) explicitly.
 
@@ -8,7 +8,7 @@ scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via W
 
 ## Installation
 
-The compiler requires Node.js 24 or newer and clang. The executables it produces do not require Node.
+The compiler requires Node.js 24 or newer and clang. Experimental `--backend rust` builds require Cargo and rustc instead of clang. The executables it produces do not require Node.
 
 ```console
 $ npm install -g scriptc
@@ -37,6 +37,17 @@ $ scriptc build hello.ts -o hello
 $ ./hello ctate
 hello, ctate
 ```
+
+To exercise the experimental memory-safe subset, select Rust explicitly:
+
+```console
+$ scriptc build hello.ts --backend rust -o hello-rust
+$ ./hello-rust ctate
+hello, ctate
+```
+
+Rust builds emit `#![forbid(unsafe_code)]`, do not translate through C, and
+report unsupported constructs instead of falling back to another backend.
 
 ## Use Node APIs
 

@@ -6,6 +6,18 @@ All notable changes to scriptc will be documented in this file.
 
 <!-- release:start -->
 
+## 0.0.36-rust.0
+
+### Features
+
+- **Experimental memory-safe Rust executables are available with `--backend rust`.** The compiler emits Rust source and invokes `rustc` directly, with `#![forbid(unsafe_code)]` across generated programs and the bundled runtime and no translation or fallback through C. The initial native-only subset covers scalar and aggregate values, functions and closures, safe cycle collection, temporal-dead-zone errors, and `try`/`catch`/`finally` with typed throws and abrupt control flow; unsupported constructs fail with `SC3001`.
+
+### Release notes
+
+- This is a prerelease intended for installation in real projects and Rust-backend compatibility testing. Stable LLVM and C behavior remains available unchanged, and npm installs this line through the `next` dist-tag.
+
+<!-- release:end -->
+
 ## 0.0.35
 
 ### Performance
@@ -17,8 +29,6 @@ All notable changes to scriptc will be documented in this file.
 
 - **Unsupported `Array.from` element shapes refuse cleanly.** Mapper results that the backends cannot represent are diagnosed or deferred before emission instead of reaching a C emitter crash.
 - **JSDoc record equality reads preserve dynamic property behavior.** Dot and bracket reads used by strict-equality and missing-key probes now route through checked-dynamic lookup, preserving absent properties and object identity.
-
-<!-- release:end -->
 
 ## 0.0.34
 

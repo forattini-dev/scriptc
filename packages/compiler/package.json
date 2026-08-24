@@ -1,7 +1,7 @@
 {
   "name": "@scriptc/compiler",
-  "version": "0.0.35",
-  "description": "The scriptc compiler — TypeScript/JavaScript frontend, typed IR, LLVM and C backends",
+  "version": "0.0.36-rust.0",
+  "description": "The scriptc compiler — TypeScript/JavaScript frontend, typed IR, and LLVM, C, and experimental Rust backends",
   "license": "Apache-2.0",
   "homepage": "https://scriptc.dev",
   "repository": {
@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@scriptc/runtime": "workspace:*",
+    "@scriptc/runtime-rust": "workspace:*",
     "typescript": "7.0.2",
     "typescript5": "npm:typescript@5.9.3"
   }

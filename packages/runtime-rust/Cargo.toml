@@ -1,0 +1,16 @@
+[package]
+name = "scriptc-runtime"
+version = "0.0.35"
+edition = "2024"
+license = "Apache-2.0"
+description = "Memory-safe Rust runtime for scriptc-generated programs"
+publish = false
+
+[lib]
+name = "scriptc_runtime"
+path = "src/lib.rs"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true

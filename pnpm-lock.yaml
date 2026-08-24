@@ -44,6 +44,9 @@ importers:
       '@scriptc/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@scriptc/runtime-rust':
+        specifier: workspace:*
+        version: link:../runtime-rust
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -52,6 +55,8 @@ importers:
         version: typescript@5.9.3
 
   packages/runtime: {}
+
+  packages/runtime-rust: {}
 
 packages:
 

@@ -24,6 +24,7 @@ dist/
 *.log
 .DS_Store
 packages/runtime/test/build/
+packages/runtime-rust/target/
 # lazily built engine archives for --dynamic (see packages/runtime/vendor/README.md)
 packages/runtime/vendor/.cache/
 # fs corpus scratch directories (created in the test cwd, removed on clean runs)

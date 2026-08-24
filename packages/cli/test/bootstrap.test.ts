@@ -22,7 +22,7 @@ test("bootstrap serves version and help without loading the compiler graph", asy
       "",
     ].join("\n"));
     const version = await execFileAsync(process.execPath, ["--import", preload, bootstrap, "--version"]);
-    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     const help = await execFileAsync(process.execPath, ["--import", preload, bootstrap, "--help"]);
     expect(help.stdout).toContain("scriptc build <file.ts|.js>");
   } finally {
@@ -81,6 +81,29 @@ test("bootstrap exact builds use the routed cache and source edits fall through"
     expect((await build()).stderr).not.toContain("scriptc lowering");
     expect((await execFileAsync(outPath)).stdout).toBe("two\n");
     expect(await readFile(join(dir, "main.ll"), "utf8")).toContain("two");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("installed CLI exposes the explicit Rust backend", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-cli-rust-"));
+  const entry = join(dir, "main.ts");
+  const outPath = join(dir, process.platform === "win32" ? "program.exe" : "program");
+  try {
+    await writeFile(entry, 'console.log("rust cli");\n');
+    const built = await execFileAsync(process.execPath, [
+      bootstrap,
+      "build",
+      entry,
+      "--backend",
+      "rust",
+      "-o",
+      outPath,
+    ], { maxBuffer: 4 * 1024 * 1024 });
+    expect(built.stdout.trim()).toBe(outPath);
+    expect(await readFile(join(dir, "main.rs"), "utf8")).toContain("#![forbid(unsafe_code)]");
+    expect((await execFileAsync(outPath)).stdout).toBe("rust cli\n");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
