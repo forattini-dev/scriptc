@@ -77,6 +77,7 @@ class RustEmitter {
   private indent = 0;
   private temporary = 0;
   private currentFunction: IrFunction | null = null;
+  private currentAsyncResult: string | null = null;
   private capturedReturnDepth = 0;
   private readonly loopTargets: { id: number; breakLabel: string; continueBlock: string | null }[] = [];
   private readonly completionLoopBoundaries: number[] = [];
@@ -137,8 +138,11 @@ class RustEmitter {
     this.line("fn main() {");
     this.indent += 1;
     this.line("runtime::init();");
-    this.line(`${mangleFunction(entry.name)}();`);
+    this.line(entry.async
+      ? `let _sc_main_promise = ${mangleFunction(entry.name)}();`
+      : `${mangleFunction(entry.name)}();`);
     this.line("runtime::run_event_loop();");
+    if (entry.async) this.line("drop(_sc_main_promise);");
     for (const global of this.globals.values()) {
       if (this.isHeapRoot(global.type)) {
         this.line(`${mangleGlobal(global.id)}.with(|slot| *slot.borrow_mut() = None);`);
@@ -699,6 +703,7 @@ class RustEmitter {
         case "object":
         case "union":
         case "func":
+        case "promise":
           this.line(`static ${name}: RefCell<Option<${this.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
         default:
@@ -716,7 +721,6 @@ class RustEmitter {
   }
 
   private emitFunction(fn: IrFunction): void {
-    if (fn.async) this.unsupported(`async function '${fn.name}'`, fn.loc);
     if (fn.generator !== undefined) this.unsupported(`generator function '${fn.name}'`, fn.loc);
     for (const local of fn.locals) {
       this.rustType(local.type, fn.loc);
@@ -733,26 +737,121 @@ class RustEmitter {
     params.push(...fn.params.map((param) => {
       const local = fn.locals.find((candidate) => candidate.id === param.localId);
       if (local === undefined) this.unsupported(`missing parameter local '${param.localId}'`, fn.loc);
-      const name = local.boxed ? mangleRawParam(param.localId) : mangleLocal(param.localId);
-      return `${local.mutable && !local.boxed ? "mut " : ""}${name}: ${this.rustType(param.type, fn.loc)}`;
+      const boxed = local.boxed || fn.async === true;
+      const name = boxed ? mangleRawParam(param.localId) : mangleLocal(param.localId);
+      return `${local.mutable && !boxed ? "mut " : ""}${name}: ${this.rustType(param.type, fn.loc)}`;
     }));
     const returnType = this.rustType(fn.returnType, fn.loc);
-    this.line(`fn ${mangleFunction(fn.name)}(${params.join(", ")})${returnType === "()" ? "" : ` -> ${returnType}`} {`);
+    const emittedReturnType = fn.async ? `runtime::JsPromise<${returnType}>` : returnType;
+    this.line(`fn ${mangleFunction(fn.name)}(${params.join(", ")})${emittedReturnType === "()" ? "" : ` -> ${emittedReturnType}`} {`);
     this.indent += 1;
     this.currentFunction = fn;
     for (const param of fn.params) {
       const local = fn.locals.find((candidate) => candidate.id === param.localId);
-      if (local?.boxed) {
+      if (local !== undefined && (local.boxed || fn.async === true)) {
         this.line(`let ${mangleLocal(param.localId)} = runtime::cell_new(${mangleRawParam(param.localId)});`);
       }
     }
-    this.emitStatements(fn.body);
-    if (fn.returnType.kind !== "void") {
-      this.line(`unreachable!("scriptc invariant: function '${this.rustString(fn.name)}' fell through")`);
+    if (fn.async) {
+      if (fn.captures !== undefined) this.unsupported(`capturing async function '${fn.name}'`, fn.loc);
+      const result = `sc_async_result_${this.temporary++}`;
+      const bodyResult = `sc_async_result_${this.temporary++}`;
+      const guard = `sc_async_guard_${this.temporary++}`;
+      this.line(`let ${result} = runtime::promise_new();`);
+      this.line(`let ${bodyResult} = ${result}.clone();`);
+      this.line(`let ${guard} = ${result}.clone();`);
+      this.line(`runtime::promise_run_segment(&${guard}, move || {`);
+      this.indent += 1;
+      this.line(`let ${bodyResult} = ${bodyResult};`);
+      this.currentAsyncResult = bodyResult;
+      this.emitAsyncStatements(fn.body);
+      this.currentAsyncResult = null;
+      this.indent -= 1;
+      this.line("});");
+      this.line(result);
+    } else {
+      this.emitStatements(fn.body);
+      if (fn.returnType.kind !== "void") {
+        this.line(`unreachable!("scriptc invariant: function '${this.rustString(fn.name)}' fell through")`);
+      }
     }
     this.currentFunction = null;
     this.indent -= 1;
     this.line("}");
+  }
+
+  private containsAsyncSuspension(value: unknown): boolean {
+    if (value === null || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => this.containsAsyncSuspension(item));
+    const node = value as { kind?: unknown; fn?: unknown };
+    if (node.kind === "awaitExpr" || node.kind === "awaitUnionExpr") return true;
+    if (node.kind === "libCall" && node.fn === "async.hop") return true;
+    return Object.values(value).some((item) => this.containsAsyncSuspension(item));
+  }
+
+  private emitAsyncStatements(statements: readonly IrStmt[]): void {
+    const result = this.currentAsyncResult;
+    const fn = this.currentFunction;
+    if (result === null || fn?.async !== true) this.unsupported("async continuation outside an async function", fn?.loc);
+
+    for (let index = 0; index < statements.length; index += 1) {
+      const stmt = statements[index];
+      if (stmt === undefined) break;
+      const awaited =
+        stmt.kind === "assign" && stmt.value.kind === "awaitExpr" ? stmt.value
+        : stmt.kind === "varDecl" && stmt.init?.kind === "awaitExpr" ? stmt.init
+        : stmt.kind === "exprStmt" && stmt.expr.kind === "awaitExpr" ? stmt.expr
+        : stmt.kind === "return" && stmt.value?.kind === "awaitExpr" ? stmt.value
+        : null;
+      if (awaited === null) {
+        if (this.containsAsyncSuspension(stmt)) {
+          this.unsupported("nested async suspension in the Rust state-machine subset", stmt.loc);
+        }
+        this.emitStatement(stmt);
+        continue;
+      }
+
+      const dependency = `sc_async_dependency_${this.temporary++}`;
+      const nextResult = `sc_async_result_${this.temporary++}`;
+      const outcome = `sc_async_outcome_${this.temporary++}`;
+      const guard = `sc_async_guard_${this.temporary++}`;
+      const value = `sc_async_value_${this.temporary++}`;
+      this.line(`let ${dependency} = ${this.emitExpr(awaited.value)};`);
+      this.line(`let ${nextResult} = ${result}.clone();`);
+      this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
+      this.indent += 1;
+      this.line(`let ${guard} = ${nextResult}.clone();`);
+      this.line(`runtime::promise_run_segment(&${guard}, move || {`);
+      this.indent += 1;
+      this.line(`let ${result} = ${nextResult};`);
+      this.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
+
+      if (stmt.kind === "assign") {
+        this.emitAssignment(stmt.localId, value, stmt.loc);
+      } else if (stmt.kind === "varDecl") {
+        const local = this.local(stmt.localId, stmt.loc);
+        this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+      } else if (stmt.kind === "exprStmt") {
+        this.line(`let _ = ${value};`);
+      } else {
+        this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+        this.line("return;");
+      }
+
+      if (stmt.kind !== "return") this.emitAsyncStatements(statements.slice(index + 1));
+      this.indent -= 1;
+      this.line("});");
+      this.indent -= 1;
+      this.line("}));");
+      this.line("return;");
+      return;
+    }
+
+    if (fn.returnType.kind === "void") {
+      this.line(`let _ = runtime::promise_fulfill(&${result}, ());`);
+    } else {
+      this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
+    }
   }
 
   private emitStatements(statements: readonly IrStmt[]): void {
@@ -763,7 +862,7 @@ class RustEmitter {
     switch (stmt.kind) {
       case "varDecl": {
         const local = this.local(stmt.localId, stmt.loc);
-        if (local.boxed) {
+        if (this.localIsBoxed(local)) {
           const init = stmt.init === null
             ? "runtime::cell_empty()"
             : `runtime::cell_new(${this.emitExpr(stmt.init)})`;
@@ -829,7 +928,7 @@ class RustEmitter {
         this.line("}");
         if (stmt.init?.kind === "varDecl") {
           const initLocal = this.local(stmt.init.localId, stmt.loc);
-          if (initLocal.boxed) {
+          if (this.localIsBoxed(initLocal)) {
             const name = mangleLocal(initLocal.id);
             this.line(`${name} = runtime::cell_new(runtime::cell_get(&${name}));`);
           }
@@ -856,7 +955,7 @@ class RustEmitter {
         this.indent += 1;
         this.line(`'${continueTarget}: {`);
         this.indent += 1;
-        this.line(local.boxed
+        this.line(this.localIsBoxed(local)
           ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`
           : `let ${mangleLocal(local.id)}: ${this.rustType(local.type, stmt.loc)} = runtime::array_get(&${array}, ${index});`);
         this.loopTargets.push({ id: this.nextLoopTargetId++, breakLabel: loopLabel, continueBlock: continueTarget });
@@ -916,6 +1015,11 @@ class RustEmitter {
         return;
       case "return": {
         const value = stmt.value === null ? "()" : this.emitExpr(stmt.value);
+        if (this.currentAsyncResult !== null && this.capturedReturnDepth === 0) {
+          this.line(`let _ = runtime::promise_fulfill(&${this.currentAsyncResult}, ${value});`);
+          this.line("return;");
+          return;
+        }
         this.line(this.capturedReturnDepth > 0
           ? `return runtime::Completion::Return(${value});`
           : stmt.value === null ? "return;" : `return ${value};`);
@@ -1845,7 +1949,16 @@ class RustEmitter {
         }
         this.unsupported(`library call '${expr.fn}'`, expr.loc);
       }
+      case "awaitExpr":
+      case "awaitUnionExpr":
+        this.unsupported("async suspension outside the Rust state-machine subset", expr.loc);
       case "intrinsic":
+        if (expr.name === "promise.resolve") {
+          if (expr.type.kind !== "promise" || expr.args.length > 1) {
+            this.unsupported("Promise.resolve shape", expr.loc);
+          }
+          return `runtime::promise_resolved(${expr.args[0] === undefined ? "()" : this.emitExpr(expr.args[0])})`;
+        }
         if (expr.name !== "console.log" && expr.name !== "console.error") {
           this.unsupported(`intrinsic '${expr.name}'`, expr.loc);
         }
@@ -2015,6 +2128,7 @@ class RustEmitter {
       case "record": return "true";
       case "object": return "true";
       case "func": return "true";
+      case "promise": return "true";
       case "classval": return "true";
       case "union": {
         const union = this.union(type.unionId, loc);
@@ -2047,7 +2161,7 @@ class RustEmitter {
       this.unsupported(`global read type '${type.kind}'`, loc);
     }
     const local = this.local(id, loc);
-    if (local.boxed) {
+    if (this.localIsBoxed(local)) {
       return local.tdz
         ? `runtime::cell_get_tdz(&${mangleLocal(id)}, "${this.rustString(local.name)}")`
         : `runtime::cell_get(&${mangleLocal(id)})`;
@@ -2069,7 +2183,7 @@ class RustEmitter {
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
     }
     const local = this.local(id, loc);
-    if (local.boxed) return `runtime::cell_set(&${mangleLocal(id)}, ${value});`;
+    if (this.localIsBoxed(local)) return `runtime::cell_set(&${mangleLocal(id)}, ${value});`;
     return `${mangleLocal(id)} = ${value};`;
   }
 
@@ -2077,6 +2191,10 @@ class RustEmitter {
     const local = this.currentFunction?.locals.find((candidate) => candidate.id === id);
     if (local === undefined) this.unsupported(`unknown local '${id}'`, loc);
     return local;
+  }
+
+  private localIsBoxed(local: IrFunction["locals"][number]): boolean {
+    return local.boxed === true || this.currentFunction?.async === true;
   }
 
   private crossesCompletionBoundary(target: { id: number }): boolean {
@@ -2125,6 +2243,7 @@ class RustEmitter {
         const shape = this.closureShapeForType(type, loc);
         return `runtime::Gc<${this.closureName(shape)}>`;
       }
+      case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
       case "caught": return "runtime::Caught";
       default: this.unsupported(`type '${type.kind}'`, loc);
     }
@@ -2338,7 +2457,7 @@ class RustEmitter {
   }
 
   private isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "spawnRes" || type.kind === "record" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && this.classes.has(type.className)) || type.kind === "func";
   }
 

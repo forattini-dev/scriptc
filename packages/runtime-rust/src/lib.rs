@@ -777,6 +777,7 @@ pub trait HeapValue: Clone + 'static {
 impl HeapValue for f64 {}
 impl HeapValue for bool {}
 impl HeapValue for usize {}
+impl HeapValue for () {}
 impl HeapValue for JsString {}
 impl HeapValue for JsError {}
 

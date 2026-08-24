@@ -1080,6 +1080,43 @@ test("Rust process introspection and Number predicates preserve Node invariants"
   }
 }, 120_000);
 
+test("Rust async state machines resume settled promises on microtasks", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-resolve-"));
+  const entry = join(dir, "async-resolve.ts");
+  await writeFile(entry, `
+async function compute(): Promise<number> {
+  console.log("compute start");
+  const value = await Promise.resolve(40);
+  console.log("compute resumed");
+  return value + 2;
+}
+console.log("main start");
+const answer = await compute();
+console.log("answer", answer);
+export {};
+`);
+  const result = await compile(entry, {
+    outDir: dir,
+    outPath: join(dir, "async-resolve"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (result.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entry]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [
