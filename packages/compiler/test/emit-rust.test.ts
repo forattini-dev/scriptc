@@ -48,6 +48,54 @@ test("TypeScript lowers through the Rust backend to a rustc executable", async (
   expect(stdout).toBe("hello world\n");
 }, 120_000);
 
+test("Rust JSON.stringify matches Node for scalars, arrays, records, optionals, and cycles", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-json-scalars-"));
+  const entryPath = join(dir, "json-scalars.ts");
+  await writeFile(entryPath, `
+console.log(JSON.stringify(1), JSON.stringify(1.5), JSON.stringify(-2.25));
+console.log(JSON.stringify(true), JSON.stringify(false));
+console.log(JSON.stringify(0 / 0), JSON.stringify(1 / 0), JSON.stringify(-1 / 0), JSON.stringify(-0));
+console.log(JSON.stringify(1e21), JSON.stringify(1e-7), JSON.stringify(0.1 + 0.2));
+console.log(JSON.stringify('quote " backslash \\\\ slash /'));
+console.log(JSON.stringify("line\\nbreak\\ttab\\rret\\u0007"));
+console.log(JSON.stringify("héllo 日本語 😀"));
+const nums: number[] = [1, 2.5, -0, 0 / 0];
+console.log(JSON.stringify(nums), JSON.stringify([[1, 2], [], [3]]));
+const point = { y: -1.5, label: "origin", x: 0 };
+const cfg = { debug: true, ports: [80, 443], server: { host: "example.com", port: 8080 } };
+console.log(JSON.stringify(point));
+console.log(JSON.stringify(cfg));
+type Optional = { name: string; count?: number };
+const absent: Optional = { name: "absent" };
+const present: Optional = { name: "present", count: 2 };
+console.log(JSON.stringify(absent), JSON.stringify(present));
+type Link = { value: number; next: Link | null };
+const link: Link = { value: 1, next: null };
+link.next = link;
+try { console.log(JSON.stringify(link)); }
+catch { console.log("cycle"); }
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "json-scalars"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+}, 120_000);
+
 test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-instanceof-"));
   const entryPath = join(dir, "instanceof.ts");
@@ -480,10 +528,11 @@ for (const shape of shapes) console.log(shape.describe(), shape instanceof Polyg
   expect(rust.stderr).toBe(node.stderr);
 }, 120_000);
 
-test("Rust class values and generic classes preserve identity, statics, hierarchy, and dispatch", async () => {
+test("Rust class values, expressions, and generics preserve identity, statics, hierarchy, and dispatch", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-class-values-"));
   for (const fixture of [
     "1940-class-values-basics.ts",
+    "1942-class-expressions.ts",
     "1951-generic-classes-basics.ts",
     "1952-generic-class-statics-values.ts",
     "1953-generic-class-hierarchy.ts",

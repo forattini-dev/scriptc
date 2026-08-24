@@ -131,6 +131,10 @@ where
         Rc::ptr_eq(self.rc(), other.rc())
     }
 
+    pub fn identity(&self) -> usize {
+        self.rc().id
+    }
+
     fn rc(&self) -> &Rc<Node<T>> {
         self.inner.as_ref().expect("scriptc: moved heap handle")
     }
@@ -401,6 +405,13 @@ pub fn throw_value<T: 'static>(value: T) -> ! {
 pub fn throw_reference_error(message: String) -> ! {
     throw_value(JsError {
         name: "ReferenceError".to_owned(),
+        message,
+    })
+}
+
+pub fn throw_type_error(message: String) -> ! {
+    throw_value(JsError {
+        name: "TypeError".to_owned(),
         message,
     })
 }
@@ -877,12 +888,159 @@ pub fn string_to_upper_case(value: &JsString) -> JsString {
     Rc::<str>::from(value.to_uppercase())
 }
 
+pub fn string_includes(value: &JsString, search: &JsString) -> bool {
+    value.contains(search.as_ref())
+}
+
 pub fn number_to_string(value: f64) -> JsString {
     Rc::from(format_number(value))
 }
 
 pub fn bool_to_string(value: bool) -> JsString {
     string(if value { "true" } else { "false" })
+}
+
+pub trait JsonValue {
+    fn write_json(&self, writer: &mut JsonWriter);
+
+    fn is_json_undefined(&self) -> bool {
+        false
+    }
+}
+
+pub trait JsonObject: Trace + ClearEdges + 'static {
+    fn write_json_object(&self, writer: &mut JsonWriter);
+}
+
+pub struct JsonWriter {
+    output: String,
+    stack: HashSet<usize>,
+}
+
+impl JsonWriter {
+    fn new() -> Self {
+        Self {
+            output: String::new(),
+            stack: HashSet::new(),
+        }
+    }
+
+    pub fn begin_array(&mut self) {
+        self.output.push('[');
+    }
+
+    pub fn end_array(&mut self) {
+        self.output.push(']');
+    }
+
+    pub fn begin_object(&mut self) {
+        self.output.push('{');
+    }
+
+    pub fn end_object(&mut self) {
+        self.output.push('}');
+    }
+
+    pub fn element<T: JsonValue>(&mut self, first: &mut bool, value: &T) {
+        if !*first {
+            self.output.push(',');
+        }
+        *first = false;
+        value.write_json(self);
+    }
+
+    pub fn property<T: JsonValue>(&mut self, first: &mut bool, name: &str, value: &T) {
+        if value.is_json_undefined() {
+            return;
+        }
+        if !*first {
+            self.output.push(',');
+        }
+        *first = false;
+        self.write_string(name);
+        self.output.push(':');
+        value.write_json(self);
+    }
+
+    pub fn write_null(&mut self) {
+        self.output.push_str("null");
+    }
+
+    fn write_string(&mut self, value: &str) {
+        self.output.push('"');
+        for ch in value.chars() {
+            match ch {
+                '"' => self.output.push_str("\\\""),
+                '\\' => self.output.push_str("\\\\"),
+                '\u{0008}' => self.output.push_str("\\b"),
+                '\u{000c}' => self.output.push_str("\\f"),
+                '\n' => self.output.push_str("\\n"),
+                '\r' => self.output.push_str("\\r"),
+                '\t' => self.output.push_str("\\t"),
+                '\u{0000}'..='\u{001f}' => {
+                    self.output.push_str(&format!("\\u{:04x}", ch as u32));
+                }
+                _ => self.output.push(ch),
+            }
+        }
+        self.output.push('"');
+    }
+}
+
+impl JsonValue for f64 {
+    fn write_json(&self, writer: &mut JsonWriter) {
+        if self.is_finite() {
+            writer.output.push_str(&format_number(*self));
+        } else {
+            writer.write_null();
+        }
+    }
+}
+
+impl JsonValue for bool {
+    fn write_json(&self, writer: &mut JsonWriter) {
+        writer.output.push_str(if *self { "true" } else { "false" });
+    }
+}
+
+impl JsonValue for JsString {
+    fn write_json(&self, writer: &mut JsonWriter) {
+        writer.write_string(self);
+    }
+}
+
+impl<T> JsonValue for Gc<T>
+where
+    T: JsonObject,
+{
+    fn write_json(&self, writer: &mut JsonWriter) {
+        let id = self.identity();
+        if !writer.stack.insert(id) {
+            throw_type_error("Converting circular structure to JSON".to_owned());
+        }
+        self.with(|value| value.write_json_object(writer));
+        assert!(writer.stack.remove(&id));
+    }
+}
+
+impl<T> JsonObject for ArrayData<T>
+where
+    T: ArrayElement + JsonValue,
+{
+    fn write_json_object(&self, writer: &mut JsonWriter) {
+        writer.begin_array();
+        let mut first = true;
+        for value in &self.elements {
+            writer.element(&mut first, value);
+        }
+        writer.end_array();
+    }
+}
+
+pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
+    let mut writer = JsonWriter::new();
+    value.write_json(&mut writer);
+    Rc::from(writer.output)
 }
 
 pub fn format_number(value: f64) -> String {
@@ -897,6 +1055,20 @@ pub fn format_number(value: f64) -> String {
     }
     if value == 0.0 {
         return "0".to_owned();
+    }
+    let magnitude = value.abs();
+    if !(1e-6..1e21).contains(&magnitude) {
+        let scientific = format!("{value:e}");
+        let (mantissa, exponent) = scientific
+            .split_once('e')
+            .expect("scriptc: Rust scientific number without an exponent");
+        let exponent = exponent
+            .parse::<i32>()
+            .expect("scriptc: invalid Rust scientific exponent");
+        return format!(
+            "{mantissa}e{}{exponent}",
+            if exponent >= 0 { "+" } else { "" }
+        );
     }
     value.to_string()
 }
@@ -1008,6 +1180,10 @@ mod tests {
         assert_eq!(format_number(f64::INFINITY), "Infinity");
         assert_eq!(format_number(f64::NEG_INFINITY), "-Infinity");
         assert_eq!(format_number(-0.0), "0");
+        assert_eq!(format_number(1e21), "1e+21");
+        assert_eq!(format_number(1e-7), "1e-7");
+        assert_eq!(format_number(1e-6), "0.000001");
+        assert_eq!(format_number(0.1 + 0.2), "0.30000000000000004");
         assert_eq!(display_number(-0.0), "-0");
     }
 
@@ -1028,6 +1204,21 @@ mod tests {
         let value = string("ScriptC 42");
         assert_eq!(string_to_lower_case(&value).as_ref(), "scriptc 42");
         assert_eq!(string_to_upper_case(&value).as_ref(), "SCRIPTC 42");
+        assert!(string_includes(&value, &string("iptC")));
+        assert!(!string_includes(&value, &string("iptc")));
+    }
+
+    #[test]
+    fn scalar_json_stringification_escapes_strings_and_normalizes_non_finite_numbers() {
+        assert_eq!(json_stringify(&f64::NAN).as_ref(), "null");
+        assert_eq!(json_stringify(&f64::INFINITY).as_ref(), "null");
+        assert_eq!(json_stringify(&-0.0).as_ref(), "0");
+        assert_eq!(json_stringify(&true).as_ref(), "true");
+        assert_eq!(
+            json_stringify(&string("quote \" slash \\\n\t\u{0007}")).as_ref(),
+            "\"quote \\\" slash \\\\\\n\\t\\u0007\""
+        );
+        assert_eq!(json_stringify(&string("héllo 😀")).as_ref(), "\"héllo 😀\"");
     }
 
     #[test]

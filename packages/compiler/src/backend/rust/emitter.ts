@@ -362,6 +362,38 @@ class RustEmitter {
       this.line("}");
       this.indent -= 1;
       this.line("}");
+      if (this.isRustJsonCompatible({ kind: "union", unionId: union.id })) {
+        this.line(`impl runtime::JsonValue for ${name} {`);
+        this.indent += 1;
+        this.line("fn write_json(&self, writer: &mut runtime::JsonWriter) {");
+        this.indent += 1;
+        this.line("match self {");
+        this.indent += 1;
+        union.arms.forEach((arm, tag) => {
+          const variant = `Self::${this.unionVariant(tag)}`;
+          if (arm.kind === "nullT" || arm.kind === "undefinedT") {
+            this.line(`${variant} => writer.write_null(),`);
+          } else {
+            this.line(`${variant}(value) => runtime::JsonValue::write_json(value, writer),`);
+          }
+        });
+        this.indent -= 1;
+        this.line("}");
+        this.indent -= 1;
+        this.line("}");
+        if (union.arms.some((arm) => arm.kind === "undefinedT")) {
+          const undefinedVariants = union.arms.flatMap((arm, tag) =>
+            arm.kind === "undefinedT" ? [`Self::${this.unionVariant(tag)}`] : []
+          );
+          this.line("fn is_json_undefined(&self) -> bool {");
+          this.indent += 1;
+          this.line(`matches!(self, ${undefinedVariants.join(" | ")})`);
+          this.indent -= 1;
+          this.line("}");
+        }
+        this.indent -= 1;
+        this.line("}");
+      }
       this.line(`impl runtime::HeapValue for ${name} {`);
       this.indent += 1;
       this.line("fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) {");
@@ -470,6 +502,34 @@ class RustEmitter {
       this.line("}");
       this.indent -= 1;
       this.line("}");
+      if (this.isRustJsonCompatible({ kind: "record", shapeId: shape.id })) {
+        this.line(`impl runtime::JsonObject for ${struct} {`);
+        this.indent += 1;
+        this.line("fn write_json_object(&self, writer: &mut runtime::JsonWriter) {");
+        this.indent += 1;
+        this.line(shape.tuple ? "writer.begin_array();" : "writer.begin_object();");
+        this.line("let mut first = true;");
+        const byName = new Map(shape.fields.map((field) => [field.name, field]));
+        const fields = shape.tuple
+          ? [...shape.fields].sort((left, right) => Number(left.name) - Number(right.name))
+          : (shape.declaredOrder ?? shape.fields.map((field) => field.name))
+            .map((name) => byName.get(name))
+            .filter((field) => field !== undefined);
+        for (const field of fields) {
+          const stored = `self.${mangleField(field.name)}`;
+          const value = this.isEdgeValue(field.type)
+            ? `${stored}.as_ref().expect("scriptc: cleared live JSON record field")`
+            : `&${stored}`;
+          this.line(shape.tuple
+            ? `writer.element(&mut first, ${value});`
+            : `writer.property(&mut first, "${this.rustString(field.name)}", ${value});`);
+        }
+        this.line(shape.tuple ? "writer.end_array();" : "writer.end_object();");
+        this.indent -= 1;
+        this.line("}");
+        this.indent -= 1;
+        this.line("}");
+      }
       this.line("");
     }
   }
@@ -968,6 +1028,9 @@ class RustEmitter {
         if (expr.method === "repeat" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_repeat(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
+        if (expr.method === "includes" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_includes(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        }
         this.unsupported(`string intrinsic '${expr.method}'`, expr.loc);
       case "strEq": {
         const compare = `(${this.emitExpr(expr.left)}).as_ref() == (${this.emitExpr(expr.right)}).as_ref()`;
@@ -982,6 +1045,17 @@ class RustEmitter {
         if (expr.operand.type.kind === "f64") return `runtime::number_to_string(${operand})`;
         if (expr.operand.type.kind === "bool") return `runtime::bool_to_string(${operand})`;
         this.unsupported(`toString from '${expr.operand.type.kind}'`, expr.loc);
+      }
+      case "jsonStringify": {
+        const value = this.emitExpr(expr.value);
+        if (!this.isRustJsonCompatible(expr.value.type)) {
+          this.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
+        }
+        const indent = (expr as typeof expr & { indent?: string }).indent;
+        if (indent && expr.value.type.kind !== "f64" && expr.value.type.kind !== "bool" && expr.value.type.kind !== "string") {
+          this.unsupported("JSON.stringify indentation for composite values", expr.loc);
+        }
+        return `runtime::json_stringify(&(${value}))`;
       }
       case "ternary":
         return `(if ${this.emitExpr(expr.cond)} { ${this.emitExpr(expr.then)} } else { ${this.emitExpr(expr.else_)} })`;
@@ -1708,6 +1782,37 @@ class RustEmitter {
 
   private isUnit(type: IrType): boolean {
     return type.kind === "undefinedT" || type.kind === "nullT";
+  }
+
+  private isRustJsonCompatible(type: IrType, visiting = new Set<string>()): boolean {
+    switch (type.kind) {
+      case "f64":
+      case "bool":
+      case "string":
+      case "undefinedT":
+      case "nullT":
+        return true;
+      case "array":
+        return this.isRustJsonCompatible(type.elem, visiting);
+      case "record": {
+        const key = `record:${type.shapeId}`;
+        if (visiting.has(key)) return true;
+        const shape = this.records.get(type.shapeId);
+        if (shape === undefined || shape.indexValue !== undefined) return false;
+        const next = new Set(visiting).add(key);
+        return shape.fields.every((field) => this.isRustJsonCompatible(field.type, next));
+      }
+      case "union": {
+        const key = `union:${type.unionId}`;
+        if (visiting.has(key)) return true;
+        const union = this.unions.get(type.unionId);
+        if (union === undefined) return false;
+        const next = new Set(visiting).add(key);
+        return union.arms.every((arm) => this.isRustJsonCompatible(arm, next));
+      }
+      default:
+        return false;
+    }
   }
 
   private ensureUnionArm(type: IrType): void {

@@ -53,7 +53,8 @@ monomorphic and virtual methods, generic specializations, abstract dispatch,
 first-class constructor values, lexical `this` captures, object identity,
 single inheritance, runtime `instanceof`, composition, collectable cycles,
 array identity searches, and insertion-ordered `Map` and `Set` containers with
-live iteration.
+live iteration. Compact type-directed `JSON.stringify` covers scalars, nested
+arrays, records, unions, optional fields, and circular-value errors.
 
 ## Use Node APIs
 
