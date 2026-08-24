@@ -1993,7 +1993,10 @@ class RustEmitter {
         const operand = this.emitExpr(expr.operand);
         if (expr.operand.type.kind === "f64") return `runtime::number_to_string(${operand})`;
         if (expr.operand.type.kind === "bool") return `runtime::bool_to_string(${operand})`;
-        if (expr.operand.type.kind === "caught") return `runtime::caught_to_string(&(${operand}))`;
+        if (expr.operand.type.kind === "caught") {
+          const helper = this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string";
+          return `${helper}(&(${operand}))`;
+        }
         if (expr.operand.type.kind === "union") {
           const union = this.union(expr.operand.type.unionId, expr.loc);
           const name = this.unionName(union.id);

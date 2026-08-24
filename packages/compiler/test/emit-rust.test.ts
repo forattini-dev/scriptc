@@ -532,6 +532,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1302-errors-typed-catch.ts",
     "1303-errors-rc-stress.ts",
     "1366-union-equality.ts",
+    "1431-caught-tostring.ts",
     "2482-recursive-union-tree.ts",
     "2483-recursive-record-cycles.ts",
   ]) {
