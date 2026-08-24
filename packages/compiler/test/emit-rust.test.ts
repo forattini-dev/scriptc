@@ -1120,6 +1120,13 @@ function makeAsync(prefix: string): () => Promise<string> {
 const captureFn = makeAsync("cap");
 const captured = await captureFn();
 console.log("capture", captured);
+const raced = await Promise.race([Promise.resolve(1), Promise.resolve(2)]);
+console.log("race", raced);
+const pendingRace = await Promise.race([
+  new Promise<number>((resolveRace) => setTimeout(() => resolveRace(3), 5)),
+  new Promise<number>((resolveRace) => setTimeout(() => resolveRace(4), 1)),
+]);
+console.log("pending race", pendingRace);
 export {};
 `);
   for (const [name, entryPath] of [

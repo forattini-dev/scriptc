@@ -851,6 +851,25 @@ pub fn promise_immediate() -> JsPromise<()> {
     promise
 }
 
+pub fn promise_race<T: HeapValue>(entries: Vec<JsPromise<T>>) -> JsPromise<T> {
+    let result = promise_new();
+    for entry in entries {
+        let target = result.clone();
+        promise_then(
+            &entry,
+            Box::new(move |outcome| match outcome {
+                Ok(value) => {
+                    let _ = promise_fulfill(&target, value);
+                }
+                Err(reason) => {
+                    let _ = promise_reject(&target, reason);
+                }
+            }),
+        );
+    }
+    result
+}
+
 fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<T, Caught>) {
     timer_queue_microtask(Box::new(move || reaction(outcome)));
 }

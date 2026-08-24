@@ -2041,6 +2041,15 @@ class RustEmitter {
           }
           return `runtime::promise_resolved(${expr.args[0] === undefined ? "()" : this.emitExpr(expr.args[0])})`;
         }
+        if (expr.name === "promise.race") {
+          if (expr.type.kind !== "promise") this.unsupported("Promise.race result shape", expr.loc);
+          const raceInner = expr.type.inner;
+          if (expr.args.length === 0 || expr.args.some((arg) =>
+            arg.type.kind !== "promise" || typeKey(arg.type.inner) !== typeKey(raceInner))) {
+            this.unsupported("Promise.race with differing Rust value types", expr.loc);
+          }
+          return `runtime::promise_race(vec![${expr.args.map((arg) => this.emitExpr(arg)).join(", ")}])`;
+        }
         if (expr.name !== "console.log" && expr.name !== "console.error") {
           this.unsupported(`intrinsic '${expr.name}'`, expr.loc);
         }
