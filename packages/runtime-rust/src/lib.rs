@@ -1578,6 +1578,24 @@ pub fn array_extend<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) ->
     })
 }
 
+pub fn array_unshift<T: ArrayElement>(array: &JsArray<T>, mut values: Vec<T>) -> f64 {
+    array.with_mut(|data| {
+        values.append(&mut data.elements);
+        data.elements = values;
+        data.elements.len() as f64
+    })
+}
+
+pub fn array_unshift_from<T: ArrayElement>(array: &JsArray<T>, source: &JsArray<T>) -> f64 {
+    let snapshot = source.with(|data| data.elements.clone());
+    array_unshift(array, snapshot)
+}
+
+pub fn array_reverse<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
+    array.with_mut(|data| data.elements.reverse());
+    array.clone()
+}
+
 pub fn array_index_of_by<T, F>(array: &JsArray<T>, needle: &T, equal: F) -> f64
 where
     T: ArrayElement,
@@ -2297,6 +2315,16 @@ where
     F: Fn(&T, &T) -> bool,
 {
     map_delete_by(set, value, equal)
+}
+
+pub fn set_to_array<T: ArrayElement>(set: &JsSet<T>) -> JsArray<T> {
+    let values = set.with(|data| {
+        data.entries
+            .iter()
+            .filter_map(|entry| entry.as_ref().map(|(value, _)| value.clone()))
+            .collect()
+    });
+    array_new(values)
 }
 
 fn array_index(index: f64, allow_end: bool, len: usize) -> usize {
@@ -5029,6 +5057,13 @@ mod tests {
             array_set(&alias, 1.0, 9.0);
             assert_eq!(array_get(&array, 1.0), 9.0);
             assert!(array_ptr_eq(&array, &alias));
+            assert_eq!(array_unshift(&array, vec![-1.0, 0.0]), 4.0);
+            assert_eq!(array_unshift_from(&array, &array), 8.0);
+            assert_eq!(array_get(&array, 0.0), -1.0);
+            assert_eq!(array_get(&array, 4.0), -1.0);
+            let reversed = array_reverse(&array);
+            assert!(array_ptr_eq(&array, &reversed));
+            assert_eq!(array_get(&array, 0.0), 9.0);
         }
         assert_eq!(live_heap_objects(), baseline);
     }

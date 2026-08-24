@@ -4153,6 +4153,19 @@ class RustEmitter {
         const source = `sc_rt_${this.temporary++}`;
         return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
       }
+      case "unshift": {
+        const values = argExprs.map(() => `sc_rt_${this.temporary++}`);
+        const bindings = argExprs.map((arg, index) => `let ${values[index]} = ${arg};`).join(" ");
+        return `{ let ${receiver} = ${receiverExpr}; ${bindings} runtime::array_unshift(&${receiver}, vec![${values.join(", ")}]) }`;
+      }
+      case "unshiftSpread": {
+        const first = argExprs[0];
+        if (first === undefined) this.unsupported("array unshiftSpread without a source", expr.loc);
+        const source = `sc_rt_${this.temporary++}`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_unshift_from(&${receiver}, &${source}) }`;
+      }
+      case "reverse":
+        return `{ let ${receiver} = ${receiverExpr}; runtime::array_reverse(&${receiver}) }`;
       case "join": {
         const separator = argExprs[0];
         if (separator === undefined) this.unsupported("array join without a separator", expr.loc);
@@ -4265,6 +4278,7 @@ class RustEmitter {
       const helper = expr.method === "iterLive" ? "map_iter_live" : "map_iter_key";
       return `{ ${receiverBinding} let ${index} = ${this.emitExpr(indexExpr)}; runtime::${helper}(&${receiver}, ${index}) }`;
     }
+    if (expr.method === "toArray") return `{ ${receiverBinding} runtime::set_to_array(&${receiver}) }`;
     const valueExpr = expr.args[0];
     if (valueExpr === undefined) this.unsupported(`set ${expr.method} without a value`, expr.loc);
     const value = `sc_rt_${this.temporary++}`;

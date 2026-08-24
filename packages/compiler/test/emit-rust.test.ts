@@ -196,6 +196,7 @@ test("Rust array higher-order methods preserve callbacks, references, reductions
     "516-array-reduce.ts",
     "517-array-hof-index-args.ts",
     "518-array-sort.ts",
+    "2685-array-unshift-reverse.ts",
     "531-record-array-hofs.ts",
     "532-record-arrays-rc-stress.ts",
     "533-array-element-cycles.ts",
