@@ -73,6 +73,7 @@ class RustEmitter {
   private readonly unions = new Map<string, IrUnionDef>();
   private readonly closureShapes = new Map<string, RustClosureShape>();
   private readonly closureTargets = new Map<string, RustClosureShape>();
+  private readonly promiseResolverTypes = new Map<string, IrType>();
   private readonly internedClosureTargets = new Set<string>();
   private indent = 0;
   private temporary = 0;
@@ -257,6 +258,25 @@ class RustEmitter {
         this.closureTargets.set(target.name, shape);
         if (target.captures === undefined) this.internedClosureTargets.add(target.name);
       }
+      if (node.kind === "newPromise") {
+        const promiseType = node.type as IrType | undefined;
+        const executor = node.executor as { type?: IrType } | undefined;
+        const resolverType = executor?.type?.kind === "func" ? executor.type.params[0] : undefined;
+        if (promiseType?.kind !== "promise" || resolverType?.kind !== "func") {
+          this.unsupported("malformed new Promise IR");
+        }
+        const key = typeKey(resolverType);
+        let shape = this.closureShapes.get(key);
+        if (shape === undefined) {
+          shape = { index: this.closureShapes.size, type: resolverType, targets: [] };
+          this.closureShapes.set(key, shape);
+        }
+        const existing = this.promiseResolverTypes.get(key);
+        if (existing !== undefined && typeKey(existing) !== typeKey(promiseType.inner)) {
+          this.unsupported(`Promise resolver signature '${key}' with multiple value types`);
+        }
+        this.promiseResolverTypes.set(key, promiseType.inner);
+      }
       for (const child of Object.values(node)) visit(child);
     };
     for (const fn of this.mod.functions) visit(fn.body);
@@ -286,6 +306,7 @@ class RustEmitter {
   private emitClosureDefinitions(): void {
     for (const shape of this.closureShapes.values()) {
       const name = this.closureName(shape);
+      const resolverType = this.promiseResolverTypes.get(typeKey(shape.type));
       this.line(`enum ${name} {`);
       this.indent += 1;
       for (const target of shape.targets) {
@@ -299,6 +320,9 @@ class RustEmitter {
           this.line(`${this.closureVariant(target)} { ${fields} },`);
         }
       }
+      if (resolverType !== undefined) {
+        this.line(`PromiseResolver { promise: Option<runtime::JsPromise<${this.rustType(resolverType)}>> },`);
+      }
       this.indent -= 1;
       this.line("}");
       this.line(`impl runtime::Trace for ${name} {`);
@@ -306,7 +330,7 @@ class RustEmitter {
       this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.indent += 1;
       const capturing = shape.targets.filter((target) => (target.captures?.length ?? 0) > 0);
-      if (capturing.length === 0) {
+      if (capturing.length === 0 && resolverType === undefined) {
         this.line("let _ = tracer;");
       } else {
         this.line("match self {");
@@ -318,6 +342,13 @@ class RustEmitter {
           for (const field of fields) {
             this.line(`if let Some(edge) = ${field} { tracer.edge(edge); }`);
           }
+          this.indent -= 1;
+          this.line("},");
+        }
+        if (resolverType !== undefined) {
+          this.line("Self::PromiseResolver { promise } => {");
+          this.indent += 1;
+          this.line("if let Some(edge) = promise { tracer.edge(edge); }");
           this.indent -= 1;
           this.line("},");
         }
@@ -333,7 +364,7 @@ class RustEmitter {
       this.indent += 1;
       this.line("fn clear_edges(&mut self) {");
       this.indent += 1;
-      if (capturing.length > 0) {
+      if (capturing.length > 0 || resolverType !== undefined) {
         this.line("match self {");
         this.indent += 1;
         for (const target of capturing) {
@@ -343,6 +374,9 @@ class RustEmitter {
           for (const field of fields) this.line(`*${field} = None;`);
           this.indent -= 1;
           this.line("},");
+        }
+        if (resolverType !== undefined) {
+          this.line("Self::PromiseResolver { promise } => *promise = None,");
         }
         this.line("_ => {},");
         this.indent -= 1;
@@ -1988,6 +2022,19 @@ class RustEmitter {
       case "awaitExpr":
       case "awaitUnionExpr":
         this.unsupported("async suspension outside the Rust state-machine subset", expr.loc);
+      case "newPromise": {
+        if (expr.type.kind !== "promise" || expr.executor.type.kind !== "func") {
+          this.unsupported("new Promise shape", expr.loc);
+        }
+        const resolverType = expr.executor.type.params[0];
+        if (resolverType?.kind !== "func") this.unsupported("new Promise resolver shape", expr.loc);
+        const shape = this.closureShapeForType(resolverType, expr.loc);
+        const promise = `sc_rt_${this.temporary++}`;
+        const executor = `sc_rt_${this.temporary++}`;
+        const resolver = `sc_rt_${this.temporary++}`;
+        const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [resolver], expr.loc);
+        return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
+      }
       case "intrinsic":
         if (expr.name === "promise.resolve") {
           if (expr.type.kind !== "promise" || expr.args.length > 1) {
@@ -2108,8 +2155,15 @@ class RustEmitter {
       }
       callArgs.push(...args);
       return `${pattern} => ${mangleFunction(target.name)}(${callArgs.join(", ")})`;
-    }).join(", ");
-    return `${callee}.with(|closure| match closure { ${arms} })`;
+    });
+    const resolverType = this.promiseResolverTypes.get(typeKey(shape.type));
+    if (resolverType !== undefined) {
+      const expectedArity = resolverType.kind === "void" ? 0 : 1;
+      if (args.length !== expectedArity) this.unsupported("Promise resolver argument arity", loc);
+      const value = args[0] ?? "()";
+      arms.push(`${this.closureName(shape)}::PromiseResolver { promise } => { let promise = promise.as_ref().expect("scriptc: cleared live Promise resolver"); let _ = runtime::promise_fulfill(promise, ${value}); }`);
+    }
+    return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
 
   private emitBinary(expr: Extract<IrExpr, { kind: "bin" }>): string {
