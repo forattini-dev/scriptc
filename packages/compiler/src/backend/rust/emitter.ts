@@ -1015,7 +1015,8 @@ class RustEmitter {
           : stmt.kind === "exprStmt" ? stmt.expr
           : stmt.kind === "return" ? stmt.value
           : null;
-        if ((nested?.kind === "bin" || nested?.kind === "recordLit") && this.containsAsyncSuspension(nested)) {
+        if ((nested?.kind === "bin" || nested?.kind === "recordLit" || nested?.kind === "arrIntrinsic") &&
+          this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
               this.emitAssignment(stmt.localId, value, stmt.loc);
@@ -1311,6 +1312,14 @@ class RustEmitter {
       this.emitAsyncRecord(expr, consume);
       return;
     }
+    if (expr.kind === "arrIntrinsic") {
+      this.emitAsyncValue(expr.receiver, (receiver) => {
+        this.emitAsyncValues(expr.args, (args) => {
+          consume(this.emitArrayIntrinsicValues(expr, receiver, args));
+        });
+      });
+      return;
+    }
     if (this.containsAsyncSuspension(expr)) {
       this.unsupported("nested async value in the Rust state-machine subset", expr.loc);
     }
@@ -1344,6 +1353,22 @@ class RustEmitter {
       return `${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? `Some(${value})` : value}`;
     }).join(", ");
     consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
+  }
+
+  private emitAsyncValues(
+    exprs: readonly IrExpr[],
+    consume: (values: string[]) => void,
+    index = 0,
+    values: string[] = [],
+  ): void {
+    const expr = exprs[index];
+    if (expr === undefined) {
+      consume(values);
+      return;
+    }
+    this.emitAsyncValue(expr, (value) => {
+      this.emitAsyncValues(exprs, consume, index + 1, [...values, value]);
+    });
   }
 
   private emitAsyncConsole(
@@ -2967,42 +2992,54 @@ class RustEmitter {
   }
 
   private emitArrayIntrinsic(expr: Extract<IrExpr, { kind: "arrIntrinsic" }>): string {
+    return this.emitArrayIntrinsicValues(
+      expr,
+      this.emitExpr(expr.receiver),
+      expr.args.map((arg) => this.emitExpr(arg)),
+    );
+  }
+
+  private emitArrayIntrinsicValues(
+    expr: Extract<IrExpr, { kind: "arrIntrinsic" }>,
+    receiverExpr: string,
+    argExprs: readonly string[],
+  ): string {
     if (expr.receiver.type.kind !== "array") this.unsupported("array intrinsic on a non-array", expr.loc);
     const receiver = `sc_rt_${this.temporary++}`;
     switch (expr.method) {
       case "length":
-        return `runtime::array_len(&(${this.emitExpr(expr.receiver)}))`;
+        return `runtime::array_len(&(${receiverExpr}))`;
       case "pop":
-        return `runtime::array_pop(&(${this.emitExpr(expr.receiver)}))`;
+        return `runtime::array_pop(&(${receiverExpr}))`;
       case "indexOf":
       case "includes": {
-        const needleExpr = expr.args[0];
+        const needleExpr = argExprs[0];
         if (needleExpr === undefined) this.unsupported(`array ${expr.method} without a needle`, expr.loc);
         const needle = `sc_rt_${this.temporary++}`;
         const equality = this.arrayElementEquality("left", "right", expr.receiver.type.elem, expr.method === "includes", expr.loc);
         const helper = expr.method === "indexOf" ? "array_index_of_by" : "array_includes_by";
-        return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${needle} = ${this.emitExpr(needleExpr)}; runtime::${helper}(&${receiver}, &${needle}, |left, right| ${equality}) }`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${needle} = ${needleExpr}; runtime::${helper}(&${receiver}, &${needle}, |left, right| ${equality}) }`;
       }
       case "push": {
-        const values = expr.args.map(() => `sc_rt_${this.temporary++}`);
-        const bindings = expr.args.map((arg, index) => `let ${values[index]} = ${this.emitExpr(arg)};`).join(" ");
+        const values = argExprs.map(() => `sc_rt_${this.temporary++}`);
+        const bindings = argExprs.map((arg, index) => `let ${values[index]} = ${arg};`).join(" ");
         const pushes = values.map((value) => `runtime::array_push(&${receiver}, ${value});`).join(" ");
-        return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; ${bindings} ${pushes} runtime::array_len(&${receiver}) }`;
+        return `{ let ${receiver} = ${receiverExpr}; ${bindings} ${pushes} runtime::array_len(&${receiver}) }`;
       }
       case "pushSpread": {
-        const first = expr.args[0];
+        const first = argExprs[0];
         if (first === undefined) this.unsupported("array pushSpread without a source", expr.loc);
         const source = `sc_rt_${this.temporary++}`;
-        return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${source} = ${this.emitExpr(first)}; runtime::array_extend(&${receiver}, &${source}) }`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
       }
       case "join": {
-        const separator = expr.args[0];
+        const separator = argExprs[0];
         if (separator === undefined) this.unsupported("array join without a separator", expr.loc);
         const elem = expr.receiver.type.elem;
         if (elem.kind !== "f64" && elem.kind !== "bool" && elem.kind !== "string") {
           this.unsupported(`array join element '${elem.kind}'`, expr.loc);
         }
-        return `runtime::array_join(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(separator)}))`;
+        return `runtime::array_join(&(${receiverExpr}), &(${separator}))`;
       }
       default:
         this.unsupported(`array intrinsic '${expr.method}'`, expr.loc);

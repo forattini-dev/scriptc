@@ -1288,6 +1288,20 @@ async function recoverFinallyThrow(): Promise<string> {
   }
 }
 console.log("finally throw", await recoverFinallyThrow());
+const pushedAcrossAwait: string[] = [];
+function pushReceiver(): string[] {
+  console.log("push receiver");
+  return pushedAcrossAwait;
+}
+async function pushArgument(): Promise<string> {
+  console.log("push argument start");
+  await Promise.resolve(0);
+  console.log("push argument end");
+  return "middle";
+}
+const pushedLength = pushReceiver().push("first", await pushArgument(), "last");
+console.log("push length", pushedLength);
+console.log("push values", pushedAcrossAwait.join(","));
 export {};
 `);
   for (const [name, entryPath] of [
@@ -1298,6 +1312,7 @@ export {};
     ["settled-await-order", resolve("tests/corpus/1428-settled-await-order.ts")],
     ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
     ["async-ordering", resolve("tests/corpus/1021-async-ordering.ts")],
+    ["async-rc-stress", resolve("tests/corpus/1023-async-rc-stress.ts")],
     ["throw-promise", resolve("tests/corpus/1026-throw-promise.ts")],
     ["async-return-promise", resolve("tests/corpus/1027-async-return-promise.ts")],
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
