@@ -1407,15 +1407,27 @@ pub fn caught_to_string(caught: &Caught) -> JsString {
         return value.clone();
     }
     if let Some(error) = caught.value.downcast_ref::<JsError>() {
-        if error.name.is_empty() {
-            return Rc::from(error.message.as_str());
-        }
-        if error.message.is_empty() {
-            return Rc::from(error.name.as_str());
-        }
-        return Rc::from(format!("{}: {}", error.name, error.message));
+        return error_to_string(error);
     }
     string("[object Object]")
+}
+
+pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
+    if name.is_empty() {
+        return Rc::from(message);
+    }
+    if message.is_empty() {
+        return Rc::from(name);
+    }
+    Rc::from(format!("{name}: {message}"))
+}
+
+pub fn error_to_string(error: &JsError) -> JsString {
+    error_to_string_parts(&error.name, &error.message)
+}
+
+pub fn error_is_class(error: &JsError, name: &str) -> bool {
+    name == "Error" || error.name == name
 }
 
 pub fn error_name(error: &JsError) -> JsString {
@@ -4627,7 +4639,15 @@ mod tests {
         assert_eq!(caught_narrow::<JsString>(&text).as_ref(), "reason");
         assert_eq!(caught_to_string(&text).as_ref(), "reason");
 
-        let error = caught_value(error_new("TypeError", string("bad")));
+        let typed_error = error_new("TypeError", string("bad"));
+        assert!(error_is_class(&typed_error, "TypeError"));
+        assert!(error_is_class(&typed_error, "Error"));
+        assert!(!error_is_class(&typed_error, "RangeError"));
+        assert_eq!(error_to_string(&typed_error).as_ref(), "TypeError: bad");
+        assert_eq!(error_to_string_parts("", "message").as_ref(), "message");
+        assert_eq!(error_to_string_parts("Error", "").as_ref(), "Error");
+
+        let error = caught_value(typed_error);
         assert_eq!(caught_to_string(&error).as_ref(), "TypeError: bad");
     }
 

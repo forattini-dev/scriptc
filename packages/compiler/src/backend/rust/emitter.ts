@@ -177,7 +177,8 @@ class RustEmitter {
 
   private checkModuleSurface(): void {
     for (const cls of this.classes.values()) {
-      if (cls.base !== undefined && !this.classes.has(cls.base)) {
+      if (cls.base !== undefined && !this.classes.has(cls.base) &&
+        (cls.base === "%DOMException" || !RUNTIME_ERROR_CLASSES.has(cls.base))) {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
     }
@@ -2031,14 +2032,36 @@ class RustEmitter {
           const test = `runtime::caught_is::<${type}>(&(${this.emitExpr(expr.value)}))`;
           return expr.negated ? `!(${test})` : test;
         }
-        if (expr.className === undefined || !RUNTIME_ERROR_CLASSES.has(expr.className)) {
+        if (expr.className === undefined) {
           this.unsupported(`caught test '${expr.test}:${expr.className ?? ""}'`, expr.loc);
+        }
+        if (!RUNTIME_ERROR_CLASSES.has(expr.className)) {
+          const meta = this.classMeta.get(expr.className);
+          if (meta === undefined) this.unsupported(`caught test '${expr.test}:${expr.className}'`, expr.loc);
+          const caught = `sc_rt_${this.temporary++}`;
+          const object = `sc_rt_${this.temporary++}`;
+          const type = this.rustType({ kind: "object", className: meta.def.name }, expr.loc);
+          const sameHierarchy = `runtime::caught_is::<${type}>(&${caught})`;
+          const test = meta.hierarchy
+            ? `${sameHierarchy} && { let ${object} = runtime::caught_narrow::<${type}>(&${caught}); ${object}.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}) }`
+            : sameHierarchy;
+          const result = expr.negated ? `!(${test})` : test;
+          return `{ let ${caught} = ${this.emitExpr(expr.value)}; ${result} }`;
         }
         {
           const error = RUNTIME_ERROR_CLASSES.get(expr.className);
           if (error === undefined) this.unsupported(`caught test '${expr.test}:${expr.className}'`, expr.loc);
-          const test = `runtime::caught_is_error_class(&(${this.emitExpr(expr.value)}), "${this.rustString(error.lib)}")`;
-          return expr.negated ? `!(${test})` : test;
+          const caught = `sc_rt_${this.temporary++}`;
+          const subclassTests = [...this.classMeta.values()]
+            .filter((meta) => meta === meta.root && this.runtimeErrorAncestor(meta.def.name) !== null)
+            .filter((meta) => error.lib === "Error" || this.runtimeErrorAncestor(meta.def.name) === expr.className)
+            .map((meta) => `runtime::caught_is::<${this.rustType({ kind: "object", className: meta.def.name }, expr.loc)}>(&${caught})`);
+          const test = [
+            `runtime::caught_is_error_class(&${caught}, "${this.rustString(error.lib)}")`,
+            ...subclassTests,
+          ].join(" || ");
+          const wrapped = `{ let ${caught} = ${this.emitExpr(expr.value)}; ${test} }`;
+          return expr.negated ? `!(${wrapped})` : wrapped;
         }
       case "caughtNarrow":
         if (expr.type.kind === "f64") return `runtime::caught_narrow::<f64>(&(${this.emitExpr(expr.value)}))`;
@@ -2046,6 +2069,9 @@ class RustEmitter {
         if (expr.type.kind === "string") return `runtime::caught_narrow::<runtime::JsString>(&(${this.emitExpr(expr.value)}))`;
         if (expr.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
           return `runtime::caught_error_value(&(${this.emitExpr(expr.value)}))`;
+        }
+        if (expr.type.kind === "object" && this.classMeta.has(expr.type.className)) {
+          return `runtime::caught_narrow::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(expr.value)}))`;
         }
         this.unsupported("caught narrowing outside scalar and Error values", expr.loc);
       case "caughtCheck": {
@@ -2161,6 +2187,21 @@ class RustEmitter {
       }
       case "instanceOf": {
         if (expr.value.type.kind !== "object") this.unsupported("instanceof on a non-object", expr.loc);
+        const runtimeTarget = RUNTIME_ERROR_CLASSES.get(expr.className);
+        if (runtimeTarget !== undefined) {
+          const value = `sc_rt_${this.temporary++}`;
+          const ancestor = this.runtimeErrorAncestor(expr.value.type.className);
+          if (ancestor !== null) {
+            return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; ${this.runtimeErrorIsA(ancestor, expr.className)} }`;
+          }
+          if (RUNTIME_ERROR_CLASSES.has(expr.value.type.className)) {
+            return `{ let ${value} = ${this.emitExpr(expr.value)}; runtime::error_is_class(&${value}, "${this.rustString(runtimeTarget.lib)}") }`;
+          }
+          return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; false }`;
+        }
+        if (RUNTIME_ERROR_CLASSES.has(expr.value.type.className)) {
+          this.unsupported("polymorphic built-in Error narrowing to a user subclass", expr.loc);
+        }
         const target = this.classMetaOf(expr.className, expr.loc);
         const value = `sc_rt_${this.temporary++}`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${value}.with(|object| ${target.pre} <= object.sc_class_pre && object.sc_class_pre <= ${target.post}) }`;
@@ -2216,7 +2257,16 @@ class RustEmitter {
         return `{ ${bindings} match ${callee} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
       }
       case "upcast":
+        if (expr.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.type.className) &&
+          expr.value.type.kind === "object" && this.classMeta.has(expr.value.type.className)) {
+          this.unsupported("polymorphic built-in Error storage for a user subclass", expr.loc);
+        }
+        return this.emitExpr(expr.value);
       case "downcast":
+        if (expr.value.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.value.type.className) &&
+          expr.type.kind === "object" && this.classMeta.has(expr.type.className)) {
+          this.unsupported("polymorphic built-in Error narrowing to a user subclass", expr.loc);
+        }
         return this.emitExpr(expr.value);
       case "libCall": {
         const arg = expr.args[0];
@@ -2253,6 +2303,16 @@ class RustEmitter {
         }
         if ((expr.fn === "number.isInteger" || expr.fn === "number.isSafeInteger") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::${expr.fn === "number.isInteger" ? "number_is_integer" : "number_is_safe_integer"}(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "error.toString" && expr.args.length === 1 && arg !== undefined) {
+          const receiverExpr = this.stripCasts(arg);
+          if (receiverExpr.type.kind === "object" && this.classMeta.has(receiverExpr.type.className)) {
+            const receiver = `sc_rt_${this.temporary++}`;
+            const nameField = this.classFieldName(receiverExpr.type.className, "name", expr.loc);
+            const messageField = this.classFieldName(receiverExpr.type.className, "message", expr.loc);
+            return `{ let ${receiver} = ${this.emitExpr(receiverExpr)}; ${receiver}.with(|object| runtime::error_to_string_parts(object.${nameField}.as_ref(), object.${messageField}.as_ref())) }`;
+          }
+          return `runtime::error_to_string(&(${this.emitExpr(arg)}))`;
         }
         if (expr.fn === "error.code" && expr.args.length === 1 && arg !== undefined) {
           if (expr.type.kind !== "union") this.unsupported("error.code without an optional result union", expr.loc);
@@ -2537,6 +2597,21 @@ class RustEmitter {
         }
         if (expr.fn === "path.relative" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::path_relative(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "error.ctor" && expr.args.length === 2 && arg !== undefined &&
+          expr.args[1] !== undefined && arg.type.kind === "object") {
+          const error = RUNTIME_ERROR_CLASSES.get(arg.type.className);
+          const receiverExpr = this.stripCasts(arg);
+          if (error === undefined || receiverExpr.type.kind !== "object" ||
+            !this.classMeta.has(receiverExpr.type.className)) {
+            this.unsupported("Error subclass constructor", expr.loc);
+          }
+          const receiver = `sc_rt_${this.temporary++}`;
+          const message = `sc_rt_${this.temporary++}`;
+          const nameField = this.classFieldName(receiverExpr.type.className, "name", expr.loc);
+          const messageField = this.classFieldName(receiverExpr.type.className, "message", expr.loc);
+          const codeField = this.classFieldName(receiverExpr.type.className, "%code", expr.loc);
+          return `{ let ${receiver} = ${this.emitExpr(receiverExpr)}; let ${message} = ${this.emitExpr(expr.args[1])}; ${receiver}.with_mut(|object| { object.${nameField} = runtime::string("${this.rustString(error.lib)}"); object.${messageField} = ${message}; object.${codeField} = runtime::empty_string(); }); }`;
         }
         if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
           const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);
@@ -3262,6 +3337,32 @@ class RustEmitter {
     const cls = this.classes.get(name);
     if (cls === undefined) this.unsupported(`class '${name}'`, loc);
     return cls;
+  }
+
+  private stripCasts(expr: IrExpr): IrExpr {
+    let value = expr;
+    while (value.kind === "upcast" || value.kind === "downcast") value = value.value;
+    return value;
+  }
+
+  private runtimeErrorAncestor(name: string): string | null {
+    const seen = new Set<string>();
+    let cls = this.classes.get(name);
+    while (cls?.base !== undefined && !seen.has(cls.name)) {
+      seen.add(cls.name);
+      if (RUNTIME_ERROR_CLASSES.has(cls.base)) return cls.base;
+      cls = this.classes.get(cls.base);
+    }
+    return null;
+  }
+
+  private runtimeErrorIsA(source: string, target: string): boolean {
+    let current: string | null = source;
+    while (current !== null) {
+      if (current === target) return true;
+      current = RUNTIME_ERROR_CLASSES.get(current)?.base ?? null;
+    }
+    return false;
   }
 
   private classMetaOf(name: string, loc?: SrcLoc): RustClassMeta {

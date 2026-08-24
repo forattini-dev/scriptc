@@ -418,6 +418,20 @@ for (let kind = 0; kind < 3; kind++) {
 }
 try { throw "plain"; }
 catch (error) { console.log("is Error", error instanceof Error); }
+class LocalError extends Error {
+  code: number;
+  constructor(message: string, code: number) {
+    super(message);
+    this.name = "LocalError";
+    this.code = code;
+  }
+}
+const localError = new LocalError("local failure", 17);
+console.log("local error", localError instanceof Error, localError.toString(), localError.code);
+try { throw localError; }
+catch (error) {
+  if (error instanceof LocalError) console.log("local catch", error.message, error.code);
+}
 function scan(): string {
   let out = "";
   for (let i = 0; i < 8; i++) {
@@ -514,6 +528,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "975-unions-undefined.ts",
     "980-exceptions-basics.ts",
     "984-exceptions-finally.ts",
+    "1302-errors-typed-catch.ts",
     "1366-union-equality.ts",
     "2482-recursive-union-tree.ts",
     "2483-recursive-record-cycles.ts",
@@ -1317,6 +1332,7 @@ export {};
     ["async-return-promise", resolve("tests/corpus/1027-async-return-promise.ts")],
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
+    ["async-eager-chains", resolve("tests/corpus/1029-async-eager-chains.ts")],
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],
     ["async-methods", resolve("tests/corpus/2351-async-methods.ts")],
     ["async-never", resolve("tests/corpus/1434-async-never.ts")],
