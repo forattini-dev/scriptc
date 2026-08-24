@@ -1621,6 +1621,7 @@ class RustEmitter {
         const operand = this.emitExpr(expr.operand);
         if (expr.operand.type.kind === "f64") return `runtime::number_to_string(${operand})`;
         if (expr.operand.type.kind === "bool") return `runtime::bool_to_string(${operand})`;
+        if (expr.operand.type.kind === "caught") return `runtime::caught_to_string(&(${operand}))`;
         if (expr.operand.type.kind === "union") {
           const union = this.union(expr.operand.type.unionId, expr.loc);
           const name = this.unionName(union.id);
@@ -1790,7 +1791,12 @@ class RustEmitter {
         return `(${this.emitExpr(expr.obj)}).with(|record| ${result})`;
       }
       case "caughtTest":
-        if (expr.test !== "instanceof" || expr.className === undefined || !RUNTIME_ERROR_CLASSES.has(expr.className)) {
+        if (expr.test !== "instanceof") {
+          const type = { string: "runtime::JsString", number: "f64", boolean: "bool" }[expr.test];
+          const test = `runtime::caught_is::<${type}>(&(${this.emitExpr(expr.value)}))`;
+          return expr.negated ? `!(${test})` : test;
+        }
+        if (expr.className === undefined || !RUNTIME_ERROR_CLASSES.has(expr.className)) {
           this.unsupported(`caught test '${expr.test}:${expr.className ?? ""}'`, expr.loc);
         }
         {
@@ -1800,10 +1806,13 @@ class RustEmitter {
           return expr.negated ? `!(${test})` : test;
         }
       case "caughtNarrow":
-        if (expr.type.kind !== "object" || !RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
-          this.unsupported("caught narrowing outside Error", expr.loc);
+        if (expr.type.kind === "f64") return `runtime::caught_narrow::<f64>(&(${this.emitExpr(expr.value)}))`;
+        if (expr.type.kind === "bool") return `runtime::caught_narrow::<bool>(&(${this.emitExpr(expr.value)}))`;
+        if (expr.type.kind === "string") return `runtime::caught_narrow::<runtime::JsString>(&(${this.emitExpr(expr.value)}))`;
+        if (expr.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.type.className)) {
+          return `runtime::caught_error_value(&(${this.emitExpr(expr.value)}))`;
         }
-        return `runtime::caught_error_value(&(${this.emitExpr(expr.value)}))`;
+        this.unsupported("caught narrowing outside scalar and Error values", expr.loc);
       case "caughtCheck": {
         if (expr.type.kind !== "object") this.unsupported("caught check outside an object", expr.loc);
         const error = RUNTIME_ERROR_CLASSES.get(expr.className);

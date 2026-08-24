@@ -1208,6 +1208,7 @@ export {};
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],
     ["async-methods", resolve("tests/corpus/2351-async-methods.ts")],
+    ["async-never", resolve("tests/corpus/1434-async-never.ts")],
     ["promise-reject-all", resolve("tests/corpus/1572-promise-reject-all-tuple.ts")],
   ] as const) {
     const result = await compile(entryPath, {

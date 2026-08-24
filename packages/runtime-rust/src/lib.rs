@@ -1257,6 +1257,18 @@ pub fn caught_is_error(caught: &Caught) -> bool {
     caught.value.is::<JsError>()
 }
 
+pub fn caught_is<T: 'static>(caught: &Caught) -> bool {
+    caught.value.is::<T>()
+}
+
+pub fn caught_narrow<T: Clone + 'static>(caught: &Caught) -> T {
+    caught
+        .value
+        .downcast_ref::<T>()
+        .expect("scriptc: narrowed caught value has the wrong runtime type")
+        .clone()
+}
+
 pub fn caught_is_error_class(caught: &Caught, name: &str) -> bool {
     caught
         .value
@@ -1303,6 +1315,28 @@ pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
         .code
         .as_deref()
         .map(Rc::<str>::from)
+}
+
+pub fn caught_to_string(caught: &Caught) -> JsString {
+    if let Some(value) = caught.value.downcast_ref::<f64>() {
+        return number_to_string(*value);
+    }
+    if let Some(value) = caught.value.downcast_ref::<bool>() {
+        return bool_to_string(*value);
+    }
+    if let Some(value) = caught.value.downcast_ref::<JsString>() {
+        return value.clone();
+    }
+    if let Some(error) = caught.value.downcast_ref::<JsError>() {
+        if error.name.is_empty() {
+            return Rc::from(error.message.as_str());
+        }
+        if error.message.is_empty() {
+            return Rc::from(error.name.as_str());
+        }
+        return Rc::from(format!("{}: {}", error.name, error.message));
+    }
+    string("[object Object]")
 }
 
 pub fn error_name(error: &JsError) -> JsString {
@@ -4494,6 +4528,28 @@ mod tests {
         let propagated =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| caught_from_panic(payload)));
         assert!(propagated.is_err());
+    }
+
+    #[test]
+    fn caught_primitive_values_narrow_and_stringify() {
+        let number = caught_value(12.5_f64);
+        assert!(caught_is::<f64>(&number));
+        assert!(!caught_is::<bool>(&number));
+        assert_eq!(caught_narrow::<f64>(&number), 12.5);
+        assert_eq!(caught_to_string(&number).as_ref(), "12.5");
+
+        let boolean = caught_value(true);
+        assert!(caught_is::<bool>(&boolean));
+        assert!(caught_narrow::<bool>(&boolean));
+        assert_eq!(caught_to_string(&boolean).as_ref(), "true");
+
+        let text = caught_value(string("reason"));
+        assert!(caught_is::<JsString>(&text));
+        assert_eq!(caught_narrow::<JsString>(&text).as_ref(), "reason");
+        assert_eq!(caught_to_string(&text).as_ref(), "reason");
+
+        let error = caught_value(error_new("TypeError", string("bad")));
+        assert_eq!(caught_to_string(&error).as_ref(), "TypeError: bad");
     }
 
     #[test]
