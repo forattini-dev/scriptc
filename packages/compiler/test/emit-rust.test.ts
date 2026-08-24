@@ -12,6 +12,28 @@ import { fibModule } from "./fixtures/fib-ir.js";
 
 const execFileAsync = promisify(execFile);
 
+interface ProcessOutcome {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+function runToExit(
+  file: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ProcessOutcome> {
+  return new Promise((resolveRun) => {
+    execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
+      resolveRun({
+        stdout,
+        stderr,
+        exitCode: error && typeof error.code === "number" ? error.code : 0,
+      });
+    });
+  });
+}
+
 test("Rust emitter compiles recursive scalar IR without unsafe or C", async () => {
   expect(validateModule(fibModule)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-emit-"));
@@ -1307,6 +1329,37 @@ export {};
     expect(rust.stdout, name).toBe(node.stdout);
     expect(rust.stderr, name).toBe(node.stderr);
   }
+}, 120_000);
+
+test("Rust unhandled async rejection matches the official exit-one corpus", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-unhandled-"));
+  const entryPath = resolve("tests/corpus/1022-async-exceptions.ts");
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "async-exceptions"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok
+      ? undefined
+      : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(node.exitCode).toBe(1);
+  expect(rust.exitCode).toBe(node.exitCode);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toContain("UnhandledPromiseRejection: boom: unhandled-path");
+  expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 120_000);
 
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {

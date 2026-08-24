@@ -38,6 +38,8 @@ thread_local! {
     static NEXT_IMMEDIATE_ID: Cell<u64> = const { Cell::new(1) };
     static MICROTASKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
     static NEXT_TICKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
+    static PROMISE_CHECKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
+    static UNHANDLED_REJECTION: Cell<bool> = const { Cell::new(false) };
     static EVENT_TURN: Cell<u64> = const { Cell::new(0) };
     static EVENT_PHASE: Cell<u8> = const { Cell::new(0) };
     static FIRING_TIMER_ID: Cell<u64> = const { Cell::new(0) };
@@ -56,6 +58,8 @@ pub struct Tracer<'a> {
 
 pub fn init() {
     let _ = PROCESS_START.get_or_init(std::time::Instant::now);
+    PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
+    UNHANDLED_REJECTION.with(|unhandled| unhandled.set(false));
 }
 
 fn process_elapsed() -> std::time::Duration {
@@ -318,11 +322,16 @@ pub fn finish() {
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
     MICROTASKS.with(|tasks| tasks.borrow_mut().clear());
     NEXT_TICKS.with(|tasks| tasks.borrow_mut().clear());
+    PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
     collect_cycles();
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();
         assert_eq!(live, 0, "scriptc: {live} Rust heap object(s) still live");
     }
+}
+
+pub fn had_unhandled_rejection() -> bool {
+    UNHANDLED_REJECTION.with(Cell::get)
 }
 
 struct TimerTask {
@@ -679,6 +688,18 @@ pub fn run_event_loop() {
             continue;
         }
 
+        let mut promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
+        if promise_check.is_some() {
+            while let Some(check) = promise_check {
+                check();
+                promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
+            }
+            if had_unhandled_rejection() {
+                break;
+            }
+            continue;
+        }
+
         let has_referenced_work = TIMER_TASKS
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced));
@@ -801,6 +822,8 @@ enum PromiseState<T: HeapValue> {
 
 pub struct PromiseData<T: HeapValue> {
     state: PromiseState<T>,
+    handled: bool,
+    reported: bool,
 }
 
 impl<T: HeapValue> Trace for PromiseData<T> {
@@ -814,6 +837,7 @@ impl<T: HeapValue> Trace for PromiseData<T> {
 impl<T: HeapValue> ClearEdges for PromiseData<T> {
     fn clear_edges(&mut self) {
         self.state = PromiseState::Pending(Vec::new());
+        self.handled = true;
     }
 }
 
@@ -822,12 +846,16 @@ pub type JsPromise<T> = Gc<PromiseData<T>>;
 pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
     Gc::new(PromiseData {
         state: PromiseState::Pending(Vec::new()),
+        handled: false,
+        reported: false,
     })
 }
 
 pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
     Gc::new(PromiseData {
         state: PromiseState::Fulfilled(Some(value)),
+        handled: false,
+        reported: false,
     })
 }
 
@@ -1011,19 +1039,22 @@ fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<
 
 pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
     let mut reaction = Some(reaction);
-    let settled = promise.with_mut(|data| match &mut data.state {
-        PromiseState::Pending(reactions) => {
-            reactions.push(reaction.take().expect("scriptc: missing promise reaction"));
-            None
+    let settled = promise.with_mut(|data| {
+        data.handled = true;
+        match &mut data.state {
+            PromiseState::Pending(reactions) => {
+                reactions.push(reaction.take().expect("scriptc: missing promise reaction"));
+                None
+            }
+            PromiseState::Fulfilled(value) => Some(Ok(value
+                .as_ref()
+                .expect("scriptc: cleared fulfilled promise")
+                .clone())),
+            PromiseState::Rejected(reason) => Some(Err(reason
+                .as_ref()
+                .expect("scriptc: cleared rejected promise")
+                .clone())),
         }
-        PromiseState::Fulfilled(value) => Some(Ok(value
-            .as_ref()
-            .expect("scriptc: cleared fulfilled promise")
-            .clone())),
-        PromiseState::Rejected(reason) => Some(Err(reason
-            .as_ref()
-            .expect("scriptc: cleared rejected promise")
-            .clone())),
     });
     if let Some(outcome) = settled {
         promise_schedule(
@@ -1086,6 +1117,28 @@ pub fn promise_reject<T: HeapValue>(promise: &JsPromise<T>, reason: Caught) -> b
     for reaction in reactions {
         promise_schedule(reaction, Err(reason.clone()));
     }
+    let candidate = promise.clone();
+    PROMISE_CHECKS.with(|checks| {
+        checks.borrow_mut().push_back(Box::new(move || {
+            let unhandled = candidate.with_mut(|data| {
+                if data.handled || data.reported {
+                    return None;
+                }
+                let reason = match &data.state {
+                    PromiseState::Rejected(Some(reason)) => reason.clone(),
+                    PromiseState::Pending(_)
+                    | PromiseState::Fulfilled(_)
+                    | PromiseState::Rejected(None) => return None,
+                };
+                data.reported = true;
+                Some(reason)
+            });
+            if let Some(reason) = unhandled {
+                eprintln!("UnhandledPromiseRejection: {}", caught_to_string(&reason));
+                UNHANDLED_REJECTION.with(|flag| flag.set(true));
+            }
+        }));
+    });
     true
 }
 
@@ -4658,6 +4711,33 @@ mod tests {
 
         drop(promise);
         drop(rejected);
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promise_rejections_wait_for_handlers_until_the_microtask_checkpoint() {
+        init();
+        let baseline = live_heap_objects();
+
+        let unhandled = promise_rejected::<f64>(caught_value(string("unhandled")));
+        assert!(!had_unhandled_rejection());
+        run_event_loop();
+        assert!(had_unhandled_rejection());
+        drop(unhandled);
+
+        init();
+        let handled = promise_rejected::<f64>(caught_value(string("handled")));
+        let saw_rejection = Rc::new(Cell::new(false));
+        let observed = saw_rejection.clone();
+        promise_then(
+            &handled,
+            Box::new(move |outcome| observed.set(matches!(outcome, Err(_)))),
+        );
+        run_event_loop();
+        assert!(saw_rejection.get());
+        assert!(!had_unhandled_rejection());
+        drop(handled);
+
         assert_eq!(live_heap_objects(), baseline);
     }
 

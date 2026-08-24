@@ -158,6 +158,7 @@ class RustEmitter {
       ? `let _sc_main_promise = ${mangleFunction(entry.name)}();`
       : `${mangleFunction(entry.name)}();`);
     this.line("runtime::run_event_loop();");
+    this.line("let _sc_unhandled_rejection = runtime::had_unhandled_rejection();");
     if (entry.async) this.line("drop(_sc_main_promise);");
     for (const global of this.globals.values()) {
       if (this.isHeapRoot(global.type)) {
@@ -168,6 +169,7 @@ class RustEmitter {
       this.line(`${mangleFnClosure(fnName)}.with(|slot| *slot.borrow_mut() = None);`);
     }
     this.line("runtime::finish();");
+    this.line("if _sc_unhandled_rejection { std::process::exit(1); }");
     this.indent -= 1;
     this.line("}");
     return `${this.lines.join("\n")}\n`;
