@@ -1054,6 +1054,32 @@ console.log("timer armed", count("Timeout"));
   }
 }, 120_000);
 
+test("Rust process introspection and Number predicates preserve Node invariants", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-process-usage-"));
+  for (const fixture of ["2314-process-introspection.ts", "1420-number-statics.ts"]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [

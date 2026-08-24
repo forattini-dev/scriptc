@@ -1546,6 +1546,12 @@ class RustEmitter {
         if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).is_nan()`;
         }
+        if (expr.fn === "number.isFinite" && expr.args.length === 1 && arg !== undefined) {
+          return `(${this.emitExpr(arg)}).is_finite()`;
+        }
+        if ((expr.fn === "number.isInteger" || expr.fn === "number.isSafeInteger") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::${expr.fn === "number.isInteger" ? "number_is_integer" : "number_is_safe_integer"}(${this.emitExpr(arg)})`;
+        }
         if (expr.fn === "error.code" && expr.args.length === 1 && arg !== undefined) {
           if (expr.type.kind !== "union") this.unsupported("error.code without an optional result union", expr.loc);
           const union = this.union(expr.type.unionId, expr.loc);
@@ -1685,6 +1691,30 @@ class RustEmitter {
         if (expr.fn === "perf.now" && expr.args.length === 0) return "runtime::performance_now()";
         if (expr.fn === "date.now" && expr.args.length === 0) return "runtime::date_now()";
         if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
+        const processSample = new Map<string, string>([
+          ["process.availableMemory", "process_available_memory"],
+          ["process.constrainedMemory", "process_constrained_memory"],
+          ["process.cpuUser", "process_cpu_user"],
+          ["process.cpuSystem", "process_cpu_system"],
+          ["process.threadCpuUser", "process_thread_cpu_user"],
+          ["process.threadCpuSystem", "process_thread_cpu_system"],
+        ]).get(expr.fn);
+        if (processSample !== undefined && expr.args.length === 0) return `runtime::${processSample}()`;
+        const processDiff = new Map<string, string>([
+          ["process.cpuUserDiff", "process_cpu_user"],
+          ["process.cpuSystemDiff", "process_cpu_system"],
+          ["process.threadCpuUserDiff", "process_thread_cpu_user"],
+          ["process.threadCpuSystemDiff", "process_thread_cpu_system"],
+        ]).get(expr.fn);
+        if (processDiff !== undefined && expr.args.length === 1 && arg !== undefined) {
+          return `(runtime::${processDiff}() - ${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "process.cpuPrevValidate" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::process_cpu_prev_validate(${this.emitExpr(arg)}, ${this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.fn === "process.rusage" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::process_rusage(${this.emitExpr(arg)})`;
+        }
         if (expr.fn === "atomics.wait" && expr.args.length === 4 && arg !== undefined) {
           const [index, expected, timeout] = expr.args.slice(1);
           if (index === undefined || expected === undefined || timeout === undefined) {

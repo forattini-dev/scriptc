@@ -535,6 +535,130 @@ pub fn process_active_resources() -> JsArray<JsString> {
     array_new(resources)
 }
 
+fn proc_stat_fields() -> Option<Vec<String>> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let command_end = stat.rfind(')')?;
+    Some(
+        stat.get(command_end + 2..)?
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+fn proc_stat_value(index: usize) -> f64 {
+    proc_stat_fields()
+        .and_then(|fields| fields.get(index)?.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+fn proc_status_value(name: &str) -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let rest = line.strip_prefix(name)?.trim_start_matches(':').trim();
+                rest.split_whitespace().next()?.parse::<f64>().ok()
+            })
+        })
+        .unwrap_or(0.0)
+}
+
+pub fn process_cpu_user() -> f64 {
+    proc_stat_value(11) * 10_000.0
+}
+
+pub fn process_cpu_system() -> f64 {
+    proc_stat_value(12) * 10_000.0
+}
+
+pub fn process_thread_cpu_user() -> f64 {
+    process_cpu_user()
+}
+
+pub fn process_thread_cpu_system() -> f64 {
+    process_cpu_system()
+}
+
+pub fn process_cpu_prev_validate(user: f64, system: f64) {
+    for (name, value) in [("user", user), ("system", system)] {
+        if !value.is_finite() || value < 0.0 {
+            throw_value(JsError {
+                name: "RangeError".to_owned(),
+                message: format!(
+                    "The property 'prevValue.{name}' is invalid. Received {}",
+                    format_number(value)
+                ),
+                code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            });
+        }
+    }
+}
+
+pub fn process_rusage(index: f64) -> f64 {
+    match index as i32 {
+        0 => process_cpu_user(),
+        1 => process_cpu_system(),
+        2 => {
+            let linux_high_water = proc_status_value("VmHWM");
+            if linux_high_water > 0.0 {
+                linux_high_water
+            } else {
+                std::process::Command::new("ps")
+                    .args(["-o", "rss=", "-p"])
+                    .arg(std::process::id().to_string())
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .and_then(|output| String::from_utf8(output.stdout).ok())
+                    .and_then(|rss| rss.trim().parse::<f64>().ok())
+                    .unwrap_or(0.0)
+            }
+        }
+        6 => proc_stat_value(7),
+        7 => proc_stat_value(9),
+        14 => proc_status_value("voluntary_ctxt_switches"),
+        15 => proc_status_value("nonvoluntary_ctxt_switches"),
+        _ => 0.0,
+    }
+}
+
+fn read_memory_number(path: &str) -> f64 {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| value.split_whitespace().next()?.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.0)
+}
+
+pub fn process_constrained_memory() -> f64 {
+    let v2 = read_memory_number("/sys/fs/cgroup/memory.max");
+    if v2 > 0.0 {
+        v2
+    } else {
+        read_memory_number("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    }
+}
+
+pub fn process_available_memory() -> f64 {
+    let host_available = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|info| {
+            info.lines().find_map(|line| {
+                let rest = line.strip_prefix("MemAvailable:")?.trim();
+                rest.split_whitespace().next()?.parse::<f64>().ok()
+            })
+        })
+        .map_or(0.0, |kilobytes| kilobytes * 1024.0);
+    let constrained = process_constrained_memory();
+    if constrained > 0.0 {
+        let used = read_memory_number("/sys/fs/cgroup/memory.current");
+        host_available.min((constrained - used).max(0.0))
+    } else {
+        host_available
+    }
+}
+
 pub fn run_event_loop() {
     let mut turn = 0_u64;
     loop {
@@ -3275,6 +3399,14 @@ pub fn path_relative(from: &JsString, to: &JsString) -> JsString {
 
 pub fn number_to_string(value: f64) -> JsString {
     Rc::from(format_number(value))
+}
+
+pub fn number_is_integer(value: f64) -> bool {
+    value.is_finite() && value.fract() == 0.0
+}
+
+pub fn number_is_safe_integer(value: f64) -> bool {
+    number_is_integer(value) && value.abs() <= 9_007_199_254_740_991.0
 }
 
 pub fn bool_to_string(value: bool) -> JsString {
