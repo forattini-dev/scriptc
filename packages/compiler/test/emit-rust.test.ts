@@ -1111,6 +1111,15 @@ const firstSettle = await new Promise<number>((resolvePromise) => {
 console.log("first settle", firstSettle);
 const mapped = await Promise.resolve(5).then((value) => value + 1);
 console.log("mapped", mapped);
+function makeAsync(prefix: string): () => Promise<string> {
+  return async () => {
+    await sleep(1);
+    return prefix + "tured";
+  };
+}
+const captureFn = makeAsync("cap");
+const captured = await captureFn();
+console.log("capture", captured);
 export {};
 `);
   for (const [name, entryPath] of [
