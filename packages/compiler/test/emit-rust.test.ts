@@ -1174,6 +1174,29 @@ async function recoverStaticRejection(): Promise<string> {
   }
 }
 console.log("static recovered", await recoverStaticRejection());
+function rejectedByExecutor(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    reject(new TypeError("executor rejection"));
+    resolve(99);
+  });
+}
+async function recoverExecutorRejection(): Promise<string> {
+  try {
+    await rejectedByExecutor();
+    return "unreachable";
+  } catch (error) {
+    if (error instanceof TypeError) return error.name + ": " + error.message;
+    return "unknown";
+  }
+}
+console.log("executor recovered", await recoverExecutorRejection());
+function resolvedBeforeReject(): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    resolve("winner");
+    reject(new Error("too late"));
+  });
+}
+console.log("executor first", await resolvedBeforeReject());
 async function throwFromCatch(): Promise<number> {
   try {
     await rejectAfterAwait();

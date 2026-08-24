@@ -75,6 +75,7 @@ class RustEmitter {
   private readonly closureShapes = new Map<string, RustClosureShape>();
   private readonly closureTargets = new Map<string, RustClosureShape>();
   private readonly promiseResolverTypes = new Map<string, IrType>();
+  private readonly promiseRejectorTypes = new Map<string, IrType[]>();
   private readonly internedClosureTargets = new Set<string>();
   private indent = 0;
   private temporary = 0;
@@ -267,6 +268,7 @@ class RustEmitter {
         if (promiseType?.kind !== "promise" || executor?.type?.kind !== "func") {
           this.unsupported("malformed new Promise IR");
         }
+        if (executor.type.params.length > 2) this.unsupported("malformed new Promise executor IR");
         if (resolverType === undefined) {
           if (executor.type.params.length !== 0) this.unsupported("malformed new Promise resolver IR");
         } else {
@@ -282,6 +284,21 @@ class RustEmitter {
             this.unsupported(`Promise resolver signature '${key}' with multiple value types`);
           }
           this.promiseResolverTypes.set(key, promiseType.inner);
+        }
+        const rejectorType = executor.type.params[1];
+        if (rejectorType !== undefined) {
+          if (rejectorType.kind !== "func") this.unsupported("malformed new Promise rejector IR");
+          const key = typeKey(rejectorType);
+          let shape = this.closureShapes.get(key);
+          if (shape === undefined) {
+            shape = { index: this.closureShapes.size, type: rejectorType, targets: [] };
+            this.closureShapes.set(key, shape);
+          }
+          const promiseTypes = this.promiseRejectorTypes.get(key) ?? [];
+          if (!promiseTypes.some((candidate) => typeKey(candidate) === typeKey(promiseType.inner))) {
+            promiseTypes.push(promiseType.inner);
+          }
+          this.promiseRejectorTypes.set(key, promiseTypes);
         }
       }
       for (const child of Object.values(node)) visit(child);
@@ -314,6 +331,7 @@ class RustEmitter {
     for (const shape of this.closureShapes.values()) {
       const name = this.closureName(shape);
       const resolverType = this.promiseResolverTypes.get(typeKey(shape.type));
+      const rejectorTypes = this.promiseRejectorTypes.get(typeKey(shape.type)) ?? [];
       this.line(`enum ${name} {`);
       this.indent += 1;
       for (const target of shape.targets) {
@@ -330,6 +348,9 @@ class RustEmitter {
       if (resolverType !== undefined) {
         this.line(`PromiseResolver { promise: Option<runtime::JsPromise<${this.rustType(resolverType)}>> },`);
       }
+      rejectorTypes.forEach((promiseType, index) => {
+        this.line(`PromiseRejector${index} { promise: Option<runtime::JsPromise<${this.rustType(promiseType)}>> },`);
+      });
       this.indent -= 1;
       this.line("}");
       this.line(`impl runtime::Trace for ${name} {`);
@@ -337,7 +358,7 @@ class RustEmitter {
       this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.indent += 1;
       const capturing = shape.targets.filter((target) => (target.captures?.length ?? 0) > 0);
-      if (capturing.length === 0 && resolverType === undefined) {
+      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0) {
         this.line("let _ = tracer;");
       } else {
         this.line("match self {");
@@ -359,6 +380,13 @@ class RustEmitter {
           this.indent -= 1;
           this.line("},");
         }
+        rejectorTypes.forEach((_, index) => {
+          this.line(`Self::PromiseRejector${index} { promise } => {`);
+          this.indent += 1;
+          this.line("if let Some(edge) = promise { tracer.edge(edge); }");
+          this.indent -= 1;
+          this.line("},");
+        });
         this.line("_ => {},");
         this.indent -= 1;
         this.line("}");
@@ -371,7 +399,7 @@ class RustEmitter {
       this.indent += 1;
       this.line("fn clear_edges(&mut self) {");
       this.indent += 1;
-      if (capturing.length > 0 || resolverType !== undefined) {
+      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0) {
         this.line("match self {");
         this.indent += 1;
         for (const target of capturing) {
@@ -385,6 +413,9 @@ class RustEmitter {
         if (resolverType !== undefined) {
           this.line("Self::PromiseResolver { promise } => *promise = None,");
         }
+        rejectorTypes.forEach((_, index) => {
+          this.line(`Self::PromiseRejector${index} { promise } => *promise = None,`);
+        });
         this.line("_ => {},");
         this.indent -= 1;
         this.line("}");
@@ -2403,15 +2434,22 @@ class RustEmitter {
           const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [], expr.loc);
           return `{ let ${promise} = runtime::promise_new::<${this.rustType(expr.type.inner, expr.loc)}>(); let ${executor} = ${this.emitExpr(expr.executor)}; runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
         }
-        if (expr.executor.type.params.length !== 1) {
-          this.unsupported("new Promise reject resolver in the Rust backend", expr.loc);
-        }
+        if (expr.executor.type.params.length > 2) this.unsupported("new Promise executor arity", expr.loc);
         const resolverType = expr.executor.type.params[0];
         if (resolverType?.kind !== "func") this.unsupported("new Promise resolver shape", expr.loc);
         const shape = this.closureShapeForType(resolverType, expr.loc);
         const resolver = `sc_rt_${this.temporary++}`;
-        const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [resolver], expr.loc);
-        return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
+        const rejectorType = expr.executor.type.params[1];
+        if (rejectorType === undefined) {
+          const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [resolver], expr.loc);
+          return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
+        }
+        if (rejectorType.kind !== "func") this.unsupported("new Promise rejector shape", expr.loc);
+        const rejectorShape = this.closureShapeForType(rejectorType, expr.loc);
+        const rejectorVariant = this.promiseRejectorVariant(rejectorType, expr.type.inner, expr.loc);
+        const rejector = `sc_rt_${this.temporary++}`;
+        const dispatch = this.emitClosureDispatch(executor, expr.executor.type, [resolver, rejector], expr.loc);
+        return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); let ${rejector} = runtime::Gc::new(${this.closureName(rejectorShape)}::${rejectorVariant} { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
       }
       case "intrinsic":
         if (expr.name === "promise.reject") {
@@ -2575,6 +2613,15 @@ class RustEmitter {
       if (args.length !== expectedArity) this.unsupported("Promise resolver argument arity", loc);
       const value = args[0] ?? "()";
       arms.push(`${this.closureName(shape)}::PromiseResolver { promise } => { let promise = promise.as_ref().expect("scriptc: cleared live Promise resolver"); let _ = runtime::promise_fulfill(promise, ${value}); }`);
+    }
+    const rejectorTypes = this.promiseRejectorTypes.get(typeKey(shape.type)) ?? [];
+    if (rejectorTypes.length > 0) {
+      if (args.length !== 1) this.unsupported("Promise rejector argument arity", loc);
+      const reason = args[0];
+      if (reason === undefined) this.unsupported("Promise rejector without a reason", loc);
+      for (let index = 0; index < rejectorTypes.length; index += 1) {
+        arms.push(`${this.closureName(shape)}::PromiseRejector${index} { promise } => { let promise = promise.as_ref().expect("scriptc: cleared live Promise rejector"); let _ = runtime::promise_reject(promise, runtime::caught_value(${reason})); }`);
+      }
     }
     return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
@@ -3113,6 +3160,13 @@ class RustEmitter {
 
   private closureName(shape: RustClosureShape): string {
     return `sc_closure_${shape.index}`;
+  }
+
+  private promiseRejectorVariant(type: IrFuncType, promiseType: IrType, loc?: SrcLoc): string {
+    const promiseTypes = this.promiseRejectorTypes.get(typeKey(type));
+    const index = promiseTypes?.findIndex((candidate) => typeKey(candidate) === typeKey(promiseType)) ?? -1;
+    if (index < 0) this.unsupported(`Promise rejector for '${typeKey(promiseType)}'`, loc);
+    return `PromiseRejector${index}`;
   }
 
   private closureVariant(target: IrFunction): string {
