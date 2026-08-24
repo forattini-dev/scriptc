@@ -136,6 +136,7 @@ class RustEmitter {
     }
     this.line("fn main() {");
     this.indent += 1;
+    this.line("runtime::init();");
     this.line(`${mangleFunction(entry.name)}();`);
     this.line("runtime::run_event_loop();");
     for (const global of this.globals.values()) {
@@ -1679,6 +1680,16 @@ class RustEmitter {
             ? "timer_set_timeout"
             : expr.fn === "timers.setTimeoutHandle" ? "timer_set_timeout_handle" : "timer_set_interval";
           return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::${runtimeFn}(Box::new(move || { ${dispatch}; }), ${this.emitExpr(expr.args[1])}) }`;
+        }
+        if (expr.fn === "process.uptime" && expr.args.length === 0) return "runtime::process_uptime()";
+        if (expr.fn === "perf.now" && expr.args.length === 0) return "runtime::performance_now()";
+        if (expr.fn === "date.now" && expr.args.length === 0) return "runtime::date_now()";
+        if (expr.fn === "atomics.wait" && expr.args.length === 4 && arg !== undefined) {
+          const [index, expected, timeout] = expr.args.slice(1);
+          if (index === undefined || expected === undefined || timeout === undefined) {
+            this.unsupported("atomics.wait arguments", expr.loc);
+          }
+          return `runtime::atomics_wait(&(${this.emitExpr(arg)}), ${this.emitExpr(index)}, ${this.emitExpr(expected)}, ${this.emitExpr(timeout)})`;
         }
         if ((expr.fn === "timers.setImmediate" || expr.fn === "timers.queueMicrotask" || expr.fn === "process.nextTick") &&
             expr.args.length === 1 && arg !== undefined) {

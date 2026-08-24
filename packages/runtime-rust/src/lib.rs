@@ -4,6 +4,9 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::{Rc, Weak};
+use std::sync::OnceLock;
+
+static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
 
 /// Owned JavaScript string handle for the static Rust heap.
 ///
@@ -49,6 +52,29 @@ thread_local! {
 /// changes the liveness result it is trying to compute.
 pub struct Tracer<'a> {
     visit: &'a mut dyn FnMut(DynNodeWeak),
+}
+
+pub fn init() {
+    let _ = PROCESS_START.get_or_init(std::time::Instant::now);
+}
+
+fn process_elapsed() -> std::time::Duration {
+    PROCESS_START.get_or_init(std::time::Instant::now).elapsed()
+}
+
+pub fn process_uptime() -> f64 {
+    process_elapsed().as_secs_f64()
+}
+
+pub fn performance_now() -> f64 {
+    process_elapsed().as_secs_f64() * 1000.0
+}
+
+pub fn date_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("scriptc: system clock precedes the Unix epoch")
+        .as_millis() as f64
 }
 
 impl Tracer<'_> {
@@ -1118,6 +1144,16 @@ pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
 pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
     let index = bytes_index(bytes, index);
     bytes.with(|data| data.storage.borrow_mut()[data.offset + index] = T::from_number(value));
+}
+
+pub fn atomics_wait(bytes: &JsBytes<i32>, index: f64, expected: f64, timeout_ms: f64) -> JsString {
+    if bytes_get(bytes, index) != f64::from(to_int32(expected)) {
+        return string("not-equal");
+    }
+    if timeout_ms.is_finite() && timeout_ms > 0.0 {
+        std::thread::sleep(std::time::Duration::from_secs_f64(timeout_ms / 1000.0));
+    }
+    string("timed-out")
 }
 
 fn bytes_relative_index(index: f64, length: usize, default: usize) -> usize {
