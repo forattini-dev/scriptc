@@ -1146,6 +1146,20 @@ class RustEmitter {
         const operand = this.emitExpr(expr.operand);
         if (expr.operand.type.kind === "f64") return `runtime::number_to_string(${operand})`;
         if (expr.operand.type.kind === "bool") return `runtime::bool_to_string(${operand})`;
+        if (expr.operand.type.kind === "union") {
+          const union = this.union(expr.operand.type.unionId, expr.loc);
+          const name = this.unionName(union.id);
+          const arms = union.arms.map((arm, tag) => {
+            const variant = `${name}::${this.unionVariant(tag)}`;
+            if (arm.kind === "undefinedT") return `${variant} => runtime::string("undefined")`;
+            if (arm.kind === "nullT") return `${variant} => runtime::string("null")`;
+            if (arm.kind === "string") return `${variant}(value) => value`;
+            if (arm.kind === "f64") return `${variant}(value) => runtime::number_to_string(value)`;
+            if (arm.kind === "bool") return `${variant}(value) => runtime::bool_to_string(value)`;
+            this.unsupported(`toString union arm '${arm.kind}'`, expr.loc);
+          }).join(", ");
+          return `match ${operand} { ${arms} }`;
+        }
         this.unsupported(`toString from '${expr.operand.type.kind}'`, expr.loc);
       }
       case "jsonStringify": {
@@ -1255,6 +1269,12 @@ class RustEmitter {
           this.unsupported("caught narrowing outside Error", expr.loc);
         }
         return this.emitExpr(expr.value);
+      case "caughtCheck": {
+        if (expr.type.kind !== "object") this.unsupported("caught check outside an object", expr.loc);
+        const error = RUNTIME_ERROR_CLASSES.get(expr.className);
+        if (error === undefined) this.unsupported(`caught check '${expr.className}'`, expr.loc);
+        return `runtime::caught_check_error(&(${this.emitExpr(expr.value)}), "${this.rustString(error.lib)}")`;
+      }
       case "fieldGet":
         if (RUNTIME_ERROR_CLASSES.has(expr.className) && (expr.field === "name" || expr.field === "message")) {
           return `runtime::caught_error_${expr.field}(&(${this.emitExpr(expr.obj)}))`;
@@ -1449,6 +1469,15 @@ class RustEmitter {
         if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).is_nan()`;
         }
+        if (expr.fn === "error.code" && expr.args.length === 1 && arg !== undefined) {
+          if (expr.type.kind !== "union") this.unsupported("error.code without an optional result union", expr.loc);
+          const union = this.union(expr.type.unionId, expr.loc);
+          const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+          const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+          if (stringTag < 0 || undefinedTag < 0) this.unsupported("error.code result union shape", expr.loc);
+          const name = this.unionName(union.id);
+          return `match runtime::caught_error_code(&(${this.emitExpr(arg)})) { Some(value) => ${name}::${this.unionVariant(stringTag)}(value), None => ${name}::${this.unionVariant(undefinedTag)}, }`;
+        }
         if (expr.fn === "fs.readFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           const path = `sc_rt_${this.temporary++}`;
           return `{ let ${path} = ${this.emitExpr(arg)}; let _ = ${this.emitExpr(expr.args[1])}; runtime::fs_read_file(&${path}) }`;
@@ -1476,6 +1505,49 @@ class RustEmitter {
         }
         if (expr.fn === "fs.realpathSync" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::fs_realpath(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "os.tmpdir" && expr.args.length === 0) return "runtime::os_tmpdir()";
+        if (expr.fn === "fs.mkdtempSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_mkdtemp(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.mkdirRecursiveSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_mkdir_recursive(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.rmOptsSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return `runtime::fs_rm_options(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])}, ${this.emitExpr(expr.args[2])})`;
+        }
+        if (expr.fn === "fs.rmRetrySync" && expr.args.length === 5 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          const maxRetriesArg = expr.args[3];
+          const retryDelayArg = expr.args[4];
+          if (maxRetriesArg === undefined || retryDelayArg === undefined) this.unsupported("fs.rmRetrySync arguments", expr.loc);
+          const path = `sc_rt_${this.temporary++}`;
+          const recursive = `sc_rt_${this.temporary++}`;
+          const force = `sc_rt_${this.temporary++}`;
+          return `{ let ${path} = ${this.emitExpr(arg)}; let ${recursive} = ${this.emitExpr(expr.args[1])}; let ${force} = ${this.emitExpr(expr.args[2])}; let _ = ${this.emitExpr(maxRetriesArg)}; let _ = ${this.emitExpr(retryDelayArg)}; runtime::fs_rm_options(&${path}, ${recursive}, ${force}) }`;
+        }
+        if (expr.fn === "fs.unlinkSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_unlink(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.copyFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_copy_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.renameSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_rename(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.chmodSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_chmod(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.fn === "fs.chownSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return `runtime::fs_chown(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])}, ${this.emitExpr(expr.args[2])})`;
+        }
+        if (expr.fn === "fs.writeFileModeSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return `runtime::fs_write_file_mode(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}), ${this.emitExpr(expr.args[2])})`;
+        }
+        if ((expr.fn === "fs.mkdirModeSync" || expr.fn === "fs.mkdirRecursiveModeSync") && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_mkdir_mode(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])}, ${expr.fn === "fs.mkdirRecursiveModeSync"})`;
+        }
+        if (expr.fn === "fs.accessSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_access(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
         }
         if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::path_join(&(${this.emitExpr(arg)}))`;

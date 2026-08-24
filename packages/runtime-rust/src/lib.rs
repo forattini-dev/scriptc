@@ -365,6 +365,7 @@ pub fn cell_set<T: HeapValue>(cell: &JsCell<T>, value: T) {
 pub struct JsError {
     name: String,
     message: String,
+    code: Option<String>,
 }
 
 impl Trace for JsError {
@@ -375,6 +376,7 @@ pub fn error_new(name: &str, message: JsString) -> JsError {
     JsError {
         name: name.to_owned(),
         message: message.to_string(),
+        code: None,
     }
 }
 
@@ -408,6 +410,7 @@ pub fn throw_reference_error(message: String) -> ! {
     throw_value(JsError {
         name: "ReferenceError".to_owned(),
         message,
+        code: None,
     })
 }
 
@@ -415,6 +418,7 @@ pub fn throw_type_error(message: String) -> ! {
     throw_value(JsError {
         name: "TypeError".to_owned(),
         message,
+        code: None,
     })
 }
 
@@ -422,6 +426,7 @@ pub fn throw_syntax_error(message: String) -> ! {
     throw_value(JsError {
         name: "SyntaxError".to_owned(),
         message,
+        code: None,
     })
 }
 
@@ -459,6 +464,13 @@ pub fn caught_is_error_class(caught: &Caught, name: &str) -> bool {
         .is_some_and(|error| name == "Error" || error.name == name)
 }
 
+pub fn caught_check_error(caught: &Caught, name: &str) -> Caught {
+    if !caught_is_error_class(caught, name) {
+        throw_type_error(format!("caught value is not a {name}"));
+    }
+    caught.clone()
+}
+
 pub fn caught_error_name(caught: &Caught) -> JsString {
     let error = caught
         .value
@@ -473,6 +485,16 @@ pub fn caught_error_message(caught: &Caught) -> JsString {
         .downcast_ref::<JsError>()
         .expect("scriptc: narrowed non-Error caught value");
     Rc::<str>::from(error.message.as_str())
+}
+
+pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
+    caught
+        .value
+        .downcast_ref::<JsError>()
+        .expect("scriptc: narrowed non-Error caught value")
+        .code
+        .as_deref()
+        .map(Rc::<str>::from)
 }
 
 /// A value that may be stored in a traced JavaScript array.
@@ -1172,10 +1194,35 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
     if negative { -result } else { result }
 }
 
+fn fs_error_code(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "ENOENT",
+        std::io::ErrorKind::PermissionDenied => "EACCES",
+        std::io::ErrorKind::AlreadyExists => "EEXIST",
+        std::io::ErrorKind::InvalidInput => "EINVAL",
+        std::io::ErrorKind::NotADirectory => "ENOTDIR",
+        std::io::ErrorKind::IsADirectory => "EISDIR",
+        std::io::ErrorKind::DirectoryNotEmpty => "ENOTEMPTY",
+        std::io::ErrorKind::BrokenPipe => "EPIPE",
+        _ => "EIO",
+    }
+}
+
 fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! {
+    let code = fs_error_code(&error);
     throw_value(JsError {
         name: "Error".to_owned(),
-        message: format!("{error}, {operation} '{}'", path),
+        message: format!("{code}: {error}, {operation} '{}'", path),
+        code: Some(code.to_owned()),
+    })
+}
+
+fn throw_fs_error2(operation: &str, from: &JsString, to: &JsString, error: std::io::Error) -> ! {
+    let code = fs_error_code(&error);
+    throw_value(JsError {
+        name: "Error".to_owned(),
+        message: format!("{code}: {error}, {operation} '{from}' -> '{to}'"),
+        code: Some(code.to_owned()),
     })
 }
 
@@ -1249,6 +1296,211 @@ pub fn fs_realpath(path: &JsString) -> JsString {
     match std::fs::canonicalize(path.as_ref()) {
         Ok(resolved) => Rc::from(resolved.to_string_lossy().as_ref()),
         Err(error) => throw_fs_error("lstat", path, error),
+    }
+}
+
+pub fn os_tmpdir() -> JsString {
+    let value = std::env::var_os("TMPDIR")
+        .or_else(|| std::env::var_os("TMP"))
+        .or_else(|| std::env::var_os("TEMP"))
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "windows") {
+                "."
+            } else {
+                "/tmp"
+            }
+            .to_owned()
+        });
+    let trimmed = if value.len() > 1 {
+        value.trim_end_matches(['/', '\\'])
+    } else {
+        value.as_str()
+    };
+    Rc::from(trimmed)
+}
+
+pub fn fs_mkdtemp(prefix: &JsString) -> JsString {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..1024 {
+        let tick = NEXT.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos() as u64);
+        let suffix = format!(
+            "{:06x}",
+            (nanos ^ tick ^ u64::from(std::process::id())) & 0xff_ffff
+        );
+        let candidate: JsString = Rc::from(format!("{prefix}{suffix}"));
+        match std::fs::create_dir(candidate.as_ref()) {
+            Ok(()) => return candidate,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => throw_fs_error("mkdtemp", &candidate, error),
+        }
+    }
+    throw_fs_error(
+        "mkdtemp",
+        prefix,
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "temporary name collision",
+        ),
+    )
+}
+
+pub fn fs_mkdir_recursive(path: &JsString) {
+    if let Err(error) = std::fs::create_dir_all(path.as_ref()) {
+        throw_fs_error("mkdir", path, error);
+    }
+}
+
+pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
+    let metadata = match std::fs::symlink_metadata(path.as_ref()) {
+        Ok(metadata) => metadata,
+        Err(error) if force && error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => throw_fs_error("lstat", path, error),
+    };
+    let result = if metadata.is_dir() {
+        if recursive {
+            std::fs::remove_dir_all(path.as_ref())
+        } else {
+            std::fs::remove_dir(path.as_ref())
+        }
+    } else {
+        std::fs::remove_file(path.as_ref())
+    };
+    if let Err(error) = result {
+        throw_fs_error("rm", path, error);
+    }
+}
+
+pub fn fs_unlink(path: &JsString) {
+    if let Err(error) = std::fs::remove_file(path.as_ref()) {
+        throw_fs_error("unlink", path, error);
+    }
+}
+
+pub fn fs_copy_file(from: &JsString, to: &JsString) {
+    if let Err(error) = std::fs::copy(from.as_ref(), to.as_ref()) {
+        throw_fs_error2("copyfile", from, to, error);
+    }
+}
+
+pub fn fs_rename(from: &JsString, to: &JsString) {
+    if let Err(error) = std::fs::rename(from.as_ref(), to.as_ref()) {
+        throw_fs_error2("rename", from, to, error);
+    }
+}
+
+#[cfg(unix)]
+pub fn fs_chmod(path: &JsString, mode: f64) {
+    use std::os::unix::fs::PermissionsExt;
+    let permissions = std::fs::Permissions::from_mode(to_uint32(mode));
+    if let Err(error) = std::fs::set_permissions(path.as_ref(), permissions) {
+        throw_fs_error("chmod", path, error);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn fs_chmod(path: &JsString, _mode: f64) {
+    if !fs_exists(path) {
+        throw_fs_error(
+            "chmod",
+            path,
+            std::io::Error::new(std::io::ErrorKind::NotFound, "path does not exist"),
+        );
+    }
+}
+
+pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
+    if let Err(error) = std::fs::metadata(path.as_ref()) {
+        throw_fs_error("chown", path, error);
+    }
+    if uid == -1.0 && gid == -1.0 {
+        return;
+    }
+    let owner = format!("{}:{}", uid.trunc() as i64, gid.trunc() as i64);
+    let status = std::process::Command::new("chown")
+        .arg(owner)
+        .arg("--")
+        .arg(path.as_ref())
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        throw_fs_error(
+            "chown",
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "operation not permitted",
+            ),
+        );
+    }
+}
+
+#[cfg(unix)]
+pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(to_uint32(mode))
+        .open(path.as_ref())
+    {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    if let Err(error) = file.write_all(data.as_bytes()) {
+        throw_fs_error("write", path, error);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn fs_write_file_mode(path: &JsString, data: &JsString, _mode: f64) {
+    fs_write_file(path, data);
+}
+
+#[cfg(unix)]
+pub fn fs_mkdir_mode(path: &JsString, mode: f64, recursive: bool) {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(recursive).mode(to_uint32(mode));
+    if let Err(error) = builder.create(path.as_ref()) {
+        throw_fs_error("mkdir", path, error);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn fs_mkdir_mode(path: &JsString, _mode: f64, recursive: bool) {
+    if recursive {
+        fs_mkdir_recursive(path);
+    } else {
+        fs_mkdir(path);
+    }
+}
+
+pub fn fs_access(path: &JsString, mode: f64) {
+    if let Err(error) = std::fs::metadata(path.as_ref()) {
+        throw_fs_error("access", path, error);
+    }
+    let mode = to_int32(mode);
+    for (bit, flag) in [(4, "-r"), (2, "-w"), (1, "-x")] {
+        if mode & bit == 0 {
+            continue;
+        }
+        let status = std::process::Command::new("test")
+            .arg(flag)
+            .arg(path.as_ref())
+            .status();
+        if !status.is_ok_and(|status| status.success()) {
+            throw_fs_error(
+                "access",
+                path,
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+            );
+        }
     }
 }
 

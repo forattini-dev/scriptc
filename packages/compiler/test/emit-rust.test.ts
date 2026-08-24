@@ -748,6 +748,7 @@ test("Rust synchronous text filesystem operations match Node and throw catchably
     "993-fs-readdir.ts",
     "994-fs-errors.ts",
     "1006-json-fs-config.ts",
+    "1520-fs-wider-surface.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
@@ -775,7 +776,11 @@ test("Rust synchronous text filesystem operations match Node and throw catchably
 import { realpathSync } from "node:fs";
 console.log(realpathSync(".") === process.cwd());
 try { realpathSync("scriptc-rust-definitely-missing"); }
-catch { console.log("caught realpath"); }
+catch (error) {
+  if (error instanceof Error) {
+    console.log("caught realpath", (error as NodeJS.ErrnoException).code);
+  }
+}
 `);
   const realpathResult = await compile(realpathEntry, {
     outDir: dir,
