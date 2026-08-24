@@ -393,6 +393,24 @@ class RustEmitter {
         }
         this.indent -= 1;
         this.line("}");
+        this.line(`impl runtime::JsonDecode for ${name} {`);
+        this.indent += 1;
+        this.line("fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {");
+        this.indent += 1;
+        union.arms.forEach((arm, tag) => {
+          const variant = `Self::${this.unionVariant(tag)}`;
+          if (arm.kind === "nullT") {
+            this.line(`if matches!(node, runtime::JsonNode::Null) { return Ok(${variant}); }`);
+          } else if (arm.kind !== "undefinedT") {
+            const type = this.rustType(arm);
+            this.line(`if let Ok(value) = <${type} as runtime::JsonDecode>::decode_json(node, path) { return Ok(${variant}(value)); }`);
+          }
+        });
+        this.line(`Err(runtime::json_type_error(path, "${this.rustString(typeKey({ kind: "union", unionId: union.id }))}", node))`);
+        this.indent -= 1;
+        this.line("}");
+        this.indent -= 1;
+        this.line("}");
       }
       this.line(`impl runtime::HeapValue for ${name} {`);
       this.indent += 1;
@@ -525,6 +543,42 @@ class RustEmitter {
             : `writer.property(&mut first, "${this.rustString(field.name)}", ${value});`);
         }
         this.line(shape.tuple ? "writer.end_array();" : "writer.end_object();");
+        this.indent -= 1;
+        this.line("}");
+        this.indent -= 1;
+        this.line("}");
+        this.line(`impl runtime::JsonObjectDecode for ${struct} {`);
+        this.indent += 1;
+        this.line("fn decode_json_object(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {");
+        this.indent += 1;
+        this.line(shape.tuple
+          ? "let values = runtime::json_expect_array(node, path)?;"
+          : "let values = runtime::json_expect_object(node, path)?;");
+        this.line(`Ok(${struct} {`);
+        this.indent += 1;
+        for (const field of shape.fields) {
+          const type = this.rustType(field.type);
+          let decoded: string;
+          if (shape.tuple) {
+            const index = Number(field.name);
+            const node = `values.get(${index}).ok_or_else(|| format!("expected index ${index} at {path}"))?`;
+            decoded = `<${type} as runtime::JsonDecode>::decode_json(${node}, &runtime::json_index_path(path, ${index}))?`;
+          } else {
+            const property = `"${this.rustString(field.name)}"`;
+            const path = `runtime::json_property_path(path, ${property})`;
+            const optionalTag = field.type.kind === "union"
+              ? this.union(field.type.unionId).arms.findIndex((arm) => arm.kind === "undefinedT")
+              : -1;
+            if (optionalTag >= 0 && field.type.kind === "union") {
+              decoded = `match runtime::json_object_field(values, ${property}) { Some(value) => <${type} as runtime::JsonDecode>::decode_json(value, &${path})?, None => ${type}::${this.unionVariant(optionalTag)}, }`;
+            } else {
+              decoded = `<${type} as runtime::JsonDecode>::decode_json(runtime::json_required_field(values, ${property}, path)?, &${path})?`;
+            }
+          }
+          this.line(`${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? `Some(${decoded})` : decoded},`);
+        }
+        this.indent -= 1;
+        this.line("})");
         this.indent -= 1;
         this.line("}");
         this.indent -= 1;
@@ -1056,6 +1110,16 @@ class RustEmitter {
           this.unsupported("JSON.stringify indentation for composite values", expr.loc);
         }
         return `runtime::json_stringify(&(${value}))`;
+      }
+      case "dynCheck": {
+        if (expr.value.kind === "libCall" && expr.value.fn === "json.parse" && expr.value.args.length === 1) {
+          const text = expr.value.args[0];
+          if (text === undefined || text.type.kind !== "string" || !this.isRustJsonCompatible(expr.type)) {
+            this.unsupported(`JSON.parse target '${expr.type.kind}'`, expr.loc);
+          }
+          return `runtime::json_parse_typed::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(text)}))`;
+        }
+        this.unsupported("dynamic checked cast", expr.loc);
       }
       case "ternary":
         return `(if ${this.emitExpr(expr.cond)} { ${this.emitExpr(expr.then)} } else { ${this.emitExpr(expr.else_)} })`;

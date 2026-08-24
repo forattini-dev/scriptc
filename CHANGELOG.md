@@ -8,7 +8,7 @@ All notable changes to scriptc will be documented in this file.
 
 - **The memory-safe Rust backend now supports classes vertically.** Constructors, field initialization and expression-position mutation, accessors, monomorphic and virtual methods, generic specializations, abstract dispatch, first-class constructor values, lexical `this` captures, object identity, single inheritance, runtime `instanceof`, composition, and cyclic class graphs compile to traced safe-Rust heap objects.
 - **Rust containers now cover array identity searches plus insertion-ordered `Map` and `Set`.** Strict-equality `indexOf`, SameValueZero `includes`, number/string keys, seeded construction, live mutation during iteration, reference values, cycle tracing, and first-class constructor registries preserve Node behavior in safe Rust.
-- **Rust gains type-directed compact JSON serialization.** `JSON.stringify` now preserves Node formatting for scalars, nested arrays, records, unions, optional-field omission, declared property order, and catchable circular-structure errors; string inclusion and upper-case conversion cover the supporting class and JSON corpora.
+- **Rust gains type-directed JSON serialization and parsing.** `JSON.stringify` now preserves Node formatting for scalars, nested arrays, records, unions, optional-field omission, declared property order, and catchable circular-structure errors. A `JSON.parse` result immediately checked into a static JSON-safe type validates and builds that value without exposing unchecked dynamic data; string inclusion and upper-case conversion cover the supporting class and JSON corpora.
 
 <!-- release:start -->
 

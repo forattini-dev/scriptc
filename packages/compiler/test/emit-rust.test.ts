@@ -48,7 +48,7 @@ test("TypeScript lowers through the Rust backend to a rustc executable", async (
   expect(stdout).toBe("hello world\n");
 }, 120_000);
 
-test("Rust JSON.stringify matches Node for scalars, arrays, records, optionals, and cycles", async () => {
+test("Rust typed JSON parse/stringify matches Node for scalars, arrays, records, unions, optionals, and cycles", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-json-scalars-"));
   const entryPath = join(dir, "json-scalars.ts");
   await writeFile(entryPath, `
@@ -74,6 +74,8 @@ const link: Link = { value: 1, next: null };
 link.next = link;
 try { console.log(JSON.stringify(link)); }
 catch { console.log("cycle"); }
+try { console.log(JSON.parse("{") as number); }
+catch { console.log("syntax"); }
 `);
   const result = await compile(entryPath, {
     outDir: dir,
@@ -94,6 +96,34 @@ catch { console.log("cycle"); }
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
+  for (const fixture of [
+    "1000-json-stringify-basics.ts",
+    "1001-json-escapes-unicode.ts",
+    "1003-json-parse-unions.ts",
+    "1008-json-null-arms.ts",
+    "1009-json-optional-fields.ts",
+  ]) {
+    const corpusPath = resolve("tests/corpus", fixture);
+    const corpusResult = await compile(corpusPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      corpusResult.ok,
+      corpusResult.ok ? fixture : `${fixture}: ${corpusResult.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!corpusResult.ok) continue;
+    const [corpusNode, corpusRust] = await Promise.all([
+      execFileAsync(process.execPath, [corpusPath]),
+      execFileAsync(corpusResult.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(corpusRust.stdout, fixture).toBe(corpusNode.stdout);
+    expect(corpusRust.stderr, fixture).toBe(corpusNode.stderr);
+  }
 }, 120_000);
 
 test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
