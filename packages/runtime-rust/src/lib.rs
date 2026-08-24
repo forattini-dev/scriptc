@@ -830,6 +830,27 @@ pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
     })
 }
 
+pub fn promise_timeout(delay_ms: f64) -> JsPromise<()> {
+    let promise = promise_new();
+    let result = promise.clone();
+    timer_set_timeout(
+        Box::new(move || {
+            let _ = promise_fulfill(&result, ());
+        }),
+        delay_ms,
+    );
+    promise
+}
+
+pub fn promise_immediate() -> JsPromise<()> {
+    let promise = promise_new();
+    let result = promise.clone();
+    let _ = timer_set_immediate(Box::new(move || {
+        let _ = promise_fulfill(&result, ());
+    }));
+    promise
+}
+
 fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<T, Caught>) {
     timer_queue_microtask(Box::new(move || reaction(outcome)));
 }

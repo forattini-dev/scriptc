@@ -1819,6 +1819,12 @@ class RustEmitter {
         if (expr.fn === "process.rusage" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::process_rusage(${this.emitExpr(arg)})`;
         }
+        if (expr.fn === "tp.setTimeout" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::promise_timeout(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "tp.setImmediate" && expr.args.length === 0) {
+          return "runtime::promise_immediate()";
+        }
         if (expr.fn === "atomics.wait" && expr.args.length === 4 && arg !== undefined) {
           const [index, expected, timeout] = expr.args.slice(1);
           if (index === undefined || expected === undefined || timeout === undefined) {

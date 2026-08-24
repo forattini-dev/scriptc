@@ -1084,6 +1084,7 @@ test("Rust async state machines resume settled promises on microtasks", async ()
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-resolve-"));
   const entry = join(dir, "async-resolve.ts");
   await writeFile(entry, `
+import { setTimeout as sleep, setImmediate as tick } from "node:timers/promises";
 async function compute(): Promise<number> {
   console.log("compute start");
   const value = await Promise.resolve(40);
@@ -1093,6 +1094,11 @@ async function compute(): Promise<number> {
 console.log("main start");
 const answer = await compute();
 console.log("answer", answer);
+setTimeout(() => console.log("callback timer"), 0);
+await sleep(5);
+console.log("promise timer");
+await tick();
+console.log("promise immediate");
 export {};
 `);
   const result = await compile(entry, {
