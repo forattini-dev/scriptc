@@ -1150,6 +1150,48 @@ const awaitRight = argument(16) + await Promise.resolve(17);
 console.log("await right", awaitRight);
 const awaitLeft = await Promise.resolve(18) + argument(19);
 console.log("await left", awaitLeft);
+async function rejectAfterAwait(): Promise<number> {
+  await Promise.resolve(0);
+  throw new Error("caught after await");
+}
+async function recoverRejection(): Promise<string> {
+  try {
+    await rejectAfterAwait();
+    return "unreachable";
+  } catch (error) {
+    if (error instanceof Error) return error.message;
+    return "unknown";
+  }
+}
+console.log("recovered", await recoverRejection());
+async function recoverStaticRejection(): Promise<string> {
+  try {
+    await Promise.reject(new TypeError("static rejection"));
+    return "unreachable";
+  } catch (error) {
+    if (error instanceof TypeError) return error.name + ": " + error.message;
+    return "unknown";
+  }
+}
+console.log("static recovered", await recoverStaticRejection());
+async function throwFromCatch(): Promise<number> {
+  try {
+    await rejectAfterAwait();
+    return 0;
+  } catch {
+    throw new RangeError("catch failed");
+  }
+}
+async function recoverCatchThrow(): Promise<string> {
+  try {
+    await throwFromCatch();
+    return "unreachable";
+  } catch (error) {
+    if (error instanceof RangeError) return error.name + ": " + error.message;
+    return "unknown";
+  }
+}
+console.log("catch throw", await recoverCatchThrow());
 export {};
 `);
   for (const [name, entryPath] of [
@@ -1161,6 +1203,7 @@ export {};
     ["async-basics", resolve("tests/corpus/1020-async-basics.ts")],
     ["async-promise-capture", resolve("tests/corpus/1025-async-promise-capture.ts")],
     ["async-return-records", resolve("tests/corpus/1028-async-return-record-literals.ts")],
+    ["promise-reject-all", resolve("tests/corpus/1572-promise-reject-all-tuple.ts")],
   ] as const) {
     const result = await compile(entryPath, {
       outDir: dir,

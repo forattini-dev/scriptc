@@ -780,6 +780,7 @@ impl HeapValue for usize {}
 impl HeapValue for () {}
 impl HeapValue for JsString {}
 impl HeapValue for JsError {}
+impl HeapValue for Caught {}
 
 impl<T> HeapValue for Gc<T>
 where
@@ -828,6 +829,12 @@ pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
     Gc::new(PromiseData {
         state: PromiseState::Fulfilled(Some(value)),
     })
+}
+
+pub fn promise_rejected<T: HeapValue>(reason: Caught) -> JsPromise<T> {
+    let promise = promise_new();
+    let _ = promise_reject(&promise, reason);
+    promise
 }
 
 pub fn promise_timeout(delay_ms: f64) -> JsPromise<()> {
@@ -1073,6 +1080,22 @@ where
     }
 }
 
+pub enum AsyncSegment {
+    Fallthrough,
+    Suspended,
+    Completed,
+}
+
+pub fn promise_try_segment<F>(segment: F) -> Result<AsyncSegment, Caught>
+where
+    F: FnOnce() -> AsyncSegment,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(segment)) {
+        Ok(completion) => Ok(completion),
+        Err(payload) => Err(caught_from_panic(payload)),
+    }
+}
+
 /// Payload of a shared lexical binding captured by one or more closures.
 pub struct CellData<T: HeapValue> {
     value: Option<T>,
@@ -1146,6 +1169,12 @@ pub fn error_new(name: &str, message: JsString) -> JsError {
 #[derive(Clone)]
 pub struct Caught {
     value: Rc<dyn Any>,
+}
+
+pub fn caught_value<T: 'static>(value: T) -> Caught {
+    Caught {
+        value: Rc::new(value),
+    }
 }
 
 pub enum Completion<T> {

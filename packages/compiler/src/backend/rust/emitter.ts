@@ -79,6 +79,7 @@ class RustEmitter {
   private temporary = 0;
   private currentFunction: IrFunction | null = null;
   private currentAsyncResult: string | null = null;
+  private currentAsyncLocals: Set<string> | null = null;
   private capturedReturnDepth = 0;
   private readonly loopTargets: { id: number; breakLabel: string; continueBlock: string | null }[] = [];
   private readonly completionLoopBoundaries: number[] = [];
@@ -797,8 +798,13 @@ class RustEmitter {
       this.indent += 1;
       this.line(`let ${bodyResult} = ${bodyResult};`);
       this.currentAsyncResult = bodyResult;
+      this.currentAsyncLocals = new Set([
+        ...fn.params.map((param) => param.localId),
+        ...(fn.captures ?? []).map((capture) => capture.localId),
+      ]);
       this.emitAsyncStatements(fn.body);
       this.currentAsyncResult = null;
+      this.currentAsyncLocals = null;
       this.indent -= 1;
       this.line("});");
       this.line(result);
@@ -830,6 +836,10 @@ class RustEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const stmt = statements[index];
       if (stmt === undefined) break;
+      if (stmt.kind === "tryCatch" && this.containsAsyncSuspension(stmt)) {
+        this.emitAsyncTryCatch(stmt, statements.slice(index + 1));
+        return;
+      }
       const hop = stmt.kind === "exprStmt" && stmt.expr.kind === "seqExpr"
         ? stmt.expr.stmts.findIndex((candidate) =>
           candidate.kind === "exprStmt" && candidate.expr.kind === "libCall" && candidate.expr.fn === "async.hop")
@@ -873,6 +883,7 @@ class RustEmitter {
             } else if (stmt.kind === "varDecl") {
               const local = this.local(stmt.localId, stmt.loc);
               this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+              this.currentAsyncLocals?.add(local.id);
               this.emitAsyncStatements(statements.slice(index + 1));
             } else if (stmt.kind === "exprStmt") {
               this.line(`let _ = ${value};`);
@@ -888,6 +899,7 @@ class RustEmitter {
           this.unsupported("nested async suspension in the Rust state-machine subset", stmt.loc);
         }
         this.emitStatement(stmt);
+        if (stmt.kind === "varDecl") this.currentAsyncLocals?.add(stmt.localId);
         continue;
       }
 
@@ -899,6 +911,7 @@ class RustEmitter {
           } else if (stmt.kind === "varDecl") {
             const local = this.local(stmt.localId, stmt.loc);
             this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
+            this.currentAsyncLocals?.add(local.id);
           } else if (stmt.kind === "exprStmt") {
             this.line(`let _ = ${value};`);
           } else {
@@ -915,6 +928,165 @@ class RustEmitter {
       this.line(`let _ = runtime::promise_fulfill(&${result}, ());`);
     } else {
       this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
+    }
+  }
+
+  private emitAsyncTryCatch(
+    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
+    remaining: readonly IrStmt[],
+  ): void {
+    if (stmt.catchBody === null || stmt.finallyBody !== null) {
+      this.unsupported("async try/finally in the Rust state-machine subset", stmt.loc);
+    }
+    const outerLocals = new Set(this.currentAsyncLocals ?? []);
+    this.emitAsyncTrySegment(stmt.tryBody, stmt, remaining, outerLocals);
+  }
+
+  private emitAsyncTrySegment(
+    statements: readonly IrStmt[],
+    owner: Extract<IrStmt, { kind: "tryCatch" }>,
+    remaining: readonly IrStmt[],
+    outerLocals: ReadonlySet<string>,
+  ): void {
+    const result = this.currentAsyncResult;
+    if (result === null) this.unsupported("async try segment without a result promise", owner.loc);
+    const segment = `sc_async_segment_${this.temporary++}`;
+    this.line(`let ${segment} = runtime::promise_try_segment(|| {`);
+    this.indent += 1;
+    let terminal = false;
+    for (let index = 0; index < statements.length; index += 1) {
+      const current = statements[index];
+      if (current === undefined) break;
+      const awaited =
+        current.kind === "assign" && current.value.kind === "awaitExpr" ? current.value
+        : current.kind === "varDecl" && current.init?.kind === "awaitExpr" ? current.init
+        : current.kind === "exprStmt" && current.expr.kind === "awaitExpr" ? current.expr
+        : current.kind === "return" && current.value?.kind === "awaitExpr" ? current.value
+        : null;
+      if (awaited !== null) {
+        const dependency = `sc_async_dependency_${this.temporary++}`;
+        const nextResult = `sc_async_result_${this.temporary++}`;
+        const outcome = `sc_async_outcome_${this.temporary++}`;
+        const guard = `sc_async_guard_${this.temporary++}`;
+        const value = `sc_async_value_${this.temporary++}`;
+        this.line(`let ${dependency} = ${this.emitExpr(awaited.value)};`);
+        this.line(`let ${nextResult} = ${result}.clone();`);
+        const continuationLocals = new Set(this.currentAsyncLocals ?? []);
+        const captures = [...continuationLocals].map((localId) => ({
+          localId,
+          capture: `sc_async_capture_${this.temporary++}`,
+        }));
+        for (const capture of captures) {
+          this.line(`let ${capture.capture} = ${mangleLocal(capture.localId)}.clone();`);
+        }
+        this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
+        this.indent += 1;
+        this.line(`let ${guard} = ${nextResult}.clone();`);
+        this.line(`runtime::promise_run_segment(&${guard}, move || {`);
+        this.indent += 1;
+        this.line(`let ${result} = ${nextResult};`);
+        for (const capture of captures) {
+          this.line(`let ${mangleLocal(capture.localId)} = ${capture.capture};`);
+        }
+        this.line(`match ${outcome} {`);
+        this.indent += 1;
+        this.line(`Ok(${value}) => {`);
+        this.indent += 1;
+        this.withAsyncLocals(new Set(continuationLocals), () => {
+          if (current.kind === "assign") {
+            this.emitAssignment(current.localId, value, current.loc);
+            this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
+          } else if (current.kind === "varDecl") {
+            const local = this.local(current.localId, current.loc);
+            this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${value});`);
+            this.currentAsyncLocals?.add(local.id);
+            this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
+          } else if (current.kind === "exprStmt") {
+            this.line(`let _ = ${value};`);
+            this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
+          } else {
+            this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+          }
+        });
+        this.indent -= 1;
+        this.line("},");
+        this.line("Err(reason) => {");
+        this.indent += 1;
+        this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncCatch(owner, remaining, "reason"));
+        this.indent -= 1;
+        this.line("},");
+        this.indent -= 1;
+        this.line("}");
+        this.indent -= 1;
+        this.line("});");
+        this.indent -= 1;
+        this.line("}));");
+        this.line("return runtime::AsyncSegment::Suspended;");
+        terminal = true;
+        break;
+      }
+      if (this.containsAsyncSuspension(current)) {
+        this.unsupported("nested async suspension inside Rust try/catch", current.loc);
+      }
+      if (current.kind === "return") {
+        const value = current.value === null ? "()" : this.emitExpr(current.value);
+        this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+        this.line("return runtime::AsyncSegment::Completed;");
+        terminal = true;
+        break;
+      }
+      this.emitStatement(current);
+      if (current.kind === "varDecl") this.currentAsyncLocals?.add(current.localId);
+    }
+    if (!terminal) this.line("runtime::AsyncSegment::Fallthrough");
+    this.indent -= 1;
+    this.line("});");
+    this.line(`match ${segment} {`);
+    this.indent += 1;
+    this.line("Ok(runtime::AsyncSegment::Fallthrough) => {");
+    this.indent += 1;
+    this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(remaining));
+    this.indent -= 1;
+    this.line("},");
+    this.line("Ok(runtime::AsyncSegment::Suspended) | Ok(runtime::AsyncSegment::Completed) => {},");
+    this.line("Err(reason) => {");
+    this.indent += 1;
+    this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncCatch(owner, remaining, "reason"));
+    this.indent -= 1;
+    this.line("},");
+    this.indent -= 1;
+    this.line("}");
+    this.line("return;");
+  }
+
+  private emitAsyncCatch(
+    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
+    remaining: readonly IrStmt[],
+    reason: string,
+  ): void {
+    if (stmt.catchBody === null) {
+      const result = this.currentAsyncResult;
+      if (result === null) this.unsupported("async rejection without a result promise", stmt.loc);
+      this.line(`let _ = runtime::promise_reject(&${result}, ${reason});`);
+      return;
+    }
+    if (stmt.catchLocalId === null) {
+      this.line(`let _ = ${reason};`);
+    } else {
+      const local = this.local(stmt.catchLocalId, stmt.loc);
+      this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${reason});`);
+      this.currentAsyncLocals?.add(local.id);
+    }
+    this.emitAsyncStatements([...stmt.catchBody, ...remaining]);
+  }
+
+  private withAsyncLocals<T>(locals: Set<string>, emit: () => T): T {
+    const previous = this.currentAsyncLocals;
+    this.currentAsyncLocals = locals;
+    try {
+      return emit();
+    } finally {
+      this.currentAsyncLocals = previous;
     }
   }
 
@@ -2149,6 +2321,16 @@ class RustEmitter {
         return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
       }
       case "intrinsic":
+        if (expr.name === "promise.reject") {
+          if (expr.type.kind !== "promise" || expr.args.length !== 1) {
+            this.unsupported("Promise.reject shape", expr.loc);
+          }
+          const reason = expr.args[0];
+          if (reason === undefined || reason.type.kind !== "object") {
+            this.unsupported("Promise.reject reason outside typed Error objects", expr.loc);
+          }
+          return `runtime::promise_rejected::<${this.rustType(expr.type.inner, expr.loc)}>(runtime::caught_value(${this.emitExpr(reason)}))`;
+        }
         if (expr.name === "promise.resolve") {
           if (expr.type.kind !== "promise" || expr.args.length > 1) {
             this.unsupported("Promise.resolve shape", expr.loc);
