@@ -1395,6 +1395,37 @@ test("Rust unhandled async rejection matches the official exit-one corpus", asyn
   expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 120_000);
 
+test("Rust uncaught Error subclass matches the official exit-one corpus", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-uncaught-error-"));
+  const entryPath = resolve("tests/corpus/1304-errors-uncaught.ts");
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "errors-uncaught"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok
+      ? undefined
+      : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(node.exitCode).toBe(1);
+  expect(rust.exitCode).toBe(node.exitCode);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toContain("Uncaught FatalError: unrecoverable");
+  expect(rust.stderr).not.toContain("Rust heap object(s) still live");
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [

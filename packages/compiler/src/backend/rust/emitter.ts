@@ -155,12 +155,30 @@ class RustEmitter {
     this.line("fn main() {");
     this.indent += 1;
     this.line("runtime::init();");
+    this.line("let _sc_execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
+    this.indent += 1;
     this.line(entry.async
       ? `let _sc_main_promise = ${mangleFunction(entry.name)}();`
       : `${mangleFunction(entry.name)}();`);
     this.line("runtime::run_event_loop();");
     this.line("let _sc_unhandled_rejection = runtime::had_unhandled_rejection();");
     if (entry.async) this.line("drop(_sc_main_promise);");
+    this.line("_sc_unhandled_rejection");
+    this.indent -= 1;
+    this.line("}));");
+    this.line("let (_sc_unhandled_rejection, _sc_uncaught) = match _sc_execution {");
+    this.indent += 1;
+    this.line("Ok(unhandled) => (unhandled, None),");
+    this.line("Err(payload) => {");
+    this.indent += 1;
+    this.line("let caught = runtime::caught_from_panic(payload);");
+    this.line(`let message = ${this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string"}(&caught);`);
+    this.line("drop(caught);");
+    this.line("(false, Some(message))");
+    this.indent -= 1;
+    this.line("},");
+    this.indent -= 1;
+    this.line("};");
     for (const global of this.globals.values()) {
       if (this.isHeapRoot(global.type)) {
         this.line(`${mangleGlobal(global.id)}.with(|slot| *slot.borrow_mut() = None);`);
@@ -170,6 +188,7 @@ class RustEmitter {
       this.line(`${mangleFnClosure(fnName)}.with(|slot| *slot.borrow_mut() = None);`);
     }
     this.line("runtime::finish();");
+    this.line("if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }");
     this.line("if _sc_unhandled_rejection { std::process::exit(1); }");
     this.indent -= 1;
     this.line("}");
@@ -883,6 +902,12 @@ class RustEmitter {
       this.line(`if runtime::caught_is::<${typeName}>(caught) { return matches!(target, ${classes.map((value) => `"${this.rustString(value)}"`).join(" | ")}); }`);
     }
     this.line("false");
+    this.indent -= 1;
+    this.line("}");
+    this.line("fn sc_caught_to_string(caught: &runtime::Caught) -> runtime::JsString {");
+    this.indent += 1;
+    this.line("if sc_caught_is_error_class(caught, \"Error\") { return sc_error_to_string(&sc_caught_error_value(caught)); }");
+    this.line("runtime::caught_to_string(caught)");
     this.indent -= 1;
     this.line("}");
     this.line("");
