@@ -889,7 +889,7 @@ if (timed.error) {
   }
 }, 120_000);
 
-test("Rust one-shot timers drain after synchronous work", async () => {
+test("Rust timers, immediates, and microtasks preserve ordering and liveness", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-timers-"));
   const entry = join(dir, "timers.ts");
   await writeFile(entry, `
@@ -902,6 +902,22 @@ setTimeout(() => {
 const cancelled = setImmediate(() => console.log("cancelled"));
 clearImmediate(cancelled);
 setImmediate(() => console.log("immediate"));
+const dead = setTimeout(() => console.log("dead"), 0);
+clearTimeout(dead);
+let ticks = 0;
+const interval = setInterval(() => {
+  ticks += 1;
+  console.log("tick", ticks);
+  if (ticks === 2) clearInterval(interval);
+}, 0);
+const unreffed = setTimeout(() => console.log("unreffed"), 100);
+unreffed.unref();
+console.log("hasRef", unreffed.hasRef());
+unreffed.ref();
+console.log("hasRef", unreffed.hasRef());
+clearTimeout(unreffed);
+const refreshed = setTimeout(() => console.log("refreshed"), 4);
+refreshed.refresh();
 setTimeout(() => console.log("later"), 8);
 value = "after";
 console.log("sync", value);

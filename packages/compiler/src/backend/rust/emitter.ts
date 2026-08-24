@@ -1668,13 +1668,17 @@ class RustEmitter {
               stdoutMode === undefined || stderrMode === undefined) this.unsupported("cp.execSync arguments", expr.loc);
           return `runtime::child_exec_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(shell)}, &(${this.emitExpr(input)}), ${this.emitExpr(hasInput)}, &(${this.emitExpr(cwd)}), ${this.emitExpr(hasEnv)}, &(${this.emitExpr(envPairs)}), ${this.emitExpr(timeout)}, ${this.emitExpr(stdoutMode)}, ${this.emitExpr(stderrMode)})`;
         }
-        if (expr.fn === "timers.setTimeout" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+        if ((expr.fn === "timers.setTimeout" || expr.fn === "timers.setTimeoutHandle" || expr.fn === "timers.setInterval") &&
+            expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {
             this.unsupported("setTimeout callback shape", expr.loc);
           }
           const callback = `sc_rt_${this.temporary++}`;
           const dispatch = this.emitClosureDispatch(callback, arg.type, [], expr.loc);
-          return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::timer_set_timeout(Box::new(move || { ${dispatch}; }), ${this.emitExpr(expr.args[1])}); }`;
+          const runtimeFn = expr.fn === "timers.setTimeout"
+            ? "timer_set_timeout"
+            : expr.fn === "timers.setTimeoutHandle" ? "timer_set_timeout_handle" : "timer_set_interval";
+          return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::${runtimeFn}(Box::new(move || { ${dispatch}; }), ${this.emitExpr(expr.args[1])}) }`;
         }
         if ((expr.fn === "timers.setImmediate" || expr.fn === "timers.queueMicrotask") && expr.args.length === 1 && arg !== undefined) {
           if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {
@@ -1687,6 +1691,18 @@ class RustEmitter {
         }
         if (expr.fn === "timers.clearImmediate" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::timer_clear_immediate(${this.emitExpr(arg)})`;
+        }
+        if ((expr.fn === "timers.clearTimeout" || expr.fn === "timers.clearInterval") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_clear(${this.emitExpr(arg)})`;
+        }
+        if ((expr.fn === "timers.unref" || expr.fn === "timers.ref") && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_set_ref(${this.emitExpr(arg)}, ${expr.fn === "timers.ref"})`;
+        }
+        if (expr.fn === "timers.hasRef" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_has_ref(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "timers.refresh" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_refresh(${this.emitExpr(arg)})`;
         }
         if (expr.fn === "cp.spawnSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::child_spawn_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}), 0.0, &runtime::string(""), 0.0, 0.0, 0.0)`;

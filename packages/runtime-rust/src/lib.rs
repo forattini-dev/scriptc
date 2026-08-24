@@ -36,6 +36,10 @@ thread_local! {
     static MICROTASKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
     static EVENT_TURN: Cell<u64> = const { Cell::new(0) };
     static EVENT_PHASE: Cell<u8> = const { Cell::new(0) };
+    static FIRING_TIMER_ID: Cell<u64> = const { Cell::new(0) };
+    static FIRING_TIMER_REFRESHED: Cell<bool> = const { Cell::new(false) };
+    static FIRING_TIMER_CLEARED: Cell<bool> = const { Cell::new(false) };
+    static FIRING_TIMER_REFERENCED: Cell<bool> = const { Cell::new(true) };
 }
 
 /// Visitor used by generated heap payloads to expose owning edges.
@@ -297,7 +301,10 @@ struct TimerTask {
     id: u64,
     turn: u64,
     due: std::time::Instant,
-    callback: Box<dyn FnOnce()>,
+    delay: std::time::Duration,
+    repeat: bool,
+    referenced: bool,
+    callback: Box<dyn FnMut()>,
 }
 
 struct ImmediateTask {
@@ -306,12 +313,17 @@ struct ImmediateTask {
     callback: Box<dyn FnOnce()>,
 }
 
-pub fn timer_set_timeout(callback: Box<dyn FnOnce()>, delay_ms: f64) {
+fn timer_delay(delay_ms: f64) -> std::time::Duration {
     let delay_ms = if delay_ms.is_finite() && delay_ms > 0.0 {
         delay_ms.trunc().min(f64::from(i32::MAX)) as u64
     } else {
         0
     };
+    std::time::Duration::from_millis(delay_ms)
+}
+
+fn timer_schedule(callback: Box<dyn FnMut()>, delay_ms: f64, repeat: bool) -> f64 {
+    let delay = timer_delay(delay_ms);
     let id = NEXT_TIMER_ID.with(|next| {
         let id = next.get();
         next.set(id.checked_add(1).expect("scriptc: exhausted timer ids"));
@@ -327,10 +339,98 @@ pub fn timer_set_timeout(callback: Box<dyn FnOnce()>, delay_ms: f64) {
             } else {
                 turn
             },
-            due: std::time::Instant::now() + std::time::Duration::from_millis(delay_ms),
+            due: std::time::Instant::now() + delay,
+            delay,
+            repeat,
+            referenced: true,
             callback,
         });
     });
+    id as f64
+}
+
+pub fn timer_set_timeout(callback: Box<dyn FnMut()>, delay_ms: f64) {
+    let _ = timer_schedule(callback, delay_ms, false);
+}
+
+pub fn timer_set_timeout_handle(callback: Box<dyn FnMut()>, delay_ms: f64) -> f64 {
+    timer_schedule(callback, delay_ms, false)
+}
+
+pub fn timer_set_interval(callback: Box<dyn FnMut()>, delay_ms: f64) -> f64 {
+    timer_schedule(callback, delay_ms, true)
+}
+
+pub fn timer_clear(id: f64) {
+    if !id.is_finite() || id.fract() != 0.0 || id < 1.0 || id > u64::MAX as f64 {
+        return;
+    }
+    let id = id as u64;
+    TIMER_TASKS.with(|tasks| tasks.borrow_mut().retain(|task| task.id != id));
+    FIRING_TIMER_ID.with(|firing| {
+        if firing.get() == id {
+            FIRING_TIMER_CLEARED.with(|cleared| cleared.set(true));
+        }
+    });
+}
+
+pub fn timer_set_ref(id: f64, referenced: bool) -> f64 {
+    if id.is_finite() && id.fract() == 0.0 && id >= 1.0 && id <= u64::MAX as f64 {
+        let id = id as u64;
+        TIMER_TASKS.with(|tasks| {
+            if let Some(task) = tasks.borrow_mut().iter_mut().find(|task| task.id == id) {
+                task.referenced = referenced;
+            }
+        });
+        FIRING_TIMER_ID.with(|firing| {
+            if firing.get() == id {
+                FIRING_TIMER_REFERENCED.with(|value| value.set(referenced));
+            }
+        });
+    }
+    id
+}
+
+pub fn timer_has_ref(id: f64) -> bool {
+    if !id.is_finite() || id.fract() != 0.0 || id < 1.0 || id > u64::MAX as f64 {
+        return false;
+    }
+    let id = id as u64;
+    let pending = TIMER_TASKS.with(|tasks| {
+        tasks
+            .borrow()
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.referenced)
+    });
+    pending.unwrap_or_else(|| {
+        FIRING_TIMER_ID.with(|firing| firing.get() == id)
+            && FIRING_TIMER_REFERENCED.with(|referenced| referenced.get())
+    })
+}
+
+pub fn timer_refresh(id: f64) -> f64 {
+    if !id.is_finite() || id.fract() != 0.0 || id < 1.0 || id > u64::MAX as f64 {
+        return id;
+    }
+    let id_int = id as u64;
+    let refreshed = TIMER_TASKS.with(|tasks| {
+        let mut tasks = tasks.borrow_mut();
+        if let Some(task) = tasks.iter_mut().find(|task| task.id == id_int) {
+            task.due = std::time::Instant::now() + task.delay;
+            true
+        } else {
+            false
+        }
+    });
+    if !refreshed {
+        FIRING_TIMER_ID.with(|firing| {
+            if firing.get() == id_int {
+                FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.set(true));
+            }
+        });
+    }
+    id
 }
 
 pub fn timer_set_immediate(callback: Box<dyn FnOnce()>) -> f64 {
@@ -373,6 +473,13 @@ pub fn run_event_loop() {
             continue;
         }
 
+        let has_referenced_work = TIMER_TASKS
+            .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
+            || IMMEDIATE_TASKS.with(|tasks| !tasks.borrow().is_empty());
+        if !has_referenced_work {
+            break;
+        }
+
         let now = std::time::Instant::now();
         let timer = TIMER_TASKS.with(|tasks| {
             let mut tasks = tasks.borrow_mut();
@@ -384,9 +491,22 @@ pub fn run_event_loop() {
                 .and_then(|(index, task)| (task.due <= now).then_some(index))?;
             Some(tasks.swap_remove(index))
         });
-        if let Some(timer) = timer {
+        if let Some(mut timer) = timer {
             EVENT_PHASE.with(|phase| phase.set(1));
+            FIRING_TIMER_ID.with(|id| id.set(timer.id));
+            FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.set(false));
+            FIRING_TIMER_CLEARED.with(|cleared| cleared.set(false));
+            FIRING_TIMER_REFERENCED.with(|referenced| referenced.set(timer.referenced));
             (timer.callback)();
+            let refreshed = FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.get());
+            let cleared = FIRING_TIMER_CLEARED.with(|cleared| cleared.get());
+            timer.referenced = FIRING_TIMER_REFERENCED.with(|referenced| referenced.get());
+            FIRING_TIMER_ID.with(|id| id.set(0));
+            if !cleared && (timer.repeat || refreshed) {
+                timer.turn = turn + 1;
+                timer.due = std::time::Instant::now() + timer.delay;
+                TIMER_TASKS.with(|tasks| tasks.borrow_mut().push(timer));
+            }
             continue;
         }
 
