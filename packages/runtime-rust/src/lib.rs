@@ -29,6 +29,13 @@ thread_local! {
     static OPEN_FILES: RefCell<HashMap<i32, std::fs::File>> = RefCell::new(HashMap::new());
     #[cfg(not(unix))]
     static NEXT_FILE_ID: Cell<i32> = const { Cell::new(3) };
+    static TIMER_TASKS: RefCell<Vec<TimerTask>> = const { RefCell::new(Vec::new()) };
+    static NEXT_TIMER_ID: Cell<u64> = const { Cell::new(1) };
+    static IMMEDIATE_TASKS: RefCell<Vec<ImmediateTask>> = const { RefCell::new(Vec::new()) };
+    static NEXT_IMMEDIATE_ID: Cell<u64> = const { Cell::new(1) };
+    static MICROTASKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
+    static EVENT_TURN: Cell<u64> = const { Cell::new(0) };
+    static EVENT_PHASE: Cell<u8> = const { Cell::new(0) };
 }
 
 /// Visitor used by generated heap payloads to expose owning edges.
@@ -276,11 +283,154 @@ pub fn collect_cycles() -> usize {
 /// traced array/record object was released.
 pub fn finish() {
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
+    TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());
+    IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
+    MICROTASKS.with(|tasks| tasks.borrow_mut().clear());
     collect_cycles();
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();
         assert_eq!(live, 0, "scriptc: {live} Rust heap object(s) still live");
     }
+}
+
+struct TimerTask {
+    id: u64,
+    turn: u64,
+    due: std::time::Instant,
+    callback: Box<dyn FnOnce()>,
+}
+
+struct ImmediateTask {
+    id: u64,
+    turn: u64,
+    callback: Box<dyn FnOnce()>,
+}
+
+pub fn timer_set_timeout(callback: Box<dyn FnOnce()>, delay_ms: f64) {
+    let delay_ms = if delay_ms.is_finite() && delay_ms > 0.0 {
+        delay_ms.trunc().min(f64::from(i32::MAX)) as u64
+    } else {
+        0
+    };
+    let id = NEXT_TIMER_ID.with(|next| {
+        let id = next.get();
+        next.set(id.checked_add(1).expect("scriptc: exhausted timer ids"));
+        id
+    });
+    TIMER_TASKS.with(|tasks| {
+        let turn = EVENT_TURN.with(|turn| turn.get());
+        let phase = EVENT_PHASE.with(|phase| phase.get());
+        tasks.borrow_mut().push(TimerTask {
+            id,
+            turn: if phase == 1 || phase == 2 {
+                turn + 1
+            } else {
+                turn
+            },
+            due: std::time::Instant::now() + std::time::Duration::from_millis(delay_ms),
+            callback,
+        });
+    });
+}
+
+pub fn timer_set_immediate(callback: Box<dyn FnOnce()>) -> f64 {
+    let id = NEXT_IMMEDIATE_ID.with(|next| {
+        let id = next.get();
+        next.set(id.checked_add(1).expect("scriptc: exhausted immediate ids"));
+        id
+    });
+    let turn = EVENT_TURN.with(|turn| turn.get());
+    let phase = EVENT_PHASE.with(|phase| phase.get());
+    IMMEDIATE_TASKS.with(|tasks| {
+        tasks.borrow_mut().push(ImmediateTask {
+            id,
+            turn: if phase == 2 { turn + 1 } else { turn },
+            callback,
+        });
+    });
+    id as f64
+}
+
+pub fn timer_clear_immediate(id: f64) {
+    if !id.is_finite() || id.fract() != 0.0 || id < 1.0 || id > u64::MAX as f64 {
+        return;
+    }
+    IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().retain(|task| task.id != id as u64));
+}
+
+pub fn timer_queue_microtask(callback: Box<dyn FnOnce()>) {
+    MICROTASKS.with(|tasks| tasks.borrow_mut().push_back(callback));
+}
+
+pub fn run_event_loop() {
+    let mut turn = 0_u64;
+    loop {
+        EVENT_TURN.with(|current| current.set(turn));
+        let microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
+        if let Some(microtask) = microtask {
+            EVENT_PHASE.with(|phase| phase.set(3));
+            microtask();
+            continue;
+        }
+
+        let now = std::time::Instant::now();
+        let timer = TIMER_TASKS.with(|tasks| {
+            let mut tasks = tasks.borrow_mut();
+            let index = tasks
+                .iter()
+                .enumerate()
+                .filter(|(_, task)| task.turn <= turn)
+                .min_by_key(|(_, task)| (task.due, task.id))
+                .and_then(|(index, task)| (task.due <= now).then_some(index))?;
+            Some(tasks.swap_remove(index))
+        });
+        if let Some(timer) = timer {
+            EVENT_PHASE.with(|phase| phase.set(1));
+            (timer.callback)();
+            continue;
+        }
+
+        let immediate = IMMEDIATE_TASKS.with(|tasks| {
+            let mut tasks = tasks.borrow_mut();
+            let index = tasks
+                .iter()
+                .enumerate()
+                .filter(|(_, task)| task.turn <= turn)
+                .min_by_key(|(_, task)| task.id)
+                .map(|(index, _)| index)?;
+            Some(tasks.swap_remove(index))
+        });
+        if let Some(immediate) = immediate {
+            EVENT_PHASE.with(|phase| phase.set(2));
+            (immediate.callback)();
+            continue;
+        }
+
+        EVENT_PHASE.with(|phase| phase.set(0));
+        let has_future_turn = TIMER_TASKS
+            .with(|tasks| tasks.borrow().iter().any(|task| task.turn > turn))
+            || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.turn > turn));
+        if has_future_turn {
+            turn = turn
+                .checked_add(1)
+                .expect("scriptc: exhausted event-loop turns");
+            continue;
+        }
+        let next_due = TIMER_TASKS.with(|tasks| {
+            tasks
+                .borrow()
+                .iter()
+                .filter(|task| task.turn <= turn)
+                .map(|task| task.due)
+                .min()
+        });
+        let Some(next_due) = next_due else { break };
+        if let Some(wait) = next_due.checked_duration_since(std::time::Instant::now()) {
+            std::thread::sleep(wait);
+        }
+    }
+    EVENT_PHASE.with(|phase| phase.set(0));
+    EVENT_TURN.with(|turn| turn.set(0));
 }
 
 #[doc(hidden)]

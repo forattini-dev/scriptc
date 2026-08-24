@@ -889,6 +889,45 @@ if (timed.error) {
   }
 }, 120_000);
 
+test("Rust one-shot timers drain after synchronous work", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-timers-"));
+  const entry = join(dir, "timers.ts");
+  await writeFile(entry, `
+let value = "before";
+queueMicrotask(() => console.log("micro", value));
+setTimeout(() => {
+  console.log("zero", value);
+  setTimeout(() => console.log("nested"), 0);
+}, 0);
+const cancelled = setImmediate(() => console.log("cancelled"));
+clearImmediate(cancelled);
+setImmediate(() => console.log("immediate"));
+setTimeout(() => console.log("later"), 8);
+value = "after";
+console.log("sync", value);
+`);
+  const result = await compile(entry, {
+    outDir: dir,
+    outPath: join(dir, "timers"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (result.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entry]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 120_000);
+
 test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [

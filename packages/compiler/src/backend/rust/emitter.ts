@@ -137,6 +137,7 @@ class RustEmitter {
     this.line("fn main() {");
     this.indent += 1;
     this.line(`${mangleFunction(entry.name)}();`);
+    this.line("runtime::run_event_loop();");
     for (const global of this.globals.values()) {
       if (this.isHeapRoot(global.type)) {
         this.line(`${mangleGlobal(global.id)}.with(|slot| *slot.borrow_mut() = None);`);
@@ -1667,6 +1668,26 @@ class RustEmitter {
               stdoutMode === undefined || stderrMode === undefined) this.unsupported("cp.execSync arguments", expr.loc);
           return `runtime::child_exec_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(argv)}), ${this.emitExpr(shell)}, &(${this.emitExpr(input)}), ${this.emitExpr(hasInput)}, &(${this.emitExpr(cwd)}), ${this.emitExpr(hasEnv)}, &(${this.emitExpr(envPairs)}), ${this.emitExpr(timeout)}, ${this.emitExpr(stdoutMode)}, ${this.emitExpr(stderrMode)})`;
         }
+        if (expr.fn === "timers.setTimeout" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {
+            this.unsupported("setTimeout callback shape", expr.loc);
+          }
+          const callback = `sc_rt_${this.temporary++}`;
+          const dispatch = this.emitClosureDispatch(callback, arg.type, [], expr.loc);
+          return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::timer_set_timeout(Box::new(move || { ${dispatch}; }), ${this.emitExpr(expr.args[1])}); }`;
+        }
+        if ((expr.fn === "timers.setImmediate" || expr.fn === "timers.queueMicrotask") && expr.args.length === 1 && arg !== undefined) {
+          if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {
+            this.unsupported(`${expr.fn} callback shape`, expr.loc);
+          }
+          const callback = `sc_rt_${this.temporary++}`;
+          const dispatch = this.emitClosureDispatch(callback, arg.type, [], expr.loc);
+          const runtimeFn = expr.fn === "timers.setImmediate" ? "timer_set_immediate" : "timer_queue_microtask";
+          return `{ let ${callback} = ${this.emitExpr(arg)}; runtime::${runtimeFn}(Box::new(move || { ${dispatch}; })) }`;
+        }
+        if (expr.fn === "timers.clearImmediate" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::timer_clear_immediate(${this.emitExpr(arg)})`;
+        }
         if (expr.fn === "cp.spawnSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::child_spawn_sync(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}), 0.0, &runtime::string(""), 0.0, 0.0, 0.0)`;
         }
@@ -1851,6 +1872,12 @@ class RustEmitter {
       `let ${callee} = ${this.emitExpr(expr.callee)};`,
       ...expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`),
     ].join(" ");
+    return `{ ${bindings} ${this.emitClosureDispatch(callee, expr.callee.type, args, expr.loc)} }`;
+  }
+
+  private emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string {
+    const shape = this.closureShapeForType(type, loc);
+    if (args.length !== shape.type.params.length) this.unsupported("closure dispatch argument arity", loc);
     const arms = shape.targets.map((target) => {
       const captures = target.captures ?? [];
       const variant = `${this.closureName(shape)}::${this.closureVariant(target)}`;
@@ -1866,7 +1893,7 @@ class RustEmitter {
       callArgs.push(...args);
       return `${pattern} => ${mangleFunction(target.name)}(${callArgs.join(", ")})`;
     }).join(", ");
-    return `{ ${bindings} ${callee}.with(|closure| match closure { ${arms} }) }`;
+    return `${callee}.with(|closure| match closure { ${arms} })`;
   }
 
   private emitBinary(expr: Extract<IrExpr, { kind: "bin" }>): string {
