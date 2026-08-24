@@ -1350,6 +1350,7 @@ export {};
     ["await-promiselike-return", resolve("tests/corpus/1538-await-promiselike-return.ts")],
     ["promise-then", resolve("tests/corpus/1561-promise-then.ts")],
     ["generics-async", resolve("tests/corpus/965-generics-async.ts")],
+    ["generic-member-fields-async", resolve("tests/corpus/2432-generic-member-fields-async.ts")],
     ["void-statement", resolve("tests/corpus/1540-void-statement.ts")],
     ["await-unit", resolve("tests/corpus/2320-await-unit.ts")],
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],

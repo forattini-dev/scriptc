@@ -1210,7 +1210,8 @@ class RustEmitter {
       );
       if (awaited === null) {
         if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "recordLit" || nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
+          nested?.kind === "recordLit" || nested?.kind === "arrayGet" || nested?.kind === "arrIntrinsic" ||
+          nested?.kind === "mapIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
@@ -1743,6 +1744,17 @@ class RustEmitter {
       });
       return;
     }
+    if (expr.kind === "arrayGet") {
+      this.emitAsyncProtectedValue(expr.arr, exitLocals, handlers, (array) => {
+        this.emitAsyncProtectedValue(
+          expr.index,
+          exitLocals,
+          handlers,
+          (index) => consume(this.emitArrayGetValues(expr, array, index)),
+        );
+      });
+      return;
+    }
     if (expr.kind === "mapIntrinsic") {
       this.emitAsyncProtectedValue(expr.receiver, exitLocals, handlers, (receiver) => {
         this.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
@@ -2017,6 +2029,12 @@ class RustEmitter {
     if (expr.kind === "strConcat") {
       this.emitAsyncValue(expr.left, (left) => {
         this.emitAsyncValue(expr.right, (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`));
+      });
+      return;
+    }
+    if (expr.kind === "arrayGet") {
+      this.emitAsyncValue(expr.arr, (array) => {
+        this.emitAsyncValue(expr.index, (index) => consume(this.emitArrayGetValues(expr, array, index)));
       });
       return;
     }
@@ -3872,6 +3890,15 @@ class RustEmitter {
       this.emitExpr(expr.receiver),
       expr.args.map((arg) => this.emitExpr(arg)),
     );
+  }
+
+  private emitArrayGetValues(
+    expr: Extract<IrExpr, { kind: "arrayGet" }>,
+    array: string,
+    index: string,
+  ): string {
+    if (expr.arr.type.kind !== "array") this.unsupported("async arrayGet on a non-array", expr.loc);
+    return `runtime::array_get(&(${array}), ${index})`;
   }
 
   private emitArrayIntrinsicValues(
