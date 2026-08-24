@@ -65,7 +65,9 @@ sanitized conformance lanes before the full sandbox gate. When the static fetch
 surface changes, update the profile first; its evidence check makes the missing
 fixture or generated scenario the implementation worklist.
 
-Full-suite runs (`vitest run` with no filters) take an advisory machine-wide lock (a pidfile in the OS temp dir) so concurrent full suites — typically parallel agents — queue instead of oversubscribing the CPU, which is a known flake source (vitest worker RPC timeouts, event-loop timing failures). The lock is per flavor (plain vs `SCRIPTC_SAN=1`): the two lanes read the same committed tree through separate cache directories, so a merge gate may deliberately run one of each concurrently — split the cores between them with `SCRIPTC_TEST_WORKERS` (e.g. 5 and 5) or the oversubscription flakes come back. Two runs of the SAME flavor still queue. Filtered and watch runs never wait. `SCRIPTC_NO_LOCK=1` opts out; stale locks from dead processes are stolen automatically. `SCRIPTC_TEST_WORKERS=<n>` caps the vitest worker pool (default: unchanged, all cores).
+Full-suite runs (`vitest run` with no filters) take one advisory machine-wide lock (a pidfile in the OS temp dir) so plain and sanitized suites queue instead of oversubscribing the CPU. Filtered and watch runs never wait. `SCRIPTC_NO_LOCK=1` opts out; stale locks from dead processes are stolen automatically.
+
+Direct local runs default to two Vitest workers, two nested native compiler jobs per worker, and one Cargo job. Their temporary build trees live under `~/.cache/scriptc/test-tmp` instead of a RAM-backed system `/tmp` when the shell has not selected its own `TMPDIR`. `SCRIPTC_TEST_WORKERS`, `SCRIPTC_NATIVE_WORKERS`, `CARGO_BUILD_JOBS`, and `TMPDIR` override those defaults for CI or deliberate high-capacity runs.
 
 ## Build and oracle caches
 

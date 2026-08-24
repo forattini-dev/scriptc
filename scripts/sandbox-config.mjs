@@ -22,7 +22,7 @@ export function sandboxRunnerConfig(env) {
   const source = env ?? process.env;
   return {
     vcpus: source.SCRIPTC_SANDBOX_VCPUS ?? "8",
-    testWorkers: source.SCRIPTC_TEST_WORKERS ?? "4",
+    testWorkers: source.SCRIPTC_TEST_WORKERS ?? "2",
     localTestWorkers: source.SCRIPTC_LOCAL_TEST_WORKERS ?? "2",
     localCaseShards: source.SCRIPTC_LOCAL_CASE_SHARDS ?? "2",
     sandboxTimeout: source.SCRIPTC_SANDBOX_TIMEOUT ?? "45m",

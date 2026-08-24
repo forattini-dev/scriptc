@@ -25,7 +25,7 @@ test("runner settings are read after loading the sandbox environment", () => {
 test("runner settings retain their documented defaults", () => {
   expect(sandboxRunnerConfig({})).toEqual({
     vcpus: "8",
-    testWorkers: "4",
+    testWorkers: "2",
     localTestWorkers: "2",
     localCaseShards: "2",
     sandboxTimeout: "45m",

@@ -12,14 +12,9 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/* The lock is PER FLAVOR: the plain and sanitized lanes read the same
- * committed tree through separate binary/oracle cache directories, so one
- * of each may run concurrently by design (the merge-gate pattern splits
- * workers between them via SCRIPTC_TEST_WORKERS). The lock's job is only
- * to stop two runs of the SAME flavor from thrashing each other's caches
- * and the CPU accidentally. */
-const FLAVOR = process.env.SCRIPTC_SAN === "1" ? "san" : "plain";
-const LOCK_PATH = join(tmpdir(), `scriptc-full-suite-${FLAVOR}.lock`);
+// Plain and sanitized runs share one host-wide slot. Separate caches prevent
+// corruption, but do not prevent their clang processes from exhausting RAM.
+const LOCK_PATH = join(tmpdir(), "scriptc-full-suite.lock");
 const MAX_WAIT_MS = 45 * 60 * 1000;
 const POLL_MS = 2000;
 

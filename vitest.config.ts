@@ -1,4 +1,6 @@
 import { chmodSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -11,6 +13,9 @@ const configuredCacheDir = process.env["SCRIPTC_CACHE_DIR"];
 const cacheDir =
   configuredCacheDir ??
   fileURLToPath(new URL("./node_modules/.cache/scriptc-tests/cas", import.meta.url));
+const testTmpDir =
+  process.env["TMPDIR"] ??
+  join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "scriptc", "test-tmp");
 
 // The production cache refuses an existing explicit override that is visible
 // to other users. This repository owns the default test-only override, so
@@ -21,11 +26,15 @@ if (configuredCacheDir === undefined && process.env["SCRIPTC_NO_CACHE"] !== "1")
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") chmodSync(cacheDir, 0o700);
 }
+if (process.platform !== "win32") mkdirSync(testTmpDir, { recursive: true });
 
-// Contention control for concurrent agents: SCRIPTC_TEST_WORKERS caps the vitest
-// worker pool (the default — all cores — is unchanged when unset). Full-suite
-// runs additionally queue behind an advisory lock; see suite-lock.mjs.
-const workers = process.env["SCRIPTC_TEST_WORKERS"];
+// Native differential tests are memory-heavy, so two workers is the safe host
+// default. CI and larger machines can override it explicitly.
+const configuredWorkers = process.env["SCRIPTC_TEST_WORKERS"] ?? "2";
+const workers = Number(configuredWorkers);
+if (!Number.isInteger(workers) || workers < 1) {
+  throw new Error("SCRIPTC_TEST_WORKERS must be a positive integer");
+}
 
 export default defineConfig({
   resolve: {
@@ -51,6 +60,9 @@ export default defineConfig({
     hookTimeout: 300_000,
     env: {
       SCRIPTC_CACHE_DIR: cacheDir,
+      ...(process.platform === "win32" ? {} : { TMPDIR: testTmpDir }),
+      SCRIPTC_NATIVE_WORKERS: process.env["SCRIPTC_NATIVE_WORKERS"] ?? "2",
+      CARGO_BUILD_JOBS: process.env["CARGO_BUILD_JOBS"] ?? "1",
       // The differential lanes run against one immutable checkout/toolchain
       // per worker. Reuse expensive compiler/linker metadata probes inside
       // that session; cc.test.ts removes this flag to keep exercising
@@ -58,9 +70,8 @@ export default defineConfig({
       SCRIPTC_TEST_STABLE_TOOLCHAIN:
         process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"] ?? "1",
     },
-    ...(workers !== undefined && workers !== ""
-      ? { maxWorkers: Number(workers), minWorkers: 1 }
-      : {}),
+    maxWorkers: workers,
+    minWorkers: 1,
     globalSetup: ["./tests/harness/suite-lock.mjs"],
   },
 });

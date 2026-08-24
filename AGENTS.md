@@ -26,8 +26,9 @@ SCRIPTC_TEST_WORKERS=4 SCRIPTC_SAN=1 pnpm test  # sanitized lane
 ```
 
 `SCRIPTC_TEST_WORKERS` caps the vitest worker pool so concurrent agents don't
-contend for cores; full local suites also queue behind an advisory lock per
-lane.
+contend for cores. Direct local runs default to two workers, two nested native
+compiler jobs per worker, and one Cargo job. Full local suites share one
+cross-lane advisory lock.
 
 Corpus programs are differential tests against Node: every program runs under Node and as a compiled native binary, and stdout, stderr, and exit codes must match byte-for-byte. A new feature lands with corpus programs that pin its behavior both ways.
 

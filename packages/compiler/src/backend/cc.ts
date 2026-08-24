@@ -25,6 +25,18 @@ function stableTestToolchainSession(): boolean {
   return process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"] === "1";
 }
 
+/** Bound nested clang fan-out independently from the outer test worker pool. */
+function nativeCompileWidth(maximum = availableParallelism()): number {
+  const available = Math.max(1, Math.min(maximum, availableParallelism()));
+  const configured = process.env["SCRIPTC_NATIVE_WORKERS"];
+  if (configured === undefined || configured === "") return available;
+  const width = Number(configured);
+  if (!Number.isInteger(width) || width < 1) {
+    throw new Error("SCRIPTC_NATIVE_WORKERS must be a positive integer");
+  }
+  return Math.min(available, width);
+}
+
 function stableTestMemo<T>(
   cache: Map<string, Promise<T>>,
   key: string,
@@ -1126,7 +1138,7 @@ async function buildEngineArchiveDirect(sanitize: boolean, driver: CcDriver, cac
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(tmpdir(), `scriptc-vendor-qjs-${driver.target ?? "host"}-`));
   try {
-    const width = Math.min(QJS_ENGINE_SOURCES.length, availableParallelism());
+    const width = nativeCompileWidth(QJS_ENGINE_SOURCES.length);
     for (let i = 0; i < QJS_ENGINE_SOURCES.length; i += width) {
       await Promise.all(
         QJS_ENGINE_SOURCES.slice(i, i + width).map((src) =>
@@ -1422,7 +1434,7 @@ async function ensureTlsArchive(
       "-I", join(vendor, "include"),
       "-I", join(vendor, "library"),
     ];
-    const width = availableParallelism();
+    const width = nativeCompileWidth();
     for (let i = 0; i < sources.length; i += width) {
       await Promise.all(
         sources.slice(i, i + width).map((src) =>
@@ -1991,7 +2003,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
             }
             return { ...shard, sourcePath, staged, cachePath, missed: false };
           });
-          const shardWidth = Math.min(8, availableParallelism());
+          const shardWidth = nativeCompileWidth(8);
           for (let i = 0; i < shardEntries.length; i += shardWidth) {
             await Promise.all(shardEntries.slice(i, i + shardWidth).map(async (entry) => {
               await writeFile(entry.sourcePath, entry.source);
@@ -2167,7 +2179,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
       }
       if (runtimeObjects === null) {
         runtimeObjects = [];
-        const width = Math.min(4, availableParallelism());
+        const width = nativeCompileWidth(4);
         for (let i = 0; i < sources.length; i += width) {
           runtimeObjects.push(
             ...(await Promise.all(
@@ -4477,7 +4489,7 @@ async function ensureRuntimeObjects(
       const compiled = new Map<string, string>();
       // Modest parallelism: a flavor's objects build once, but several cold
       // workers can race here — keep each build's CPU footprint small.
-      const width = 4;
+      const width = nativeCompileWidth(4);
       for (let i = 0; i < missing.length; i += width) {
         await Promise.all(
           missing.slice(i, i + width).map(async (src) => {
@@ -5784,7 +5796,7 @@ async function compileCInternal(
             missed: false,
           };
         });
-        const shardWidth = Math.min(8, availableParallelism());
+        const shardWidth = nativeCompileWidth(8);
         for (let i = 0; i < entries.length; i += shardWidth) {
           await Promise.all(entries.slice(i, i + shardWidth).map(async (entry) => {
             await writeFile(entry.sourcePath, entry.source);
