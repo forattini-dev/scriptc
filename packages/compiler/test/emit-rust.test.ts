@@ -740,3 +740,61 @@ test("Rust process reads and POSIX path operations match Node", async () => {
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
 }, 180_000);
+
+test("Rust synchronous text filesystem operations match Node and throw catchably", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-fs-sync-"));
+  for (const fixture of [
+    "992-fs-roundtrip.ts",
+    "993-fs-readdir.ts",
+    "994-fs-errors.ts",
+    "1006-json-fs-config.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+  const realpathEntry = join(dir, "realpath.ts");
+  await writeFile(realpathEntry, `
+import { realpathSync } from "node:fs";
+console.log(realpathSync(".") === process.cwd());
+try { realpathSync("scriptc-rust-definitely-missing"); }
+catch { console.log("caught realpath"); }
+`);
+  const realpathResult = await compile(realpathEntry, {
+    outDir: dir,
+    outPath: join(dir, "realpath"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    realpathResult.ok,
+    realpathResult.ok ? undefined : realpathResult.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (realpathResult.ok) {
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [realpathEntry]),
+      execFileAsync(realpathResult.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stderr).toBe(node.stderr);
+  }
+}, 180_000);

@@ -1172,6 +1172,86 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
     if negative { -result } else { result }
 }
 
+fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! {
+    throw_value(JsError {
+        name: "Error".to_owned(),
+        message: format!("{error}, {operation} '{}'", path),
+    })
+}
+
+pub fn fs_read_file(path: &JsString) -> JsString {
+    match std::fs::read(path.as_ref()) {
+        Ok(bytes) => Rc::from(String::from_utf8_lossy(&bytes).as_ref()),
+        Err(error) => throw_fs_error("open", path, error),
+    }
+}
+
+pub fn fs_write_file(path: &JsString, data: &JsString) {
+    if let Err(error) = std::fs::write(path.as_ref(), data.as_bytes()) {
+        throw_fs_error("open", path, error);
+    }
+}
+
+pub fn fs_append_file(path: &JsString, data: &JsString) {
+    use std::io::Write;
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path.as_ref())
+    {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    if let Err(error) = file.write_all(data.as_bytes()) {
+        throw_fs_error("write", path, error);
+    }
+}
+
+pub fn fs_exists(path: &JsString) -> bool {
+    std::fs::exists(path.as_ref()).unwrap_or(false)
+}
+
+pub fn fs_mkdir(path: &JsString) {
+    if let Err(error) = std::fs::create_dir(path.as_ref()) {
+        throw_fs_error("mkdir", path, error);
+    }
+}
+
+pub fn fs_rm(path: &JsString) {
+    if let Err(error) = std::fs::remove_file(path.as_ref()) {
+        throw_fs_error("rm", path, error);
+    }
+}
+
+pub fn fs_rmdir(path: &JsString) {
+    if let Err(error) = std::fs::remove_dir(path.as_ref()) {
+        throw_fs_error("rmdir", path, error);
+    }
+}
+
+pub fn fs_readdir(path: &JsString) -> JsArray<JsString> {
+    let entries = match std::fs::read_dir(path.as_ref()) {
+        Ok(entries) => entries,
+        Err(error) => throw_fs_error("scandir", path, error),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => throw_fs_error("scandir", path, error),
+        };
+        names.push(Rc::from(entry.file_name().to_string_lossy().as_ref()));
+    }
+    array_new(names)
+}
+
+pub fn fs_realpath(path: &JsString) -> JsString {
+    match std::fs::canonicalize(path.as_ref()) {
+        Ok(resolved) => Rc::from(resolved.to_string_lossy().as_ref()),
+        Err(error) => throw_fs_error("lstat", path, error),
+    }
+}
+
 fn normalize_posix(path: &str) -> String {
     if path.is_empty() {
         return ".".to_owned();

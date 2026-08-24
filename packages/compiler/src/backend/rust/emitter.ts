@@ -1449,6 +1449,34 @@ class RustEmitter {
         if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).is_nan()`;
         }
+        if (expr.fn === "fs.readFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const path = `sc_rt_${this.temporary++}`;
+          return `{ let ${path} = ${this.emitExpr(arg)}; let _ = ${this.emitExpr(expr.args[1])}; runtime::fs_read_file(&${path}) }`;
+        }
+        if (expr.fn === "fs.writeFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_write_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.appendFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::fs_append_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if (expr.fn === "fs.existsSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_exists(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.mkdirSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_mkdir(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.rmSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_rm(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.rmdirSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_rmdir(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.readdirSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_readdir(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "fs.realpathSync" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::fs_realpath(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::path_join(&(${this.emitExpr(arg)}))`;
         }
