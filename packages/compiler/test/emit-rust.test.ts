@@ -1346,6 +1346,8 @@ export {};
     ["promise-race", resolve("tests/corpus/1430-promise-race.ts")],
     ["promise-all-tuple-literal", resolve("tests/corpus/1574-promise-all-tuple-literal.ts")],
     ["promise-try", resolve("tests/corpus/2369-promise-try.ts")],
+    ["fsp-roundtrip", resolve("tests/corpus/1357-fsp-roundtrip.ts")],
+    ["fsp-mkdir-unlink-chmod", resolve("tests/corpus/1569-fsp-mkdir-unlink-chmod.ts")],
     ["map-promise-values", resolve("tests/corpus/1542-map-promise-values.ts")],
     ["params-async-generics", resolve("tests/corpus/409-params-async-generics.ts")],
     ["errors-async-rejections", resolve("tests/corpus/1305-errors-async-rejections.ts")],

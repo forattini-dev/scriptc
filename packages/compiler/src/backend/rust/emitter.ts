@@ -3134,18 +3134,67 @@ class RustEmitter {
           return `runtime::fs_write_file_bytes(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
         if (expr.fn === "fsp.readFileBytes" && expr.args.length === 1 && arg !== undefined) {
-          const path = `sc_rt_${this.temporary++}`;
-          return `{ let ${path} = ${this.emitExpr(arg)}; runtime::promise_from_sync(move || runtime::fs_read_file_bytes(&${path})) }`;
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_read_file_bytes(&${value(0)})`);
         }
         if (expr.fn === "fsp.readFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-          const path = `sc_rt_${this.temporary++}`;
-          const encoding = `sc_rt_${this.temporary++}`;
-          return `{ let ${path} = ${this.emitExpr(arg)}; let ${encoding} = ${this.emitExpr(expr.args[1])}; runtime::promise_from_sync(move || { let _ = ${encoding}; runtime::fs_read_file(&${path}) }) }`;
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `{ let _ = ${value(1)}; runtime::fs_read_file(&${value(0)}) }`,
+          );
         }
         if (expr.fn === "fsp.writeFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-          const path = `sc_rt_${this.temporary++}`;
-          const data = `sc_rt_${this.temporary++}`;
-          return `{ let ${path} = ${this.emitExpr(arg)}; let ${data} = ${this.emitExpr(expr.args[1])}; runtime::promise_from_sync(move || runtime::fs_write_file(&${path}, &${data})) }`;
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::fs_write_file(&${value(0)}, &${value(1)})`,
+          );
+        }
+        if (expr.fn === "fsp.writeFileMode" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1], expr.args[2]],
+            (value) => `runtime::fs_write_file_mode(&${value(0)}, &${value(1)}, ${value(2)})`,
+          );
+        }
+        if (expr.fn === "fsp.mkdir" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_mkdir(&${value(0)})`);
+        }
+        if (expr.fn === "fsp.mkdirMode" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::fs_mkdir_mode(&${value(0)}, ${value(1)}, false)`,
+          );
+        }
+        if (expr.fn === "fsp.mkdirRecursive" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_mkdir_recursive(&${value(0)})`);
+        }
+        if (expr.fn === "fsp.mkdirRecursiveMode" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::fs_mkdir_mode(&${value(0)}, ${value(1)}, true)`,
+          );
+        }
+        if (expr.fn === "fsp.unlink" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_unlink(&${value(0)})`);
+        }
+        if (expr.fn === "fsp.chmod" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::fs_chmod(&${value(0)}, ${value(1)})`,
+          );
+        }
+        if (expr.fn === "fsp.rename" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return this.emitPromiseFromSync(
+            [arg, expr.args[1]],
+            (value) => `runtime::fs_rename(&${value(0)}, &${value(1)})`,
+          );
+        }
+        if (expr.fn === "fsp.readdir" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_readdir(&${value(0)})`);
+        }
+        if (expr.fn === "fsp.rm" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_rm(&${value(0)})`);
+        }
+        if (expr.fn === "fsp.stat" && expr.args.length === 1 && arg !== undefined) {
+          return this.emitPromiseFromSync([arg], (value) => `runtime::fs_stat(&${value(0)}, true)`);
         }
         if (expr.fn === "fs.appendFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_append_file(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
@@ -3727,6 +3776,20 @@ class RustEmitter {
       return `match ${operand} { ${arms} }`;
     }
     this.unsupported(`toString from '${type.kind}'`, loc);
+  }
+
+  private emitPromiseFromSync(
+    args: readonly IrExpr[],
+    operation: (value: (index: number) => string) => string,
+  ): string {
+    const values = args.map(() => `sc_rt_${this.temporary++}`);
+    const value = (index: number): string => {
+      const result = values[index];
+      if (result === undefined) this.unsupported(`missing synchronous promise argument ${index}`);
+      return result;
+    };
+    const bindings = args.map((arg, index) => `let ${value(index)} = ${this.emitExpr(arg)};`).join(" ");
+    return `{ ${bindings} runtime::promise_from_sync(move || ${operation(value)}) }`;
   }
 
   private emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string {
