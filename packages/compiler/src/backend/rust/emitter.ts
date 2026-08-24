@@ -23,6 +23,7 @@ import {
 } from "../mangle.js";
 
 type IrFuncType = Extract<IrType, { kind: "func" }>;
+type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
 interface RustClosureShape {
   readonly index: number;
@@ -537,6 +538,7 @@ class RustEmitter {
         case "spawnRes":
         case "record":
         case "func":
+        case "promise":
           comparison = "left.ptr_eq(right)";
           break;
         case "object":
@@ -833,6 +835,60 @@ class RustEmitter {
     return Object.values(value).some((item) => this.containsAsyncSuspension(item));
   }
 
+  private awaitExpression(expr: IrExpr | null): IrAwaitExpr | null {
+    return expr?.kind === "awaitExpr" || expr?.kind === "awaitUnionExpr" ? expr : null;
+  }
+
+  private awaitedValue(expr: IrExpr | null): { awaited: IrAwaitExpr; wrap: (value: string) => string } | null {
+    const awaited = this.awaitExpression(expr);
+    if (awaited !== null) return { awaited, wrap: (value) => value };
+    if (expr?.kind !== "unionWrap") return null;
+    const inner = this.awaitedValue(expr.value);
+    if (inner === null) return null;
+    const union = this.union(expr.unionId, expr.loc);
+    const arm = union.arms[expr.tag];
+    if (arm === undefined || this.isUnit(arm)) {
+      this.unsupported(`awaited union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
+    }
+    const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
+    return { awaited: inner.awaited, wrap: (value) => `${variant}(${inner.wrap(value)})` };
+  }
+
+  private emitAwaitDependency(expr: IrAwaitExpr): string {
+    if (expr.kind === "awaitExpr") return this.emitExpr(expr.value);
+    if (expr.value.type.kind !== "union") this.unsupported("await union with a non-union operand", expr.loc);
+    const source = this.union(expr.value.type.unionId, expr.loc);
+    const promiseArm = source.arms[expr.promiseTag];
+    if (promiseArm?.kind !== "promise") this.unsupported("await union without a Promise arm", expr.loc);
+    const sourceName = this.unionName(source.id);
+    const value = `sc_async_await_union_${this.temporary++}`;
+    if (expr.type.kind === "void") {
+      const arms = source.arms.map((arm, tag) => {
+        const variant = `${sourceName}::${this.unionVariant(tag)}`;
+        if (tag === expr.promiseTag) return `${variant}(promise) => promise`;
+        if (this.isUnit(arm)) return `${variant} => runtime::promise_resolved(())`;
+        this.unsupported(`await union arm '${arm.kind}'`, expr.loc);
+      });
+      return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
+    }
+    if (expr.type.kind !== "union") this.unsupported("await union with a non-union result", expr.loc);
+    const result = this.union(expr.type.unionId, expr.loc);
+    const resultName = this.unionName(result.id);
+    const resultTag = (arm: IrType): number => {
+      const tag = result.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
+      if (tag < 0) this.unsupported(`await union result missing arm '${arm.kind}'`, expr.loc);
+      return tag;
+    };
+    const arms = source.arms.map((arm, tag) => {
+      const variant = `${sourceName}::${this.unionVariant(tag)}`;
+      const target = `${resultName}::${this.unionVariant(resultTag(tag === expr.promiseTag ? promiseArm.inner : arm))}`;
+      if (tag === expr.promiseTag) return `${variant}(promise) => runtime::promise_map(&promise, |value| ${target}(value))`;
+      if (this.isUnit(arm)) return `${variant} => runtime::promise_resolved(${target})`;
+      this.unsupported(`await union arm '${arm.kind}'`, expr.loc);
+    });
+    return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
+  }
+
   private emitAsyncStatements(statements: readonly IrStmt[]): void {
     const result = this.currentAsyncResult;
     const fn = this.currentFunction;
@@ -863,16 +919,17 @@ class RustEmitter {
       }
       if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
         (stmt.expr.name === "console.log" || stmt.expr.name === "console.error") &&
-        stmt.expr.args.some((arg) => arg.kind === "awaitExpr")) {
+        stmt.expr.args.some((arg) => this.awaitExpression(arg) !== null)) {
         this.emitAsyncConsole(stmt.expr, statements.slice(index + 1));
         return;
       }
-      const awaited =
-        stmt.kind === "assign" && stmt.value.kind === "awaitExpr" ? stmt.value
-        : stmt.kind === "varDecl" && stmt.init?.kind === "awaitExpr" ? stmt.init
-        : stmt.kind === "exprStmt" && stmt.expr.kind === "awaitExpr" ? stmt.expr
-        : stmt.kind === "return" && stmt.value?.kind === "awaitExpr" ? stmt.value
-        : null;
+      const awaited = this.awaitedValue(
+        stmt.kind === "assign" ? stmt.value
+        : stmt.kind === "varDecl" ? stmt.init
+        : stmt.kind === "exprStmt" ? stmt.expr
+        : stmt.kind === "return" ? stmt.value
+        : null,
+      );
       if (awaited === null) {
         const nested =
           stmt.kind === "assign" ? stmt.value
@@ -909,8 +966,9 @@ class RustEmitter {
       }
 
       this.emitAsyncContinuation(
-        this.emitExpr(awaited.value),
-        (value) => {
+        this.emitAwaitDependency(awaited.awaited),
+        (rawValue) => {
+          const value = awaited.wrap(rawValue);
           if (stmt.kind === "assign") {
             this.emitAssignment(stmt.localId, value, stmt.loc);
           } else if (stmt.kind === "varDecl") {
@@ -962,19 +1020,20 @@ class RustEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const current = statements[index];
       if (current === undefined) break;
-      const awaited =
-        current.kind === "assign" && current.value.kind === "awaitExpr" ? current.value
-        : current.kind === "varDecl" && current.init?.kind === "awaitExpr" ? current.init
-        : current.kind === "exprStmt" && current.expr.kind === "awaitExpr" ? current.expr
-        : current.kind === "return" && current.value?.kind === "awaitExpr" ? current.value
-        : null;
+      const awaited = this.awaitedValue(
+        current.kind === "assign" ? current.value
+        : current.kind === "varDecl" ? current.init
+        : current.kind === "exprStmt" ? current.expr
+        : current.kind === "return" ? current.value
+        : null,
+      );
       if (awaited !== null) {
         const dependency = `sc_async_dependency_${this.temporary++}`;
         const nextResult = `sc_async_result_${this.temporary++}`;
         const outcome = `sc_async_outcome_${this.temporary++}`;
         const guard = `sc_async_guard_${this.temporary++}`;
         const value = `sc_async_value_${this.temporary++}`;
-        this.line(`let ${dependency} = ${this.emitExpr(awaited.value)};`);
+        this.line(`let ${dependency} = ${this.emitAwaitDependency(awaited.awaited)};`);
         this.line(`let ${nextResult} = ${result}.clone();`);
         const continuationLocals = new Set(this.currentAsyncLocals ?? []);
         const captures = [...continuationLocals].map((localId) => ({
@@ -998,19 +1057,20 @@ class RustEmitter {
         this.line(`Ok(${value}) => {`);
         this.indent += 1;
         this.withAsyncLocals(new Set(continuationLocals), () => {
+          const completedValue = awaited.wrap(value);
           if (current.kind === "assign") {
-            this.emitAssignment(current.localId, value, current.loc);
+            this.emitAssignment(current.localId, completedValue, current.loc);
             this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
           } else if (current.kind === "varDecl") {
             const local = this.local(current.localId, current.loc);
-            this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${value});`);
+            this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${completedValue});`);
             this.currentAsyncLocals?.add(local.id);
             this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
           } else if (current.kind === "exprStmt") {
-            this.line(`let _ = ${value};`);
+            this.line(`let _ = ${completedValue};`);
             this.emitAsyncTrySegment(statements.slice(index + 1), owner, remaining, outerLocals);
           } else {
-            this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
+            this.line(`let _ = runtime::promise_fulfill(&${result}, ${completedValue});`);
           }
         });
         this.indent -= 1;
@@ -1096,8 +1156,19 @@ class RustEmitter {
   }
 
   private emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
-    if (expr.kind === "awaitExpr") {
-      this.emitAsyncContinuation(this.emitExpr(expr.value), consume, null);
+    const awaited = this.awaitExpression(expr);
+    if (awaited !== null) {
+      this.emitAsyncContinuation(this.emitAwaitDependency(awaited), consume, null);
+      return;
+    }
+    if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {
+      const union = this.union(expr.unionId, expr.loc);
+      const arm = union.arms[expr.tag];
+      if (arm === undefined || this.isUnit(arm)) {
+        this.unsupported(`async union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
+      }
+      const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
+      this.emitAsyncValue(expr.value, (value) => consume(`${variant}(${value})`));
       return;
     }
     if (expr.kind === "bin") {
@@ -1159,9 +1230,10 @@ class RustEmitter {
       this.emitAsyncStatements(remaining);
       return;
     }
-    if (arg.kind === "awaitExpr") {
+    const awaited = this.awaitExpression(arg);
+    if (awaited !== null) {
       this.emitAsyncContinuation(
-        this.emitExpr(arg.value),
+        this.emitAwaitDependency(awaited),
         (value) => this.emitAsyncConsole(expr, remaining, index + 1, [
           ...values,
           { name: value, type: arg.type, loc: arg.loc },
@@ -2952,6 +3024,7 @@ class RustEmitter {
       case "object":
       case "classval":
       case "func":
+      case "promise":
       case "undefinedT":
       case "nullT":
         return;

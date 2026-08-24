@@ -1192,6 +1192,18 @@ async function recoverCatchThrow(): Promise<string> {
   }
 }
 console.log("catch throw", await recoverCatchThrow());
+function optionalNumber(present: boolean): Promise<number> | undefined {
+  return present ? Promise.resolve(20) : undefined;
+}
+function optionalVoid(present: boolean): Promise<void> | undefined {
+  return present ? Promise.resolve() : undefined;
+}
+const optionalPresent = await optionalNumber(true);
+console.log("optional present", optionalPresent === 20);
+const optionalMissing = await optionalNumber(false);
+console.log("optional missing", optionalMissing === undefined);
+await optionalVoid(false);
+console.log("optional void");
 export {};
 `);
   for (const [name, entryPath] of [
@@ -1209,6 +1221,7 @@ export {};
     ["async-pending-exit", resolve("tests/corpus/1024-async-pending-exit.ts")],
     ["async-methods", resolve("tests/corpus/2351-async-methods.ts")],
     ["async-never", resolve("tests/corpus/1434-async-never.ts")],
+    ["promise-catch-finally", resolve("tests/corpus/1429-promise-catch-finally.ts")],
     ["promise-reject-all", resolve("tests/corpus/1572-promise-reject-all-tuple.ts")],
   ] as const) {
     const result = await compile(entryPath, {

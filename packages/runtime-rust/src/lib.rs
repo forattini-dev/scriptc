@@ -1033,6 +1033,32 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
     }
 }
 
+pub fn promise_map<T, U, F>(promise: &JsPromise<T>, map: F) -> JsPromise<U>
+where
+    T: HeapValue,
+    U: HeapValue,
+    F: FnOnce(T) -> U + 'static,
+{
+    let result = promise_new();
+    let target = result.clone();
+    promise_then(
+        promise,
+        Box::new(move |outcome| match outcome {
+            Ok(value) => {
+                let guard = target.clone();
+                promise_run_segment(&guard, move || {
+                    let mapped = map(value);
+                    let _ = promise_fulfill(&target, mapped);
+                });
+            }
+            Err(reason) => {
+                let _ = promise_reject(&target, reason);
+            }
+        }),
+    );
+    result
+}
+
 pub fn promise_fulfill<T: HeapValue>(promise: &JsPromise<T>, value: T) -> bool {
     let reactions = promise.with_mut(|data| match &mut data.state {
         PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
@@ -4632,6 +4658,37 @@ mod tests {
 
         drop(promise);
         drop(rejected);
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn promise_map_transforms_fulfillments_and_forwards_rejections() {
+        let baseline = live_heap_objects();
+        {
+            let fulfilled = promise_resolved(2.0_f64);
+            let mapped = promise_map(&fulfilled, |value| number_to_string(value * 3.0));
+            let values = Rc::new(RefCell::new(Vec::new()));
+            let observed = values.clone();
+            promise_then(
+                &mapped,
+                Box::new(move |outcome| observed.borrow_mut().push(promise_unwrap(outcome))),
+            );
+
+            let rejected = promise_rejected::<f64>(caught_value(string("reason")));
+            let forwarded = promise_map(&rejected, |value| value + 1.0);
+            let saw_rejection = Rc::new(Cell::new(false));
+            let observed_rejection = saw_rejection.clone();
+            promise_then(
+                &forwarded,
+                Box::new(move |outcome| {
+                    observed_rejection.set(matches!(outcome, Err(reason) if caught_to_string(&reason).as_ref() == "reason"));
+                }),
+            );
+
+            run_event_loop();
+            assert_eq!(values.borrow().as_slice(), &[string("6")]);
+            assert!(saw_rejection.get());
+        }
         assert_eq!(live_heap_objects(), baseline);
     }
 
