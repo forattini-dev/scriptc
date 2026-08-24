@@ -1128,6 +1128,14 @@ class RustEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const stmt = statements[index];
       if (stmt === undefined) break;
+      if (stmt.kind === "while" && this.containsAsyncSuspension(stmt.body)) {
+        this.emitAsyncWhile(stmt, statements.slice(index + 1), onComplete);
+        return;
+      }
+      if (stmt.kind === "forOf" && this.containsAsyncSuspension(stmt.body)) {
+        this.emitAsyncForOf(stmt, statements.slice(index + 1), onComplete);
+        return;
+      }
       if (stmt.kind === "for" && this.containsAsyncSuspension(stmt.body)) {
         this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
         return;
@@ -1201,8 +1209,8 @@ class RustEmitter {
         : null,
       );
       if (awaited === null) {
-        if ((nested?.kind === "bin" || nested?.kind === "strConcat" || nested?.kind === "recordLit" ||
-          nested?.kind === "arrIntrinsic") &&
+        if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
+          nested?.kind === "recordLit" || nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
@@ -1359,6 +1367,122 @@ class RustEmitter {
     this.indent -= 1;
     this.line("}");
     this.line(call());
+    this.line("return;");
+  }
+
+  private emitAsyncWhile(
+    stmt: Extract<IrStmt, { kind: "while" }>,
+    remaining: readonly IrStmt[],
+    onComplete: (() => void) | null,
+  ): void {
+    const result = this.currentAsyncResult;
+    const fn = this.currentFunction;
+    if (result === null || fn?.async !== true) this.unsupported("async while outside an async function", stmt.loc);
+    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async while", stmt.loc);
+    if (this.containsAsyncSuspension(stmt.cond)) this.unsupported("async suspension in a while condition", stmt.loc);
+    if (this.containsLoopControl(stmt.body)) {
+      this.unsupported("break or continue in a suspended async while", stmt.loc);
+    }
+
+    const loopLocals = new Set(this.currentAsyncLocals ?? []);
+    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
+    const helper = `sc_async_while_${this.temporary++}`;
+    const params = [
+      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, stmt.loc)}>`,
+      ...locals.map((local) =>
+        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}>`
+      ),
+    ];
+    const call = `${helper}(${[
+      `${result}.clone()`,
+      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
+    ].join(", ")});`;
+
+    this.line(`fn ${helper}(${params.join(", ")}) {`);
+    this.indent += 1;
+    this.withAsyncLocals(new Set(loopLocals), () => {
+      this.line(`if ${this.emitExpr(stmt.cond)} {`);
+      this.indent += 1;
+      this.emitAsyncStatements(stmt.body, () => this.withAsyncLocals(new Set(loopLocals), () => {
+        this.line(call);
+        this.line("return;");
+      }));
+      this.indent -= 1;
+      this.line("} else {");
+      this.indent += 1;
+      this.emitAsyncStatements(remaining, onComplete);
+      this.indent -= 1;
+      this.line("}");
+    });
+    this.indent -= 1;
+    this.line("}");
+    this.line(call);
+    this.line("return;");
+  }
+
+  private emitAsyncForOf(
+    stmt: Extract<IrStmt, { kind: "forOf" }>,
+    remaining: readonly IrStmt[],
+    onComplete: (() => void) | null,
+  ): void {
+    const result = this.currentAsyncResult;
+    const fn = this.currentFunction;
+    if (result === null || fn?.async !== true) this.unsupported("async for-of outside an async function", stmt.loc);
+    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async for-of", stmt.loc);
+    if (stmt.iterable.type.kind !== "array") this.unsupported("async for-of over a non-array", stmt.loc);
+    if (this.containsAsyncSuspension(stmt.iterable)) {
+      this.unsupported("async suspension in a for-of iterable", stmt.loc);
+    }
+    if (this.containsLoopControl(stmt.body)) {
+      this.unsupported("break or continue in a suspended async for-of", stmt.loc);
+    }
+
+    const loopLocals = new Set(this.currentAsyncLocals ?? []);
+    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
+    const local = this.local(stmt.localId, stmt.loc);
+    const helper = `sc_async_for_of_${this.temporary++}`;
+    const array = `sc_async_for_of_array_${this.temporary++}`;
+    const index = `sc_async_for_of_index_${this.temporary++}`;
+    const params = [
+      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, stmt.loc)}>`,
+      `${array}: ${this.rustType(stmt.iterable.type, stmt.loc)}`,
+      `${index}: f64`,
+      ...locals.map((candidate) =>
+        `${mangleLocal(candidate.id)}: runtime::JsCell<${this.rustType(candidate.type, stmt.loc)}>`
+      ),
+    ];
+    const call = (nextIndex: string) => `${helper}(${[
+      `${result}.clone()`,
+      `${array}.clone()`,
+      nextIndex,
+      ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
+    ].join(", ")});`;
+
+    this.line(`let ${array} = ${this.emitExpr(stmt.iterable)};`);
+    this.line(`fn ${helper}(${params.join(", ")}) {`);
+    this.indent += 1;
+    this.withAsyncLocals(new Set(loopLocals), () => {
+      this.line(`if ${index} < runtime::array_len(&${array}) {`);
+      this.indent += 1;
+      this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
+      const iterationLocals = new Set(loopLocals);
+      iterationLocals.add(local.id);
+      this.withAsyncLocals(iterationLocals, () => {
+        this.emitAsyncStatements(stmt.body, () => this.withAsyncLocals(new Set(loopLocals), () => {
+          this.line(call(`${index} + 1.0_f64`));
+          this.line("return;");
+        }));
+      });
+      this.indent -= 1;
+      this.line("} else {");
+      this.indent += 1;
+      this.withAsyncLocals(new Set(loopLocals), () => this.emitAsyncStatements(remaining, onComplete));
+      this.indent -= 1;
+      this.line("}");
+    });
+    this.indent -= 1;
+    this.line("}");
+    this.line(call("0.0_f64"));
     this.line("return;");
   }
 
@@ -1599,6 +1723,15 @@ class RustEmitter {
       });
       return;
     }
+    if (expr.kind === "toString") {
+      this.emitAsyncProtectedValue(
+        expr.operand,
+        exitLocals,
+        handlers,
+        (value) => consume(this.emitToStringValue(expr.operand.type, value, expr.loc)),
+      );
+      return;
+    }
     if (expr.kind === "strConcat") {
       this.emitAsyncProtectedValue(expr.left, exitLocals, handlers, (left) => {
         this.emitAsyncProtectedValue(
@@ -1607,6 +1740,14 @@ class RustEmitter {
           handlers,
           (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`),
         );
+      });
+      return;
+    }
+    if (expr.kind === "mapIntrinsic") {
+      this.emitAsyncProtectedValue(expr.receiver, exitLocals, handlers, (receiver) => {
+        this.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
+          consume(this.emitMapIntrinsicValues(expr, receiver, args));
+        });
       });
       return;
     }
@@ -1866,9 +2007,24 @@ class RustEmitter {
       });
       return;
     }
+    if (expr.kind === "toString") {
+      this.emitAsyncValue(
+        expr.operand,
+        (value) => consume(this.emitToStringValue(expr.operand.type, value, expr.loc)),
+      );
+      return;
+    }
     if (expr.kind === "strConcat") {
       this.emitAsyncValue(expr.left, (left) => {
         this.emitAsyncValue(expr.right, (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`));
+      });
+      return;
+    }
+    if (expr.kind === "mapIntrinsic") {
+      this.emitAsyncValue(expr.receiver, (receiver) => {
+        this.emitAsyncValues(expr.args, (args) => {
+          consume(this.emitMapIntrinsicValues(expr, receiver, args));
+        });
       });
       return;
     }
@@ -1932,6 +2088,31 @@ class RustEmitter {
     }
     this.emitAsyncValue(expr, (value) => {
       this.emitAsyncValues(exprs, consume, index + 1, [...values, value]);
+    });
+  }
+
+  private emitAsyncProtectedValues(
+    exprs: readonly IrExpr[],
+    exitLocals: ReadonlySet<string>,
+    handlers: RustAsyncHandlers,
+    consume: (values: string[]) => void,
+    index = 0,
+    values: string[] = [],
+  ): void {
+    const expr = exprs[index];
+    if (expr === undefined) {
+      consume(values);
+      return;
+    }
+    this.emitAsyncProtectedValue(expr, exitLocals, handlers, (value) => {
+      this.emitAsyncProtectedValues(
+        exprs,
+        exitLocals,
+        handlers,
+        consume,
+        index + 1,
+        [...values, value],
+      );
     });
   }
 
@@ -2425,28 +2606,7 @@ class RustEmitter {
         return `((${this.emitExpr(expr.left)}).as_ref() ${expr.op} (${this.emitExpr(expr.right)}).as_ref())`;
       }
       case "toString": {
-        const operand = this.emitExpr(expr.operand);
-        if (expr.operand.type.kind === "f64") return `runtime::number_to_string(${operand})`;
-        if (expr.operand.type.kind === "bool") return `runtime::bool_to_string(${operand})`;
-        if (expr.operand.type.kind === "caught") {
-          const helper = this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string";
-          return `${helper}(&(${operand}))`;
-        }
-        if (expr.operand.type.kind === "union") {
-          const union = this.union(expr.operand.type.unionId, expr.loc);
-          const name = this.unionName(union.id);
-          const arms = union.arms.map((arm, tag) => {
-            const variant = `${name}::${this.unionVariant(tag)}`;
-            if (arm.kind === "undefinedT") return `${variant} => runtime::string("undefined")`;
-            if (arm.kind === "nullT") return `${variant} => runtime::string("null")`;
-            if (arm.kind === "string") return `${variant}(value) => value`;
-            if (arm.kind === "f64") return `${variant}(value) => runtime::number_to_string(value)`;
-            if (arm.kind === "bool") return `${variant}(value) => runtime::bool_to_string(value)`;
-            this.unsupported(`toString union arm '${arm.kind}'`, expr.loc);
-          }).join(", ");
-          return `match ${operand} { ${arms} }`;
-        }
-        this.unsupported(`toString from '${expr.operand.type.kind}'`, expr.loc);
+        return this.emitToStringValue(expr.operand.type, this.emitExpr(expr.operand), expr.loc);
       }
       case "jsonStringify": {
         const value = this.emitExpr(expr.value);
@@ -3507,6 +3667,30 @@ class RustEmitter {
     }
   }
 
+  private emitToStringValue(type: IrType, operand: string, loc: SrcLoc): string {
+    if (type.kind === "f64") return `runtime::number_to_string(${operand})`;
+    if (type.kind === "bool") return `runtime::bool_to_string(${operand})`;
+    if (type.kind === "caught") {
+      const helper = this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string";
+      return `${helper}(&(${operand}))`;
+    }
+    if (type.kind === "union") {
+      const union = this.union(type.unionId, loc);
+      const name = this.unionName(union.id);
+      const arms = union.arms.map((arm, tag) => {
+        const variant = `${name}::${this.unionVariant(tag)}`;
+        if (arm.kind === "undefinedT") return `${variant} => runtime::string("undefined")`;
+        if (arm.kind === "nullT") return `${variant} => runtime::string("null")`;
+        if (arm.kind === "string") return `${variant}(value) => value`;
+        if (arm.kind === "f64") return `${variant}(value) => runtime::number_to_string(value)`;
+        if (arm.kind === "bool") return `${variant}(value) => runtime::bool_to_string(value)`;
+        this.unsupported(`toString union arm '${arm.kind}'`, loc);
+      }).join(", ");
+      return `match ${operand} { ${arms} }`;
+    }
+    this.unsupported(`toString from '${type.kind}'`, loc);
+  }
+
   private displayExpr(expr: IrExpr): string {
     return this.displayValue(this.emitExpr(expr), expr.type, expr.loc);
   }
@@ -3803,6 +3987,19 @@ class RustEmitter {
       default:
         this.unsupported(`map intrinsic '${expr.method}'`, expr.loc);
     }
+  }
+
+  private emitMapIntrinsicValues(
+    expr: Extract<IrExpr, { kind: "mapIntrinsic" }>,
+    receiver: string,
+    args: readonly string[],
+  ): string {
+    if (expr.receiver.type.kind !== "map") this.unsupported("async map intrinsic on a non-map", expr.loc);
+    if (expr.method !== "set" || args.length !== 2 || args[0] === undefined || args[1] === undefined) {
+      this.unsupported(`async map intrinsic '${expr.method}'`, expr.loc);
+    }
+    const equality = this.mapKeyEquality("left", "right", expr.receiver.type.key, expr.loc);
+    return `runtime::map_set_by(&(${receiver}), ${this.mapStoredKey(args[0], expr.receiver.type.key)}, ${args[1]}, |left, right| ${equality})`;
   }
 
   private emitSetIntrinsic(expr: Extract<IrExpr, { kind: "setIntrinsic" }>): string {
