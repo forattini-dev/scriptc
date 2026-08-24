@@ -880,11 +880,67 @@ pub fn string_char_at(value: &JsString, index: f64) -> JsString {
     empty_string()
 }
 
+pub fn string_char_code_at(value: &JsString, index: f64) -> f64 {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
+        return f64::NAN;
+    }
+    value
+        .encode_utf16()
+        .nth(index as usize)
+        .map_or(f64::NAN, f64::from)
+}
+
+fn relative_string_index(index: f64, len: usize) -> usize {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if index == f64::NEG_INFINITY {
+        return 0;
+    }
+    if index == f64::INFINITY {
+        return len;
+    }
+    if index < 0.0 {
+        (len as f64 + index).clamp(0.0, len as f64) as usize
+    } else {
+        index.clamp(0.0, len as f64) as usize
+    }
+}
+
+pub fn string_index_of(value: &JsString, search: &JsString, from_index: f64) -> f64 {
+    let haystack: Vec<u16> = value.encode_utf16().collect();
+    let needle: Vec<u16> = search.encode_utf16().collect();
+    let start = if from_index.is_nan() {
+        0
+    } else if from_index == f64::INFINITY {
+        haystack.len()
+    } else {
+        from_index.trunc().clamp(0.0, haystack.len() as f64) as usize
+    };
+    if needle.is_empty() {
+        return start as f64;
+    }
+    haystack[start..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .map_or(-1.0, |index| (start + index) as f64)
+}
+
+pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let start = relative_string_index(start, units.len());
+    let end = relative_string_index(end, units.len());
+    if end <= start {
+        return empty_string();
+    }
+    Rc::from(String::from_utf16_lossy(&units[start..end]))
+}
+
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
+    let count = if count.is_nan() { 0.0 } else { count.trunc() };
     if !count.is_finite() || count < 0.0 {
         panic!("RangeError: Invalid count value");
     }
-    Rc::<str>::from(value.repeat(count.trunc() as usize))
+    Rc::<str>::from(value.repeat(count as usize))
 }
 
 pub fn string_to_lower_case(value: &JsString) -> JsString {
@@ -895,8 +951,37 @@ pub fn string_to_upper_case(value: &JsString) -> JsString {
     Rc::<str>::from(value.to_uppercase())
 }
 
-pub fn string_includes(value: &JsString, search: &JsString) -> bool {
-    value.contains(search.as_ref())
+pub fn string_includes(value: &JsString, search: &JsString, from_index: f64) -> bool {
+    string_index_of(value, search, from_index) >= 0.0
+}
+
+pub fn string_starts_with(value: &JsString, search: &JsString) -> bool {
+    value.starts_with(search.as_ref())
+}
+
+pub fn string_ends_with(value: &JsString, search: &JsString) -> bool {
+    value.ends_with(search.as_ref())
+}
+
+fn javascript_whitespace(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0009}'..='\u{000d}'
+            | '\u{0020}'
+            | '\u{00a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202f}'
+            | '\u{205f}'
+            | '\u{3000}'
+            | '\u{feff}'
+    )
+}
+
+pub fn string_trim(value: &JsString) -> JsString {
+    Rc::from(value.trim_matches(javascript_whitespace))
 }
 
 pub fn number_to_string(value: f64) -> JsString {
@@ -1587,8 +1672,8 @@ mod tests {
         let value = string("ScriptC 42");
         assert_eq!(string_to_lower_case(&value).as_ref(), "scriptc 42");
         assert_eq!(string_to_upper_case(&value).as_ref(), "SCRIPTC 42");
-        assert!(string_includes(&value, &string("iptC")));
-        assert!(!string_includes(&value, &string("iptc")));
+        assert!(string_includes(&value, &string("iptC"), 0.0));
+        assert!(!string_includes(&value, &string("iptc"), 0.0));
     }
 
     #[test]

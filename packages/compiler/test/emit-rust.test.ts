@@ -102,6 +102,7 @@ catch { console.log("syntax"); }
     "1003-json-parse-unions.ts",
     "1008-json-null-arms.ts",
     "1009-json-optional-fields.ts",
+    "541-ref-array-json.ts",
   ]) {
     const corpusPath = resolve("tests/corpus", fixture);
     const corpusResult = await compile(corpusPath, {
@@ -123,6 +124,39 @@ catch { console.log("syntax"); }
     ]);
     expect(corpusRust.stdout, fixture).toBe(corpusNode.stdout);
     expect(corpusRust.stderr, fixture).toBe(corpusNode.stderr);
+  }
+}, 120_000);
+
+test("Rust UTF-16 string methods, array iteration, record arrays, and tuples match Node", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-builtins-"));
+  for (const fixture of [
+    "210-string-methods.ts",
+    "211-string-unicode.ts",
+    "502-array-for-of.ts",
+    "512-array-join-chains.ts",
+    "530-record-arrays.ts",
+    "540-tuples-basics.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
   }
 }, 120_000);
 

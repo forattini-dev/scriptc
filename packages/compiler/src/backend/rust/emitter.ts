@@ -1079,11 +1079,27 @@ class RustEmitter {
         if (expr.method === "charAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
+        if (expr.method === "charCodeAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_char_code_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
+        }
         if (expr.method === "repeat" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_repeat(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
-        if (expr.method === "includes" && expr.args.length === 1 && expr.args[0] !== undefined) {
-          return `runtime::string_includes(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        if ((expr.method === "indexOf" || expr.method === "includes") && expr.args[0] !== undefined) {
+          const index = `runtime::string_index_of(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1])})`;
+          return expr.method === "includes" ? `(${index} >= 0.0)` : index;
+        }
+        if (expr.method === "startsWith" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_starts_with(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        }
+        if (expr.method === "endsWith" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_ends_with(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}))`;
+        }
+        if (expr.method === "slice") {
+          return `runtime::string_slice(&(${this.emitExpr(expr.receiver)}), ${expr.args[0] === undefined ? "0.0" : this.emitExpr(expr.args[0])}, ${expr.args[1] === undefined ? "f64::INFINITY" : this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.method === "trim" && expr.args.length === 0) {
+          return `runtime::string_trim(&(${this.emitExpr(expr.receiver)}))`;
         }
         this.unsupported(`string intrinsic '${expr.method}'`, expr.loc);
       case "strEq": {
