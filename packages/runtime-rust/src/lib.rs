@@ -2652,20 +2652,37 @@ fn fs_error_code(error: &std::io::Error) -> &'static str {
     }
 }
 
+fn fs_error_text(error: &std::io::Error) -> String {
+    let text = match error.kind() {
+        std::io::ErrorKind::NotFound => "no such file or directory",
+        std::io::ErrorKind::PermissionDenied => "permission denied",
+        std::io::ErrorKind::AlreadyExists => "file already exists",
+        std::io::ErrorKind::InvalidInput => "invalid argument",
+        std::io::ErrorKind::NotADirectory => "not a directory",
+        std::io::ErrorKind::IsADirectory => "illegal operation on a directory",
+        std::io::ErrorKind::DirectoryNotEmpty => "directory not empty",
+        std::io::ErrorKind::BrokenPipe => "broken pipe",
+        _ => return error.to_string(),
+    };
+    text.to_owned()
+}
+
 fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! {
     let code = fs_error_code(&error);
+    let text = fs_error_text(&error);
     throw_value(JsError {
         name: "Error".to_owned(),
-        message: format!("{code}: {error}, {operation} '{}'", path),
+        message: format!("{code}: {text}, {operation} '{}'", path),
         code: Some(code.to_owned()),
     })
 }
 
 fn throw_fs_error2(operation: &str, from: &JsString, to: &JsString, error: std::io::Error) -> ! {
     let code = fs_error_code(&error);
+    let text = fs_error_text(&error);
     throw_value(JsError {
         name: "Error".to_owned(),
-        message: format!("{code}: {error}, {operation} '{from}' -> '{to}'"),
+        message: format!("{code}: {text}, {operation} '{from}' -> '{to}'"),
         code: Some(code.to_owned()),
     })
 }
@@ -4587,6 +4604,22 @@ mod tests {
     fn bitwise_conversions_follow_ecmascript_width() {
         assert_eq!(bit_not(0.0), -1.0);
         assert_eq!(shift_right_unsigned(-1.0, 1.0), 2_147_483_647.0);
+    }
+
+    #[test]
+    fn filesystem_errors_use_node_style_lowercase_descriptions() {
+        assert_eq!(
+            fs_error_text(&std::io::Error::from(std::io::ErrorKind::NotFound)),
+            "no such file or directory"
+        );
+        assert_eq!(
+            fs_error_text(&std::io::Error::from(std::io::ErrorKind::AlreadyExists)),
+            "file already exists"
+        );
+        assert_eq!(
+            fs_error_text(&std::io::Error::from(std::io::ErrorKind::IsADirectory)),
+            "illegal operation on a directory"
+        );
     }
 
     #[test]

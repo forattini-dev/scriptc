@@ -1210,8 +1210,8 @@ class RustEmitter {
       );
       if (awaited === null) {
         if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "recordLit" || nested?.kind === "arrayGet" || nested?.kind === "arrIntrinsic" ||
-          nested?.kind === "mapIntrinsic") &&
+          nested?.kind === "recordLit" || nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
+          nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
@@ -1755,6 +1755,15 @@ class RustEmitter {
       });
       return;
     }
+    if (expr.kind === "bytesNew" && expr.source !== null) {
+      this.emitAsyncProtectedValue(
+        expr.source,
+        exitLocals,
+        handlers,
+        (source) => consume(this.emitBytesNewValue(expr, source)),
+      );
+      return;
+    }
     if (expr.kind === "mapIntrinsic") {
       this.emitAsyncProtectedValue(expr.receiver, exitLocals, handlers, (receiver) => {
         this.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
@@ -2036,6 +2045,10 @@ class RustEmitter {
       this.emitAsyncValue(expr.arr, (array) => {
         this.emitAsyncValue(expr.index, (index) => consume(this.emitArrayGetValues(expr, array, index)));
       });
+      return;
+    }
+    if (expr.kind === "bytesNew" && expr.source !== null) {
+      this.emitAsyncValue(expr.source, (source) => consume(this.emitBytesNewValue(expr, source)));
       return;
     }
     if (expr.kind === "mapIntrinsic") {
@@ -2460,7 +2473,9 @@ class RustEmitter {
         this.line(`let _ = ${caught};`);
       } else {
         const local = this.local(stmt.catchLocalId, stmt.loc);
-        this.line(`let ${mangleLocal(local.id)}: runtime::Caught = ${caught};`);
+        this.line(this.localIsBoxed(local)
+          ? `let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${caught});`
+          : `let ${mangleLocal(local.id)}: runtime::Caught = ${caught};`);
       }
       this.completionLoopBoundaries.push(this.loopTargets.length);
       this.capturedReturnDepth += 1;
@@ -2664,19 +2679,7 @@ class RustEmitter {
       case "arrIntrinsic":
         return this.emitArrayIntrinsic(expr);
       case "bytesNew": {
-        if (expr.type.kind !== "bytes") this.unsupported("bytes construction result", expr.loc);
-        const elem = this.rustBytesElement(expr.type.elem);
-        if (expr.source === null) return `runtime::bytes_empty::<${elem}>()`;
-        if (expr.source.type.kind === "f64") {
-          return `runtime::bytes_alloc::<${elem}>(${this.emitExpr(expr.source)})`;
-        }
-        if (expr.source.type.kind === "bytes") {
-          return `runtime::bytes_copy(&(${this.emitExpr(expr.source)}))`;
-        }
-        if (expr.source.type.kind === "array" && expr.source.type.elem.kind === "f64") {
-          return `runtime::bytes_from_array::<${elem}>(&(${this.emitExpr(expr.source)}))`;
-        }
-        this.unsupported(`bytes construction from '${expr.source.type.kind}'`, expr.loc);
+        return this.emitBytesNewValue(expr, expr.source === null ? null : this.emitExpr(expr.source));
       }
       case "bytesIntrinsic": {
         if (expr.receiver.type.kind !== "bytes") this.unsupported("bytes intrinsic receiver", expr.loc);
@@ -4009,6 +4012,22 @@ class RustEmitter {
   ): string {
     if (expr.arr.type.kind !== "array") this.unsupported("async arrayGet on a non-array", expr.loc);
     return `runtime::array_get(&(${array}), ${index})`;
+  }
+
+  private emitBytesNewValue(
+    expr: Extract<IrExpr, { kind: "bytesNew" }>,
+    source: string | null,
+  ): string {
+    if (expr.type.kind !== "bytes") this.unsupported("bytes construction result", expr.loc);
+    const elem = this.rustBytesElement(expr.type.elem);
+    if (expr.source === null) return `runtime::bytes_empty::<${elem}>()`;
+    if (source === null) this.unsupported("missing bytes construction source", expr.loc);
+    if (expr.source.type.kind === "f64") return `runtime::bytes_alloc::<${elem}>(${source})`;
+    if (expr.source.type.kind === "bytes") return `runtime::bytes_copy(&(${source}))`;
+    if (expr.source.type.kind === "array" && expr.source.type.elem.kind === "f64") {
+      return `runtime::bytes_from_array::<${elem}>(&(${source}))`;
+    }
+    this.unsupported(`bytes construction from '${expr.source.type.kind}'`, expr.loc);
   }
 
   private emitArrayIntrinsicValues(
