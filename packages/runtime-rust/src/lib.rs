@@ -1045,6 +1045,7 @@ pub fn process_cpu_prev_validate(user: f64, system: f64) {
                     format_number(value)
                 ),
                 code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+                dom: None,
             });
         }
     }
@@ -1719,12 +1720,58 @@ pub fn cell_set<T: HeapValue>(cell: &JsCell<T>, value: T) {
     cell.with_mut(|data| data.value = Some(value));
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct JsError {
     name: String,
     message: String,
     code: Option<String>,
+    dom: Option<DomExceptionData>,
 }
+
+#[derive(Clone)]
+struct DomExceptionData {
+    code: f64,
+    cause: Option<Caught>,
+}
+
+impl std::fmt::Debug for JsError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JsError")
+            .field("name", &self.name)
+            .field("message", &self.message)
+            .field("code", &self.code)
+            .field("dom_code", &self.dom.as_ref().map(|dom| dom.code))
+            .field(
+                "dom_has_cause",
+                &self.dom.as_ref().is_some_and(|dom| dom.cause.is_some()),
+            )
+            .finish()
+    }
+}
+
+impl PartialEq for JsError {
+    fn eq(&self, other: &Self) -> bool {
+        let dom_equal = match (&self.dom, &other.dom) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                left.code == right.code
+                    && match (&left.cause, &right.cause) {
+                        (None, None) => true,
+                        (Some(left), Some(right)) => Rc::ptr_eq(&left.value, &right.value),
+                        _ => false,
+                    }
+            }
+            _ => false,
+        };
+        self.name == other.name
+            && self.message == other.message
+            && self.code == other.code
+            && dom_equal
+    }
+}
+
+impl Eq for JsError {}
 
 impl Trace for JsError {
     fn trace(&self, _tracer: &mut Tracer<'_>) {}
@@ -1735,6 +1782,7 @@ pub fn error_new(name: &str, message: JsString) -> JsError {
         name: name.to_owned(),
         message: message.to_string(),
         code: None,
+        dom: None,
     }
 }
 
@@ -1775,6 +1823,7 @@ pub fn throw_reference_error(message: String) -> ! {
         name: "ReferenceError".to_owned(),
         message,
         code: None,
+        dom: None,
     })
 }
 
@@ -1783,6 +1832,16 @@ pub fn throw_error_code(message: String, code: &str) -> ! {
         name: "Error".to_owned(),
         message,
         code: Some(code.to_owned()),
+        dom: None,
+    })
+}
+
+pub fn throw_type_error_code(message: String, code: &str) -> ! {
+    throw_value(JsError {
+        name: "TypeError".to_owned(),
+        message,
+        code: Some(code.to_owned()),
+        dom: None,
     })
 }
 
@@ -1791,6 +1850,7 @@ pub fn throw_type_error(message: String) -> ! {
         name: "TypeError".to_owned(),
         message,
         code: None,
+        dom: None,
     })
 }
 
@@ -1799,6 +1859,7 @@ pub fn throw_syntax_error(message: String) -> ! {
         name: "SyntaxError".to_owned(),
         message,
         code: None,
+        dom: None,
     })
 }
 
@@ -1807,6 +1868,7 @@ pub fn throw_range_error(message: String) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: None,
+        dom: None,
     })
 }
 
@@ -1815,6 +1877,7 @@ pub fn throw_uri_error(message: String) -> ! {
         name: "URIError".to_owned(),
         message,
         code: None,
+        dom: None,
     })
 }
 
@@ -1861,7 +1924,7 @@ pub fn caught_is_error_class(caught: &Caught, name: &str) -> bool {
     caught
         .value
         .downcast_ref::<JsError>()
-        .is_some_and(|error| name == "Error" || error.name == name)
+        .is_some_and(|error| error_is_class(error, name))
 }
 
 pub fn caught_check_error(caught: &Caught, name: &str) -> JsError {
@@ -1936,7 +1999,12 @@ pub fn error_to_string(error: &JsError) -> JsString {
 }
 
 pub fn error_is_class(error: &JsError, name: &str) -> bool {
-    name == "Error" || error.name == name
+    name == "Error"
+        || if error.dom.is_some() {
+            name == "DOMException"
+        } else {
+            error.name == name
+        }
 }
 
 pub fn error_name(error: &JsError) -> JsString {
@@ -1949,6 +2017,139 @@ pub fn error_message(error: &JsError) -> JsString {
 
 pub fn error_code(error: &JsError) -> Option<JsString> {
     error.code.as_deref().map(Rc::from)
+}
+
+fn dom_exception_code(name: &str) -> f64 {
+    match name {
+        "IndexSizeError" => 1.0,
+        "DOMStringSizeError" => 2.0,
+        "HierarchyRequestError" => 3.0,
+        "WrongDocumentError" => 4.0,
+        "InvalidCharacterError" => 5.0,
+        "NoDataAllowedError" => 6.0,
+        "NoModificationAllowedError" => 7.0,
+        "NotFoundError" => 8.0,
+        "NotSupportedError" => 9.0,
+        "InUseAttributeError" => 10.0,
+        "InvalidStateError" => 11.0,
+        "SyntaxError" => 12.0,
+        "InvalidModificationError" => 13.0,
+        "NamespaceError" => 14.0,
+        "InvalidAccessError" => 15.0,
+        "ValidationError" => 16.0,
+        "TypeMismatchError" => 17.0,
+        "SecurityError" => 18.0,
+        "NetworkError" => 19.0,
+        "AbortError" => 20.0,
+        "URLMismatchError" => 21.0,
+        "QuotaExceededError" => 22.0,
+        "TimeoutError" => 23.0,
+        "InvalidNodeTypeError" => 24.0,
+        "DataCloneError" => 25.0,
+        _ => 0.0,
+    }
+}
+
+pub fn dom_exception_new(message: JsString, name: JsString, cause: Option<Caught>) -> JsError {
+    JsError {
+        name: name.to_string(),
+        message: message.to_string(),
+        code: None,
+        dom: Some(DomExceptionData {
+            code: dom_exception_code(&name),
+            cause,
+        }),
+    }
+}
+
+pub fn throw_dom_exception(name: &str, message: &str) -> ! {
+    throw_value(dom_exception_new(string(message), string(name), None))
+}
+
+pub fn error_dom_code(error: &JsError) -> f64 {
+    error
+        .dom
+        .as_ref()
+        .expect("scriptc: DOMException accessor on a non-DOM error")
+        .code
+}
+
+pub fn error_dom_has_cause(error: &JsError) -> bool {
+    error
+        .dom
+        .as_ref()
+        .expect("scriptc: DOMException accessor on a non-DOM error")
+        .cause
+        .is_some()
+}
+
+pub fn error_dom_cause<T: Clone + 'static>(error: &JsError) -> Option<T> {
+    error
+        .dom
+        .as_ref()
+        .expect("scriptc: DOMException accessor on a non-DOM error")
+        .cause
+        .as_ref()
+        .map(caught_narrow::<T>)
+}
+
+pub fn error_dom_clone(error: &JsError) -> JsError {
+    dom_exception_new(error_message(error), error_name(error), None)
+}
+
+fn throw_assertion_error(message: String) -> ! {
+    throw_value(JsError {
+        name: "AssertionError".to_owned(),
+        message,
+        code: Some("ERR_ASSERTION".to_owned()),
+        dom: None,
+    })
+}
+
+pub fn assert_throws_none(
+    rejection: bool,
+    expected_name: &JsString,
+    has_expected_name: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let mut output = if rejection {
+        "Missing expected rejection".to_owned()
+    } else {
+        "Missing expected exception".to_owned()
+    };
+    if has_expected_name {
+        output.push_str(" (");
+        output.push_str(expected_name);
+        output.push(')');
+    }
+    if has_message {
+        output.push_str(": ");
+        output.push_str(message);
+    } else {
+        output.push('.');
+    }
+    throw_assertion_error(output)
+}
+
+pub fn assert_throws_mismatch(
+    expected_name: &JsString,
+    received_name: &JsString,
+    received_message: &JsString,
+    message: &JsString,
+    has_message: bool,
+) {
+    if has_message {
+        throw_assertion_error(message.to_string());
+    }
+    let mut output = format!(
+        "The error is expected to be an instance of \"{expected_name}\". Received \"{received_name}\""
+    );
+    if !received_message.is_empty() {
+        output.push_str("\n\nError message:\n\n");
+        output.push_str(received_message);
+    }
+    throw_assertion_error(output)
 }
 
 /// A value that may be stored in a traced JavaScript array.
@@ -2454,6 +2655,7 @@ fn bytes_validate_offset(name: &str, value: f64, max: f64) {
             "The value of \"{name}\" is out of range. It must be {requirement}. Received {received}"
         ),
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        dom: None,
     })
 }
 
@@ -2597,6 +2799,7 @@ fn bytes_fill_core(
             name: "TypeError".to_owned(),
             message: "The argument 'value' is invalid. Received <Buffer >".to_owned(),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            dom: None,
         });
     }
     let length = bytes.with(|data| data.length);
@@ -2706,6 +2909,7 @@ pub fn bytes_swap(bytes: &JsBytes<u8>, width: usize) -> JsBytes<u8> {
             name: "RangeError".to_owned(),
             message: format!("Buffer size must be a multiple of {}-bits", width * 8),
             code: Some("ERR_INVALID_BUFFER_SIZE".to_owned()),
+            dom: None,
         });
     }
     bytes.with(|data| {
@@ -2921,6 +3125,7 @@ fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
             name: "TypeError".to_owned(),
             message: format!("Unknown encoding: {encoding}"),
             code: Some("ERR_UNKNOWN_ENCODING".to_owned()),
+            dom: None,
         })
     })
 }
@@ -3287,6 +3492,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
                 bytes_received_number(value)
             ),
             code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            dom: None,
         });
     }
     if length < 0.0 {
@@ -3294,6 +3500,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
             name: "RangeError".to_owned(),
             message: "Attempt to access memory outside buffer bounds".to_owned(),
             code: Some("ERR_BUFFER_OUT_OF_BOUNDS".to_owned()),
+            dom: None,
         });
     }
     throw_value(JsError {
@@ -3306,6 +3513,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
             bytes_received_number(value)
         ),
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        dom: None,
     })
 }
 
@@ -3352,6 +3560,7 @@ fn bytes_check_int(
                 bytes_received_number(value)
             ),
             code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            dom: None,
         });
     }
     bytes_num_offset(bytes, offset, width)
@@ -3921,6 +4130,99 @@ pub fn string_decode_uri_component(value: &JsString) -> JsString {
     Rc::from(String::from_utf8(decoded).expect("validated URI bytes are UTF-8"))
 }
 
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+pub fn string_atob(value: &JsString) -> JsString {
+    let mut encoded: Vec<u8> = value
+        .bytes()
+        .filter(|byte| !matches!(byte, b'\t' | b'\n' | 0x0c | b'\r' | b' '))
+        .collect();
+    if !encoded.is_empty() && encoded.len().is_multiple_of(4) {
+        if encoded.last() == Some(&b'=') {
+            encoded.pop();
+        }
+        if encoded.last() == Some(&b'=') {
+            encoded.pop();
+        }
+    }
+    if encoded.len() % 4 == 1 {
+        throw_dom_exception(
+            "InvalidCharacterError",
+            "The string to be decoded is not correctly encoded.",
+        );
+    }
+
+    let mut output = String::with_capacity(encoded.len() / 4 * 3);
+    let mut accumulator = 0u32;
+    let mut bits = 0u32;
+    for byte in encoded {
+        let Some(value) = base64_value(byte) else {
+            throw_dom_exception(
+                "InvalidCharacterError",
+                "The string to be decoded is not correctly encoded.",
+            );
+        };
+        accumulator = (accumulator << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push(char::from(((accumulator >> bits) & 0xff) as u8));
+            accumulator &= if bits == 0 { 0 } else { (1 << bits) - 1 };
+        }
+    }
+    Rc::from(output)
+}
+
+pub fn string_btoa(value: &JsString) -> JsString {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut bytes = Vec::with_capacity(value.len());
+    for ch in value.chars() {
+        let code = u32::from(ch);
+        if code > 0xff {
+            throw_dom_exception("InvalidCharacterError", "Invalid character");
+        }
+        bytes.push(code as u8);
+    }
+
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = u32::from(chunk[0]);
+        let second = u32::from(*chunk.get(1).unwrap_or(&0));
+        let third = u32::from(*chunk.get(2).unwrap_or(&0));
+        let triple = (first << 16) | (second << 8) | third;
+        output.push(char::from(ALPHABET[((triple >> 18) & 0x3f) as usize]));
+        output.push(char::from(ALPHABET[((triple >> 12) & 0x3f) as usize]));
+        output.push(if chunk.len() > 1 {
+            char::from(ALPHABET[((triple >> 6) & 0x3f) as usize])
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            char::from(ALPHABET[(triple & 0x3f) as usize])
+        } else {
+            '='
+        });
+    }
+    Rc::from(output)
+}
+
+pub fn string_base64_missing_argument() -> JsString {
+    throw_type_error_code(
+        "The \"input\" argument must be specified".to_owned(),
+        "ERR_MISSING_ARGS",
+    )
+}
+
 pub fn string_len(value: &JsString) -> f64 {
     value.encode_utf16().count() as f64
 }
@@ -4419,6 +4721,7 @@ fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! 
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{}'", path),
         code: Some(code.to_owned()),
+        dom: None,
     })
 }
 
@@ -4433,6 +4736,7 @@ fn fs_error2(operation: &str, from: &str, to: &str, error: &std::io::Error) -> J
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{from}' -> '{to}'"),
         code: Some(code.to_owned()),
+        dom: None,
     }
 }
 
@@ -4441,6 +4745,7 @@ fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
         name: "Error".to_owned(),
         message: format!("{code}: {description}, {operation}"),
         code: Some(code.to_owned()),
+        dom: None,
     })
 }
 
@@ -4455,6 +4760,7 @@ fn throw_out_of_range(message: String) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        dom: None,
     })
 }
 
@@ -4510,6 +4816,7 @@ fn throw_invalid_arg_value(prefix: &str, value: &str) -> ! {
         name: "TypeError".to_owned(),
         message: format!("{prefix}{}", inspected_argument(value)),
         code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+        dom: None,
     })
 }
 
@@ -5204,6 +5511,7 @@ fn file_handle_require_open(handle: &JsFileHandle) -> f64 {
         name: "Error".to_owned(),
         message: "file closed".to_owned(),
         code: Some("EBADF".to_owned()),
+        dom: None,
     })
 }
 
@@ -5238,6 +5546,7 @@ pub fn file_handle_read(
             message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >"
                 .to_owned(),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            dom: None,
         });
     }
     if length_default
@@ -5659,6 +5968,7 @@ pub fn child_exec_sync(
                 name: "Error".to_owned(),
                 message: format!("spawnSync {command} {code}"),
                 code: Some(code.to_owned()),
+                dom: None,
             })
         }
     };
@@ -5670,6 +5980,7 @@ pub fn child_exec_sync(
             name: "Error".to_owned(),
             message: format!("spawnSync {command} ETIMEDOUT"),
             code: Some("ETIMEDOUT".to_owned()),
+            dom: None,
         });
     }
     if !output.status.success() {
@@ -5696,6 +6007,7 @@ pub fn child_exec_sync(
             name: "Error".to_owned(),
             message: format!("Command failed: {display}\n{stderr}"),
             code: None,
+            dom: None,
         });
     }
     Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())
@@ -5787,6 +6099,7 @@ pub fn child_spawn_sync(
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} {code}"),
                     code: Some(code.to_owned()),
+                    dom: None,
                 }),
             })
         }
@@ -5813,6 +6126,7 @@ pub fn child_spawn_sync(
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} ETIMEDOUT"),
                     code: Some("ETIMEDOUT".to_owned()),
+                    dom: None,
                 }),
             })
         }
@@ -7637,6 +7951,60 @@ mod tests {
             assert_eq!(caught_error_name(&caught).as_ref(), "URIError");
             assert_eq!(caught_error_message(&caught).as_ref(), "URI malformed");
         }
+    }
+
+    #[test]
+    fn dom_exception_and_base64_follow_web_platform_rules() {
+        let cause = string("cause");
+        let error = dom_exception_new(
+            string("bad input"),
+            string("InvalidCharacterError"),
+            Some(caught_value(cause.clone())),
+        );
+        assert!(error_is_class(&error, "DOMException"));
+        assert!(error_is_class(&error, "Error"));
+        assert!(!error_is_class(&error, "InvalidCharacterError"));
+        assert_eq!(error_dom_code(&error), 5.0);
+        assert!(error_dom_has_cause(&error));
+        assert_eq!(error_dom_cause::<JsString>(&error).as_ref(), Some(&cause));
+        let cloned = error_dom_clone(&error);
+        assert_eq!(error_name(&cloned).as_ref(), "InvalidCharacterError");
+        assert_eq!(error_message(&cloned).as_ref(), "bad input");
+        assert!(!error_dom_has_cause(&cloned));
+
+        for value in ["", "a", "ab", "abc", "binary\0\u{1}\u{fe}data"] {
+            let value = string(value);
+            assert_eq!(string_atob(&string_btoa(&value)), value);
+        }
+        assert_eq!(string_atob(&string("  Y\tW\nJj\r ")).as_ref(), "abc");
+        assert_eq!(string_atob(&string("YWJjZA==")).as_ref(), "abcd");
+
+        for malformed in ["a", "我要抛错！"] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                string_atob(&string(malformed))
+            }))
+            .err()
+            .expect("invalid base64 must throw");
+            let caught = caught_from_panic(payload);
+            assert!(caught_is_error_class(&caught, "DOMException"));
+            let error = caught_error_value(&caught);
+            assert_eq!(error_name(&error).as_ref(), "InvalidCharacterError");
+            assert_eq!(error_dom_code(&error), 5.0);
+            assert_eq!(
+                error_message(&error).as_ref(),
+                "The string to be decoded is not correctly encoded."
+            );
+        }
+
+        let payload = std::panic::catch_unwind(|| string_base64_missing_argument())
+            .err()
+            .expect("missing base64 input must throw");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert_eq!(
+            caught_error_code(&caught).as_deref(),
+            Some("ERR_MISSING_ARGS")
+        );
     }
 
     #[test]

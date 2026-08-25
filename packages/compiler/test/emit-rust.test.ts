@@ -570,6 +570,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1666-dyn-fn-identity.ts",
     "2140-uri-component-codecs.ts",
     "2191-uri-encoders.ts",
+    "2281-domexception-atob-btoa.cjs",
     "2350-nan-global.ts",
     "2366-string-well-formed.ts",
     "2367-regexp-escape.ts",
@@ -615,7 +616,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     expect(rust.stdout, fixture).toBe(node.stdout);
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
-}, 120_000);
+}, 180_000);
 
 test("Rust checked-dynamic adapters validate JSON, arguments, and results catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-functions-"));

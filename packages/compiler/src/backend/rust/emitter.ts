@@ -1015,7 +1015,23 @@ class RustEmitter {
         if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
           return `sc_dyn_deep_copy(&${name}::Object(${value}))`;
         }
-        this.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
+        if (shape === undefined || shape.indexValue !== undefined) {
+          this.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
+        }
+        const record = `sc_rt_${this.temporary++}`;
+        const object = `sc_rt_${this.temporary++}`;
+        const byName = new Map(shape.fields.map((field) => [field.name, field]));
+        const fields = (shape.declaredOrder ?? shape.fields.map((field) => field.name)).map((fieldName) => {
+          const field = byName.get(fieldName);
+          if (field === undefined) this.unsupported(`missing declared record field '${type.shapeId}.${fieldName}'`, loc);
+          const stored = `${record}.${mangleField(field.name)}`;
+          const fieldValue = this.isEdgeValue(field.type)
+            ? `${stored}.as_ref().expect("scriptc: cleared live dynamic record field").clone()`
+            : this.needsClone(field.type) ? `${stored}.clone()` : stored;
+          const dynamic = this.emitDynFromValue(field.type, fieldValue, loc);
+          return `runtime::map_set_by(&${object}, runtime::string("${this.rustString(field.name)}"), ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
+        }).join(" ");
+        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} }); ${name}::Object(${object}) }`;
       }
       default:
         this.unsupported(`dynamic boxing from '${type.kind}'`, loc);
@@ -3664,6 +3680,13 @@ class RustEmitter {
         }
         return `runtime::map_string_keys_js_order(&(${this.emitExpr(expr.obj)}))`;
       }
+      case "caughtToDyn": {
+        const caught = `sc_rt_${this.temporary++}`;
+        const object = `sc_rt_${this.temporary++}`;
+        const error = `sc_rt_${this.temporary++}`;
+        const dyn = this.dynTypeName();
+        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if runtime::caught_is_error(&${caught}) { let ${error} = runtime::caught_error_value(&${caught}); let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); runtime::map_set_by(&${object}, runtime::string("%error"), ${dyn}::Boolean(true), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&${object}, runtime::string("name"), ${dyn}::String(runtime::error_name(&${error})), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&${object}, runtime::string("message"), ${dyn}::String(runtime::error_message(&${error})), |left, right| left.as_ref() == right.as_ref()); if runtime::error_is_class(&${error}, "DOMException") { runtime::map_set_by(&${object}, runtime::string("code"), ${dyn}::Number(runtime::error_dom_code(&${error})), |left, right| left.as_ref() == right.as_ref()); if let Some(cause) = runtime::error_dom_cause::<${dyn}>(&${error}) { runtime::map_set_by(&${object}, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); } } else if let Some(code) = runtime::error_code(&${error}) { runtime::map_set_by(&${object}, runtime::string("code"), ${dyn}::String(code), |left, right| left.as_ref() == right.as_ref()); } ${dyn}::Object(${object}) } else { ${dyn}::Object(runtime::map_new()) } }`;
+      }
       case "caughtTest":
         if (expr.test !== "instanceof") {
           const type = { string: "runtime::JsString", number: "f64", boolean: "bool" }[expr.test];
@@ -4020,6 +4043,14 @@ class RustEmitter {
         }
         if (expr.fn === "str.decodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::string_decode_uri_component(&(${this.emitExpr(arg)}))`;
+        }
+        if ((expr.fn === "str.atob" || expr.fn === "str.btoa") && expr.args.length === 1 && arg?.type.kind === "dyn") {
+          const value = `sc_rt_${this.temporary++}`;
+          const helper = expr.fn === "str.atob" ? "string_atob" : "string_btoa";
+          return `{ let ${value} = ${this.emitExpr(arg)}; runtime::${helper}(&sc_dyn_to_string(&${value})) }`;
+        }
+        if (expr.fn === "str.b64Missing" && expr.args.length === 0) {
+          return "runtime::string_base64_missing_argument()";
         }
         if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
         if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
@@ -4509,6 +4540,50 @@ class RustEmitter {
           if (error === undefined) this.unsupported(`error.new result '${expr.type.className}'`, expr.loc);
           const value = `runtime::error_new("${this.rustString(error.lib)}", ${this.emitExpr(arg)})`;
           return this.errorClassRoots().length === 0 ? value : `${this.errorValueName()}::Builtin(${value})`;
+        }
+        if (expr.fn === "error.newDom" && expr.args.length === 2 && arg?.type.kind === "dyn" &&
+          secondArg?.type.kind === "dyn" && expr.type.kind === "object" && expr.type.className === "%DOMException") {
+          const message = `sc_rt_${this.temporary++}`;
+          const options = `sc_rt_${this.temporary++}`;
+          const messageString = `sc_rt_${this.temporary++}`;
+          const name = `sc_rt_${this.temporary++}`;
+          const cause = `sc_rt_${this.temporary++}`;
+          const dyn = this.dynTypeName();
+          const value = `{ let ${message} = ${this.emitExpr(arg)}; let ${options} = ${this.emitExpr(secondArg)}; let ${messageString} = if matches!(&${message}, ${dyn}::Undefined) { runtime::empty_string() } else { sc_dyn_to_string(&${message}) }; let (${name}, ${cause}) = match &${options} { ${dyn}::Undefined => (runtime::string("Error"), None), ${dyn}::Object(object) => { let name_value = runtime::map_get_by(object, &runtime::string("name"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${dyn}::Undefined); let cause_value = runtime::map_get_by(object, &runtime::string("cause"), |left, right| left.as_ref() == right.as_ref()).map(runtime::caught_value); (sc_dyn_to_string(&name_value), cause_value) }, _ => (sc_dyn_to_string(&${options}), None), }; runtime::dom_exception_new(${messageString}, ${name}, ${cause}) }`;
+          return this.errorClassRoots().length === 0 ? value : `${this.errorValueName()}::Builtin(${value})`;
+        }
+        if ((expr.fn === "error.domCode" || expr.fn === "error.domHasCause") &&
+          expr.args.length === 1 && arg?.type.kind === "object" && arg.type.className === "%DOMException") {
+          const helper = expr.fn === "error.domCode" ? "error_dom_code" : "error_dom_has_cause";
+          if (this.errorClassRoots().length === 0) {
+            return `runtime::${helper}(&(${this.emitExpr(arg)}))`;
+          }
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; match &${value} { ${this.errorValueName()}::Builtin(error) => runtime::${helper}(error), _ => unreachable!("scriptc invariant: DOMException is not builtin"), } }`;
+        }
+        if (expr.fn === "error.domCause" && expr.args.length === 1 &&
+          arg?.type.kind === "object" && arg.type.className === "%DOMException" && expr.type.kind === "dyn") {
+          const dyn = this.dynTypeName();
+          if (this.errorClassRoots().length === 0) {
+            return `runtime::error_dom_cause::<${dyn}>(&(${this.emitExpr(arg)})).unwrap_or(${dyn}::Undefined)`;
+          }
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; match &${value} { ${this.errorValueName()}::Builtin(error) => runtime::error_dom_cause::<${dyn}>(error).unwrap_or(${dyn}::Undefined), _ => unreachable!("scriptc invariant: DOMException is not builtin"), } }`;
+        }
+        if (expr.fn === "assert.throwsNone" && expr.args.length === 5 &&
+          arg !== undefined && secondArg !== undefined && expr.args[2] !== undefined &&
+          expr.args[3] !== undefined && expr.args[4] !== undefined) {
+          return `runtime::assert_throws_none(${this.emitExpr(arg)}, &(${this.emitExpr(secondArg)}), ${this.emitExpr(expr.args[2])}, &(${this.emitExpr(expr.args[3])}), ${this.emitExpr(expr.args[4])})`;
+        }
+        if (expr.fn === "assert.throwsMismatch" && expr.args.length === 4 &&
+          arg !== undefined && secondArg?.type.kind === "object" && expr.args[2] !== undefined && expr.args[3] !== undefined) {
+          const expected = `sc_rt_${this.temporary++}`;
+          const error = `sc_rt_${this.temporary++}`;
+          const message = `sc_rt_${this.temporary++}`;
+          const hasMessage = `sc_rt_${this.temporary++}`;
+          const nameHelper = this.errorClassRoots().length === 0 ? "runtime::error_name" : "sc_error_name";
+          const messageHelper = this.errorClassRoots().length === 0 ? "runtime::error_message" : "sc_error_message";
+          return `{ let ${expected} = ${this.emitExpr(arg)}; let ${error} = ${this.emitExpr(secondArg)}; let ${message} = ${this.emitExpr(expr.args[2])}; let ${hasMessage} = ${this.emitExpr(expr.args[3])}; runtime::assert_throws_mismatch(&${expected}, &${nameHelper}(&${error}), &${messageHelper}(&${error}), &${message}, ${hasMessage}) }`;
         }
         if (expr.fn === "class.name" && expr.args.length === 1 && arg !== undefined && arg.type.kind === "classval") {
           const value = `sc_rt_${this.temporary++}`;
@@ -5410,7 +5485,8 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "regex" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || this.isTracedHandle(type);
+    return type.kind === "string" || type.kind === "regex" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
+      (type.kind === "object" && RUNTIME_ERROR_CLASSES.has(type.className)) || this.isTracedHandle(type);
   }
 
   private arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string {
@@ -5457,7 +5533,7 @@ class RustEmitter {
   }
 
   private isHeapRoot(type: IrType): boolean {
-    return this.isEdgeValue(type);
+    return this.isEdgeValue(type) || (type.kind === "object" && RUNTIME_ERROR_CLASSES.has(type.className));
   }
 
   private isUnit(type: IrType): boolean {
