@@ -3801,6 +3801,14 @@ pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
     Rc::from(result)
 }
 
+pub fn string_is_well_formed(_value: &JsString) -> bool {
+    true
+}
+
+pub fn string_to_well_formed(value: &JsString) -> JsString {
+    value.clone()
+}
+
 fn uri_unescaped(byte: u8, keep_reserved: bool) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(
@@ -7628,6 +7636,14 @@ mod tests {
             let caught = caught_from_panic(payload);
             assert_eq!(caught_error_name(&caught).as_ref(), "URIError");
             assert_eq!(caught_error_message(&caught).as_ref(), "URI malformed");
+        }
+    }
+
+    #[test]
+    fn string_well_formed_methods_follow_the_utf8_storage_invariant() {
+        for value in [string(""), string("plain"), string("é€"), string("😀")] {
+            assert!(string_is_well_formed(&value));
+            assert!(Rc::ptr_eq(&value, &string_to_well_formed(&value)));
         }
     }
 

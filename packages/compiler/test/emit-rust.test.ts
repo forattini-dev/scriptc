@@ -571,6 +571,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2140-uri-component-codecs.ts",
     "2191-uri-encoders.ts",
     "2350-nan-global.ts",
+    "2366-string-well-formed.ts",
     "2367-regexp-escape.ts",
     "2445-math-minmax-nary.ts",
     "2453-private-accessors.ts",
