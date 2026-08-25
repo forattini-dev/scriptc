@@ -6493,6 +6493,23 @@ pub fn math_min_array(values: &JsArray<f64>) -> f64 {
     })
 }
 
+pub fn math_round(value: f64) -> f64 {
+    if value.is_nan() || value.is_infinite() || value == 0.0 {
+        return value;
+    }
+    let floor = value.floor();
+    let rounded = if value - floor < 0.5 {
+        floor
+    } else {
+        floor + 1.0
+    };
+    if rounded == 0.0 && value < 0.0 {
+        -0.0
+    } else {
+        rounded
+    }
+}
+
 thread_local! {
     static MATH_RANDOM_STATE: Cell<u64> = const { Cell::new(0x9e37_79b9_7f4a_7c15) };
 }
@@ -7230,6 +7247,17 @@ mod tests {
         assert_eq!(math_max_array(&array_new(Vec::new())), f64::NEG_INFINITY);
         assert_eq!(math_min_array(&array_new(Vec::new())), f64::INFINITY);
         assert!(math_max_array(&array_new(vec![1.0, f64::NAN])).is_nan());
+    }
+
+    #[test]
+    fn math_round_matches_javascript_ties_and_signed_zero() {
+        assert_eq!(math_round(1.5), 2.0);
+        assert_eq!(math_round(-1.5), -1.0);
+        assert_eq!(math_round(0.499_999_999_999_999_94), 0.0);
+        assert!(math_round(-0.3).is_sign_negative());
+        assert!(math_round(-0.0).is_sign_negative());
+        assert!(math_round(f64::NAN).is_nan());
+        assert_eq!(math_round(f64::INFINITY), f64::INFINITY);
     }
 
     #[test]

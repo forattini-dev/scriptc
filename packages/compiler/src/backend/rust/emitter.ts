@@ -3977,6 +3977,15 @@ class RustEmitter {
         if (expr.fn === "math.floor" && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).floor()`;
         }
+        if (expr.fn === "math.abs" && expr.args.length === 1 && arg !== undefined) {
+          return `(${this.emitExpr(arg)}).abs()`;
+        }
+        if (expr.fn === "math.round" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::math_round(${this.emitExpr(arg)})`;
+        }
+        if ((expr.fn === "math.trunc" || expr.fn === "math.ceil") && expr.args.length === 1 && arg !== undefined) {
+          return `(${this.emitExpr(arg)}).${expr.fn === "math.trunc" ? "trunc" : "ceil"}()`;
+        }
         if ((expr.fn === "math.max" || expr.fn === "math.min") && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::${expr.fn === "math.max" ? "math_max" : "math_min"}(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
         }
