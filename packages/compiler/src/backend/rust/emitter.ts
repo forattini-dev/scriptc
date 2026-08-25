@@ -4003,6 +4003,9 @@ class RustEmitter {
           const flags = `sc_rt_${this.temporary++}`;
           return `{ let ${pattern} = ${this.emitExpr(arg)}; let ${flags} = ${this.emitExpr(secondArg)}; runtime::regex_new(&${pattern}, &${flags}) }`;
         }
+        if (expr.fn === "regexp.escape" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::regexp_escape(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
         if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
         if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";

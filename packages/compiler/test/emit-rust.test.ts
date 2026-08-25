@@ -569,6 +569,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1664-dyn-fn-boundary.cjs",
     "1666-dyn-fn-identity.ts",
     "2350-nan-global.ts",
+    "2367-regexp-escape.ts",
     "2445-math-minmax-nary.ts",
     "2453-private-accessors.ts",
     "2472-string-regexp-union.ts",

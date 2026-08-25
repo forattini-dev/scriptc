@@ -374,6 +374,88 @@ pub fn regex_flags(regex: &JsRegex) -> JsString {
     regex.flags.clone()
 }
 
+pub fn regexp_escape(value: &JsString) -> JsString {
+    use std::fmt::Write as _;
+
+    let mut output = String::with_capacity(value.len());
+    for (index, ch) in value.chars().enumerate() {
+        let code = u32::from(ch);
+        let leading_alphanumeric = index == 0 && ch.is_ascii_alphanumeric();
+        let syntax = matches!(
+            ch,
+            '^' | '$'
+                | '\\'
+                | '.'
+                | '*'
+                | '+'
+                | '?'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '|'
+                | '/'
+        );
+        let control = match ch {
+            '\t' => Some('t'),
+            '\n' => Some('n'),
+            '\u{000b}' => Some('v'),
+            '\u{000c}' => Some('f'),
+            '\r' => Some('r'),
+            _ => None,
+        };
+        let hex_escaped = matches!(
+            ch,
+            ',' | '-'
+                | '='
+                | '<'
+                | '>'
+                | '#'
+                | '&'
+                | '!'
+                | '%'
+                | ':'
+                | ';'
+                | '@'
+                | '~'
+                | '\''
+                | '`'
+                | '"'
+                | ' '
+                | '\u{00a0}'
+                | '\u{1680}'
+                | '\u{2000}'
+                ..='\u{200a}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{202f}'
+                    | '\u{205f}'
+                    | '\u{3000}'
+                    | '\u{feff}'
+        );
+        if leading_alphanumeric {
+            write!(&mut output, "\\x{code:02x}").expect("writing to String cannot fail");
+        } else if syntax {
+            output.push('\\');
+            output.push(ch);
+        } else if let Some(control) = control {
+            output.push('\\');
+            output.push(control);
+        } else if hex_escaped {
+            if code < 0x100 {
+                write!(&mut output, "\\x{code:02x}").expect("writing to String cannot fail");
+            } else {
+                write!(&mut output, "\\u{code:04x}").expect("writing to String cannot fail");
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    Rc::from(output)
+}
+
 trait DynNode {
     fn id(&self) -> usize;
     fn trace(&self, tracer: &mut Tracer<'_>);
@@ -6792,6 +6874,8 @@ mod tests {
         assert_eq!(array_get(&pieces, 0.0).as_ref(), "a");
         assert_eq!(array_get(&pieces, 1.0).as_ref(), "b");
         assert_eq!(array_get(&pieces, 2.0).as_ref(), "c");
+        assert_eq!(regexp_escape(&string("a.b")).as_ref(), r"\x61\.b");
+        assert_eq!(regexp_escape(&string("- \n")).as_ref(), r"\x2d\x20\n");
     }
 
     #[test]
