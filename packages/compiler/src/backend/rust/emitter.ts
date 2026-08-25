@@ -22,6 +22,7 @@ import { RustValueEmitter } from "./values.js";
 import { RustFunctionValueEmitter } from "./function-values.js";
 import { RustDefinitionEmitter } from "./definitions.js";
 import { RustMetadata } from "./metadata.js";
+import { RustEventEmitterEmitter } from "./event-emitter.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import {
   mangleFnClosure,
@@ -59,6 +60,7 @@ class RustEmitter {
   private readonly closureTargets = new Map<string, RustClosureShape>();
   private readonly dynBoxedFunctionShapes = new Set<string>();
   private readonly dynAdapterShapes = new Set<string>();
+  private readonly emitterListenerShapes = new Map<string, RustClosureShape>();
   private readonly promiseResolverTypes = new Map<string, IrType>();
   private readonly promiseRejectorTypes = new Map<string, IrType[]>();
   private readonly internedClosureTargets = new Set<string>();
@@ -81,6 +83,7 @@ class RustEmitter {
   private nextLoopTargetId = 0;
   private usesDyn = false;
   private usesDynamicInvoke = false;
+  private usesEventEmitter = false;
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -124,6 +127,22 @@ class RustEmitter {
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
     unionVariant: (tag) => this.unionVariant(tag),
+    unsupported: (kind, loc) => this.unsupported(kind, loc),
+  });
+  private readonly eventEmitter = new RustEventEmitterEmitter({
+    listenerShapes: this.emitterListenerShapes,
+    isUsed: () => this.usesEventEmitter,
+    line: (value) => this.line(value),
+    pushIndent: () => { this.indent += 1; },
+    popIndent: () => { this.indent -= 1; },
+    nextTemporary: () => `sc_rt_${this.temporary++}`,
+    emitExpr: (expr) => this.emitExpr(expr),
+    closureName: (shape) => this.closureName(shape),
+    closureShapeForType: (type, loc) => this.closureShapeForType(type, loc),
+    emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
+    sourceLoc: () => this.mod.functions[0]?.loc ?? { file: "<builtin>", start: 0, end: 0 },
+    needsClone: (type) => this.needsClone(type),
+    rustString: (value) => this.rustString(value),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncControlEmitter = new RustAsyncControlEmitter({
@@ -239,6 +258,7 @@ class RustEmitter {
     emitCallValue: (expr) => this.emitCallValue(expr),
     emitClosure: (expr) => this.emitClosure(expr),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
+    emitEventEmitterCall: (expr) => this.eventEmitter.emitLibCall(expr),
     emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
     emitDynFromValue: (type, value, loc, functionName) => this.emitDynFromValue(type, value, loc, functionName),
     emitFileHandleTransferPromise: (expr) => this.emitFileHandleTransferPromise(expr),
@@ -444,6 +464,7 @@ class RustEmitter {
     }
     this.line("");
     this.emitClosureDefinitions();
+    this.eventEmitter.emitDefinition();
     this.emitDynamicDefinition();
     this.emitUnionDefinitions();
     this.emitRecordDefinitions();
@@ -586,6 +607,15 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("emitter.")) {
+        this.usesEventEmitter = true;
+        if (node.fn === "emitter.on") {
+          const callback = (node.args as { type?: IrType }[] | undefined)?.[2];
+          if (callback?.type?.kind !== "func") this.unsupported("malformed EventEmitter listener IR");
+          const shape = this.ensureClosureShape(callback.type);
+          this.emitterListenerShapes.set(typeKey(callback.type), shape);
+        }
+      }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {
         this.usesDynamicInvoke = true;

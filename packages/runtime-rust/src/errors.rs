@@ -168,6 +168,16 @@ pub fn throw_range_error(message: String) -> ! {
     })
 }
 
+pub fn throw_range_error_code(message: String, code: &str) -> ! {
+    throw_value(JsError {
+        identity: Rc::new(()),
+        name: "RangeError".to_owned(),
+        message,
+        code: Some(code.to_owned()),
+        dom: None,
+    })
+}
+
 pub fn throw_uri_error(message: String) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),

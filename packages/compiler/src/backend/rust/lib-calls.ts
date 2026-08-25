@@ -45,10 +45,13 @@ export interface RustLibCallContext {
   emitFileHandleTransferPromise(expr: RustLibCallExpr): string;
   emitFsRenameCallback(expr: RustLibCallExpr): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
+  emitEventEmitterCall(expr: RustLibCallExpr): string | null;
   classNameArms(className: string, loc?: SrcLoc): string;
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const eventEmitterCall = context.emitEventEmitterCall(expr);
+  if (eventEmitterCall !== null) return eventEmitterCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";

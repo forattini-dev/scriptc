@@ -2013,3 +2013,70 @@ test("Rust dynamic prototype dispatch preserves array mutation and string conver
     expect(rust, fixture).toEqual(node);
   }
 }, 120_000);
+
+test("Rust EventEmitter preserves dispatch, meta-events, limits, and identity", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-event-emitter-"));
+  for (const fixture of [
+    "1644-ee-basics.ts",
+    "1646-ee-once-remove.ts",
+    "1649-ee-names-counts.ts",
+    "1650-ee-prepend.ts",
+    "1652-ee-snapshot.ts",
+    "1647-ee-meta-events.ts",
+    "1651-ee-max-listeners.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      runToExit(process.execPath, [entryPath]),
+      runToExit(result.binaryPath, [], {
+        ...process.env,
+        SCRIPTC_RUST_HEAP_AUDIT: "1",
+      }),
+    ]);
+    expect(rust, fixture).toEqual(node);
+  }
+}, 120_000);
+
+test("Rust EventEmitter preserves unhandled errors, CJS identity, and the global listener limit", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-event-emitter-advanced-"));
+  for (const fixture of ["1648-ee-error-event.ts", "1653-ee-cjs.cjs", "2321-emitter-static-setmax.cjs"]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      runToExit(process.execPath, [entryPath]),
+      runToExit(result.binaryPath, [], {
+        ...process.env,
+        SCRIPTC_RUST_HEAP_AUDIT: "1",
+      }),
+    ]);
+    if (fixture === "1648-ee-error-event.ts") {
+      expect(rust.stdout, fixture).toBe(node.stdout);
+      expect(rust.exitCode, fixture).toBe(node.exitCode);
+      expect(rust.stderr, fixture).toContain("Uncaught Error: unhandled fatal");
+      expect(rust.stderr, fixture).not.toContain("Rust heap object(s) still live");
+    } else {
+      expect(rust, fixture).toEqual(node);
+    }
+  }
+}, 120_000);

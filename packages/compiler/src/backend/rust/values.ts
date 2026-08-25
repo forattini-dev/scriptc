@@ -1,5 +1,5 @@
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 import { mangleGlobal, mangleLocal, mangleRecordStruct } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
@@ -180,6 +180,7 @@ export class RustValueEmitter {
         if (RUNTIME_ERROR_CLASSES.has(type.className)) {
           return this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
         }
+        if (type.className === RUNTIME_EMITTER_CLASS) return "ScEventEmitter";
         if (!this.context.classes.has(type.className)) this.context.unsupported(`object type '${type.className}'`, loc);
         return `runtime::Gc<${this.context.classStructName(type.className, loc)}>`;
       }
@@ -295,7 +296,7 @@ export class RustValueEmitter {
       case "func":
         return `${left}.ptr_eq(${right})`;
       case "object":
-        if (this.context.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
+        if (type.className === RUNTIME_EMITTER_CLASS || this.context.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
         this.context.unsupported(`array identity for runtime object '${type.className}'`, loc);
       default:
         this.context.unsupported(`array ${sameValueZero ? "includes" : "indexOf"} element '${type.kind}'`, loc);
@@ -316,6 +317,7 @@ export class RustValueEmitter {
   isTracedHandle(type: IrType): boolean {
     return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) ||
+        type.className === RUNTIME_EMITTER_CLASS ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
 

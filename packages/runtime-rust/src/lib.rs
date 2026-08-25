@@ -32,6 +32,7 @@ include!("arrays.rs");
 include!("bytes.rs");
 include!("bytes_encoding.rs");
 include!("collections.rs");
+include!("event_emitter.rs");
 include!("strings_and_process.rs");
 include!("filesystem.rs");
 include!("child_process_and_paths.rs");

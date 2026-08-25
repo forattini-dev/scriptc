@@ -1,5 +1,5 @@
 import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
@@ -34,6 +34,7 @@ export interface RustExpressionContext {
   emitCallValue(expr: Extract<IrExpr, { kind: "callValue" }>): string;
   emitClosure(expr: Extract<IrExpr, { kind: "closure" }>): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
+  emitEventEmitterCall(expr: Extract<IrExpr, { kind: "libCall" }>): string | null;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
   emitFileHandleTransferPromise(expr: Extract<IrExpr, { kind: "libCall" }>): string;
@@ -893,6 +894,10 @@ export class RustExpressionEmitter {
       }
       case "instanceOf": {
         if (expr.value.type.kind !== "object") this.context.unsupported("instanceof on a non-object", expr.loc);
+        if (expr.className === RUNTIME_EMITTER_CLASS && expr.value.type.className === RUNTIME_EMITTER_CLASS) {
+          const value = this.context.nextName("sc_rt");
+          return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; true }`;
+        }
         const runtimeTarget = RUNTIME_ERROR_CLASSES.get(expr.className);
         if (runtimeTarget !== undefined) {
           const value = this.context.nextName("sc_rt");
@@ -1007,6 +1012,7 @@ export class RustExpressionEmitter {
           emitFileHandleTransferPromise: (value) => this.context.emitFileHandleTransferPromise(value),
           emitFsRenameCallback: (value) => this.context.emitFsRenameCallback(value),
           emitClosureDispatch: (callee, type, args, loc) => this.context.emitClosureDispatch(callee, type, args, loc),
+          emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);
             return this.context.classSubtree(meta).map((candidate) =>
