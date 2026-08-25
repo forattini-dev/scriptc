@@ -3980,6 +3980,9 @@ class RustEmitter {
         if ((expr.fn === "math.max" || expr.fn === "math.min") && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::${expr.fn === "math.max" ? "math_max" : "math_min"}(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
         }
+        if ((expr.fn === "math.maxArr" || expr.fn === "math.minArr") && expr.args.length === 1 && arg?.type.kind === "array" && arg.type.elem.kind === "f64") {
+          return `runtime::${expr.fn === "math.maxArr" ? "math_max_array" : "math_min_array"}(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "math.random" && expr.args.length === 0) return "runtime::math_random()";
         if (expr.fn === "regex.new" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           const pattern = `sc_rt_${this.temporary++}`;

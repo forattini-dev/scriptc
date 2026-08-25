@@ -6473,6 +6473,26 @@ pub fn math_min(left: f64, right: f64) -> f64 {
     if left < right { left } else { right }
 }
 
+pub fn math_max_array(values: &JsArray<f64>) -> f64 {
+    values.with(|values| {
+        values
+            .elements
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, math_max)
+    })
+}
+
+pub fn math_min_array(values: &JsArray<f64>) -> f64 {
+    values.with(|values| {
+        values
+            .elements
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, math_min)
+    })
+}
+
 thread_local! {
     static MATH_RANDOM_STATE: Cell<u64> = const { Cell::new(0x9e37_79b9_7f4a_7c15) };
 }
@@ -7203,6 +7223,13 @@ mod tests {
         assert!(math_max(-0.0, -0.0).is_sign_negative());
         assert!(math_min(-0.0, 0.0).is_sign_negative());
         assert!(math_min(0.0, 0.0).is_sign_positive());
+
+        let values = array_new(vec![3.0, -0.0, 0.0, 9.0]);
+        assert_eq!(math_max_array(&values), 9.0);
+        assert_eq!(math_min_array(&values), -0.0);
+        assert_eq!(math_max_array(&array_new(Vec::new())), f64::NEG_INFINITY);
+        assert_eq!(math_min_array(&array_new(Vec::new())), f64::INFINITY);
+        assert!(math_max_array(&array_new(vec![1.0, f64::NAN])).is_nan());
     }
 
     #[test]
