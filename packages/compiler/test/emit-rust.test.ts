@@ -577,6 +577,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1111-math-random.ts",
     "1112-number-methods.ts",
     "1113-string-methods.ts",
+    "1114-string-unicode-island.ts",
     "1115-parse-globals.ts",
     "1117-typeof-static-union.ts",
     "1118-object-spread-conditional.ts",

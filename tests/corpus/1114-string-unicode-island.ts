@@ -1,8 +1,7 @@
-// @dynamic
-// Astral-plane and special-cased strings cross the boundary intact (UTF-8
-// on the static side, engine UTF-16 inside): supplementary-plane case
-// pairs (Deseret), 1:many mappings (ß → SS), context-sensitive Greek final
-// sigma, and split on an astral separator.
+// Astral-plane and special-cased strings stay intact through the static
+// UTF-8 runtime while preserving JavaScript's UTF-16 observations:
+// supplementary-plane case pairs (Deseret), 1:many mappings (ß → SS),
+// context-sensitive Greek final sigma, and split on an astral separator.
 const deseret = "\u{10437}\u{10437}";
 const upper = deseret.toUpperCase();
 console.log(upper, upper.length, upper.charCodeAt(0));
