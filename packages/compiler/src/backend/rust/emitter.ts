@@ -3635,6 +3635,19 @@ class RustEmitter {
         if (expr.fn === "buffer.isEncoding" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::buffer_is_encoding(&(${this.emitExpr(arg)}))`;
         }
+        if ((expr.fn === "strdec.write" || expr.fn === "strdec.next") && expr.args.length === 3 &&
+          arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          const encoding = `sc_rt_${this.temporary++}`;
+          const pending = `sc_rt_${this.temporary++}`;
+          const chunk = `sc_rt_${this.temporary++}`;
+          const helper = expr.fn === "strdec.write" ? "string_decoder_write" : "string_decoder_next";
+          return `{ let ${encoding} = ${this.emitExpr(arg)}; let ${pending} = ${this.emitExpr(expr.args[1])}; let ${chunk} = ${this.emitExpr(expr.args[2])}; runtime::${helper}(&${encoding}, ${pending}, &${chunk}) }`;
+        }
+        if (expr.fn === "strdec.end" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const encoding = `sc_rt_${this.temporary++}`;
+          const pending = `sc_rt_${this.temporary++}`;
+          return `{ let ${encoding} = ${this.emitExpr(arg)}; let ${pending} = ${this.emitExpr(expr.args[1])}; runtime::string_decoder_end(&${encoding}, ${pending}) }`;
+        }
         if ((expr.fn === "fs.statSync" || expr.fn === "fs.lstatSync") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::fs_stat(&(${this.emitExpr(arg)}), ${expr.fn === "fs.statSync"})`;
         }

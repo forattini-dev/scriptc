@@ -2508,6 +2508,147 @@ pub fn bytes_to_string_checked_range(
     bytes_to_string_range(bytes, &string(encoding), start as f64, end as f64)
 }
 
+fn string_decoder_unpack(pending: f64) -> Vec<u8> {
+    let packed = pending as u32;
+    let length = (packed & 0xff).min(3) as usize;
+    (0..length)
+        .map(|index| (packed >> (8 * (index + 1))) as u8)
+        .collect()
+}
+
+fn string_decoder_pack(bytes: &[u8]) -> f64 {
+    let mut packed = bytes.len().min(3) as u32;
+    for (index, byte) in bytes.iter().take(3).enumerate() {
+        packed |= u32::from(*byte) << (8 * (index + 1));
+    }
+    f64::from(packed)
+}
+
+fn string_decoder_combined(pending: f64, chunk: &JsBytes<u8>) -> Vec<u8> {
+    let mut combined = string_decoder_unpack(pending);
+    combined.extend(bytes_u8_values(chunk));
+    combined
+}
+
+fn string_decoder_utf8_tail(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let byte = bytes[bytes.len() - back];
+        if byte & 0xc0 == 0x80 {
+            continue;
+        }
+        let needed = if byte & 0xe0 == 0xc0 {
+            2
+        } else if byte & 0xf0 == 0xe0 {
+            3
+        } else if byte & 0xf8 == 0xf0 {
+            4
+        } else {
+            return 0;
+        };
+        return usize::from(back < needed) * back;
+    }
+    0
+}
+
+fn string_decoder_base64(values: &[u8], url: bool) -> JsString {
+    let output = bytes_base64_encode(values);
+    if url {
+        Rc::from(
+            output
+                .replace('+', "-")
+                .replace('/', "_")
+                .trim_end_matches('=')
+                .to_owned(),
+        )
+    } else {
+        Rc::from(output)
+    }
+}
+
+fn string_decoder_utf16_step(pending: f64, chunk: &JsBytes<u8>) -> (JsString, f64) {
+    let held = string_decoder_unpack(pending);
+    let chunk = bytes_u8_values(chunk);
+    let mut complete = Vec::with_capacity(4);
+    let mut offset = 0;
+    if !held.is_empty() {
+        let total = if held.len() == 1 { 2 } else { 4 };
+        let needed = total - held.len();
+        if chunk.len() < needed {
+            let mut next = held;
+            next.extend_from_slice(&chunk);
+            return (empty_string(), string_decoder_pack(&next));
+        }
+        complete.extend_from_slice(&held);
+        complete.extend_from_slice(&chunk[..needed]);
+        offset = needed;
+    }
+    let rest = &chunk[offset..];
+    let keep = if rest.len() % 2 == 1 {
+        rest.len() - 1
+    } else if rest.len() >= 2 {
+        let last = u16::from_le_bytes([rest[rest.len() - 2], rest[rest.len() - 1]]);
+        if (0xd800..=0xdbff).contains(&last) {
+            rest.len() - 2
+        } else {
+            rest.len()
+        }
+    } else {
+        0
+    };
+    let next = string_decoder_pack(&rest[keep..]);
+    complete.extend_from_slice(&rest[..keep]);
+    (decode_bytes(&complete, "utf16le"), next)
+}
+
+fn string_decoder_step(encoding: &JsString, pending: f64, chunk: &JsBytes<u8>) -> (JsString, f64) {
+    match encoding.as_ref() {
+        "utf16le" => string_decoder_utf16_step(pending, chunk),
+        "base64" | "base64url" => {
+            let combined = string_decoder_combined(pending, chunk);
+            let tail = combined.len() % 3;
+            let complete = combined.len() - tail;
+            (
+                string_decoder_base64(&combined[..complete], encoding.as_ref() == "base64url"),
+                string_decoder_pack(&combined[complete..]),
+            )
+        }
+        "latin1" | "ascii" | "hex" => {
+            let values = bytes_u8_values(chunk);
+            (decode_bytes(&values, encoding), 0.0)
+        }
+        "utf8" | "utf-8" => {
+            let combined = string_decoder_combined(pending, chunk);
+            let tail = string_decoder_utf8_tail(&combined);
+            let complete = combined.len() - tail;
+            (
+                decode_bytes(&combined[..complete], "utf8"),
+                string_decoder_pack(&combined[complete..]),
+            )
+        }
+        other => panic!("scriptc: invalid canonical StringDecoder encoding '{other}'"),
+    }
+}
+
+pub fn string_decoder_write(encoding: &JsString, pending: f64, chunk: &JsBytes<u8>) -> JsString {
+    string_decoder_step(encoding, pending, chunk).0
+}
+
+pub fn string_decoder_next(encoding: &JsString, pending: f64, chunk: &JsBytes<u8>) -> f64 {
+    string_decoder_step(encoding, pending, chunk).1
+}
+
+pub fn string_decoder_end(encoding: &JsString, pending: f64) -> JsString {
+    let pending = string_decoder_unpack(pending);
+    match encoding.as_ref() {
+        "base64" => string_decoder_base64(&pending, false),
+        "base64url" => string_decoder_base64(&pending, true),
+        "utf16le" => decode_bytes(&pending, "utf16le"),
+        "latin1" | "ascii" | "hex" => empty_string(),
+        "utf8" | "utf-8" => decode_bytes(&pending, "utf8"),
+        other => panic!("scriptc: invalid canonical StringDecoder encoding '{other}'"),
+    }
+}
+
 fn bytes_from_vec(values: Vec<u8>) -> JsBytes<u8> {
     Gc::new(BytesData {
         length: values.len(),
@@ -6145,6 +6286,37 @@ mod tests {
                 caught_error_message(&caught).as_ref(),
                 "Unknown encoding: wat"
             );
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn string_decoder_buffers_only_incomplete_encoding_units() {
+        let baseline = live_heap_objects();
+        {
+            let utf8 = string("utf8");
+            let first = bytes_from_elements(vec![0xe2, 0x82]);
+            assert_eq!(string_decoder_write(&utf8, 0.0, &first).as_ref(), "");
+            let pending = string_decoder_next(&utf8, 0.0, &first);
+            let second = bytes_from_elements(vec![0xac, 0x61]);
+            assert_eq!(string_decoder_write(&utf8, pending, &second).as_ref(), "€a");
+            assert_eq!(string_decoder_next(&utf8, pending, &second), 0.0);
+
+            let utf16 = string("utf16le");
+            let odd = buffer_from_string(&string("61"), &string("hex"));
+            assert_eq!(string_decoder_write(&utf16, 0.0, &odd).as_ref(), "");
+            let pending = string_decoder_next(&utf16, 0.0, &odd);
+            let rest = buffer_from_string(&string("006200"), &string("hex"));
+            assert_eq!(string_decoder_write(&utf16, pending, &rest).as_ref(), "ab");
+
+            let base64 = string("base64");
+            let grouped = bytes_from_elements(vec![1, 2, 3, 4]);
+            assert_eq!(
+                string_decoder_write(&base64, 0.0, &grouped).as_ref(),
+                "AQID"
+            );
+            let pending = string_decoder_next(&base64, 0.0, &grouped);
+            assert_eq!(string_decoder_end(&base64, pending).as_ref(), "BA==");
         }
         assert_eq!(live_heap_objects(), baseline);
     }
