@@ -538,6 +538,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1303-errors-rc-stress.ts",
     "1366-union-equality.ts",
     "1431-caught-tostring.ts",
+    "1666-dyn-fn-identity.ts",
     "2482-recursive-union-tree.ts",
     "2483-recursive-record-cycles.ts",
   ]) {
@@ -572,6 +573,44 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     expect(rust.stdout, fixture).toBe(node.stdout);
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
+}, 120_000);
+
+test("Rust checked-dynamic function adapters validate arguments and results catchably", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-functions-"));
+  const entryPath = join(dir, "dyn-function-errors.ts");
+  await writeFile(entryPath, `
+function takesNumber(value: number): number { return value + 1; }
+const boxedArgument: unknown = takesNumber;
+const acceptsString = boxedArgument as (value: string) => unknown;
+try {
+  acceptsString("wrong");
+} catch {
+  console.log("argument mismatch caught");
+}
+
+function returnsString(): string { return "wrong"; }
+const boxedResult: unknown = returnsString;
+const returnsNumber = boxedResult as () => number;
+console.log(returnsNumber());
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "dyn-function-errors"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  const outcome = await runToExit(result.binaryPath, [], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  });
+  expect(outcome.exitCode).toBe(1);
+  expect(outcome.stdout).toBe("argument mismatch caught\n");
+  expect(outcome.stderr).toContain("Uncaught TypeError: expected number at $, got string");
 }, 120_000);
 
 test("Rust array ranges, removals, copying, and reverse searches match Node byte-for-byte", async () => {

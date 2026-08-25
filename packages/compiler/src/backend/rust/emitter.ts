@@ -85,6 +85,8 @@ class RustEmitter {
   private readonly unions = new Map<string, IrUnionDef>();
   private readonly closureShapes = new Map<string, RustClosureShape>();
   private readonly closureTargets = new Map<string, RustClosureShape>();
+  private readonly dynBoxedFunctionShapes = new Set<string>();
+  private readonly dynAdapterShapes = new Set<string>();
   private readonly promiseResolverTypes = new Map<string, IrType>();
   private readonly promiseRejectorTypes = new Map<string, IrType[]>();
   private readonly internedClosureTargets = new Set<string>();
@@ -99,6 +101,7 @@ class RustEmitter {
   private readonly loopTargets: { id: number; breakLabel: string; continueBlock: string | null }[] = [];
   private readonly completionLoopBoundaries: number[] = [];
   private nextLoopTargetId = 0;
+  private usesDyn = false;
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.functions.set(fn.name, fn);
@@ -120,6 +123,7 @@ class RustEmitter {
     for (const global of mod.globals ?? []) this.globals.set(global.id, global);
     for (const record of mod.records ?? []) this.records.set(record.id, record);
     for (const union of mod.unions ?? []) this.unions.set(union.id, union);
+    this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn");
     this.buildClassGraph();
     this.discoverClosures();
   }
@@ -134,6 +138,7 @@ class RustEmitter {
     }
     this.line("");
     this.emitClosureDefinitions();
+    this.emitDynamicDefinition();
     this.emitUnionDefinitions();
     this.emitRecordDefinitions();
     this.emitClassDefinitions();
@@ -273,6 +278,25 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      if (node.kind === "dynFrom") {
+        this.usesDyn = true;
+        const operand = node.value as { type?: IrType } | undefined;
+        if (operand?.type?.kind === "func") {
+          this.registerDynBoxedFunction(operand.type);
+        }
+      }
+      if (node.kind === "dynCheck") {
+        const operand = node.value as { kind?: string; fn?: string } | undefined;
+        const jsonParse = operand?.kind === "libCall" && operand.fn === "json.parse";
+        if (!jsonParse) {
+          this.usesDyn = true;
+          const target = node.type as IrType | undefined;
+          if (target?.kind === "func") {
+            this.registerDynAdapter(target);
+          }
+        }
+      }
+      if (node.kind === "dynTest" || node.kind === "dynCall") this.usesDyn = true;
       if (node.kind === "closure") {
         const type = node.type as IrType | undefined;
         const fnName = node.fnName;
@@ -281,12 +305,7 @@ class RustEmitter {
         }
         const target = this.functions.get(fnName);
         if (target === undefined) this.unsupported(`unknown closure target '${fnName}'`);
-        const key = typeKey(type);
-        let shape = this.closureShapes.get(key);
-        if (shape === undefined) {
-          shape = { index: this.closureShapes.size, type, targets: [] };
-          this.closureShapes.set(key, shape);
-        }
+        const shape = this.ensureClosureShape(type);
         if (!shape.targets.some((candidate) => candidate.name === target.name)) {
           shape.targets.push(target);
         }
@@ -375,6 +394,38 @@ class RustEmitter {
     for (const fn of this.mod.functions) visit(fn.body);
   }
 
+  private ensureClosureShape(type: IrFuncType): RustClosureShape {
+    const key = typeKey(type);
+    let shape = this.closureShapes.get(key);
+    if (shape === undefined) {
+      shape = { index: this.closureShapes.size, type, targets: [] };
+      this.closureShapes.set(key, shape);
+    }
+    return shape;
+  }
+
+  private registerDynBoxedFunction(type: IrFuncType): void {
+    const shape = this.ensureClosureShape(type);
+    const key = typeKey(shape.type);
+    if (this.dynBoxedFunctionShapes.has(key)) return;
+    this.dynBoxedFunctionShapes.add(key);
+    for (const param of type.params) {
+      if (param.kind === "func") this.registerDynAdapter(param);
+    }
+    if (type.ret.kind === "func") this.registerDynBoxedFunction(type.ret);
+  }
+
+  private registerDynAdapter(type: IrFuncType): void {
+    const shape = this.ensureClosureShape(type);
+    const key = typeKey(shape.type);
+    if (this.dynAdapterShapes.has(key)) return;
+    this.dynAdapterShapes.add(key);
+    for (const param of type.params) {
+      if (param.kind === "func") this.registerDynBoxedFunction(param);
+    }
+    if (type.ret.kind === "func") this.registerDynAdapter(type.ret);
+  }
+
   private isFunctionReferenced(name: string): boolean {
     let found = false;
     const visit = (value: unknown): void => {
@@ -399,6 +450,7 @@ class RustEmitter {
   private emitClosureDefinitions(): void {
     for (const shape of this.closureShapes.values()) {
       const name = this.closureName(shape);
+      const dynAdapter = this.dynAdapterShapes.has(typeKey(shape.type));
       const resolverType = this.promiseResolverTypes.get(typeKey(shape.type));
       const rejectorTypes = this.promiseRejectorTypes.get(typeKey(shape.type)) ?? [];
       this.line(`enum ${name} {`);
@@ -420,6 +472,7 @@ class RustEmitter {
       rejectorTypes.forEach((promiseType, index) => {
         this.line(`PromiseRejector${index} { promise: Option<runtime::JsPromise<${this.rustType(promiseType)}>> },`);
       });
+      if (dynAdapter) this.line(`DynAdapter { value: Option<${this.dynTypeName()}> },`);
       this.indent -= 1;
       this.line("}");
       this.line(`impl runtime::Trace for ${name} {`);
@@ -427,7 +480,7 @@ class RustEmitter {
       this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.indent += 1;
       const capturing = shape.targets.filter((target) => (target.captures?.length ?? 0) > 0);
-      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0) {
+      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0 && !dynAdapter) {
         this.line("let _ = tracer;");
       } else {
         this.line("match self {");
@@ -456,6 +509,13 @@ class RustEmitter {
           this.indent -= 1;
           this.line("},");
         });
+        if (dynAdapter) {
+          this.line("Self::DynAdapter { value } => {");
+          this.indent += 1;
+          this.line("if let Some(edge) = value { runtime::Trace::trace(edge, tracer); }");
+          this.indent -= 1;
+          this.line("},");
+        }
         this.line("_ => {},");
         this.indent -= 1;
         this.line("}");
@@ -468,7 +528,7 @@ class RustEmitter {
       this.indent += 1;
       this.line("fn clear_edges(&mut self) {");
       this.indent += 1;
-      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0) {
+      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0 || dynAdapter) {
         this.line("match self {");
         this.indent += 1;
         for (const target of capturing) {
@@ -485,6 +545,7 @@ class RustEmitter {
         rejectorTypes.forEach((_, index) => {
           this.line(`Self::PromiseRejector${index} { promise } => *promise = None,`);
         });
+        if (dynAdapter) this.line("Self::DynAdapter { value } => *value = None,");
         this.line("_ => {},");
         this.indent -= 1;
         this.line("}");
@@ -494,6 +555,176 @@ class RustEmitter {
       this.indent -= 1;
       this.line("}");
       this.line("");
+    }
+  }
+
+  private emitDynamicDefinition(): void {
+    if (!this.usesDyn) return;
+    const name = this.dynTypeName();
+    const boxedShapes = [...this.dynBoxedFunctionShapes].map((key) => {
+      const shape = this.closureShapes.get(key);
+      if (shape === undefined) this.unsupported(`dynamic function signature '${key}'`);
+      return shape;
+    });
+
+    this.line("#[derive(Clone)]");
+    this.line(`enum ${name} {`);
+    this.indent += 1;
+    this.line("Undefined,");
+    this.line("Null,");
+    this.line("Number(f64),");
+    this.line("Boolean(bool),");
+    this.line("String(runtime::JsString),");
+    for (const shape of boxedShapes) {
+      this.line(`${this.dynFunctionVariant(shape)}(runtime::Gc<${this.closureName(shape)}>),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::Trace for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
+    this.indent += 1;
+    if (boxedShapes.length === 0) {
+      this.line("let _ = tracer;");
+    } else {
+      this.line("match self {");
+      this.indent += 1;
+      for (const shape of boxedShapes) {
+        this.line(`Self::${this.dynFunctionVariant(shape)}(value) => tracer.edge(value),`);
+      }
+      this.line("_ => {},");
+      this.indent -= 1;
+      this.line("}");
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::HeapValue for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`impl runtime::ArrayElement for ${name} {`);
+    this.indent += 1;
+    this.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.indent -= 1;
+    this.line("}");
+
+    this.line(`fn sc_dyn_kind(value: &${name}) -> &'static str {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined => "undefined",`);
+    this.line(`${name}::Null => "null",`);
+    this.line(`${name}::Number(..) => "number",`);
+    this.line(`${name}::Boolean(..) => "boolean",`);
+    this.line(`${name}::String(..) => "string",`);
+    if (boxedShapes.length > 0) {
+      this.line(`${boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_check_fail(expected: &str, value: &${name}) -> ! {`);
+    this.indent += 1;
+    this.line("runtime::throw_type_error(format!(\"expected {expected} at $, got {}\", sc_dyn_kind(value)))");
+    this.indent -= 1;
+    this.line("}");
+    this.emitDynamicScalarCheck("number", "f64", "Number");
+    this.emitDynamicScalarCheck("boolean", "bool", "Boolean");
+    this.emitDynamicScalarCheck("string", "runtime::JsString", "String");
+
+    for (const key of this.dynAdapterShapes) {
+      const target = this.closureShapes.get(key);
+      if (target === undefined) this.unsupported(`dynamic adapter signature '${key}'`);
+      this.line(`fn ${this.dynFunctionCheckName(target)}(value: ${name}) -> runtime::Gc<${this.closureName(target)}> {`);
+      this.indent += 1;
+      this.line("match value {");
+      this.indent += 1;
+      if (this.dynBoxedFunctionShapes.has(key)) {
+        this.line(`${name}::${this.dynFunctionVariant(target)}(closure) => closure,`);
+      }
+      const adaptable = boxedShapes.filter((shape) => typeKey(shape.type) !== key);
+      if (adaptable.length > 0) {
+        const patterns = adaptable.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ");
+        this.line(`value @ (${patterns}) => runtime::Gc::new(${this.closureName(target)}::DynAdapter { value: Some(value) }),`);
+      }
+      this.line("value => sc_dyn_check_fail(\"function\", &value),");
+      this.indent -= 1;
+      this.line("}");
+      this.indent -= 1;
+      this.line("}");
+    }
+
+    this.line(`fn sc_dyn_call(callee: &${name}, args: &[${name}], callee_name: &str) -> ${name} {`);
+    this.indent += 1;
+    this.line("match callee {");
+    this.indent += 1;
+    for (const shape of boxedShapes) {
+      const typedArgs = shape.type.params.map((param, index) => {
+        const value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
+        return this.emitDynCheckValue(param, value);
+      });
+      const loc = this.mod.functions[0]?.loc;
+      if (loc === undefined) this.unsupported("dynamic call without a source location");
+      const dispatch = this.emitClosureDispatch("sc_dyn_callee", shape.type, typedArgs, loc);
+      const result = this.emitDynFromResult(shape.type.ret, dispatch);
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(closure) => { let sc_dyn_callee = closure.clone(); ${result} },`);
+    }
+    this.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line("");
+  }
+
+  private emitDynamicScalarCheck(expected: string, rustType: string, variant: string): void {
+    const name = this.dynTypeName();
+    this.line(`fn sc_dyn_check_${expected}(value: ${name}) -> ${rustType} {`);
+    this.indent += 1;
+    this.line(`match value { ${name}::${variant}(value) => value, value => sc_dyn_check_fail("${expected}", &value) }`);
+    this.indent -= 1;
+    this.line("}");
+  }
+
+  private emitDynFromResult(type: IrType, value: string, loc?: SrcLoc): string {
+    if (type.kind === "void") return `{ let _ = ${value}; ${this.dynTypeName()}::Undefined }`;
+    return this.emitDynFromValue(type, value, loc);
+  }
+
+  private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc): string {
+    const name = this.dynTypeName();
+    switch (type.kind) {
+      case "dyn": return value;
+      case "f64": return `${name}::Number(${value})`;
+      case "bool": return `${name}::Boolean(${value})`;
+      case "string": return `${name}::String(${value})`;
+      case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
+      case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
+      case "func": {
+        const shape = this.closureShapeForType(type, loc);
+        if (!this.dynBoxedFunctionShapes.has(typeKey(type))) {
+          this.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
+        }
+        return `${name}::${this.dynFunctionVariant(shape)}(${value})`;
+      }
+      default:
+        this.unsupported(`dynamic boxing from '${type.kind}'`, loc);
+    }
+  }
+
+  private emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
+    switch (type.kind) {
+      case "dyn": return value;
+      case "f64": return `sc_dyn_check_number(${value})`;
+      case "bool": return `sc_dyn_check_boolean(${value})`;
+      case "string": return `sc_dyn_check_string(${value})`;
+      case "func": return `${this.dynFunctionCheckName(this.closureShapeForType(type, loc))}(${value})`;
+      default:
+        this.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
     }
   }
 
@@ -964,6 +1195,7 @@ class RustEmitter {
         case "union":
         case "func":
         case "promise":
+        case "dyn":
           this.line(`static ${name}: RefCell<Option<${this.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
         default:
@@ -2688,6 +2920,43 @@ class RustEmitter {
         }
         return `runtime::json_stringify(&(${value}))`;
       }
+      case "dynFrom":
+        return this.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc);
+      case "dynCall": {
+        if ((expr.spreads?.length ?? 0) > 0) this.unsupported("dynamic call spreads", expr.loc);
+        const callee = `sc_rt_${this.temporary++}`;
+        const args = `sc_rt_${this.temporary++}`;
+        const values = expr.args.map((arg) => this.emitExpr(arg)).join(", ");
+        return `{ let ${callee} = ${this.emitExpr(expr.callee)}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "${this.rustString(expr.calleeName)}") }`;
+      }
+      case "dynTest": {
+        const value = `sc_rt_${this.temporary++}`;
+        const name = this.dynTypeName();
+        const functions = [...this.dynBoxedFunctionShapes].map((key) => {
+          const shape = this.closureShapes.get(key);
+          if (shape === undefined) this.unsupported(`dynamic function signature '${key}'`, expr.loc);
+          return `${name}::${this.dynFunctionVariant(shape)}(..)`;
+        });
+        let test: string;
+        switch (expr.test) {
+          case "number": test = `matches!(&${value}, ${name}::Number(..))`; break;
+          case "boolean": test = `matches!(&${value}, ${name}::Boolean(..))`; break;
+          case "string": test = `matches!(&${value}, ${name}::String(..))`; break;
+          case "undefined": test = `matches!(&${value}, ${name}::Undefined)`; break;
+          case "null": test = `matches!(&${value}, ${name}::Null)`; break;
+          case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
+          case "function": test = functions.length === 0 ? "false" : `matches!(&${value}, ${functions.join(" | ")})`; break;
+          case "object": test = `matches!(&${value}, ${name}::Null)`; break;
+          case "array":
+          case "bytes":
+          case "error": test = "false"; break;
+          case "truthy":
+            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty()${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
+            break;
+        }
+        if (expr.negated) test = `!(${test})`;
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; ${test} }`;
+      }
       case "dynCheck": {
         if (expr.value.kind === "libCall" && expr.value.fn === "json.parse" && expr.value.args.length === 1) {
           const text = expr.value.args[0];
@@ -2696,7 +2965,7 @@ class RustEmitter {
           }
           return `runtime::json_parse_typed::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(text)}))`;
         }
-        this.unsupported("dynamic checked cast", expr.loc);
+        return this.emitDynCheckValue(expr.type, this.emitExpr(expr.value), expr.loc);
       }
       case "ternary":
         return `(if ${this.emitExpr(expr.cond)} { ${this.emitExpr(expr.then)} } else { ${this.emitExpr(expr.else_)} })`;
@@ -3953,6 +4222,21 @@ class RustEmitter {
         arms.push(`${this.closureName(shape)}::PromiseRejector${index} { promise } => { let promise = promise.as_ref().expect("scriptc: cleared live Promise rejector"); let _ = runtime::promise_reject(promise, runtime::caught_value(${reason})); }`);
       }
     }
+    if (this.dynAdapterShapes.has(typeKey(shape.type))) {
+      const dynamicArgs = shape.type.params.map((param, index) => {
+        const arg = args[index];
+        if (arg === undefined) this.unsupported("dynamic adapter argument arity", loc);
+        return this.emitDynFromValue(param, arg, loc);
+      }).join(", ");
+      const call = `sc_dyn_call(value.as_ref().expect("scriptc: cleared live dynamic function adapter"), &sc_dyn_args, "value")`;
+      let result: string;
+      if (shape.type.ret.kind === "void") {
+        result = `{ let _ = ${call}; () }`;
+      } else {
+        result = this.emitDynCheckValue(shape.type.ret, call, loc);
+      }
+      arms.push(`${this.closureName(shape)}::DynAdapter { value } => { let sc_dyn_args = [${dynamicArgs}]; ${result} }`);
+    }
     return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
 
@@ -4277,6 +4561,7 @@ class RustEmitter {
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
       case "caught": return "runtime::Caught";
+      case "dyn": return this.dynTypeName();
       default: this.unsupported(`type '${type.kind}'`, loc);
     }
   }
@@ -4576,7 +4861,7 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "union" || type.kind === "caught" || this.isTracedHandle(type);
+    return type.kind === "string" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || this.isTracedHandle(type);
   }
 
   private arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string {
@@ -4619,7 +4904,7 @@ class RustEmitter {
   }
 
   private isEdgeValue(type: IrType): boolean {
-    return this.isTracedHandle(type) || type.kind === "union";
+    return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn";
   }
 
   private isHeapRoot(type: IrType): boolean {
@@ -4814,6 +5099,18 @@ class RustEmitter {
 
   private closureName(shape: RustClosureShape): string {
     return `sc_closure_${shape.index}`;
+  }
+
+  private dynTypeName(): string {
+    return "sc_dyn_value";
+  }
+
+  private dynFunctionVariant(shape: RustClosureShape): string {
+    return `Function${shape.index}`;
+  }
+
+  private dynFunctionCheckName(shape: RustClosureShape): string {
+    return `sc_dyn_check_function_${shape.index}`;
   }
 
   private promiseRejectorVariant(type: IrFuncType, promiseType: IrType, loc?: SrcLoc): string {

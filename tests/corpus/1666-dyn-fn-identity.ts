@@ -40,6 +40,15 @@ const boxed: unknown = makeCounter();
 const counter = boxed as () => number;
 console.log(counter(), counter(), counter());
 
+// A dyn value captured BY another closure lives in a traced JsCell. This
+// pins the generated dyn HeapValue edge rather than exercising only globals.
+function captureDyn(value: unknown): () => unknown {
+  return () => value;
+}
+const relay = captureDyn(11);
+const relayed = relay();
+console.log(typeof relayed === "number", relayed as number);
+
 // A function RESULT crossing back out of the box: adapters validate the
 // returned value into the target type.
 function twice(x: number): number {
@@ -48,3 +57,21 @@ function twice(x: number): number {
 const t: unknown = twice;
 const viaDyn = t as (x: number) => unknown;
 console.log((viaDyn(21) as number) === 42);
+
+// Higher-order signatures recurse through the same boundary in both
+// directions: returned closures box, and closure arguments check back out.
+function makeAdder(x: number): (y: number) => number {
+  return (y: number) => x + y;
+}
+const boxedFactory: unknown = makeAdder;
+const factory = boxedFactory as (x: number) => unknown;
+const produced = factory(10);
+const addTen = produced as (y: number) => number;
+console.log(addTen(5));
+
+function apply(fn: (x: number) => number, value: number): number {
+  return fn(value);
+}
+const boxedApply: unknown = apply;
+const looseApply = boxedApply as (fn: (x: number) => number, value: number) => unknown;
+console.log(looseApply(twice, 6) as number);
