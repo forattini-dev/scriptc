@@ -51,6 +51,13 @@ export interface RustLibCallContext {
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";
+  if (expr.fn === "dyn.defineProps" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
+    const target = context.nextTemporary();
+    const descriptors = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${descriptors} = ${context.emitExpr(secondArg)}; sc_dyn_define_properties(&${target}, &${descriptors}) }`;
+  }
   if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const keyExpr = expr.args[1];
     const valueExpr = expr.args[2];

@@ -314,6 +314,12 @@ export class RustExpressionEmitter {
         const values = expr.args.map((arg) => this.emitExpr(arg)).join(", ");
         return `{ let ${callee} = ${this.emitExpr(expr.callee)}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "${this.context.rustString(expr.calleeName)}") }`;
       }
+      case "dynInvoke": {
+        const receiver = this.context.nextName("sc_rt");
+        const args = this.context.nextName("sc_rt");
+        const values = expr.args.map((arg) => this.emitExpr(arg)).join(", ");
+        return `{ let ${receiver} = ${this.emitExpr(expr.recv)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${this.context.rustString(expr.method)}", &${args}, "${this.context.rustString(expr.calleeName)}") }`;
+      }
       case "dynTest": {
         const value = this.context.nextName("sc_rt");
         const name = this.context.dynTypeName();
@@ -347,6 +353,40 @@ export class RustExpressionEmitter {
         const value = this.context.nextName("sc_rt");
         const key = this.context.nextName("sc_rt");
         return `{ let ${value} = ${this.emitExpr(expr.value)}; let ${key} = ${this.emitExpr(expr.key)}; sc_dyn_key_get(&${value}, &${key}, ${expr.optional === true ? "true" : "false"}) }`;
+      }
+      case "dynHasKey": {
+        const value = this.context.nextName("sc_rt");
+        const index = /^(?:0|[1-9][0-9]*)$/u.test(expr.key) && Number.isSafeInteger(Number(expr.key))
+          ? Number(expr.key)
+          : null;
+        const arrayTest = expr.key === "length"
+          ? "true"
+          : index === null ? "false" : `runtime::array_len(array) > ${index}.0`;
+        const test = `match &${value} { ${this.context.dynTypeName()}::Object(object) => runtime::map_has_by(object, &runtime::string("${this.context.rustString(expr.key)}"), |left, right| left.as_ref() == right.as_ref()), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; ${expr.negated === true ? `!(${test})` : test} }`;
+      }
+      case "dynScalarEq": {
+        const left = this.context.nextName("sc_rt");
+        const right = this.context.nextName("sc_rt");
+        let test: string;
+        if (expr.left.type.kind === "dyn" && expr.right.type.kind === "dyn") {
+          test = `sc_dyn_strict_equal(&${left}, &${right})`;
+        } else {
+          const dynamic = expr.left.type.kind === "dyn" ? left : right;
+          const scalar = expr.left.type.kind === "dyn" ? right : left;
+          const scalarType = expr.left.type.kind === "dyn" ? expr.right.type : expr.left.type;
+          const name = this.context.dynTypeName();
+          if (scalarType.kind === "string") {
+            test = `match &${dynamic} { ${name}::String(value) => value.as_ref() == ${scalar}.as_ref(), _ => false, }`;
+          } else if (scalarType.kind === "f64") {
+            test = `match &${dynamic} { ${name}::Number(value) => *value == ${scalar}, _ => false, }`;
+          } else if (scalarType.kind === "bool") {
+            test = `match &${dynamic} { ${name}::Boolean(value) => *value == ${scalar}, _ => false, }`;
+          } else {
+            this.context.unsupported(`dynamic scalar equality with '${scalarType.kind}'`, expr.loc);
+          }
+        }
+        return `{ let ${left} = ${this.emitExpr(expr.left)}; let ${right} = ${this.emitExpr(expr.right)}; ${expr.negated === true ? `!(${test})` : test} }`;
       }
       case "dynCheck": {
         if (expr.value.kind === "libCall" && expr.value.fn === "json.parse" && expr.value.args.length === 1) {

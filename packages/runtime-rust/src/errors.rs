@@ -108,6 +108,16 @@ pub fn throw_reference_error(message: String) -> ! {
     })
 }
 
+pub fn throw_error(message: String) -> ! {
+    throw_value(JsError {
+        identity: Rc::new(()),
+        name: "Error".to_owned(),
+        message,
+        code: None,
+        dom: None,
+    })
+}
+
 pub fn throw_error_code(message: String, code: &str) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),

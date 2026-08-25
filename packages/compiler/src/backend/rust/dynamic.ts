@@ -1,10 +1,12 @@
 import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
+import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustDynamicContext {
   usesDyn(): boolean;
+  usesDynamicInvoke(): boolean;
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
   readonly dynAdapterShapes: ReadonlySet<string>;
   readonly dynBoxedFunctionShapes: ReadonlySet<string>;
@@ -432,7 +434,17 @@ export class RustDynamicEmitter {
     this.context.line("runtime::string(&output)");
     this.context.popIndent();
     this.context.line("},");
-    this.context.line(`${name}::Object(..) => runtime::string("[object Object]"),`);
+    this.context.line(`${name}::Object(object) => {`);
+    this.context.pushIndent();
+    this.context.line("if runtime::map_has_by(object, &runtime::string(\"%error\"), |left, right| left.as_ref() == right.as_ref()) {");
+    this.context.pushIndent();
+    this.context.line(`let error_name = match runtime::map_get_by(object, &runtime::string("name"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);
+    this.context.line(`let message = match runtime::map_get_by(object, &runtime::string("message"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);
+    this.context.line("if error_name.is_empty() { message } else if message.is_empty() { error_name } else { runtime::string(&format!(\"{error_name}: {message}\")) }");
+    this.context.popIndent();
+    this.context.line("} else { runtime::string(\"[object Object]\") }");
+    this.context.popIndent();
+    this.context.line("},");
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("function () { [native code] }") } else { runtime::string(&format!("function {}() {{ [native code] }}", function_name)) },`);
     }
@@ -497,6 +509,10 @@ export class RustDynamicEmitter {
         const value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
         return this.emitDynCheckValue(param, value);
       });
+      if (shape.type.rest === true) {
+        if (shape.type.restAbi === "jsval") this.context.unsupported("dynamic jsval rest call");
+        typedArgs.push(`${name}::Array(runtime::array_new(args.iter().skip(${shape.type.params.length}).cloned().collect()))`);
+      }
       const loc = this.context.module().functions[0]?.loc;
       if (loc === undefined) this.context.unsupported("dynamic call without a source location");
       const dispatch = this.context.emitClosureDispatch("sc_dyn_callee", shape.type, typedArgs, loc);
@@ -508,6 +524,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    if (this.context.usesDynamicInvoke()) emitRustDynamicInvoke(this.context, boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     this.context.line("");
   }
@@ -710,6 +727,9 @@ export class RustDynamicEmitter {
         const shape = this.context.closureShapeForType(type, loc);
         if (!this.context.dynBoxedFunctionShapes.has(typeKey(type))) {
           this.context.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
+        }
+        if (this.context.usesDynamicInvoke()) {
+          return `sc_dyn_box_function_${shape.index}(${value}, runtime::string("${this.context.rustString(functionName)}"))`;
         }
         return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, runtime::string("${this.context.rustString(functionName)}"), runtime::map_new())`;
       }

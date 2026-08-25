@@ -80,6 +80,7 @@ class RustEmitter {
   private readonly forcedBoxedLocals = new Set<string>();
   private nextLoopTargetId = 0;
   private usesDyn = false;
+  private usesDynamicInvoke = false;
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -96,6 +97,7 @@ class RustEmitter {
   });
   private readonly dynamicEmitter = new RustDynamicEmitter({
     usesDyn: () => this.usesDyn,
+    usesDynamicInvoke: () => this.usesDynamicInvoke,
     closureShapes: this.closureShapes,
     dynAdapterShapes: this.dynAdapterShapes,
     dynBoxedFunctionShapes: this.dynBoxedFunctionShapes,
@@ -498,6 +500,7 @@ class RustEmitter {
       this.line(`${mangleFnClosure(fnName)}.with(|slot| *slot.borrow_mut() = None);`);
     }
     if (this.usesDyn) this.line("sc_dyn_error_cache_clear();");
+    if (this.usesDynamicInvoke) this.line("sc_dyn_function_cache_clear();");
     this.line("runtime::finish();");
     this.line("if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }");
     this.line("if _sc_unhandled_rejection { std::process::exit(1); }");
@@ -583,6 +586,10 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||
+        (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {
+        this.usesDynamicInvoke = true;
+      }
       if (node.kind === "dynFrom") {
         this.usesDyn = true;
         const operand = node.value as { type?: IrType } | undefined;

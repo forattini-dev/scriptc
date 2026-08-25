@@ -1978,3 +1978,38 @@ test("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and 
     expect(rust, fixture).toEqual(node);
   }
 }, 120_000);
+
+test("Rust dynamic prototype dispatch preserves array mutation and string conversion", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-invoke-"));
+  for (const fixture of [
+    "2164-js-then-dyn-handler.cjs",
+    "1122-any-captures.ts",
+    "1591-js-closures.js",
+    "1702-dyn-proto-dispatch.cjs",
+    "1703-arguments-rest-props.cjs",
+    "2036-evolving-array-decl.cjs",
+    "2037-fn-decl-hoisting.cjs",
+    "2038-evolving-array-js.cjs",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const [node, rust] = await Promise.all([
+      runToExit(process.execPath, [entryPath]),
+      runToExit(result.binaryPath, [], {
+        ...process.env,
+        SCRIPTC_RUST_HEAP_AUDIT: "1",
+      }),
+    ]);
+    expect(rust, fixture).toEqual(node);
+  }
+}, 120_000);
