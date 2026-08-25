@@ -533,6 +533,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "979-unions-optional-chaining.ts",
     "980-exceptions-basics.ts",
     "984-exceptions-finally.ts",
+    "1011-json-unknown-typeof.ts",
     "1301-errors-subclass.ts",
     "1302-errors-typed-catch.ts",
     "1303-errors-rc-stress.ts",
@@ -575,10 +576,17 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
   }
 }, 120_000);
 
-test("Rust checked-dynamic function adapters validate arguments and results catchably", async () => {
+test("Rust checked-dynamic adapters validate JSON, arguments, and results catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-functions-"));
   const entryPath = join(dir, "dyn-function-errors.ts");
   await writeFile(entryPath, `
+const parsed: unknown = JSON.parse('"wrong"');
+try {
+  console.log(parsed as number);
+} catch {
+  console.log("JSON mismatch caught");
+}
+
 function takesNumber(value: number): number { return value + 1; }
 const boxedArgument: unknown = takesNumber;
 const acceptsString = boxedArgument as (value: string) => unknown;
@@ -609,7 +617,7 @@ console.log(returnsNumber());
     SCRIPTC_RUST_HEAP_AUDIT: "1",
   });
   expect(outcome.exitCode).toBe(1);
-  expect(outcome.stdout).toBe("argument mismatch caught\n");
+  expect(outcome.stdout).toBe("JSON mismatch caught\nargument mismatch caught\n");
   expect(outcome.stderr).toContain("Uncaught TypeError: expected number at $, got string");
 }, 120_000);
 

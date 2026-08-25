@@ -575,6 +575,8 @@ class RustEmitter {
     this.line("Number(f64),");
     this.line("Boolean(bool),");
     this.line("String(runtime::JsString),");
+    this.line(`Array(runtime::JsArray<${name}>),`);
+    this.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     for (const shape of boxedShapes) {
       this.line(`${this.dynFunctionVariant(shape)}(runtime::Gc<${this.closureName(shape)}>),`);
     }
@@ -584,18 +586,16 @@ class RustEmitter {
     this.indent += 1;
     this.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
     this.indent += 1;
-    if (boxedShapes.length === 0) {
-      this.line("let _ = tracer;");
-    } else {
-      this.line("match self {");
-      this.indent += 1;
-      for (const shape of boxedShapes) {
-        this.line(`Self::${this.dynFunctionVariant(shape)}(value) => tracer.edge(value),`);
-      }
-      this.line("_ => {},");
-      this.indent -= 1;
-      this.line("}");
+    this.line("match self {");
+    this.indent += 1;
+    for (const shape of boxedShapes) {
+      this.line(`Self::${this.dynFunctionVariant(shape)}(value) => tracer.edge(value),`);
     }
+    this.line("Self::Array(value) => tracer.edge(value),");
+    this.line("Self::Object(value) => tracer.edge(value),");
+    this.line("_ => {},");
+    this.indent -= 1;
+    this.line("}");
     this.indent -= 1;
     this.line("}");
     this.indent -= 1;
@@ -610,6 +610,94 @@ class RustEmitter {
     this.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
     this.indent -= 1;
     this.line("}");
+    this.line(`impl runtime::JsonDecode for ${name} {`);
+    this.indent += 1;
+    this.line("fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {");
+    this.indent += 1;
+    this.line("match node {");
+    this.indent += 1;
+    this.line("runtime::JsonNode::Null => Ok(Self::Null),");
+    this.line("runtime::JsonNode::Bool(value) => Ok(Self::Boolean(*value)),");
+    this.line("runtime::JsonNode::Number(value) => Ok(Self::Number(*value)),");
+    this.line("runtime::JsonNode::String(value) => Ok(Self::String(value.clone())),");
+    this.line("runtime::JsonNode::Array(elements) => {");
+    this.indent += 1;
+    this.line("let mut values = Vec::with_capacity(elements.len());");
+    this.line("for (index, element) in elements.iter().enumerate() {");
+    this.indent += 1;
+    this.line("values.push(Self::decode_json(element, &runtime::json_index_path(path, index))?);");
+    this.indent -= 1;
+    this.line("}");
+    this.line("Ok(Self::Array(runtime::array_new(values)))");
+    this.indent -= 1;
+    this.line("},");
+    this.line("runtime::JsonNode::Object(fields) => {");
+    this.indent += 1;
+    this.line(`let object: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new();`);
+    this.line("for (key, field) in fields {");
+    this.indent += 1;
+    this.line("let value = Self::decode_json(field, &runtime::json_property_path(path, key))?;");
+    this.line("runtime::map_set_by(&object, runtime::string(key), value, |left, right| left.as_ref() == right.as_ref());");
+    this.indent -= 1;
+    this.line("}");
+    this.line("Ok(Self::Object(object))");
+    this.indent -= 1;
+    this.line("},");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_deep_copy(value: &${name}) -> ${name} {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined => ${name}::Undefined,`);
+    this.line(`${name}::Null => ${name}::Null,`);
+    this.line(`${name}::Number(value) => ${name}::Number(*value),`);
+    this.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
+    this.line(`${name}::String(value) => ${name}::String(value.clone()),`);
+    this.line(`${name}::Array(value) => {`);
+    this.indent += 1;
+    this.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::array_len(value) {");
+    this.indent += 1;
+    this.line("let element = runtime::array_get(value, index);");
+    this.line("runtime::array_push(&output, sc_dyn_deep_copy(&element));");
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`${name}::Array(output)`);
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Object(value) => {`);
+    this.indent += 1;
+    this.line(`let output: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new();`);
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::map_iter_count(value) {");
+    this.indent += 1;
+    this.line("if runtime::map_iter_live(value, index) {");
+    this.indent += 1;
+    this.line("let key = runtime::map_iter_key(value, index);");
+    this.line("let field = runtime::map_iter_value(value, index);");
+    this.line("runtime::map_set_by(&output, key, sc_dyn_deep_copy(&field), |left, right| left.as_ref() == right.as_ref());");
+    this.indent -= 1;
+    this.line("}");
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`${name}::Object(output)`);
+    this.indent -= 1;
+    this.line("},");
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(value) => ${name}::${this.dynFunctionVariant(shape)}(value.clone()),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
 
     this.line(`fn sc_dyn_kind(value: &${name}) -> &'static str {`);
     this.indent += 1;
@@ -620,6 +708,8 @@ class RustEmitter {
     this.line(`${name}::Number(..) => "number",`);
     this.line(`${name}::Boolean(..) => "boolean",`);
     this.line(`${name}::String(..) => "string",`);
+    this.line(`${name}::Array(..) => "array",`);
+    this.line(`${name}::Object(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.line(`${boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
@@ -711,6 +801,13 @@ class RustEmitter {
         }
         return `${name}::${this.dynFunctionVariant(shape)}(${value})`;
       }
+      case "record": {
+        const shape = this.records.get(type.shapeId);
+        if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
+          return `sc_dyn_deep_copy(&${name}::Object(${value}))`;
+        }
+        this.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
+      }
       default:
         this.unsupported(`dynamic boxing from '${type.kind}'`, loc);
     }
@@ -723,6 +820,14 @@ class RustEmitter {
       case "bool": return `sc_dyn_check_boolean(${value})`;
       case "string": return `sc_dyn_check_string(${value})`;
       case "func": return `${this.dynFunctionCheckName(this.closureShapeForType(type, loc))}(${value})`;
+      case "record": {
+        const shape = this.records.get(type.shapeId);
+        if (shape?.indexValue?.kind !== "dyn" || shape.fields.length !== 0) {
+          this.unsupported(`dynamic checked cast to record '${type.shapeId}'`, loc);
+        }
+        const name = this.dynTypeName();
+        return `{ let value = ${value}; match &value { ${name}::Object(..) => match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }, _ => sc_dyn_check_fail("object", &value), } }`;
+      }
       default:
         this.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
     }
@@ -2946,12 +3051,12 @@ class RustEmitter {
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
           case "function": test = functions.length === 0 ? "false" : `matches!(&${value}, ${functions.join(" | ")})`; break;
-          case "object": test = `matches!(&${value}, ${name}::Null)`; break;
-          case "array":
+          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Array(..) | ${name}::Object(..))`; break;
+          case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "bytes":
           case "error": test = "false"; break;
           case "truthy":
-            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty()${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
+            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), ${name}::Array(..) | ${name}::Object(..) => true${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
             break;
         }
         if (expr.negated) test = `!(${test})`;
@@ -2960,7 +3065,17 @@ class RustEmitter {
       case "dynCheck": {
         if (expr.value.kind === "libCall" && expr.value.fn === "json.parse" && expr.value.args.length === 1) {
           const text = expr.value.args[0];
-          if (text === undefined || text.type.kind !== "string" || !this.isRustJsonCompatible(expr.type)) {
+          if (text === undefined || text.type.kind !== "string") {
+            this.unsupported(`JSON.parse target '${expr.type.kind}'`, expr.loc);
+          }
+          if (expr.type.kind === "record") {
+            const shape = this.records.get(expr.type.shapeId);
+            if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
+              const parsed = `runtime::json_parse_typed::<${this.dynTypeName()}>(&(${this.emitExpr(text)}))`;
+              return this.emitDynCheckValue(expr.type, parsed, expr.loc);
+            }
+          }
+          if (!this.isRustJsonCompatible(expr.type)) {
             this.unsupported(`JSON.parse target '${expr.type.kind}'`, expr.loc);
           }
           return `runtime::json_parse_typed::<${this.rustType(expr.type, expr.loc)}>(&(${this.emitExpr(text)}))`;
@@ -3199,6 +3314,16 @@ class RustEmitter {
           ? `${access}.as_ref().expect("scriptc: cleared live record field").clone()`
           : this.needsClone(field.type) ? `${access}.clone()` : access;
         return `(${this.emitExpr(expr.obj)}).with(|record| ${result})`;
+      }
+      case "recordKeyGet": {
+        const shape = this.records.get(expr.shapeId);
+        if (shape?.indexValue?.kind !== "dyn" || shape.fields.length !== 0 || expr.type.kind !== "dyn") {
+          this.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
+        }
+        if (expr.key.type.kind !== "string") this.unsupported("indexed record key type", expr.loc);
+        const object = `sc_rt_${this.temporary++}`;
+        const key = `sc_rt_${this.temporary++}`;
+        return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dynTypeName()}::Undefined) }`;
       }
       case "caughtTest":
         if (expr.test !== "instanceof") {
@@ -3490,6 +3615,9 @@ class RustEmitter {
         return this.emitExpr(expr.value);
       case "libCall": {
         const arg = expr.args[0];
+        if (expr.fn === "json.parse" && expr.args.length === 1 && arg?.type.kind === "string" && expr.type.kind === "dyn") {
+          return `runtime::json_parse_typed::<${this.dynTypeName()}>(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "math.floor" && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).floor()`;
         }
@@ -4541,7 +4669,12 @@ class RustEmitter {
       case "record": {
         const shape = this.records.get(type.shapeId);
         if (shape === undefined) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
-        if (shape.indexValue !== undefined) this.unsupported(`indexed record value '${type.shapeId}'`, loc);
+        if (shape.indexValue !== undefined) {
+          if (shape.indexValue.kind === "dyn" && shape.fields.length === 0) {
+            return `runtime::JsMap<runtime::JsString, ${this.dynTypeName()}>`;
+          }
+          this.unsupported(`indexed record value '${type.shapeId}'`, loc);
+        }
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
       }
       case "object": {
