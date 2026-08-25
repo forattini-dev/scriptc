@@ -4581,6 +4581,15 @@ class RustEmitter {
         if (expr.fn === "string.lastIndexOf" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::string_last_index_of(&(${this.emitExpr(arg)}), &(${this.emitExpr(secondArg)}))`;
         }
+        if (expr.fn === "string.fromCharCode" && expr.args.length === 1 && arg !== undefined) {
+          if (arg.type.kind === "array" && arg.type.elem.kind === "f64") {
+            return `runtime::string_from_char_codes(&(${this.emitExpr(arg)}))`;
+          }
+          if (arg.type.kind === "bytes") {
+            return `runtime::string_from_char_code_bytes(&(${this.emitExpr(arg)}))`;
+          }
+          this.unsupported("String.fromCharCode source type", expr.loc);
+        }
         if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).is_nan()`;
         }
@@ -4922,6 +4931,67 @@ class RustEmitter {
         ]).get(expr.fn);
         if (urlGetter !== undefined && expr.args.length === 1 && arg !== undefined) {
           return `runtime::${urlGetter}(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "sp.new" && expr.args.length === 0) return "runtime::search_params_new()";
+        if ((expr.fn === "sp.parse" || expr.fn === "sp.copy" || expr.fn === "sp.fromPairs" ||
+            expr.fn === "url.searchParams" || expr.fn === "url.search") &&
+            expr.args.length === 1 && arg !== undefined) {
+          const runtimeFn = new Map<string, string>([
+            ["sp.parse", "search_params_parse"],
+            ["sp.copy", "search_params_copy"],
+            ["sp.fromPairs", "search_params_from_array"],
+            ["url.searchParams", "url_search_params"],
+            ["url.search", "url_search"],
+          ]).get(expr.fn);
+          if (runtimeFn === undefined) this.unsupported(`URLSearchParams call '${expr.fn}'`, expr.loc);
+          return `runtime::${runtimeFn}(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "sp.with" && expr.args.length === 3 && arg !== undefined &&
+            expr.args[1] !== undefined && expr.args[2] !== undefined) {
+          return `runtime::search_params_with(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}), &(${this.emitExpr(expr.args[2])}))`;
+        }
+        if (expr.fn === "sp.get" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          if (expr.type.kind !== "union") this.unsupported("URLSearchParams.get without a nullable result union", expr.loc);
+          const union = this.union(expr.type.unionId, expr.loc);
+          const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+          const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+          if (stringTag < 0 || nullTag < 0) this.unsupported("URLSearchParams.get result union shape", expr.loc);
+          const name = this.unionName(union.id);
+          return `match runtime::search_params_get(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])})) { Some(value) => ${name}::${this.unionVariant(stringTag)}(value), None => ${name}::${this.unionVariant(nullTag)}, }`;
+        }
+        if (expr.fn === "sp.getAll" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::search_params_get_all(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
+        }
+        const spMutation = new Map<string, string>([
+          ["sp.append", "search_params_append"],
+          ["sp.set", "search_params_set"],
+          ["sp.delete", "search_params_delete"],
+          ["sp.deleteValue", "search_params_delete_value"],
+        ]).get(expr.fn);
+        if (spMutation !== undefined && arg !== undefined && expr.args.length >= 2 && expr.args.length <= 3) {
+          return `runtime::${spMutation}(${expr.args.map((value) => `&(${this.emitExpr(value)})`).join(", ")})`;
+        }
+        const spPredicate = new Map<string, string>([
+          ["sp.has", "search_params_has"],
+          ["sp.hasValue", "search_params_has_value"],
+        ]).get(expr.fn);
+        if (spPredicate !== undefined && arg !== undefined && expr.args.length >= 2 && expr.args.length <= 3) {
+          return `runtime::${spPredicate}(${expr.args.map((value) => `&(${this.emitExpr(value)})`).join(", ")})`;
+        }
+        const spRead = new Map<string, string>([
+          ["sp.sort", "search_params_sort"],
+          ["sp.size", "search_params_size"],
+          ["sp.toString", "search_params_to_string"],
+        ]).get(expr.fn);
+        if (spRead !== undefined && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::${spRead}(&(${this.emitExpr(arg)}))`;
+        }
+        const spIndexRead = new Map<string, string>([
+          ["sp.keyAt", "search_params_key_at"],
+          ["sp.valAt", "search_params_value_at"],
+        ]).get(expr.fn);
+        if (spIndexRead !== undefined && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          return `runtime::${spIndexRead}(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
         }
         if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
         const processSample = new Map<string, string>([
