@@ -987,6 +987,84 @@ pub fn date_get_timezone_offset(ms: f64) -> f64 {
     date_local_parts(ms).map_or(f64::NAN, |parts| parts.timezone_offset)
 }
 
+/// Shared, identity-bearing WHATWG URL value. The parsed URL sits behind
+/// interior mutability so the later live URLSearchParams view can update its
+/// query while ordinary URL getters remain pure reads.
+pub struct UrlData {
+    value: RefCell<url::Url>,
+    extra_file_slashes: usize,
+}
+
+pub type JsUrl = Rc<UrlData>;
+
+pub fn url_new(input: &JsString) -> JsUrl {
+    let value =
+        url::Url::parse(input).unwrap_or_else(|_| throw_type_error("Invalid URL".to_owned()));
+    // The url crate collapses every host-less file path to one leading
+    // slash. WHATWG/Node preserve each slash beyond the authority marker:
+    // `file:////double` has pathname `//double` and serializes unchanged.
+    let trimmed = input.trim_matches(|character: char| character <= ' ');
+    let bytes = trimmed.as_bytes();
+    let extra_file_slashes = if bytes.len() >= 5 && bytes[..5].eq_ignore_ascii_case(b"file:") {
+        let leading = bytes[5..].iter().take_while(|byte| **byte == b'/').count();
+        leading.saturating_sub(3)
+    } else {
+        0
+    };
+    Rc::new(UrlData {
+        value: RefCell::new(value),
+        extra_file_slashes,
+    })
+}
+
+pub fn url_protocol(value: &JsUrl) -> JsString {
+    let value = value.value.borrow();
+    string(&format!("{}:", value.scheme()))
+}
+
+pub fn url_hostname(value: &JsUrl) -> JsString {
+    let value = value.value.borrow();
+    string(value.host_str().unwrap_or(""))
+}
+
+pub fn url_host(value: &JsUrl) -> JsString {
+    let value = value.value.borrow();
+    let Some(hostname) = value.host_str() else {
+        return empty_string();
+    };
+    match value.port() {
+        Some(port) => string(&format!("{hostname}:{port}")),
+        None => string(hostname),
+    }
+}
+
+pub fn url_pathname(value: &JsUrl) -> JsString {
+    let parsed = value.value.borrow();
+    if value.extra_file_slashes == 0 {
+        return string(parsed.path());
+    }
+    string(&format!(
+        "{}{}",
+        "/".repeat(value.extra_file_slashes),
+        parsed.path()
+    ))
+}
+
+pub fn url_href(value: &JsUrl) -> JsString {
+    let parsed = value.value.borrow();
+    if value.extra_file_slashes == 0 {
+        return string(parsed.as_str());
+    }
+    let href = parsed.as_str();
+    debug_assert!(href.starts_with("file://"));
+    string(&format!(
+        "{}{}{}",
+        &href[..7],
+        "/".repeat(value.extra_file_slashes),
+        &href[7..]
+    ))
+}
+
 impl Tracer<'_> {
     pub fn edge<T>(&mut self, edge: &Gc<T>)
     where
@@ -8630,6 +8708,39 @@ mod tests {
         }
         assert!(date_get_full_year(f64::NAN, true).is_nan());
         assert!(date_get_full_year(f64::NAN, false).is_nan());
+    }
+
+    #[test]
+    fn url_construction_and_getters_match_whatwg_serialization() {
+        let secure = url_new(&string("HTTPS://Example.COM:443/a/../x?q=1#f"));
+        assert_eq!(url_href(&secure).as_ref(), "https://example.com/x?q=1#f");
+        assert_eq!(url_protocol(&secure).as_ref(), "https:");
+        assert_eq!(url_host(&secure).as_ref(), "example.com");
+        assert_eq!(url_hostname(&secure).as_ref(), "example.com");
+        assert_eq!(url_pathname(&secure).as_ref(), "/x");
+
+        let ipv6 = url_new(&string("http://[0:0:0:0:0:0:0:1]:8080/x"));
+        assert_eq!(url_href(&ipv6).as_ref(), "http://[::1]:8080/x");
+        assert_eq!(url_host(&ipv6).as_ref(), "[::1]:8080");
+        assert_eq!(url_hostname(&ipv6).as_ref(), "[::1]");
+
+        let opaque = url_new(&string("data:text/plain,hi there"));
+        assert_eq!(url_href(&opaque).as_ref(), "data:text/plain,hi there");
+        assert_eq!(url_pathname(&opaque).as_ref(), "text/plain,hi there");
+        assert_eq!(url_host(&opaque).as_ref(), "");
+
+        let file = url_new(&string("file:////double"));
+        assert_eq!(url_href(&file).as_ref(), "file:////double");
+        assert_eq!(url_pathname(&file).as_ref(), "//double");
+
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            url_new(&string("not a url"))
+        }))
+        .err()
+        .expect("an invalid URL must throw");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert_eq!(caught_error_message(&caught).as_ref(), "Invalid URL");
     }
 
     #[test]

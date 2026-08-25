@@ -1496,6 +1496,8 @@ class RustEmitter {
           comparison = "left.ptr_eq(right)";
           break;
         case "regex":
+        case "url":
+        case "searchParams":
           comparison = "std::rc::Rc::ptr_eq(left, right)";
           break;
         case "object":
@@ -1822,6 +1824,8 @@ class RustEmitter {
         case "func":
         case "promise":
         case "regex":
+        case "url":
+        case "searchParams":
         case "dyn":
           this.line(`static ${name}: RefCell<Option<${this.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
@@ -4906,6 +4910,19 @@ class RustEmitter {
         if (expr.fn === "date.getTimezoneOffset" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::date_get_timezone_offset(${this.emitExpr(arg)})`;
         }
+        if (expr.fn === "url.new" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::url_new(&(${this.emitExpr(arg)}))`;
+        }
+        const urlGetter = new Map<string, string>([
+          ["url.protocol", "url_protocol"],
+          ["url.host", "url_host"],
+          ["url.hostname", "url_hostname"],
+          ["url.pathname", "url_pathname"],
+          ["url.href", "url_href"],
+        ]).get(expr.fn);
+        if (urlGetter !== undefined && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::${urlGetter}(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
         const processSample = new Map<string, string>([
           ["process.availableMemory", "process_available_memory"],
@@ -5453,7 +5470,8 @@ class RustEmitter {
   }
 
   private emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string {
-    if (expr.left.type.kind === "regex" && (expr.op === "===" || expr.op === "!==")) {
+    if ((expr.left.type.kind === "regex" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams") &&
+        (expr.op === "===" || expr.op === "!==")) {
       const compare = `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
@@ -5655,6 +5673,8 @@ class RustEmitter {
       case "func": return "true";
       case "promise": return "true";
       case "regex": return "true";
+      case "url": return "true";
+      case "searchParams": return "true";
       case "classval": return "true";
       case "union": {
         const union = this.union(type.unionId, loc);
@@ -5679,7 +5699,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(type) || type.kind === "regex") {
+      if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "url" || type.kind === "searchParams") {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
@@ -5703,7 +5723,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(global.type) || global.type.kind === "regex") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
+      if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "url" || global.type.kind === "searchParams") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
       if (global.type.kind === "f64" || global.type.kind === "date" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
@@ -5783,6 +5803,8 @@ class RustEmitter {
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
       case "regex": return "runtime::JsRegex";
+      case "url": return "runtime::JsUrl";
+      case "searchParams": return "runtime::JsSearchParams";
       case "caught": return "runtime::Caught";
       case "dyn": return this.dynTypeName();
       default: this.unsupported(`type '${type.kind}'`, loc);
@@ -6085,7 +6107,7 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "regex" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
+    return type.kind === "string" || type.kind === "regex" || type.kind === "url" || type.kind === "searchParams" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
       (type.kind === "object" && RUNTIME_ERROR_CLASSES.has(type.className)) || this.isTracedHandle(type);
   }
 
@@ -6186,6 +6208,8 @@ class RustEmitter {
       case "func":
       case "promise":
       case "regex":
+      case "url":
+      case "searchParams":
       case "undefinedT":
       case "nullT":
         return;
