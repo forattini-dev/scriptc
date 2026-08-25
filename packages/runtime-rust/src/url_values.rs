@@ -1,6 +1,6 @@
 use crate::{
-    JsArray, JsString, array_get, array_len, array_new, empty_string, string, throw_type_error,
-    throw_type_error_code,
+    JsArray, JsString, array_get, array_len, array_new, empty_string, path_resolve, string,
+    throw_type_error, throw_type_error_code,
 };
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -17,6 +17,14 @@ pub struct UrlData {
 
 pub type JsUrl = Rc<UrlData>;
 
+fn url_from_parsed(value: url::Url, extra_file_slashes: usize) -> JsUrl {
+    Rc::new(UrlData {
+        value: RefCell::new(value),
+        extra_file_slashes,
+        search_params: RefCell::new(None),
+    })
+}
+
 pub fn url_new(input: &JsString) -> JsUrl {
     let value =
         url::Url::parse(input).unwrap_or_else(|_| throw_type_error("Invalid URL".to_owned()));
@@ -30,11 +38,7 @@ pub fn url_new(input: &JsString) -> JsUrl {
     } else {
         0
     };
-    Rc::new(UrlData {
-        value: RefCell::new(value),
-        extra_file_slashes,
-        search_params: RefCell::new(None),
-    })
+    url_from_parsed(value, extra_file_slashes)
 }
 
 pub fn url_protocol(value: &JsUrl) -> JsString {
@@ -83,6 +87,118 @@ pub fn url_href(value: &JsUrl) -> JsString {
         "/".repeat(value.extra_file_slashes),
         &href[7..]
     ))
+}
+
+fn percent_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(not(windows))]
+fn file_url_path(value: &JsUrl) -> JsString {
+    let parsed = value.value.borrow();
+    if parsed.scheme() != "file" {
+        throw_type_error("The URL must be of scheme file".to_owned());
+    }
+    if let Some(host) = parsed.host_str().filter(|host| !host.is_empty()) {
+        let _ = host;
+        let platform = if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "posix"
+        };
+        throw_type_error(format!(
+            "File URL host must be \"localhost\" or empty on {platform}"
+        ));
+    }
+    let encoded = parsed.path().as_bytes();
+    let mut decoded = Vec::with_capacity(encoded.len());
+    let mut index = 0;
+    while index < encoded.len() {
+        if encoded[index] == b'%' && index + 2 < encoded.len() {
+            if let (Some(high), Some(low)) = (
+                percent_hex(encoded[index + 1]),
+                percent_hex(encoded[index + 2]),
+            ) {
+                let byte = high << 4 | low;
+                if byte == b'/' {
+                    throw_type_error(
+                        "File URL path must not include encoded / characters".to_owned(),
+                    );
+                }
+                decoded.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(encoded[index]);
+        index += 1;
+    }
+    Rc::from(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+#[cfg(windows)]
+fn file_url_path(value: &JsUrl) -> JsString {
+    let parsed = value.value.borrow();
+    if parsed.scheme() != "file" {
+        throw_type_error("The URL must be of scheme file".to_owned());
+    }
+    let encoded = parsed.path().as_bytes();
+    if encoded.windows(3).any(|window| {
+        window[0] == b'%'
+            && ((window[1] == b'2' && window[2].eq_ignore_ascii_case(&b'f'))
+                || (window[1] == b'5' && window[2].eq_ignore_ascii_case(&b'c')))
+    }) {
+        throw_type_error("File URL path must not include encoded \\ or / characters".to_owned());
+    }
+    parsed
+        .to_file_path()
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .map(|path| Rc::from(path.as_str()))
+        .unwrap_or_else(|| throw_type_error("File URL path must be absolute".to_owned()))
+}
+
+pub fn url_file_url_to_path(value: &JsUrl) -> JsString {
+    file_url_path(value)
+}
+
+pub fn url_string_to_path(value: &JsString) -> JsString {
+    file_url_path(&url_new(value))
+}
+
+#[cfg(not(windows))]
+pub fn url_path_to_file_url(path: &JsString) -> JsUrl {
+    let trailing_slash = path.ends_with('/');
+    let resolved = path_resolve(&array_new(vec![path.clone()]));
+    let mut resolved = resolved.to_string();
+    if trailing_slash && resolved != "/" && !resolved.ends_with('/') {
+        resolved.push('/');
+    }
+    let parsed = url::Url::from_file_path(&resolved)
+        .unwrap_or_else(|_| throw_type_error("Invalid URL".to_owned()));
+    url_from_parsed(parsed, 0)
+}
+
+#[cfg(windows)]
+pub fn url_path_to_file_url(path: &JsString) -> JsUrl {
+    let path = std::path::PathBuf::from(path.as_ref());
+    let resolved = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|error| throw_type_error(error.to_string()))
+            .join(path)
+    };
+    let parsed = url::Url::from_file_path(resolved)
+        .unwrap_or_else(|_| throw_type_error("Invalid URL".to_owned()));
+    url_from_parsed(parsed, 0)
 }
 
 pub struct SearchParamsData {

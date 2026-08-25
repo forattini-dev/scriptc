@@ -161,6 +161,45 @@
         assert_eq!(caught_error_message(&caught).as_ref(), "Invalid URL");
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn file_url_bridge_round_trips_paths_and_throws_node_messages() {
+        let encoded = url_path_to_file_url(&string("/tmp/a b/100% légit 🌍"));
+        assert_eq!(
+            url_href(&encoded).as_ref(),
+            "file:///tmp/a%20b/100%25%20l%C3%A9git%20%F0%9F%8C%8D"
+        );
+        assert_eq!(
+            url_file_url_to_path(&encoded).as_ref(),
+            "/tmp/a b/100% légit 🌍"
+        );
+        assert_eq!(
+            url_string_to_path(&string("file:///tmp/a%20b/c%25d")).as_ref(),
+            "/tmp/a b/c%d"
+        );
+        assert_eq!(
+            url_string_to_path(&string("file://localhost/tmp/x")).as_ref(),
+            "/tmp/x"
+        );
+
+        for (input, message) in [
+            ("http://x/y", "The URL must be of scheme file"),
+            (
+                "file:///a%2Fb",
+                "File URL path must not include encoded / characters",
+            ),
+        ] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                url_string_to_path(&string(input))
+            }))
+            .err()
+            .expect("invalid file URL must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+            assert_eq!(caught_error_message(&caught).as_ref(), message);
+        }
+    }
+
     #[test]
     fn search_params_parse_mutate_encode_and_sync_live_urls() {
         let params = search_params_parse(&string("a=1&b=2&a=3"));
