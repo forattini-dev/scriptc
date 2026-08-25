@@ -6,6 +6,7 @@ export interface RustLoopTarget {
   readonly id: number;
   readonly breakLabel: string;
   readonly continueBlock: string | null;
+  readonly allowsContinue: boolean;
 }
 
 export interface RustStatementContext {
@@ -20,13 +21,14 @@ export interface RustStatementContext {
   pushIndent(): void;
   popIndent(): void;
   nextTemporary(): string;
-  nextLabel(prefix: "sc_loop" | "sc_continue"): string;
+  nextLabel(prefix: "sc_loop" | "sc_continue" | "sc_switch"): string;
   nextLoopTargetId(): number;
   emitExpr(expr: IrExpr): string;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
   emitAssignment(id: string, value: string, loc: SrcLoc): void;
   local(id: string, loc: SrcLoc): IrFunction["locals"][number];
   localIsBoxed(local: IrFunction["locals"][number]): boolean;
+  forceBoxedLocal(id: string, forced: boolean): void;
   rustType(type: IrType, loc?: SrcLoc): string;
   defaultValue(type: IrType, loc: SrcLoc): string;
   record(shapeId: string): IrRecordShape | undefined;
@@ -45,6 +47,8 @@ export function emitRustStatements(
 }
 
 class RustStatementEmitter {
+  private readonly predeclaredLocals = new Set<string>();
+
   constructor(private readonly context: RustStatementContext) {}
 
   emit(statements: readonly IrStmt[]): void {
@@ -55,6 +59,12 @@ class RustStatementEmitter {
     switch (stmt.kind) {
       case "varDecl": {
         const local = this.context.local(stmt.localId, stmt.loc);
+        if (this.predeclaredLocals.has(local.id)) {
+          if (stmt.init !== null) {
+            this.context.line(`runtime::cell_set(&${mangleLocal(local.id)}, ${this.context.emitExpr(stmt.init)});`);
+          }
+          return;
+        }
         if (this.context.localIsBoxed(local)) {
           const init = stmt.init === null
             ? "runtime::cell_empty()"
@@ -92,6 +102,9 @@ class RustStatementEmitter {
         return;
       case "while":
         this.emitWhile(stmt);
+        return;
+      case "switch":
+        this.emitSwitch(stmt);
         return;
       case "for":
         this.emitFor(stmt);
@@ -170,6 +183,7 @@ class RustStatementEmitter {
       id: this.context.nextLoopTargetId(),
       breakLabel: loopLabel,
       continueBlock: null,
+      allowsContinue: true,
     });
     this.emit(stmt.body);
     this.context.loopTargets.pop();
@@ -192,6 +206,7 @@ class RustStatementEmitter {
       id: this.context.nextLoopTargetId(),
       breakLabel: loopLabel,
       continueBlock: continueTarget,
+      allowsContinue: true,
     });
     this.emit(stmt.body);
     this.context.loopTargets.pop();
@@ -234,6 +249,7 @@ class RustStatementEmitter {
       id: this.context.nextLoopTargetId(),
       breakLabel: loopLabel,
       continueBlock: continueTarget,
+      allowsContinue: true,
     });
     this.emit(stmt.body);
     this.context.loopTargets.pop();
@@ -325,7 +341,7 @@ class RustStatementEmitter {
 
   private emitContinue(stmt: Extract<IrStmt, { kind: "continue" }>): void {
     if (stmt.label !== undefined) this.context.unsupported("labeled continue", stmt.loc);
-    const target = this.context.loopTargets.at(-1);
+    const target = this.context.loopTargets.findLast((candidate) => candidate.allowsContinue);
     if (target === undefined) this.context.unsupported("continue outside a Rust-supported loop", stmt.loc);
     if (this.crossesCompletionBoundary(target)) {
       this.context.line(`return runtime::Completion::Continue(${target.id});`);
@@ -449,9 +465,11 @@ class RustStatementEmitter {
     this.context.line("runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),");
     for (const target of this.context.loopTargets) {
       this.context.line(`runtime::Completion::Break(${target.id}) => break '${target.breakLabel},`);
-      this.context.line(`runtime::Completion::Continue(${target.id}) => ${target.continueBlock === null
-        ? `continue '${target.breakLabel}`
-        : `break '${target.continueBlock}`},`);
+      if (target.allowsContinue) {
+        this.context.line(`runtime::Completion::Continue(${target.id}) => ${target.continueBlock === null
+          ? `continue '${target.breakLabel}`
+          : `break '${target.continueBlock}`},`);
+      }
     }
     this.context.line("runtime::Completion::Break(_) | runtime::Completion::Continue(_) => unreachable!(\"scriptc invariant: unknown completion target\"),");
     this.context.popIndent();
@@ -464,5 +482,71 @@ class RustStatementEmitter {
     } else {
       this.context.line(`runtime::throw_error_code("${this.context.rustString(stmt.message)}".to_owned(), "${this.context.rustString(stmt.code)}");`);
     }
+  }
+
+  private emitSwitch(stmt: Extract<IrStmt, { kind: "switch" }>): void {
+    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled switch", stmt.loc);
+    const kind = stmt.disc.type.kind;
+    if (kind !== "f64" && kind !== "string" && kind !== "bool") {
+      this.context.unsupported(`switch discriminant '${kind}'`, stmt.loc);
+    }
+    const disc = this.context.nextTemporary();
+    const start = this.context.nextTemporary();
+    const switchLabel = this.context.nextLabel("sc_switch");
+    const defaultIndex = stmt.cases.findIndex((candidate) => candidate.test === null);
+    const tests = stmt.cases.flatMap((candidate, index) => {
+      if (candidate.test === null) return [];
+      if (candidate.test.type.kind !== kind) {
+        this.context.unsupported("switch case type mismatch", candidate.test.loc);
+      }
+      const test = this.context.nextTemporary();
+      const equality = kind === "string"
+        ? `${disc}.as_ref() == ${test}.as_ref()`
+        : `${disc} == ${test}`;
+      return [`{ let ${test} = ${this.context.emitExpr(candidate.test)}; if ${equality} { ${index}_i32 } else { `];
+    });
+    const miss = `${defaultIndex < 0 ? stmt.cases.length : defaultIndex}_i32`;
+    this.context.line("{");
+    this.context.pushIndent();
+    this.context.line(`let ${disc} = ${this.context.emitExpr(stmt.disc)};`);
+    this.context.line(`let ${start}: i32 = ${tests.join("")}${miss}${" } }".repeat(tests.length)};`);
+
+    const locals = new Map<string, IrFunction["locals"][number]>();
+    for (const candidate of stmt.cases) {
+      for (const statement of candidate.body) {
+        if (statement.kind !== "varDecl") continue;
+        locals.set(statement.localId, this.context.local(statement.localId, statement.loc));
+      }
+    }
+    for (const local of locals.values()) {
+      this.predeclaredLocals.add(local.id);
+      this.context.forceBoxedLocal(local.id, true);
+      this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_empty();`);
+    }
+
+    this.context.line(`'${switchLabel}: {`);
+    this.context.pushIndent();
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(),
+      breakLabel: switchLabel,
+      continueBlock: null,
+      allowsContinue: false,
+    });
+    stmt.cases.forEach((candidate, index) => {
+      this.context.line(`if ${start} <= ${index}_i32 {`);
+      this.context.pushIndent();
+      this.emit(candidate.body);
+      this.context.popIndent();
+      this.context.line("}");
+    });
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
+    for (const local of locals.values()) {
+      this.predeclaredLocals.delete(local.id);
+      this.context.forceBoxedLocal(local.id, false);
+    }
+    this.context.popIndent();
+    this.context.line("}");
   }
 }

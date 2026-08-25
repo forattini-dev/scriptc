@@ -1924,3 +1924,57 @@ rmSync(path);
     expect(rust.stderr).toBe(node.stderr);
   }
 }, 120_000);
+
+test("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and narrowing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-switch-"));
+  for (const fixture of [
+    "1119-switch-union.ts",
+    "1532-union-shared-field-read.ts",
+    "1825-exhaustive-typeof-switch.ts",
+    "1830-enum-numeric-basics.ts",
+    "1835-var-basics.ts",
+    "2398-switch-arm-kill.ts",
+    "2406-switch-clause-sibling-narrow.ts",
+    "2410-stacked-cases-terminality.ts",
+    "2411-exhaustive-switch-terminality.ts",
+    "2419-selector-ternary-union.ts",
+    "2442-union-literal-arm-widening.ts",
+    "2443-union-literal-shadow-narrowing.ts",
+    "2444-union-literal-reducer-spread.ts",
+    "2488-ast-walker.ts",
+    "2493-switch-unit-cases.ts",
+    "800-switch-basics.ts",
+    "801-switch-lazy-tests.ts",
+    "803-switch-rc-stress.ts",
+    "804-switch-braced-blocks.ts",
+    "830-let-uninitialized.ts",
+    "971-unions-switch.ts",
+    "982-exceptions-rc-stress.ts",
+    "983-exceptions-control-flow.ts",
+    "987-exceptions-result-unions.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok) continue;
+    const nodeArgs = /\benum\s+[A-Za-z_$]/u.test(await readFile(entryPath, "utf8"))
+      ? ["--no-warnings", "--experimental-transform-types", entryPath]
+      : [entryPath];
+    const [node, rust] = await Promise.all([
+      runToExit(process.execPath, nodeArgs),
+      runToExit(result.binaryPath, [], {
+        ...process.env,
+        SCRIPTC_RUST_HEAP_AUDIT: "1",
+      }),
+    ]);
+    expect(rust, fixture).toEqual(node);
+  }
+}, 120_000);

@@ -70,8 +70,14 @@ class RustEmitter {
   private currentAsyncLocals: Set<string> | null = null;
   private asyncProtectedReturnDepth = 0;
   private capturedReturnDepth = 0;
-  private readonly loopTargets: { id: number; breakLabel: string; continueBlock: string | null }[] = [];
+  private readonly loopTargets: {
+    id: number;
+    breakLabel: string;
+    continueBlock: string | null;
+    allowsContinue: boolean;
+  }[] = [];
   private readonly completionLoopBoundaries: number[] = [];
+  private readonly forcedBoxedLocals = new Set<string>();
   private nextLoopTargetId = 0;
   private usesDyn = false;
   private readonly containerExpressions = new RustContainerExpressionEmitter({
@@ -276,6 +282,7 @@ class RustEmitter {
     records: this.records,
     unions: this.unions,
     currentFunction: () => this.currentFunction,
+    isForcedBoxed: (id) => this.forcedBoxedLocals.has(id),
     line: (value) => this.line(value),
     emitExpr: (expr) => this.emitExpr(expr),
     classMetaOf: (name, loc) => this.classMetaOf(name, loc),
@@ -872,6 +879,10 @@ class RustEmitter {
       emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
       local: (id, loc) => this.local(id, loc),
       localIsBoxed: (local) => this.localIsBoxed(local),
+      forceBoxedLocal: (id, forced) => {
+        if (forced) this.forcedBoxedLocals.add(id);
+        else this.forcedBoxedLocals.delete(id);
+      },
       rustType: (type, loc) => this.rustType(type, loc),
       defaultValue: (type, loc) => this.defaultValue(type, loc),
       record: (shapeId) => this.records.get(shapeId),

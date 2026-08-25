@@ -9,6 +9,7 @@ export interface RustValueContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
   readonly unions: ReadonlyMap<string, IrUnionDef>;
   currentFunction(): IrFunction | null;
+  isForcedBoxed(id: string): boolean;
   line(value: string): void;
   emitExpr(expr: IrExpr): string;
   classMetaOf(name: string, loc?: SrcLoc): RustClassMeta;
@@ -134,7 +135,9 @@ export class RustValueEmitter {
   }
 
   localIsBoxed(local: IrFunction["locals"][number]): boolean {
-    return local.boxed === true || this.context.currentFunction()?.async === true;
+    return this.context.isForcedBoxed(local.id)
+      || local.boxed === true
+      || this.context.currentFunction()?.async === true;
   }
 
   rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
