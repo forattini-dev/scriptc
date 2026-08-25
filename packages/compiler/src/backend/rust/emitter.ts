@@ -1517,6 +1517,7 @@ class RustEmitter {
         case "union":
         case "func":
         case "promise":
+        case "regex":
         case "dyn":
           this.line(`static ${name}: RefCell<Option<${this.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
@@ -3105,6 +3106,8 @@ class RustEmitter {
         return this.numberLiteral(expr.value);
       case "strLit":
         return `runtime::string("${this.rustString(expr.value)}")`;
+      case "regexLit":
+        return `runtime::regex_new("${this.rustString(expr.pattern)}", "${this.rustString(expr.flags)}")`;
       case "boolLit":
         return expr.value ? "true" : "false";
       case "unitLit":
@@ -3202,6 +3205,9 @@ class RustEmitter {
         if (expr.method === "repeat" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_repeat(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
+        if ((expr.method === "padStart" || expr.method === "padEnd") && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
+          return `runtime::string_${expr.method === "padStart" ? "pad_start" : "pad_end"}(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])}, &(${this.emitExpr(expr.args[1])}))`;
+        }
         if ((expr.method === "indexOf" || expr.method === "includes") && expr.args[0] !== undefined) {
           const index = `runtime::string_index_of(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1])})`;
           return expr.method === "includes" ? `(${index} >= 0.0)` : index;
@@ -3222,6 +3228,24 @@ class RustEmitter {
           return `runtime::string_split(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${this.emitExpr(expr.args[1])})`;
         }
         this.unsupported(`string intrinsic '${expr.method}'`, expr.loc);
+      case "regexIntrinsic": {
+        const receiver = `sc_rt_${this.temporary++}`;
+        const args = expr.args.map(() => `sc_rt_${this.temporary++}`);
+        const bindings = [
+          `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
+          ...expr.args.map((argument, index) => `let ${args[index]} = ${this.emitExpr(argument)};`),
+        ].join(" ");
+        if (expr.method === "test" && args.length === 1) {
+          return `{ ${bindings} runtime::regex_test(&${receiver}, &${args[0]}) }`;
+        }
+        if (expr.method === "source" && args.length === 0) {
+          return `{ ${bindings} runtime::regex_source(&${receiver}) }`;
+        }
+        if (expr.method === "flags" && args.length === 0) {
+          return `{ ${bindings} runtime::regex_flags(&${receiver}) }`;
+        }
+        this.unsupported(`regex intrinsic '${expr.method}'`, expr.loc);
+      }
       case "strEq": {
         const compare = `(${this.emitExpr(expr.left)}).as_ref() == (${this.emitExpr(expr.right)}).as_ref()`;
         return expr.negated ? `!(${compare})` : `(${compare})`;
@@ -4644,6 +4668,10 @@ class RustEmitter {
   }
 
   private emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string {
+    if (expr.left.type.kind === "regex" && (expr.op === "===" || expr.op === "!==")) {
+      const compare = `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
+      return expr.op === "!==" ? `!(${compare})` : compare;
+    }
     if (this.isTracedHandle(expr.left.type) && (expr.op === "===" || expr.op === "!==")) {
       const compare = `((${left}).ptr_eq(&(${right})))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
@@ -4840,6 +4868,7 @@ class RustEmitter {
       case "object": return "true";
       case "func": return "true";
       case "promise": return "true";
+      case "regex": return "true";
       case "classval": return "true";
       case "union": {
         const union = this.union(type.unionId, loc);
@@ -4864,7 +4893,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(type)) {
+      if (this.isHeapRoot(type) || type.kind === "regex") {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
@@ -4888,7 +4917,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
+      if (this.isHeapRoot(global.type) || global.type.kind === "regex") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
       if (global.type.kind === "f64" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
@@ -4963,6 +4992,7 @@ class RustEmitter {
         return `runtime::Gc<${this.closureName(shape)}>`;
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
+      case "regex": return "runtime::JsRegex";
       case "caught": return "runtime::Caught";
       case "dyn": return this.dynTypeName();
       default: this.unsupported(`type '${type.kind}'`, loc);
@@ -5264,7 +5294,7 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || this.isTracedHandle(type);
+    return type.kind === "string" || type.kind === "regex" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || this.isTracedHandle(type);
   }
 
   private arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string {

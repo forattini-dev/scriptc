@@ -15,6 +15,72 @@ static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
 /// families use the same owning-handle rule and add tracing for cycles.
 pub type JsString = Rc<str>;
 
+pub struct RegexData {
+    compiled: regress::Regex,
+    source: JsString,
+    flags: JsString,
+    unicode: bool,
+    global: bool,
+    sticky: bool,
+    last_index: Cell<usize>,
+}
+
+pub type JsRegex = Rc<RegexData>;
+
+pub fn regex_new(pattern: &str, flags: &str) -> JsRegex {
+    let parsed_flags = regress::Flags::from(flags);
+    let unicode = flags.contains('u') || flags.contains('v');
+    let compiled = if unicode {
+        regress::Regex::from_unicode(pattern.chars().map(u32::from), parsed_flags)
+    } else {
+        regress::Regex::from_unicode(pattern.encode_utf16().map(u32::from), parsed_flags)
+    }
+    .unwrap_or_else(|error| throw_syntax_error(error.to_string()));
+    Rc::new(RegexData {
+        compiled,
+        source: string(pattern),
+        flags: string(flags),
+        unicode,
+        global: flags.contains('g'),
+        sticky: flags.contains('y'),
+        last_index: Cell::new(0),
+    })
+}
+
+pub fn regex_test(regex: &JsRegex, text: &JsString) -> bool {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let stateful = regex.global || regex.sticky;
+    let start = if stateful { regex.last_index.get() } else { 0 };
+    let found = if regex.unicode {
+        regex
+            .compiled
+            .find_from_utf16(&units, start)
+            .next()
+            .map(|matched| matched.range())
+    } else {
+        regex
+            .compiled
+            .find_from_ucs2(&units, start)
+            .next()
+            .map(|matched| matched.range())
+    }
+    .filter(|range| !regex.sticky || range.start == start);
+    if stateful {
+        regex
+            .last_index
+            .set(found.as_ref().map_or(0, |range| range.end));
+    }
+    found.is_some()
+}
+
+pub fn regex_source(regex: &JsRegex) -> JsString {
+    regex.source.clone()
+}
+
+pub fn regex_flags(regex: &JsRegex) -> JsString {
+    regex.flags.clone()
+}
+
 trait DynNode {
     fn id(&self) -> usize;
     fn trace(&self, tracer: &mut Tracer<'_>);
@@ -816,6 +882,7 @@ impl HeapValue for bool {}
 impl HeapValue for usize {}
 impl HeapValue for () {}
 impl HeapValue for JsString {}
+impl HeapValue for JsRegex {}
 impl HeapValue for JsError {}
 impl HeapValue for Caught {}
 
@@ -1506,6 +1573,7 @@ impl ArrayElement for f64 {}
 impl ArrayElement for bool {}
 impl ArrayElement for usize {}
 impl ArrayElement for JsString {}
+impl ArrayElement for JsRegex {}
 
 impl JoinElement for f64 {
     fn append_joined(&self, output: &mut String) {
@@ -3391,6 +3459,44 @@ pub fn string_repeat(value: &JsString, count: f64) -> JsString {
         panic!("RangeError: Invalid count value");
     }
     Rc::<str>::from(value.repeat(count as usize))
+}
+
+fn string_pad(value: &JsString, max_length: f64, fill: &JsString, at_start: bool) -> JsString {
+    let target = if max_length.is_nan() {
+        0.0
+    } else {
+        max_length.trunc()
+    };
+    let value_units: Vec<u16> = value.encode_utf16().collect();
+    if target <= value_units.len() as f64 || fill.is_empty() {
+        return value.clone();
+    }
+    if !target.is_finite() || target > usize::MAX as f64 {
+        throw_range_error("Invalid string length".to_owned());
+    }
+    let target = target as usize;
+    let fill_units: Vec<u16> = fill.encode_utf16().collect();
+    let pad_length = target - value_units.len();
+    let mut padded = Vec::with_capacity(target);
+    let append_padding = |output: &mut Vec<u16>| {
+        output.extend(fill_units.iter().copied().cycle().take(pad_length));
+    };
+    if at_start {
+        append_padding(&mut padded);
+        padded.extend_from_slice(&value_units);
+    } else {
+        padded.extend_from_slice(&value_units);
+        append_padding(&mut padded);
+    }
+    Rc::from(String::from_utf16_lossy(&padded))
+}
+
+pub fn string_pad_start(value: &JsString, max_length: f64, fill: &JsString) -> JsString {
+    string_pad(value, max_length, fill, true)
+}
+
+pub fn string_pad_end(value: &JsString, max_length: f64, fill: &JsString) -> JsString {
+    string_pad(value, max_length, fill, false)
 }
 
 pub fn string_to_lower_case(value: &JsString) -> JsString {
@@ -6059,6 +6165,40 @@ mod tests {
         assert_eq!(string_to_upper_case(&value).as_ref(), "SCRIPTC 42");
         assert!(string_includes(&value, &string("iptC"), 0.0));
         assert!(!string_includes(&value, &string("iptc"), 0.0));
+    }
+
+    #[test]
+    fn string_padding_counts_utf16_units() {
+        let value = string("😀");
+        assert_eq!(string_pad_start(&value, 3.0, &string("ab")).as_ref(), "a😀");
+        assert_eq!(string_pad_end(&value, 4.0, &string("🎉")).as_ref(), "😀🎉");
+        assert_eq!(string_pad_start(&value, 3.0, &string("🎉")).as_ref(), "�😀");
+        assert_eq!(string_pad_start(&value, -1.0, &string("x")).as_ref(), "😀");
+        assert_eq!(
+            string_pad_start(&value, 10.0, &empty_string()).as_ref(),
+            "😀"
+        );
+    }
+
+    #[test]
+    fn regex_test_preserves_ecmascript_flags_and_state() {
+        let unicode = regex_new("^.$", "u");
+        let legacy = regex_new("^.$", "");
+        assert!(regex_test(&unicode, &string("😀")));
+        assert!(!regex_test(&legacy, &string("😀")));
+
+        let global = regex_new(r"\d", "g");
+        let text = string("1a2");
+        assert!(regex_test(&global, &text));
+        assert!(regex_test(&global, &text));
+        assert!(!regex_test(&global, &text));
+        assert!(regex_test(&global, &text));
+
+        let sticky = regex_new("a", "y");
+        assert!(regex_test(&sticky, &string("ab")));
+        assert!(!regex_test(&sticky, &string("ab")));
+        assert_eq!(regex_source(&global).as_ref(), r"\d");
+        assert_eq!(regex_flags(&global).as_ref(), "g");
     }
 
     #[test]
