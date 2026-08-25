@@ -4006,6 +4006,15 @@ class RustEmitter {
         if (expr.fn === "regexp.escape" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::regexp_escape(&(${this.emitExpr(arg)}))`;
         }
+        if (expr.fn === "str.encodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::string_encode_uri_component(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "str.encodeUri" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::string_encode_uri(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "str.decodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::string_decode_uri_component(&(${this.emitExpr(arg)}))`;
+        }
         if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
         if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
         if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";

@@ -1810,6 +1810,14 @@ pub fn throw_range_error(message: String) -> ! {
     })
 }
 
+pub fn throw_uri_error(message: String) -> ! {
+    throw_value(JsError {
+        name: "URIError".to_owned(),
+        message,
+        code: None,
+    })
+}
+
 pub fn caught_from_panic(payload: Box<dyn Any + Send>) -> Caught {
     match payload.downcast::<ScriptThrow>() {
         Ok(_) => EXCEPTION_SLOT.with(|slot| Caught {
@@ -3791,6 +3799,118 @@ pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
     result.push_str(left);
     result.push_str(right);
     Rc::from(result)
+}
+
+fn uri_unescaped(byte: u8, keep_reserved: bool) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+        )
+        || (keep_reserved
+            && matches!(
+                byte,
+                b';' | b'/' | b'?' | b':' | b'@' | b'&' | b'=' | b'+' | b'$' | b',' | b'#'
+            ))
+}
+
+fn encode_uri(value: &JsString, keep_reserved: bool) -> JsString {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    if value
+        .as_bytes()
+        .iter()
+        .all(|byte| uri_unescaped(*byte, keep_reserved))
+    {
+        return value.clone();
+    }
+    let mut encoded = Vec::with_capacity(value.len().saturating_mul(3));
+    for byte in value.as_bytes() {
+        if uri_unescaped(*byte, keep_reserved) {
+            encoded.push(*byte);
+        } else {
+            encoded.push(b'%');
+            encoded.push(HEX[usize::from(byte >> 4)]);
+            encoded.push(HEX[usize::from(byte & 0x0f)]);
+        }
+    }
+    Rc::from(String::from_utf8(encoded).expect("URI encoding emits ASCII"))
+}
+
+pub fn string_encode_uri_component(value: &JsString) -> JsString {
+    encode_uri(value, false)
+}
+
+pub fn string_encode_uri(value: &JsString) -> JsString {
+    encode_uri(value, true)
+}
+
+fn uri_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn uri_hex_byte(bytes: &[u8], index: usize) -> Option<u8> {
+    if bytes.get(index) != Some(&b'%') {
+        return None;
+    }
+    let high = uri_hex_nibble(*bytes.get(index + 1)?)?;
+    let low = uri_hex_nibble(*bytes.get(index + 2)?)?;
+    Some((high << 4) | low)
+}
+
+pub fn string_decode_uri_component(value: &JsString) -> JsString {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        let Some(leading) = uri_hex_byte(bytes, index) else {
+            throw_uri_error("URI malformed".to_owned());
+        };
+        index += 3;
+        if leading < 0x80 {
+            decoded.push(leading);
+            continue;
+        }
+
+        let (continuations, first_low, first_high) = match leading {
+            0xc2..=0xdf => (1, 0x80, 0xbf),
+            0xe0 => (2, 0xa0, 0xbf),
+            0xe1..=0xec | 0xee..=0xef => (2, 0x80, 0xbf),
+            0xed => (2, 0x80, 0x9f),
+            0xf0 => (3, 0x90, 0xbf),
+            0xf1..=0xf3 => (3, 0x80, 0xbf),
+            0xf4 => (3, 0x80, 0x8f),
+            _ => throw_uri_error("URI malformed".to_owned()),
+        };
+        decoded.push(leading);
+        for continuation_index in 0..continuations {
+            let Some(continuation) = uri_hex_byte(bytes, index) else {
+                throw_uri_error("URI malformed".to_owned());
+            };
+            let valid = if continuation_index == 0 {
+                (first_low..=first_high).contains(&continuation)
+            } else {
+                (0x80..=0xbf).contains(&continuation)
+            };
+            if !valid {
+                throw_uri_error("URI malformed".to_owned());
+            }
+            decoded.push(continuation);
+            index += 3;
+        }
+    }
+    Rc::from(String::from_utf8(decoded).expect("validated URI bytes are UTF-8"))
 }
 
 pub fn string_len(value: &JsString) -> f64 {
@@ -7454,6 +7574,61 @@ mod tests {
         assert!(number_parse_float(&string("inf")).is_nan());
         assert!(number_parse_float(&string("")).is_nan());
         assert!(number_parse_float(&string("-0")).is_sign_negative());
+    }
+
+    #[test]
+    fn uri_codecs_match_ecmascript_sets_utf8_and_errors() {
+        let unchanged = string("AZaz09-_.!~*'()");
+        let encoded = string_encode_uri_component(&unchanged);
+        assert!(Rc::ptr_eq(&unchanged, &encoded));
+        assert_eq!(
+            string_encode_uri_component(&string("a b;c/d?é€💩")).as_ref(),
+            "a%20b%3Bc%2Fd%3F%C3%A9%E2%82%AC%F0%9F%92%A9"
+        );
+        assert_eq!(
+            string_encode_uri(&string("a b;c/d?e:f@g&h=i+j$k,l#m")).as_ref(),
+            "a%20b;c/d?e:f@g&h=i+j$k,l#m"
+        );
+        assert_eq!(
+            string_decode_uri_component(&string("mix é %C3%A9 %23%2f")).as_ref(),
+            "mix é é #/"
+        );
+        for (encoded, decoded) in [
+            ("%C2%80", "\u{80}"),
+            ("%E0%A0%80", "\u{800}"),
+            ("%ED%9F%BF", "\u{d7ff}"),
+            ("%EE%80%80", "\u{e000}"),
+            ("%F0%90%80%80", "\u{10000}"),
+            ("%F4%8F%BF%BF", "\u{10ffff}"),
+        ] {
+            assert_eq!(
+                string_decode_uri_component(&string(encoded)).as_ref(),
+                decoded
+            );
+        }
+
+        for malformed in [
+            "%",
+            "%2",
+            "%zz",
+            "%C3",
+            "%C3x",
+            "%C3%2F",
+            "%E0%80%80",
+            "%ED%A0%80",
+            "%F4%90%80%80",
+            "%FF",
+            "%80",
+        ] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                string_decode_uri_component(&string(malformed))
+            }))
+            .err()
+            .expect("malformed URI escapes must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "URIError");
+            assert_eq!(caught_error_message(&caught).as_ref(), "URI malformed");
+        }
     }
 
     #[test]
