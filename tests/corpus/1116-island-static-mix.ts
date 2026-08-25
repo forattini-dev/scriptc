@@ -1,7 +1,5 @@
-// @dynamic
-// A statically-typed program whose types never change: only the calls the
-// static runtime doesn't implement run in the island, and every result
-// flows straight back into static functions, arrays, and classes.
+// Static strings, numeric parsing, arrays, and classes compose without an
+// embedded-engine boundary; every value remains in the typed native path.
 function priceLabel(price: number, width: number): string {
   return ("$" + price.toFixed(2)).padStart(width, " ");
 }
