@@ -661,6 +661,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2610-regex-named-matchall.ts",
     "2611-regex-named-groups-js.cjs",
     "2676-record-clone-overrides.ts",
+    "2678-date-instances.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-corpus-"));

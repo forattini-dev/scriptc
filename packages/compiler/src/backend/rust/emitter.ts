@@ -4869,12 +4869,42 @@ class RustEmitter {
           const runtimeFn = expr.fn === "date.newMs" ? "date_new_ms" : "date_get_time";
           return `runtime::${runtimeFn}(${this.emitExpr(arg)})`;
         }
+        if ((expr.fn === "date.newString" || expr.fn === "date.parseGetTime") &&
+            expr.args.length === 1 && arg !== undefined) {
+          return `runtime::date_parse_get_time(&(${this.emitExpr(arg)}))`;
+        }
         if ((expr.fn === "date.toISOString" || expr.fn === "date.toISOStringValue") &&
             expr.args.length === 1 && arg !== undefined) {
           return `runtime::date_to_iso(${this.emitExpr(arg)})`;
         }
         if (expr.fn === "date.utc" && expr.args.length === 7) {
           return `runtime::date_utc(${expr.args.map((value) => this.emitExpr(value)).join(", ")})`;
+        }
+        const dateGetter = new Map<string, [string, boolean]>([
+          ["date.getFullYear", ["date_get_full_year", false]],
+          ["date.getUTCFullYear", ["date_get_full_year", true]],
+          ["date.getMonth", ["date_get_month", false]],
+          ["date.getUTCMonth", ["date_get_month", true]],
+          ["date.getDate", ["date_get_date", false]],
+          ["date.getUTCDate", ["date_get_date", true]],
+          ["date.getDay", ["date_get_day", false]],
+          ["date.getUTCDay", ["date_get_day", true]],
+          ["date.getHours", ["date_get_hours", false]],
+          ["date.getUTCHours", ["date_get_hours", true]],
+          ["date.getMinutes", ["date_get_minutes", false]],
+          ["date.getUTCMinutes", ["date_get_minutes", true]],
+          ["date.getSeconds", ["date_get_seconds", false]],
+          ["date.getUTCSeconds", ["date_get_seconds", true]],
+        ]).get(expr.fn);
+        if (dateGetter !== undefined && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::${dateGetter[0]}(${this.emitExpr(arg)}, ${dateGetter[1]})`;
+        }
+        if ((expr.fn === "date.getMilliseconds" || expr.fn === "date.getUTCMilliseconds") &&
+            expr.args.length === 1 && arg !== undefined) {
+          return `runtime::date_get_milliseconds(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "date.getTimezoneOffset" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::date_get_timezone_offset(${this.emitExpr(arg)})`;
         }
         if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
         const processSample = new Map<string, string>([

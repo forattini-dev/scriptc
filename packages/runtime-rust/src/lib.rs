@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use chrono::{Datelike, Local, TimeZone, Timelike};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -644,6 +645,346 @@ pub fn date_utc(
         return f64::NAN;
     }
     if time == 0.0 { 0.0 } else { time }
+}
+
+fn date_make_ms(
+    year: i64,
+    month: i32,
+    date: i32,
+    hours: i32,
+    minutes: i32,
+    seconds: i32,
+    ms: i32,
+) -> f64 {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&date)
+        || hours > 24
+        || minutes > 59
+        || seconds > 59
+        || (hours == 24 && (minutes != 0 || seconds != 0 || ms != 0))
+    {
+        return f64::NAN;
+    }
+    days_from_civil(year, month, date) * 86_400_000.0
+        + f64::from(hours) * 3_600_000.0
+        + f64::from(minutes) * 60_000.0
+        + f64::from(seconds) * 1_000.0
+        + f64::from(ms)
+}
+
+fn date_take_digits(bytes: &[u8], cursor: &mut usize, count: usize) -> Option<i32> {
+    if bytes.len().saturating_sub(*cursor) < count {
+        return None;
+    }
+    let mut value = 0_i32;
+    for byte in &bytes[*cursor..*cursor + count] {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value * 10 + i32::from(*byte - b'0');
+    }
+    *cursor += count;
+    Some(value)
+}
+
+/// The bounded parser shared with the C runtime: ASN.1 certificate dates
+/// and ECMAScript's own date-time format with an explicit timezone.
+pub fn date_parse_get_time(value: &JsString) -> f64 {
+    let bytes = value.as_bytes();
+
+    if bytes.len() > 3 && bytes[0].is_ascii_alphabetic() {
+        const MONTHS: [&[u8; 3]; 12] = [
+            b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
+            b"Dec",
+        ];
+        let Some(month) = MONTHS
+            .iter()
+            .position(|candidate| bytes[..3].eq_ignore_ascii_case(candidate.as_slice()))
+            .map(|index| index as i32 + 1)
+        else {
+            return f64::NAN;
+        };
+        let mut cursor = 3;
+        if bytes.get(cursor) == Some(&b' ') {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b' ') {
+            cursor += 1;
+        }
+        let Some(mut date) = date_take_digits(bytes, &mut cursor, 1) else {
+            return f64::NAN;
+        };
+        if bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            let Some(second) = date_take_digits(bytes, &mut cursor, 1) else {
+                return f64::NAN;
+            };
+            date = date * 10 + second;
+        }
+        if bytes.get(cursor) != Some(&b' ') {
+            return f64::NAN;
+        }
+        cursor += 1;
+        let Some(hours) = date_take_digits(bytes, &mut cursor, 2) else {
+            return f64::NAN;
+        };
+        if bytes.get(cursor) != Some(&b':') {
+            return f64::NAN;
+        }
+        cursor += 1;
+        let Some(minutes) = date_take_digits(bytes, &mut cursor, 2) else {
+            return f64::NAN;
+        };
+        if bytes.get(cursor) != Some(&b':') {
+            return f64::NAN;
+        }
+        cursor += 1;
+        let Some(seconds) = date_take_digits(bytes, &mut cursor, 2) else {
+            return f64::NAN;
+        };
+        if bytes.get(cursor) != Some(&b' ') {
+            return f64::NAN;
+        }
+        cursor += 1;
+        let Some(year) = date_take_digits(bytes, &mut cursor, 4) else {
+            return f64::NAN;
+        };
+        if bytes.get(cursor..) != Some(b" GMT") {
+            return f64::NAN;
+        }
+        return date_new_ms(date_make_ms(
+            i64::from(year),
+            month,
+            date,
+            hours,
+            minutes,
+            seconds,
+            0,
+        ));
+    }
+
+    let mut cursor = 0;
+    let signed_year = matches!(bytes.get(cursor), Some(b'+') | Some(b'-'));
+    let year = if signed_year {
+        let negative = bytes[cursor] == b'-';
+        cursor += 1;
+        let Some(year) = date_take_digits(bytes, &mut cursor, 6) else {
+            return f64::NAN;
+        };
+        if negative && year == 0 {
+            return f64::NAN;
+        }
+        if negative {
+            -i64::from(year)
+        } else {
+            i64::from(year)
+        }
+    } else {
+        let Some(year) = date_take_digits(bytes, &mut cursor, 4) else {
+            return f64::NAN;
+        };
+        i64::from(year)
+    };
+    let mut month = 1;
+    let mut date = 1;
+    if bytes.get(cursor) == Some(&b'-') {
+        cursor += 1;
+        let Some(parsed) = date_take_digits(bytes, &mut cursor, 2) else {
+            return f64::NAN;
+        };
+        month = parsed;
+        if bytes.get(cursor) == Some(&b'-') {
+            cursor += 1;
+            let Some(parsed) = date_take_digits(bytes, &mut cursor, 2) else {
+                return f64::NAN;
+            };
+            date = parsed;
+        }
+    }
+    if cursor == bytes.len() {
+        return date_new_ms(date_make_ms(year, month, date, 0, 0, 0, 0));
+    }
+    if bytes.get(cursor) != Some(&b'T') {
+        return f64::NAN;
+    }
+    cursor += 1;
+    let Some(hours) = date_take_digits(bytes, &mut cursor, 2) else {
+        return f64::NAN;
+    };
+    if bytes.get(cursor) != Some(&b':') {
+        return f64::NAN;
+    }
+    cursor += 1;
+    let Some(minutes) = date_take_digits(bytes, &mut cursor, 2) else {
+        return f64::NAN;
+    };
+    let mut seconds = 0;
+    let mut ms = 0;
+    if bytes.get(cursor) == Some(&b':') {
+        cursor += 1;
+        let Some(parsed) = date_take_digits(bytes, &mut cursor, 2) else {
+            return f64::NAN;
+        };
+        seconds = parsed;
+        if bytes.get(cursor) == Some(&b'.') {
+            cursor += 1;
+            let Some(parsed) = date_take_digits(bytes, &mut cursor, 3) else {
+                return f64::NAN;
+            };
+            ms = parsed;
+        }
+    }
+    if cursor == bytes.len() {
+        return f64::NAN;
+    }
+    let offset = match bytes[cursor] {
+        b'Z' => {
+            cursor += 1;
+            0.0
+        }
+        b'+' | b'-' => {
+            let negative = bytes[cursor] == b'-';
+            cursor += 1;
+            let Some(offset_hours) = date_take_digits(bytes, &mut cursor, 2) else {
+                return f64::NAN;
+            };
+            if bytes.get(cursor) != Some(&b':') {
+                return f64::NAN;
+            }
+            cursor += 1;
+            let Some(offset_minutes) = date_take_digits(bytes, &mut cursor, 2) else {
+                return f64::NAN;
+            };
+            if offset_hours > 23 || offset_minutes > 59 {
+                return f64::NAN;
+            }
+            let value = f64::from(offset_hours * 60 + offset_minutes) * 60_000.0;
+            if negative { -value } else { value }
+        }
+        _ => return f64::NAN,
+    };
+    if cursor != bytes.len() {
+        return f64::NAN;
+    }
+    date_new_ms(date_make_ms(year, month, date, hours, minutes, seconds, ms) - offset)
+}
+
+#[derive(Clone, Copy)]
+struct DateParts {
+    year: i64,
+    month: i32,
+    date: i32,
+    day: i32,
+    hours: i32,
+    minutes: i32,
+    seconds: i32,
+    milliseconds: i32,
+    timezone_offset: f64,
+}
+
+fn date_utc_parts_unchecked(time: f64) -> DateParts {
+    let day = (time / 86_400_000.0).floor();
+    let millis_of_day = (time - day * 86_400_000.0) as i64;
+    let (year, month, date) = civil_from_days(day as i64);
+    DateParts {
+        year,
+        month: month as i32 - 1,
+        date: date as i32,
+        day: ((day as i64 + 4).rem_euclid(7)) as i32,
+        hours: (millis_of_day / 3_600_000) as i32,
+        minutes: (millis_of_day / 60_000 % 60) as i32,
+        seconds: (millis_of_day / 1_000 % 60) as i32,
+        milliseconds: (millis_of_day % 1_000) as i32,
+        timezone_offset: 0.0,
+    }
+}
+
+fn date_utc_parts(ms: f64) -> Option<DateParts> {
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
+        None
+    } else {
+        Some(date_utc_parts_unchecked(ms.trunc()))
+    }
+}
+
+fn date_local_snapshot(seconds: f64) -> Option<(i64, i32, i32, i32, i32, i32)> {
+    let seconds_integer = seconds as i64;
+    if seconds_integer as f64 != seconds {
+        return None;
+    }
+    let value = Local.timestamp_opt(seconds_integer, 0).single()?;
+    Some((
+        i64::from(value.year()),
+        value.month() as i32,
+        value.day() as i32,
+        value.hour() as i32,
+        value.minute() as i32,
+        value.second() as i32,
+    ))
+}
+
+fn date_local_parts(ms: f64) -> Option<DateParts> {
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
+        return None;
+    }
+    let clipped = ms.trunc();
+    let seconds = (clipped / 1_000.0).floor();
+    let mut basis_seconds = seconds;
+    let mut local = date_local_snapshot(basis_seconds);
+    if local.is_none() {
+        let utc = date_utc_parts_unchecked(clipped);
+        let surrogate_year = 2_000 + (utc.year - 2_000).rem_euclid(400);
+        basis_seconds = days_from_civil(surrogate_year, utc.month + 1, utc.date) * 86_400.0
+            + f64::from(utc.hours) * 3_600.0
+            + f64::from(utc.minutes) * 60.0
+            + f64::from(utc.seconds);
+        local = date_local_snapshot(basis_seconds);
+    }
+    let (year, month, date, hours, minutes, seconds) = local?;
+    let local_as_utc = days_from_civil(year, month, date) * 86_400.0
+        + f64::from(hours) * 3_600.0
+        + f64::from(minutes) * 60.0
+        + f64::from(seconds);
+    let local_offset = local_as_utc - basis_seconds;
+    let mut parts = date_utc_parts_unchecked(clipped + local_offset * 1_000.0);
+    let timezone_offset = (-local_offset / 60.0).trunc();
+    parts.timezone_offset = if timezone_offset == 0.0 {
+        0.0
+    } else {
+        timezone_offset
+    };
+    Some(parts)
+}
+
+fn date_parts(ms: f64, utc: bool) -> Option<DateParts> {
+    if utc {
+        date_utc_parts(ms)
+    } else {
+        date_local_parts(ms)
+    }
+}
+
+macro_rules! date_part_getter {
+    ($name:ident, $field:ident) => {
+        pub fn $name(ms: f64, utc: bool) -> f64 {
+            date_parts(ms, utc).map_or(f64::NAN, |parts| parts.$field as f64)
+        }
+    };
+}
+
+date_part_getter!(date_get_full_year, year);
+date_part_getter!(date_get_month, month);
+date_part_getter!(date_get_date, date);
+date_part_getter!(date_get_day, day);
+date_part_getter!(date_get_hours, hours);
+date_part_getter!(date_get_minutes, minutes);
+date_part_getter!(date_get_seconds, seconds);
+
+pub fn date_get_milliseconds(ms: f64) -> f64 {
+    date_utc_parts(ms).map_or(f64::NAN, |parts| f64::from(parts.milliseconds))
+}
+
+pub fn date_get_timezone_offset(ms: f64) -> f64 {
+    date_local_parts(ms).map_or(f64::NAN, |parts| parts.timezone_offset)
 }
 
 impl Tracer<'_> {
@@ -8250,6 +8591,45 @@ mod tests {
         assert!(date_utc(f64::NAN, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
         assert!(date_utc(1_000_001.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
         assert!(date_utc(2017.0, 10_000_001.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
+    }
+
+    #[test]
+    fn date_parser_and_calendar_getters_cover_stored_dates() {
+        let instant = date_parse_get_time(&string("2024-07-04T12:34:56.789Z"));
+        assert_eq!(instant, 1_720_096_496_789.0);
+        assert_eq!(date_get_full_year(instant, true), 2024.0);
+        assert_eq!(date_get_month(instant, true), 6.0);
+        assert_eq!(date_get_date(instant, true), 4.0);
+        assert_eq!(date_get_day(instant, true), 4.0);
+        assert_eq!(date_get_hours(instant, true), 12.0);
+        assert_eq!(date_get_minutes(instant, true), 34.0);
+        assert_eq!(date_get_seconds(instant, true), 56.0);
+        assert_eq!(date_get_milliseconds(instant), 789.0);
+        assert!(date_get_timezone_offset(instant).is_finite());
+        assert!(date_get_timezone_offset(instant).fract() == 0.0);
+
+        assert_eq!(
+            date_parse_get_time(&string("Jul  1 00:00:00 2026 GMT")),
+            1_782_864_000_000.0
+        );
+        assert_eq!(
+            date_parse_get_time(&string("+010000-01-01T00:00:00.000Z")),
+            253_402_300_800_000.0
+        );
+        assert_eq!(
+            date_parse_get_time(&string("+275760-09-13T23:00:00.000+23:00")),
+            8_640_000_000_000_000.0
+        );
+        for invalid in [
+            "bogus",
+            "-000000-01-01T00:00:00.000Z",
+            "2024-01-01T00:00:00.000+24:00",
+            "2026-13-01",
+        ] {
+            assert!(date_parse_get_time(&string(invalid)).is_nan(), "{invalid}");
+        }
+        assert!(date_get_full_year(f64::NAN, true).is_nan());
+        assert!(date_get_full_year(f64::NAN, false).is_nan());
     }
 
     #[test]
