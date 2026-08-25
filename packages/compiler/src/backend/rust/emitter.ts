@@ -2846,6 +2846,24 @@ class RustEmitter {
           const receiver = `sc_rt_${this.temporary++}`;
           return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; runtime::bytes_to_array(&${receiver}) }`;
         }
+        if (expr.method === "toStringVar" && expr.args.length >= 1 && expr.args.length <= 3 && expr.args[0] !== undefined) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          const encoding = `sc_rt_${this.temporary++}`;
+          const startExpr = expr.args[1];
+          const endExpr = expr.args[2];
+          const start = startExpr === undefined ? null : `sc_rt_${this.temporary++}`;
+          const end = endExpr === undefined ? null : `sc_rt_${this.temporary++}`;
+          const bindings = [
+            `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
+            `let ${encoding} = ${this.emitExpr(expr.args[0])};`,
+            startExpr === undefined ? "" : `let ${start} = ${this.emitExpr(startExpr)};`,
+            endExpr === undefined ? "" : `let ${end} = ${this.emitExpr(endExpr)};`,
+          ].join(" ");
+          if (start === null) {
+            return `{ ${bindings} runtime::bytes_to_string_checked(&${receiver}, &${encoding}) }`;
+          }
+          return `{ ${bindings} runtime::bytes_to_string_checked_range(&${receiver}, &${encoding}, ${start}, ${end ?? `runtime::bytes_len(&${receiver})`}) }`;
+        }
         if (expr.method === "toString" && expr.args[0] !== undefined) {
           const encoding = this.emitExpr(expr.args[0]);
           if (expr.args.length === 1) {
@@ -3608,6 +3626,14 @@ class RustEmitter {
           const list = `sc_rt_${this.temporary++}`;
           const total = `sc_rt_${this.temporary++}`;
           return `{ let ${list} = ${this.emitExpr(arg)}; let ${total} = ${this.emitExpr(expr.args[1])}; runtime::buffer_concat_len(&${list}, ${total}) }`;
+        }
+        if (expr.fn === "buffer.byteLenStr" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const value = `sc_rt_${this.temporary++}`;
+          const encoding = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; let ${encoding} = ${this.emitExpr(expr.args[1])}; runtime::buffer_byte_length_string(&${value}, &${encoding}) }`;
+        }
+        if (expr.fn === "buffer.isEncoding" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::buffer_is_encoding(&(${this.emitExpr(arg)}))`;
         }
         if ((expr.fn === "fs.statSync" || expr.fn === "fs.lstatSync") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::fs_stat(&(${this.emitExpr(arg)}), ${expr.fn === "fs.statSync"})`;

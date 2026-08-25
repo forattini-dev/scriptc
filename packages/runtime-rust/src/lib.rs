@@ -2426,6 +2426,46 @@ fn bytes_decode_index(index: f64, length: usize) -> usize {
     }
 }
 
+fn bytes_decode_bounds(length: usize, start: f64, end: f64) -> (usize, usize) {
+    let start = bytes_decode_index(start, length);
+    let end = bytes_decode_index(end, length).max(start);
+    (start, end)
+}
+
+fn normalize_buffer_encoding(encoding: &str) -> Option<&'static str> {
+    if encoding.eq_ignore_ascii_case("utf8") || encoding.eq_ignore_ascii_case("utf-8") {
+        Some("utf8")
+    } else if encoding.eq_ignore_ascii_case("hex") {
+        Some("hex")
+    } else if encoding.eq_ignore_ascii_case("base64") {
+        Some("base64")
+    } else if encoding.eq_ignore_ascii_case("base64url") {
+        Some("base64url")
+    } else if encoding.eq_ignore_ascii_case("latin1") || encoding.eq_ignore_ascii_case("binary") {
+        Some("latin1")
+    } else if encoding.eq_ignore_ascii_case("ascii") {
+        Some("ascii")
+    } else if encoding.eq_ignore_ascii_case("utf16le")
+        || encoding.eq_ignore_ascii_case("utf-16le")
+        || encoding.eq_ignore_ascii_case("ucs2")
+        || encoding.eq_ignore_ascii_case("ucs-2")
+    {
+        Some("utf16le")
+    } else {
+        None
+    }
+}
+
+fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
+    normalize_buffer_encoding(encoding).unwrap_or_else(|| {
+        throw_value(JsError {
+            name: "TypeError".to_owned(),
+            message: format!("Unknown encoding: {encoding}"),
+            code: Some("ERR_UNKNOWN_ENCODING".to_owned()),
+        })
+    })
+}
+
 pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
     bytes_to_string_range(bytes, encoding, 0.0, f64::INFINITY)
 }
@@ -2437,14 +2477,35 @@ pub fn bytes_to_string_range(
     end: f64,
 ) -> JsString {
     bytes.with(|data| {
-        let start = bytes_decode_index(start, data.length);
-        let end = bytes_decode_index(end, data.length).max(start);
+        let (start, end) = bytes_decode_bounds(data.length, start, end);
         let storage = data.storage.borrow();
         decode_bytes(
             &storage[data.offset + start..data.offset + end],
             encoding.as_ref(),
         )
     })
+}
+
+pub fn bytes_to_string_checked(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
+    if bytes.with(|data| data.length) == 0 {
+        return empty_string();
+    }
+    let encoding = checked_buffer_encoding(encoding);
+    bytes_to_string(bytes, &string(encoding))
+}
+
+pub fn bytes_to_string_checked_range(
+    bytes: &JsBytes<u8>,
+    encoding: &JsString,
+    start: f64,
+    end: f64,
+) -> JsString {
+    let (start, end) = bytes.with(|data| bytes_decode_bounds(data.length, start, end));
+    if start == end {
+        return empty_string();
+    }
+    let encoding = checked_buffer_encoding(encoding);
+    bytes_to_string_range(bytes, &string(encoding), start as f64, end as f64)
 }
 
 fn bytes_from_vec(values: Vec<u8>) -> JsBytes<u8> {
@@ -2579,6 +2640,31 @@ pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u
         }
     });
     bytes_from_vec(output)
+}
+
+pub fn buffer_byte_length_string(value: &JsString, encoding: &JsString) -> f64 {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    match encoding.as_ref() {
+        "latin1" | "ascii" => units.len() as f64,
+        "utf16le" => (units.len() * 2) as f64,
+        "hex" => (units.len() / 2) as f64,
+        "base64" | "base64url" => {
+            let mut length = units.len();
+            if units.get(length.wrapping_sub(1)) == Some(&u16::from(b'=')) {
+                length -= 1;
+            }
+            if units.get(length.wrapping_sub(1)) == Some(&u16::from(b'=')) {
+                length -= 1;
+            }
+            ((length * 3) >> 2) as f64
+        }
+        "utf8" | "utf-8" => value.len() as f64,
+        other => panic!("scriptc: invalid canonical Buffer encoding '{other}'"),
+    }
+}
+
+pub fn buffer_is_encoding(value: &JsString) -> bool {
+    normalize_buffer_encoding(value).is_some()
 }
 
 fn bytes_num_width(kind: &str) -> usize {
@@ -6010,6 +6096,54 @@ mod tests {
             assert_eq!(
                 caught_error_message(&caught).as_ref(),
                 "The value of \"offset\" is out of range. It must be >= 0 and <= 6. Received 4_294_967_297"
+            );
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn buffer_encodings_cover_aliases_dynamic_errors_and_utf16_lengths() {
+        let baseline = live_heap_objects();
+        {
+            let value = string("hé€😀x");
+            let latin1 = buffer_from_string(&value, &string("latin1"));
+            assert_eq!(
+                bytes_to_string(&latin1, &string("hex")).as_ref(),
+                "68e9ac3d0078"
+            );
+            let utf16 = buffer_from_string(&value, &string("utf16le"));
+            assert_eq!(
+                bytes_to_string(&utf16, &string("utf16le")).as_ref(),
+                value.as_ref()
+            );
+            assert_eq!(buffer_byte_length_string(&value, &string("latin1")), 6.0);
+            assert_eq!(buffer_byte_length_string(&value, &string("utf16le")), 12.0);
+            assert!(buffer_is_encoding(&string("BASE64URL")));
+            assert!(buffer_is_encoding(&string("ucs-2")));
+            assert!(!buffer_is_encoding(&string("utf16")));
+
+            let raw = buffer_from_string(&string("68e9807fff"), &string("hex"));
+            assert_eq!(
+                bytes_to_string_checked(&raw, &string("BINARY")).as_ref(),
+                "hé\u{80}\u{7f}ÿ"
+            );
+            assert_eq!(
+                bytes_to_string_checked_range(&raw, &string("wat"), 2.0, 2.0).as_ref(),
+                ""
+            );
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bytes_to_string_checked(&raw, &string("wat"))
+            }))
+            .err()
+            .expect("an unknown dynamic encoding must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(
+                caught_error_code(&caught).expect("error code").as_ref(),
+                "ERR_UNKNOWN_ENCODING"
+            );
+            assert_eq!(
+                caught_error_message(&caught).as_ref(),
+                "Unknown encoding: wat"
             );
         }
         assert_eq!(live_heap_objects(), baseline);

@@ -608,9 +608,13 @@ test("Rust array ranges, removals, copying, and reverse searches match Node byte
   }
 }, 240_000);
 
-test("Rust Buffer numeric, comparison, search, and mutation surfaces match Node byte-for-byte", async () => {
+test("Rust Buffer numeric, encoding, comparison, search, and mutation surfaces match Node byte-for-byte", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-buffer-surface-"));
-  for (const fixture of ["1660-buffer-read-write-num.ts", "1663-buffer-compare-search-fill.ts"]) {
+  for (const fixture of [
+    "1660-buffer-read-write-num.ts",
+    "1661-buffer-encodings-full.ts",
+    "1663-buffer-compare-search-fill.ts",
+  ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {
       outDir: dir,
