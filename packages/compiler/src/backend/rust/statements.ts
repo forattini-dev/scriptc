@@ -1,0 +1,468 @@
+import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
+import { typeKey } from "../../ir/nodes.js";
+import { mangleField, mangleLocal } from "../mangle.js";
+
+export interface RustLoopTarget {
+  readonly id: number;
+  readonly breakLabel: string;
+  readonly continueBlock: string | null;
+}
+
+export interface RustStatementContext {
+  readonly loopTargets: RustLoopTarget[];
+  readonly completionLoopBoundaries: number[];
+  capturedReturnDepth(): number;
+  adjustCapturedReturnDepth(delta: number): void;
+  asyncProtectedReturnDepth(): number;
+  currentAsyncResult(): string | null;
+  currentFunction(): IrFunction | null;
+  line(value: string): void;
+  pushIndent(): void;
+  popIndent(): void;
+  nextTemporary(): string;
+  nextLabel(prefix: "sc_loop" | "sc_continue"): string;
+  nextLoopTargetId(): number;
+  emitExpr(expr: IrExpr): string;
+  emitRead(id: string, type: IrType, loc: SrcLoc): string;
+  emitAssignment(id: string, value: string, loc: SrcLoc): void;
+  local(id: string, loc: SrcLoc): IrFunction["locals"][number];
+  localIsBoxed(local: IrFunction["locals"][number]): boolean;
+  rustType(type: IrType, loc?: SrcLoc): string;
+  defaultValue(type: IrType, loc: SrcLoc): string;
+  record(shapeId: string): IrRecordShape | undefined;
+  classDef(name: string, loc?: SrcLoc): IrClassDef;
+  classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
+  isEdgeValue(type: IrType): boolean;
+  rustString(value: string): string;
+  unsupported(kind: string, loc?: SrcLoc): never;
+}
+
+export function emitRustStatements(
+  statements: readonly IrStmt[],
+  context: RustStatementContext,
+): void {
+  new RustStatementEmitter(context).emit(statements);
+}
+
+class RustStatementEmitter {
+  constructor(private readonly context: RustStatementContext) {}
+
+  emit(statements: readonly IrStmt[]): void {
+    for (const statement of statements) this.emitStatement(statement);
+  }
+
+  private emitStatement(stmt: IrStmt): void {
+    switch (stmt.kind) {
+      case "varDecl": {
+        const local = this.context.local(stmt.localId, stmt.loc);
+        if (this.context.localIsBoxed(local)) {
+          const init = stmt.init === null
+            ? "runtime::cell_empty()"
+            : `runtime::cell_new(${this.context.emitExpr(stmt.init)})`;
+          this.context.line(`let ${local.mutable ? "mut " : ""}${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = ${init};`);
+          return;
+        }
+        const mutable = local.mutable ? "mut " : "";
+        const init = stmt.init === null
+          ? this.context.defaultValue(local.type, stmt.loc)
+          : this.context.emitExpr(stmt.init);
+        this.context.line(`let ${mutable}${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = ${init};`);
+        return;
+      }
+      case "assign":
+        this.context.emitAssignment(stmt.localId, this.context.emitExpr(stmt.value), stmt.loc);
+        return;
+      case "exprStmt":
+        this.context.line(`let _ = ${this.context.emitExpr(stmt.expr)};`);
+        return;
+      case "if":
+        this.context.line(`if ${this.context.emitExpr(stmt.cond)} {`);
+        this.context.pushIndent();
+        this.emit(stmt.then);
+        this.context.popIndent();
+        if (stmt.else_ === null) {
+          this.context.line("}");
+        } else {
+          this.context.line("} else {");
+          this.context.pushIndent();
+          this.emit(stmt.else_);
+          this.context.popIndent();
+          this.context.line("}");
+        }
+        return;
+      case "while":
+        this.emitWhile(stmt);
+        return;
+      case "for":
+        this.emitFor(stmt);
+        return;
+      case "forOf":
+        this.emitForOf(stmt);
+        return;
+      case "arraySet": {
+        if (stmt.arr.type.kind !== "array") this.context.unsupported("arraySet on a non-array", stmt.loc);
+        const array = this.context.nextTemporary();
+        const index = this.context.nextTemporary();
+        const value = this.context.nextTemporary();
+        this.context.line(`{ let ${array} = ${this.context.emitExpr(stmt.arr)}; let ${index} = ${this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::array_set(&${array}, ${index}, ${value}); }`);
+        return;
+      }
+      case "bytesSet": {
+        if (stmt.arr.type.kind !== "bytes") this.context.unsupported("bytesSet on non-bytes", stmt.loc);
+        const bytes = this.context.nextTemporary();
+        const index = this.context.nextTemporary();
+        const value = this.context.nextTemporary();
+        this.context.line(`{ let ${bytes} = ${this.context.emitExpr(stmt.arr)}; let ${index} = ${this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::bytes_set(&${bytes}, ${index}, ${value}); }`);
+        return;
+      }
+      case "recordKeySet":
+        this.emitRecordKeySet(stmt);
+        return;
+      case "recordKeyDelete":
+        this.emitRecordKeyDelete(stmt);
+        return;
+      case "recordSet":
+        this.emitRecordSet(stmt);
+        return;
+      case "fieldSet":
+        this.emitFieldSet(stmt);
+        return;
+      case "throw":
+        this.context.line(`runtime::throw_value(${this.context.emitExpr(stmt.value)});`);
+        return;
+      case "rethrow":
+        this.context.line(`runtime::rethrow_caught(${this.context.emitRead(stmt.localId, { kind: "caught" }, stmt.loc)});`);
+        return;
+      case "return":
+        this.emitReturn(stmt);
+        return;
+      case "break":
+        this.emitBreak(stmt);
+        return;
+      case "continue":
+        this.emitContinue(stmt);
+        return;
+      case "block":
+        if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled block", stmt.loc);
+        this.context.line("{");
+        this.context.pushIndent();
+        this.emit(stmt.body);
+        this.context.popIndent();
+        this.context.line("}");
+        return;
+      case "tryCatch":
+        this.emitTryCatch(stmt);
+        return;
+      case "runtimeFence":
+        this.emitRuntimeFence(stmt);
+        return;
+      default:
+        this.context.unsupported(`statement '${stmt.kind}'`, stmt.loc);
+    }
+  }
+
+  private emitWhile(stmt: Extract<IrStmt, { kind: "while" }>): void {
+    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled while", stmt.loc);
+    const loopLabel = this.context.nextLabel("sc_loop");
+    this.context.line(`'${loopLabel}: while ${this.context.emitExpr(stmt.cond)} {`);
+    this.context.pushIndent();
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(),
+      breakLabel: loopLabel,
+      continueBlock: null,
+    });
+    this.emit(stmt.body);
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitFor(stmt: Extract<IrStmt, { kind: "for" }>): void {
+    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled for", stmt.loc);
+    this.context.line("{");
+    this.context.pushIndent();
+    if (stmt.init !== null) this.emitStatement(stmt.init);
+    const loopLabel = this.context.nextLabel("sc_loop");
+    this.context.line(`'${loopLabel}: while ${stmt.cond === null ? "true" : this.context.emitExpr(stmt.cond)} {`);
+    this.context.pushIndent();
+    const continueTarget = this.context.nextLabel("sc_continue");
+    this.context.line(`'${continueTarget}: {`);
+    this.context.pushIndent();
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(),
+      breakLabel: loopLabel,
+      continueBlock: continueTarget,
+    });
+    this.emit(stmt.body);
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
+    if (stmt.init?.kind === "varDecl") {
+      const initLocal = this.context.local(stmt.init.localId, stmt.loc);
+      if (this.context.localIsBoxed(initLocal)) {
+        const name = mangleLocal(initLocal.id);
+        this.context.line(`${name} = runtime::cell_new(runtime::cell_get(&${name}));`);
+      }
+    }
+    if (stmt.update !== null) this.emitStatement(stmt.update);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitForOf(stmt: Extract<IrStmt, { kind: "forOf" }>): void {
+    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled for-of", stmt.loc);
+    if (stmt.iterable.type.kind !== "array") this.context.unsupported("for-of over a non-array", stmt.loc);
+    const local = this.context.local(stmt.localId, stmt.loc);
+    const array = this.context.nextTemporary();
+    const index = this.context.nextTemporary();
+    const loopLabel = this.context.nextLabel("sc_loop");
+    const continueTarget = this.context.nextLabel("sc_continue");
+    this.context.line("{");
+    this.context.pushIndent();
+    this.context.line(`let ${array} = ${this.context.emitExpr(stmt.iterable)};`);
+    this.context.line(`let mut ${index} = 0.0_f64;`);
+    this.context.line(`'${loopLabel}: while ${index} < runtime::array_len(&${array}) {`);
+    this.context.pushIndent();
+    this.context.line(`'${continueTarget}: {`);
+    this.context.pushIndent();
+    this.context.line(this.context.localIsBoxed(local)
+      ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`
+      : `let ${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = runtime::array_get(&${array}, ${index});`);
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(),
+      breakLabel: loopLabel,
+      continueBlock: continueTarget,
+    });
+    this.emit(stmt.body);
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`${index} += 1.0_f64;`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitRecordKeySet(stmt: Extract<IrStmt, { kind: "recordKeySet" }>): void {
+    const shape = this.context.record(stmt.shapeId);
+    if (shape?.indexValue === undefined || shape.fields.length !== 0) {
+      this.context.unsupported(`keyed write on non-indexed record '${stmt.shapeId}'`, stmt.loc);
+    }
+    if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(shape.indexValue)) {
+      this.context.unsupported(`keyed write types for record '${stmt.shapeId}'`, stmt.loc);
+    }
+    const object = this.context.nextTemporary();
+    const key = this.context.nextTemporary();
+    const value = this.context.nextTemporary();
+    this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${key} = ${this.context.emitExpr(stmt.key)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
+  }
+
+  private emitRecordKeyDelete(stmt: Extract<IrStmt, { kind: "recordKeyDelete" }>): void {
+    const shape = this.context.record(stmt.shapeId);
+    if (shape?.indexValue === undefined || shape.fields.length !== 0 || stmt.key.type.kind !== "string") {
+      this.context.unsupported(`keyed delete on non-indexed record '${stmt.shapeId}'`, stmt.loc);
+    }
+    const object = this.context.nextTemporary();
+    const key = this.context.nextTemporary();
+    this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${key} = ${this.context.emitExpr(stmt.key)}; let _ = runtime::map_delete_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()); }`);
+  }
+
+  private emitRecordSet(stmt: Extract<IrStmt, { kind: "recordSet" }>): void {
+    const shape = this.context.record(stmt.shapeId);
+    const field = shape?.fields.find((candidate) => candidate.name === stmt.field);
+    if (shape === undefined || field === undefined) {
+      this.context.unsupported(`unknown record field '${stmt.shapeId}.${stmt.field}'`, stmt.loc);
+    }
+    const object = this.context.nextTemporary();
+    const value = this.context.nextTemporary();
+    const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
+    this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${value} = ${this.context.emitExpr(stmt.value)}; ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`);
+  }
+
+  private emitFieldSet(stmt: Extract<IrStmt, { kind: "fieldSet" }>): void {
+    const cls = this.context.classDef(stmt.className, stmt.loc);
+    const field = cls.fields.find((candidate) => candidate.name === stmt.field);
+    if (field === undefined) {
+      this.context.unsupported(`unknown class field '${stmt.className}.${stmt.field}'`, stmt.loc);
+    }
+    const name = this.context.classFieldName(stmt.className, field.name, stmt.loc);
+    const object = this.context.nextTemporary();
+    const value = this.context.nextTemporary();
+    const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
+    this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${value} = ${this.context.emitExpr(stmt.value)}; ${object}.with_mut(|object| object.${name} = ${stored}); }`);
+  }
+
+  private emitReturn(stmt: Extract<IrStmt, { kind: "return" }>): void {
+    const value = stmt.value === null ? "()" : this.context.emitExpr(stmt.value);
+    if (this.context.capturedReturnDepth() > 0) {
+      this.context.line(`return runtime::Completion::Return(${value});`);
+      return;
+    }
+    if (this.context.asyncProtectedReturnDepth() > 0) {
+      this.context.line(`return runtime::AsyncCompletion::Return(${value});`);
+      return;
+    }
+    const asyncResult = this.context.currentAsyncResult();
+    if (asyncResult !== null) {
+      this.context.line(`let _ = runtime::promise_fulfill(&${asyncResult}, ${value});`);
+      this.context.line("return;");
+      return;
+    }
+    this.context.line(stmt.value === null ? "return;" : `return ${value};`);
+  }
+
+  private emitBreak(stmt: Extract<IrStmt, { kind: "break" }>): void {
+    if (stmt.label !== undefined) this.context.unsupported("labeled break", stmt.loc);
+    const target = this.context.loopTargets.at(-1);
+    if (target === undefined) this.context.unsupported("break outside a Rust-supported loop", stmt.loc);
+    this.context.line(this.crossesCompletionBoundary(target)
+      ? `return runtime::Completion::Break(${target.id});`
+      : `break '${target.breakLabel};`);
+  }
+
+  private emitContinue(stmt: Extract<IrStmt, { kind: "continue" }>): void {
+    if (stmt.label !== undefined) this.context.unsupported("labeled continue", stmt.loc);
+    const target = this.context.loopTargets.at(-1);
+    if (target === undefined) this.context.unsupported("continue outside a Rust-supported loop", stmt.loc);
+    if (this.crossesCompletionBoundary(target)) {
+      this.context.line(`return runtime::Completion::Continue(${target.id});`);
+    } else {
+      this.context.line(target.continueBlock === null
+        ? `continue '${target.breakLabel};`
+        : `break '${target.continueBlock};`);
+    }
+  }
+
+  private crossesCompletionBoundary(target: RustLoopTarget): boolean {
+    const boundary = this.context.completionLoopBoundaries.at(-1);
+    if (boundary === undefined) return false;
+    const index = this.context.loopTargets.findIndex((candidate) => candidate.id === target.id);
+    return index >= 0 && index < boundary;
+  }
+
+  private emitTryCatch(stmt: Extract<IrStmt, { kind: "tryCatch" }>): void {
+    const fn = this.context.currentFunction();
+    if (fn === null) this.context.unsupported("try/catch outside a function", stmt.loc);
+    let pending = this.context.nextTemporary();
+    const payload = this.context.nextTemporary();
+    this.context.line(`let ${pending} = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
+    this.context.pushIndent();
+    this.context.completionLoopBoundaries.push(this.context.loopTargets.length);
+    this.context.adjustCapturedReturnDepth(1);
+    this.emit(stmt.tryBody);
+    this.context.adjustCapturedReturnDepth(-1);
+    this.context.completionLoopBoundaries.pop();
+    this.context.line(`runtime::Completion::<${this.context.rustType(fn.returnType, stmt.loc)}>::Normal`);
+    this.context.popIndent();
+    this.context.line("})) {");
+    this.context.pushIndent();
+    this.context.line("Ok(completion) => completion,");
+    this.context.line(`Err(${payload}) => runtime::Completion::Throw(runtime::caught_from_panic(${payload})),`);
+    this.context.popIndent();
+    this.context.line("};");
+    if (stmt.catchBody !== null) pending = this.emitCatch(stmt, pending, fn.returnType);
+    if (stmt.finallyBody !== null) this.emitFinally(stmt.finallyBody);
+    this.emitPendingCompletion(pending);
+  }
+
+  private emitCatch(
+    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
+    pending: string,
+    returnType: IrType,
+  ): string {
+    const nextPending = this.context.nextTemporary();
+    const caught = this.context.nextTemporary();
+    const catchPayload = this.context.nextTemporary();
+    this.context.line(`let ${nextPending} = match ${pending} {`);
+    this.context.pushIndent();
+    this.context.line(`runtime::Completion::Throw(${caught}) => {`);
+    this.context.pushIndent();
+    this.context.line("match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
+    this.context.pushIndent();
+    if (stmt.catchLocalId === null) {
+      this.context.line(`let _ = ${caught};`);
+    } else {
+      const local = this.context.local(stmt.catchLocalId, stmt.loc);
+      this.context.line(this.context.localIsBoxed(local)
+        ? `let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${caught});`
+        : `let ${mangleLocal(local.id)}: runtime::Caught = ${caught};`);
+    }
+    this.context.completionLoopBoundaries.push(this.context.loopTargets.length);
+    this.context.adjustCapturedReturnDepth(1);
+    this.emit(stmt.catchBody ?? []);
+    this.context.adjustCapturedReturnDepth(-1);
+    this.context.completionLoopBoundaries.pop();
+    this.context.line(`runtime::Completion::<${this.context.rustType(returnType, stmt.loc)}>::Normal`);
+    this.context.popIndent();
+    this.context.line("})) {");
+    this.context.pushIndent();
+    this.context.line("Ok(completion) => completion,");
+    this.context.line(`Err(${catchPayload}) => runtime::Completion::Throw(runtime::caught_from_panic(${catchPayload})),`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line("completion => completion,");
+    this.context.popIndent();
+    this.context.line("};");
+    return nextPending;
+  }
+
+  private emitFinally(statements: readonly IrStmt[]): void {
+    const finalResult = this.context.nextTemporary();
+    const finalPayload = this.context.nextTemporary();
+    this.context.line(`let ${finalResult} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
+    this.context.pushIndent();
+    this.context.completionLoopBoundaries.push(this.context.loopTargets.length);
+    this.emit(statements);
+    this.context.completionLoopBoundaries.pop();
+    this.context.popIndent();
+    this.context.line("}));");
+    this.context.line(`if let Err(${finalPayload}) = ${finalResult} {`);
+    this.context.pushIndent();
+    this.context.line(`runtime::rethrow_caught(runtime::caught_from_panic(${finalPayload}));`);
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitPendingCompletion(pending: string): void {
+    this.context.line(`match ${pending} {`);
+    this.context.pushIndent();
+    this.context.line("runtime::Completion::Normal => {},");
+    this.context.line("runtime::Completion::Return(value) => {");
+    this.context.pushIndent();
+    if (this.context.capturedReturnDepth() > 0) {
+      this.context.line("return runtime::Completion::Return(value);");
+    } else if (this.context.asyncProtectedReturnDepth() > 0) {
+      this.context.line("return runtime::AsyncCompletion::Return(value);");
+    } else if (this.context.currentAsyncResult() !== null) {
+      this.context.line(`let _ = runtime::promise_fulfill(&${this.context.currentAsyncResult()}, value);`);
+      this.context.line("return;");
+    } else {
+      this.context.line("return value;");
+    }
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line("runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),");
+    for (const target of this.context.loopTargets) {
+      this.context.line(`runtime::Completion::Break(${target.id}) => break '${target.breakLabel},`);
+      this.context.line(`runtime::Completion::Continue(${target.id}) => ${target.continueBlock === null
+        ? `continue '${target.breakLabel}`
+        : `break '${target.continueBlock}`},`);
+    }
+    this.context.line("runtime::Completion::Break(_) | runtime::Completion::Continue(_) => unreachable!(\"scriptc invariant: unknown completion target\"),");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitRuntimeFence(stmt: Extract<IrStmt, { kind: "runtimeFence" }>): void {
+    if (stmt.code === "SC9002") {
+      this.context.line(`panic!("${this.context.rustString(`${stmt.code}: ${stmt.message}`)}");`);
+    } else {
+      this.context.line(`runtime::throw_error_code("${this.context.rustString(stmt.message)}".to_owned(), "${this.context.rustString(stmt.code)}");`);
+    }
+  }
+}

@@ -12,6 +12,7 @@ import type {
 } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { emitRustLibCall } from "./lib-calls.js";
+import { emitRustStatements } from "./statements.js";
 import {
   mangleClassStruct,
   mangleField,
@@ -3200,359 +3201,38 @@ class RustEmitter {
   }
 
   private emitStatements(statements: readonly IrStmt[]): void {
-    for (const stmt of statements) this.emitStatement(stmt);
+    emitRustStatements(statements, {
+      loopTargets: this.loopTargets,
+      completionLoopBoundaries: this.completionLoopBoundaries,
+      capturedReturnDepth: () => this.capturedReturnDepth,
+      adjustCapturedReturnDepth: (delta) => { this.capturedReturnDepth += delta; },
+      asyncProtectedReturnDepth: () => this.asyncProtectedReturnDepth,
+      currentAsyncResult: () => this.currentAsyncResult,
+      currentFunction: () => this.currentFunction,
+      line: (value) => this.line(value),
+      pushIndent: () => { this.indent += 1; },
+      popIndent: () => { this.indent -= 1; },
+      nextTemporary: () => `sc_rt_${this.temporary++}`,
+      nextLabel: (prefix) => `${prefix}_${this.temporary++}`,
+      nextLoopTargetId: () => this.nextLoopTargetId++,
+      emitExpr: (expr) => this.emitExpr(expr),
+      emitRead: (id, type, loc) => this.emitRead(id, type, loc),
+      emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
+      local: (id, loc) => this.local(id, loc),
+      localIsBoxed: (local) => this.localIsBoxed(local),
+      rustType: (type, loc) => this.rustType(type, loc),
+      defaultValue: (type, loc) => this.defaultValue(type, loc),
+      record: (shapeId) => this.records.get(shapeId),
+      classDef: (name, loc) => this.classDef(name, loc),
+      classFieldName: (className, fieldName, loc) => this.classFieldName(className, fieldName, loc),
+      isEdgeValue: (type) => this.isEdgeValue(type),
+      rustString: (value) => this.rustString(value),
+      unsupported: (kind, loc) => this.unsupported(kind, loc),
+    });
   }
 
-  private emitStatement(stmt: IrStmt): void {
-    switch (stmt.kind) {
-      case "varDecl": {
-        const local = this.local(stmt.localId, stmt.loc);
-        if (this.localIsBoxed(local)) {
-          const init = stmt.init === null
-            ? "runtime::cell_empty()"
-            : `runtime::cell_new(${this.emitExpr(stmt.init)})`;
-          this.line(`let ${local.mutable ? "mut " : ""}${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = ${init};`);
-          return;
-        }
-        const mutable = local.mutable ? "mut " : "";
-        const init = stmt.init === null
-          ? this.defaultValue(local.type, stmt.loc)
-          : this.emitExpr(stmt.init);
-        this.line(`let ${mutable}${mangleLocal(local.id)}: ${this.rustType(local.type, stmt.loc)} = ${init};`);
-        return;
-      }
-      case "assign":
-        this.emitAssignment(stmt.localId, this.emitExpr(stmt.value), stmt.loc);
-        return;
-      case "exprStmt":
-        this.line(`let _ = ${this.emitExpr(stmt.expr)};`);
-        return;
-      case "if":
-        this.line(`if ${this.emitExpr(stmt.cond)} {`);
-        this.indent += 1;
-        this.emitStatements(stmt.then);
-        this.indent -= 1;
-        if (stmt.else_ === null) {
-          this.line("}");
-        } else {
-          this.line("} else {");
-          this.indent += 1;
-          this.emitStatements(stmt.else_);
-          this.indent -= 1;
-          this.line("}");
-        }
-        return;
-      case "while":
-        if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled while", stmt.loc);
-        {
-          const loopLabel = `sc_loop_${this.temporary++}`;
-          this.line(`'${loopLabel}: while ${this.emitExpr(stmt.cond)} {`);
-          this.indent += 1;
-          this.loopTargets.push({ id: this.nextLoopTargetId++, breakLabel: loopLabel, continueBlock: null });
-          this.emitStatements(stmt.body);
-          this.loopTargets.pop();
-          this.indent -= 1;
-          this.line("}");
-        }
-        return;
-      case "for":
-        if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled for", stmt.loc);
-        this.line("{");
-        this.indent += 1;
-        if (stmt.init !== null) this.emitStatement(stmt.init);
-        const loopLabel = `sc_loop_${this.temporary++}`;
-        this.line(`'${loopLabel}: while ${stmt.cond === null ? "true" : this.emitExpr(stmt.cond)} {`);
-        this.indent += 1;
-        const continueTarget = `sc_continue_${this.temporary++}`;
-        this.line(`'${continueTarget}: {`);
-        this.indent += 1;
-        this.loopTargets.push({ id: this.nextLoopTargetId++, breakLabel: loopLabel, continueBlock: continueTarget });
-        this.emitStatements(stmt.body);
-        this.loopTargets.pop();
-        this.indent -= 1;
-        this.line("}");
-        if (stmt.init?.kind === "varDecl") {
-          const initLocal = this.local(stmt.init.localId, stmt.loc);
-          if (this.localIsBoxed(initLocal)) {
-            const name = mangleLocal(initLocal.id);
-            this.line(`${name} = runtime::cell_new(runtime::cell_get(&${name}));`);
-          }
-        }
-        if (stmt.update !== null) this.emitStatement(stmt.update);
-        this.indent -= 1;
-        this.line("}");
-        this.indent -= 1;
-        this.line("}");
-        return;
-      case "forOf": {
-        if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled for-of", stmt.loc);
-        if (stmt.iterable.type.kind !== "array") this.unsupported("for-of over a non-array", stmt.loc);
-        const local = this.local(stmt.localId, stmt.loc);
-        const array = `sc_rt_${this.temporary++}`;
-        const index = `sc_rt_${this.temporary++}`;
-        const loopLabel = `sc_loop_${this.temporary++}`;
-        const continueTarget = `sc_continue_${this.temporary++}`;
-        this.line("{");
-        this.indent += 1;
-        this.line(`let ${array} = ${this.emitExpr(stmt.iterable)};`);
-        this.line(`let mut ${index} = 0.0_f64;`);
-        this.line(`'${loopLabel}: while ${index} < runtime::array_len(&${array}) {`);
-        this.indent += 1;
-        this.line(`'${continueTarget}: {`);
-        this.indent += 1;
-        this.line(this.localIsBoxed(local)
-          ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`
-          : `let ${mangleLocal(local.id)}: ${this.rustType(local.type, stmt.loc)} = runtime::array_get(&${array}, ${index});`);
-        this.loopTargets.push({ id: this.nextLoopTargetId++, breakLabel: loopLabel, continueBlock: continueTarget });
-        this.emitStatements(stmt.body);
-        this.loopTargets.pop();
-        this.indent -= 1;
-        this.line("}");
-        this.line(`${index} += 1.0_f64;`);
-        this.indent -= 1;
-        this.line("}");
-        this.indent -= 1;
-        this.line("}");
-        return;
-      }
-      case "arraySet": {
-        if (stmt.arr.type.kind !== "array") this.unsupported("arraySet on a non-array", stmt.loc);
-        const array = `sc_rt_${this.temporary++}`;
-        const index = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        this.line(`{ let ${array} = ${this.emitExpr(stmt.arr)}; let ${index} = ${this.emitExpr(stmt.index)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::array_set(&${array}, ${index}, ${value}); }`);
-        return;
-      }
-      case "bytesSet": {
-        if (stmt.arr.type.kind !== "bytes") this.unsupported("bytesSet on non-bytes", stmt.loc);
-        const bytes = `sc_rt_${this.temporary++}`;
-        const index = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        this.line(`{ let ${bytes} = ${this.emitExpr(stmt.arr)}; let ${index} = ${this.emitExpr(stmt.index)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::bytes_set(&${bytes}, ${index}, ${value}); }`);
-        return;
-      }
-      case "recordKeySet": {
-        const shape = this.records.get(stmt.shapeId);
-        if (shape?.indexValue === undefined || shape.fields.length !== 0) {
-          this.unsupported(`keyed write on non-indexed record '${stmt.shapeId}'`, stmt.loc);
-        }
-        if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(shape.indexValue)) {
-          this.unsupported(`keyed write types for record '${stmt.shapeId}'`, stmt.loc);
-        }
-        const object = `sc_rt_${this.temporary++}`;
-        const key = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${key} = ${this.emitExpr(stmt.key)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
-        return;
-      }
-      case "recordKeyDelete": {
-        const shape = this.records.get(stmt.shapeId);
-        if (shape?.indexValue === undefined || shape.fields.length !== 0 || stmt.key.type.kind !== "string") {
-          this.unsupported(`keyed delete on non-indexed record '${stmt.shapeId}'`, stmt.loc);
-        }
-        const object = `sc_rt_${this.temporary++}`;
-        const key = `sc_rt_${this.temporary++}`;
-        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${key} = ${this.emitExpr(stmt.key)}; let _ = runtime::map_delete_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()); }`);
-        return;
-      }
-      case "recordSet": {
-        const shape = this.records.get(stmt.shapeId);
-        const field = shape?.fields.find((candidate) => candidate.name === stmt.field);
-        if (shape === undefined || field === undefined) this.unsupported(`unknown record field '${stmt.shapeId}.${stmt.field}'`, stmt.loc);
-        const object = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        const stored = this.isEdgeValue(field.type) ? `Some(${value})` : value;
-        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${value} = ${this.emitExpr(stmt.value)}; ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`);
-        return;
-      }
-      case "fieldSet": {
-        const cls = this.classDef(stmt.className, stmt.loc);
-        const field = cls.fields.find((candidate) => candidate.name === stmt.field);
-        if (field === undefined) this.unsupported(`unknown class field '${stmt.className}.${stmt.field}'`, stmt.loc);
-        const name = this.classFieldName(stmt.className, field.name, stmt.loc);
-        const object = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        const stored = this.isEdgeValue(field.type) ? `Some(${value})` : value;
-        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${value} = ${this.emitExpr(stmt.value)}; ${object}.with_mut(|object| object.${name} = ${stored}); }`);
-        return;
-      }
-      case "throw":
-        this.line(`runtime::throw_value(${this.emitExpr(stmt.value)});`);
-        return;
-      case "rethrow":
-        this.line(`runtime::rethrow_caught(${this.emitRead(stmt.localId, { kind: "caught" }, stmt.loc)});`);
-        return;
-      case "return": {
-        const value = stmt.value === null ? "()" : this.emitExpr(stmt.value);
-        if (this.capturedReturnDepth > 0) {
-          this.line(`return runtime::Completion::Return(${value});`);
-          return;
-        }
-        if (this.asyncProtectedReturnDepth > 0) {
-          this.line(`return runtime::AsyncCompletion::Return(${value});`);
-          return;
-        }
-        if (this.currentAsyncResult !== null && this.capturedReturnDepth === 0) {
-          this.line(`let _ = runtime::promise_fulfill(&${this.currentAsyncResult}, ${value});`);
-          this.line("return;");
-          return;
-        }
-        this.line(stmt.value === null ? "return;" : `return ${value};`);
-        return;
-      }
-      case "break":
-        if (stmt.label !== undefined) this.unsupported("labeled break", stmt.loc);
-        {
-          const target = this.loopTargets.at(-1);
-          if (target === undefined) this.unsupported("break outside a Rust-supported loop", stmt.loc);
-          this.line(this.crossesCompletionBoundary(target)
-            ? `return runtime::Completion::Break(${target.id});`
-            : `break '${target.breakLabel};`);
-        }
-        return;
-      case "continue":
-        if (stmt.label !== undefined) this.unsupported("labeled continue", stmt.loc);
-        {
-          const target = this.loopTargets.at(-1);
-          if (target === undefined) this.unsupported("continue outside a Rust-supported loop", stmt.loc);
-          if (this.crossesCompletionBoundary(target)) {
-            this.line(`return runtime::Completion::Continue(${target.id});`);
-          } else {
-            this.line(target.continueBlock === null
-              ? `continue '${target.breakLabel};`
-              : `break '${target.continueBlock};`);
-          }
-        }
-        return;
-      case "block":
-        if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled block", stmt.loc);
-        this.line("{");
-        this.indent += 1;
-        this.emitStatements(stmt.body);
-        this.indent -= 1;
-        this.line("}");
-        return;
-      case "tryCatch":
-        this.emitTryCatch(stmt);
-        return;
-      case "runtimeFence":
-        // TypeScript lowering appends SC9002 after paths it proved cannot
-        // fall through (for example, while(true) with a return). It remains
-        // a loud invariant if frontend and backend ever disagree. Deferred
-        // JavaScript fences are ordinary catchable Error values with their
-        // diagnostic code exposed as `.code`, matching the C runtime.
-        if (stmt.code === "SC9002") {
-          this.line(`panic!("${this.rustString(`${stmt.code}: ${stmt.message}`)}");`);
-        } else {
-          this.line(`runtime::throw_error_code("${this.rustString(stmt.message)}".to_owned(), "${this.rustString(stmt.code)}");`);
-        }
-        return;
-      default:
-        this.unsupported(`statement '${stmt.kind}'`, stmt.loc);
-    }
-  }
-
-  private emitTryCatch(stmt: Extract<IrStmt, { kind: "tryCatch" }>): void {
-    const fn = this.currentFunction;
-    if (fn === null) this.unsupported("try/catch outside a function", stmt.loc);
-    let pending = `sc_rt_${this.temporary++}`;
-    const payload = `sc_rt_${this.temporary++}`;
-    this.line(`let ${pending} = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
-    this.indent += 1;
-    this.completionLoopBoundaries.push(this.loopTargets.length);
-    this.capturedReturnDepth += 1;
-    this.emitStatements(stmt.tryBody);
-    this.capturedReturnDepth -= 1;
-    this.completionLoopBoundaries.pop();
-    this.line(`runtime::Completion::<${this.rustType(fn.returnType, stmt.loc)}>::Normal`);
-    this.indent -= 1;
-    this.line("})) {");
-    this.indent += 1;
-    this.line("Ok(completion) => completion,");
-    this.line(`Err(${payload}) => runtime::Completion::Throw(runtime::caught_from_panic(${payload})),`);
-    this.indent -= 1;
-    this.line("};");
-    if (stmt.catchBody !== null) {
-      const nextPending = `sc_rt_${this.temporary++}`;
-      const caught = `sc_rt_${this.temporary++}`;
-      const catchPayload = `sc_rt_${this.temporary++}`;
-      this.line(`let ${nextPending} = match ${pending} {`);
-      this.indent += 1;
-      this.line(`runtime::Completion::Throw(${caught}) => {`);
-      this.indent += 1;
-      this.line("match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
-      this.indent += 1;
-      if (stmt.catchLocalId === null) {
-        this.line(`let _ = ${caught};`);
-      } else {
-        const local = this.local(stmt.catchLocalId, stmt.loc);
-        this.line(this.localIsBoxed(local)
-          ? `let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${caught});`
-          : `let ${mangleLocal(local.id)}: runtime::Caught = ${caught};`);
-      }
-      this.completionLoopBoundaries.push(this.loopTargets.length);
-      this.capturedReturnDepth += 1;
-      this.emitStatements(stmt.catchBody);
-      this.capturedReturnDepth -= 1;
-      this.completionLoopBoundaries.pop();
-      this.line(`runtime::Completion::<${this.rustType(fn.returnType, stmt.loc)}>::Normal`);
-      this.indent -= 1;
-      this.line("})) {");
-      this.indent += 1;
-      this.line("Ok(completion) => completion,");
-      this.line(`Err(${catchPayload}) => runtime::Completion::Throw(runtime::caught_from_panic(${catchPayload})),`);
-      this.indent -= 1;
-      this.line("}");
-      this.indent -= 1;
-      this.line("},");
-      this.line("completion => completion,");
-      this.indent -= 1;
-      this.line("};");
-      pending = nextPending;
-    }
-    if (stmt.finallyBody !== null) {
-      const finalResult = `sc_rt_${this.temporary++}`;
-      const finalPayload = `sc_rt_${this.temporary++}`;
-      this.line(`let ${finalResult} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
-      this.indent += 1;
-      this.completionLoopBoundaries.push(this.loopTargets.length);
-      this.emitStatements(stmt.finallyBody);
-      this.completionLoopBoundaries.pop();
-      this.indent -= 1;
-      this.line("}));");
-      this.line(`if let Err(${finalPayload}) = ${finalResult} {`);
-      this.indent += 1;
-      this.line(`runtime::rethrow_caught(runtime::caught_from_panic(${finalPayload}));`);
-      this.indent -= 1;
-      this.line("}");
-    }
-    this.line(`match ${pending} {`);
-    this.indent += 1;
-    this.line("runtime::Completion::Normal => {},");
-    this.line("runtime::Completion::Return(value) => {");
-    this.indent += 1;
-    if (this.capturedReturnDepth > 0) {
-      this.line("return runtime::Completion::Return(value);");
-    } else if (this.asyncProtectedReturnDepth > 0) {
-      this.line("return runtime::AsyncCompletion::Return(value);");
-    } else if (this.currentAsyncResult !== null) {
-      this.line(`let _ = runtime::promise_fulfill(&${this.currentAsyncResult}, value);`);
-      this.line("return;");
-    } else {
-      this.line("return value;");
-    }
-    this.indent -= 1;
-    this.line("},");
-    this.line("runtime::Completion::Throw(caught) => runtime::rethrow_caught(caught),");
-    for (const target of this.loopTargets) {
-      this.line(`runtime::Completion::Break(${target.id}) => break '${target.breakLabel},`);
-      this.line(`runtime::Completion::Continue(${target.id}) => ${target.continueBlock === null
-        ? `continue '${target.breakLabel}`
-        : `break '${target.continueBlock}`},`);
-    }
-    this.line("runtime::Completion::Break(_) | runtime::Completion::Continue(_) => unreachable!(\"scriptc invariant: unknown completion target\"),");
-    this.indent -= 1;
-    this.line("}");
+  private emitStatement(statement: IrStmt): void {
+    this.emitStatements([statement]);
   }
 
   private emitExpr(expr: IrExpr): string {
@@ -4986,13 +4666,6 @@ class RustEmitter {
 
   private localIsBoxed(local: IrFunction["locals"][number]): boolean {
     return local.boxed === true || this.currentFunction?.async === true;
-  }
-
-  private crossesCompletionBoundary(target: { id: number }): boolean {
-    const boundary = this.completionLoopBoundaries.at(-1);
-    if (boundary === undefined) return false;
-    const index = this.loopTargets.findIndex((candidate) => candidate.id === target.id);
-    return index >= 0 && index < boundary;
   }
 
   private rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
