@@ -533,6 +533,10 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "979-unions-optional-chaining.ts",
     "980-exceptions-basics.ts",
     "984-exceptions-finally.ts",
+    "1002-json-parse-cast.ts",
+    "1004-json-parse-errors.ts",
+    "1005-json-nested.ts",
+    "1007-json-rc-stress.ts",
     "1011-json-unknown-typeof.ts",
     "1301-errors-subclass.ts",
     "1302-errors-typed-catch.ts",
@@ -599,7 +603,14 @@ try {
 function returnsString(): string { return "wrong"; }
 const boxedResult: unknown = returnsString;
 const returnsNumber = boxedResult as () => number;
-console.log(returnsNumber());
+try {
+  console.log(returnsNumber());
+} catch {
+  console.log("result mismatch caught");
+}
+
+const nested: unknown = JSON.parse('{"items":[1,"wrong"]}');
+console.log((nested as { items: number[] }).items.length);
 `);
   const result = await compile(entryPath, {
     outDir: dir,
@@ -617,8 +628,12 @@ console.log(returnsNumber());
     SCRIPTC_RUST_HEAP_AUDIT: "1",
   });
   expect(outcome.exitCode).toBe(1);
-  expect(outcome.stdout).toBe("JSON mismatch caught\nargument mismatch caught\n");
-  expect(outcome.stderr).toContain("Uncaught TypeError: expected number at $, got string");
+  expect(outcome.stdout).toBe(
+    "JSON mismatch caught\nargument mismatch caught\nresult mismatch caught\n",
+  );
+  expect(outcome.stderr).toContain(
+    "Uncaught TypeError: expected number at $.items[1], got string",
+  );
 }, 120_000);
 
 test("Rust array ranges, removals, copying, and reverse searches match Node byte-for-byte", async () => {

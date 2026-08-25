@@ -698,6 +698,56 @@ class RustEmitter {
     this.line("}");
     this.indent -= 1;
     this.line("}");
+    this.line(`fn sc_dyn_to_json(value: &${name}, path: &str) -> Result<runtime::JsonNode, String> {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Null => Ok(runtime::JsonNode::Null),`);
+    this.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
+    this.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
+    this.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
+    this.line(`${name}::Array(value) => {`);
+    this.indent += 1;
+    this.line("let mut elements = Vec::new();");
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::array_len(value) {");
+    this.indent += 1;
+    this.line("let element = runtime::array_get(value, index);");
+    this.line("elements.push(sc_dyn_to_json(&element, &runtime::json_index_path(path, index as usize))?);");
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line("Ok(runtime::JsonNode::Array(elements))");
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Object(value) => {`);
+    this.indent += 1;
+    this.line("let mut fields = Vec::new();");
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::map_iter_count(value) {");
+    this.indent += 1;
+    this.line("if runtime::map_iter_live(value, index) {");
+    this.indent += 1;
+    this.line("let key = runtime::map_iter_key(value, index);");
+    this.line("let field = runtime::map_iter_value(value, index);");
+    this.line("let field_path = runtime::json_property_path(path, key.as_ref());");
+    this.line("fields.push((key.to_string(), sc_dyn_to_json(&field, &field_path)?));");
+    this.indent -= 1;
+    this.line("}");
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line("Ok(runtime::JsonNode::Object(fields))");
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Undefined => Err(format!("undefined at {path} is not JSON data")),`);
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(..) => Err(format!("function at {path} is not JSON data")),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
 
     this.line(`fn sc_dyn_kind(value: &${name}) -> &'static str {`);
     this.indent += 1;
@@ -820,13 +870,21 @@ class RustEmitter {
       case "bool": return `sc_dyn_check_boolean(${value})`;
       case "string": return `sc_dyn_check_string(${value})`;
       case "func": return `${this.dynFunctionCheckName(this.closureShapeForType(type, loc))}(${value})`;
+      case "array":
+      case "union":
       case "record": {
-        const shape = this.records.get(type.shapeId);
-        if (shape?.indexValue?.kind !== "dyn" || shape.fields.length !== 0) {
-          this.unsupported(`dynamic checked cast to record '${type.shapeId}'`, loc);
+        if (type.kind === "record") {
+          const shape = this.records.get(type.shapeId);
+          if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
+            const name = this.dynTypeName();
+            return `{ let value = ${value}; match &value { ${name}::Object(..) => match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }, _ => sc_dyn_check_fail("object", &value), } }`;
+          }
         }
-        const name = this.dynTypeName();
-        return `{ let value = ${value}; match &value { ${name}::Object(..) => match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }, _ => sc_dyn_check_fail("object", &value), } }`;
+        if (!this.isRustJsonCompatible(type)) {
+          this.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
+        }
+        const rustType = this.rustType(type, loc);
+        return `{ let value = ${value}; let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message)) }`;
       }
       default:
         this.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
