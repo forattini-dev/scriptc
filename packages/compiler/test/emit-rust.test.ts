@@ -543,6 +543,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1303-errors-rc-stress.ts",
     "1366-union-equality.ts",
     "1431-caught-tostring.ts",
+    "1664-dyn-fn-boundary.cjs",
     "1666-dyn-fn-identity.ts",
     "2482-recursive-union-tree.ts",
     "2483-recursive-record-cycles.ts",
@@ -634,6 +635,79 @@ console.log((nested as { items: number[] }).items.length);
   expect(outcome.stderr).toContain(
     "Uncaught TypeError: expected number at $.items[1], got string",
   );
+}, 120_000);
+
+test("Rust dynamic objects, arrays, strings, and function properties match Node", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-properties-"));
+  const entryPath = join(dir, "dyn-properties.ts");
+  await writeFile(entryPath, `
+"use strict";
+function pass(value: any): any { return value; }
+const object: any = JSON.parse('{"a":1,"b":"x"}');
+object.c = true;
+console.log(object.a, object.b, object.c, typeof object.missing);
+const array: any = JSON.parse("[1,2]");
+array[3] = 4;
+console.log(array.length, array[0], typeof array[2], array[3]);
+const text = pass("abc");
+console.log(text.length, text[0], text[2], typeof text[3]);
+function named(left: number, right: number): number { return left + right; }
+const fn = pass(named);
+fn.extra = 7;
+console.log(fn.name, fn.length, fn.extra, fn(2, 3));
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "dyn-properties"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust).toEqual(node);
+}, 120_000);
+
+test("Rust dynamic calls preserve catchable and uncaught failures", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-call-errors-"));
+  for (const [fixture, uncaught] of [
+    ["1667-dyn-fn-not-callable.cjs", "Uncaught TypeError: s is not a function"],
+    ["1668-dyn-fn-throws.cjs", "Uncaught RangeError: too big: 9"],
+  ] as const) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -4)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok || result.backend !== "rust") continue;
+    const [node, rust] = await Promise.all([
+      runToExit(process.execPath, [entryPath]),
+      runToExit(result.binaryPath, [], {
+        ...process.env,
+        SCRIPTC_RUST_HEAP_AUDIT: "1",
+      }),
+    ]);
+    expect(node.exitCode, fixture).toBe(1);
+    expect(rust.exitCode, fixture).toBe(node.exitCode);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toContain(uncaught);
+    expect(rust.stderr, fixture).not.toContain("Rust heap object(s) still live");
+  }
 }, 120_000);
 
 test("Rust array ranges, removals, copying, and reverse searches match Node byte-for-byte", async () => {

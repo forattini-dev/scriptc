@@ -296,7 +296,8 @@ class RustEmitter {
           }
         }
       }
-      if (node.kind === "dynTest" || node.kind === "dynCall") this.usesDyn = true;
+      const nodeType = node.type as IrType | undefined;
+      if (nodeType?.kind === "dyn" || node.kind === "dynTest" || node.kind === "dynCall") this.usesDyn = true;
       if (node.kind === "closure") {
         const type = node.type as IrType | undefined;
         const fnName = node.fnName;
@@ -578,7 +579,7 @@ class RustEmitter {
     this.line(`Array(runtime::JsArray<${name}>),`);
     this.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     for (const shape of boxedShapes) {
-      this.line(`${this.dynFunctionVariant(shape)}(runtime::Gc<${this.closureName(shape)}>),`);
+      this.line(`${this.dynFunctionVariant(shape)}(runtime::Gc<${this.closureName(shape)}>, runtime::JsString, runtime::JsMap<runtime::JsString, ${name}>),`);
     }
     this.indent -= 1;
     this.line("}");
@@ -589,7 +590,7 @@ class RustEmitter {
     this.line("match self {");
     this.indent += 1;
     for (const shape of boxedShapes) {
-      this.line(`Self::${this.dynFunctionVariant(shape)}(value) => tracer.edge(value),`);
+      this.line(`Self::${this.dynFunctionVariant(shape)}(value, _, properties) => { tracer.edge(value); tracer.edge(properties); },`);
     }
     this.line("Self::Array(value) => tracer.edge(value),");
     this.line("Self::Object(value) => tracer.edge(value),");
@@ -692,7 +693,7 @@ class RustEmitter {
     this.indent -= 1;
     this.line("},");
     for (const shape of boxedShapes) {
-      this.line(`${name}::${this.dynFunctionVariant(shape)}(value) => ${name}::${this.dynFunctionVariant(shape)}(value.clone()),`);
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(value, function_name, properties) => ${name}::${this.dynFunctionVariant(shape)}(value.clone(), function_name.clone(), properties.clone()),`);
     }
     this.indent -= 1;
     this.line("}");
@@ -767,6 +768,164 @@ class RustEmitter {
     this.line("}");
     this.indent -= 1;
     this.line("}");
+    this.line(`fn sc_dyn_typeof(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line("let kind = match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined => "undefined",`);
+    this.line(`${name}::Number(..) => "number",`);
+    this.line(`${name}::Boolean(..) => "boolean",`);
+    this.line(`${name}::String(..) => "string",`);
+    if (boxedShapes.length > 0) {
+      this.line(`${boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
+    }
+    this.line("_ => \"object\",");
+    this.indent -= 1;
+    this.line("};");
+    this.line("runtime::string(kind)");
+    this.indent -= 1;
+    this.line("}");
+    this.line("fn sc_dyn_key_index(key: &runtime::JsString) -> Option<usize> {");
+    this.indent += 1;
+    this.line("let bytes = key.as_bytes();");
+    this.line("if bytes.is_empty() || (bytes.len() > 1 && bytes[0] == b'0') { return None; }");
+    this.line("let mut index = 0usize;");
+    this.line("for byte in bytes {");
+    this.indent += 1;
+    this.line("if !byte.is_ascii_digit() { return None; }");
+    this.line("index = index.checked_mul(10)?.checked_add((byte - b'0') as usize)?;");
+    this.indent -= 1;
+    this.line("}");
+    this.line("Some(index)");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined | ${name}::Null => {`);
+    this.indent += 1;
+    this.line(`if optional { return ${name}::Undefined; }`);
+    this.line(`runtime::throw_type_error(format!("Cannot read properties of {} (reading '{}')", sc_dyn_kind(value), key))`);
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Object(object) => runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined),`);
+    this.line(`${name}::Array(array) => {`);
+    this.indent += 1;
+    this.line(`if key.as_ref() == "length" { ${name}::Number(runtime::array_len(array)) }`);
+    this.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::array_len(array) as usize { runtime::array_get(array, index as f64) } else { ${name}::Undefined } }`);
+    this.line(`else { ${name}::Undefined }`);
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::String(text) => {`);
+    this.indent += 1;
+    this.line(`if key.as_ref() == "length" { ${name}::Number(runtime::string_len(text)) }`);
+    this.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::string_len(text) as usize { ${name}::String(runtime::string_char_at(text, index as f64)) } else { ${name}::Undefined } }`);
+    this.line(`else { ${name}::Undefined }`);
+    this.indent -= 1;
+    this.line("},");
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(_, function_name, properties) => {`);
+      this.indent += 1;
+      this.line("if let Some(property) = runtime::map_get_by(properties, key, |left, right| left.as_ref() == right.as_ref()) { property }");
+      this.line(`else if key.as_ref() == "name" { ${name}::String(function_name.clone()) }`);
+      this.line(`else if key.as_ref() == "length" { ${name}::Number(${shape.type.params.length}.0) }`);
+      this.line(`else { ${name}::Undefined }`);
+      this.indent -= 1;
+      this.line("},");
+    }
+    this.line(`_ => ${name}::Undefined,`);
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_key_set_error(value: &${name}, key: &runtime::JsString) -> ! {`);
+    this.indent += 1;
+    this.line(`if matches!(value, ${name}::Undefined | ${name}::Null) {`);
+    this.indent += 1;
+    this.line(`runtime::throw_type_error(format!("Cannot set properties of {} (setting '{}')", sc_dyn_kind(value), key));`);
+    this.indent -= 1;
+    this.line("}");
+    this.line("let receiver = match value {");
+    this.indent += 1;
+    this.line(`${name}::Number(number) => format!("number '{}'", runtime::display_number(*number)),`);
+    this.line(`${name}::Boolean(boolean) => format!("boolean '{}'", runtime::display_bool(*boolean)),`);
+    this.line(`${name}::String(text) => format!("string '{}'", text),`);
+    this.line("_ => sc_dyn_kind(value).to_owned(),");
+    this.indent -= 1;
+    this.line("};");
+    this.line(`runtime::throw_type_error(format!("Cannot create property '{}' on {}", key, receiver))`);
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_key_set(value: &${name}, key: runtime::JsString, field: ${name}) {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Object(object) => runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()),`);
+    this.line(`${name}::Array(array) => {`);
+    this.indent += 1;
+    this.line("let Some(index) = sc_dyn_key_index(&key) else { sc_dyn_key_set_error(value, &key); };");
+    this.line(`while runtime::array_len(array) <= index as f64 { runtime::array_push(array, ${name}::Undefined); }`);
+    this.line("runtime::array_set(array, index as f64, field);");
+    this.indent -= 1;
+    this.line("},");
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_set_by(properties, key, field, |left, right| left.as_ref() == right.as_ref()),`);
+    }
+    this.line("_ => sc_dyn_key_set_error(value, &key),");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_to_string(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined => runtime::string("undefined"),`);
+    this.line(`${name}::Null => runtime::string("null"),`);
+    this.line(`${name}::Number(value) => runtime::string(&runtime::display_number(*value)),`);
+    this.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
+    this.line(`${name}::String(value) => value.clone(),`);
+    this.line(`${name}::Array(value) => {`);
+    this.indent += 1;
+    this.line("let mut output = String::new();");
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::array_len(value) {");
+    this.indent += 1;
+    this.line("if index > 0.0 { output.push(','); }");
+    this.line("let element = runtime::array_get(value, index);");
+    this.line(`if !matches!(&element, ${name}::Undefined | ${name}::Null) { output.push_str(sc_dyn_to_string(&element).as_ref()); }`);
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line("runtime::string(&output)");
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Object(..) => runtime::string("[object Object]"),`);
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("function () { [native code] }") } else { runtime::string(&format!("function {}() {{ [native code] }}", function_name)) },`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_inspect(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
+    }
+    this.line("_ => sc_dyn_to_string(value),");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_inspect_s(value: &${name}) -> runtime::JsString {`);
+    this.indent += 1;
+    this.line(`match value { ${name}::String(text) => text.clone(), _ => sc_dyn_inspect(value), }`);
+    this.indent -= 1;
+    this.line("}");
     this.line(`fn sc_dyn_check_fail(expected: &str, value: &${name}) -> ! {`);
     this.indent += 1;
     this.line("runtime::throw_type_error(format!(\"expected {expected} at $, got {}\", sc_dyn_kind(value)))");
@@ -784,7 +943,7 @@ class RustEmitter {
       this.line("match value {");
       this.indent += 1;
       if (this.dynBoxedFunctionShapes.has(key)) {
-        this.line(`${name}::${this.dynFunctionVariant(target)}(closure) => closure,`);
+        this.line(`${name}::${this.dynFunctionVariant(target)}(closure, _, _) => closure,`);
       }
       const adaptable = boxedShapes.filter((shape) => typeKey(shape.type) !== key);
       if (adaptable.length > 0) {
@@ -811,7 +970,7 @@ class RustEmitter {
       if (loc === undefined) this.unsupported("dynamic call without a source location");
       const dispatch = this.emitClosureDispatch("sc_dyn_callee", shape.type, typedArgs, loc);
       const result = this.emitDynFromResult(shape.type.ret, dispatch);
-      this.line(`${name}::${this.dynFunctionVariant(shape)}(closure) => { let sc_dyn_callee = closure.clone(); ${result} },`);
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(closure, _, _) => { let sc_dyn_callee = closure.clone(); ${result} },`);
     }
     this.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.indent -= 1;
@@ -835,7 +994,7 @@ class RustEmitter {
     return this.emitDynFromValue(type, value, loc);
   }
 
-  private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc): string {
+  private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = ""): string {
     const name = this.dynTypeName();
     switch (type.kind) {
       case "dyn": return value;
@@ -849,7 +1008,7 @@ class RustEmitter {
         if (!this.dynBoxedFunctionShapes.has(typeKey(type))) {
           this.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
         }
-        return `${name}::${this.dynFunctionVariant(shape)}(${value})`;
+        return `${name}::${this.dynFunctionVariant(shape)}(${value}, runtime::string("${this.rustString(functionName)}"), runtime::map_new())`;
       }
       case "record": {
         const shape = this.records.get(type.shapeId);
@@ -2948,6 +3107,8 @@ class RustEmitter {
         return `runtime::string("${this.rustString(expr.value)}")`;
       case "boolLit":
         return expr.value ? "true" : "false";
+      case "unitLit":
+        return "()";
       case "varRef":
         return this.emitRead(expr.localId, expr.type, expr.loc);
       case "bin":
@@ -3083,8 +3244,25 @@ class RustEmitter {
         }
         return `runtime::json_stringify(&(${value}))`;
       }
+      case "dynArrLit": {
+        const array = `sc_rt_${this.temporary++}`;
+        const values = expr.elems.map((element) => `runtime::array_push(&${array}, ${this.emitExpr(element)});`).join(" ");
+        return `{ let ${array}: runtime::JsArray<${this.dynTypeName()}> = runtime::array_new(Vec::new()); ${values} ${this.dynTypeName()}::Array(${array}) }`;
+      }
+      case "dynObjLit": {
+        const object = `sc_rt_${this.temporary++}`;
+        const fields = (expr.fields ?? []).map((field) => {
+          if (field.key.type.kind !== "string" || field.value.type.kind !== "dyn") {
+            this.unsupported("dynamic object field types", expr.loc);
+          }
+          const key = `sc_rt_${this.temporary++}`;
+          const value = `sc_rt_${this.temporary++}`;
+          return `let ${key} = ${this.emitExpr(field.key)}; let ${value} = ${this.emitExpr(field.value)}; runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
+        }).join(" ");
+        return `{ let ${object}: runtime::JsMap<runtime::JsString, ${this.dynTypeName()}> = runtime::map_new(); ${fields} ${this.dynTypeName()}::Object(${object}) }`;
+      }
       case "dynFrom":
-        return this.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc);
+        return this.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "");
       case "dynCall": {
         if ((expr.spreads?.length ?? 0) > 0) this.unsupported("dynamic call spreads", expr.loc);
         const callee = `sc_rt_${this.temporary++}`;
@@ -3119,6 +3297,12 @@ class RustEmitter {
         }
         if (expr.negated) test = `!(${test})`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${test} }`;
+      }
+      case "dynKeyGet": {
+        if (expr.key.type.kind !== "string") this.unsupported("dynamic keyed read with a non-string key", expr.loc);
+        const value = `sc_rt_${this.temporary++}`;
+        const key = `sc_rt_${this.temporary++}`;
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; let ${key} = ${this.emitExpr(expr.key)}; sc_dyn_key_get(&${value}, &${key}, ${expr.optional === true ? "true" : "false"}) }`;
       }
       case "dynCheck": {
         if (expr.value.kind === "libCall" && expr.value.fn === "json.parse" && expr.value.args.length === 1) {
@@ -3673,6 +3857,33 @@ class RustEmitter {
         return this.emitExpr(expr.value);
       case "libCall": {
         const arg = expr.args[0];
+        if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
+          const keyExpr = expr.args[1];
+          const valueExpr = expr.args[2];
+          if (keyExpr?.type.kind !== "string" || valueExpr?.type.kind !== "dyn") {
+            this.unsupported("dynamic keyed write argument types", expr.loc);
+          }
+          const receiver = `sc_rt_${this.temporary++}`;
+          const key = `sc_rt_${this.temporary++}`;
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(arg)}; let ${key} = ${this.emitExpr(keyExpr)}; let ${value} = ${this.emitExpr(valueExpr)}; sc_dyn_key_set(&${receiver}, ${key}, ${value}); () }`;
+        }
+        if (expr.fn === "dyn.typeof" && expr.args.length === 1 && arg?.type.kind === "dyn") {
+          return `sc_dyn_typeof(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
+          const depth = expr.args[1];
+          const colors = expr.args[2];
+          if (depth === undefined || colors === undefined) this.unsupported("dynamic inspect arguments", expr.loc);
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; let _ = ${this.emitExpr(depth)}; let _ = ${this.emitExpr(colors)}; sc_dyn_inspect(&${value}) }`;
+        }
+        if (expr.fn === "insp.dynS" && expr.args.length === 2 && arg?.type.kind === "dyn") {
+          const depth = expr.args[1];
+          if (depth === undefined) this.unsupported("dynamic string inspection depth", expr.loc);
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; let _ = ${this.emitExpr(depth)}; sc_dyn_inspect_s(&${value}) }`;
+        }
         if (expr.fn === "json.parse" && expr.args.length === 1 && arg?.type.kind === "string" && expr.type.kind === "dyn") {
           return `runtime::json_parse_typed::<${this.dynTypeName()}>(&(${this.emitExpr(arg)}))`;
         }
@@ -4461,6 +4672,7 @@ class RustEmitter {
   private emitToStringValue(type: IrType, operand: string, loc: SrcLoc): string {
     if (type.kind === "f64") return `runtime::number_to_string(${operand})`;
     if (type.kind === "bool") return `runtime::bool_to_string(${operand})`;
+    if (type.kind === "dyn") return `sc_dyn_to_string(&(${operand}))`;
     if (type.kind === "caught") {
       const helper = this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string";
       return `${helper}(&(${operand}))`;
