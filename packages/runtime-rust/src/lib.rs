@@ -47,30 +47,227 @@ pub fn regex_new(pattern: &str, flags: &str) -> JsRegex {
     })
 }
 
+fn regex_find(
+    regex: &JsRegex,
+    units: &[u16],
+    start: usize,
+    sticky: bool,
+) -> Option<regress::Match> {
+    if regex.unicode {
+        regex.compiled.find_from_utf16(units, start).next()
+    } else {
+        regex.compiled.find_from_ucs2(units, start).next()
+    }
+    .filter(|matched| !sticky || matched.start() == start)
+}
+
+fn advance_string_index(units: &[u16], index: usize, unicode: bool) -> usize {
+    if unicode && index + 1 < units.len() {
+        let first = units[index];
+        let second = units[index + 1];
+        if (0xd800..=0xdbff).contains(&first) && (0xdc00..=0xdfff).contains(&second) {
+            return index + 2;
+        }
+    }
+    index.saturating_add(1)
+}
+
+fn string_from_utf16(units: &[u16]) -> JsString {
+    Rc::from(String::from_utf16_lossy(units))
+}
+
 pub fn regex_test(regex: &JsRegex, text: &JsString) -> bool {
     let units: Vec<u16> = text.encode_utf16().collect();
     let stateful = regex.global || regex.sticky;
     let start = if stateful { regex.last_index.get() } else { 0 };
-    let found = if regex.unicode {
-        regex
-            .compiled
-            .find_from_utf16(&units, start)
-            .next()
-            .map(|matched| matched.range())
-    } else {
-        regex
-            .compiled
-            .find_from_ucs2(&units, start)
-            .next()
-            .map(|matched| matched.range())
-    }
-    .filter(|range| !regex.sticky || range.start == start);
+    let found = regex_find(regex, &units, start, regex.sticky);
     if stateful {
         regex
             .last_index
-            .set(found.as_ref().map_or(0, |range| range.end));
+            .set(found.as_ref().map_or(0, regress::Match::end));
     }
     found.is_some()
+}
+
+fn regex_put_substitution(
+    output: &mut Vec<u16>,
+    subject: &[u16],
+    matched: &regress::Match,
+    replacement: &[u16],
+) {
+    let whole = matched.range();
+    let has_named_groups = matched.named_groups().next().is_some();
+    let mut index = 0usize;
+    while index < replacement.len() {
+        if replacement[index] != b'$' as u16 || index + 1 >= replacement.len() {
+            output.push(replacement[index]);
+            index += 1;
+            continue;
+        }
+        let next = replacement[index + 1];
+        if next == b'$' as u16 {
+            output.push(b'$' as u16);
+            index += 2;
+        } else if next == b'&' as u16 {
+            output.extend_from_slice(&subject[whole.clone()]);
+            index += 2;
+        } else if next == b'`' as u16 {
+            output.extend_from_slice(&subject[..whole.start]);
+            index += 2;
+        } else if next == b'\'' as u16 {
+            output.extend_from_slice(&subject[whole.end..]);
+            index += 2;
+        } else if (b'0' as u16..=b'9' as u16).contains(&next) {
+            let mut group = (next - b'0' as u16) as usize;
+            let mut consumed = 2usize;
+            if index + 2 < replacement.len() {
+                let second = replacement[index + 2];
+                if (b'0' as u16..=b'9' as u16).contains(&second) {
+                    let two_digit = group * 10 + (second - b'0' as u16) as usize;
+                    if (1..=matched.captures.len()).contains(&two_digit) {
+                        group = two_digit;
+                        consumed = 3;
+                    }
+                }
+            }
+            if (1..=matched.captures.len()).contains(&group) {
+                if let Some(range) = matched.group(group) {
+                    output.extend_from_slice(&subject[range]);
+                }
+                index += consumed;
+            } else {
+                output.push(b'$' as u16);
+                index += 1;
+            }
+        } else if next == b'<' as u16 && has_named_groups {
+            let mut close = index + 2;
+            while close < replacement.len() && replacement[close] != b'>' as u16 {
+                close += 1;
+            }
+            if close == replacement.len() {
+                output.push(b'$' as u16);
+                index += 1;
+                continue;
+            }
+            let name = String::from_utf16_lossy(&replacement[index + 2..close]);
+            if let Some(range) = matched
+                .named_groups()
+                .find_map(|(candidate, range)| (candidate == name).then_some(range).flatten())
+            {
+                output.extend_from_slice(&subject[range]);
+            }
+            index = close + 1;
+        } else {
+            output.push(b'$' as u16);
+            index += 1;
+        }
+    }
+}
+
+fn regex_replace_impl(
+    subject: &JsString,
+    regex: &JsRegex,
+    replacement: &JsString,
+    require_global: bool,
+) -> JsString {
+    if require_global && !regex.global {
+        throw_type_error(
+            "String.prototype.replaceAll called with a non-global RegExp argument".to_owned(),
+        );
+    }
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    let replacement_units: Vec<u16> = replacement.encode_utf16().collect();
+    let mut output = Vec::new();
+    let mut next = 0usize;
+    let mut position = if regex.sticky && !regex.global {
+        regex.last_index.get()
+    } else {
+        0
+    };
+    if regex.global {
+        regex.last_index.set(0);
+    }
+    while position <= units.len() {
+        let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
+            if regex.global || regex.sticky {
+                regex.last_index.set(0);
+            }
+            break;
+        };
+        let range = matched.range();
+        if regex.global || regex.sticky {
+            regex.last_index.set(range.end);
+        }
+        output.extend_from_slice(&units[next..range.start]);
+        regex_put_substitution(&mut output, &units, &matched, &replacement_units);
+        next = range.end;
+        if !regex.global {
+            break;
+        }
+        position = if range.start == range.end {
+            advance_string_index(&units, range.end, regex.unicode)
+        } else {
+            range.end
+        };
+    }
+    if regex.global {
+        regex.last_index.set(0);
+    }
+    output.extend_from_slice(&units[next..]);
+    string_from_utf16(&output)
+}
+
+pub fn regex_replace(subject: &JsString, regex: &JsRegex, replacement: &JsString) -> JsString {
+    regex_replace_impl(subject, regex, replacement, false)
+}
+
+pub fn regex_replace_all(subject: &JsString, regex: &JsRegex, replacement: &JsString) -> JsString {
+    regex_replace_impl(subject, regex, replacement, true)
+}
+
+pub fn regex_split(subject: &JsString, regex: &JsRegex, limit: f64) -> JsArray<JsString> {
+    let limit = to_uint32(limit) as usize;
+    if limit == 0 {
+        return array_new(Vec::new());
+    }
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    if units.is_empty() {
+        return if regex_find(regex, &units, 0, regex.sticky).is_some() {
+            array_new(Vec::new())
+        } else {
+            array_new(vec![empty_string()])
+        };
+    }
+    let mut pieces = Vec::new();
+    let mut previous = 0usize;
+    let mut position = 0usize;
+    while position < units.len() {
+        let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
+            if !regex.sticky {
+                break;
+            }
+            position = advance_string_index(&units, position, regex.unicode);
+            continue;
+        };
+        if !matched.captures.is_empty() {
+            throw_type_error(
+                "split() with capture groups in the pattern is not supported (JS splices the captured values into the result); use a non-capturing group (?:...)".to_owned(),
+            );
+        }
+        let range = matched.range();
+        if range.end == previous {
+            position = advance_string_index(&units, range.start, regex.unicode);
+        } else {
+            pieces.push(string_from_utf16(&units[previous..range.start]));
+            if pieces.len() == limit {
+                return array_new(pieces);
+            }
+            previous = range.end;
+            position = previous;
+        }
+    }
+    pieces.push(string_from_utf16(&units[previous..]));
+    array_new(pieces)
 }
 
 pub fn regex_source(regex: &JsRegex) -> JsString {
@@ -6199,6 +6396,31 @@ mod tests {
         assert!(!regex_test(&sticky, &string("ab")));
         assert_eq!(regex_source(&global).as_ref(), r"\d");
         assert_eq!(regex_flags(&global).as_ref(), "g");
+    }
+
+    #[test]
+    fn regex_replacement_and_split_use_utf16_ranges() {
+        let astral_subject = string("😀z");
+        let suffix = regex_new("z", "");
+        let prefix_replacement = string("($`)");
+        assert_eq!(
+            regex_replace(&astral_subject, &suffix, &prefix_replacement).as_ref(),
+            "😀(😀)"
+        );
+        assert_eq!(
+            regex_replace(
+                &string("14px 9em"),
+                &regex_new(r"(?<n>\d+)px|(?<n>\d+)em", "g"),
+                &string("[$<n>]"),
+            )
+            .as_ref(),
+            "[14] [9]"
+        );
+        let pieces = regex_split(&string("a1b2c"), &regex_new(r"\d", ""), u32::MAX as f64);
+        assert_eq!(array_len(&pieces), 3.0);
+        assert_eq!(array_get(&pieces, 0.0).as_ref(), "a");
+        assert_eq!(array_get(&pieces, 1.0).as_ref(), "b");
+        assert_eq!(array_get(&pieces, 2.0).as_ref(), "c");
     }
 
     #[test]

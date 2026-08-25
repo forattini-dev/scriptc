@@ -1195,6 +1195,9 @@ class RustEmitter {
         case "promise":
           comparison = "left.ptr_eq(right)";
           break;
+        case "regex":
+          comparison = "std::rc::Rc::ptr_eq(left, right)";
+          break;
         case "object":
           comparison = RUNTIME_ERROR_CLASSES.has(arm.className) ? "std::ptr::eq(left, right)" : "left.ptr_eq(right)";
           break;
@@ -3235,6 +3238,12 @@ class RustEmitter {
           `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
           ...expr.args.map((argument, index) => `let ${args[index]} = ${this.emitExpr(argument)};`),
         ].join(" ");
+        if ((expr.method === "replace" || expr.method === "replaceAll") && args.length === 2) {
+          return `{ ${bindings} runtime::regex_${expr.method === "replace" ? "replace" : "replace_all"}(&${receiver}, &${args[0]}, &${args[1]}) }`;
+        }
+        if (expr.method === "split" && args.length === 2) {
+          return `{ ${bindings} runtime::regex_split(&${receiver}, &${args[0]}, ${args[1]}) }`;
+        }
         if (expr.method === "test" && args.length === 1) {
           return `{ ${bindings} runtime::regex_test(&${receiver}, &${args[0]}) }`;
         }
@@ -5390,6 +5399,7 @@ class RustEmitter {
       case "classval":
       case "func":
       case "promise":
+      case "regex":
       case "undefinedT":
       case "nullT":
         return;
