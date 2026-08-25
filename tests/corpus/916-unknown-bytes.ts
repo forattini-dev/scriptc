@@ -31,6 +31,8 @@ console.log(JSON.stringify(scratch));
 // against Node); the BYTES are value-exact.
 const again = scratch.buf as Uint8Array;
 console.log(again[0] + again[1] + again[2]);
+delete scratch.buf;
+console.log(JSON.stringify(scratch), scratch.buf === undefined);
 
 // Buffer is bytes<u8> too. (String() of an unknown holding a BUFFER joins
 // the elements like a Uint8Array — Node decodes UTF-8 there; the checked-dynamic tree

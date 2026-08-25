@@ -577,6 +577,7 @@ class RustEmitter {
     this.line("Number(f64),");
     this.line("Boolean(bool),");
     this.line("String(runtime::JsString),");
+    this.line("Bytes(runtime::JsBytes<u8>),");
     this.line(`Array(runtime::JsArray<${name}>),`);
     this.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     for (const shape of boxedShapes) {
@@ -595,6 +596,7 @@ class RustEmitter {
     }
     this.line("Self::Array(value) => tracer.edge(value),");
     this.line("Self::Object(value) => tracer.edge(value),");
+    this.line("Self::Bytes(value) => tracer.edge(value),");
     this.line("_ => {},");
     this.indent -= 1;
     this.line("}");
@@ -622,6 +624,15 @@ class RustEmitter {
     this.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
     this.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
     this.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.line(`${name}::Bytes(value) => {`);
+    this.indent += 1;
+    this.line("writer.begin_object();");
+    this.line("let mut first = true;");
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::bytes_len(value) { writer.property(&mut first, &(index as usize).to_string(), &runtime::bytes_get(value, index)); index += 1.0; }");
+    this.line("writer.end_object();");
+    this.indent -= 1;
+    this.line("},");
     this.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
     for (const shape of boxedShapes) {
@@ -690,6 +701,7 @@ class RustEmitter {
     this.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.line(`${name}::String(value) => ${name}::String(value.clone()),`);
+    this.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
     this.line(`${name}::Array(value) => {`);
     this.indent += 1;
     this.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
@@ -738,6 +750,7 @@ class RustEmitter {
     this.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
     this.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
+    this.line(`${name}::Bytes(..) => Err(format!("bytes at {path} is not JSON data")),`);
     this.line(`${name}::Array(value) => {`);
     this.indent += 1;
     this.line("let mut elements = Vec::new();");
@@ -790,6 +803,7 @@ class RustEmitter {
     this.line(`${name}::Number(..) => "number",`);
     this.line(`${name}::Boolean(..) => "boolean",`);
     this.line(`${name}::String(..) => "string",`);
+    this.line(`${name}::Bytes(..) => "bytes",`);
     this.line(`${name}::Array(..) => "array",`);
     this.line(`${name}::Object(..) => "object",`);
     if (boxedShapes.length > 0) {
@@ -807,6 +821,7 @@ class RustEmitter {
     this.line(`${name}::Number(..) => "number",`);
     this.line(`${name}::Boolean(..) => "boolean",`);
     this.line(`${name}::String(..) => "string",`);
+    this.line(`${name}::Bytes(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.line(`${boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
@@ -852,6 +867,13 @@ class RustEmitter {
     this.indent += 1;
     this.line(`if key.as_ref() == "length" { ${name}::Number(runtime::string_len(text)) }`);
     this.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::string_len(text) as usize { ${name}::String(runtime::string_char_at(text, index as f64)) } else { ${name}::Undefined } }`);
+    this.line(`else { ${name}::Undefined }`);
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Bytes(bytes) => {`);
+    this.indent += 1;
+    this.line(`if key.as_ref() == "length" { ${name}::Number(runtime::bytes_len(bytes)) }`);
+    this.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::bytes_len(bytes) as usize { ${name}::Number(runtime::bytes_get(bytes, index as f64)) } else { ${name}::Undefined } }`);
     this.line(`else { ${name}::Undefined }`);
     this.indent -= 1;
     this.line("},");
@@ -917,6 +939,7 @@ class RustEmitter {
     this.line(`${name}::Number(value) => runtime::string(&runtime::display_number(*value)),`);
     this.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.line(`${name}::String(value) => value.clone(),`);
+    this.line(`${name}::Bytes(value) => runtime::bytes_join(value, &runtime::string(",")),`);
     this.line(`${name}::Array(value) => {`);
     this.indent += 1;
     this.line("let mut output = String::new();");
@@ -1088,6 +1111,7 @@ class RustEmitter {
     this.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.line(`${name}::String(value) => ${name}::String(value.clone()),`);
+    this.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
     this.line(`${name}::Array(value) => {`);
     this.indent += 1;
     this.line("let identity = value.identity();");
@@ -1140,6 +1164,15 @@ class RustEmitter {
     this.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
     this.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
     this.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
+    this.line(`(${name}::Bytes(left), ${name}::Bytes(right)) => {`);
+    this.indent += 1;
+    this.line("if left.ptr_eq(right) { true } else if !deep || runtime::bytes_len(left) != runtime::bytes_len(right) { false } else {");
+    this.indent += 1;
+    this.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::bytes_len(left) { equal = runtime::bytes_get(left, index) == runtime::bytes_get(right, index); index += 1.0; } equal");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("},");
     this.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
     this.indent += 1;
     this.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
@@ -1190,6 +1223,10 @@ class RustEmitter {
       case "f64": return `${name}::Number(${value})`;
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;
+      case "bytes": {
+        if (type.elem !== "u8") this.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
+        return `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
+      }
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
       case "func": {
@@ -1266,6 +1303,11 @@ class RustEmitter {
       case "f64": return `sc_dyn_check_number(${value})`;
       case "bool": return `sc_dyn_check_boolean(${value})`;
       case "string": return `sc_dyn_check_string(${value})`;
+      case "bytes": {
+        if (type.elem !== "u8") this.unsupported(`dynamic checked cast to bytes<${type.elem}>`, loc);
+        const name = this.dynTypeName();
+        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) => runtime::bytes_copy(&bytes), value => sc_dyn_check_fail("bytes", &value), } }`;
+      }
       case "func": return `${this.dynFunctionCheckName(this.closureShapeForType(type, loc))}(${value})`;
       case "array":
       case "union":
@@ -3145,6 +3187,30 @@ class RustEmitter {
         this.line(`{ let ${bytes} = ${this.emitExpr(stmt.arr)}; let ${index} = ${this.emitExpr(stmt.index)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::bytes_set(&${bytes}, ${index}, ${value}); }`);
         return;
       }
+      case "recordKeySet": {
+        const shape = this.records.get(stmt.shapeId);
+        if (shape?.indexValue === undefined || shape.fields.length !== 0) {
+          this.unsupported(`keyed write on non-indexed record '${stmt.shapeId}'`, stmt.loc);
+        }
+        if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(shape.indexValue)) {
+          this.unsupported(`keyed write types for record '${stmt.shapeId}'`, stmt.loc);
+        }
+        const object = `sc_rt_${this.temporary++}`;
+        const key = `sc_rt_${this.temporary++}`;
+        const value = `sc_rt_${this.temporary++}`;
+        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${key} = ${this.emitExpr(stmt.key)}; let ${value} = ${this.emitExpr(stmt.value)}; runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
+        return;
+      }
+      case "recordKeyDelete": {
+        const shape = this.records.get(stmt.shapeId);
+        if (shape?.indexValue === undefined || shape.fields.length !== 0 || stmt.key.type.kind !== "string") {
+          this.unsupported(`keyed delete on non-indexed record '${stmt.shapeId}'`, stmt.loc);
+        }
+        const object = `sc_rt_${this.temporary++}`;
+        const key = `sc_rt_${this.temporary++}`;
+        this.line(`{ let ${object} = ${this.emitExpr(stmt.obj)}; let ${key} = ${this.emitExpr(stmt.key)}; let _ = runtime::map_delete_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()); }`);
+        return;
+      }
       case "recordSet": {
         const shape = this.records.get(stmt.shapeId);
         const field = shape?.fields.find((candidate) => candidate.name === stmt.field);
@@ -3536,7 +3602,10 @@ class RustEmitter {
       }
       case "jsonStringify": {
         const value = this.emitExpr(expr.value);
-        if (expr.value.type.kind !== "dyn" && !this.isRustJsonCompatible(expr.value.type)) {
+        const indexedDynRecord = expr.value.type.kind === "record" &&
+          this.records.get(expr.value.type.shapeId)?.indexValue?.kind === "dyn" &&
+          this.records.get(expr.value.type.shapeId)?.fields.length === 0;
+        if (expr.value.type.kind !== "dyn" && !indexedDynRecord && !this.isRustJsonCompatible(expr.value.type)) {
           this.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
         }
         const indent = (expr as typeof expr & { indent?: string }).indent;
@@ -3588,12 +3657,12 @@ class RustEmitter {
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
           case "function": test = functions.length === 0 ? "false" : `matches!(&${value}, ${functions.join(" | ")})`; break;
-          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Array(..) | ${name}::Object(..))`; break;
+          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Bytes(..) | ${name}::Array(..) | ${name}::Object(..))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
-          case "bytes": test = "false"; break;
+          case "bytes": test = `matches!(&${value}, ${name}::Bytes(..))`; break;
           case "truthy":
-            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), ${name}::Array(..) | ${name}::Object(..) => true${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
+            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), ${name}::Bytes(..) | ${name}::Array(..) | ${name}::Object(..) => true${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
             break;
         }
         if (expr.negated) test = `!(${test})`;
