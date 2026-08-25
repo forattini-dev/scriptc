@@ -14,6 +14,7 @@ impl HeapValue for usize {}
 impl HeapValue for () {}
 impl HeapValue for JsString {}
 impl HeapValue for JsRegex {}
+impl HeapValue for JsSymbol {}
 impl HeapValue for JsUrl {}
 impl HeapValue for JsSearchParams {}
 impl HeapValue for JsError {}

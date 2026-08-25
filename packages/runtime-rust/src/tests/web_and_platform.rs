@@ -201,6 +201,26 @@
     }
 
     #[test]
+    fn symbols_preserve_fresh_and_registered_identity() {
+        let first = symbol_new(&string("key"));
+        let second = symbol_new(&string("key"));
+        let anonymous = symbol_new_anonymous();
+        assert!(!symbol_ptr_eq(&first, &second));
+        assert!(symbol_ptr_eq(&first, &first));
+        assert_eq!(symbol_to_string(&first).as_ref(), "Symbol(key)");
+        assert_eq!(symbol_to_string(&anonymous).as_ref(), "Symbol()");
+        assert_eq!(symbol_description(&first).unwrap().as_ref(), "key");
+        assert!(symbol_description(&anonymous).is_none());
+
+        let registered = symbol_for(&string("registry.key"));
+        let same = symbol_for(&string("registry.key"));
+        assert!(symbol_ptr_eq(&registered, &same));
+        assert_eq!(symbol_description(&registered).unwrap().as_ref(), "registry.key");
+        assert_eq!(symbol_key_for(&registered).unwrap().as_ref(), "registry.key");
+        assert!(symbol_key_for(&first).is_none());
+    }
+
+    #[test]
     fn search_params_parse_mutate_encode_and_sync_live_urls() {
         let params = search_params_parse(&string("a=1&b=2&a=3"));
         assert_eq!(search_params_to_string(&params).as_ref(), "a=1&b=2&a=3");

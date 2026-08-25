@@ -157,6 +157,29 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "str.b64Missing" && expr.args.length === 0) {
     return "runtime::string_base64_missing_argument()";
   }
+  if (expr.fn === "sym.new" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::symbol_new(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "sym.newAnon" && expr.args.length === 0) {
+    return "runtime::symbol_new_anonymous()";
+  }
+  if (expr.fn === "sym.for" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::symbol_for(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "sym.toString" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::symbol_to_string(&(${context.emitExpr(arg)}))`;
+  }
+  if ((expr.fn === "sym.desc" || expr.fn === "sym.keyFor") &&
+    expr.args.length === 1 && arg !== undefined) {
+    if (expr.type.kind !== "union") context.unsupported(`${expr.fn} without an optional result union`, expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (stringTag < 0 || undefinedTag < 0) context.unsupported(`${expr.fn} result union shape`, expr.loc);
+    const name = context.unionName(union.id);
+    const helper = expr.fn === "sym.desc" ? "symbol_description" : "symbol_key_for";
+    return `match runtime::${helper}(&(${context.emitExpr(arg)})) { Some(value) => ${name}::${context.unionVariant(stringTag)}(value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
   if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
   if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
   if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";

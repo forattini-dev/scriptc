@@ -12,6 +12,7 @@ impl ArrayElement for bool {}
 impl ArrayElement for usize {}
 impl ArrayElement for JsString {}
 impl ArrayElement for JsRegex {}
+impl ArrayElement for JsSymbol {}
 
 impl JoinElement for f64 {
     fn append_joined(&self, output: &mut String) {

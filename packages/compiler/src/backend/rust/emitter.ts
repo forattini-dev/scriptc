@@ -1477,6 +1477,7 @@ class RustEmitter {
           comparison = "left.ptr_eq(right)";
           break;
         case "regex":
+        case "symbol":
         case "url":
         case "searchParams":
           comparison = "std::rc::Rc::ptr_eq(left, right)";
@@ -1805,6 +1806,7 @@ class RustEmitter {
         case "func":
         case "promise":
         case "regex":
+        case "symbol":
         case "url":
         case "searchParams":
         case "dyn":
@@ -4712,7 +4714,7 @@ class RustEmitter {
   }
 
   private emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string {
-    if ((expr.left.type.kind === "regex" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams") &&
+    if ((expr.left.type.kind === "regex" || expr.left.type.kind === "symbol" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams") &&
         (expr.op === "===" || expr.op === "!==")) {
       const compare = `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
@@ -4915,6 +4917,7 @@ class RustEmitter {
       case "func": return "true";
       case "promise": return "true";
       case "regex": return "true";
+      case "symbol": return "true";
       case "url": return "true";
       case "searchParams": return "true";
       case "classval": return "true";
@@ -4941,7 +4944,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "url" || type.kind === "searchParams") {
+      if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams") {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
@@ -4965,7 +4968,7 @@ class RustEmitter {
     const global = this.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "url" || global.type.kind === "searchParams") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
+      if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "symbol" || global.type.kind === "url" || global.type.kind === "searchParams") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
       if (global.type.kind === "f64" || global.type.kind === "date" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
@@ -5045,6 +5048,7 @@ class RustEmitter {
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
       case "regex": return "runtime::JsRegex";
+      case "symbol": return "runtime::JsSymbol";
       case "url": return "runtime::JsUrl";
       case "searchParams": return "runtime::JsSearchParams";
       case "caught": return "runtime::Caught";
@@ -5059,6 +5063,7 @@ class RustEmitter {
       case "date": return "0.0";
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
+      case "symbol": return "runtime::symbol_new_anonymous()";
       case "array": return "runtime::array_new(Vec::new())";
       case "bytes": return `runtime::bytes_empty::<${this.rustBytesElement(type.elem)}>()`;
       case "map": return "runtime::map_new()";
@@ -5349,7 +5354,7 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "regex" || type.kind === "url" || type.kind === "searchParams" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
+    return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
       (type.kind === "object" && RUNTIME_ERROR_CLASSES.has(type.className)) || this.isTracedHandle(type);
   }
 
@@ -5364,6 +5369,8 @@ class RustEmitter {
         return `${left} == ${right}`;
       case "string":
         return `${left}.as_ref() == ${right}.as_ref()`;
+      case "symbol":
+        return `runtime::symbol_ptr_eq(${left}, ${right})`;
       case "array":
       case "record":
       case "func":
@@ -5379,6 +5386,7 @@ class RustEmitter {
   private mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string {
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
+    if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
     this.unsupported(`map key '${type.kind}'`, loc);
   }
 
@@ -5450,6 +5458,7 @@ class RustEmitter {
       case "func":
       case "promise":
       case "regex":
+      case "symbol":
       case "url":
       case "searchParams":
       case "undefinedT":
