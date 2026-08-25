@@ -4,7 +4,8 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::{Rc, Weak};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
 
@@ -46,6 +47,7 @@ thread_local! {
     static FIRING_TIMER_REFRESHED: Cell<bool> = const { Cell::new(false) };
     static FIRING_TIMER_CLEARED: Cell<bool> = const { Cell::new(false) };
     static FIRING_TIMER_REFERENCED: Cell<bool> = const { Cell::new(true) };
+    static FS_RENAME_CALLBACKS: RefCell<HashMap<u64, FsRenameCallback>> = RefCell::new(HashMap::new());
 }
 
 /// Visitor used by generated heap payloads to expose owning edges.
@@ -317,6 +319,7 @@ pub fn collect_cycles() -> usize {
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    fs_renames_finish();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
@@ -538,9 +541,11 @@ pub fn process_active_resources() -> JsArray<JsString> {
                 && FIRING_TIMER_CLEARED.with(|cleared| !cleared.get()),
         );
     let immediate_count = IMMEDIATE_TASKS.with(|tasks| tasks.borrow().len());
-    let mut resources = Vec::with_capacity(timer_count + immediate_count);
+    let rename_count = FS_RENAME_CALLBACKS.with(|callbacks| callbacks.borrow().len());
+    let mut resources = Vec::with_capacity(timer_count + immediate_count + rename_count);
     resources.extend((0..timer_count).map(|_| string("Timeout")));
     resources.extend((0..immediate_count).map(|_| string("Immediate")));
+    resources.extend((0..rename_count).map(|_| string("FSReqCallback")));
     array_new(resources)
 }
 
@@ -700,9 +705,14 @@ pub fn run_event_loop() {
             continue;
         }
 
+        if fs_renames_dispatch_one() {
+            continue;
+        }
+
         let has_referenced_work = TIMER_TASKS
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
-            || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced));
+            || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
+            || fs_renames_pending();
         if !has_referenced_work {
             break;
         }
@@ -771,6 +781,12 @@ pub fn run_event_loop() {
                 .map(|task| task.due)
                 .min()
         });
+        if fs_renames_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            fs_renames_wait(wait);
+            continue;
+        }
         let Some(next_due) = next_due else { break };
         if let Some(wait) = next_due.checked_duration_since(std::time::Instant::now()) {
             std::thread::sleep(wait);
@@ -2717,13 +2733,17 @@ fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! 
 }
 
 fn throw_fs_error2(operation: &str, from: &JsString, to: &JsString, error: std::io::Error) -> ! {
-    let code = fs_error_code(&error);
-    let text = fs_error_text(&error);
-    throw_value(JsError {
+    throw_value(fs_error2(operation, from, to, &error))
+}
+
+fn fs_error2(operation: &str, from: &str, to: &str, error: &std::io::Error) -> JsError {
+    let code = fs_error_code(error);
+    let text = fs_error_text(error);
+    JsError {
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{from}' -> '{to}'"),
         code: Some(code.to_owned()),
-    })
+    }
 }
 
 fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
@@ -3002,6 +3022,234 @@ pub fn fs_copy_file(from: &JsString, to: &JsString) {
 pub fn fs_rename(from: &JsString, to: &JsString) {
     if let Err(error) = std::fs::rename(from.as_ref(), to.as_ref()) {
         throw_fs_error2("rename", from, to, error);
+    }
+}
+
+struct FsRenameWork {
+    id: u64,
+    owner: std::thread::ThreadId,
+    from: String,
+    to: String,
+}
+
+struct FsRenameCompletion {
+    id: u64,
+    owner: std::thread::ThreadId,
+    result: std::io::Result<()>,
+}
+
+struct FsRenameState {
+    work: VecDeque<FsRenameWork>,
+    done: VecDeque<FsRenameCompletion>,
+}
+
+struct FsRenamePool {
+    state: Mutex<FsRenameState>,
+    work_ready: Condvar,
+    done_ready: Condvar,
+    worker_count: AtomicUsize,
+}
+
+struct FsRenameCallback {
+    from: JsString,
+    to: JsString,
+    callback: Box<dyn FnOnce(Option<JsError>)>,
+}
+
+static FS_RENAME_POOL: OnceLock<Arc<FsRenamePool>> = OnceLock::new();
+static NEXT_FS_RENAME_ID: AtomicU64 = AtomicU64::new(1);
+
+fn fs_rename_pool() -> &'static Arc<FsRenamePool> {
+    FS_RENAME_POOL.get_or_init(|| {
+        let pool = Arc::new(FsRenamePool {
+            state: Mutex::new(FsRenameState {
+                work: VecDeque::new(),
+                done: VecDeque::new(),
+            }),
+            work_ready: Condvar::new(),
+            done_ready: Condvar::new(),
+            worker_count: AtomicUsize::new(0),
+        });
+        for index in 0..4 {
+            let worker_pool = pool.clone();
+            if std::thread::Builder::new()
+                .name(format!("scriptc-fs-{index}"))
+                .spawn(move || fs_rename_worker(worker_pool))
+                .is_ok()
+            {
+                pool.worker_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        pool
+    })
+}
+
+fn fs_rename_worker(pool: Arc<FsRenamePool>) {
+    loop {
+        let work = {
+            let state = pool
+                .state
+                .lock()
+                .expect("scriptc: poisoned fs worker queue");
+            let mut state = pool
+                .work_ready
+                .wait_while(state, |state| state.work.is_empty())
+                .expect("scriptc: poisoned fs worker queue");
+            state
+                .work
+                .pop_front()
+                .expect("scriptc: awakened fs worker without work")
+        };
+        let result = std::fs::rename(&work.from, &work.to);
+        let mut state = pool
+            .state
+            .lock()
+            .expect("scriptc: poisoned fs completion queue");
+        state.done.push_back(FsRenameCompletion {
+            id: work.id,
+            owner: work.owner,
+            result,
+        });
+        pool.done_ready.notify_all();
+    }
+}
+
+pub fn fs_rename_async(from: &JsString, to: &JsString, callback: Box<dyn FnOnce(Option<JsError>)>) {
+    let id = NEXT_FS_RENAME_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("scriptc: exhausted fs.rename request ids");
+    let owner = std::thread::current().id();
+    FS_RENAME_CALLBACKS.with(|callbacks| {
+        let previous = callbacks.borrow_mut().insert(
+            id,
+            FsRenameCallback {
+                from: from.clone(),
+                to: to.clone(),
+                callback,
+            },
+        );
+        assert!(
+            previous.is_none(),
+            "scriptc: duplicate fs.rename request id"
+        );
+    });
+    let pool = fs_rename_pool();
+    let mut state = pool
+        .state
+        .lock()
+        .expect("scriptc: poisoned fs worker queue");
+    if pool.worker_count.load(Ordering::Relaxed) == 0 {
+        state.done.push_back(FsRenameCompletion {
+            id,
+            owner,
+            result: Err(std::io::Error::new(
+                std::io::ErrorKind::ResourceBusy,
+                "could not create fs worker",
+            )),
+        });
+        pool.done_ready.notify_all();
+        return;
+    }
+    state.work.push_back(FsRenameWork {
+        id,
+        owner,
+        from: from.to_string(),
+        to: to.to_string(),
+    });
+    pool.work_ready.notify_one();
+}
+
+fn fs_renames_pending() -> bool {
+    FS_RENAME_CALLBACKS.with(|callbacks| !callbacks.borrow().is_empty())
+}
+
+fn fs_rename_completion_index(
+    state: &FsRenameState,
+    owner: std::thread::ThreadId,
+) -> Option<usize> {
+    state
+        .done
+        .iter()
+        .position(|completion| completion.owner == owner)
+}
+
+fn fs_renames_dispatch_one() -> bool {
+    if !fs_renames_pending() {
+        return false;
+    }
+    let owner = std::thread::current().id();
+    let completion = {
+        let pool = fs_rename_pool();
+        let mut state = pool
+            .state
+            .lock()
+            .expect("scriptc: poisoned fs completion queue");
+        let Some(index) = fs_rename_completion_index(&state, owner) else {
+            return false;
+        };
+        state
+            .done
+            .remove(index)
+            .expect("scriptc: missing fs.rename completion")
+    };
+    let pending =
+        FS_RENAME_CALLBACKS.with(|callbacks| callbacks.borrow_mut().remove(&completion.id));
+    let Some(pending) = pending else {
+        return false;
+    };
+    let error = completion
+        .result
+        .err()
+        .map(|error| fs_error2("rename", &pending.from, &pending.to, &error));
+    (pending.callback)(error);
+    true
+}
+
+fn fs_renames_wait(timeout: Option<std::time::Duration>) {
+    let owner = std::thread::current().id();
+    let pool = fs_rename_pool();
+    let state = pool
+        .state
+        .lock()
+        .expect("scriptc: poisoned fs completion queue");
+    if fs_rename_completion_index(&state, owner).is_some() {
+        return;
+    }
+    if let Some(timeout) = timeout {
+        let _ = pool
+            .done_ready
+            .wait_timeout_while(state, timeout, |state| {
+                fs_rename_completion_index(state, owner).is_none()
+            })
+            .expect("scriptc: poisoned fs completion queue");
+    } else {
+        drop(
+            pool.done_ready
+                .wait_while(state, |state| {
+                    fs_rename_completion_index(state, owner).is_none()
+                })
+                .expect("scriptc: poisoned fs completion queue"),
+        );
+    }
+}
+
+fn fs_renames_finish() {
+    while fs_renames_pending() {
+        fs_renames_wait(None);
+        let owner = std::thread::current().id();
+        let removed = {
+            let pool = fs_rename_pool();
+            let mut state = pool
+                .state
+                .lock()
+                .expect("scriptc: poisoned fs completion queue");
+            fs_rename_completion_index(&state, owner).and_then(|index| state.done.remove(index))
+        };
+        if let Some(completion) = removed {
+            FS_RENAME_CALLBACKS.with(|callbacks| {
+                callbacks.borrow_mut().remove(&completion.id);
+            });
+        }
     }
 }
 
@@ -5039,6 +5287,89 @@ mod tests {
         assert_eq!(long.encode_utf16().count(), 131);
         assert!(long.starts_with('\''));
         assert!(long.ends_with("..."));
+    }
+
+    #[test]
+    fn rename_workers_progress_and_checkpoint_each_callback() {
+        init();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the test clock must follow the Unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "scriptc-runtime-rename-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).expect("the rename fixture directory must be creatable");
+        let source_a = dir.join("a.txt");
+        let source_b = dir.join("b.txt");
+        let destination_a = dir.join("a-done.txt");
+        let destination_b = dir.join("b-done.txt");
+        std::fs::write(&source_a, b"a").expect("the first rename fixture must be writable");
+        std::fs::write(&source_b, b"b").expect("the second rename fixture must be writable");
+
+        let callbacks = Rc::new(Cell::new(0));
+        let ticks = Rc::new(Cell::new(0));
+        let microtasks = Rc::new(Cell::new(0));
+        let callback =
+            |callbacks: Rc<Cell<i32>>, ticks: Rc<Cell<i32>>, microtasks: Rc<Cell<i32>>| {
+                Box::new(move |error: Option<JsError>| {
+                    assert!(error.is_none());
+                    callbacks.set(callbacks.get() + 1);
+                    if callbacks.get() == 2 {
+                        assert_eq!(ticks.get(), 1);
+                        assert_eq!(microtasks.get(), 1);
+                    }
+                    let next_ticks = ticks.clone();
+                    process_next_tick(Box::new(move || next_ticks.set(next_ticks.get() + 1)));
+                    let queued_microtasks = microtasks.clone();
+                    timer_queue_microtask(Box::new(move || {
+                        queued_microtasks.set(queued_microtasks.get() + 1);
+                    }));
+                }) as Box<dyn FnOnce(Option<JsError>)>
+            };
+
+        let source_a_string: JsString = Rc::from(source_a.to_string_lossy().as_ref());
+        let source_b_string: JsString = Rc::from(source_b.to_string_lossy().as_ref());
+        let destination_a_string: JsString = Rc::from(destination_a.to_string_lossy().as_ref());
+        let destination_b_string: JsString = Rc::from(destination_b.to_string_lossy().as_ref());
+        fs_rename_async(
+            &source_a_string,
+            &destination_a_string,
+            callback(callbacks.clone(), ticks.clone(), microtasks.clone()),
+        );
+        fs_rename_async(
+            &source_b_string,
+            &destination_b_string,
+            callback(callbacks.clone(), ticks.clone(), microtasks.clone()),
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while (source_a.exists() || source_b.exists()) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(!source_a.exists() && !source_b.exists());
+        assert_eq!(callbacks.get(), 0);
+        run_event_loop();
+        assert_eq!(callbacks.get(), 2);
+        assert_eq!(ticks.get(), 2);
+        assert_eq!(microtasks.get(), 2);
+
+        let abandoned_source = dir.join("abandoned.txt");
+        let abandoned_destination = dir.join("abandoned-done.txt");
+        std::fs::write(&abandoned_source, b"cleanup")
+            .expect("the abandoned rename fixture must be writable");
+        let abandoned_called = Rc::new(Cell::new(false));
+        let abandoned_callback = abandoned_called.clone();
+        fs_rename_async(
+            &Rc::from(abandoned_source.to_string_lossy().as_ref()),
+            &Rc::from(abandoned_destination.to_string_lossy().as_ref()),
+            Box::new(move |_| abandoned_callback.set(true)),
+        );
+        finish();
+        assert!(abandoned_destination.exists());
+        assert!(!abandoned_called.get());
+        std::fs::remove_dir_all(dir).expect("the rename fixture directory must be removable");
     }
 
     #[test]

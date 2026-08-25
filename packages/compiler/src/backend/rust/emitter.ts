@@ -88,6 +88,7 @@ class RustEmitter {
   private readonly promiseResolverTypes = new Map<string, IrType>();
   private readonly promiseRejectorTypes = new Map<string, IrType[]>();
   private readonly internedClosureTargets = new Set<string>();
+  private readonly chainValues = new Map<string, string>();
   private indent = 0;
   private temporary = 0;
   private currentFunction: IrFunction | null = null;
@@ -2588,6 +2589,39 @@ class RustEmitter {
         }).join(", ");
         return `{ let ${left} = ${this.emitExpr(expr.left)}; match ${left} { ${arms} } }`;
       }
+      case "optChain": {
+        if (expr.receiver.type.kind !== "union") this.unsupported("optional chain over a non-union", expr.loc);
+        const source = this.union(expr.receiver.type.unionId, expr.loc);
+        const narrowedTags = source.arms.flatMap((arm, tag) => this.isUnit(arm) ? [] : [tag]);
+        const unitTags = source.arms.flatMap((arm, tag) => this.isUnit(arm) ? [tag] : []);
+        if (narrowedTags.length !== 1 || unitTags.length === 0) this.unsupported("optional chain union shape", expr.loc);
+        let absent: string;
+        if (expr.type.kind === "void") {
+          absent = "()";
+        } else {
+          if (expr.type.kind !== "union") this.unsupported("optional chain result without undefined union", expr.loc);
+          const result = this.union(expr.type.unionId, expr.loc);
+          const undefinedTag = result.arms.findIndex((arm) => arm.kind === "undefinedT");
+          if (undefinedTag < 0) this.unsupported("optional chain result without undefined arm", expr.loc);
+          absent = `${this.unionName(result.id)}::${this.unionVariant(undefinedTag)}`;
+        }
+        if (this.chainValues.has(expr.id)) this.unsupported(`nested optional chain '${expr.id}'`, expr.loc);
+        const payload = `sc_chain_${this.temporary++}`;
+        this.chainValues.set(expr.id, payload);
+        const body = this.emitExpr(expr.body);
+        this.chainValues.delete(expr.id);
+        const sourceName = this.unionName(source.id);
+        const arms = source.arms.map((arm, tag) => {
+          const variant = `${sourceName}::${this.unionVariant(tag)}`;
+          return this.isUnit(arm) ? `${variant} => ${absent}` : `${variant}(${payload}) => ${body}`;
+        }).join(", ");
+        return `match ${this.emitExpr(expr.receiver)} { ${arms} }`;
+      }
+      case "chainRecv": {
+        const value = this.chainValues.get(expr.id);
+        if (value === undefined) this.unsupported(`optional-chain receiver '${expr.id}' outside its body`, expr.loc);
+        return this.needsClone(expr.type) ? `${value}.clone()` : value;
+      }
       case "toBool": {
         const operand = this.emitExpr(expr.operand);
         const temp = `sc_rt_${this.temporary++}`;
@@ -3292,6 +3326,9 @@ class RustEmitter {
         if (expr.fn === "fs.renameSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_rename(&(${this.emitExpr(arg)}), &(${this.emitExpr(expr.args[1])}))`;
         }
+        if (expr.fn === "fs.renameCb") {
+          return this.emitFsRenameCallback(expr);
+        }
         if (expr.fn === "fs.chmodSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::fs_chmod(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
         }
@@ -3881,6 +3918,38 @@ class RustEmitter {
           : `runtime::file_handle_write_str(&${value(0)}, &${value(1)}, ${value(2)}, &${value(3)})`;
       return `{ let sc_count = ${operation}; let sc_buffer = ${value(1)}; runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
     });
+  }
+
+  private emitFsRenameCallback(expr: Extract<IrExpr, { kind: "libCall" }>): string {
+    const [fromExpr, toExpr, callbackExpr] = expr.args;
+    if (fromExpr === undefined || toExpr === undefined || callbackExpr === undefined || expr.args.length !== 3) {
+      this.unsupported("fs.rename callback argument shape", expr.loc);
+    }
+    if (callbackExpr.type.kind !== "func" || callbackExpr.type.params.length > 1) {
+      this.unsupported("fs.rename callback type", expr.loc);
+    }
+    const callbackType = callbackExpr.type;
+    const from = `sc_rt_${this.temporary++}`;
+    const to = `sc_rt_${this.temporary++}`;
+    const callback = `sc_rt_${this.temporary++}`;
+    let invoke: string;
+    const parameter = callbackType.params[0];
+    if (parameter === undefined) {
+      invoke = `let _ = sc_error; ${this.emitClosureDispatch(callback, callbackType, [], expr.loc)};`;
+    } else {
+      if (parameter.kind !== "union") this.unsupported("fs.rename callback error parameter", expr.loc);
+      const union = this.union(parameter.unionId, expr.loc);
+      const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+      const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+      if (errorTag < 0 || nullTag < 0) this.unsupported("fs.rename callback Error | null union", expr.loc);
+      const name = this.unionName(union.id);
+      const errorPayload = this.errorClassRoots().length === 0
+        ? "error"
+        : `${this.errorValueName()}::Builtin(error)`;
+      const argument = `match sc_error { Some(error) => ${name}::${this.unionVariant(errorTag)}(${errorPayload}), None => ${name}::${this.unionVariant(nullTag)}, }`;
+      invoke = `let sc_argument = ${argument}; ${this.emitClosureDispatch(callback, callbackType, ["sc_argument"], expr.loc)};`;
+    }
+    return `{ let ${from} = ${this.emitExpr(fromExpr)}; let ${to} = ${this.emitExpr(toExpr)}; let ${callback} = ${this.emitExpr(callbackExpr)}; runtime::fs_rename_async(&${from}, &${to}, Box::new(move |sc_error| { ${invoke} })); }`;
   }
 
   private emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string {
