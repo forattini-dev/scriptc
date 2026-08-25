@@ -566,6 +566,8 @@ export const STATIC_NUMBER_METHODS: Record<
   { fns: readonly IrLibFn[]; minArgs: number; maxArgs: number } | undefined
 > = {
   toFixed: { fns: ["num.toFixed0", "num.toFixed"], minArgs: 0, maxArgs: 1 },
+  toPrecision: { fns: ["num.toPrecision"], minArgs: 0, maxArgs: 1 },
+  toString: { fns: ["num.toRadixString"] as const, minArgs: 0, maxArgs: 1 },
 };
 
 /** One lowerable builtin-module FUNCTION: `fn`'s libCall with `params`

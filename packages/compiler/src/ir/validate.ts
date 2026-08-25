@@ -248,6 +248,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "num.toExponential": { argTypes: [F64], result: STRING },
   "num.toFixed0": { argTypes: [F64], result: STRING },
   "num.toFixed": { argTypes: [F64, F64], result: STRING },
+  "num.toPrecision": { argTypes: [F64, F64], result: STRING },
+  "num.toRadixString": { argTypes: [F64, F64], result: STRING },
   "num.sameValue": { argTypes: [F64, F64], result: BOOL },
   "intl.numFormatEnUs": { argTypes: [F64], result: STRING },
   "sym.new": { argTypes: [STRING], result: SYMBOL_T },

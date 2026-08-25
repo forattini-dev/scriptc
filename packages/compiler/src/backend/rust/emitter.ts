@@ -4588,6 +4588,12 @@ class RustEmitter {
         if (expr.fn === "num.toFixed" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::number_to_fixed(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
         }
+        if (expr.fn === "num.toPrecision" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::number_to_precision(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
+        }
+        if (expr.fn === "num.toRadixString" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::number_to_radix_string(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
+        }
         if (expr.fn === "num.sameValue" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::number_same_value(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
         }

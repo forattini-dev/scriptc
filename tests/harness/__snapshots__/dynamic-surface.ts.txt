@@ -1,30 +1,3 @@
-dynamic-surface.ts:10:12 - error SC2012: 'Math.sqrt' runs in the embedded dynamic engine, which this build does not include
-
-   9 | // appear here.)
-  10 | const up = Math.sqrt(2);
-     |            ^~~~~~~~~~~~
-  11 | const tau = Math.PI * 2;
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-dynamic-surface.ts:11:13 - error SC2012: 'Math.PI' runs in the embedded dynamic engine, which this build does not include
-
-  10 | const up = Math.sqrt(2);
-  11 | const tau = Math.PI * 2;
-     |             ^~~~~~~
-  12 | const price = (19.99).toPrecision(4);
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
-dynamic-surface.ts:12:15 - error SC2012: '.toPrecision()' on numbers runs in the embedded dynamic engine, which this build does not include
-
-  11 | const tau = Math.PI * 2;
-  12 | const price = (19.99).toPrecision(4);
-     |               ^~~~~~~~~~~~~~~~~~~~~~
-  13 | const swapped = "banana".replace("an", "AN");
-
-  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
-
 dynamic-surface.ts:13:17 - error SC2012: '.replace()' on strings runs in the embedded dynamic engine, which this build does not include
 
   12 | const price = (19.99).toPrecision(4);

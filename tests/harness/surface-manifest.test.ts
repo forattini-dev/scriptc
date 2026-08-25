@@ -117,6 +117,14 @@ const PROBES: Probe[] = [
   { id: "stdlib.map.has", source: 'const m = new Map<string, number>();\nm.set("a", 1);\nconsole.log(m.has("a"));\n' },
   { id: "stdlib.date.now", source: "console.log(Date.now() > 0);\n" },
   { id: "stdlib.number.toFixed", source: "const n = 1.2345;\nconsole.log(n.toFixed(2));\n" },
+  {
+    id: "stdlib.number.toPrecision",
+    source: "const n = 1.2345;\nconsole.log(n.toPrecision(3));\n",
+  },
+  {
+    id: "stdlib.number.toString",
+    source: "const n = 255;\nconsole.log(n.toString(16));\n",
+  },
   { id: "stdlib.abort-signal.timeout", source: "const signal = AbortSignal.timeout(1000);\nconsole.log(signal.aborted);\n" },
   {
     id: "stdlib.abort-controller.constructor",

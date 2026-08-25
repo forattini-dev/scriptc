@@ -2153,15 +2153,21 @@ export type IrLibFn =
   | "str.atob"
   | "str.btoa"
   | "str.b64Missing"
-  /** Number.prototype formatters (scr_lib.c), JS-exact:
+  /** Number.prototype formatters (scr_lib.c/scr_dtoa.c), JS-exact:
    * num.toExponential is toExponential() with the spec's "as many digits
    * as necessary"; num.toFixed0 is the non-throwing omitted-argument
    * toFixed() fast path; num.toFixed implements an explicit fractionDigits
    * with exact binary-value rounding and THROWS RangeError outside 0..100.
+   * num.toPrecision implements the explicit significant-digit form and
+   * THROWS outside 1..100. num.toRadixString is Number::toString for an
+   * explicit radix, reproducing Node/V8's permitted digit sequence, and
+   * THROWS outside 2..36.
    * Successful results +1. */
   | "num.toExponential"
   | "num.toFixed0"
   | "num.toFixed"
+  | "num.toPrecision"
+  | "num.toRadixString"
   /** Object.is over two numbers — the spec's SameValue on doubles: NaN
    * equals NaN, +0 differs from -0, everything else is `===`. Plain bool
    * result; never throws. (Union-armed operands take unionEq's sameValue
@@ -7004,6 +7010,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fetch.streamNew",
   "fetch.streamFrom",
   "num.toFixed",
+  "num.toPrecision",
+  "num.toRadixString",
   "insp.jsonDyn",
   // diagnostics_channel: publish runs subscribers synchronously (a throw
   // propagates — the documented divergence from triggerUncaughtException);

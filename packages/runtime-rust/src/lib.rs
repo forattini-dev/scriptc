@@ -7283,16 +7283,47 @@ impl FixedInteger {
         }
     }
 
-    fn multiply_by_five(&mut self) {
+    fn compare(&self, other: &Self) -> std::cmp::Ordering {
+        match self.limbs.len().cmp(&other.limbs.len()) {
+            std::cmp::Ordering::Equal => self.limbs.iter().rev().cmp(other.limbs.iter().rev()),
+            ordering => ordering,
+        }
+    }
+
+    fn subtract_assign(&mut self, other: &Self) {
+        assert!(self.compare(other) != std::cmp::Ordering::Less);
+        let mut borrow = 0_i64;
+        for index in 0..self.limbs.len() {
+            let difference = i64::from(self.limbs[index])
+                - i64::from(other.limbs.get(index).copied().unwrap_or(0))
+                - borrow;
+            if difference < 0 {
+                self.limbs[index] = (difference + (1_i64 << 32)) as u32;
+                borrow = 1;
+            } else {
+                self.limbs[index] = difference as u32;
+                borrow = 0;
+            }
+        }
+        assert_eq!(borrow, 0);
+        self.normalize();
+    }
+
+    fn multiply_small(&mut self, multiplier: u32) {
         let mut carry = 0_u64;
         for limb in &mut self.limbs {
-            let product = u64::from(*limb) * 5 + carry;
+            let product = u64::from(*limb) * u64::from(multiplier) + carry;
             *limb = product as u32;
             carry = product >> 32;
         }
         if carry != 0 {
             self.limbs.push(carry as u32);
         }
+        self.normalize();
+    }
+
+    fn multiply_by_five(&mut self) {
+        self.multiply_small(5);
     }
 
     fn bit(&self, bit: usize) -> bool {
@@ -7355,20 +7386,163 @@ impl FixedInteger {
         }
     }
 
-    fn divide_by_billion(&mut self) -> u32 {
+    fn set_bit(&mut self, bit: usize) {
+        let word = bit / 32;
+        self.limbs.resize(self.limbs.len().max(word + 1), 0);
+        self.limbs[word] |= 1_u32 << (bit % 32);
+    }
+
+    fn bit_length(&self) -> usize {
+        if self.is_zero() {
+            0
+        } else {
+            (self.limbs.len() - 1) * 32
+                + (32 - self.limbs.last().copied().unwrap_or(0).leading_zeros()) as usize
+        }
+    }
+
+    fn is_odd(&self) -> bool {
+        self.limbs[0] & 1 != 0
+    }
+
+    fn divide_rem(&self, divisor: &Self) -> (Self, Self) {
+        assert!(!divisor.is_zero());
+        if self.compare(divisor) == std::cmp::Ordering::Less {
+            return (Self::from_u64(0), self.clone());
+        }
+        let mut remainder = self.clone();
+        let shift = remainder.bit_length() - divisor.bit_length();
+        let mut shifted = divisor.clone();
+        shifted.shift_left(shift);
+        let mut quotient = Self::from_u64(0);
+        for bit in (0..=shift).rev() {
+            if remainder.compare(&shifted) != std::cmp::Ordering::Less {
+                remainder.subtract_assign(&shifted);
+                quotient.set_bit(bit);
+            }
+            shifted.shift_right(1);
+        }
+        quotient.normalize();
+        (quotient, remainder)
+    }
+
+    fn divide_small(&mut self, divisor: u32) -> u32 {
         let mut remainder = 0_u64;
         for limb in self.limbs.iter_mut().rev() {
             let current = (remainder << 32) | u64::from(*limb);
-            *limb = (current / 1_000_000_000) as u32;
-            remainder = current % 1_000_000_000;
+            *limb = (current / u64::from(divisor)) as u32;
+            remainder = current % u64::from(divisor);
         }
         self.normalize();
         remainder as u32
     }
 
+    fn divide_by_billion(&mut self) -> u32 {
+        self.divide_small(1_000_000_000)
+    }
+
     fn is_zero(&self) -> bool {
         self.limbs.len() == 1 && self.limbs[0] == 0
     }
+
+    fn to_radix_string(&self, radix: u32) -> String {
+        const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        if self.is_zero() {
+            return "0".to_owned();
+        }
+        let mut value = self.clone();
+        let mut reversed = Vec::new();
+        while !value.is_zero() {
+            reversed.push(DIGITS[value.divide_small(radix) as usize]);
+        }
+        reversed.reverse();
+        String::from_utf8(reversed).expect("scriptc: radix formatter emitted non-ASCII digits")
+    }
+}
+
+fn positive_f64_ratio(value: f64) -> (FixedInteger, usize) {
+    debug_assert!(value >= 0.0 && value.is_finite());
+    let bits = value.to_bits();
+    let ieee_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let mut mantissa = bits & ((1_u64 << 52) - 1);
+    let binary_exponent = if ieee_exponent == 0 {
+        -1074
+    } else {
+        mantissa |= 1_u64 << 52;
+        ieee_exponent - 1023 - 52
+    };
+    let mut numerator = FixedInteger::from_u64(mantissa);
+    if binary_exponent >= 0 {
+        numerator.shift_left(binary_exponent as usize);
+        (numerator, 0)
+    } else {
+        (numerator, (-binary_exponent) as usize)
+    }
+}
+
+fn rounded_ratio(
+    numerator: &FixedInteger,
+    denominator: &FixedInteger,
+    ties_up: bool,
+) -> FixedInteger {
+    let (mut quotient, remainder) = numerator.divide_rem(denominator);
+    let mut twice_remainder = remainder;
+    twice_remainder.shift_left(1);
+    let comparison = twice_remainder.compare(denominator);
+    if comparison == std::cmp::Ordering::Greater
+        || (comparison == std::cmp::Ordering::Equal && (ties_up || quotient.is_odd()))
+    {
+        quotient.increment();
+    }
+    quotient
+}
+
+fn rounded_decimal_integer(value: f64, decimal_scale: i32) -> FixedInteger {
+    let (mut numerator, denominator_bits) = positive_f64_ratio(value);
+    let mut denominator = FixedInteger::from_u64(1);
+    if decimal_scale >= 0 {
+        for _ in 0..decimal_scale {
+            numerator.multiply_by_five();
+        }
+        let binary_shift = decimal_scale - denominator_bits as i32;
+        if binary_shift >= 0 {
+            numerator.shift_left(binary_shift as usize);
+        } else {
+            denominator.shift_left((-binary_shift) as usize);
+        }
+    } else {
+        let inverse_scale = -decimal_scale;
+        for _ in 0..inverse_scale {
+            denominator.multiply_by_five();
+        }
+        let binary_shift = -(denominator_bits as i32) - inverse_scale;
+        if binary_shift >= 0 {
+            numerator.shift_left(binary_shift as usize);
+        } else {
+            denominator.shift_left((-binary_shift) as usize);
+        }
+    }
+    rounded_ratio(&numerator, &denominator, true)
+}
+
+fn decimal_exponent(value: f64) -> i32 {
+    let plain = format_number(value);
+    if let Some((_, exponent)) = plain.split_once('e') {
+        return exponent
+            .parse::<i32>()
+            .expect("scriptc: formatted number has an invalid exponent");
+    }
+    if let Some(decimal) = plain.find('.') {
+        if decimal != 1 || !plain.starts_with('0') {
+            return decimal as i32 - 1;
+        }
+        let first = plain
+            .bytes()
+            .position(|digit| digit >= b'1' && digit <= b'9')
+            .expect("scriptc: non-zero number formatted without a non-zero digit");
+        return 1 - first as i32;
+    }
+    plain.len() as i32 - 1
 }
 
 pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
@@ -7513,6 +7687,178 @@ pub fn number_to_exponential(value: f64) -> JsString {
     }
     output.push_str(&exponent.to_string());
     Rc::from(output)
+}
+
+pub fn number_to_precision(value: f64, precision: f64) -> JsString {
+    let precision = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
+    if !value.is_finite() {
+        return Rc::from(format_number(value));
+    }
+    if !(1.0..=100.0).contains(&precision) {
+        throw_range_error("toPrecision() argument must be between 1 and 100".to_owned());
+    }
+    let precision = precision as usize;
+    let negative = value < 0.0;
+    let magnitude = value.abs();
+    let mut exponent = if magnitude == 0.0 {
+        0
+    } else {
+        decimal_exponent(magnitude)
+    };
+    let mut digits = if magnitude == 0.0 {
+        "0".repeat(precision)
+    } else {
+        let mut rounded = rounded_decimal_integer(magnitude, precision as i32 - exponent - 1);
+        let mut rendered = rounded.to_radix_string(10);
+        if rendered.len() > precision {
+            assert_eq!(rounded.divide_small(10), 0);
+            exponent += 1;
+            rendered = rounded.to_radix_string(10);
+        }
+        while rendered.len() < precision {
+            rendered.insert(0, '0');
+        }
+        rendered
+    };
+
+    let mut output = String::with_capacity(precision + exponent.unsigned_abs() as usize + 8);
+    if negative {
+        output.push('-');
+    }
+    if exponent < -6 || exponent >= precision as i32 {
+        output.push(digits.remove(0));
+        if !digits.is_empty() {
+            output.push('.');
+            output.push_str(&digits);
+        }
+        output.push('e');
+        if exponent >= 0 {
+            output.push('+');
+        }
+        output.push_str(&exponent.to_string());
+    } else if exponent == precision as i32 - 1 {
+        output.push_str(&digits);
+    } else if exponent >= 0 {
+        let split = exponent as usize + 1;
+        output.push_str(&digits[..split]);
+        output.push('.');
+        output.push_str(&digits[split..]);
+    } else {
+        output.push_str("0.");
+        for _ in 0..-exponent - 1 {
+            output.push('0');
+        }
+        output.push_str(&digits);
+    }
+    Rc::from(output)
+}
+
+pub fn number_to_radix_string(value: f64, radix: f64) -> JsString {
+    let radix = if radix.is_nan() { 0.0 } else { radix.trunc() };
+    if !(2.0..=36.0).contains(&radix) {
+        throw_range_error("toString() radix argument must be between 2 and 36".to_owned());
+    }
+    let radix = radix as u32;
+    if radix == 10 {
+        return Rc::from(format_number(value));
+    }
+    if value.is_nan() {
+        return string("NaN");
+    }
+    if value == f64::INFINITY {
+        return string("Infinity");
+    }
+    if value == f64::NEG_INFINITY {
+        return string("-Infinity");
+    }
+    if value == 0.0 {
+        return string("0");
+    }
+
+    // Match V8's implementation, including its observable choice among the
+    // representations permitted by Number::toString for non-decimal radices.
+    // The algorithm deliberately performs each digit step in binary64.
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    const CAPACITY: usize = 2200;
+    let mut buffer = [0_u8; CAPACITY];
+    let midpoint = CAPACITY / 2;
+    let mut integer_cursor = midpoint;
+    let mut fraction_cursor = midpoint;
+    let negative = value < 0.0;
+    let magnitude = value.abs();
+    let mut integer = magnitude.floor();
+    let mut fraction = magnitude - integer;
+    let next = f64::from_bits(magnitude.to_bits() + 1);
+    let mut delta = 0.5 * (next - magnitude);
+    if delta <= 0.0 {
+        delta = f64::from_bits(1);
+    }
+
+    if fraction >= delta {
+        buffer[fraction_cursor] = b'.';
+        fraction_cursor += 1;
+        loop {
+            fraction *= f64::from(radix);
+            delta *= f64::from(radix);
+            let mut digit = fraction as usize;
+            buffer[fraction_cursor] = DIGITS[digit];
+            fraction_cursor += 1;
+            fraction -= digit as f64;
+
+            if (fraction > 0.5 || (fraction == 0.5 && digit & 1 != 0)) && fraction + delta > 1.0 {
+                loop {
+                    fraction_cursor -= 1;
+                    if fraction_cursor == midpoint {
+                        debug_assert_eq!(buffer[fraction_cursor], b'.');
+                        integer += 1.0;
+                        break;
+                    }
+                    digit = match buffer[fraction_cursor] {
+                        byte @ b'0'..=b'9' => usize::from(byte - b'0'),
+                        byte => usize::from(byte - b'a' + 10),
+                    };
+                    if digit + 1 < radix as usize {
+                        buffer[fraction_cursor] = DIGITS[digit + 1];
+                        fraction_cursor += 1;
+                        break;
+                    }
+                }
+                break;
+            }
+            if fraction < delta {
+                break;
+            }
+        }
+    }
+
+    let radix_float = f64::from(radix);
+    // V8's base::Double::Exponent() is relative to its 53-bit significand.
+    while integer / radix_float >= 9_007_199_254_740_992.0 {
+        integer /= radix_float;
+        integer_cursor -= 1;
+        buffer[integer_cursor] = b'0';
+    }
+    loop {
+        let remainder = integer % radix_float;
+        integer_cursor -= 1;
+        buffer[integer_cursor] = DIGITS[remainder as usize];
+        integer = (integer - remainder) / radix_float;
+        if integer <= 0.0 {
+            break;
+        }
+    }
+    if negative {
+        integer_cursor -= 1;
+        buffer[integer_cursor] = b'-';
+    }
+    Rc::from(
+        std::str::from_utf8(&buffer[integer_cursor..fraction_cursor])
+            .expect("scriptc: radix formatter emitted non-ASCII digits"),
+    )
 }
 
 thread_local! {
@@ -8307,6 +8653,68 @@ mod tests {
         }
         assert_eq!(number_to_exponential(0.0).as_ref(), "0e+0");
         assert_eq!(number_to_exponential(-0.0).as_ref(), "0e+0");
+    }
+
+    #[test]
+    fn precision_number_formatting_rounds_the_exact_binary_value() {
+        for (value, precision, expected) in [
+            (1.25, 2.0, "1.3"),
+            (2.25, 2.0, "2.3"),
+            (9.95, 2.0, "9.9"),
+            (9.99, 2.0, "10"),
+            (1234.5678, 2.0, "1.2e+3"),
+            (1234.5678, 8.0, "1234.5678"),
+            (0.000123, 2.0, "0.00012"),
+            (1e21, 3.0, "1.00e+21"),
+            (1e-7, 3.0, "1.00e-7"),
+            (f64::from_bits(1), 5.0, "4.9407e-324"),
+            (f64::MAX, 5.0, "1.7977e+308"),
+            (-0.0, 3.0, "0.00"),
+            (f64::NAN, 2.0, "NaN"),
+            (f64::INFINITY, 0.0, "Infinity"),
+        ] {
+            assert_eq!(number_to_precision(value, precision).as_ref(), expected);
+        }
+    }
+
+    #[test]
+    fn radix_number_formatting_matches_v8_digit_boundaries() {
+        for (value, radix, expected) in [
+            (255.0, 16.0, "ff"),
+            (255.0, 2.0, "11111111"),
+            (511.0, 8.0, "777"),
+            (12345.0, 36.0, "9ix"),
+            (-255.0, 16.0, "-ff"),
+            (0.5, 2.0, "0.1"),
+            (
+                0.1,
+                2.0,
+                "0.0001100110011001100110011001100110011001100110011001101",
+            ),
+            (0.1, 3.0, "0.0022002200220022002200220022002201"),
+            (1.0 / 3.0, 16.0, "0.55555555555554"),
+            (std::f64::consts::PI, 36.0, "3.53i5ab8p5f"),
+            (
+                1.0000000000000002,
+                3.0,
+                "1.000000000000000000000000000000001",
+            ),
+            (
+                9_007_199_254_740_992.0,
+                3.0,
+                "1121202011211211122211100012101112",
+            ),
+            (0.0, 2.0, "0"),
+            (-0.0, 2.0, "0"),
+            (f64::NAN, 16.0, "NaN"),
+            (f64::INFINITY, 16.0, "Infinity"),
+        ] {
+            assert_eq!(number_to_radix_string(value, radix).as_ref(), expected);
+        }
+        let minimum = number_to_radix_string(f64::from_bits(1), 2.0);
+        assert_eq!(minimum.len(), 1076);
+        assert!(minimum.starts_with("0."));
+        assert!(minimum.ends_with('1'));
     }
 
     #[test]

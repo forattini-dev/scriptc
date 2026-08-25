@@ -3543,6 +3543,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_num_to_fixed0(${arg(0)})`);
           case "num.toFixed":
             return finish(`scr_num_to_fixed(${arg(0)}, ${arg(1)})`);
+          case "num.toPrecision":
+            return finish(`scr_num_to_precision(${arg(0)}, ${arg(1)})`);
+          case "num.toRadixString":
+            return finish(`scr_num_to_radix_string(${arg(0)}, ${arg(1)})`);
           // Object.is over two numbers — SameValue on doubles. No throw.
           case "num.sameValue":
             return finish(`scr_num_same_value(${arg(0)}, ${arg(1)})`);

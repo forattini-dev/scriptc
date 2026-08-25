@@ -5158,7 +5158,8 @@ const inliningPredicates = new Set<ts.Symbol>();
    * member spellings (`x.hasOwnProperty(...)` and `x['hasOwnProperty'](...)`
    * — JS resolves the two identically, so the element spelling routes here
    * from lowerCall's element-access hook):
-   *   - `n.toExponential()` and both `n.toFixed()` forms — the static
+   *   - `n.toExponential()`, both `n.toFixed()` forms, `n.toPrecision(p)`,
+   *     and `n.toString(radix)` — the static
    *     runtime formatters (num.toExponential's shortest-mantissa form,
    *     num.toFixed0's ties-up integer fast path, and num.toFixed's exact
    *     binary-value rounding for an explicit fractionDigits).
@@ -5179,9 +5180,9 @@ const inliningPredicates = new Set<ts.Symbol>();
     const recvKind = L.mapTypeOf(L.typeOf(recv))?.kind;
     if (recvKind !== "f64" && recvKind !== "bool" && recvKind !== "string") return null;
     const loc = locOf(call);
-    if (name === "toString" && call.arguments.length === 0) {
+    if ((name === "toString" || name === "toPrecision") && call.arguments.length === 0) {
       const operand = L.lowerExpr(recv);
-      if (operand.type.kind === "string") return operand; // identity
+      if (name === "toString" && operand.type.kind === "string") return operand; // identity
       if (operand.type.kind !== "f64" && operand.type.kind !== "bool") return null;
       return { kind: "toString", operand, type: STRING, loc };
     }
@@ -5226,6 +5227,108 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       if (operand.type.kind !== "f64" || digits.type.kind !== "f64") return null;
       return { kind: "libCall", fn: "num.toFixed", args: [operand, digits], type: STRING, loc };
+    }
+    if ((name === "toPrecision" || name === "toString") && recvKind === "f64" &&
+        call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const operand = L.lowerExpr(recv);
+      const argument = L.lowerExpr(call.arguments[0]!);
+      if (operand.type.kind !== "f64") return null;
+      const defaultResult = (receiver: IrExpr): IrExpr => ({
+        kind: "toString",
+        operand: receiver,
+        type: STRING,
+        loc,
+      });
+      if (argument.type.kind === "undefinedT" || argument.type.kind === "void") {
+        if (droppableStatic(argument)) return defaultResult(operand);
+        const receiverLocal = L.declareHiddenLocal("%numfmt.recv", F64);
+        const receiverRef: IrExpr = {
+          kind: "varRef",
+          localId: receiverLocal.id,
+          type: F64,
+          loc,
+        };
+        return {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: receiverLocal.id, init: operand, loc },
+            { kind: "exprStmt", expr: argument, loc: argument.loc },
+          ],
+          result: defaultResult(receiverRef),
+          type: STRING,
+          loc,
+        };
+      }
+      if (argument.type.kind === "union") {
+        const def = L.unions.get(argument.type.unionId);
+        const numberTag = def?.arms.findIndex((arm) => arm.kind === "f64") ?? -1;
+        const undefinedTag = def?.arms.findIndex((arm) => arm.kind === "undefinedT") ?? -1;
+        if (def?.arms.length === 2 && numberTag >= 0 && undefinedTag >= 0) {
+          const receiverLocal = L.declareHiddenLocal("%numfmt.recv", F64);
+          const argumentLocal = L.declareHiddenLocal("%numfmt.arg", argument.type);
+          const receiverRef: IrExpr = {
+            kind: "varRef",
+            localId: receiverLocal.id,
+            type: F64,
+            loc,
+          };
+          const argumentRef: IrExpr = {
+            kind: "varRef",
+            localId: argumentLocal.id,
+            type: argument.type,
+            loc,
+          };
+          return {
+            kind: "seqExpr",
+            stmts: [
+              { kind: "varDecl", localId: receiverLocal.id, init: operand, loc },
+              { kind: "varDecl", localId: argumentLocal.id, init: argument, loc },
+            ],
+            result: {
+              kind: "ternary",
+              cond: {
+                kind: "unionIsTag",
+                unionId: argument.type.unionId,
+                tag: undefinedTag,
+                negated: false,
+                value: argumentRef,
+                type: BOOL,
+                loc,
+              },
+              then: defaultResult(receiverRef),
+              else_: {
+                kind: "libCall",
+                fn: name === "toPrecision" ? "num.toPrecision" : "num.toRadixString",
+                args: [
+                  receiverRef,
+                  {
+                    kind: "unionNarrow",
+                    unionId: argument.type.unionId,
+                    tag: numberTag,
+                    value: argumentRef,
+                    type: F64,
+                    loc,
+                  },
+                ],
+                type: STRING,
+                loc,
+              },
+              type: STRING,
+              loc,
+            },
+            type: STRING,
+            loc,
+          };
+        }
+      }
+      if (argument.type.kind !== "f64") return null;
+      return {
+        kind: "libCall",
+        fn: name === "toPrecision" ? "num.toPrecision" : "num.toRadixString",
+        args: [operand, argument],
+        type: STRING,
+        loc,
+      };
     }
     // Number.prototype.toLocaleString("en-US") — the spec makes it
     // NumberFormat(locale).format(this), so the en-US embedded formatter
