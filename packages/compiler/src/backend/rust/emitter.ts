@@ -2719,6 +2719,57 @@ class RustEmitter {
       }
       case "bytesIntrinsic": {
         if (expr.receiver.type.kind !== "bytes") this.unsupported("bytes intrinsic receiver", expr.loc);
+        if ([
+          "equals", "compareBuf", "indexOf", "lastIndexOf", "includes",
+          "indexOfNum", "lastIndexOfNum", "includesNum",
+          "fill", "fillNum", "fillStr", "copy", "swap16", "swap32", "swap64", "writeStr",
+        ].includes(expr.method)) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          const args = expr.args.map(() => `sc_rt_${this.temporary++}`);
+          const bindings = [
+            `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
+            ...expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`),
+          ].join(" ");
+          if (expr.method === "equals" && args.length === 1 && args[0] !== undefined) {
+            return `{ ${bindings} runtime::bytes_equals(&${receiver}, &${args[0]}) }`;
+          }
+          if (expr.method === "compareBuf" && args.length >= 1 && args.length <= 5 && args[0] !== undefined) {
+            const offsets = [args[1] ?? "0.0", args[2] ?? "0.0", args[3] ?? "0.0", args[4] ?? "0.0"];
+            return `{ ${bindings} runtime::bytes_compare(&${receiver}, &${args[0]}, ${args.length - 1}_usize, ${offsets.join(", ")}) }`;
+          }
+          if ((expr.method === "indexOf" || expr.method === "lastIndexOf" || expr.method === "includes") &&
+            args.length >= 2 && args.length <= 3 && args[0] !== undefined && args[1] !== undefined) {
+            const call = `runtime::bytes_index_of(&${receiver}, &${args[0]}, ${args[2] ?? "f64::NAN"}, ${args[1]}, ${expr.method !== "lastIndexOf"})`;
+            return `{ ${bindings} ${expr.method === "includes" ? `${call} != -1.0` : call} }`;
+          }
+          if ((expr.method === "indexOfNum" || expr.method === "lastIndexOfNum" || expr.method === "includesNum") &&
+            args.length >= 1 && args.length <= 2 && args[0] !== undefined) {
+            const call = `runtime::bytes_index_of_num(&${receiver}, ${args[0]}, ${args[1] ?? "f64::NAN"}, ${expr.method !== "lastIndexOfNum"})`;
+            return `{ ${bindings} ${expr.method === "includesNum" ? `${call} != -1.0` : call} }`;
+          }
+          if ((expr.method === "fill" || expr.method === "fillNum") &&
+            args.length >= 1 && args.length <= 3 && args[0] !== undefined) {
+            const helper = expr.method === "fill" ? "bytes_fill" : "bytes_fill_num";
+            const value = expr.method === "fill" ? `&${args[0]}` : args[0];
+            return `{ ${bindings} runtime::${helper}(&${receiver}, ${value}, ${args.length - 1}_usize, ${args[1] ?? "0.0"}, ${args[2] ?? "0.0"}) }`;
+          }
+          if (expr.method === "fillStr" && args.length >= 2 && args.length <= 4 &&
+            args[0] !== undefined && args[1] !== undefined) {
+            return `{ ${bindings} runtime::bytes_fill_str(&${receiver}, &${args[0]}, &${args[1]}, ${args.length - 2}_usize, ${args[2] ?? "0.0"}, ${args[3] ?? "0.0"}) }`;
+          }
+          if (expr.method === "copy" && args.length >= 1 && args.length <= 4 && args[0] !== undefined) {
+            return `{ ${bindings} runtime::bytes_copy_into(&${receiver}, &${args[0]}, ${args.length - 1}_usize, ${args[1] ?? "0.0"}, ${args[2] ?? "0.0"}, ${args[3] ?? "0.0"}) }`;
+          }
+          if ((expr.method === "swap16" || expr.method === "swap32" || expr.method === "swap64") && args.length === 0) {
+            const width = expr.method === "swap16" ? 2 : expr.method === "swap32" ? 4 : 8;
+            return `{ ${bindings} runtime::bytes_swap(&${receiver}, ${width}_usize) }`;
+          }
+          if (expr.method === "writeStr" && args.length >= 3 && args.length <= 4 &&
+            args[0] !== undefined && args[1] !== undefined && args[2] !== undefined) {
+            return `{ ${bindings} runtime::bytes_write_str(&${receiver}, &${args[0]}, &${args[1]}, ${args[2]}, ${args[3] ?? "0.0"}, ${args[3] !== undefined}) }`;
+          }
+          this.unsupported(`bytes intrinsic '${expr.method}' arguments`, expr.loc);
+        }
         if (expr.method === "readNum" && expr.args.length === 2) {
           const kind = expr.args[0];
           const offset = expr.args[1];
@@ -3526,6 +3577,11 @@ class RustEmitter {
         }
         if (expr.fn === "buffer.concat" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::buffer_concat(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "buffer.concatLen" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+          const list = `sc_rt_${this.temporary++}`;
+          const total = `sc_rt_${this.temporary++}`;
+          return `{ let ${list} = ${this.emitExpr(arg)}; let ${total} = ${this.emitExpr(expr.args[1])}; runtime::buffer_concat_len(&${list}, ${total}) }`;
         }
         if ((expr.fn === "fs.statSync" || expr.fn === "fs.lstatSync") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::fs_stat(&(${this.emitExpr(arg)}), ${expr.fn === "fs.statSync"})`;

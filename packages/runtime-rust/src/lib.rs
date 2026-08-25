@@ -1954,6 +1954,349 @@ pub fn bytes_to_array<T: ByteElement>(bytes: &JsBytes<T>) -> JsArray<f64> {
     array_new(elements)
 }
 
+fn bytes_u8_values(bytes: &JsBytes<u8>) -> Vec<u8> {
+    bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec())
+}
+
+fn bytes_received_number(value: f64) -> String {
+    let plain = format_number(value);
+    if !(value.is_finite() && value.trunc() == value && value.abs() > 4_294_967_296.0) {
+        return plain;
+    }
+    let start = usize::from(plain.starts_with('-'));
+    let mut head = plain.len();
+    while head >= start + 4 {
+        head -= 3;
+    }
+    let mut received = String::with_capacity(plain.len() + (plain.len() - head).div_ceil(3));
+    received.push_str(&plain[..head]);
+    for group in plain.as_bytes()[head..].chunks(3) {
+        received.push('_');
+        received.push_str(std::str::from_utf8(group).expect("scriptc: number spelling is ASCII"));
+    }
+    received
+}
+
+fn bytes_validate_offset(name: &str, value: f64, max: f64) {
+    if value.is_finite() && value.fract() == 0.0 && value >= 0.0 && (max < 0.0 || value <= max) {
+        return;
+    }
+    let received = bytes_received_number(value);
+    let requirement = if !value.is_finite() || value.fract() != 0.0 {
+        "an integer".to_owned()
+    } else if max < 0.0 {
+        ">= 0".to_owned()
+    } else {
+        format!(">= 0 && <= {}", format_number(max))
+    };
+    throw_value(JsError {
+        name: "RangeError".to_owned(),
+        message: format!(
+            "The value of \"{name}\" is out of range. It must be {requirement}. Received {received}"
+        ),
+        code: Some("ERR_OUT_OF_RANGE".to_owned()),
+    })
+}
+
+pub fn bytes_equals(left: &JsBytes<u8>, right: &JsBytes<u8>) -> bool {
+    bytes_u8_values(left) == bytes_u8_values(right)
+}
+
+pub fn bytes_compare(
+    source: &JsBytes<u8>,
+    target: &JsBytes<u8>,
+    nargs: usize,
+    target_start: f64,
+    target_end: f64,
+    source_start: f64,
+    source_end: f64,
+) -> f64 {
+    let source = bytes_u8_values(source);
+    let target = bytes_u8_values(target);
+    let target_start = if nargs < 1 {
+        0.0
+    } else {
+        bytes_validate_offset("targetStart", target_start, 9_007_199_254_740_991.0);
+        target_start
+    };
+    let target_end = if nargs < 2 {
+        target.len() as f64
+    } else {
+        bytes_validate_offset("targetEnd", target_end, target.len() as f64);
+        target_end
+    };
+    let source_start = if nargs < 3 {
+        0.0
+    } else {
+        bytes_validate_offset("sourceStart", source_start, 9_007_199_254_740_991.0);
+        source_start
+    };
+    let source_end = if nargs < 4 {
+        source.len() as f64
+    } else {
+        bytes_validate_offset("sourceEnd", source_end, source.len() as f64);
+        source_end
+    };
+    if target_start >= target_end {
+        return if source_start >= source_end { 0.0 } else { 1.0 };
+    }
+    if source_start >= source_end {
+        return -1.0;
+    }
+    let target_start = (target_start as usize).min(target.len());
+    let source_start = (source_start as usize).min(source.len());
+    let target_end = target_end as usize;
+    let source_end = source_end as usize;
+    match source[source_start..source_end].cmp(&target[target_start..target_end]) {
+        std::cmp::Ordering::Less => -1.0,
+        std::cmp::Ordering::Equal => 0.0,
+        std::cmp::Ordering::Greater => 1.0,
+    }
+}
+
+pub fn bytes_index_of(
+    bytes: &JsBytes<u8>,
+    needle: &JsBytes<u8>,
+    offset: f64,
+    alignment: f64,
+    forward: bool,
+) -> f64 {
+    let bytes = bytes_u8_values(bytes);
+    let needle = bytes_u8_values(needle);
+    let length = bytes.len();
+    let step = if alignment == 2.0 { 2 } else { 1 };
+    let mut offset = if offset.is_nan() {
+        if forward { 0.0 } else { length as f64 }
+    } else {
+        offset.trunc()
+    };
+    if offset < 0.0 {
+        offset += length as f64;
+        if offset < 0.0 {
+            if !forward {
+                return -1.0;
+            }
+            offset = 0.0;
+        }
+    }
+    if needle.is_empty() {
+        return offset.min(length as f64);
+    }
+    if needle.len() > length {
+        return -1.0;
+    }
+    if forward {
+        let mut start = if offset.is_finite() {
+            (offset as usize).min(length)
+        } else {
+            length
+        };
+        if step == 2 {
+            start += start % 2;
+        }
+        for index in (start..=length - needle.len()).step_by(step) {
+            if bytes[index..index + needle.len()] == needle {
+                return index as f64;
+            }
+        }
+        return -1.0;
+    }
+    let mut start = if offset.is_finite() {
+        (offset as usize).min(length - needle.len())
+    } else {
+        length - needle.len()
+    };
+    if step == 2 {
+        start -= start % 2;
+    }
+    loop {
+        if bytes[start..start + needle.len()] == needle {
+            return start as f64;
+        }
+        if start < step {
+            return -1.0;
+        }
+        start -= step;
+    }
+}
+
+pub fn bytes_index_of_num(bytes: &JsBytes<u8>, value: f64, offset: f64, forward: bool) -> f64 {
+    let needle = bytes_from_elements(vec![u8::from_number(value)]);
+    bytes_index_of(bytes, &needle, offset, 1.0, forward)
+}
+
+fn bytes_fill_core(
+    bytes: &JsBytes<u8>,
+    pattern: &[u8],
+    empty_pattern_zero_fills: bool,
+    nargs: usize,
+    offset: f64,
+    end: f64,
+) -> JsBytes<u8> {
+    if pattern.is_empty() && !empty_pattern_zero_fills {
+        throw_value(JsError {
+            name: "TypeError".to_owned(),
+            message: "The argument 'value' is invalid. Received <Buffer >".to_owned(),
+            code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+        });
+    }
+    let length = bytes.with(|data| data.length);
+    let offset = if nargs < 1 {
+        0.0
+    } else {
+        bytes_validate_offset("offset", offset, 9_007_199_254_740_991.0);
+        offset
+    };
+    let end = if nargs < 2 {
+        length as f64
+    } else {
+        bytes_validate_offset("end", end, length as f64);
+        end
+    };
+    if offset < end {
+        let offset = (offset as usize).min(length);
+        let end = end as usize;
+        bytes.with(|data| {
+            let mut storage = data.storage.borrow_mut();
+            let output = &mut storage[data.offset + offset..data.offset + end];
+            if pattern.is_empty() {
+                output.fill(0);
+            } else {
+                for (index, byte) in output.iter_mut().enumerate() {
+                    *byte = pattern[index % pattern.len()];
+                }
+            }
+        });
+    }
+    bytes.clone()
+}
+
+pub fn bytes_fill(
+    bytes: &JsBytes<u8>,
+    pattern: &JsBytes<u8>,
+    nargs: usize,
+    offset: f64,
+    end: f64,
+) -> JsBytes<u8> {
+    bytes_fill_core(bytes, &bytes_u8_values(pattern), false, nargs, offset, end)
+}
+
+pub fn bytes_fill_num(
+    bytes: &JsBytes<u8>,
+    value: f64,
+    nargs: usize,
+    offset: f64,
+    end: f64,
+) -> JsBytes<u8> {
+    bytes_fill_core(bytes, &[u8::from_number(value)], false, nargs, offset, end)
+}
+
+pub fn bytes_fill_str(
+    bytes: &JsBytes<u8>,
+    value: &JsString,
+    encoding: &JsString,
+    nargs: usize,
+    offset: f64,
+    end: f64,
+) -> JsBytes<u8> {
+    let pattern = buffer_string_bytes(value, encoding);
+    bytes_fill_core(bytes, &pattern, true, nargs, offset, end)
+}
+
+pub fn bytes_copy_into(
+    source: &JsBytes<u8>,
+    target: &JsBytes<u8>,
+    nargs: usize,
+    target_start: f64,
+    source_start: f64,
+    source_end: f64,
+) -> f64 {
+    let target_start = if nargs < 1 { 0.0 } else { target_start.trunc() };
+    let source_start = if nargs < 2 { 0.0 } else { source_start.trunc() };
+    let source_values = bytes_u8_values(source);
+    let source_end = if nargs < 3 {
+        source_values.len() as f64
+    } else {
+        source_end.trunc()
+    };
+    bytes_validate_offset("targetStart", target_start, -1.0);
+    bytes_validate_offset("sourceStart", source_start, source_values.len() as f64);
+    bytes_validate_offset("sourceEnd", source_end, -1.0);
+    let target_length = target.with(|data| data.length);
+    if target_start >= target_length as f64 {
+        return 0.0;
+    }
+    let target_start = target_start as usize;
+    let source_start = source_start as usize;
+    let source_end = (source_end as usize).min(source_values.len());
+    if source_start >= source_end {
+        return 0.0;
+    }
+    let count = (source_end - source_start).min(target_length - target_start);
+    target.with(|data| {
+        data.storage.borrow_mut()[data.offset + target_start..data.offset + target_start + count]
+            .copy_from_slice(&source_values[source_start..source_start + count]);
+    });
+    count as f64
+}
+
+pub fn bytes_swap(bytes: &JsBytes<u8>, width: usize) -> JsBytes<u8> {
+    let length = bytes.with(|data| data.length);
+    if !length.is_multiple_of(width) {
+        throw_value(JsError {
+            name: "RangeError".to_owned(),
+            message: format!("Buffer size must be a multiple of {}-bits", width * 8),
+            code: Some("ERR_INVALID_BUFFER_SIZE".to_owned()),
+        });
+    }
+    bytes.with(|data| {
+        for group in data.storage.borrow_mut()[data.offset..data.offset + data.length]
+            .chunks_exact_mut(width)
+        {
+            group.reverse();
+        }
+    });
+    bytes.clone()
+}
+
+pub fn bytes_write_str(
+    bytes: &JsBytes<u8>,
+    value: &JsString,
+    encoding: &JsString,
+    offset: f64,
+    length: f64,
+    has_length: bool,
+) -> f64 {
+    let byte_length = bytes.with(|data| data.length);
+    bytes_validate_offset("offset", offset, byte_length as f64);
+    let offset = offset as usize;
+    let remaining = byte_length - offset;
+    let budget = if has_length {
+        bytes_validate_offset("length", length, byte_length as f64);
+        (length as usize).min(remaining)
+    } else {
+        remaining
+    };
+    let encoded = buffer_string_bytes(value, encoding);
+    let mut count = encoded.len().min(budget);
+    if count < encoded.len() {
+        match encoding.as_ref() {
+            "utf16le" => count -= count % 2,
+            "utf8" | "utf-8" => {
+                while count > 0 && std::str::from_utf8(&encoded[..count]).is_err() {
+                    count -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    bytes.with(|data| {
+        data.storage.borrow_mut()[data.offset + offset..data.offset + offset + count]
+            .copy_from_slice(&encoded[..count]);
+    });
+    count as f64
+}
+
 pub fn atomics_wait(bytes: &JsBytes<i32>, index: f64, expected: f64, timeout_ms: f64) -> JsString {
     if bytes_get(bytes, index) != f64::from(to_int32(expected)) {
         return string("not-equal");
@@ -2040,7 +2383,35 @@ fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
             Rc::from(output)
         }
         "base64" => Rc::from(bytes_base64_encode(values)),
+        "base64url" => Rc::from(
+            bytes_base64_encode(values)
+                .replace('+', "-")
+                .replace('/', "_")
+                .trim_end_matches('=')
+                .to_owned(),
+        ),
         "utf8" | "utf-8" => Rc::from(String::from_utf8_lossy(values).as_ref()),
+        "utf16le" => {
+            let units: Vec<u16> = values
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            Rc::from(String::from_utf16_lossy(&units))
+        }
+        "latin1" => Rc::from(
+            values
+                .iter()
+                .map(|byte| char::from(*byte))
+                .collect::<String>(),
+        ),
+        "ascii" => Rc::from(
+            values
+                .iter()
+                .map(|byte| char::from(*byte & 0x7f))
+                .collect::<String>(),
+        ),
         other => throw_type_error(format!("Unknown encoding: {other}")),
     }
 }
@@ -2160,13 +2531,19 @@ fn bytes_base64_encode(values: &[u8]) -> String {
     output
 }
 
-pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> {
-    bytes_from_vec(match encoding.as_ref() {
+fn buffer_string_bytes(value: &JsString, encoding: &JsString) -> Vec<u8> {
+    match encoding.as_ref() {
         "hex" => bytes_hex_decode(value),
         "base64" | "base64url" => bytes_base64_decode(value),
         "utf8" | "utf-8" => value.as_bytes().to_vec(),
+        "utf16le" => value.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+        "latin1" | "ascii" => value.encode_utf16().map(|unit| unit as u8).collect(),
         other => throw_type_error(format!("Unknown encoding: {other}")),
-    })
+    }
+}
+
+pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> {
+    bytes_from_vec(buffer_string_bytes(value, encoding))
 }
 
 pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
@@ -2178,6 +2555,27 @@ pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
                     &data.storage.borrow()[data.offset..data.offset + data.length],
                 );
             });
+        }
+    });
+    bytes_from_vec(output)
+}
+
+pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u8> {
+    if array_len(values) == 0.0 {
+        return bytes_empty();
+    }
+    bytes_validate_offset("length", total, 9_007_199_254_740_991.0);
+    let mut output = vec![0; total as usize];
+    let mut offset = 0;
+    values.with(|array| {
+        for bytes in &array.elements {
+            if offset == output.len() {
+                break;
+            }
+            let part = bytes_u8_values(bytes);
+            let count = part.len().min(output.len() - offset);
+            output[offset..offset + count].copy_from_slice(&part[..count]);
+            offset += count;
         }
     });
     bytes_from_vec(output)
@@ -5332,6 +5730,101 @@ mod tests {
                     "Invalid typed array index"
                 );
             }
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn buffer_comparison_and_search_match_node_ranges_and_offsets() {
+        let baseline = live_heap_objects();
+        {
+            let source = buffer_from_string(&string("abcabcabc"), &string("utf8"));
+            let same = buffer_from_string(&string("abcabcabc"), &string("utf8"));
+            let greater = buffer_from_string(&string("abd"), &string("utf8"));
+            let needle = buffer_from_string(&string("bc"), &string("utf8"));
+            assert!(bytes_equals(&source, &same));
+            assert!(!bytes_equals(&source, &greater));
+            assert_eq!(
+                bytes_compare(&source, &greater, 0, 0.0, 0.0, 0.0, 0.0),
+                -1.0
+            );
+            assert_eq!(
+                bytes_compare(&source, &greater, 4, 1.0, 3.0, 0.0, 2.0),
+                -1.0
+            );
+            assert_eq!(bytes_compare(&source, &greater, 4, 1.0, 1.0, 1.0, 1.0), 0.0);
+            assert_eq!(bytes_index_of(&source, &needle, f64::NAN, 1.0, true), 1.0);
+            assert_eq!(bytes_index_of(&source, &needle, 4.0, 1.0, false), 4.0);
+            assert_eq!(bytes_index_of(&source, &needle, -99.0, 1.0, false), -1.0);
+            assert_eq!(bytes_index_of_num(&source, 354.0, 0.0, true), 1.0);
+            let utf16 = buffer_from_string(&string("610062006300"), &string("hex"));
+            let utf16_needle = buffer_from_string(&string("6200"), &string("hex"));
+            assert_eq!(
+                bytes_index_of(&utf16, &utf16_needle, f64::NAN, 2.0, true),
+                2.0
+            );
+
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bytes_compare(&source, &greater, 1, -1.0, 0.0, 0.0, 0.0)
+            }))
+            .err()
+            .expect("a negative compare offset must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+            assert_eq!(
+                caught_error_code(&caught).expect("error code").as_ref(),
+                "ERR_OUT_OF_RANGE"
+            );
+            assert_eq!(
+                caught_error_message(&caught).as_ref(),
+                "The value of \"targetStart\" is out of range. It must be >= 0 && <= 9007199254740991. Received -1"
+            );
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn buffer_mutation_methods_preserve_node_clamping_and_chaining() {
+        let baseline = live_heap_objects();
+        {
+            let filled = bytes_alloc::<u8>(5.0);
+            let chained = bytes_fill_str(&filled, &string("ab"), &string("utf8"), 0, 0.0, 0.0);
+            assert!(filled.ptr_eq(&chained));
+            assert_eq!(bytes_to_string(&filled, &string("utf8")).as_ref(), "ababa");
+
+            let source = buffer_from_string(&string("abcdef"), &string("utf8"));
+            let target = bytes_alloc::<u8>(4.0);
+            assert_eq!(bytes_copy_into(&source, &target, 3, 1.0, 2.9, 5.9), 3.0);
+            assert_eq!(
+                bytes_to_string(&target, &string("hex")).as_ref(),
+                "00636465"
+            );
+
+            let swapped = buffer_from_string(&string("01020304"), &string("hex"));
+            assert!(swapped.ptr_eq(&bytes_swap(&swapped, 2)));
+            assert_eq!(
+                bytes_to_string(&swapped, &string("hex")).as_ref(),
+                "02010403"
+            );
+
+            let written = bytes_alloc::<u8>(5.0);
+            assert_eq!(
+                bytes_write_str(&written, &string("h😀x"), &string("utf8"), 0.0, 4.0, true,),
+                1.0
+            );
+            assert_eq!(
+                bytes_to_string(&written, &string("hex")).as_ref(),
+                "6800000000"
+            );
+
+            let parts = array_new(vec![
+                buffer_from_string(&string("0102"), &string("hex")),
+                buffer_from_string(&string("03"), &string("hex")),
+            ]);
+            assert_eq!(
+                bytes_to_string(&buffer_concat_len(&parts, 5.0), &string("hex")).as_ref(),
+                "0102030000"
+            );
         }
         assert_eq!(live_heap_objects(), baseline);
     }
