@@ -1,8 +1,8 @@
-dynamic-surface.ts:15:11 - error SC2012: 'Number.parseFloat' runs in the embedded dynamic engine, which this build does not include
+dynamic-surface.ts:12:11 - error SC2012: 'Number.parseFloat' runs in the embedded dynamic engine, which this build does not include
 
-  14 | const ch = "hello".at(0);
-  15 | const n = Number.parseFloat("3.14");
-     |           ^~~~~~~~~~~~~~~~~~~~~~~~~
-  16 | 
+  11 | const input: any = "3.14";
+  12 | const n = Number.parseFloat(input);
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~
+  13 | void n;
 
   hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it

@@ -606,6 +606,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1373-union-array-arms.ts",
     "1408-string-indexing.ts",
     "1420-number-statics.ts",
+    "1421-number-parse-dynamic.ts",
     "1431-caught-tostring.ts",
     "1432-destructured-params.ts",
     "1435-math-spread.ts",

@@ -6660,12 +6660,11 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
   NEGATIVE_INFINITY: -Infinity,
 };
 
-/** Method calls on THE `Number` global: the predicate statics lower to
-   * plain C over f64 arguments; `Number.parseFloat`/`Number.parseInt` ARE
-   * the global parsers (the spec aliases them), so they get the same
-   * island lowering — engine execution under --dynamic, per-site SC2012
-   * without it (parseInt takes an explicit radix, like the global). Null
-   * for non-Number receivers. */
+/** Method calls on THE `Number` global: predicates lower over f64 values;
+ * parseFloat/parseInt share the native global-parser IR for exact string
+ * inputs (parseInt accepts its omitted radix as 0). Shapes that still need
+ * JavaScript coercion retain the dynamic fallback. Null for non-Number
+ * receivers. */
   export function lowerNumberStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
@@ -6700,17 +6699,37 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       return { kind: "libCall", fn, args: [arg], type: BOOL, loc };
     }
     if (member === "parseFloat" || member === "parseInt") {
-      const want = member === "parseFloat" ? 1 : 2;
-      if (call.arguments.length !== want) {
+      const validArity = member === "parseFloat"
+        ? call.arguments.length === 1
+        : call.arguments.length === 1 || call.arguments.length === 2;
+      if (!validArity) {
         L.noLowering(
           `Number.${member} with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
           call,
-          member === "parseInt" ? "pass an explicit radix: Number.parseInt(s, 10)" : undefined,
         );
+      }
+      const lowered = call.arguments.map((arg) => L.lowerExpr(arg));
+      const value = lowered[0]!;
+      if (member === "parseFloat" && value.type.kind === "string") {
+        return { kind: "libCall", fn: "num.parseFloat", args: [value], type: F64, loc };
+      }
+      const radix = lowered[1];
+      if (member === "parseInt" && value.type.kind === "string" &&
+          (radix === undefined || radix.type.kind === "f64")) {
+        return {
+          kind: "libCall",
+          fn: "num.parseInt",
+          args: [
+            value,
+            radix ?? { kind: "numLit", value: 0, type: F64, loc },
+          ],
+          type: F64,
+          loc,
+        };
       }
       L.requireDynamicApi(`'Number.${member}'`, call);
       const callee: IrExpr = { kind: "jsOp", op: "globalGet", name: member, args: [], type: JSVAL, loc };
-      const args = call.arguments.map((a) => L.jsvalIn(L.lowerExpr(a), a));
+      const args = lowered.map((arg, index) => L.jsvalIn(arg, call.arguments[index]!));
       const result: IrExpr = { kind: "jsOp", op: "callFn", args: [callee, ...args], type: JSVAL, loc };
       return { kind: "jsExit", value: result, type: F64, loc };
     }
