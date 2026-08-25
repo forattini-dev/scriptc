@@ -3700,6 +3700,9 @@ class RustEmitter {
         if (expr.method === "trim" && expr.args.length === 0) {
           return `runtime::string_trim(&(${this.emitExpr(expr.receiver)}))`;
         }
+        if ((expr.method === "trimStart" || expr.method === "trimEnd") && expr.args.length === 0) {
+          return `runtime::string_${expr.method === "trimStart" ? "trim_start" : "trim_end"}(&(${this.emitExpr(expr.receiver)}))`;
+        }
         if (expr.method === "split" && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
           return `runtime::string_split(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${this.emitExpr(expr.args[1])})`;
         }
@@ -4578,6 +4581,9 @@ class RustEmitter {
         }
         if (expr.fn === "num.toFixed0" && expr.args.length === 1 && arg !== undefined) {
           return `runtime::number_to_fixed_default(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "num.toExponential" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::number_to_exponential(${this.emitExpr(arg)})`;
         }
         if (expr.fn === "num.toFixed" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           return `runtime::number_to_fixed(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;

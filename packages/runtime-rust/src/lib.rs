@@ -4527,6 +4527,14 @@ pub fn string_trim(value: &JsString) -> JsString {
     Rc::from(value.trim_matches(javascript_whitespace))
 }
 
+pub fn string_trim_start(value: &JsString) -> JsString {
+    Rc::from(value.trim_start_matches(javascript_whitespace))
+}
+
+pub fn string_trim_end(value: &JsString) -> JsString {
+    Rc::from(value.trim_end_matches(javascript_whitespace))
+}
+
 pub fn string_split(value: &JsString, separator: &JsString, limit: f64) -> JsArray<JsString> {
     let limit = to_uint32(limit) as usize;
     if limit == 0 {
@@ -7445,6 +7453,68 @@ pub fn number_to_fixed_default(value: f64) -> JsString {
     number_to_fixed(value, 0.0)
 }
 
+pub fn number_to_exponential(value: f64) -> JsString {
+    if value.is_nan() {
+        return string("NaN");
+    }
+    if value == f64::INFINITY {
+        return string("Infinity");
+    }
+    if value == f64::NEG_INFINITY {
+        return string("-Infinity");
+    }
+    if value == 0.0 {
+        return string("0e+0");
+    }
+
+    // The omitted-fractionDigits form uses the same shortest, closest,
+    // round-tripping decimal digits as Number::toString. Re-place those
+    // digits into scientific notation instead of asking Rust to round the
+    // binary value a second time (which would change halfway cases).
+    let negative = value < 0.0;
+    let plain = format_number(value.abs());
+    let (mut digits, exponent) = if let Some((mantissa, exponent)) = plain.split_once('e') {
+        (
+            mantissa.chars().filter(|ch| *ch != '.').collect::<String>(),
+            exponent
+                .parse::<i32>()
+                .expect("scriptc: formatted number has an invalid exponent"),
+        )
+    } else if let Some(decimal) = plain.find('.') {
+        let compact = plain.chars().filter(|ch| *ch != '.').collect::<String>();
+        let first = compact
+            .bytes()
+            .position(|digit| digit != b'0')
+            .expect("scriptc: non-zero number formatted without a non-zero digit");
+        (
+            compact[first..].to_owned(),
+            decimal as i32 - first as i32 - 1,
+        )
+    } else {
+        let exponent = plain.len() as i32 - 1;
+        (plain, exponent)
+    };
+    while digits.len() > 1 && digits.ends_with('0') {
+        digits.pop();
+    }
+
+    let mut output = String::with_capacity(digits.len() + 8 + usize::from(negative));
+    if negative {
+        output.push('-');
+    }
+    output.push(digits.as_bytes()[0] as char);
+    if digits.len() > 1 {
+        output.push('.');
+        output.push_str(&digits[1..]);
+    }
+    output.push('e');
+    if exponent >= 0 {
+        output.push('+');
+    }
+    output.push_str(&exponent.to_string());
+    Rc::from(output)
+}
+
 thread_local! {
     static MATH_RANDOM_STATE: Cell<u64> = const { Cell::new(0x9e37_79b9_7f4a_7c15) };
 }
@@ -8219,6 +8289,24 @@ mod tests {
         assert_eq!(number_to_fixed(-0.0, 3.0).as_ref(), "0.000");
         assert_eq!(number_to_fixed(1e21, 2.0).as_ref(), "1e+21");
         assert_eq!(number_to_fixed(1.0, 5.0).as_ref(), "1.00000");
+    }
+
+    #[test]
+    fn exponential_number_formatting_reuses_shortest_ecmascript_digits() {
+        for (value, expected) in [
+            (1234.5678, "1.2345678e+3"),
+            (0.00001, "1e-5"),
+            (100.0, "1e+2"),
+            (-7.25, "-7.25e+0"),
+            (0.1 + 0.2, "3.0000000000000004e-1"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            assert_eq!(number_to_exponential(value).as_ref(), expected);
+        }
+        assert_eq!(number_to_exponential(0.0).as_ref(), "0e+0");
+        assert_eq!(number_to_exponential(-0.0).as_ref(), "0e+0");
     }
 
     #[test]
