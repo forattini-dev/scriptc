@@ -6,7 +6,7 @@ import { InternalCompilerError } from "../../errors.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
-import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
+import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
 import { foldedStringKeyOf, lowerDynObjectLiteral, pureReemittable } from "./lower-exprs.js";
@@ -3310,6 +3310,10 @@ export function lowerStaticReadableStreamReaderCall(
     const member = L.stdlibGlobalMember(expr, "Math");
     if (member === null) return null;
     const loc = locOf(expr);
+    const staticValue = own(STATIC_MATH_PROPS, member);
+    if (staticValue !== undefined) {
+      return { kind: "numLit", value: staticValue, type: F64, loc };
+    }
     const propType = own(ISLAND_SURFACE.math.props, member);
     if (propType !== undefined) {
       L.requireDynamicApi(`'Math.${member}'`, expr);

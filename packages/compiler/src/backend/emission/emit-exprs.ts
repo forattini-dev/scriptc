@@ -3452,6 +3452,40 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`trunc(${arg(0)})`);
           case "math.ceil":
             return finish(`ceil(${arg(0)})`);
+          case "math.sign":
+            return finish(`(${arg(0)} == 0.0 || isnan(${arg(0)}) ? ${arg(0)} : copysign(1.0, ${arg(0)}))`);
+          case "math.sqrt":
+            return finish(`sqrt(${arg(0)})`);
+          case "math.pow":
+            // C specifies pow(±1, ±Infinity) as 1; ECMAScript requires
+            // NaN. Every other typed-double edge follows libm directly.
+            return finish(`(isinf(${arg(1)}) && fabs(${arg(0)}) == 1.0 ? NAN : pow(${arg(0)}, ${arg(1)}))`);
+          case "math.hypot":
+            return finish(`hypot(${arg(0)}, ${arg(1)})`);
+          case "math.log2":
+            return finish(`log2(${arg(0)})`);
+          case "math.log10":
+            return finish(`log10(${arg(0)})`);
+          case "math.exp":
+            return finish(`exp(${arg(0)})`);
+          case "math.log":
+            return finish(`log(${arg(0)})`);
+          case "math.cbrt":
+            return finish(`cbrt(${arg(0)})`);
+          case "math.sin":
+            return finish(`sin(${arg(0)})`);
+          case "math.cos":
+            return finish(`cos(${arg(0)})`);
+          case "math.tan":
+            return finish(`tan(${arg(0)})`);
+          case "math.asin":
+            return finish(`asin(${arg(0)})`);
+          case "math.acos":
+            return finish(`acos(${arg(0)})`);
+          case "math.atan":
+            return finish(`atan(${arg(0)})`);
+          case "math.atan2":
+            return finish(`atan2(${arg(0)}, ${arg(1)})`);
           // Math.abs — C fabs IS the JS operation. Math.round — the JS
           // half-toward-+Infinity rule (scr_lib.c; C round() differs on
           // halves and naive floor(x+0.5) drifts at the epsilon boundary).

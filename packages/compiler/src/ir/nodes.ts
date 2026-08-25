@@ -2071,6 +2071,26 @@ export type IrLibFn =
    * inference needs them compiled, not island-served. Never throw. */
   | "math.trunc"
   | "math.ceil"
+  /** The remaining statically declared Math numeric surface. Unary and
+   * binary arities mirror ambient/scriptc.d.ts. Backends preserve the
+   * ECMAScript IEEE edge rules for sign and pow; the other operations map
+   * to their corresponding correctly-rounded platform math functions. */
+  | "math.sign"
+  | "math.sqrt"
+  | "math.pow"
+  | "math.hypot"
+  | "math.log2"
+  | "math.log10"
+  | "math.exp"
+  | "math.log"
+  | "math.cbrt"
+  | "math.sin"
+  | "math.cos"
+  | "math.tan"
+  | "math.asin"
+  | "math.acos"
+  | "math.atan"
+  | "math.atan2"
   /** The static global parsers/tests (scr_string.c). num.parseInt is
    * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
    * frontend completes an omitted radix to 0 = the spec's "undefined":

@@ -1,9 +1,7 @@
-// @dynamic
-// Math members execute in the island engine; results exit as ordinary
-// static numbers. Members with exact IEEE results print directly. The
-// transcendentals round through toFixed(9): the engine uses the system
-// libm and Node uses V8's fdlibm port, which can differ in the last ulp
-// (tan(1), asin(0.5), acos(0.5) do on macOS).
+// Math members compile to native numeric operations. Members with exact
+// IEEE results print directly. The transcendentals round through
+// toFixed(9): the native system libm and Node's V8 math implementation can
+// differ in the last ulp (tan(1), asin(0.5), acos(0.5) do on macOS).
 console.log(Math.floor(7.6), Math.ceil(7.2), Math.round(7.5), Math.round(-7.5), Math.trunc(-7.9));
 console.log(Math.abs(-3.5), Math.sign(-12), Math.sign(0), Math.sign(4.2));
 console.log(Math.sqrt(144), Math.sqrt(2), Math.pow(2, 10), Math.pow(2, 0.5));
@@ -17,5 +15,9 @@ console.log(Math.atan(1).toFixed(9), Math.atan2(1, 1).toFixed(9), Math.atan2(-1,
 // Island results chain into static arithmetic like any number.
 const area = Math.PI * Math.pow(2, 2);
 console.log(area.toFixed(6), Math.floor(area) + 1);
-// Non-finite edges: strict exits accept every engine number.
+// Non-finite edges remain ordinary native numbers.
 console.log(Math.log(0), Math.log(-1), Math.sqrt(-1), Math.pow(0, -1));
+// ECMAScript edges where a generic host helper commonly differs.
+console.log(Object.is(Math.sign(-0), -0), Number.isNaN(Math.sign(NaN)));
+console.log(Object.is(Math.sqrt(-0), -0), Number.isNaN(Math.pow(1, Infinity)));
+console.log(Math.pow(-0, -3), Math.hypot(Infinity, NaN));

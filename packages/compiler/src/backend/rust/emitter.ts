@@ -25,6 +25,26 @@ import {
 type IrFuncType = Extract<IrType, { kind: "func" }>;
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
+const RUST_UNARY_MATH_METHODS: Readonly<Record<string, string | undefined>> = {
+  "math.sqrt": "sqrt",
+  "math.log2": "log2",
+  "math.log10": "log10",
+  "math.exp": "exp",
+  "math.log": "ln",
+  "math.cbrt": "cbrt",
+  "math.sin": "sin",
+  "math.cos": "cos",
+  "math.tan": "tan",
+  "math.asin": "asin",
+  "math.acos": "acos",
+  "math.atan": "atan",
+};
+
+const RUST_BINARY_MATH_METHODS: Readonly<Record<string, string | undefined>> = {
+  "math.hypot": "hypot",
+  "math.atan2": "atan2",
+};
+
 interface RustAsyncHandlers {
   readonly fallthrough: () => void;
   readonly returned: (value: string) => void;
@@ -4480,6 +4500,20 @@ class RustEmitter {
           return `runtime::${expr.fn === "math.maxArr" ? "math_max_array" : "math_min_array"}(&(${this.emitExpr(arg)}))`;
         }
         if (expr.fn === "math.random" && expr.args.length === 0) return "runtime::math_random()";
+        if (expr.fn === "math.sign" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::math_sign(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "math.pow" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::math_pow(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
+        }
+        const unaryMathMethod = RUST_UNARY_MATH_METHODS[expr.fn];
+        if (unaryMathMethod !== undefined && expr.args.length === 1 && arg !== undefined) {
+          return `(${this.emitExpr(arg)}).${unaryMathMethod}()`;
+        }
+        const binaryMathMethod = RUST_BINARY_MATH_METHODS[expr.fn];
+        if (binaryMathMethod !== undefined && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `(${this.emitExpr(arg)}).${binaryMathMethod}(${this.emitExpr(secondArg)})`;
+        }
         if (expr.fn === "regex.new" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
           const pattern = `sc_rt_${this.temporary++}`;
           const flags = `sc_rt_${this.temporary++}`;
@@ -4541,6 +4575,15 @@ class RustEmitter {
         }
         if ((expr.fn === "number.isInteger" || expr.fn === "number.isSafeInteger") && expr.args.length === 1 && arg !== undefined) {
           return `runtime::${expr.fn === "number.isInteger" ? "number_is_integer" : "number_is_safe_integer"}(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "num.toFixed0" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::number_to_fixed_default(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "num.toFixed" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::number_to_fixed(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
+        }
+        if (expr.fn === "num.sameValue" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::number_same_value(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
         }
         if (expr.fn === "error.toString" && expr.args.length === 1 && arg !== undefined) {
           const receiverExpr = this.stripCasts(arg);

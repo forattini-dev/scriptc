@@ -222,6 +222,7 @@ function f64Lit(n: number): string {
 }
 
 const F64_INF = f64Lit(Infinity);
+const F64_NAN = f64Lit(NaN);
 
 /** LLVM c"..." payload for a UTF-8 literal, NUL-terminated like the C
  * emitter's flexible-array-member initializer. */
@@ -256,6 +257,20 @@ const LIB_FN_SYMS: Record<string, string> = {
   "num.parseFloat": "scr_parse_float",
   "num.fromString": "scr_string_to_number",
   "math.round": "scr_math_round",
+  "math.sqrt": "sqrt",
+  "math.hypot": "hypot",
+  "math.log2": "log2",
+  "math.log10": "log10",
+  "math.exp": "exp",
+  "math.log": "log",
+  "math.cbrt": "cbrt",
+  "math.sin": "sin",
+  "math.cos": "cos",
+  "math.tan": "tan",
+  "math.asin": "asin",
+  "math.acos": "acos",
+  "math.atan": "atan",
+  "math.atan2": "atan2",
   // decodeUriComponent is NOT here: it throws (MAY_THROW_LIB_FNS), so it
   // refuses by name like the rest of the throwing tier.
   "str.encodeUriComponent": "scr_str_encode_uri_component",
@@ -13955,6 +13970,42 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = call double @llvm.fabs.f64(double ${v.name})`);
       return { name: t, type: e.type };
+    }
+    if (e.fn === "math.sign") {
+      const v = this.emitExpr(e.args[0]!);
+      const zero = B.tmp();
+      const nan = B.tmp();
+      const preserve = B.tmp();
+      const sign = B.tmp();
+      const result = B.tmp();
+      B.line(`${zero} = fcmp oeq double ${v.name}, ${f64Lit(0)}`);
+      B.line(`${nan} = fcmp uno double ${v.name}, ${f64Lit(0)}`);
+      B.line(`${preserve} = or i1 ${zero}, ${nan}`);
+      this.declare("declare double @llvm.copysign.f64(double, double)");
+      B.line(`${sign} = call double @llvm.copysign.f64(double ${f64Lit(1)}, double ${v.name})`);
+      B.line(`${result} = select i1 ${preserve}, double ${v.name}, double ${sign}`);
+      return { name: result, type: e.type };
+    }
+    if (e.fn === "math.pow") {
+      const base = this.emitExpr(e.args[0]!);
+      const exponent = this.emitExpr(e.args[1]!);
+      this.declare("declare double @llvm.fabs.f64(double)");
+      const absBase = B.tmp();
+      const baseIsOne = B.tmp();
+      const absExponent = B.tmp();
+      const exponentIsInfinite = B.tmp();
+      const special = B.tmp();
+      const computed = B.tmp();
+      const result = B.tmp();
+      B.line(`${absBase} = call double @llvm.fabs.f64(double ${base.name})`);
+      B.line(`${baseIsOne} = fcmp oeq double ${absBase}, ${f64Lit(1)}`);
+      B.line(`${absExponent} = call double @llvm.fabs.f64(double ${exponent.name})`);
+      B.line(`${exponentIsInfinite} = fcmp oeq double ${absExponent}, ${F64_INF}`);
+      B.line(`${special} = and i1 ${baseIsOne}, ${exponentIsInfinite}`);
+      this.declare("declare double @pow(double, double)");
+      B.line(`${computed} = call double @pow(double ${base.name}, double ${exponent.name})`);
+      B.line(`${result} = select i1 ${special}, double ${F64_NAN}, double ${computed}`);
+      return { name: result, type: e.type };
     }
     if (e.fn === "num.isNaN") {
       const v = this.emitExpr(e.args[0]!);

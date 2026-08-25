@@ -532,6 +532,30 @@ export const STATIC_MATH_FNS: Record<string, { fn: IrLibFn; arity: number } | un
   min: { fn: "math.min", arity: 2 },
   max: { fn: "math.max", arity: 2 },
   random: { fn: "math.random", arity: 0 },
+  sign: { fn: "math.sign", arity: 1 },
+  sqrt: { fn: "math.sqrt", arity: 1 },
+  pow: { fn: "math.pow", arity: 2 },
+  hypot: { fn: "math.hypot", arity: 2 },
+  log2: { fn: "math.log2", arity: 1 },
+  log10: { fn: "math.log10", arity: 1 },
+  exp: { fn: "math.exp", arity: 1 },
+  log: { fn: "math.log", arity: 1 },
+  cbrt: { fn: "math.cbrt", arity: 1 },
+  sin: { fn: "math.sin", arity: 1 },
+  cos: { fn: "math.cos", arity: 1 },
+  tan: { fn: "math.tan", arity: 1 },
+  asin: { fn: "math.asin", arity: 1 },
+  acos: { fn: "math.acos", arity: 1 },
+  atan: { fn: "math.atan", arity: 1 },
+  atan2: { fn: "math.atan2", arity: 2 },
+};
+
+/** Readonly Math constants folded into exact f64 literals. They have no
+ * runtime reach to fence: every backend receives the same IEEE bits that
+ * the compiler host exposes for the ECMAScript constants. */
+export const STATIC_MATH_PROPS: Record<string, number | undefined> = {
+  PI: Math.PI,
+  E: Math.E,
 };
 
 /** Number prototype methods with dedicated STATIC lowering paths. The

@@ -7237,6 +7237,214 @@ pub fn math_round(value: f64) -> f64 {
     }
 }
 
+pub fn math_sign(value: f64) -> f64 {
+    if value == 0.0 || value.is_nan() {
+        value
+    } else {
+        1.0_f64.copysign(value)
+    }
+}
+
+pub fn math_pow(base: f64, exponent: f64) -> f64 {
+    // Rust/libm follows C for this special case, while ECMAScript's
+    // Number::exponentiate returns NaN for either ±1 raised to ±Infinity.
+    if exponent.is_infinite() && base.abs() == 1.0 {
+        f64::NAN
+    } else {
+        base.powf(exponent)
+    }
+}
+
+#[derive(Clone)]
+struct FixedInteger {
+    limbs: Vec<u32>,
+}
+
+impl FixedInteger {
+    fn from_u64(value: u64) -> Self {
+        let mut result = Self {
+            limbs: vec![value as u32, (value >> 32) as u32],
+        };
+        result.normalize();
+        result
+    }
+
+    fn normalize(&mut self) {
+        while self.limbs.len() > 1 && self.limbs.last() == Some(&0) {
+            self.limbs.pop();
+        }
+    }
+
+    fn multiply_by_five(&mut self) {
+        let mut carry = 0_u64;
+        for limb in &mut self.limbs {
+            let product = u64::from(*limb) * 5 + carry;
+            *limb = product as u32;
+            carry = product >> 32;
+        }
+        if carry != 0 {
+            self.limbs.push(carry as u32);
+        }
+    }
+
+    fn bit(&self, bit: usize) -> bool {
+        let word = bit / 32;
+        self.limbs
+            .get(word)
+            .is_some_and(|limb| ((limb >> (bit % 32)) & 1) != 0)
+    }
+
+    fn shift_right(&mut self, bits: usize) {
+        let words = bits / 32;
+        let remainder = bits % 32;
+        if words >= self.limbs.len() {
+            self.limbs.clear();
+            self.limbs.push(0);
+            return;
+        }
+        let count = self.limbs.len() - words;
+        let mut output = Vec::with_capacity(count);
+        for index in 0..count {
+            let low = self.limbs[index + words] >> remainder;
+            let high = if remainder != 0 && index + words + 1 < self.limbs.len() {
+                self.limbs[index + words + 1] << (32 - remainder)
+            } else {
+                0
+            };
+            output.push(low | high);
+        }
+        self.limbs = output;
+        self.normalize();
+    }
+
+    fn shift_left(&mut self, bits: usize) {
+        let words = bits / 32;
+        let remainder = bits % 32;
+        let mut output = vec![0_u32; self.limbs.len() + words + usize::from(remainder != 0)];
+        for (index, limb) in self.limbs.iter().copied().enumerate() {
+            let target = index + words;
+            output[target] |= limb << remainder;
+            if remainder != 0 {
+                output[target + 1] |= limb >> (32 - remainder);
+            }
+        }
+        self.limbs = output;
+        self.normalize();
+    }
+
+    fn increment(&mut self) {
+        let mut carry = 1_u64;
+        for limb in &mut self.limbs {
+            if carry == 0 {
+                break;
+            }
+            let sum = u64::from(*limb) + carry;
+            *limb = sum as u32;
+            carry = sum >> 32;
+        }
+        if carry != 0 {
+            self.limbs.push(carry as u32);
+        }
+    }
+
+    fn divide_by_billion(&mut self) -> u32 {
+        let mut remainder = 0_u64;
+        for limb in self.limbs.iter_mut().rev() {
+            let current = (remainder << 32) | u64::from(*limb);
+            *limb = (current / 1_000_000_000) as u32;
+            remainder = current % 1_000_000_000;
+        }
+        self.normalize();
+        remainder as u32
+    }
+
+    fn is_zero(&self) -> bool {
+        self.limbs.len() == 1 && self.limbs[0] == 0
+    }
+}
+
+pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
+    let digits = if fraction_digits.is_nan() {
+        0.0
+    } else {
+        fraction_digits.trunc()
+    };
+    if !(0.0..=100.0).contains(&digits) {
+        throw_range_error("toFixed() digits argument must be between 0 and 100".to_owned());
+    }
+    let fraction_count = digits as usize;
+    if !value.is_finite() || value.abs() >= 1e21 {
+        return Rc::from(format_number(value));
+    }
+
+    let negative = value < 0.0;
+    let magnitude = value.abs();
+    let bits = magnitude.to_bits();
+    let ieee_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let mut mantissa = bits & ((1_u64 << 52) - 1);
+    let binary_exponent = if ieee_exponent == 0 {
+        -1074
+    } else {
+        mantissa |= 1_u64 << 52;
+        ieee_exponent - 1023 - 52
+    };
+
+    let mut integer = FixedInteger::from_u64(mantissa);
+    for _ in 0..fraction_count {
+        integer.multiply_by_five();
+    }
+    let shift = binary_exponent + fraction_count as i32;
+    if shift >= 0 {
+        integer.shift_left(shift as usize);
+    } else {
+        let right = (-shift) as usize;
+        let round_up = integer.bit(right - 1);
+        integer.shift_right(right);
+        if round_up {
+            integer.increment();
+        }
+    }
+
+    let mut chunks = Vec::new();
+    loop {
+        chunks.push(integer.divide_by_billion());
+        if integer.is_zero() {
+            break;
+        }
+    }
+    let mut decimal = chunks
+        .pop()
+        .expect("scriptc: fixed integer rendered without a chunk")
+        .to_string();
+    while let Some(chunk) = chunks.pop() {
+        decimal.push_str(&format!("{chunk:09}"));
+    }
+
+    let padded = decimal.len().max(fraction_count + 1);
+    let integer_digits = padded - fraction_count;
+    let leading_zeros = padded - decimal.len();
+    let mut output =
+        String::with_capacity(padded + usize::from(fraction_count != 0) + usize::from(negative));
+    if negative {
+        output.push('-');
+    }
+    for index in 0..padded {
+        if fraction_count != 0 && index == integer_digits {
+            output.push('.');
+        }
+        output.push(if index < leading_zeros {
+            '0'
+        } else {
+            decimal.as_bytes()[index - leading_zeros] as char
+        });
+    }
+    Rc::from(output)
+}
+
+pub fn number_to_fixed_default(value: f64) -> JsString {
+    number_to_fixed(value, 0.0)
+}
+
 thread_local! {
     static MATH_RANDOM_STATE: Cell<u64> = const { Cell::new(0x9e37_79b9_7f4a_7c15) };
 }
@@ -7987,6 +8195,30 @@ mod tests {
         assert!(math_round(-0.0).is_sign_negative());
         assert!(math_round(f64::NAN).is_nan());
         assert_eq!(math_round(f64::INFINITY), f64::INFINITY);
+    }
+
+    #[test]
+    fn math_sign_and_pow_preserve_ecmascript_edges() {
+        assert!(math_sign(-0.0).is_sign_negative());
+        assert_eq!(math_sign(-4.0), -1.0);
+        assert_eq!(math_sign(4.0), 1.0);
+        assert!(math_sign(f64::NAN).is_nan());
+        assert!(math_pow(1.0, f64::INFINITY).is_nan());
+        assert!(math_pow(-1.0, f64::NEG_INFINITY).is_nan());
+        assert_eq!(math_pow(2.0, 10.0), 1024.0);
+        assert!(math_pow(-0.0, -3.0).is_infinite());
+        assert!(math_pow(-0.0, -3.0).is_sign_negative());
+    }
+
+    #[test]
+    fn fixed_number_formatting_uses_the_exact_binary_value() {
+        assert_eq!(number_to_fixed(1.005, 2.0).as_ref(), "1.00");
+        assert_eq!(number_to_fixed(2.55, 1.0).as_ref(), "2.5");
+        assert_eq!(number_to_fixed(0.5, 0.0).as_ref(), "1");
+        assert_eq!(number_to_fixed(-2.5, 0.0).as_ref(), "-3");
+        assert_eq!(number_to_fixed(-0.0, 3.0).as_ref(), "0.000");
+        assert_eq!(number_to_fixed(1e21, 2.0).as_ref(), "1e+21");
+        assert_eq!(number_to_fixed(1.0, 5.0).as_ref(), "1.00000");
     }
 
     #[test]
