@@ -10,7 +10,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import {
   mangleClassStruct,
   mangleField,
@@ -2051,7 +2051,7 @@ class RustEmitter {
       );
       if (awaited === null) {
         if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "recordLit" || nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
+          nested?.kind === "recordLit" || nested?.kind === "recordClone" || nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
           nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncValue(nested, (value) => {
@@ -2379,13 +2379,13 @@ class RustEmitter {
           terminal = "await";
           break;
         }
-        const awaited = this.awaitedValue(
+        const nested =
           current.kind === "assign" ? current.value
           : current.kind === "varDecl" ? current.init
           : current.kind === "exprStmt" ? current.expr
           : current.kind === "return" ? current.value
-          : null,
-        );
+          : null;
+        const awaited = this.awaitedValue(nested);
         if (awaited !== null) {
           this.emitAsyncProtectedContinuation(
             this.emitAwaitDependency(awaited.awaited),
@@ -2409,6 +2409,31 @@ class RustEmitter {
               }
             },
           );
+          this.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
+        if ((nested?.kind === "unionWrap" || nested?.kind === "bin" ||
+          nested?.kind === "toString" || nested?.kind === "strConcat" ||
+          nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
+          nested?.kind === "mapIntrinsic" || nested?.kind === "recordClone") &&
+          this.containsAsyncSuspension(nested)) {
+          this.emitAsyncProtectedValue(nested, exitLocals, handlers, (value) => {
+            if (current.kind === "assign") {
+              this.emitAssignment(current.localId, value, current.loc);
+              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
+            } else if (current.kind === "varDecl") {
+              const local = this.local(current.localId, current.loc);
+              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${value});`);
+              this.currentAsyncLocals?.add(local.id);
+              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
+            } else if (current.kind === "exprStmt") {
+              this.line(`let _ = ${value};`);
+              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
+            } else {
+              this.withAsyncLocals(new Set(exitLocals), () => handlers.returned(value));
+            }
+          });
           this.line("return runtime::AsyncCompletion::Suspended;");
           terminal = "await";
           break;
@@ -2610,6 +2635,20 @@ class RustEmitter {
         this.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
           consume(this.emitMapIntrinsicValues(expr, receiver, args));
         });
+      });
+      return;
+    }
+    if (expr.kind === "recordClone") {
+      this.emitAsyncProtectedValue(expr.source, exitLocals, handlers, (source) => {
+        const clone = `sc_async_record_clone_${this.temporary++}`;
+        this.line(`let ${clone} = ${this.emitRecordCloneInitial(expr, source)};`);
+        this.emitAsyncProtectedRecordCloneOverrides(
+          expr,
+          clone,
+          exitLocals,
+          handlers,
+          () => consume(clone),
+        );
       });
       return;
     }
@@ -2904,6 +2943,14 @@ class RustEmitter {
       this.emitAsyncRecord(expr, consume);
       return;
     }
+    if (expr.kind === "recordClone") {
+      this.emitAsyncValue(expr.source, (source) => {
+        const clone = `sc_async_record_clone_${this.temporary++}`;
+        this.line(`let ${clone} = ${this.emitRecordCloneInitial(expr, source)};`);
+        this.emitAsyncRecordCloneOverrides(expr, clone, () => consume(clone));
+      });
+      return;
+    }
     if (expr.kind === "arrIntrinsic") {
       this.emitAsyncValue(expr.receiver, (receiver) => {
         this.emitAsyncValues(expr.args, (args) => {
@@ -2945,6 +2992,95 @@ class RustEmitter {
       return `${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? `Some(${value})` : value}`;
     }).join(", ");
     consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
+  }
+
+  private recordCloneShape(
+    expr: Extract<IrExpr, { kind: "recordClone" }>,
+  ): IrRecordShape {
+    if (expr.type.kind !== "record") {
+      this.unsupported("recordClone with a non-record type", expr.loc);
+    }
+    const shape = this.records.get(expr.type.shapeId);
+    if (shape === undefined) {
+      this.unsupported(`unknown record clone shape '${expr.type.shapeId}'`, expr.loc);
+    }
+    if (shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
+      this.unsupported(`recordClone of non-plain shape '${shape.id}'`, expr.loc);
+    }
+    return shape;
+  }
+
+  private emitRecordCloneInitial(
+    expr: Extract<IrExpr, { kind: "recordClone" }>,
+    source: string,
+  ): string {
+    const shape = this.recordCloneShape(expr);
+    const fields = shape.fields.map((field) => {
+      const access = `record.${mangleField(field.name)}`;
+      const value = this.isEdgeValue(field.type) || this.needsClone(field.type)
+        ? `${access}.clone()`
+        : access;
+      return `${mangleField(field.name)}: ${value}`;
+    }).join(", ");
+    return `${source}.with(|record| runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }))`;
+  }
+
+  private emitRecordCloneOverride(
+    expr: Extract<IrExpr, { kind: "recordClone" }>,
+    clone: string,
+    fieldName: string,
+    value: string,
+  ): string {
+    const shape = this.recordCloneShape(expr);
+    const field = shape.fields.find((candidate) => candidate.name === fieldName);
+    if (field === undefined) {
+      this.unsupported(`unknown record clone field '${shape.id}.${fieldName}'`, expr.loc);
+    }
+    const stored = this.isEdgeValue(field.type) ? `Some(${value})` : value;
+    return `${clone}.with_mut(|record| record.${mangleField(field.name)} = ${stored});`;
+  }
+
+  private emitAsyncRecordCloneOverrides(
+    expr: Extract<IrExpr, { kind: "recordClone" }>,
+    clone: string,
+    consume: () => void,
+    index = 0,
+  ): void {
+    const override = expr.overrides[index];
+    if (override === undefined) {
+      consume();
+      return;
+    }
+    this.emitAsyncValue(override.value, (value) => {
+      this.line(this.emitRecordCloneOverride(expr, clone, override.name, value));
+      this.emitAsyncRecordCloneOverrides(expr, clone, consume, index + 1);
+    });
+  }
+
+  private emitAsyncProtectedRecordCloneOverrides(
+    expr: Extract<IrExpr, { kind: "recordClone" }>,
+    clone: string,
+    exitLocals: ReadonlySet<string>,
+    handlers: RustAsyncHandlers,
+    consume: () => void,
+    index = 0,
+  ): void {
+    const override = expr.overrides[index];
+    if (override === undefined) {
+      consume();
+      return;
+    }
+    this.emitAsyncProtectedValue(override.value, exitLocals, handlers, (value) => {
+      this.line(this.emitRecordCloneOverride(expr, clone, override.name, value));
+      this.emitAsyncProtectedRecordCloneOverrides(
+        expr,
+        clone,
+        exitLocals,
+        handlers,
+        consume,
+        index + 1,
+      );
+    });
   }
 
   private emitAsyncValues(
@@ -3926,6 +4062,15 @@ class RustEmitter {
           return `${mangleField(field.name)}: ${stored}`;
         }).join(", ");
         return `{ ${bindings.join(" ")} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
+      }
+      case "recordClone": {
+        const source = `sc_rt_${this.temporary++}`;
+        const clone = `sc_rt_${this.temporary++}`;
+        const overrides = expr.overrides.map((override) => {
+          const value = `sc_rt_${this.temporary++}`;
+          return `let ${value} = ${this.emitExpr(override.value)}; ${this.emitRecordCloneOverride(expr, clone, override.name, value)}`;
+        }).join(" ");
+        return `{ let ${source} = ${this.emitExpr(expr.source)}; let ${clone} = ${this.emitRecordCloneInitial(expr, source)}; ${overrides} ${clone} }`;
       }
       case "recordGet": {
         const shape = this.records.get(expr.shapeId);

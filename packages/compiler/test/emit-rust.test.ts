@@ -496,9 +496,13 @@ console.log(replaced());
 test("supported scalar, heap, closure, and union corpus matches Node byte-for-byte", async () => {
   for (const fixture of [
     "001-hello.ts",
+    "002-log-args.ts",
+    "100-number-format.ts",
     "101-arithmetic.ts",
     "102-comparisons.ts",
     "103-ternary.ts",
+    "104-ternary-empty-arrays.ts",
+    "140-bitwise-operators.ts",
     "200-strings.ts",
     "201-templates.ts",
     "300-if-else.ts",
@@ -541,6 +545,11 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1011-json-unknown-typeof.ts",
     "1111-math-random.ts",
     "1115-parse-globals.ts",
+    "1117-typeof-static-union.ts",
+    "1118-object-spread-conditional.ts",
+    "1119-switch-union.ts",
+    "1121-infinity-number-tostring.ts",
+    "1124-union-narrowed-retag.ts",
     "1200-regex-test-basics.ts",
     "1201-regex-replace.ts",
     "1202-regex-substitutions.ts",
@@ -551,10 +560,19 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1302-errors-typed-catch.ts",
     "1303-errors-rc-stress.ts",
     "1306-errors-runtime-instances.ts",
+    "1364-union-truthiness.ts",
+    "1365-union-logical.ts",
     "1366-union-equality.ts",
+    "1367-destructuring.ts",
+    "1368-constructor-functions.ts",
+    "1370-spread.ts",
+    "1371-union-template-tostring.ts",
+    "1372-loose-null-tests.ts",
+    "1373-union-array-arms.ts",
     "1408-string-indexing.ts",
     "1420-number-statics.ts",
     "1431-caught-tostring.ts",
+    "1432-destructured-params.ts",
     "1435-math-spread.ts",
     "1437-pad-default.ts",
     "1450-incdec-expression.ts",
@@ -591,6 +609,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2609-regex-named-replace.ts",
     "2610-regex-named-matchall.ts",
     "2611-regex-named-groups-js.cjs",
+    "2676-record-clone-overrides.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-corpus-"));
@@ -623,7 +642,76 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     expect(rust.stdout, fixture).toBe(node.stdout);
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
-}, 180_000);
+}, 240_000);
+
+test("Rust record clones preserve evaluation across async suspension", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-record-clone-async-"));
+  const entryPath = join(dir, "record-clone-async.ts");
+  await writeFile(entryPath, `
+interface Config {
+  label: string;
+  value: number;
+  nested: { tag: string };
+}
+
+const trace: string[] = [];
+const base: Config = { label: "base", value: 1, nested: { tag: "nested" } };
+
+function source(value: Config, name: string): Config {
+  trace.push(name);
+  return value;
+}
+
+async function label(): Promise<string> {
+  trace.push("label:start");
+  await Promise.resolve();
+  trace.push("label:end");
+  return "plain";
+}
+
+async function number(): Promise<number> {
+  trace.push("number:start");
+  await Promise.resolve();
+  trace.push("number:end");
+  return 3;
+}
+
+async function build(): Promise<Config> {
+  const plain: Config = { ...source(base, "source:plain"), label: await label() };
+  try {
+    return { ...source(plain, "source:protected"), value: await number() };
+  } finally {
+    trace.push("finally");
+  }
+}
+
+const result = await build();
+result.nested.tag = "shared";
+console.log(result.label, result.value, base.label, base.value, base.nested.tag);
+console.log(trace.join(","));
+export {};
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "record-clone-async"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  expect(await readFile(result.sourcePath, "utf8")).toContain("sc_async_record_clone_");
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+}, 120_000);
 
 test("Rust checked-dynamic adapters validate JSON, arguments, and results catchably", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-functions-"));
