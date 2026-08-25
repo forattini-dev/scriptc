@@ -2991,9 +2991,13 @@ class RustEmitter {
         // TypeScript lowering appends SC9002 after paths it proved cannot
         // fall through (for example, while(true) with a return). It remains
         // a loud invariant if frontend and backend ever disagree. Deferred
-        // JavaScript fences need the future catchable-exception runtime.
-        if (stmt.code !== "SC9002") this.unsupported(`runtime fence '${stmt.code}'`, stmt.loc);
-        this.line(`panic!("${this.rustString(`${stmt.code}: ${stmt.message}`)}");`);
+        // JavaScript fences are ordinary catchable Error values with their
+        // diagnostic code exposed as `.code`, matching the C runtime.
+        if (stmt.code === "SC9002") {
+          this.line(`panic!("${this.rustString(`${stmt.code}: ${stmt.message}`)}");`);
+        } else {
+          this.line(`runtime::throw_error_code("${this.rustString(stmt.message)}".to_owned(), "${this.rustString(stmt.code)}");`);
+        }
         return;
       default:
         this.unsupported(`statement '${stmt.kind}'`, stmt.loc);
@@ -3238,6 +3242,21 @@ class RustEmitter {
           `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
           ...expr.args.map((argument, index) => `let ${args[index]} = ${this.emitExpr(argument)};`),
         ].join(" ");
+        if (expr.method === "match" && args.length === 1) {
+          if (expr.type.kind !== "union") this.unsupported("regex match result without a union", expr.loc);
+          const union = this.union(expr.type.unionId, expr.loc);
+          const arrayTag = union.arms.findIndex((arm) => arm.kind === "array");
+          const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+          if (arrayTag < 0 || nullTag < 0) this.unsupported("regex match result union shape", expr.loc);
+          const name = this.unionName(union.id);
+          return `{ ${bindings} match runtime::regex_match(&${receiver}, &${args[0]}) { Some(value) => ${name}::${this.unionVariant(arrayTag)}(value), None => ${name}::${this.unionVariant(nullTag)}, } }`;
+        }
+        if ((expr.method === "matchAll" || expr.method === "matchAllInto") && args.length === (expr.method === "matchAll" ? 1 : 2)) {
+          return `{ ${bindings} runtime::regex_${expr.method === "matchAll" ? "match_all" : "match_all_into"}(&${receiver}, &${args[0]}${expr.method === "matchAllInto" ? `, &${args[1]}` : ""}) }`;
+        }
+        if (expr.method === "search" && args.length === 1) {
+          return `{ ${bindings} runtime::regex_search(&${receiver}, &${args[0]}) }`;
+        }
         if ((expr.method === "replace" || expr.method === "replaceAll") && args.length === 2) {
           return `{ ${bindings} runtime::regex_${expr.method === "replace" ? "replace" : "replace_all"}(&${receiver}, &${args[0]}, &${args[1]}) }`;
         }
@@ -3564,6 +3583,16 @@ class RustEmitter {
         if (expr.type.kind !== "record") this.unsupported("record literal with a non-record type", expr.loc);
         const shape = this.records.get(expr.type.shapeId);
         if (shape === undefined) this.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
+        if (shape.indexValue !== undefined) {
+          if (shape.fields.length !== 0) this.unsupported(`hybrid indexed record literal '${shape.id}'`, expr.loc);
+          const map = `sc_rt_${this.temporary++}`;
+          const entries = expr.fields.map((entry) => {
+            if (entry.drop) this.unsupported("dropped indexed record field", expr.loc);
+            const value = `sc_rt_${this.temporary++}`;
+            return `let ${value} = ${this.emitExpr(entry.value)}; runtime::map_set_by(&${map}, runtime::string("${this.rustString(entry.name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`;
+          }).join(" ");
+          return `{ let ${map}: ${this.rustType(expr.type, expr.loc)} = runtime::map_new(); ${entries} ${map} }`;
+        }
         const values = new Map<string, string>();
         const bindings: string[] = [];
         for (const entry of expr.fields) {
@@ -3592,13 +3621,37 @@ class RustEmitter {
       }
       case "recordKeyGet": {
         const shape = this.records.get(expr.shapeId);
-        if (shape?.indexValue?.kind !== "dyn" || shape.fields.length !== 0 || expr.type.kind !== "dyn") {
+        if (shape === undefined || shape.indexValue === undefined || shape.fields.length !== 0) {
           this.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
         }
+        const indexValue = shape.indexValue;
         if (expr.key.type.kind !== "string") this.unsupported("indexed record key type", expr.loc);
         const object = `sc_rt_${this.temporary++}`;
         const key = `sc_rt_${this.temporary++}`;
-        return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dynTypeName()}::Undefined) }`;
+        if (indexValue.kind === "dyn" && expr.type.kind === "dyn") {
+          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dynTypeName()}::Undefined) }`;
+        }
+        if (expr.type.kind === "union") {
+          const union = this.union(expr.type.unionId, expr.loc);
+          const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(indexValue));
+          const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+          if (valueTag < 0 || undefinedTag < 0) {
+            this.unsupported(`indexed record optional read result '${expr.shapeId}'`, expr.loc);
+          }
+          const name = this.unionName(union.id);
+          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; match runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()) { Some(value) => ${name}::${this.unionVariant(valueTag)}(value), None => ${name}::${this.unionVariant(undefinedTag)}, } }`;
+        }
+        if (typeKey(indexValue) !== typeKey(expr.type)) {
+          this.unsupported(`indexed record read result '${expr.shapeId}'`, expr.loc);
+        }
+        return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).expect("scriptc: missing statically-known indexed record key") }`;
+      }
+      case "recordOvfKeys": {
+        const shape = this.records.get(expr.shapeId);
+        if (shape?.indexValue === undefined || shape.fields.length !== 0) {
+          this.unsupported(`indexed record keys '${expr.shapeId}'`, expr.loc);
+        }
+        return `runtime::map_string_keys_js_order(&(${this.emitExpr(expr.obj)}))`;
       }
       case "caughtTest":
         if (expr.test !== "instanceof") {
@@ -3890,6 +3943,7 @@ class RustEmitter {
         return this.emitExpr(expr.value);
       case "libCall": {
         const arg = expr.args[0];
+        const secondArg = expr.args[1];
         if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
           const keyExpr = expr.args[1];
           const valueExpr = expr.args[2];
@@ -3922,6 +3976,15 @@ class RustEmitter {
         }
         if (expr.fn === "math.floor" && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).floor()`;
+        }
+        if ((expr.fn === "math.max" || expr.fn === "math.min") && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::${expr.fn === "math.max" ? "math_max" : "math_min"}(${this.emitExpr(arg)}, ${this.emitExpr(secondArg)})`;
+        }
+        if (expr.fn === "math.random" && expr.args.length === 0) return "runtime::math_random()";
+        if (expr.fn === "regex.new" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          const pattern = `sc_rt_${this.temporary++}`;
+          const flags = `sc_rt_${this.temporary++}`;
+          return `{ let ${pattern} = ${this.emitExpr(arg)}; let ${flags} = ${this.emitExpr(secondArg)}; runtime::regex_new(&${pattern}, &${flags}) }`;
         }
         if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
         if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
@@ -4978,8 +5041,11 @@ class RustEmitter {
         const shape = this.records.get(type.shapeId);
         if (shape === undefined) this.unsupported(`unknown record type '${type.shapeId}'`, loc);
         if (shape.indexValue !== undefined) {
-          if (shape.indexValue.kind === "dyn" && shape.fields.length === 0) {
-            return `runtime::JsMap<runtime::JsString, ${this.dynTypeName()}>`;
+          if (shape.fields.length === 0) {
+            const value = shape.indexValue.kind === "dyn"
+              ? this.dynTypeName()
+              : this.rustType(shape.indexValue, loc);
+            return `runtime::JsMap<runtime::JsString, ${value}>`;
           }
           this.unsupported(`indexed record value '${type.shapeId}'`, loc);
         }
@@ -5371,8 +5437,11 @@ class RustEmitter {
         const key = `record:${type.shapeId}`;
         if (visiting.has(key)) return true;
         const shape = this.records.get(type.shapeId);
-        if (shape === undefined || shape.indexValue !== undefined) return false;
+        if (shape === undefined) return false;
         const next = new Set(visiting).add(key);
+        if (shape.indexValue !== undefined) {
+          return shape.fields.length === 0 && this.isRustJsonCompatible(shape.indexValue, next);
+        }
         return shape.fields.every((field) => this.isRustJsonCompatible(field.type, next));
       }
       case "union": {

@@ -89,6 +89,102 @@ pub fn regex_test(regex: &JsRegex, text: &JsString) -> bool {
     found.is_some()
 }
 
+fn regex_match_row(units: &[u16], matched: &regress::Match) -> JsArray<JsString> {
+    let mut values = Vec::with_capacity(matched.captures.len() + 1);
+    values.push(string_from_utf16(&units[matched.range()]));
+    for group in &matched.captures {
+        values.push(group.as_ref().map_or_else(empty_string, |range| {
+            string_from_utf16(&units[range.clone()])
+        }));
+    }
+    array_new(values)
+}
+
+pub fn regex_match(subject: &JsString, regex: &JsRegex) -> Option<JsArray<JsString>> {
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    if regex.global {
+        regex.last_index.set(0);
+        let mut values = Vec::new();
+        let mut position = 0usize;
+        while position <= units.len() {
+            let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
+                break;
+            };
+            let start = matched.start();
+            let end = matched.end();
+            values.push(string_from_utf16(&units[matched.range()]));
+            position = if start == end {
+                advance_string_index(&units, end, regex.unicode)
+            } else {
+                end
+            };
+        }
+        regex.last_index.set(0);
+        return (!values.is_empty()).then(|| array_new(values));
+    }
+    let start = if regex.sticky {
+        regex.last_index.get()
+    } else {
+        0
+    };
+    let matched = regex_find(regex, &units, start, regex.sticky);
+    if regex.sticky {
+        regex
+            .last_index
+            .set(matched.as_ref().map_or(0, regress::Match::end));
+    }
+    matched.map(|matched| regex_match_row(&units, &matched))
+}
+
+pub fn regex_search(subject: &JsString, regex: &JsRegex) -> f64 {
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    regex_find(regex, &units, 0, regex.sticky).map_or(-1.0, |matched| matched.start() as f64)
+}
+
+fn regex_match_all_impl(
+    subject: &JsString,
+    regex: &JsRegex,
+    indices: Option<&JsArray<f64>>,
+) -> JsArray<JsArray<JsString>> {
+    if !regex.global {
+        throw_type_error(
+            "String.prototype.matchAll called with a non-global RegExp argument".to_owned(),
+        );
+    }
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    let mut rows = Vec::new();
+    let mut position = regex.last_index.get();
+    while position <= units.len() {
+        let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
+            break;
+        };
+        let start = matched.start();
+        let end = matched.end();
+        if let Some(indices) = indices {
+            array_push(indices, start as f64);
+        }
+        rows.push(regex_match_row(&units, &matched));
+        position = if start == end {
+            advance_string_index(&units, end, regex.unicode)
+        } else {
+            end
+        };
+    }
+    array_new(rows)
+}
+
+pub fn regex_match_all(subject: &JsString, regex: &JsRegex) -> JsArray<JsArray<JsString>> {
+    regex_match_all_impl(subject, regex, None)
+}
+
+pub fn regex_match_all_into(
+    subject: &JsString,
+    regex: &JsRegex,
+    indices: &JsArray<f64>,
+) -> JsArray<JsArray<JsString>> {
+    regex_match_all_impl(subject, regex, Some(indices))
+}
+
 fn regex_put_substitution(
     output: &mut Vec<u16>,
     subject: &[u16],
@@ -1597,6 +1693,14 @@ pub fn throw_reference_error(message: String) -> ! {
         name: "ReferenceError".to_owned(),
         message,
         code: None,
+    })
+}
+
+pub fn throw_error_code(message: String, code: &str) -> ! {
+    throw_value(JsError {
+        name: "Error".to_owned(),
+        message,
+        code: Some(code.to_owned()),
     })
 }
 
@@ -3483,6 +3587,48 @@ pub fn map_iter_exit<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
             data.entries.retain(Option::is_some);
         }
     });
+}
+
+fn js_property_index(key: &str) -> Option<u32> {
+    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
+        return None;
+    }
+    let index = key.parse::<u32>().ok()?;
+    (index != u32::MAX && index.to_string() == key).then_some(index)
+}
+
+fn map_string_entry_order<V: HeapValue>(data: &MapData<JsString, V>) -> Vec<usize> {
+    let mut indexes = Vec::new();
+    let mut names = Vec::new();
+    for (position, entry) in data.entries.iter().enumerate() {
+        let Some((key, _)) = entry else { continue };
+        if let Some(index) = js_property_index(key) {
+            indexes.push((index, position));
+        } else {
+            names.push(position);
+        }
+    }
+    indexes.sort_unstable_by_key(|(index, _)| *index);
+    indexes
+        .into_iter()
+        .map(|(_, position)| position)
+        .chain(names)
+        .collect()
+}
+
+pub fn map_string_keys_js_order<V: HeapValue>(map: &JsMap<JsString, V>) -> JsArray<JsString> {
+    array_new(map.with(|data| {
+        map_string_entry_order(data)
+            .into_iter()
+            .map(|position| {
+                data.entries[position]
+                    .as_ref()
+                    .expect("scriptc: ordered map key points at a tombstone")
+                    .0
+                    .clone()
+            })
+            .collect()
+    }))
 }
 
 pub type JsSet<T> = JsMap<T, bool>;
@@ -5817,6 +5963,23 @@ where
     }
 }
 
+impl<V> JsonObject for MapData<JsString, V>
+where
+    V: HeapValue + JsonValue,
+{
+    fn write_json_object(&self, writer: &mut JsonWriter) {
+        writer.begin_object();
+        let mut first = true;
+        for position in map_string_entry_order(self) {
+            let (key, value) = self.entries[position]
+                .as_ref()
+                .expect("scriptc: ordered JSON property points at a tombstone");
+            writer.property(&mut first, key, value);
+        }
+        writer.end_object();
+    }
+}
+
 pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     let mut writer = JsonWriter::new();
     value.write_json(&mut writer);
@@ -5944,6 +6107,33 @@ where
             decoded.push(T::decode_json(element, &json_index_path(path, index))?);
         }
         Ok(Self { elements: decoded })
+    }
+}
+
+impl<V> JsonObjectDecode for MapData<JsString, V>
+where
+    V: HeapValue + JsonDecode,
+{
+    fn decode_json_object(node: &JsonNode, path: &str) -> Result<Self, String> {
+        let fields = json_expect_object(node, path)?;
+        let mut entries: Vec<Option<(JsString, V)>> = Vec::with_capacity(fields.len());
+        for (key, value) in fields {
+            let decoded = V::decode_json(value, &json_property_path(path, key))?;
+            if let Some((_, stored)) = entries
+                .iter_mut()
+                .flatten()
+                .find(|(stored, _)| stored.as_ref() == key)
+            {
+                *stored = decoded;
+            } else {
+                entries.push(Some((string(key), decoded)));
+            }
+        }
+        Ok(Self {
+            live: entries.len(),
+            entries,
+            iteration_depth: 0,
+        })
     }
 }
 
@@ -6255,6 +6445,50 @@ pub fn number_same_value(left: f64, right: f64) -> bool {
     left == right
 }
 
+pub fn math_max(left: f64, right: f64) -> f64 {
+    if left.is_nan() || right.is_nan() {
+        return f64::NAN;
+    }
+    if left == 0.0 && right == 0.0 {
+        return if left.is_sign_positive() || right.is_sign_positive() {
+            0.0
+        } else {
+            -0.0
+        };
+    }
+    if left > right { left } else { right }
+}
+
+pub fn math_min(left: f64, right: f64) -> f64 {
+    if left.is_nan() || right.is_nan() {
+        return f64::NAN;
+    }
+    if left == 0.0 && right == 0.0 {
+        return if left.is_sign_negative() || right.is_sign_negative() {
+            -0.0
+        } else {
+            0.0
+        };
+    }
+    if left < right { left } else { right }
+}
+
+thread_local! {
+    static MATH_RANDOM_STATE: Cell<u64> = const { Cell::new(0x9e37_79b9_7f4a_7c15) };
+}
+
+pub fn math_random() -> f64 {
+    MATH_RANDOM_STATE.with(|state| {
+        let mut next = state.get();
+        next ^= next >> 12;
+        next ^= next << 25;
+        next ^= next >> 27;
+        state.set(next);
+        let bits = next.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 11;
+        bits as f64 * (1.0 / 9_007_199_254_740_992.0)
+    })
+}
+
 pub fn console_log(values: &[String]) {
     println!("{}", values.join(" "));
 }
@@ -6421,6 +6655,35 @@ mod tests {
         assert_eq!(array_get(&pieces, 0.0).as_ref(), "a");
         assert_eq!(array_get(&pieces, 1.0).as_ref(), "b");
         assert_eq!(array_get(&pieces, 2.0).as_ref(), "c");
+    }
+
+    #[test]
+    fn regex_match_search_and_match_all_preserve_utf16_semantics() {
+        let subject = string("😀a12 b");
+        let matched = regex_match(&subject, &regex_new(r"(a)(\d+)", "")).unwrap();
+        assert_eq!(array_len(&matched), 3.0);
+        assert_eq!(array_get(&matched, 0.0).as_ref(), "a12");
+        assert_eq!(array_get(&matched, 1.0).as_ref(), "a");
+        assert_eq!(array_get(&matched, 2.0).as_ref(), "12");
+        assert_eq!(regex_search(&subject, &regex_new(r"\d+", "")), 3.0);
+
+        let indices = array_new(Vec::new());
+        let rows = regex_match_all_into(&subject, &regex_new(r"\w", "g"), &indices);
+        assert_eq!(array_len(&rows), 4.0);
+        assert_eq!(array_len(&indices), 4.0);
+        assert_eq!(array_get(&indices, 0.0), 2.0);
+        assert_eq!(array_get(&indices, 3.0), 6.0);
+
+        let stateful = regex_new(r"\w", "g");
+        assert!(regex_test(&stateful, &string("ab")));
+        assert_eq!(stateful.last_index.get(), 1);
+        let remaining = regex_match_all(&string("ab"), &stateful);
+        assert_eq!(array_len(&remaining), 1.0);
+        assert_eq!(array_get(&array_get(&remaining, 0.0), 0.0).as_ref(), "b");
+        assert_eq!(stateful.last_index.get(), 1);
+        let all = regex_match(&string("ab"), &stateful).unwrap();
+        assert_eq!(array_len(&all), 2.0);
+        assert_eq!(stateful.last_index.get(), 0);
     }
 
     #[test]
@@ -6933,6 +7196,47 @@ mod tests {
     }
 
     #[test]
+    fn math_min_max_match_javascript_nan_and_signed_zero_rules() {
+        assert!(math_max(f64::NAN, 1.0).is_nan());
+        assert!(math_min(1.0, f64::NAN).is_nan());
+        assert!(math_max(-0.0, 0.0).is_sign_positive());
+        assert!(math_max(-0.0, -0.0).is_sign_negative());
+        assert!(math_min(-0.0, 0.0).is_sign_negative());
+        assert!(math_min(0.0, 0.0).is_sign_positive());
+    }
+
+    #[test]
+    fn math_random_stays_in_javascript_range_and_varies() {
+        let first = math_random();
+        let mut varied = false;
+        for _ in 0..128 {
+            let value = math_random();
+            assert!((0.0..1.0).contains(&value));
+            varied |= value != first;
+        }
+        assert!(varied);
+    }
+
+    #[test]
+    fn indexed_string_records_use_javascript_property_order() {
+        let record = map_new();
+        for (key, value) in [("name", "n"), ("10", "ten"), ("2", "two"), ("tail", "t")] {
+            map_set_by(&record, string(key), string(value), |left, right| {
+                left.as_ref() == right.as_ref()
+            });
+        }
+        let keys = map_string_keys_js_order(&record);
+        assert_eq!(array_get(&keys, 0.0).as_ref(), "2");
+        assert_eq!(array_get(&keys, 1.0).as_ref(), "10");
+        assert_eq!(array_get(&keys, 2.0).as_ref(), "name");
+        assert_eq!(array_get(&keys, 3.0).as_ref(), "tail");
+        assert_eq!(
+            json_stringify(&record).as_ref(),
+            r#"{"2":"two","10":"ten","name":"n","tail":"t"}"#
+        );
+    }
+
+    #[test]
     fn arrays_preserve_aliasing_and_release_acyclic_values() {
         let baseline = live_heap_objects();
         {
@@ -7096,6 +7400,21 @@ mod tests {
 
         cell_set(&cell, string("ready"));
         assert_eq!(cell_get_tdz(&cell, "answer").as_ref(), "ready");
+    }
+
+    #[test]
+    fn runtime_fences_unwind_as_catchable_coded_errors() {
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            throw_error_code("deferred construct".to_owned(), "SC1031")
+        }))
+        .expect_err("a runtime fence must unwind");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "Error");
+        assert_eq!(caught_error_message(&caught).as_ref(), "deferred construct");
+        assert_eq!(
+            error_code(&caught_error_value(&caught)).unwrap().as_ref(),
+            "SC1031"
+        );
     }
 
     #[test]
