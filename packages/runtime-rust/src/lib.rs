@@ -1039,6 +1039,7 @@ pub fn process_cpu_prev_validate(user: f64, system: f64) {
     for (name, value) in [("user", user), ("system", system)] {
         if !value.is_finite() || value < 0.0 {
             throw_value(JsError {
+                identity: Rc::new(()),
                 name: "RangeError".to_owned(),
                 message: format!(
                     "The property 'prevValue.{name}' is invalid. Received {}",
@@ -1722,6 +1723,7 @@ pub fn cell_set<T: HeapValue>(cell: &JsCell<T>, value: T) {
 
 #[derive(Clone)]
 pub struct JsError {
+    identity: Rc<()>,
     name: String,
     message: String,
     code: Option<String>,
@@ -1779,6 +1781,7 @@ impl Trace for JsError {
 
 pub fn error_new(name: &str, message: JsString) -> JsError {
     JsError {
+        identity: Rc::new(()),
         name: name.to_owned(),
         message: message.to_string(),
         code: None,
@@ -1820,6 +1823,7 @@ pub fn throw_value<T: 'static>(value: T) -> ! {
 
 pub fn throw_reference_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "ReferenceError".to_owned(),
         message,
         code: None,
@@ -1829,6 +1833,7 @@ pub fn throw_reference_error(message: String) -> ! {
 
 pub fn throw_error_code(message: String, code: &str) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "Error".to_owned(),
         message,
         code: Some(code.to_owned()),
@@ -1838,6 +1843,7 @@ pub fn throw_error_code(message: String, code: &str) -> ! {
 
 pub fn throw_type_error_code(message: String, code: &str) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "TypeError".to_owned(),
         message,
         code: Some(code.to_owned()),
@@ -1847,6 +1853,7 @@ pub fn throw_type_error_code(message: String, code: &str) -> ! {
 
 pub fn throw_type_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "TypeError".to_owned(),
         message,
         code: None,
@@ -1856,6 +1863,7 @@ pub fn throw_type_error(message: String) -> ! {
 
 pub fn throw_syntax_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "SyntaxError".to_owned(),
         message,
         code: None,
@@ -1865,6 +1873,7 @@ pub fn throw_syntax_error(message: String) -> ! {
 
 pub fn throw_range_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "RangeError".to_owned(),
         message,
         code: None,
@@ -1874,6 +1883,7 @@ pub fn throw_range_error(message: String) -> ! {
 
 pub fn throw_uri_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "URIError".to_owned(),
         message,
         code: None,
@@ -2019,6 +2029,10 @@ pub fn error_code(error: &JsError) -> Option<JsString> {
     error.code.as_deref().map(Rc::from)
 }
 
+pub fn error_identity(error: &JsError) -> usize {
+    Rc::as_ptr(&error.identity) as usize
+}
+
 fn dom_exception_code(name: &str) -> f64 {
     match name {
         "IndexSizeError" => 1.0,
@@ -2052,6 +2066,7 @@ fn dom_exception_code(name: &str) -> f64 {
 
 pub fn dom_exception_new(message: JsString, name: JsString, cause: Option<Caught>) -> JsError {
     JsError {
+        identity: Rc::new(()),
         name: name.to_string(),
         message: message.to_string(),
         code: None,
@@ -2099,11 +2114,79 @@ pub fn error_dom_clone(error: &JsError) -> JsError {
 
 fn throw_assertion_error(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "AssertionError".to_owned(),
         message,
         code: Some("ERR_ASSERTION".to_owned()),
         dom: None,
     })
+}
+
+pub fn assert_dyn_result(equal: bool, negated: bool, message: &JsString, has_message: bool) {
+    if (negated && !equal) || (!negated && equal) {
+        return;
+    }
+    throw_assertion_error(if has_message {
+        message.to_string()
+    } else if negated {
+        "Expected values to be strictly unequal".to_owned()
+    } else {
+        "Expected values to be strictly equal".to_owned()
+    })
+}
+
+thread_local! {
+    static ASSERT_SHAPE: RefCell<Option<(JsError, [Option<JsString>; 3])>> = const { RefCell::new(None) };
+}
+
+pub fn assert_shape_begin(error: &JsError) {
+    ASSERT_SHAPE.with(|shape| {
+        *shape.borrow_mut() = Some((error.clone(), [None, None, None]));
+    });
+}
+
+pub fn assert_shape_string(key: f64, value: &JsString) {
+    let index = key as usize;
+    ASSERT_SHAPE.with(|shape| {
+        let mut shape = shape.borrow_mut();
+        let (_, slots) = shape
+            .as_mut()
+            .expect("scriptc: assertion shape slot without begin");
+        let slot = slots
+            .get_mut(index)
+            .expect("scriptc: invalid assertion shape slot");
+        *slot = Some(value.clone());
+    });
+}
+
+pub fn assert_shape_end(message: &JsString, has_message: bool) {
+    let (error, slots) = ASSERT_SHAPE.with(|shape| {
+        shape
+            .borrow_mut()
+            .take()
+            .expect("scriptc: assertion shape end without begin")
+    });
+    let actual = [
+        error_code(&error),
+        Some(error_message(&error)),
+        Some(error_name(&error)),
+    ];
+    let matches = slots
+        .iter()
+        .zip(actual.iter())
+        .all(|(expected, actual)| match expected {
+            None => true,
+            Some(expected) => actual
+                .as_ref()
+                .is_some_and(|actual| actual.as_ref() == expected.as_ref()),
+        });
+    if !matches {
+        throw_assertion_error(if has_message {
+            message.to_string()
+        } else {
+            "Expected values to be strictly deep-equal".to_owned()
+        });
+    }
 }
 
 pub fn assert_throws_none(
@@ -2650,6 +2733,7 @@ fn bytes_validate_offset(name: &str, value: f64, max: f64) {
         format!(">= 0 && <= {}", format_number(max))
     };
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "RangeError".to_owned(),
         message: format!(
             "The value of \"{name}\" is out of range. It must be {requirement}. Received {received}"
@@ -2796,6 +2880,7 @@ fn bytes_fill_core(
 ) -> JsBytes<u8> {
     if pattern.is_empty() && !empty_pattern_zero_fills {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "TypeError".to_owned(),
             message: "The argument 'value' is invalid. Received <Buffer >".to_owned(),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
@@ -2906,6 +2991,7 @@ pub fn bytes_swap(bytes: &JsBytes<u8>, width: usize) -> JsBytes<u8> {
     let length = bytes.with(|data| data.length);
     if !length.is_multiple_of(width) {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "RangeError".to_owned(),
             message: format!("Buffer size must be a multiple of {}-bits", width * 8),
             code: Some("ERR_INVALID_BUFFER_SIZE".to_owned()),
@@ -3122,6 +3208,7 @@ fn normalize_buffer_encoding(encoding: &str) -> Option<&'static str> {
 fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
     normalize_buffer_encoding(encoding).unwrap_or_else(|| {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "TypeError".to_owned(),
             message: format!("Unknown encoding: {encoding}"),
             code: Some("ERR_UNKNOWN_ENCODING".to_owned()),
@@ -3485,6 +3572,7 @@ fn bytes_num_width(kind: &str) -> usize {
 fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
     if value.floor() != value {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "RangeError".to_owned(),
             message: format!(
                 "The value of \"{}\" is out of range. It must be an integer. Received {}",
@@ -3497,6 +3585,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
     }
     if length < 0.0 {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "RangeError".to_owned(),
             message: "Attempt to access memory outside buffer bounds".to_owned(),
             code: Some("ERR_BUFFER_OUT_OF_BOUNDS".to_owned()),
@@ -3504,6 +3593,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
         });
     }
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "RangeError".to_owned(),
         message: format!(
             "The value of \"{}\" is out of range. It must be >= {} and <= {}. Received {}",
@@ -3554,6 +3644,7 @@ fn bytes_check_int(
             )
         };
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "RangeError".to_owned(),
             message: format!(
                 "The value of \"value\" is out of range. It must be {requirement}. Received {}",
@@ -4718,6 +4809,7 @@ fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! 
     let code = fs_error_code(&error);
     let text = fs_error_text(&error);
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{}'", path),
         code: Some(code.to_owned()),
@@ -4733,6 +4825,7 @@ fn fs_error2(operation: &str, from: &str, to: &str, error: &std::io::Error) -> J
     let code = fs_error_code(error);
     let text = fs_error_text(error);
     JsError {
+        identity: Rc::new(()),
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{from}' -> '{to}'"),
         code: Some(code.to_owned()),
@@ -4742,6 +4835,7 @@ fn fs_error2(operation: &str, from: &str, to: &str, error: &std::io::Error) -> J
 
 fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "Error".to_owned(),
         message: format!("{code}: {description}, {operation}"),
         code: Some(code.to_owned()),
@@ -4757,6 +4851,7 @@ fn throw_fs_fd_io_error(operation: &str, error: std::io::Error) -> ! {
 
 fn throw_out_of_range(message: String) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "RangeError".to_owned(),
         message,
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
@@ -4813,6 +4908,7 @@ fn inspected_argument(value: &str) -> String {
 
 fn throw_invalid_arg_value(prefix: &str, value: &str) -> ! {
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "TypeError".to_owned(),
         message: format!("{prefix}{}", inspected_argument(value)),
         code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
@@ -5508,6 +5604,7 @@ fn file_handle_require_open(handle: &JsFileHandle) -> f64 {
         return fd;
     }
     throw_value(JsError {
+        identity: Rc::new(()),
         name: "Error".to_owned(),
         message: "file closed".to_owned(),
         code: Some("EBADF".to_owned()),
@@ -5542,6 +5639,7 @@ pub fn file_handle_read(
             return checked;
         }
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "TypeError".to_owned(),
             message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >"
                 .to_owned(),
@@ -5965,6 +6063,7 @@ pub fn child_exec_sync(
         Err(error) => {
             let code = fs_error_code(&error);
             throw_value(JsError {
+                identity: Rc::new(()),
                 name: "Error".to_owned(),
                 message: format!("spawnSync {command} {code}"),
                 code: Some(code.to_owned()),
@@ -5977,6 +6076,7 @@ pub fn child_exec_sync(
     }
     if output.timed_out {
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "Error".to_owned(),
             message: format!("spawnSync {command} ETIMEDOUT"),
             code: Some("ETIMEDOUT".to_owned()),
@@ -6004,6 +6104,7 @@ pub fn child_exec_sync(
         };
         let stderr = String::from_utf8_lossy(&output.stderr);
         throw_value(JsError {
+            identity: Rc::new(()),
             name: "Error".to_owned(),
             message: format!("Command failed: {display}\n{stderr}"),
             code: None,
@@ -6096,6 +6197,7 @@ pub fn child_spawn_sync(
                 stdout: string(""),
                 stderr: string(""),
                 error: Some(JsError {
+                    identity: Rc::new(()),
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} {code}"),
                     code: Some(code.to_owned()),
@@ -6123,6 +6225,7 @@ pub fn child_spawn_sync(
                 stdout: Rc::from(String::from_utf8_lossy(&output.stdout).as_ref()),
                 stderr: Rc::from(String::from_utf8_lossy(&output.stderr).as_ref()),
                 error: output.timed_out.then(|| JsError {
+                    identity: Rc::new(()),
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} ETIMEDOUT"),
                     code: Some("ETIMEDOUT".to_owned()),
@@ -7967,7 +8070,10 @@ mod tests {
         assert_eq!(error_dom_code(&error), 5.0);
         assert!(error_dom_has_cause(&error));
         assert_eq!(error_dom_cause::<JsString>(&error).as_ref(), Some(&cause));
+        let identity = error_identity(&error);
+        assert_eq!(error_identity(&error.clone()), identity);
         let cloned = error_dom_clone(&error);
+        assert_ne!(error_identity(&cloned), identity);
         assert_eq!(error_name(&cloned).as_ref(), "InvalidCharacterError");
         assert_eq!(error_message(&cloned).as_ref(), "bad input");
         assert!(!error_dom_has_cause(&cloned));

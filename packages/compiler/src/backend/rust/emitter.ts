@@ -193,6 +193,7 @@ class RustEmitter {
     for (const fnName of this.internedClosureTargets) {
       this.line(`${mangleFnClosure(fnName)}.with(|slot| *slot.borrow_mut() = None);`);
     }
+    if (this.usesDyn) this.line("sc_dyn_error_cache_clear();");
     this.line("runtime::finish();");
     this.line("if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }");
     this.line("if _sc_unhandled_rejection { std::process::exit(1); }");
@@ -611,6 +612,36 @@ class RustEmitter {
     this.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
     this.indent -= 1;
     this.line("}");
+    this.line(`impl runtime::JsonValue for ${name} {`);
+    this.indent += 1;
+    this.line("fn write_json(&self, writer: &mut runtime::JsonWriter) {");
+    this.indent += 1;
+    this.line("match self {");
+    this.indent += 1;
+    this.line(`${name}::Undefined | ${name}::Null => writer.write_null(),`);
+    this.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
+    for (const shape of boxedShapes) {
+      this.line(`${name}::${this.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line("fn is_json_undefined(&self) -> bool {");
+    this.indent += 1;
+    const undefinedPatterns = [
+      `${name}::Undefined`,
+      ...boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`),
+    ];
+    this.line(`matches!(self, ${undefinedPatterns.join(" | ")})`);
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
     this.line(`impl runtime::JsonDecode for ${name} {`);
     this.indent += 1;
     this.line("fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {");
@@ -977,7 +1008,165 @@ class RustEmitter {
     this.line("}");
     this.indent -= 1;
     this.line("}");
+    this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     this.line("");
+  }
+
+  private emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
+    const name = this.dynTypeName();
+    const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
+
+    this.line("std::thread_local! {");
+    this.indent += 1;
+    this.line(`static SC_DYN_ERROR_CACHE: std::cell::RefCell<Vec<(usize, runtime::JsError, ${mapType})>> = const { std::cell::RefCell::new(Vec::new()) };`);
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_error_box(error: &runtime::JsError) -> ${name} {`);
+    this.indent += 1;
+    this.line("let identity = runtime::error_identity(error);");
+    this.line("if let Some(object) = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(cached, _, _)| *cached == identity).map(|(_, _, object)| object.clone())) {");
+    this.indent += 1;
+    this.line(`return ${name}::Object(object);`);
+    this.indent -= 1;
+    this.line("}");
+    this.line(`let object: ${mapType} = runtime::map_new();`);
+    this.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().push((identity, error.clone(), object.clone())));");
+    this.line(`runtime::map_set_by(&object, runtime::string("%error"), ${name}::Boolean(true), |left, right| left.as_ref() == right.as_ref());`);
+    this.line(`runtime::map_set_by(&object, runtime::string("name"), ${name}::String(runtime::error_name(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.line(`runtime::map_set_by(&object, runtime::string("message"), ${name}::String(runtime::error_message(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.line("if runtime::error_is_class(error, \"DOMException\") {");
+    this.indent += 1;
+    this.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::Number(runtime::error_dom_code(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.line(`if let Some(cause) = runtime::error_dom_cause::<${name}>(error) { runtime::map_set_by(&object, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); }`);
+    this.indent -= 1;
+    this.line("} else if let Some(code) = runtime::error_code(error) {");
+    this.indent += 1;
+    this.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::String(code), |left, right| left.as_ref() == right.as_ref());`);
+    this.indent -= 1;
+    this.line("}");
+    this.line(`${name}::Object(object)`);
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_error_instanceof(value: &${name}, kind: f64) -> bool {`);
+    this.indent += 1;
+    this.line("let target = match kind as i32 { 0 => \"Error\", 1 => \"TypeError\", 2 => \"RangeError\", 3 => \"SyntaxError\", 4 => \"DOMException\", _ => return false };");
+    this.line(`let ${name}::Object(object) = value else { return false; };`);
+    this.line("let identity = object.identity();");
+    this.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| runtime::error_is_class(error, target)))");
+    this.indent -= 1;
+    this.line("}");
+    this.line("fn sc_dyn_error_cache_clear() {");
+    this.indent += 1;
+    this.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().clear());");
+    this.indent -= 1;
+    this.line("}");
+
+    this.line(`fn sc_dyn_validate_clone_options(options: &${name}) {`);
+    this.indent += 1;
+    this.line(`if matches!(options, ${name}::Undefined | ${name}::Null) { return; }`);
+    this.line(`let ${name}::Object(object) = options else {`);
+    this.indent += 1;
+    this.line("runtime::throw_type_error_code(\"Failed to execute 'structuredClone': Options cannot be converted to a dictionary\".to_owned(), \"ERR_INVALID_ARG_TYPE\");");
+    this.indent -= 1;
+    this.line("};");
+    this.line(`let transfer = runtime::map_get_by(object, &runtime::string("transfer"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined);`);
+    this.line(`if matches!(transfer, ${name}::Undefined) { return; }`);
+    this.line(`let ${name}::Array(transfer) = transfer else {`);
+    this.indent += 1;
+    this.line("runtime::throw_type_error_code(\"Failed to execute 'structuredClone': transfer in Options cannot be converted to sequence.\".to_owned(), \"ERR_INVALID_ARG_TYPE\");");
+    this.indent -= 1;
+    this.line("};");
+    this.line("if runtime::array_len(&transfer) > 0.0 { runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\"); }");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_clone(value: &${name}, parents: &mut Vec<usize>) -> ${name} {`);
+    this.indent += 1;
+    this.line("match value {");
+    this.indent += 1;
+    this.line(`${name}::Undefined => ${name}::Undefined,`);
+    this.line(`${name}::Null => ${name}::Null,`);
+    this.line(`${name}::Number(value) => ${name}::Number(*value),`);
+    this.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
+    this.line(`${name}::String(value) => ${name}::String(value.clone()),`);
+    this.line(`${name}::Array(value) => {`);
+    this.indent += 1;
+    this.line("let identity = value.identity();");
+    this.line("if parents.contains(&identity) { runtime::throw_value(runtime::error_new(\"Error\", runtime::string(\"structuredClone of cyclic values (the checked-dynamic tree cannot represent cycles) is not supported yet\"))); }");
+    this.line("parents.push(identity);");
+    this.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::array_len(value) { let field = runtime::array_get(value, index); runtime::array_push(&output, sc_dyn_clone(&field, parents)); index += 1.0; }");
+    this.line("parents.pop();");
+    this.line(`${name}::Array(output)`);
+    this.indent -= 1;
+    this.line("},");
+    this.line(`${name}::Object(value) => {`);
+    this.indent += 1;
+    this.line("let identity = value.identity();");
+    this.line("if parents.contains(&identity) { runtime::throw_value(runtime::error_new(\"Error\", runtime::string(\"structuredClone of cyclic values (the checked-dynamic tree cannot represent cycles) is not supported yet\"))); }");
+    this.line("parents.push(identity);");
+    this.line(`let output: ${mapType} = runtime::map_new();`);
+    this.line("let mut index = 0.0;");
+    this.line("while index < runtime::map_iter_count(value) {");
+    this.indent += 1;
+    this.line("if runtime::map_iter_live(value, index) { let key = runtime::map_iter_key(value, index); let field = runtime::map_iter_value(value, index); runtime::map_set_by(&output, key, sc_dyn_clone(&field, parents), |left, right| left.as_ref() == right.as_ref()); }");
+    this.line("index += 1.0;");
+    this.indent -= 1;
+    this.line("}");
+    this.line("parents.pop();");
+    this.line(`${name}::Object(output)`);
+    this.indent -= 1;
+    this.line("},");
+    if (boxedShapes.length > 0) {
+      const patterns = boxedShapes.map((shape) => `${name}::${this.dynFunctionVariant(shape)}(..)`).join(" | ");
+      this.line(`value @ (${patterns}) => runtime::throw_dom_exception("DataCloneError", &format!("{} could not be cloned.", sc_dyn_to_string(value))),`);
+    }
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
+    this.line(`fn sc_dyn_structured_clone(value: &${name}, options: &${name}) -> ${name} {`);
+    this.indent += 1;
+    this.line("sc_dyn_validate_clone_options(options);");
+    this.line("sc_dyn_clone(value, &mut Vec::new())");
+    this.indent -= 1;
+    this.line("}");
+
+    this.line(`fn sc_dyn_equal(left: &${name}, right: &${name}, deep: bool) -> bool {`);
+    this.indent += 1;
+    this.line("match (left, right) {");
+    this.indent += 1;
+    this.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
+    this.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
+    this.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
+    this.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
+    this.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
+    this.indent += 1;
+    this.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
+    this.indent += 1;
+    this.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::array_len(left) { equal = sc_dyn_equal(&runtime::array_get(left, index), &runtime::array_get(right, index), true); index += 1.0; } equal");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("},");
+    this.line(`(${name}::Object(left), ${name}::Object(right)) => {`);
+    this.indent += 1;
+    this.line("if left.ptr_eq(right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
+    this.indent += 1;
+    this.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::map_iter_count(left) { if runtime::map_iter_live(left, index) { let key = runtime::map_iter_key(left, index); let field = runtime::map_iter_value(left, index); equal = runtime::map_get_by(right, &key, |a, b| a.as_ref() == b.as_ref()).is_some_and(|other| sc_dyn_equal(&field, &other, true)); } index += 1.0; } equal");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("},");
+    for (const shape of boxedShapes) {
+      const variant = this.dynFunctionVariant(shape);
+      this.line(`(${name}::${variant}(left, _, _), ${name}::${variant}(right, _, _)) => left.identity() == right.identity(),`);
+    }
+    this.line("_ => false,");
+    this.indent -= 1;
+    this.line("}");
+    this.indent -= 1;
+    this.line("}");
   }
 
   private emitDynamicScalarCheck(expected: string, rustType: string, variant: string): void {
@@ -1009,6 +1198,39 @@ class RustEmitter {
           this.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
         }
         return `${name}::${this.dynFunctionVariant(shape)}(${value}, runtime::string("${this.rustString(functionName)}"), runtime::map_new())`;
+      }
+      case "array": {
+        const source = `sc_rt_${this.temporary++}`;
+        const output = `sc_rt_${this.temporary++}`;
+        const index = `sc_rt_${this.temporary++}`;
+        const element = this.emitDynFromValue(
+          type.elem,
+          `runtime::array_get(&${source}, ${index})`,
+          loc,
+        );
+        return `{ let ${source} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); let mut ${index} = 0.0; while ${index} < runtime::array_len(&${source}) { runtime::array_push(&${output}, ${element}); ${index} += 1.0; } ${name}::Array(${output}) }`;
+      }
+      case "union": {
+        const union = this.union(type.unionId, loc);
+        const unionValue = `sc_rt_${this.temporary++}`;
+        const arms = union.arms.map((arm, tag) => {
+          const variant = `${this.unionName(union.id)}::${this.unionVariant(tag)}`;
+          if (this.isUnit(arm)) {
+            return `${variant} => ${this.emitDynFromValue(arm, "()", loc)}`;
+          }
+          return `${variant}(payload) => ${this.emitDynFromValue(arm, "payload", loc)}`;
+        }).join(", ");
+        return `{ let ${unionValue} = ${value}; match ${unionValue} { ${arms} } }`;
+      }
+      case "object": {
+        if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
+          this.unsupported(`dynamic boxing from object '${type.className}'`, loc);
+        }
+        if (this.errorClassRoots().length > 0) {
+          this.unsupported("dynamic Error boxing alongside user Error subclasses", loc);
+        }
+        const error = `sc_rt_${this.temporary++}`;
+        return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
       }
       case "record": {
         const shape = this.records.get(type.shapeId);
@@ -3314,7 +3536,7 @@ class RustEmitter {
       }
       case "jsonStringify": {
         const value = this.emitExpr(expr.value);
-        if (!this.isRustJsonCompatible(expr.value.type)) {
+        if (expr.value.type.kind !== "dyn" && !this.isRustJsonCompatible(expr.value.type)) {
           this.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
         }
         const indent = (expr as typeof expr & { indent?: string }).indent;
@@ -3368,8 +3590,8 @@ class RustEmitter {
           case "function": test = functions.length === 0 ? "false" : `matches!(&${value}, ${functions.join(" | ")})`; break;
           case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Array(..) | ${name}::Object(..))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
-          case "bytes":
-          case "error": test = "false"; break;
+          case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
+          case "bytes": test = "false"; break;
           case "truthy":
             test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), ${name}::Array(..) | ${name}::Object(..) => true${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
             break;
@@ -3682,10 +3904,9 @@ class RustEmitter {
       }
       case "caughtToDyn": {
         const caught = `sc_rt_${this.temporary++}`;
-        const object = `sc_rt_${this.temporary++}`;
         const error = `sc_rt_${this.temporary++}`;
         const dyn = this.dynTypeName();
-        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if runtime::caught_is_error(&${caught}) { let ${error} = runtime::caught_error_value(&${caught}); let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); runtime::map_set_by(&${object}, runtime::string("%error"), ${dyn}::Boolean(true), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&${object}, runtime::string("name"), ${dyn}::String(runtime::error_name(&${error})), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&${object}, runtime::string("message"), ${dyn}::String(runtime::error_message(&${error})), |left, right| left.as_ref() == right.as_ref()); if runtime::error_is_class(&${error}, "DOMException") { runtime::map_set_by(&${object}, runtime::string("code"), ${dyn}::Number(runtime::error_dom_code(&${error})), |left, right| left.as_ref() == right.as_ref()); if let Some(cause) = runtime::error_dom_cause::<${dyn}>(&${error}) { runtime::map_set_by(&${object}, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); } } else if let Some(code) = runtime::error_code(&${error}) { runtime::map_set_by(&${object}, runtime::string("code"), ${dyn}::String(code), |left, right| left.as_ref() == right.as_ref()); } ${dyn}::Object(${object}) } else { ${dyn}::Object(runtime::map_new()) } }`;
+        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if runtime::caught_is_error(&${caught}) { let ${error} = runtime::caught_error_value(&${caught}); sc_dyn_error_box(&${error}) } else { ${dyn}::Object(runtime::map_new()) } }`;
       }
       case "caughtTest":
         if (expr.test !== "instanceof") {
@@ -3991,6 +4212,24 @@ class RustEmitter {
         }
         if (expr.fn === "dyn.typeof" && expr.args.length === 1 && arg?.type.kind === "dyn") {
           return `sc_dyn_typeof(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "dyn.errInstanceof" && expr.args.length === 2 &&
+          arg?.type.kind === "dyn" && secondArg?.type.kind === "f64") {
+          const value = `sc_rt_${this.temporary++}`;
+          const kind = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; let ${kind} = ${this.emitExpr(secondArg)}; sc_dyn_error_instanceof(&${value}, ${kind}) }`;
+        }
+        if (expr.fn === "dyn.structuredClone" && expr.args.length === 2 &&
+          arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
+          const value = `sc_rt_${this.temporary++}`;
+          const options = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; let ${options} = ${this.emitExpr(secondArg)}; sc_dyn_structured_clone(&${value}, &${options}) }`;
+        }
+        if (expr.fn === "dyn.cloneMissing" && expr.args.length === 0) {
+          return "runtime::throw_type_error_code(\"The \\\"The value argument must be specified\\\" argument must be specified\".to_owned(), \"ERR_MISSING_ARGS\")";
+        }
+        if (expr.fn === "dyn.cloneTransferFail" && expr.args.length === 0) {
+          return "runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\")";
         }
         if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
           const depth = expr.args[1];
@@ -4569,6 +4808,45 @@ class RustEmitter {
           }
           const value = `sc_rt_${this.temporary++}`;
           return `{ let ${value} = ${this.emitExpr(arg)}; match &${value} { ${this.errorValueName()}::Builtin(error) => runtime::error_dom_cause::<${dyn}>(error).unwrap_or(${dyn}::Undefined), _ => unreachable!("scriptc invariant: DOMException is not builtin"), } }`;
+        }
+        if (expr.fn === "error.domClone" && expr.args.length === 2 &&
+          arg?.type.kind === "object" && arg.type.className === "%DOMException" &&
+          secondArg?.type.kind === "dyn" && expr.type.kind === "object" &&
+          expr.type.className === "%DOMException") {
+          const value = `sc_rt_${this.temporary++}`;
+          const options = `sc_rt_${this.temporary++}`;
+          if (this.errorClassRoots().length === 0) {
+            return `{ let ${value} = ${this.emitExpr(arg)}; let ${options} = ${this.emitExpr(secondArg)}; sc_dyn_validate_clone_options(&${options}); runtime::error_dom_clone(&${value}) }`;
+          }
+          return `{ let ${value} = ${this.emitExpr(arg)}; let ${options} = ${this.emitExpr(secondArg)}; sc_dyn_validate_clone_options(&${options}); match &${value} { ${this.errorValueName()}::Builtin(error) => ${this.errorValueName()}::Builtin(runtime::error_dom_clone(error)), _ => unreachable!("scriptc invariant: DOMException is not builtin"), } }`;
+        }
+        if (expr.fn === "assert.eqDyn" && expr.args.length === 6 &&
+          arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" &&
+          expr.args[2]?.type.kind === "bool" && expr.args[3]?.type.kind === "bool" &&
+          expr.args[4]?.type.kind === "string" && expr.args[5]?.type.kind === "bool") {
+          const actual = `sc_rt_${this.temporary++}`;
+          const expected = `sc_rt_${this.temporary++}`;
+          const negated = `sc_rt_${this.temporary++}`;
+          const deep = `sc_rt_${this.temporary++}`;
+          const message = `sc_rt_${this.temporary++}`;
+          const hasMessage = `sc_rt_${this.temporary++}`;
+          return `{ let ${actual} = ${this.emitExpr(arg)}; let ${expected} = ${this.emitExpr(secondArg)}; let ${negated} = ${this.emitExpr(expr.args[2])}; let ${deep} = ${this.emitExpr(expr.args[3])}; let ${message} = ${this.emitExpr(expr.args[4])}; let ${hasMessage} = ${this.emitExpr(expr.args[5])}; runtime::assert_dyn_result(sc_dyn_equal(&${actual}, &${expected}, ${deep}), ${negated}, &${message}, ${hasMessage}); () }`;
+        }
+        if (expr.fn === "assert.shapeBegin" && expr.args.length === 1 &&
+          arg?.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(arg.type.className)) {
+          if (this.errorClassRoots().length > 0) {
+            this.unsupported("assertion shape over Error subclasses", expr.loc);
+          }
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${value} = ${this.emitExpr(arg)}; runtime::assert_shape_begin(&${value}); () }`;
+        }
+        if (expr.fn === "assert.shapeStr" && expr.args.length === 2 &&
+          arg?.type.kind === "f64" && secondArg?.type.kind === "string") {
+          return `runtime::assert_shape_string(${this.emitExpr(arg)}, &(${this.emitExpr(secondArg)}))`;
+        }
+        if (expr.fn === "assert.shapeEnd" && expr.args.length === 2 &&
+          arg?.type.kind === "string" && secondArg?.type.kind === "bool") {
+          return `runtime::assert_shape_end(&(${this.emitExpr(arg)}), ${this.emitExpr(secondArg)})`;
         }
         if (expr.fn === "assert.throwsNone" && expr.args.length === 5 &&
           arg !== undefined && secondArg !== undefined && expr.args[2] !== undefined &&
