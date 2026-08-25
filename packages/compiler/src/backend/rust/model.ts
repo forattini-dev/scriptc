@@ -1,6 +1,7 @@
-import type { IrClassDef, IrFunction, IrType } from "../../ir/nodes.js";
+import type { IrClassDef, IrExpr, IrFunction, IrType } from "../../ir/nodes.js";
 
 export type IrFuncType = Extract<IrType, { kind: "func" }>;
+export type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
 export interface RustClosureShape {
   readonly index: number;

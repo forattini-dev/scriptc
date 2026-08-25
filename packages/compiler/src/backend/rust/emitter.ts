@@ -10,11 +10,14 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustStatements } from "./statements.js";
 import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import { RustDynamicEmitter } from "./dynamic.js";
+import { RustAsyncControlEmitter } from "./async-control.js";
+import type { RustAsyncHandlers } from "./async-control.js";
+import { RustAsyncValueEmitter } from "./async-values.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import {
   mangleClassStruct,
@@ -28,17 +31,6 @@ import {
 } from "../mangle.js";
 
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
-
-interface RustAsyncHandlers {
-  readonly fallthrough: () => void;
-  readonly returned: (value: string) => void;
-  readonly thrown: (reason: string) => void;
-}
-
-type RustAsyncCompletion =
-  | { readonly kind: "fallthrough" }
-  | { readonly kind: "return"; readonly value: string }
-  | { readonly kind: "throw"; readonly reason: string };
 
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
 export class RustUnsupportedError extends Error {
@@ -122,6 +114,80 @@ class RustEmitter {
     needsClone: (type) => this.needsClone(type),
     rustString: (value) => this.rustString(value),
     rustType: (type, loc) => this.rustType(type, loc),
+    union: (id, loc) => this.union(id, loc),
+    unionName: (id) => this.unionName(id),
+    unionVariant: (tag) => this.unionVariant(tag),
+    unsupported: (kind, loc) => this.unsupported(kind, loc),
+  });
+  private readonly asyncControlEmitter = new RustAsyncControlEmitter({
+    records: this.records,
+    line: (value) => this.line(value),
+    pushIndent: () => { this.indent += 1; },
+    popIndent: () => { this.indent -= 1; },
+    nextName: (prefix) => `${prefix}_${this.temporary++}`,
+    currentAsyncResult: () => this.currentAsyncResult,
+    currentFunction: () => this.currentFunction,
+    currentAsyncLocals: () => this.currentAsyncLocals,
+    setCurrentAsyncLocals: (locals) => { this.currentAsyncLocals = locals; },
+    adjustAsyncProtectedReturnDepth: (delta) => { this.asyncProtectedReturnDepth += delta; },
+    emitExpr: (expr) => this.emitExpr(expr),
+    emitStatement: (statement) => this.emitStatement(statement),
+    emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
+    emitAsyncValue: (expr, consume) => this.emitAsyncValue(expr, consume),
+    emitAsyncContinuation: (dependencyExpr, consume, remaining, onComplete) =>
+      this.asyncValueEmitter.emitAsyncContinuation(dependencyExpr, consume, remaining, onComplete),
+    emitAsyncProtectedValues: (exprs, exitLocals, handlers, consume, index, values) =>
+      this.emitAsyncProtectedValues(exprs, exitLocals, handlers, consume, index, values),
+    emitAsyncProtectedRecordCloneOverrides: (expr, clone, exitLocals, handlers, consume, index) =>
+      this.emitAsyncProtectedRecordCloneOverrides(expr, clone, exitLocals, handlers, consume, index),
+    emitAsyncConsole: (expr, remaining, index, values, onComplete) =>
+      this.emitAsyncConsole(expr, remaining, index, values, onComplete),
+    emitBinaryValues: (expr, left, right) => this.emitBinaryValues(expr, left, right),
+    emitArrayGetValues: (expr, array, index) => this.emitArrayGetValues(expr, array, index),
+    emitBytesNewValue: (expr, source) => this.emitBytesNewValue(expr, source),
+    emitArrayIntrinsicValues: (expr, receiver, args) => this.emitArrayIntrinsicValues(expr, receiver, args),
+    emitMapIntrinsicValues: (expr, receiver, args) => this.emitMapIntrinsicValues(expr, receiver, args),
+    emitRecordCloneInitial: (expr, source) => this.emitRecordCloneInitial(expr, source),
+    emitRecordCloneOverride: (expr, clone, name, value) =>
+      this.emitRecordCloneOverride(expr, clone, name, value),
+    emitToStringValue: (type, operand, loc) => this.emitToStringValue(type, operand, loc),
+    displayValue: (value, type, loc) => this.displayValue(value, type, loc),
+    local: (id, loc) => this.local(id, loc),
+    needsClone: (type) => this.needsClone(type),
+    isEdgeValue: (type) => this.isEdgeValue(type),
+    isUnit: (type) => this.isUnit(type),
+    rustString: (value) => this.rustString(value),
+    rustType: (type, loc) => this.rustType(type, loc),
+    union: (id, loc) => this.union(id, loc),
+    unionName: (id) => this.unionName(id),
+    unionVariant: (tag) => this.unionVariant(tag),
+    unsupported: (kind, loc) => this.unsupported(kind, loc),
+  });
+  private readonly asyncValueEmitter = new RustAsyncValueEmitter({
+    records: this.records,
+    line: (value) => this.line(value),
+    pushIndent: () => { this.indent += 1; },
+    popIndent: () => { this.indent -= 1; },
+    nextName: (prefix) => `${prefix}_${this.temporary++}`,
+    currentAsyncResult: () => this.currentAsyncResult,
+    currentFunction: () => this.currentFunction,
+    containsAsyncSuspension: (value) => this.containsAsyncSuspension(value),
+    awaitExpression: (expr) => this.awaitExpression(expr),
+    emitAwaitDependency: (expr) => this.emitAwaitDependency(expr),
+    emitAsyncProtectedValue: (expr, exitLocals, handlers, consume) =>
+      this.emitAsyncProtectedValue(expr, exitLocals, handlers, consume),
+    emitAsyncStatements: (statements, onComplete) => this.emitAsyncStatements(statements, onComplete),
+    emitExpr: (expr) => this.emitExpr(expr),
+    emitBinaryValues: (expr, left, right) => this.emitBinaryValues(expr, left, right),
+    emitArrayGetValues: (expr, array, index) => this.emitArrayGetValues(expr, array, index),
+    emitBytesNewValue: (expr, source) => this.emitBytesNewValue(expr, source),
+    emitArrayIntrinsicValues: (expr, receiver, args) => this.emitArrayIntrinsicValues(expr, receiver, args),
+    emitMapIntrinsicValues: (expr, receiver, args) => this.emitMapIntrinsicValues(expr, receiver, args),
+    emitToStringValue: (type, operand, loc) => this.emitToStringValue(type, operand, loc),
+    displayValue: (value, type, loc) => this.displayValue(value, type, loc),
+    needsClone: (type) => this.needsClone(type),
+    isEdgeValue: (type) => this.isEdgeValue(type),
+    isUnit: (type) => this.isUnit(type),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
     unionVariant: (tag) => this.unionVariant(tag),
@@ -1157,674 +1223,22 @@ class RustEmitter {
   }
 
   private containsAsyncSuspension(value: unknown): boolean {
-    if (value === null || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some((item) => this.containsAsyncSuspension(item));
-    const node = value as { kind?: unknown; fn?: unknown };
-    if (node.kind === "awaitExpr" || node.kind === "awaitUnionExpr") return true;
-    if (node.kind === "libCall" && node.fn === "async.hop") return true;
-    return Object.values(value).some((item) => this.containsAsyncSuspension(item));
+    return this.asyncControlEmitter.containsAsyncSuspension(value);
   }
 
   private awaitExpression(expr: IrExpr | null): IrAwaitExpr | null {
-    return expr?.kind === "awaitExpr" || expr?.kind === "awaitUnionExpr" ? expr : null;
-  }
-
-  private asyncHopSequence(expr: IrExpr | null): {
-    prelude: readonly IrStmt[];
-    result: IrExpr;
-  } | null {
-    if (expr?.kind !== "seqExpr") return null;
-    const hop = expr.stmts.findIndex((candidate) =>
-      candidate.kind === "exprStmt" && candidate.expr.kind === "libCall" && candidate.expr.fn === "async.hop"
-    );
-    if (hop < 0) return null;
-    if (hop !== expr.stmts.length - 1 || expr.result.kind !== "varRef" ||
-      this.containsAsyncSuspension(expr.stmts.slice(0, hop))) {
-      this.unsupported("non-canonical await-value hop", expr.loc);
-    }
-    return { prelude: expr.stmts.slice(0, hop), result: expr.result };
-  }
-
-  private awaitedValue(expr: IrExpr | null): { awaited: IrAwaitExpr; wrap: (value: string) => string } | null {
-    const awaited = this.awaitExpression(expr);
-    if (awaited !== null) return { awaited, wrap: (value) => value };
-    if (expr?.kind !== "unionWrap") return null;
-    const inner = this.awaitedValue(expr.value);
-    if (inner === null) return null;
-    const union = this.union(expr.unionId, expr.loc);
-    const arm = union.arms[expr.tag];
-    if (arm === undefined || this.isUnit(arm)) {
-      this.unsupported(`awaited union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
-    }
-    const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
-    return { awaited: inner.awaited, wrap: (value) => `${variant}(${inner.wrap(value)})` };
+    return this.asyncControlEmitter.awaitExpression(expr);
   }
 
   private emitAwaitDependency(expr: IrAwaitExpr): string {
-    if (expr.kind === "awaitExpr") return this.emitExpr(expr.value);
-    if (expr.value.type.kind !== "union") this.unsupported("await union with a non-union operand", expr.loc);
-    const source = this.union(expr.value.type.unionId, expr.loc);
-    const promiseArm = source.arms[expr.promiseTag];
-    if (promiseArm?.kind !== "promise") this.unsupported("await union without a Promise arm", expr.loc);
-    const sourceName = this.unionName(source.id);
-    const value = `sc_async_await_union_${this.temporary++}`;
-    if (expr.type.kind === "void") {
-      const arms = source.arms.map((arm, tag) => {
-        const variant = `${sourceName}::${this.unionVariant(tag)}`;
-        if (tag === expr.promiseTag) return `${variant}(promise) => promise`;
-        if (this.isUnit(arm)) return `${variant} => runtime::promise_resolved(())`;
-        this.unsupported(`await union arm '${arm.kind}'`, expr.loc);
-      });
-      return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
-    }
-    if (expr.type.kind !== "union") this.unsupported("await union with a non-union result", expr.loc);
-    const result = this.union(expr.type.unionId, expr.loc);
-    const resultName = this.unionName(result.id);
-    const resultTag = (arm: IrType): number => {
-      const tag = result.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
-      if (tag < 0) this.unsupported(`await union result missing arm '${arm.kind}'`, expr.loc);
-      return tag;
-    };
-    const arms = source.arms.map((arm, tag) => {
-      const variant = `${sourceName}::${this.unionVariant(tag)}`;
-      const target = `${resultName}::${this.unionVariant(resultTag(tag === expr.promiseTag ? promiseArm.inner : arm))}`;
-      if (tag === expr.promiseTag) return `${variant}(promise) => runtime::promise_map(&promise, |value| ${target}(value))`;
-      if (this.isUnit(arm)) return `${variant} => runtime::promise_resolved(${target})`;
-      this.unsupported(`await union arm '${arm.kind}'`, expr.loc);
-    });
-    return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
+    return this.asyncControlEmitter.emitAwaitDependency(expr);
   }
 
-  private emitAsyncStatements(statements: readonly IrStmt[], onComplete: (() => void) | null = null): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) this.unsupported("async continuation outside an async function", fn?.loc);
-
-    for (let index = 0; index < statements.length; index += 1) {
-      const stmt = statements[index];
-      if (stmt === undefined) break;
-      if (stmt.kind === "while" && this.containsAsyncSuspension(stmt.body)) {
-        this.emitAsyncWhile(stmt, statements.slice(index + 1), onComplete);
-        return;
-      }
-      if (stmt.kind === "forOf" && this.containsAsyncSuspension(stmt.body)) {
-        this.emitAsyncForOf(stmt, statements.slice(index + 1), onComplete);
-        return;
-      }
-      if (stmt.kind === "for" && this.containsAsyncSuspension(stmt.body)) {
-        this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
-        return;
-      }
-      if (stmt.kind === "block" && this.containsAsyncSuspension(stmt.body)) {
-        const outerLocals = new Set(this.currentAsyncLocals ?? []);
-        const resume = this.emitAsyncResumeHelper(
-          statements.slice(index + 1),
-          onComplete,
-          outerLocals,
-          stmt.loc,
-          "block_continue",
-        );
-        this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.body, resume));
-        return;
-      }
-      if (stmt.kind === "if" && this.containsAsyncSuspension(stmt)) {
-        this.emitAsyncIf(stmt, statements.slice(index + 1), onComplete);
-        return;
-      }
-      if (stmt.kind === "tryCatch" && this.containsAsyncSuspension(stmt)) {
-        this.emitAsyncTryCatch(stmt, statements.slice(index + 1), onComplete);
-        return;
-      }
-      const nested =
-        stmt.kind === "assign" ? stmt.value
-        : stmt.kind === "varDecl" ? stmt.init
-        : stmt.kind === "exprStmt" ? stmt.expr
-        : stmt.kind === "return" ? stmt.value
-        : null;
-      const hop = this.asyncHopSequence(nested);
-      if (hop !== null) {
-        for (const prelude of hop.prelude) {
-          this.emitStatement(prelude);
-          if (prelude.kind === "varDecl") this.currentAsyncLocals?.add(prelude.localId);
-        }
-        this.emitAsyncContinuation(
-          "runtime::promise_resolved(())",
-          (rawValue) => {
-            this.line(`let _ = ${rawValue};`);
-            const value = this.emitExpr(hop.result);
-            if (stmt.kind === "assign") {
-              this.emitAssignment(stmt.localId, value, stmt.loc);
-            } else if (stmt.kind === "varDecl") {
-              const local = this.local(stmt.localId, stmt.loc);
-              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
-              this.currentAsyncLocals?.add(local.id);
-            } else if (stmt.kind === "exprStmt") {
-              this.line(`let _ = ${value};`);
-            } else {
-              this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
-              this.line("return;");
-            }
-          },
-          stmt.kind === "return" ? null : statements.slice(index + 1),
-          onComplete,
-        );
-        return;
-      }
-      if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
-        (stmt.expr.name === "console.log" || stmt.expr.name === "console.error") &&
-        stmt.expr.args.some((arg) => this.containsAsyncSuspension(arg))) {
-        this.emitAsyncConsole(stmt.expr, statements.slice(index + 1), 0, [], onComplete);
-        return;
-      }
-      const awaited = this.awaitedValue(
-        stmt.kind === "assign" ? stmt.value
-        : stmt.kind === "varDecl" ? stmt.init
-        : stmt.kind === "exprStmt" ? stmt.expr
-        : stmt.kind === "return" ? stmt.value
-        : null,
-      );
-      if (awaited === null) {
-        if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "recordLit" || nested?.kind === "recordClone" || nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
-          nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
-          this.containsAsyncSuspension(nested)) {
-          this.emitAsyncValue(nested, (value) => {
-            if (stmt.kind === "assign") {
-              this.emitAssignment(stmt.localId, value, stmt.loc);
-              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
-            } else if (stmt.kind === "varDecl") {
-              const local = this.local(stmt.localId, stmt.loc);
-              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
-              this.currentAsyncLocals?.add(local.id);
-              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
-            } else if (stmt.kind === "exprStmt") {
-              this.line(`let _ = ${value};`);
-              this.emitAsyncStatements(statements.slice(index + 1), onComplete);
-            } else {
-              this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
-              this.line("return;");
-            }
-          });
-          return;
-        }
-        if (this.containsAsyncSuspension(stmt)) {
-          this.unsupported("nested async suspension in the Rust state-machine subset", stmt.loc);
-        }
-        this.emitStatement(stmt);
-        if (stmt.kind === "varDecl") this.currentAsyncLocals?.add(stmt.localId);
-        continue;
-      }
-
-      this.emitAsyncContinuation(
-        this.emitAwaitDependency(awaited.awaited),
-        (rawValue) => {
-          const value = awaited.wrap(rawValue);
-          if (stmt.kind === "assign") {
-            this.emitAssignment(stmt.localId, value, stmt.loc);
-          } else if (stmt.kind === "varDecl") {
-            const local = this.local(stmt.localId, stmt.loc);
-            this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(${value});`);
-            this.currentAsyncLocals?.add(local.id);
-          } else if (stmt.kind === "exprStmt") {
-            this.line(`let _ = ${value};`);
-          } else {
-            this.line(`let _ = runtime::promise_fulfill(&${result}, ${value});`);
-            this.line("return;");
-          }
-        },
-        stmt.kind === "return" ? null : statements.slice(index + 1),
-        onComplete,
-      );
-      return;
-    }
-
-    if (onComplete !== null) {
-      onComplete();
-    } else if (fn.returnType.kind === "void") {
-      this.line(`let _ = runtime::promise_fulfill(&${result}, ());`);
-    } else {
-      this.line(`unreachable!("scriptc invariant: async function '${this.rustString(fn.name)}' fell through");`);
-    }
-  }
-
-  private emitAsyncTryCatch(
-    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
-    remaining: readonly IrStmt[],
-    onComplete: (() => void) | null,
-  ): void {
-    const outerLocals = new Set(this.currentAsyncLocals ?? []);
-    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "try_continue");
-    this.emitAsyncProtectedSequence(stmt.tryBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "fallthrough" }, resume),
-      returned: (value) => this.emitAsyncFinally(stmt, [], outerLocals, { kind: "return", value }, resume),
-      thrown: (reason) => this.emitAsyncCatch(stmt, [], outerLocals, reason, resume),
-    }, stmt.loc);
-  }
-
-  private emitAsyncIf(
-    stmt: Extract<IrStmt, { kind: "if" }>,
-    remaining: readonly IrStmt[],
-    onComplete: (() => void) | null,
-  ): void {
-    if (this.containsAsyncSuspension(stmt.cond)) {
-      this.unsupported("async suspension in an if condition", stmt.loc);
-    }
-    const outerLocals = new Set(this.currentAsyncLocals ?? []);
-    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "if_continue");
-    this.line(`if ${this.emitExpr(stmt.cond)} {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
-    this.indent -= 1;
-    this.line("} else {");
-    this.indent += 1;
-    const elseBody = stmt.else_;
-    if (elseBody === null) {
-      resume();
-    } else {
-      this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(elseBody, resume));
-    }
-    this.indent -= 1;
-    this.line("}");
-  }
-
-  private emitAsyncFor(
-    stmt: Extract<IrStmt, { kind: "for" }>,
-    remaining: readonly IrStmt[],
-    onComplete: (() => void) | null,
-  ): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) this.unsupported("async for outside an async function", stmt.loc);
-    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async for", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.init) || this.containsAsyncSuspension(stmt.cond) ||
-      this.containsAsyncSuspension(stmt.update)) {
-      this.unsupported("async suspension in for init, condition, or update", stmt.loc);
-    }
-    if (this.containsLoopControl(stmt.body)) {
-      this.unsupported("break or continue in a suspended async for", stmt.loc);
-    }
-    if (stmt.init !== null) {
-      this.emitStatement(stmt.init);
-      if (stmt.init.kind === "varDecl") this.currentAsyncLocals?.add(stmt.init.localId);
-    }
-    const loopLocals = new Set(this.currentAsyncLocals ?? []);
-    const helper = `sc_async_loop_${this.temporary++}`;
-    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
-    const resultType = this.rustType(fn.returnType, stmt.loc);
-    const params = [
-      `${result}: runtime::JsPromise<${resultType}>`,
-      ...locals.map((local) =>
-        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}>`
-      ),
-    ];
-    const call = () => `${helper}(${[
-      `${result}.clone()`,
-      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
-    ].join(", ")});`;
-    this.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(loopLocals), () => {
-      this.line(`if ${stmt.cond === null ? "true" : this.emitExpr(stmt.cond)} {`);
-      this.indent += 1;
-      this.emitAsyncStatements(stmt.body, () => {
-        this.withAsyncLocals(new Set(loopLocals), () => {
-          if (stmt.update !== null) this.emitStatement(stmt.update);
-          this.line(call());
-          this.line("return;");
-        });
-      });
-      this.indent -= 1;
-      this.line("} else {");
-      this.indent += 1;
-      this.emitAsyncStatements(remaining, onComplete);
-      this.indent -= 1;
-      this.line("}");
-    });
-    this.indent -= 1;
-    this.line("}");
-    this.line(call());
-    this.line("return;");
-  }
-
-  private emitAsyncWhile(
-    stmt: Extract<IrStmt, { kind: "while" }>,
-    remaining: readonly IrStmt[],
-    onComplete: (() => void) | null,
-  ): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) this.unsupported("async while outside an async function", stmt.loc);
-    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async while", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.cond)) this.unsupported("async suspension in a while condition", stmt.loc);
-    if (this.containsLoopControl(stmt.body)) {
-      this.unsupported("break or continue in a suspended async while", stmt.loc);
-    }
-
-    const loopLocals = new Set(this.currentAsyncLocals ?? []);
-    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
-    const helper = `sc_async_while_${this.temporary++}`;
-    const params = [
-      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, stmt.loc)}>`,
-      ...locals.map((local) =>
-        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}>`
-      ),
-    ];
-    const call = `${helper}(${[
-      `${result}.clone()`,
-      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
-    ].join(", ")});`;
-
-    this.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(loopLocals), () => {
-      this.line(`if ${this.emitExpr(stmt.cond)} {`);
-      this.indent += 1;
-      this.emitAsyncStatements(stmt.body, () => this.withAsyncLocals(new Set(loopLocals), () => {
-        this.line(call);
-        this.line("return;");
-      }));
-      this.indent -= 1;
-      this.line("} else {");
-      this.indent += 1;
-      this.emitAsyncStatements(remaining, onComplete);
-      this.indent -= 1;
-      this.line("}");
-    });
-    this.indent -= 1;
-    this.line("}");
-    this.line(call);
-    this.line("return;");
-  }
-
-  private emitAsyncForOf(
-    stmt: Extract<IrStmt, { kind: "forOf" }>,
-    remaining: readonly IrStmt[],
-    onComplete: (() => void) | null,
-  ): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) this.unsupported("async for-of outside an async function", stmt.loc);
-    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled async for-of", stmt.loc);
-    if (stmt.iterable.type.kind !== "array") this.unsupported("async for-of over a non-array", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.iterable)) {
-      this.unsupported("async suspension in a for-of iterable", stmt.loc);
-    }
-    if (this.containsLoopControl(stmt.body)) {
-      this.unsupported("break or continue in a suspended async for-of", stmt.loc);
-    }
-
-    const loopLocals = new Set(this.currentAsyncLocals ?? []);
-    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
-    const local = this.local(stmt.localId, stmt.loc);
-    const helper = `sc_async_for_of_${this.temporary++}`;
-    const array = `sc_async_for_of_array_${this.temporary++}`;
-    const index = `sc_async_for_of_index_${this.temporary++}`;
-    const params = [
-      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, stmt.loc)}>`,
-      `${array}: ${this.rustType(stmt.iterable.type, stmt.loc)}`,
-      `${index}: f64`,
-      ...locals.map((candidate) =>
-        `${mangleLocal(candidate.id)}: runtime::JsCell<${this.rustType(candidate.type, stmt.loc)}>`
-      ),
-    ];
-    const call = (nextIndex: string) => `${helper}(${[
-      `${result}.clone()`,
-      `${array}.clone()`,
-      nextIndex,
-      ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
-    ].join(", ")});`;
-
-    this.line(`let ${array} = ${this.emitExpr(stmt.iterable)};`);
-    this.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(loopLocals), () => {
-      this.line(`if ${index} < runtime::array_len(&${array}) {`);
-      this.indent += 1;
-      this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
-      const iterationLocals = new Set(loopLocals);
-      iterationLocals.add(local.id);
-      this.withAsyncLocals(iterationLocals, () => {
-        this.emitAsyncStatements(stmt.body, () => this.withAsyncLocals(new Set(loopLocals), () => {
-          this.line(call(`${index} + 1.0_f64`));
-          this.line("return;");
-        }));
-      });
-      this.indent -= 1;
-      this.line("} else {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(loopLocals), () => this.emitAsyncStatements(remaining, onComplete));
-      this.indent -= 1;
-      this.line("}");
-    });
-    this.indent -= 1;
-    this.line("}");
-    this.line(call("0.0_f64"));
-    this.line("return;");
-  }
-
-  private containsLoopControl(value: unknown): boolean {
-    if (value === null || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some((item) => this.containsLoopControl(item));
-    const node = value as { kind?: unknown };
-    if (node.kind === "break" || node.kind === "continue") return true;
-    return Object.values(value).some((item) => this.containsLoopControl(item));
-  }
-
-  private emitAsyncProtectedSequence(
+  private emitAsyncStatements(
     statements: readonly IrStmt[],
-    exitLocals: ReadonlySet<string>,
-    handlers: RustAsyncHandlers,
-    loc: SrcLoc,
+    onComplete: (() => void) | null = null,
   ): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) this.unsupported("async protected segment without a result promise", loc);
-    const segment = `sc_async_segment_${this.temporary++}`;
-    this.line(`let ${segment} = runtime::promise_try_segment::<${this.rustType(fn.returnType, loc)}, _>(|| {`);
-    this.indent += 1;
-    let terminal: "await" | "return" | null = null;
-    this.withAsyncLocals(new Set(this.currentAsyncLocals ?? []), () => {
-      for (let index = 0; index < statements.length; index += 1) {
-        const current = statements[index];
-        if (current === undefined) break;
-        if (current.kind === "forOf" && this.containsAsyncSuspension(current.body)) {
-          this.emitAsyncProtectedForOf(
-            current,
-            statements.slice(index + 1),
-            exitLocals,
-            handlers,
-            loc,
-          );
-          this.line("return runtime::AsyncCompletion::Suspended;");
-          terminal = "await";
-          break;
-        }
-        if (current.kind === "exprStmt" && current.expr.kind === "intrinsic" &&
-          (current.expr.name === "console.log" || current.expr.name === "console.error") &&
-          current.expr.args.some((arg) => this.containsAsyncSuspension(arg))) {
-          this.emitAsyncProtectedConsole(
-            current.expr,
-            statements.slice(index + 1),
-            exitLocals,
-            handlers,
-            loc,
-          );
-          this.line("return runtime::AsyncCompletion::Suspended;");
-          terminal = "await";
-          break;
-        }
-        const nested =
-          current.kind === "assign" ? current.value
-          : current.kind === "varDecl" ? current.init
-          : current.kind === "exprStmt" ? current.expr
-          : current.kind === "return" ? current.value
-          : null;
-        const awaited = this.awaitedValue(nested);
-        if (awaited !== null) {
-          this.emitAsyncProtectedContinuation(
-            this.emitAwaitDependency(awaited.awaited),
-            exitLocals,
-            handlers,
-            (value) => {
-              const completedValue = awaited.wrap(value);
-              if (current.kind === "assign") {
-                this.emitAssignment(current.localId, completedValue, current.loc);
-                this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-              } else if (current.kind === "varDecl") {
-                const local = this.local(current.localId, current.loc);
-                this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${completedValue});`);
-                this.currentAsyncLocals?.add(local.id);
-                this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-              } else if (current.kind === "exprStmt") {
-                this.line(`let _ = ${completedValue};`);
-                this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-              } else {
-                this.withAsyncLocals(new Set(exitLocals), () => handlers.returned(completedValue));
-              }
-            },
-          );
-          this.line("return runtime::AsyncCompletion::Suspended;");
-          terminal = "await";
-          break;
-        }
-        if ((nested?.kind === "unionWrap" || nested?.kind === "bin" ||
-          nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
-          nested?.kind === "mapIntrinsic" || nested?.kind === "recordClone") &&
-          this.containsAsyncSuspension(nested)) {
-          this.emitAsyncProtectedValue(nested, exitLocals, handlers, (value) => {
-            if (current.kind === "assign") {
-              this.emitAssignment(current.localId, value, current.loc);
-              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-            } else if (current.kind === "varDecl") {
-              const local = this.local(current.localId, current.loc);
-              this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, current.loc)}> = runtime::cell_new(${value});`);
-              this.currentAsyncLocals?.add(local.id);
-              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-            } else if (current.kind === "exprStmt") {
-              this.line(`let _ = ${value};`);
-              this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
-            } else {
-              this.withAsyncLocals(new Set(exitLocals), () => handlers.returned(value));
-            }
-          });
-          this.line("return runtime::AsyncCompletion::Suspended;");
-          terminal = "await";
-          break;
-        }
-        if (this.containsAsyncSuspension(current)) {
-          this.unsupported("nested async suspension inside a Rust protected segment", current.loc);
-        }
-        if (current.kind === "return") {
-          const value = current.value === null ? "()" : this.emitExpr(current.value);
-          this.line(`return runtime::AsyncCompletion::Return(${value});`);
-          terminal = "return";
-          break;
-        }
-        this.asyncProtectedReturnDepth += 1;
-        try {
-          this.emitStatement(current);
-        } finally {
-          this.asyncProtectedReturnDepth -= 1;
-        }
-        if (current.kind === "varDecl") this.currentAsyncLocals?.add(current.localId);
-      }
-    });
-    if (terminal === null) this.line("runtime::AsyncCompletion::Fallthrough");
-    this.indent -= 1;
-    this.line("});");
-    this.line(`match ${segment} {`);
-    this.indent += 1;
-    if (terminal === null) {
-      this.line("Ok(runtime::AsyncCompletion::Fallthrough) => {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(exitLocals), handlers.fallthrough);
-      this.indent -= 1;
-      this.line("},");
-      this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("value"));
-      this.indent -= 1;
-      this.line("},");
-      this.line("Ok(runtime::AsyncCompletion::Suspended) => unreachable!(\"scriptc invariant: invalid async fallthrough completion\"),");
-    } else if (terminal === "return") {
-      this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("value"));
-      this.indent -= 1;
-      this.line("},");
-      this.line("Ok(runtime::AsyncCompletion::Fallthrough) | Ok(runtime::AsyncCompletion::Suspended) => unreachable!(\"scriptc invariant: invalid async return completion\"),");
-    } else {
-      this.line("Ok(runtime::AsyncCompletion::Suspended) => {},");
-      this.line("Ok(runtime::AsyncCompletion::Return(value)) => {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(exitLocals), () => handlers.returned("value"));
-      this.indent -= 1;
-      this.line("},");
-      this.line("Ok(runtime::AsyncCompletion::Fallthrough) => unreachable!(\"scriptc invariant: invalid async suspension completion\"),");
-    }
-    this.line("Err(reason) => {");
-    this.indent += 1;
-    this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown("reason"));
-    this.indent -= 1;
-    this.line("},");
-    this.indent -= 1;
-    this.line("}");
-    this.line("return;");
-  }
-
-  private emitAsyncProtectedContinuation(
-    dependencyExpr: string,
-    exitLocals: ReadonlySet<string>,
-    handlers: RustAsyncHandlers,
-    consume: (value: string) => void,
-  ): void {
-    const result = this.currentAsyncResult;
-    if (result === null) {
-      this.unsupported("protected async continuation without a result promise", this.currentFunction?.loc);
-    }
-    const dependency = `sc_async_dependency_${this.temporary++}`;
-    const nextResult = `sc_async_result_${this.temporary++}`;
-    const outcome = `sc_async_outcome_${this.temporary++}`;
-    const guard = `sc_async_guard_${this.temporary++}`;
-    const value = `sc_async_value_${this.temporary++}`;
-    this.line(`let ${dependency} = ${dependencyExpr};`);
-    this.line(`let ${nextResult} = ${result}.clone();`);
-    const continuationLocals = new Set(this.currentAsyncLocals ?? []);
-    const captures = [...continuationLocals].map((localId) => ({
-      localId,
-      capture: `sc_async_capture_${this.temporary++}`,
-    }));
-    for (const capture of captures) {
-      this.line(`let ${capture.capture} = ${mangleLocal(capture.localId)}.clone();`);
-    }
-    this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
-    this.indent += 1;
-    this.line(`let ${guard} = ${nextResult}.clone();`);
-    this.line(`runtime::promise_run_segment(&${guard}, move || {`);
-    this.indent += 1;
-    this.line(`let ${result} = ${nextResult};`);
-    for (const capture of captures) {
-      this.line(`let ${mangleLocal(capture.localId)} = ${capture.capture};`);
-    }
-    this.line(`match ${outcome} {`);
-    this.indent += 1;
-    this.line(`Ok(${value}) => {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(continuationLocals), () => consume(value));
-    this.indent -= 1;
-    this.line("},");
-    this.line("Err(reason) => {");
-    this.indent += 1;
-    this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown("reason"));
-    this.indent -= 1;
-    this.line("},");
-    this.indent -= 1;
-    this.line("}");
-    this.indent -= 1;
-    this.line("});");
-    this.indent -= 1;
-    this.line("}));");
+    this.asyncControlEmitter.emitAsyncStatements(statements, onComplete);
   }
 
   private emitAsyncProtectedValue(
@@ -1833,470 +1247,18 @@ class RustEmitter {
     handlers: RustAsyncHandlers,
     consume: (value: string) => void,
   ): void {
-    const awaited = this.awaitExpression(expr);
-    if (awaited !== null) {
-      this.emitAsyncProtectedContinuation(this.emitAwaitDependency(awaited), exitLocals, handlers, consume);
-      return;
-    }
-    if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {
-      const union = this.union(expr.unionId, expr.loc);
-      const arm = union.arms[expr.tag];
-      if (arm === undefined || this.isUnit(arm)) {
-        this.unsupported(`protected async union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
-      }
-      const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
-      this.emitAsyncProtectedValue(
-        expr.value,
-        exitLocals,
-        handlers,
-        (value) => consume(`${variant}(${value})`),
-      );
-      return;
-    }
-    if (expr.kind === "bin") {
-      this.emitAsyncProtectedValue(expr.left, exitLocals, handlers, (left) => {
-        this.emitAsyncProtectedValue(
-          expr.right,
-          exitLocals,
-          handlers,
-          (right) => consume(this.emitBinaryValues(expr, left, right)),
-        );
-      });
-      return;
-    }
-    if (expr.kind === "toString") {
-      this.emitAsyncProtectedValue(
-        expr.operand,
-        exitLocals,
-        handlers,
-        (value) => consume(this.emitToStringValue(expr.operand.type, value, expr.loc)),
-      );
-      return;
-    }
-    if (expr.kind === "strConcat") {
-      this.emitAsyncProtectedValue(expr.left, exitLocals, handlers, (left) => {
-        this.emitAsyncProtectedValue(
-          expr.right,
-          exitLocals,
-          handlers,
-          (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`),
-        );
-      });
-      return;
-    }
-    if (expr.kind === "arrayGet") {
-      this.emitAsyncProtectedValue(expr.arr, exitLocals, handlers, (array) => {
-        this.emitAsyncProtectedValue(
-          expr.index,
-          exitLocals,
-          handlers,
-          (index) => consume(this.emitArrayGetValues(expr, array, index)),
-        );
-      });
-      return;
-    }
-    if (expr.kind === "bytesNew" && expr.source !== null) {
-      this.emitAsyncProtectedValue(
-        expr.source,
-        exitLocals,
-        handlers,
-        (source) => consume(this.emitBytesNewValue(expr, source)),
-      );
-      return;
-    }
-    if (expr.kind === "mapIntrinsic") {
-      this.emitAsyncProtectedValue(expr.receiver, exitLocals, handlers, (receiver) => {
-        this.emitAsyncProtectedValues(expr.args, exitLocals, handlers, (args) => {
-          consume(this.emitMapIntrinsicValues(expr, receiver, args));
-        });
-      });
-      return;
-    }
-    if (expr.kind === "recordClone") {
-      this.emitAsyncProtectedValue(expr.source, exitLocals, handlers, (source) => {
-        const clone = `sc_async_record_clone_${this.temporary++}`;
-        this.line(`let ${clone} = ${this.emitRecordCloneInitial(expr, source)};`);
-        this.emitAsyncProtectedRecordCloneOverrides(
-          expr,
-          clone,
-          exitLocals,
-          handlers,
-          () => consume(clone),
-        );
-      });
-      return;
-    }
-    if (this.containsAsyncSuspension(expr)) {
-      this.unsupported("nested async value inside a Rust protected segment", expr.loc);
-    }
-    const value = `sc_async_value_${this.temporary++}`;
-    this.line(`let ${value} = ${this.emitExpr(expr)};`);
-    consume(value);
-  }
-
-  private emitAsyncProtectedForOf(
-    stmt: Extract<IrStmt, { kind: "forOf" }>,
-    remaining: readonly IrStmt[],
-    exitLocals: ReadonlySet<string>,
-    handlers: RustAsyncHandlers,
-    loc: SrcLoc,
-  ): void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) {
-      this.unsupported("protected async for-of outside an async function", stmt.loc);
-    }
-    if ((stmt.labels?.length ?? 0) > 0) this.unsupported("labeled protected async for-of", stmt.loc);
-    if (stmt.iterable.type.kind !== "array") this.unsupported("protected async for-of over a non-array", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.iterable)) {
-      this.unsupported("async suspension in a protected for-of iterable", stmt.loc);
-    }
-    if (this.containsLoopControl(stmt.body)) {
-      this.unsupported("break or continue in a protected suspended async for-of", stmt.loc);
-    }
-
-    const loopLocals = new Set(this.currentAsyncLocals ?? []);
-    const locals = [...loopLocals].map((localId) => this.local(localId, stmt.loc));
-    const local = this.local(stmt.localId, stmt.loc);
-    const helper = `sc_async_protected_for_of_${this.temporary++}`;
-    const array = `sc_async_for_of_array_${this.temporary++}`;
-    const index = `sc_async_for_of_index_${this.temporary++}`;
-    const arrayType = this.rustType(stmt.iterable.type, stmt.loc);
-    const params = [
-      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, stmt.loc)}>`,
-      `${array}: ${arrayType}`,
-      `${index}: f64`,
-      ...locals.map((candidate) =>
-        `${mangleLocal(candidate.id)}: runtime::JsCell<${this.rustType(candidate.type, stmt.loc)}>`
-      ),
-    ];
-    const call = (nextIndex: string) => `${helper}(${[
-      `${result}.clone()`,
-      `${array}.clone()`,
-      nextIndex,
-      ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
-    ].join(", ")});`;
-
-    this.line(`let ${array} = ${this.emitExpr(stmt.iterable)};`);
-    this.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(loopLocals), () => {
-      this.line(`if ${index} < runtime::array_len(&${array}) {`);
-      this.indent += 1;
-      this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
-      const iterationLocals = new Set(loopLocals);
-      iterationLocals.add(local.id);
-      this.withAsyncLocals(iterationLocals, () => {
-        this.emitAsyncProtectedSequence(stmt.body, exitLocals, {
-          fallthrough: () => this.withAsyncLocals(new Set(loopLocals), () => {
-            this.line(call(`${index} + 1.0_f64`));
-            this.line("return;");
-          }),
-          returned: handlers.returned,
-          thrown: handlers.thrown,
-        }, loc);
-      });
-      this.indent -= 1;
-      this.line("} else {");
-      this.indent += 1;
-      this.withAsyncLocals(new Set(loopLocals), () => {
-        this.emitAsyncProtectedSequence(remaining, exitLocals, handlers, loc);
-      });
-      this.indent -= 1;
-      this.line("}");
-    });
-    this.indent -= 1;
-    this.line("}");
-    this.line(call("0.0_f64"));
-  }
-
-  private emitAsyncProtectedConsole(
-    expr: Extract<IrExpr, { kind: "intrinsic" }>,
-    remaining: readonly IrStmt[],
-    exitLocals: ReadonlySet<string>,
-    handlers: RustAsyncHandlers,
-    loc: SrcLoc,
-    index = 0,
-    values: { name: string; type: IrType; loc: SrcLoc }[] = [],
-  ): void {
-    const result = this.currentAsyncResult;
-    if (result === null) this.unsupported("protected async console without a result promise", expr.loc);
-    const arg = expr.args[index];
-    if (arg === undefined) {
-      const method = expr.name === "console.log" ? "console_log" : "console_error";
-      this.line(`runtime::${method}(&[${values.map((value) =>
-        this.displayValue(value.name, value.type, value.loc)).join(", ")}]);`);
-      this.emitAsyncProtectedSequence(remaining, exitLocals, handlers, loc);
-      return;
-    }
-    if (this.containsAsyncSuspension(arg)) {
-      this.emitAsyncProtectedValue(
-        arg,
-        exitLocals,
-        handlers,
-        (value) => {
-          this.emitAsyncProtectedConsole(expr, remaining, exitLocals, handlers, loc, index + 1, [
-            ...values,
-            { name: value, type: arg.type, loc: arg.loc },
-          ]);
-        },
-      );
-      return;
-    }
-    const value = `sc_async_argument_${this.temporary++}`;
-    this.line(`let ${value} = ${this.emitExpr(arg)};`);
-    this.emitAsyncProtectedConsole(
-      expr,
-      remaining,
-      exitLocals,
-      handlers,
-      loc,
-      index + 1,
-      [...values, { name: value, type: arg.type, loc: arg.loc }],
-    );
-  }
-
-  private emitAsyncCatch(
-    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
-    remaining: readonly IrStmt[],
-    outerLocals: ReadonlySet<string>,
-    reason: string,
-    onComplete: (() => void) | null,
-  ): void {
-    if (stmt.catchBody === null) {
-      this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason }, onComplete);
-      return;
-    }
-    if (stmt.catchLocalId === null) {
-      this.line(`let _ = ${reason};`);
-    } else {
-      const local = this.local(stmt.catchLocalId, stmt.loc);
-      this.line(`let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${reason});`);
-      this.currentAsyncLocals?.add(local.id);
-    }
-    this.emitAsyncProtectedSequence(stmt.catchBody, outerLocals, {
-      fallthrough: () => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "fallthrough" }, onComplete),
-      returned: (value) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "return", value }, onComplete),
-      thrown: (catchReason) => this.emitAsyncFinally(stmt, remaining, outerLocals, { kind: "throw", reason: catchReason }, onComplete),
-    }, stmt.loc);
-  }
-
-  private emitAsyncFinally(
-    stmt: Extract<IrStmt, { kind: "tryCatch" }>,
-    remaining: readonly IrStmt[],
-    outerLocals: ReadonlySet<string>,
-    pending: RustAsyncCompletion,
-    onComplete: (() => void) | null,
-  ): void {
-    if (stmt.finallyBody === null) {
-      this.emitAsyncCompletion(remaining, pending, onComplete);
-      return;
-    }
-    this.emitAsyncProtectedSequence(stmt.finallyBody, outerLocals, {
-      fallthrough: () => this.emitAsyncCompletion(remaining, pending, onComplete),
-      returned: (value) => this.emitAsyncCompletion(remaining, { kind: "return", value }, onComplete),
-      thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason }, onComplete),
-    }, stmt.loc);
-  }
-
-  private emitAsyncCompletion(
-    remaining: readonly IrStmt[],
-    completion: RustAsyncCompletion,
-    onComplete: (() => void) | null,
-  ): void {
-    const result = this.currentAsyncResult;
-    if (result === null) this.unsupported("async completion without a result promise", this.currentFunction?.loc);
-    if (completion.kind === "fallthrough") {
-      this.emitAsyncStatements(remaining, onComplete);
-    } else if (completion.kind === "return") {
-      this.line(`let _ = runtime::promise_fulfill(&${result}, ${completion.value});`);
-    } else {
-      this.line(`let _ = runtime::promise_reject(&${result}, ${completion.reason});`);
-    }
-  }
-
-  private withAsyncLocals<T>(locals: Set<string>, emit: () => T): T {
-    const previous = this.currentAsyncLocals;
-    this.currentAsyncLocals = locals;
-    try {
-      return emit();
-    } finally {
-      this.currentAsyncLocals = previous;
-    }
-  }
-
-  private emitAsyncResumeHelper(
-    statements: readonly IrStmt[],
-    onComplete: (() => void) | null,
-    liveLocals: ReadonlySet<string>,
-    loc: SrcLoc,
-    prefix: string,
-  ): () => void {
-    const result = this.currentAsyncResult;
-    const fn = this.currentFunction;
-    if (result === null || fn?.async !== true) {
-      this.unsupported("async continuation helper outside an async function", loc);
-    }
-    const helper = `sc_async_${prefix}_${this.temporary++}`;
-    const locals = [...liveLocals].map((localId) => this.local(localId, loc));
-    const params = [
-      `${result}: runtime::JsPromise<${this.rustType(fn.returnType, loc)}>`,
-      ...locals.map((local) =>
-        `${mangleLocal(local.id)}: runtime::JsCell<${this.rustType(local.type, loc)}>`
-      ),
-    ];
-    const call = `${helper}(${[
-      `${result}.clone()`,
-      ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
-    ].join(", ")});`;
-    this.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.indent += 1;
-    this.withAsyncLocals(new Set(liveLocals), () => this.emitAsyncStatements(statements, onComplete));
-    this.indent -= 1;
-    this.line("}");
-    return () => {
-      this.line(call);
-      this.line("return;");
-    };
+    this.asyncControlEmitter.emitAsyncProtectedValue(expr, exitLocals, handlers, consume);
   }
 
   private emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
-    const awaited = this.awaitExpression(expr);
-    if (awaited !== null) {
-      this.emitAsyncContinuation(this.emitAwaitDependency(awaited), consume, null);
-      return;
-    }
-    if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {
-      const union = this.union(expr.unionId, expr.loc);
-      const arm = union.arms[expr.tag];
-      if (arm === undefined || this.isUnit(arm)) {
-        this.unsupported(`async union wrapper '${expr.unionId}:${expr.tag}'`, expr.loc);
-      }
-      const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
-      this.emitAsyncValue(expr.value, (value) => consume(`${variant}(${value})`));
-      return;
-    }
-    if (expr.kind === "bin") {
-      this.emitAsyncValue(expr.left, (left) => {
-        this.emitAsyncValue(expr.right, (right) => consume(this.emitBinaryValues(expr, left, right)));
-      });
-      return;
-    }
-    if (expr.kind === "toString") {
-      this.emitAsyncValue(
-        expr.operand,
-        (value) => consume(this.emitToStringValue(expr.operand.type, value, expr.loc)),
-      );
-      return;
-    }
-    if (expr.kind === "strConcat") {
-      this.emitAsyncValue(expr.left, (left) => {
-        this.emitAsyncValue(expr.right, (right) => consume(`runtime::string_concat(&(${left}), &(${right}))`));
-      });
-      return;
-    }
-    if (expr.kind === "arrayGet") {
-      this.emitAsyncValue(expr.arr, (array) => {
-        this.emitAsyncValue(expr.index, (index) => consume(this.emitArrayGetValues(expr, array, index)));
-      });
-      return;
-    }
-    if (expr.kind === "bytesNew" && expr.source !== null) {
-      this.emitAsyncValue(expr.source, (source) => consume(this.emitBytesNewValue(expr, source)));
-      return;
-    }
-    if (expr.kind === "mapIntrinsic") {
-      this.emitAsyncValue(expr.receiver, (receiver) => {
-        this.emitAsyncValues(expr.args, (args) => {
-          consume(this.emitMapIntrinsicValues(expr, receiver, args));
-        });
-      });
-      return;
-    }
-    if (expr.kind === "recordLit") {
-      this.emitAsyncRecord(expr, consume);
-      return;
-    }
-    if (expr.kind === "recordClone") {
-      this.emitAsyncValue(expr.source, (source) => {
-        const clone = `sc_async_record_clone_${this.temporary++}`;
-        this.line(`let ${clone} = ${this.emitRecordCloneInitial(expr, source)};`);
-        this.emitAsyncRecordCloneOverrides(expr, clone, () => consume(clone));
-      });
-      return;
-    }
-    if (expr.kind === "arrIntrinsic") {
-      this.emitAsyncValue(expr.receiver, (receiver) => {
-        this.emitAsyncValues(expr.args, (args) => {
-          consume(this.emitArrayIntrinsicValues(expr, receiver, args));
-        });
-      });
-      return;
-    }
-    if (this.containsAsyncSuspension(expr)) {
-      this.unsupported("nested async value in the Rust state-machine subset", expr.loc);
-    }
-    const value = `sc_async_value_${this.temporary++}`;
-    this.line(`let ${value} = ${this.emitExpr(expr)};`);
-    consume(value);
-  }
-
-  private emitAsyncRecord(
-    expr: Extract<IrExpr, { kind: "recordLit" }>,
-    consume: (value: string) => void,
-    index = 0,
-    values = new Map<string, string>(),
-  ): void {
-    if (expr.type.kind !== "record") this.unsupported("async record literal with a non-record type", expr.loc);
-    const shape = this.records.get(expr.type.shapeId);
-    if (shape === undefined) this.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
-    const entry = expr.fields[index];
-    if (entry !== undefined) {
-      if (entry.overflow || entry.drop) this.unsupported("async record overflow/drop fields", expr.loc);
-      this.emitAsyncValue(entry.value, (value) => {
-        const next = new Map(values);
-        next.set(entry.name, value);
-        this.emitAsyncRecord(expr, consume, index + 1, next);
-      });
-      return;
-    }
-    const fields = shape.fields.map((field) => {
-      const value = values.get(field.name);
-      if (value === undefined) this.unsupported(`missing async record field '${shape.id}.${field.name}'`, expr.loc);
-      return `${mangleField(field.name)}: ${this.isEdgeValue(field.type) ? `Some(${value})` : value}`;
-    }).join(", ");
-    consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
-  }
-
-  private recordCloneShape(
-    expr: Extract<IrExpr, { kind: "recordClone" }>,
-  ): IrRecordShape {
-    if (expr.type.kind !== "record") {
-      this.unsupported("recordClone with a non-record type", expr.loc);
-    }
-    const shape = this.records.get(expr.type.shapeId);
-    if (shape === undefined) {
-      this.unsupported(`unknown record clone shape '${expr.type.shapeId}'`, expr.loc);
-    }
-    if (shape.tuple || shape.indexValue !== undefined || shapeHasAccessorSlots(shape)) {
-      this.unsupported(`recordClone of non-plain shape '${shape.id}'`, expr.loc);
-    }
-    return shape;
+    this.asyncValueEmitter.emitAsyncValue(expr, consume);
   }
 
   private emitRecordCloneInitial(
     expr: Extract<IrExpr, { kind: "recordClone" }>,
     source: string,
   ): string {
-    const shape = this.recordCloneShape(expr);
-    const fields = shape.fields.map((field) => {
-      const access = `record.${mangleField(field.name)}`;
-      const value = this.isEdgeValue(field.type) || this.needsClone(field.type)
-        ? `${access}.clone()`
-        : access;
-      return `${mangleField(field.name)}: ${value}`;
-    }).join(", ");
-    return `${source}.with(|record| runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }))`;
+    return this.asyncValueEmitter.emitRecordCloneInitial(expr, source);
   }
 
   private emitRecordCloneOverride(
@@ -2305,30 +1267,7 @@ class RustEmitter {
     fieldName: string,
     value: string,
   ): string {
-    const shape = this.recordCloneShape(expr);
-    const field = shape.fields.find((candidate) => candidate.name === fieldName);
-    if (field === undefined) {
-      this.unsupported(`unknown record clone field '${shape.id}.${fieldName}'`, expr.loc);
-    }
-    const stored = this.isEdgeValue(field.type) ? `Some(${value})` : value;
-    return `${clone}.with_mut(|record| record.${mangleField(field.name)} = ${stored});`;
-  }
-
-  private emitAsyncRecordCloneOverrides(
-    expr: Extract<IrExpr, { kind: "recordClone" }>,
-    clone: string,
-    consume: () => void,
-    index = 0,
-  ): void {
-    const override = expr.overrides[index];
-    if (override === undefined) {
-      consume();
-      return;
-    }
-    this.emitAsyncValue(override.value, (value) => {
-      this.line(this.emitRecordCloneOverride(expr, clone, override.name, value));
-      this.emitAsyncRecordCloneOverrides(expr, clone, consume, index + 1);
-    });
+    return this.asyncValueEmitter.emitRecordCloneOverride(expr, clone, fieldName, value);
   }
 
   private emitAsyncProtectedRecordCloneOverrides(
@@ -2339,38 +1278,14 @@ class RustEmitter {
     consume: () => void,
     index = 0,
   ): void {
-    const override = expr.overrides[index];
-    if (override === undefined) {
-      consume();
-      return;
-    }
-    this.emitAsyncProtectedValue(override.value, exitLocals, handlers, (value) => {
-      this.line(this.emitRecordCloneOverride(expr, clone, override.name, value));
-      this.emitAsyncProtectedRecordCloneOverrides(
-        expr,
-        clone,
-        exitLocals,
-        handlers,
-        consume,
-        index + 1,
-      );
-    });
-  }
-
-  private emitAsyncValues(
-    exprs: readonly IrExpr[],
-    consume: (values: string[]) => void,
-    index = 0,
-    values: string[] = [],
-  ): void {
-    const expr = exprs[index];
-    if (expr === undefined) {
-      consume(values);
-      return;
-    }
-    this.emitAsyncValue(expr, (value) => {
-      this.emitAsyncValues(exprs, consume, index + 1, [...values, value]);
-    });
+    this.asyncValueEmitter.emitAsyncProtectedRecordCloneOverrides(
+      expr,
+      clone,
+      exitLocals,
+      handlers,
+      consume,
+      index,
+    );
   }
 
   private emitAsyncProtectedValues(
@@ -2381,21 +1296,7 @@ class RustEmitter {
     index = 0,
     values: string[] = [],
   ): void {
-    const expr = exprs[index];
-    if (expr === undefined) {
-      consume(values);
-      return;
-    }
-    this.emitAsyncProtectedValue(expr, exitLocals, handlers, (value) => {
-      this.emitAsyncProtectedValues(
-        exprs,
-        exitLocals,
-        handlers,
-        consume,
-        index + 1,
-        [...values, value],
-      );
-    });
+    this.asyncValueEmitter.emitAsyncProtectedValues(exprs, exitLocals, handlers, consume, index, values);
   }
 
   private emitAsyncConsole(
@@ -2405,64 +1306,7 @@ class RustEmitter {
     values: { name: string; type: IrType; loc: SrcLoc }[] = [],
     onComplete: (() => void) | null = null,
   ): void {
-    const arg = expr.args[index];
-    if (arg === undefined) {
-      const method = expr.name === "console.log" ? "console_log" : "console_error";
-      this.line(`runtime::${method}(&[${values.map((value) =>
-        this.displayValue(value.name, value.type, value.loc)).join(", ")}]);`);
-      this.emitAsyncStatements(remaining, onComplete);
-      return;
-    }
-    if (this.containsAsyncSuspension(arg)) {
-      this.emitAsyncValue(
-        arg,
-        (value) => this.emitAsyncConsole(expr, remaining, index + 1, [
-          ...values,
-          { name: value, type: arg.type, loc: arg.loc },
-        ], onComplete),
-      );
-      return;
-    }
-    const value = `sc_async_argument_${this.temporary++}`;
-    this.line(`let ${value} = ${this.emitExpr(arg)};`);
-    this.emitAsyncConsole(
-      expr,
-      remaining,
-      index + 1,
-      [...values, { name: value, type: arg.type, loc: arg.loc }],
-      onComplete,
-    );
-  }
-
-  private emitAsyncContinuation(
-    dependencyExpr: string,
-    consume: (value: string) => void,
-    remaining: readonly IrStmt[] | null,
-    onComplete: (() => void) | null = null,
-  ): void {
-    const result = this.currentAsyncResult;
-    if (result === null) this.unsupported("async continuation without a result promise", this.currentFunction?.loc);
-    const dependency = `sc_async_dependency_${this.temporary++}`;
-    const nextResult = `sc_async_result_${this.temporary++}`;
-    const outcome = `sc_async_outcome_${this.temporary++}`;
-    const guard = `sc_async_guard_${this.temporary++}`;
-    const value = `sc_async_value_${this.temporary++}`;
-    this.line(`let ${dependency} = ${dependencyExpr};`);
-    this.line(`let ${nextResult} = ${result}.clone();`);
-    this.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
-    this.indent += 1;
-    this.line(`let ${guard} = ${nextResult}.clone();`);
-    this.line(`runtime::promise_run_segment(&${guard}, move || {`);
-    this.indent += 1;
-    this.line(`let ${result} = ${nextResult};`);
-    this.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
-    consume(value);
-    if (remaining !== null) this.emitAsyncStatements(remaining, onComplete);
-    this.indent -= 1;
-    this.line("});");
-    this.indent -= 1;
-    this.line("}));");
-    this.line("return;");
+    this.asyncValueEmitter.emitAsyncConsole(expr, remaining, index, values, onComplete);
   }
 
   private emitStatements(statements: readonly IrStmt[]): void {
