@@ -1627,6 +1627,16 @@ fn array_relative_index(index: f64, length: usize) -> usize {
     }
 }
 
+fn array_delete_count(delete_count: f64, available: usize) -> usize {
+    if delete_count.is_nan() || delete_count <= 0.0 {
+        0
+    } else if delete_count == f64::INFINITY {
+        available
+    } else {
+        delete_count.trunc().min(available as f64) as usize
+    }
+}
+
 pub fn array_slice<T: ArrayElement>(array: &JsArray<T>, start: f64, end: f64) -> JsArray<T> {
     let elements = array.with(|data| {
         let start = array_relative_index(start, data.elements.len());
@@ -1644,13 +1654,7 @@ pub fn array_splice<T: ArrayElement>(
     let removed = array.with_mut(|data| {
         let start = array_relative_index(start, data.elements.len());
         let available = data.elements.len() - start;
-        let delete_count = if delete_count.is_nan() || delete_count <= 0.0 {
-            0
-        } else if delete_count == f64::INFINITY {
-            available
-        } else {
-            delete_count.trunc().min(available as f64) as usize
-        };
+        let delete_count = array_delete_count(delete_count, available);
         data.elements
             .drain(start..start + delete_count)
             .collect::<Vec<_>>()
@@ -1665,6 +1669,48 @@ pub fn array_shift<T: ArrayElement>(array: &JsArray<T>) -> T {
         }
         data.elements.remove(0)
     })
+}
+
+pub fn array_to_reversed<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
+    let mut elements = array.with(|data| data.elements.clone());
+    elements.reverse();
+    array_new(elements)
+}
+
+pub fn array_to_spliced<T: ArrayElement>(
+    array: &JsArray<T>,
+    start: f64,
+    delete_count: f64,
+    items: &JsArray<T>,
+) -> JsArray<T> {
+    let source = array.with(|data| data.elements.clone());
+    let items = items.with(|data| data.elements.clone());
+    let start = array_relative_index(start, source.len());
+    let delete_count = array_delete_count(delete_count, source.len() - start);
+    let capacity = (source.len() - delete_count)
+        .checked_add(items.len())
+        .expect("scriptc: out of memory");
+    let mut elements = Vec::with_capacity(capacity);
+    elements.extend_from_slice(&source[..start]);
+    elements.extend(items);
+    elements.extend_from_slice(&source[start + delete_count..]);
+    array_new(elements)
+}
+
+pub fn array_with<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) -> JsArray<T> {
+    let length = array.with(|data| data.elements.len());
+    let relative = if index.is_nan() { 0.0 } else { index.trunc() };
+    let actual = if relative >= 0.0 {
+        relative
+    } else {
+        length as f64 + relative
+    };
+    if !(actual >= 0.0) || actual >= length as f64 {
+        throw_range_error(format!("Invalid index : {}", format_number(index)));
+    }
+    let mut elements = array.with(|data| data.elements.clone());
+    elements[actual as usize] = value;
+    array_new(elements)
 }
 
 pub fn array_index_of_by<T, F>(array: &JsArray<T>, needle: &T, equal: F) -> f64
@@ -5488,6 +5534,78 @@ mod tests {
             assert!(array_get(&copied, 0.0).ptr_eq(&child));
             assert!(array_get(&moved, 0.0).ptr_eq(&child));
             assert!(array_shift(&references).ptr_eq(&child));
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn array_copying_methods_preserve_sources_identity_and_range_errors() {
+        let baseline = live_heap_objects();
+        {
+            let source = array_new(vec![1.0, 2.0, 3.0, 4.0]);
+            let reversed = array_to_reversed(&source);
+            assert_eq!(
+                reversed.with(|data| data.elements.clone()),
+                vec![4.0, 3.0, 2.0, 1.0]
+            );
+            assert_eq!(
+                source.with(|data| data.elements.clone()),
+                vec![1.0, 2.0, 3.0, 4.0]
+            );
+
+            let items = array_new(vec![8.0, 9.0]);
+            let spliced = array_to_spliced(&source, 1.0, 2.0, &items);
+            assert_eq!(
+                spliced.with(|data| data.elements.clone()),
+                vec![1.0, 8.0, 9.0, 4.0]
+            );
+            assert_eq!(
+                array_to_spliced(&source, f64::NAN, 0.0, &array_new(vec![6.0]))
+                    .with(|data| data.elements.clone()),
+                vec![6.0, 1.0, 2.0, 3.0, 4.0]
+            );
+
+            assert_eq!(
+                array_with(&source, -1.0, 9.0).with(|data| data.elements.clone()),
+                vec![1.0, 2.0, 3.0, 9.0]
+            );
+            assert_eq!(
+                array_with(&source, 1.9, 7.0).with(|data| data.elements.clone()),
+                vec![1.0, 7.0, 3.0, 4.0]
+            );
+            assert_eq!(
+                array_with(&source, f64::NAN, 6.0).with(|data| data.elements.clone()),
+                vec![6.0, 2.0, 3.0, 4.0]
+            );
+            for (index, message) in [
+                (4.0, "Invalid index : 4"),
+                (-5.0, "Invalid index : -5"),
+                (f64::INFINITY, "Invalid index : Infinity"),
+            ] {
+                let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    array_with(&source, index, 0.0)
+                }))
+                .err()
+                .expect("an out-of-range Array.with index must throw");
+                let caught = caught_from_panic(payload);
+                assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+                assert_eq!(caught_error_message(&caught).as_ref(), message);
+            }
+
+            let first = array_new(vec![1.0]);
+            let second = array_new(vec![2.0]);
+            let references = array_new(vec![first.clone(), second.clone()]);
+            let reversed_refs = array_to_reversed(&references);
+            assert!(array_get(&reversed_refs, 0.0).ptr_eq(&second));
+            let inserted = array_new(vec![3.0]);
+            let spliced_refs =
+                array_to_spliced(&references, 1.0, 0.0, &array_new(vec![inserted.clone()]));
+            assert!(array_get(&spliced_refs, 0.0).ptr_eq(&first));
+            assert!(array_get(&spliced_refs, 1.0).ptr_eq(&inserted));
+            let replacement = array_new(vec![4.0]);
+            let with_ref = array_with(&references, 0.0, replacement.clone());
+            assert!(array_get(&with_ref, 0.0).ptr_eq(&replacement));
+            assert!(array_get(&with_ref, 1.0).ptr_eq(&second));
         }
         assert_eq!(live_heap_objects(), baseline);
     }

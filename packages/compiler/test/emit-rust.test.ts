@@ -574,12 +574,14 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
   }
 }, 120_000);
 
-test("Rust array slicing and removals match Node byte-for-byte", async () => {
+test("Rust array ranges, removals, copying, and reverse searches match Node byte-for-byte", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-array-ranges-"));
   for (const fixture of [
     "1532-array-splice-shift.ts",
     "1543-rest-destructuring.ts",
     "1676-func-array-surface.ts",
+    "2112-array-at-findlast.ts",
+    "2669-array-copying-methods.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {

@@ -4246,6 +4246,28 @@ class RustEmitter {
       }
       case "reverse":
         return `{ let ${receiver} = ${receiverExpr}; runtime::array_reverse(&${receiver}) }`;
+      case "toReversed":
+        return `{ let ${receiver} = ${receiverExpr}; runtime::array_to_reversed(&${receiver}) }`;
+      case "toSpliced": {
+        const startExpr = argExprs[0];
+        const countExpr = argExprs[1];
+        const itemsExpr = argExprs[2];
+        if (startExpr === undefined || countExpr === undefined || itemsExpr === undefined) {
+          this.unsupported("array toSpliced argument shape", expr.loc);
+        }
+        const start = `sc_rt_${this.temporary++}`;
+        const count = `sc_rt_${this.temporary++}`;
+        const items = `sc_rt_${this.temporary++}`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${count} = ${countExpr}; let ${items} = ${itemsExpr}; runtime::array_to_spliced(&${receiver}, ${start}, ${count}, &${items}) }`;
+      }
+      case "with": {
+        const indexExpr = argExprs[0];
+        const valueExpr = argExprs[1];
+        if (indexExpr === undefined || valueExpr === undefined) this.unsupported("array with argument shape", expr.loc);
+        const index = `sc_rt_${this.temporary++}`;
+        const value = `sc_rt_${this.temporary++}`;
+        return `{ let ${receiver} = ${receiverExpr}; let ${index} = ${indexExpr}; let ${value} = ${valueExpr}; runtime::array_with(&${receiver}, ${index}, ${value}) }`;
+      }
       case "slice": {
         const start = `sc_rt_${this.temporary++}`;
         const end = `sc_rt_${this.temporary++}`;
