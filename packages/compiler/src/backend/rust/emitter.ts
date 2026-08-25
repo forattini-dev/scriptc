@@ -13,6 +13,7 @@ import type {
 import { RUNTIME_ERROR_CLASSES, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustStatements } from "./statements.js";
+import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import {
   mangleClassStruct,
   mangleField,
@@ -104,6 +105,20 @@ class RustEmitter {
   private readonly completionLoopBoundaries: number[] = [];
   private nextLoopTargetId = 0;
   private usesDyn = false;
+  private readonly containerExpressions = new RustContainerExpressionEmitter({
+    nextTemporary: () => `sc_rt_${this.temporary++}`,
+    emitExpr: (expr) => this.emitExpr(expr),
+    arrayElementEquality: (left, right, type, sameValueZero, loc) =>
+      this.arrayElementEquality(left, right, type, sameValueZero, loc),
+    mapKeyEquality: (left, right, type, loc) => this.mapKeyEquality(left, right, type, loc),
+    mapStoredKey: (value, type) => this.mapStoredKey(value, type),
+    rustBytesElement: (elem) => this.rustBytesElement(elem),
+    isUnit: (type) => this.isUnit(type),
+    union: (id, loc) => this.union(id, loc),
+    unionName: (id) => this.unionName(id),
+    unionVariant: (tag) => this.unionVariant(tag),
+    unsupported: (kind, loc) => this.unsupported(kind, loc),
+  });
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.functions.set(fn.name, fn);
@@ -4758,11 +4773,7 @@ class RustEmitter {
   }
 
   private emitArrayIntrinsic(expr: Extract<IrExpr, { kind: "arrIntrinsic" }>): string {
-    return this.emitArrayIntrinsicValues(
-      expr,
-      this.emitExpr(expr.receiver),
-      expr.args.map((arg) => this.emitExpr(arg)),
-    );
+    return this.containerExpressions.emitArrayIntrinsic(expr);
   }
 
   private emitArrayGetValues(
@@ -4770,212 +4781,26 @@ class RustEmitter {
     array: string,
     index: string,
   ): string {
-    if (expr.arr.type.kind !== "array") this.unsupported("async arrayGet on a non-array", expr.loc);
-    return `runtime::array_get(&(${array}), ${index})`;
+    return this.containerExpressions.emitArrayGetValues(expr, array, index);
   }
 
   private emitBytesNewValue(
     expr: Extract<IrExpr, { kind: "bytesNew" }>,
     source: string | null,
   ): string {
-    if (expr.type.kind !== "bytes") this.unsupported("bytes construction result", expr.loc);
-    const elem = this.rustBytesElement(expr.type.elem);
-    if (expr.source === null) return `runtime::bytes_empty::<${elem}>()`;
-    if (source === null) this.unsupported("missing bytes construction source", expr.loc);
-    if (expr.source.type.kind === "f64") return `runtime::bytes_alloc::<${elem}>(${source})`;
-    if (expr.source.type.kind === "bytes") return `runtime::bytes_copy(&(${source}))`;
-    if (expr.source.type.kind === "array" && expr.source.type.elem.kind === "f64") {
-      return `runtime::bytes_from_array::<${elem}>(&(${source}))`;
-    }
-    this.unsupported(`bytes construction from '${expr.source.type.kind}'`, expr.loc);
+    return this.containerExpressions.emitBytesNewValue(expr, source);
   }
 
   private emitArrayIntrinsicValues(
     expr: Extract<IrExpr, { kind: "arrIntrinsic" }>,
-    receiverExpr: string,
-    argExprs: readonly string[],
+    receiver: string,
+    args: readonly string[],
   ): string {
-    if (expr.receiver.type.kind !== "array") this.unsupported("array intrinsic on a non-array", expr.loc);
-    const elementType = expr.receiver.type.elem;
-    const receiver = `sc_rt_${this.temporary++}`;
-    switch (expr.method) {
-      case "length":
-        return `runtime::array_len(&(${receiverExpr}))`;
-      case "pop":
-        return `runtime::array_pop(&(${receiverExpr}))`;
-      case "indexOf":
-      case "includes": {
-        const needleExpr = argExprs[0];
-        if (needleExpr === undefined) this.unsupported(`array ${expr.method} without a needle`, expr.loc);
-        const needle = `sc_rt_${this.temporary++}`;
-        const equality = this.arrayElementEquality("left", "right", expr.receiver.type.elem, expr.method === "includes", expr.loc);
-        const helper = expr.method === "indexOf" ? "array_index_of_by" : "array_includes_by";
-        return `{ let ${receiver} = ${receiverExpr}; let ${needle} = ${needleExpr}; runtime::${helper}(&${receiver}, &${needle}, |left, right| ${equality}) }`;
-      }
-      case "push": {
-        const values = argExprs.map(() => `sc_rt_${this.temporary++}`);
-        const bindings = argExprs.map((arg, index) => `let ${values[index]} = ${arg};`).join(" ");
-        const pushes = values.map((value) => `runtime::array_push(&${receiver}, ${value});`).join(" ");
-        return `{ let ${receiver} = ${receiverExpr}; ${bindings} ${pushes} runtime::array_len(&${receiver}) }`;
-      }
-      case "pushSpread": {
-        const first = argExprs[0];
-        if (first === undefined) this.unsupported("array pushSpread without a source", expr.loc);
-        const source = `sc_rt_${this.temporary++}`;
-        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
-      }
-      case "unshift": {
-        const values = argExprs.map(() => `sc_rt_${this.temporary++}`);
-        const bindings = argExprs.map((arg, index) => `let ${values[index]} = ${arg};`).join(" ");
-        return `{ let ${receiver} = ${receiverExpr}; ${bindings} runtime::array_unshift(&${receiver}, vec![${values.join(", ")}]) }`;
-      }
-      case "unshiftSpread": {
-        const first = argExprs[0];
-        if (first === undefined) this.unsupported("array unshiftSpread without a source", expr.loc);
-        const source = `sc_rt_${this.temporary++}`;
-        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_unshift_from(&${receiver}, &${source}) }`;
-      }
-      case "reverse":
-        return `{ let ${receiver} = ${receiverExpr}; runtime::array_reverse(&${receiver}) }`;
-      case "toReversed":
-        return `{ let ${receiver} = ${receiverExpr}; runtime::array_to_reversed(&${receiver}) }`;
-      case "toSpliced": {
-        const startExpr = argExprs[0];
-        const countExpr = argExprs[1];
-        const itemsExpr = argExprs[2];
-        if (startExpr === undefined || countExpr === undefined || itemsExpr === undefined) {
-          this.unsupported("array toSpliced argument shape", expr.loc);
-        }
-        const start = `sc_rt_${this.temporary++}`;
-        const count = `sc_rt_${this.temporary++}`;
-        const items = `sc_rt_${this.temporary++}`;
-        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${count} = ${countExpr}; let ${items} = ${itemsExpr}; runtime::array_to_spliced(&${receiver}, ${start}, ${count}, &${items}) }`;
-      }
-      case "with": {
-        const indexExpr = argExprs[0];
-        const valueExpr = argExprs[1];
-        if (indexExpr === undefined || valueExpr === undefined) this.unsupported("array with argument shape", expr.loc);
-        const index = `sc_rt_${this.temporary++}`;
-        const value = `sc_rt_${this.temporary++}`;
-        return `{ let ${receiver} = ${receiverExpr}; let ${index} = ${indexExpr}; let ${value} = ${valueExpr}; runtime::array_with(&${receiver}, ${index}, ${value}) }`;
-      }
-      case "slice": {
-        const start = `sc_rt_${this.temporary++}`;
-        const end = `sc_rt_${this.temporary++}`;
-        const startExpr = argExprs[0] ?? "0.0";
-        const endExpr = argExprs[1] ?? "f64::INFINITY";
-        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${end} = ${endExpr}; runtime::array_slice(&${receiver}, ${start}, ${end}) }`;
-      }
-      case "splice": {
-        const startExpr = argExprs[0];
-        if (startExpr === undefined) this.unsupported("array splice without a start", expr.loc);
-        const start = `sc_rt_${this.temporary++}`;
-        const count = `sc_rt_${this.temporary++}`;
-        const countExpr = argExprs[1] ?? "f64::INFINITY";
-        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${count} = ${countExpr}; runtime::array_splice(&${receiver}, ${start}, ${count}) }`;
-      }
-      case "shift": {
-        if (expr.type.kind !== "union") this.unsupported("array shift without an optional result union", expr.loc);
-        const union = this.union(expr.type.unionId, expr.loc);
-        const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(elementType));
-        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
-        if (valueTag < 0 || undefinedTag < 0) this.unsupported("array shift result union shape", expr.loc);
-        const name = this.unionName(union.id);
-        return `{ let ${receiver} = ${receiverExpr}; if runtime::array_len(&${receiver}) == 0.0 { ${name}::${this.unionVariant(undefinedTag)} } else { ${name}::${this.unionVariant(valueTag)}(runtime::array_shift(&${receiver})) } }`;
-      }
-      case "join": {
-        const separator = argExprs[0];
-        if (separator === undefined) this.unsupported("array join without a separator", expr.loc);
-        const separatorValue = `sc_rt_${this.temporary++}`;
-        if (elementType.kind === "union") {
-          const union = this.union(elementType.unionId, expr.loc);
-          const name = this.unionName(union.id);
-          const arms = union.arms.map((arm, tag) => {
-            const variant = `${name}::${this.unionVariant(tag)}`;
-            if (this.isUnit(arm)) return `${variant} => {},`;
-            if (arm.kind === "f64") return `${variant}(payload) => output.push_str(&runtime::format_number(*payload)),`;
-            if (arm.kind === "bool") return `${variant}(payload) => output.push_str(if *payload { "true" } else { "false" }),`;
-            if (arm.kind === "string") return `${variant}(payload) => output.push_str(payload),`;
-            this.unsupported(`array join union arm '${arm.kind}'`, expr.loc);
-          }).join(" ");
-          return `{ let ${receiver} = ${receiverExpr}; let ${separatorValue} = ${separator}; runtime::array_join_by(&${receiver}, &${separatorValue}, |value, output| match value { ${arms} }) }`;
-        }
-        if (elementType.kind !== "f64" && elementType.kind !== "bool" && elementType.kind !== "string") {
-          this.unsupported(`array join element '${elementType.kind}'`, expr.loc);
-        }
-        return `{ let ${receiver} = ${receiverExpr}; let ${separatorValue} = ${separator}; runtime::array_join(&${receiver}, &${separatorValue}) }`;
-      }
-      default:
-        this.unsupported(`array intrinsic '${expr.method}'`, expr.loc);
-    }
+    return this.containerExpressions.emitArrayIntrinsicValues(expr, receiver, args);
   }
 
   private emitMapIntrinsic(expr: Extract<IrExpr, { kind: "mapIntrinsic" }>): string {
-    if (expr.receiver.type.kind !== "map") this.unsupported("map intrinsic on a non-map", expr.loc);
-    const type = expr.receiver.type;
-    const receiver = `sc_rt_${this.temporary++}`;
-    const receiverBinding = `let ${receiver} = ${this.emitExpr(expr.receiver)};`;
-    if (expr.method === "size") return `{ ${receiverBinding} runtime::map_size(&${receiver}) }`;
-    if (expr.method === "clear") return `{ ${receiverBinding} runtime::map_clear(&${receiver}) }`;
-    if (expr.method === "iterCount") return `{ ${receiverBinding} runtime::map_iter_count(&${receiver}) }`;
-    if (expr.method === "iterEnter") return `{ ${receiverBinding} runtime::map_iter_enter(&${receiver}) }`;
-    if (expr.method === "iterExit") return `{ ${receiverBinding} runtime::map_iter_exit(&${receiver}) }`;
-    if (expr.method === "iterLive" || expr.method === "iterKey" || expr.method === "iterValue") {
-      const indexExpr = expr.args[0];
-      if (indexExpr === undefined) this.unsupported(`map ${expr.method} without an index`, expr.loc);
-      const index = `sc_rt_${this.temporary++}`;
-      const helper = expr.method === "iterLive"
-        ? "map_iter_live"
-        : expr.method === "iterKey" ? "map_iter_key" : "map_iter_value";
-      return `{ ${receiverBinding} let ${index} = ${this.emitExpr(indexExpr)}; runtime::${helper}(&${receiver}, ${index}) }`;
-    }
-    const keyExpr = expr.args[0];
-    if (keyExpr === undefined) this.unsupported(`map ${expr.method} without a key`, expr.loc);
-    const key = `sc_rt_${this.temporary++}`;
-    const equality = this.mapKeyEquality("left", "right", type.key, expr.loc);
-    const bindings = `${receiverBinding} let ${key} = ${this.emitExpr(keyExpr)};`;
-    switch (expr.method) {
-      case "set": {
-        const valueExpr = expr.args[1];
-        if (valueExpr === undefined) this.unsupported("map set without a value", expr.loc);
-        const value = `sc_rt_${this.temporary++}`;
-        return `{ ${bindings} let ${value} = ${this.emitExpr(valueExpr)}; runtime::map_set_by(&${receiver}, ${this.mapStoredKey(key, type.key)}, ${value}, |left, right| ${equality}) }`;
-      }
-      case "get": {
-        if (expr.type.kind !== "union") this.unsupported("map get without an optional result union", expr.loc);
-        const union = this.union(expr.type.unionId, expr.loc);
-        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
-        if (undefinedTag < 0) this.unsupported("map get result union shape", expr.loc);
-        const name = this.unionName(union.id);
-        let present: string;
-        if (type.value.kind === "union") {
-          if (type.value.unionId === union.id) {
-            present = "value";
-          } else {
-            const stored = this.union(type.value.unionId, expr.loc);
-            const arms = stored.arms.map((arm, tag) => {
-              const resultTag = union.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
-              if (resultTag < 0) this.unsupported("map get union retag", expr.loc);
-              const from = `${this.unionName(stored.id)}::${this.unionVariant(tag)}`;
-              const to = `${name}::${this.unionVariant(resultTag)}`;
-              return this.isUnit(arm) ? `${from} => ${to}` : `${from}(payload) => ${to}(payload)`;
-            }).join(", ");
-            present = `match value { ${arms} }`;
-          }
-        } else {
-          const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(type.value));
-          if (valueTag < 0) this.unsupported("map get result union shape", expr.loc);
-          present = `${name}::${this.unionVariant(valueTag)}(value)`;
-        }
-        return `{ ${bindings} match runtime::map_get_by(&${receiver}, &${key}, |left, right| ${equality}) { Some(value) => ${present}, None => ${name}::${this.unionVariant(undefinedTag)}, } }`;
-      }
-      case "has":
-        return `{ ${bindings} runtime::map_has_by(&${receiver}, &${key}, |left, right| ${equality}) }`;
-      case "delete":
-        return `{ ${bindings} runtime::map_delete_by(&${receiver}, &${key}, |left, right| ${equality}) }`;
-      default:
-        this.unsupported(`map intrinsic '${expr.method}'`, expr.loc);
-    }
+    return this.containerExpressions.emitMapIntrinsic(expr);
   }
 
   private emitMapIntrinsicValues(
@@ -4983,47 +4808,11 @@ class RustEmitter {
     receiver: string,
     args: readonly string[],
   ): string {
-    if (expr.receiver.type.kind !== "map") this.unsupported("async map intrinsic on a non-map", expr.loc);
-    if (expr.method !== "set" || args.length !== 2 || args[0] === undefined || args[1] === undefined) {
-      this.unsupported(`async map intrinsic '${expr.method}'`, expr.loc);
-    }
-    const equality = this.mapKeyEquality("left", "right", expr.receiver.type.key, expr.loc);
-    return `runtime::map_set_by(&(${receiver}), ${this.mapStoredKey(args[0], expr.receiver.type.key)}, ${args[1]}, |left, right| ${equality})`;
+    return this.containerExpressions.emitMapIntrinsicValues(expr, receiver, args);
   }
 
   private emitSetIntrinsic(expr: Extract<IrExpr, { kind: "setIntrinsic" }>): string {
-    if (expr.receiver.type.kind !== "set") this.unsupported("set intrinsic on a non-set", expr.loc);
-    const type = expr.receiver.type;
-    const receiver = `sc_rt_${this.temporary++}`;
-    const receiverBinding = `let ${receiver} = ${this.emitExpr(expr.receiver)};`;
-    if (expr.method === "size") return `{ ${receiverBinding} runtime::map_size(&${receiver}) }`;
-    if (expr.method === "clear") return `{ ${receiverBinding} runtime::map_clear(&${receiver}) }`;
-    if (expr.method === "iterCount") return `{ ${receiverBinding} runtime::map_iter_count(&${receiver}) }`;
-    if (expr.method === "iterEnter") return `{ ${receiverBinding} runtime::map_iter_enter(&${receiver}) }`;
-    if (expr.method === "iterExit") return `{ ${receiverBinding} runtime::map_iter_exit(&${receiver}) }`;
-    if (expr.method === "iterLive" || expr.method === "iterKey") {
-      const indexExpr = expr.args[0];
-      if (indexExpr === undefined) this.unsupported(`set ${expr.method} without an index`, expr.loc);
-      const index = `sc_rt_${this.temporary++}`;
-      const helper = expr.method === "iterLive" ? "map_iter_live" : "map_iter_key";
-      return `{ ${receiverBinding} let ${index} = ${this.emitExpr(indexExpr)}; runtime::${helper}(&${receiver}, ${index}) }`;
-    }
-    if (expr.method === "toArray") return `{ ${receiverBinding} runtime::set_to_array(&${receiver}) }`;
-    const valueExpr = expr.args[0];
-    if (valueExpr === undefined) this.unsupported(`set ${expr.method} without a value`, expr.loc);
-    const value = `sc_rt_${this.temporary++}`;
-    const equality = this.mapKeyEquality("left", "right", type.elem, expr.loc);
-    const bindings = `${receiverBinding} let ${value} = ${this.emitExpr(valueExpr)};`;
-    switch (expr.method) {
-      case "add":
-        return `{ ${bindings} runtime::set_add_by(&${receiver}, ${this.mapStoredKey(value, type.elem)}, |left, right| ${equality}) }`;
-      case "has":
-        return `{ ${bindings} runtime::set_has_by(&${receiver}, &${value}, |left, right| ${equality}) }`;
-      case "delete":
-        return `{ ${bindings} runtime::set_delete_by(&${receiver}, &${value}, |left, right| ${equality}) }`;
-      default:
-        this.unsupported(`set intrinsic '${expr.method}'`, expr.loc);
-    }
+    return this.containerExpressions.emitSetIntrinsic(expr);
   }
 
   private needsClone(type: IrType): boolean {
