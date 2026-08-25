@@ -608,31 +608,32 @@ test("Rust array ranges, removals, copying, and reverse searches match Node byte
   }
 }, 240_000);
 
-test("Rust Buffer comparison, search, fill, copy, swap, write, and concat match Node byte-for-byte", async () => {
-  const fixture = "1663-buffer-compare-search-fill.ts";
-  const entryPath = resolve("tests/corpus", fixture);
+test("Rust Buffer numeric, comparison, search, and mutation surfaces match Node byte-for-byte", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-buffer-surface-"));
-  const result = await compile(entryPath, {
-    outDir: dir,
-    outPath: join(dir, "buffer-surface"),
-    backend: "rust",
-    optimization: "dev",
-  });
-  expect(
-    result.ok,
-    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
-  ).toBe(true);
-  if (!result.ok || result.backend !== "rust") return;
-  const generated = await readFile(result.sourcePath, "utf8");
-  expect(generated).not.toMatch(/\bunsafe\s*\{/);
-  const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
-    execFileAsync(result.binaryPath, [], {
-      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
-    }),
-  ]);
-  expect(rust.stdout, fixture).toBe(node.stdout);
-  expect(rust.stderr, fixture).toBe(node.stderr);
+  for (const fixture of ["1660-buffer-read-write-num.ts", "1663-buffer-compare-search-fill.ts"]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok || result.backend !== "rust") continue;
+    const generated = await readFile(result.sourcePath, "utf8");
+    expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
 }, 240_000);
 
 test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {

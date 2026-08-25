@@ -2783,6 +2783,32 @@ class RustEmitter {
           if (kind?.kind !== "strLit" || value === undefined || offset === undefined) this.unsupported("bytes writeNum arguments", expr.loc);
           return `runtime::bytes_write_num(&(${this.emitExpr(expr.receiver)}), "${this.rustString(kind.value)}", ${this.emitExpr(value)}, ${this.emitExpr(offset)})`;
         }
+        if (expr.method === "readNumVar" && expr.args.length === 3) {
+          const kind = expr.args[0];
+          const offsetExpr = expr.args[1];
+          const widthExpr = expr.args[2];
+          if (kind?.kind !== "strLit" || offsetExpr === undefined || widthExpr === undefined) {
+            this.unsupported("bytes readNumVar arguments", expr.loc);
+          }
+          const receiver = `sc_rt_${this.temporary++}`;
+          const offset = `sc_rt_${this.temporary++}`;
+          const width = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${offset} = ${this.emitExpr(offsetExpr)}; let ${width} = ${this.emitExpr(widthExpr)}; runtime::bytes_read_num_var(&${receiver}, "${this.rustString(kind.value)}", ${offset}, ${width}) }`;
+        }
+        if (expr.method === "writeNumVar" && expr.args.length === 4) {
+          const kind = expr.args[0];
+          const valueExpr = expr.args[1];
+          const offsetExpr = expr.args[2];
+          const widthExpr = expr.args[3];
+          if (kind?.kind !== "strLit" || valueExpr === undefined || offsetExpr === undefined || widthExpr === undefined) {
+            this.unsupported("bytes writeNumVar arguments", expr.loc);
+          }
+          const receiver = `sc_rt_${this.temporary++}`;
+          const value = `sc_rt_${this.temporary++}`;
+          const offset = `sc_rt_${this.temporary++}`;
+          const width = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${value} = ${this.emitExpr(valueExpr)}; let ${offset} = ${this.emitExpr(offsetExpr)}; let ${width} = ${this.emitExpr(widthExpr)}; runtime::bytes_write_num_var(&${receiver}, "${this.rustString(kind.value)}", ${value}, ${offset}, ${width}) }`;
+        }
         if (expr.method === "length" && expr.args.length === 0) {
           return `runtime::bytes_len(&(${this.emitExpr(expr.receiver)}))`;
         }

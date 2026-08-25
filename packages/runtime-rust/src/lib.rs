@@ -2591,29 +2591,132 @@ fn bytes_num_width(kind: &str) -> usize {
     }
 }
 
-fn bytes_num_offset(bytes: &JsBytes<u8>, offset: f64, width: usize, reading: bool) -> usize {
-    let length = bytes.with(|data| data.length);
-    if width > length
-        || !offset.is_finite()
-        || offset.fract() != 0.0
-        || offset < 0.0
-        || offset > length.saturating_sub(width) as f64
-    {
-        if reading {
-            throw_range_error("Attempt to access memory outside buffer bounds".to_owned());
-        }
-        throw_range_error(format!(
-            "The value of \"offset\" is out of range. It must be >= 0 and <= {}. Received {}",
-            length.saturating_sub(width),
-            format_number(offset)
-        ));
+fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
+    if value.floor() != value {
+        throw_value(JsError {
+            name: "RangeError".to_owned(),
+            message: format!(
+                "The value of \"{}\" is out of range. It must be an integer. Received {}",
+                value_name.unwrap_or("offset"),
+                bytes_received_number(value)
+            ),
+            code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        });
+    }
+    if length < 0.0 {
+        throw_value(JsError {
+            name: "RangeError".to_owned(),
+            message: "Attempt to access memory outside buffer bounds".to_owned(),
+            code: Some("ERR_BUFFER_OUT_OF_BOUNDS".to_owned()),
+        });
+    }
+    throw_value(JsError {
+        name: "RangeError".to_owned(),
+        message: format!(
+            "The value of \"{}\" is out of range. It must be >= {} and <= {}. Received {}",
+            value_name.unwrap_or("offset"),
+            usize::from(value_name.is_some()),
+            format_number(length),
+            bytes_received_number(value)
+        ),
+        code: Some("ERR_OUT_OF_RANGE".to_owned()),
+    })
+}
+
+fn bytes_num_offset(bytes: &JsBytes<u8>, offset: f64, width: usize) -> usize {
+    let capacity = bytes.with(|data| data.length as f64) - width as f64;
+    if offset.floor() != offset || capacity < 0.0 || offset < 0.0 || offset > capacity {
+        bytes_bounds_error(offset, capacity, None);
     }
     offset as usize
 }
 
+fn bytes_check_int(
+    bytes: &JsBytes<u8>,
+    value: f64,
+    offset: f64,
+    width: usize,
+    signed: bool,
+) -> usize {
+    let exponent = width * 8 - usize::from(signed);
+    let limit = 2_f64.powi(exponent as i32);
+    let (minimum, maximum) = if signed {
+        (-limit, limit - 1.0)
+    } else {
+        (0.0, limit - 1.0)
+    };
+    if value > maximum || value < minimum {
+        let requirement = if width > 4 {
+            if signed {
+                format!(">= -(2 ** {exponent}) and < 2 ** {exponent}")
+            } else {
+                format!(">= 0 and < 2 ** {exponent}")
+            }
+        } else {
+            format!(
+                ">= {} and <= {}",
+                format_number(minimum),
+                format_number(maximum)
+            )
+        };
+        throw_value(JsError {
+            name: "RangeError".to_owned(),
+            message: format!(
+                "The value of \"value\" is out of range. It must be {requirement}. Received {}",
+                bytes_received_number(value)
+            ),
+            code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        });
+    }
+    bytes_num_offset(bytes, offset, width)
+}
+
+fn bytes_read_unsigned(
+    bytes: &JsBytes<u8>,
+    offset: usize,
+    width: usize,
+    little_endian: bool,
+) -> u64 {
+    bytes.with(|data| {
+        let storage = data.storage.borrow();
+        let input = &storage[data.offset + offset..data.offset + offset + width];
+        let mut value = 0_u64;
+        for index in 0..width {
+            value |= u64::from(
+                input[if little_endian {
+                    index
+                } else {
+                    width - 1 - index
+                }],
+            ) << (8 * index);
+        }
+        value
+    })
+}
+
+fn bytes_write_unsigned(
+    bytes: &JsBytes<u8>,
+    offset: usize,
+    width: usize,
+    little_endian: bool,
+    value: u64,
+) {
+    bytes.with(|data| {
+        let mut storage = data.storage.borrow_mut();
+        let output = &mut storage[data.offset + offset..data.offset + offset + width];
+        for index in 0..width {
+            output[if little_endian {
+                index
+            } else {
+                width - 1 - index
+            }] = (value >> (8 * index)) as u8;
+        }
+    });
+}
+
 pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
     let width = bytes_num_width(kind);
-    let offset = bytes_num_offset(bytes, offset, width, true);
+    let offset = bytes_num_offset(bytes, offset, width);
     bytes.with(|data| {
         let storage = data.storage.borrow();
         let input = &storage[data.offset + offset..data.offset + offset + width];
@@ -2639,30 +2742,21 @@ pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
 
 pub fn bytes_write_num(bytes: &JsBytes<u8>, kind: &str, value: f64, offset: f64) -> f64 {
     let width = bytes_num_width(kind);
-    let offset = bytes_num_offset(bytes, offset, width, false);
+    let integer = !matches!(kind, "f32be" | "f32le" | "f64be" | "f64le");
+    let signed = matches!(kind, "i8" | "i16be" | "i16le" | "i32be" | "i32le");
+    let offset = if integer {
+        bytes_check_int(bytes, value, offset, width, signed)
+    } else {
+        bytes_num_offset(bytes, offset, width)
+    };
     let bits = match kind {
-        "u8" | "u16be" | "u16le" | "u32be" | "u32le" => {
-            let max = 2_f64.powi((width * 8) as i32) - 1.0;
-            if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > max {
-                throw_range_error(format!(
-                    "The value of \"value\" is out of range. It must be >= 0 and <= {}. Received {}",
-                    format_number(max),
-                    format_number(value)
-                ));
-            }
-            (value as u64).to_be_bytes()
-        }
-        "i8" | "i16be" | "i16le" | "i32be" | "i32le" => {
-            let max = 2_f64.powi((width * 8 - 1) as i32) - 1.0;
-            let min = -max - 1.0;
-            if !value.is_finite() || value.fract() != 0.0 || value < min || value > max {
-                throw_range_error(format!(
-                    "The value of \"value\" is out of range. Received {}",
-                    format_number(value)
-                ));
-            }
-            (value as i64 as u64).to_be_bytes()
-        }
+        "u8" | "u16be" | "u16le" | "u32be" | "u32le" | "i8" | "i16be" | "i16le" | "i32be"
+        | "i32le" => (if value.is_nan() {
+            0
+        } else {
+            value.trunc() as i64
+        } as u64)
+            .to_be_bytes(),
         "f32be" | "f32le" => u64::from((value as f32).to_bits()).to_be_bytes(),
         "f64be" | "f64le" => value.to_bits().to_be_bytes(),
         _ => unreachable!(),
@@ -2679,6 +2773,54 @@ pub fn bytes_write_num(bytes: &JsBytes<u8>, kind: &str, value: f64, offset: f64)
             output.copy_from_slice(source);
         }
     });
+    (offset + width) as f64
+}
+
+fn bytes_num_var_kind(kind: &str) -> (bool, bool) {
+    match kind {
+        "ube" => (false, false),
+        "ule" => (false, true),
+        "ibe" => (true, false),
+        "ile" => (true, true),
+        _ => panic!("scriptc: invalid variable-width bytes numeric kind"),
+    }
+}
+
+fn bytes_num_var_width(byte_length: f64) -> usize {
+    if byte_length.floor() != byte_length || !(1.0..=6.0).contains(&byte_length) {
+        bytes_bounds_error(byte_length, 6.0, Some("byteLength"));
+    }
+    byte_length as usize
+}
+
+pub fn bytes_read_num_var(bytes: &JsBytes<u8>, kind: &str, offset: f64, byte_length: f64) -> f64 {
+    let width = bytes_num_var_width(byte_length);
+    let offset = bytes_num_offset(bytes, offset, width);
+    let (signed, little_endian) = bytes_num_var_kind(kind);
+    let value = bytes_read_unsigned(bytes, offset, width, little_endian);
+    if signed && value & (1_u64 << (width * 8 - 1)) != 0 {
+        (value as i64 - (1_i64 << (width * 8))) as f64
+    } else {
+        value as f64
+    }
+}
+
+pub fn bytes_write_num_var(
+    bytes: &JsBytes<u8>,
+    kind: &str,
+    value: f64,
+    offset: f64,
+    byte_length: f64,
+) -> f64 {
+    let width = bytes_num_var_width(byte_length);
+    let (signed, little_endian) = bytes_num_var_kind(kind);
+    let offset = bytes_check_int(bytes, value, offset, width, signed);
+    let value = if value.is_nan() {
+        0
+    } else {
+        value.trunc() as i64
+    } as u64;
+    bytes_write_unsigned(bytes, offset, width, little_endian, value);
     (offset + width) as f64
 }
 
@@ -5824,6 +5966,50 @@ mod tests {
             assert_eq!(
                 bytes_to_string(&buffer_concat_len(&parts, 5.0), &string("hex")).as_ref(),
                 "0102030000"
+            );
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn buffer_numeric_methods_follow_node_coercion_and_error_order() {
+        let baseline = live_heap_objects();
+        {
+            let fixed = bytes_alloc::<u8>(8.0);
+            assert_eq!(bytes_write_num(&fixed, "u32be", 1.9, 0.0), 4.0);
+            assert_eq!(bytes_read_num(&fixed, "u32be", 0.0), 1.0);
+            assert_eq!(bytes_write_num(&fixed, "u16le", f64::NAN, 0.0), 2.0);
+            assert_eq!(bytes_read_num(&fixed, "u16le", 0.0), 0.0);
+
+            let variable = bytes_alloc::<u8>(6.0);
+            assert_eq!(
+                bytes_write_num_var(&variable, "ule", 4_328_719_365.0, 0.0, 5.0),
+                5.0
+            );
+            assert_eq!(
+                bytes_to_string(&variable, &string("hex")).as_ref(),
+                "050403020100"
+            );
+            assert_eq!(
+                bytes_read_num_var(&variable, "ule", 0.0, 5.0),
+                4_328_719_365.0
+            );
+            bytes_write_num_var(&variable, "ibe", -2.0, 0.0, 3.0);
+            assert_eq!(bytes_read_num_var(&variable, "ibe", 0.0, 3.0), -2.0);
+
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bytes_read_num(&fixed, "u16be", 4_294_967_297.0)
+            }))
+            .err()
+            .expect("an out-of-range numeric offset must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(
+                caught_error_code(&caught).expect("error code").as_ref(),
+                "ERR_OUT_OF_RANGE"
+            );
+            assert_eq!(
+                caught_error_message(&caught).as_ref(),
+                "The value of \"offset\" is out of range. It must be >= 0 and <= 6. Received 4_294_967_297"
             );
         }
         assert_eq!(live_heap_objects(), baseline);
