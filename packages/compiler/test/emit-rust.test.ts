@@ -574,10 +574,42 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
   }
 }, 120_000);
 
+test("Rust array slicing and removals match Node byte-for-byte", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-array-ranges-"));
+  for (const fixture of [
+    "1532-array-splice-shift.ts",
+    "1543-rest-destructuring.ts",
+    "1676-func-array-surface.ts",
+  ]) {
+    const entryPath = resolve("tests/corpus", fixture);
+    const result = await compile(entryPath, {
+      outDir: dir,
+      outPath: join(dir, fixture.slice(0, -3)),
+      backend: "rust",
+      optimization: "dev",
+    });
+    expect(
+      result.ok,
+      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+    ).toBe(true);
+    if (!result.ok || result.backend !== "rust") continue;
+    const generated = await readFile(result.sourcePath, "utf8");
+    expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
+    const [node, rust] = await Promise.all([
+      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(result.binaryPath, [], {
+        env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+      }),
+    ]);
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.stderr, fixture).toBe(node.stderr);
+  }
+}, 240_000);
+
 test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-refusal-"));
   const sourcePath = join(dir, "unsupported.ts");
-  await writeFile(sourcePath, "console.log([1, 2, 3].slice(1));\n");
+  await writeFile(sourcePath, "console.log(/x/.test('x'));\n");
   const result = await compile(sourcePath, {
     outDir: dir,
     outPath: join(dir, "unsupported"),

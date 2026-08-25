@@ -2957,6 +2957,16 @@ class RustEmitter {
         const test = `{ let ${left} = ${this.emitExpr(expr.left)}; let ${right} = ${this.emitExpr(expr.right)}; ${this.unionEqName(union.id)}(&${left}, &${right}, ${expr.sameValue}) }`;
         return expr.negated ? `!(${test})` : test;
       }
+      case "unionFuncEq": {
+        const union = this.union(expr.unionId, expr.loc);
+        const arm = union.arms[expr.tag];
+        if (arm?.kind !== "func") this.unsupported(`invalid function union tag '${expr.unionId}:${expr.tag}'`, expr.loc);
+        const unionValue = `sc_rt_${this.temporary++}`;
+        const functionValue = `sc_rt_${this.temporary++}`;
+        const variant = `${this.unionName(union.id)}::${this.unionVariant(expr.tag)}`;
+        const test = `{ let ${unionValue} = ${this.emitExpr(expr.union)}; let ${functionValue} = ${this.emitExpr(expr.func)}; match &${unionValue} { ${variant}(payload) => payload.identity() == ${functionValue}.identity(), _ => false, } }`;
+        return expr.negated ? `!(${test})` : test;
+      }
       case "closure":
         return this.emitClosure(expr);
       case "callValue":
@@ -4195,6 +4205,7 @@ class RustEmitter {
     argExprs: readonly string[],
   ): string {
     if (expr.receiver.type.kind !== "array") this.unsupported("array intrinsic on a non-array", expr.loc);
+    const elementType = expr.receiver.type.elem;
     const receiver = `sc_rt_${this.temporary++}`;
     switch (expr.method) {
       case "length":
@@ -4235,6 +4246,30 @@ class RustEmitter {
       }
       case "reverse":
         return `{ let ${receiver} = ${receiverExpr}; runtime::array_reverse(&${receiver}) }`;
+      case "slice": {
+        const start = `sc_rt_${this.temporary++}`;
+        const end = `sc_rt_${this.temporary++}`;
+        const startExpr = argExprs[0] ?? "0.0";
+        const endExpr = argExprs[1] ?? "f64::INFINITY";
+        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${end} = ${endExpr}; runtime::array_slice(&${receiver}, ${start}, ${end}) }`;
+      }
+      case "splice": {
+        const startExpr = argExprs[0];
+        if (startExpr === undefined) this.unsupported("array splice without a start", expr.loc);
+        const start = `sc_rt_${this.temporary++}`;
+        const count = `sc_rt_${this.temporary++}`;
+        const countExpr = argExprs[1] ?? "f64::INFINITY";
+        return `{ let ${receiver} = ${receiverExpr}; let ${start} = ${startExpr}; let ${count} = ${countExpr}; runtime::array_splice(&${receiver}, ${start}, ${count}) }`;
+      }
+      case "shift": {
+        if (expr.type.kind !== "union") this.unsupported("array shift without an optional result union", expr.loc);
+        const union = this.union(expr.type.unionId, expr.loc);
+        const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(elementType));
+        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        if (valueTag < 0 || undefinedTag < 0) this.unsupported("array shift result union shape", expr.loc);
+        const name = this.unionName(union.id);
+        return `{ let ${receiver} = ${receiverExpr}; if runtime::array_len(&${receiver}) == 0.0 { ${name}::${this.unionVariant(undefinedTag)} } else { ${name}::${this.unionVariant(valueTag)}(runtime::array_shift(&${receiver})) } }`;
+      }
       case "join": {
         const separator = argExprs[0];
         if (separator === undefined) this.unsupported("array join without a separator", expr.loc);

@@ -1612,6 +1612,61 @@ pub fn array_reverse<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
     array.clone()
 }
 
+fn array_relative_index(index: f64, length: usize) -> usize {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if index == f64::NEG_INFINITY {
+        return 0;
+    }
+    if index == f64::INFINITY {
+        return length;
+    }
+    if index < 0.0 {
+        (length as f64 + index).clamp(0.0, length as f64) as usize
+    } else {
+        index.clamp(0.0, length as f64) as usize
+    }
+}
+
+pub fn array_slice<T: ArrayElement>(array: &JsArray<T>, start: f64, end: f64) -> JsArray<T> {
+    let elements = array.with(|data| {
+        let start = array_relative_index(start, data.elements.len());
+        let end = array_relative_index(end, data.elements.len()).max(start);
+        data.elements[start..end].to_vec()
+    });
+    array_new(elements)
+}
+
+pub fn array_splice<T: ArrayElement>(
+    array: &JsArray<T>,
+    start: f64,
+    delete_count: f64,
+) -> JsArray<T> {
+    let removed = array.with_mut(|data| {
+        let start = array_relative_index(start, data.elements.len());
+        let available = data.elements.len() - start;
+        let delete_count = if delete_count.is_nan() || delete_count <= 0.0 {
+            0
+        } else if delete_count == f64::INFINITY {
+            available
+        } else {
+            delete_count.trunc().min(available as f64) as usize
+        };
+        data.elements
+            .drain(start..start + delete_count)
+            .collect::<Vec<_>>()
+    });
+    array_new(removed)
+}
+
+pub fn array_shift<T: ArrayElement>(array: &JsArray<T>) -> T {
+    array.with_mut(|data| {
+        if data.elements.is_empty() {
+            panic!("scriptc: array index out of bounds");
+        }
+        data.elements.remove(0)
+    })
+}
+
 pub fn array_index_of_by<T, F>(array: &JsArray<T>, needle: &T, equal: F) -> f64
 where
     T: ArrayElement,
@@ -5395,6 +5450,44 @@ mod tests {
             let reversed = array_reverse(&array);
             assert!(array_ptr_eq(&array, &reversed));
             assert_eq!(array_get(&array, 0.0), 9.0);
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn array_ranges_follow_javascript_indices_and_preserve_reference_identity() {
+        let baseline = live_heap_objects();
+        {
+            let values = array_new(vec![10.0, 20.0, 30.0, 40.0, 50.0]);
+            let middle = array_slice(&values, -4.0, -2.0);
+            assert_eq!(middle.with(|data| data.elements.clone()), vec![20.0, 30.0]);
+            let fractional = array_slice(&values, 1.7, 3.2);
+            assert_eq!(
+                fractional.with(|data| data.elements.clone()),
+                vec![20.0, 30.0]
+            );
+
+            let removed = array_splice(&values, -2.0, 1.8);
+            assert_eq!(removed.with(|data| data.elements.clone()), vec![40.0]);
+            assert_eq!(
+                values.with(|data| data.elements.clone()),
+                vec![10.0, 20.0, 30.0, 50.0]
+            );
+            assert_eq!(array_shift(&values), 10.0);
+            assert_eq!(
+                values.with(|data| data.elements.clone()),
+                vec![20.0, 30.0, 50.0]
+            );
+            assert_eq!(array_len(&array_splice(&values, 0.0, f64::NAN)), 0.0);
+            assert_eq!(array_len(&array_splice(&values, 1.0, f64::INFINITY)), 2.0);
+
+            let child = array_new(vec![1.0]);
+            let references = array_new(vec![child.clone(), child.clone()]);
+            let copied = array_slice(&references, 0.0, 1.0);
+            let moved = array_splice(&references, 0.0, 1.0);
+            assert!(array_get(&copied, 0.0).ptr_eq(&child));
+            assert!(array_get(&moved, 0.0).ptr_eq(&child));
+            assert!(array_shift(&references).ptr_eq(&child));
         }
         assert_eq!(live_heap_objects(), baseline);
     }
