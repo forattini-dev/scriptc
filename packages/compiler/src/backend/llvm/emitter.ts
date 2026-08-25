@@ -82,7 +82,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { canMarshalFuncIntoIsland, CAUGHT, DYN, F64, ffiCallbackType, islandCallbackRet, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { canMarshalFuncIntoIsland, CAUGHT, DYN, F64, ffiCallbackType, islandCallbackRet, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { matchIntegerBytesForLoop } from "../../ir/integer-loops.js";
 import { allocateFfiCallbackAdapters, collectFfiRetainedOps, hasForeignFfiCallback, hasRetainedFfiCallback, parseFfiCallbackKey, type FfiCallbackAdapter } from "../ffi-callbacks.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -9894,6 +9894,11 @@ class LlEmitter {
         return call("scr_str_char_code_at", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "double", false);
       case "charAt":
         return call("scr_str_char_at", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "ptr", true);
+      case "at": {
+        const out = call("scr_str_at", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "ptr", true);
+        if (MAY_THROW_STR_METHODS.has(method)) this.emitPendingCheck();
+        return out;
+      }
       case "indexOf":
         return call(
           "scr_str_index_of",
@@ -9967,6 +9972,22 @@ class LlEmitter {
           "scr_str_pad_end",
           "ptr (ptr, double, ptr)",
           `ptr ${r.name}, double ${args[0]!.name}, ptr ${args[1]!.name}`,
+          "ptr",
+          true,
+        );
+      case "replace":
+        return call(
+          "scr_str_replace",
+          "ptr (ptr, ptr, ptr)",
+          `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`,
+          "ptr",
+          true,
+        );
+      case "replaceAll":
+        return call(
+          "scr_str_replace_all",
+          "ptr (ptr, ptr, ptr)",
+          `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`,
           "ptr",
           true,
         );

@@ -4344,6 +4344,24 @@ pub fn string_char_at(value: &JsString, index: f64) -> JsString {
     empty_string()
 }
 
+/// `String.prototype.at` over UTF-16 code units. The frontend intentionally
+/// types this as `string` rather than `string | undefined`; preserve the
+/// project's existing island-boundary divergence by throwing the same
+/// catchable TypeError when the relative index is outside the string.
+pub fn string_at(value: &JsString, index: f64) -> JsString {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let relative = if index.is_nan() { 0.0 } else { index.trunc() };
+    let absolute = if relative >= 0.0 {
+        relative
+    } else {
+        units.len() as f64 + relative
+    };
+    if !absolute.is_finite() || absolute < 0.0 || absolute >= units.len() as f64 {
+        throw_type_error("expected string, got undefined".to_owned());
+    }
+    string_from_utf16(&units[absolute as usize..absolute as usize + 1])
+}
+
 pub fn string_char_code_at(value: &JsString, index: f64) -> f64 {
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
     if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
@@ -4484,6 +4502,93 @@ pub fn string_pad_start(value: &JsString, max_length: f64, fill: &JsString) -> J
 
 pub fn string_pad_end(value: &JsString, max_length: f64, fill: &JsString) -> JsString {
     string_pad(value, max_length, fill, false)
+}
+
+fn append_string_substitution(
+    output: &mut Vec<u16>,
+    source: &[u16],
+    matched: &[u16],
+    position: usize,
+    replacement: &[u16],
+) {
+    let mut index = 0usize;
+    while index < replacement.len() {
+        if replacement[index] != u16::from(b'$') || index + 1 == replacement.len() {
+            output.push(replacement[index]);
+            index += 1;
+            continue;
+        }
+        match replacement[index + 1] {
+            next if next == u16::from(b'$') => output.push(u16::from(b'$')),
+            next if next == u16::from(b'&') => output.extend_from_slice(matched),
+            next if next == u16::from(b'`') => output.extend_from_slice(&source[..position]),
+            next if next == u16::from(b'\'') => {
+                output.extend_from_slice(&source[position + matched.len()..]);
+            }
+            _ => {
+                // With no captures or named captures, $n and $<name>
+                // remain literal. Consume only '$'; the next unit is
+                // handled by the following iteration.
+                output.push(u16::from(b'$'));
+                index += 1;
+                continue;
+            }
+        }
+        index += 2;
+    }
+}
+
+fn string_find_units(source: &[u16], search: &[u16], start: usize) -> Option<usize> {
+    if start > source.len() {
+        return None;
+    }
+    if search.is_empty() {
+        return Some(start);
+    }
+    source[start..]
+        .windows(search.len())
+        .position(|window| window == search)
+        .map(|position| start + position)
+}
+
+pub fn string_replace(value: &JsString, search: &JsString, replacement: &JsString) -> JsString {
+    let source: Vec<u16> = value.encode_utf16().collect();
+    let needle: Vec<u16> = search.encode_utf16().collect();
+    let template: Vec<u16> = replacement.encode_utf16().collect();
+    let Some(position) = string_find_units(&source, &needle, 0) else {
+        return value.clone();
+    };
+    let mut output = Vec::with_capacity(source.len().saturating_add(template.len()));
+    output.extend_from_slice(&source[..position]);
+    append_string_substitution(&mut output, &source, &needle, position, &template);
+    output.extend_from_slice(&source[position + needle.len()..]);
+    string_from_utf16(&output)
+}
+
+pub fn string_replace_all(value: &JsString, search: &JsString, replacement: &JsString) -> JsString {
+    let source: Vec<u16> = value.encode_utf16().collect();
+    let needle: Vec<u16> = search.encode_utf16().collect();
+    let template: Vec<u16> = replacement.encode_utf16().collect();
+    let advance = needle.len().max(1);
+    let mut output = Vec::with_capacity(source.len());
+    let mut end_of_last_match = 0usize;
+    let mut search_from = 0usize;
+    let mut matched_any = false;
+    while let Some(position) = string_find_units(&source, &needle, search_from) {
+        matched_any = true;
+        output.extend_from_slice(&source[end_of_last_match..position]);
+        append_string_substitution(&mut output, &source, &needle, position, &template);
+        end_of_last_match = position + needle.len();
+        if position == source.len() {
+            break;
+        }
+        search_from = position + advance;
+    }
+    if !matched_any {
+        return value.clone();
+    }
+    output.extend_from_slice(&source[end_of_last_match..]);
+    string_from_utf16(&output)
 }
 
 pub fn string_to_lower_case(value: &JsString) -> JsString {
@@ -7996,6 +8101,54 @@ mod tests {
         assert_eq!(
             string_pad_start(&value, 10.0, &empty_string()).as_ref(),
             "😀"
+        );
+    }
+
+    #[test]
+    fn string_pattern_replacement_uses_ecmascript_substitutions() {
+        assert_eq!(
+            string_replace(
+                &string("abc"),
+                &string("b"),
+                &string("[$&]-$`-$'-$$-$1-$<x>"),
+            )
+            .as_ref(),
+            "a[b]-a-c-$-$1-$<x>c"
+        );
+        assert_eq!(
+            string_replace_all(&string("aba"), &string("a"), &string("<$`|$&|$'>")).as_ref(),
+            "<|a|ba>b<ab|a|>"
+        );
+        assert_eq!(
+            string_replace_all(&string("😀"), &empty_string(), &string("-")).as_ref(),
+            "-�-�-"
+        );
+        assert_eq!(
+            string_replace_all(&string("😀"), &empty_string(), &empty_string()).as_ref(),
+            "😀"
+        );
+        assert_eq!(
+            string_replace(&empty_string(), &empty_string(), &string("x")).as_ref(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn string_at_uses_relative_utf16_indexes_and_throws_out_of_range() {
+        let value = string("A🎉Z");
+        assert_eq!(string_at(&value, 0.0).as_ref(), "A");
+        assert_eq!(string_at(&value, -1.0).as_ref(), "Z");
+        assert_eq!(string_at(&value, 1.0).as_ref(), "�");
+        assert_eq!(string_at(&value, -2.0).as_ref(), "�");
+        let payload =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| string_at(&value, 4.0)))
+                .err()
+                .expect("out-of-range string.at must throw");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+        assert_eq!(
+            caught_error_message(&caught).as_ref(),
+            "expected string, got undefined"
         );
     }
 

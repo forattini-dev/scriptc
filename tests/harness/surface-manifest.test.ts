@@ -110,6 +110,9 @@ const PROBES: Probe[] = [
   // status static — these must compile to a binary
   { id: "syntax.compound-assignment.plus", source: 'let x = 1;\nx += 2;\nconsole.log(x);\n' },
   { id: "stdlib.string.charCodeAt", source: 'console.log("abc".charCodeAt(0));\n' },
+  { id: "stdlib.string.at", source: 'console.log("abc".at(-1));\n' },
+  { id: "stdlib.string.replace", source: 'console.log("abc".replace("b", "$&"));\n' },
+  { id: "stdlib.string.replaceAll", source: 'console.log("aba".replaceAll("a", "x"));\n' },
   { id: "stdlib.array.push", source: "const xs: number[] = [1];\nxs.push(2);\nconsole.log(xs.length);\n" },
   { id: "stdlib.array.unshift", source: "const xs: number[] = [2];\nconsole.log(xs.unshift(1), xs[0]);\n" },
   { id: "stdlib.array.reverse", source: "const xs: number[] = [1, 2];\nconsole.log(xs.reverse()[0]);\n" },

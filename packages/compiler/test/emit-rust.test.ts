@@ -185,6 +185,36 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
   }
 }, 120_000);
 
+test("Rust string.at keeps the documented catchable out-of-range divergence", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-string-at-"));
+  const entryPath = join(dir, "at-out-of-range.ts");
+  await writeFile(entryPath, `
+const value = "abc";
+try {
+  console.log(value.at(99));
+  console.log("unreachable");
+} catch { console.log("caught"); }
+console.log(value.at(-1));
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "at-out-of-range"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
+  if (!result.ok) return;
+  const rust = await runToExit(result.binaryPath, [], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  });
+  expect(rust).toEqual({
+    stdout: "caught\nc\n",
+    stderr: "",
+    exitCode: 0,
+  });
+}, 120_000);
+
 test("Rust array higher-order methods preserve callbacks, references, reductions, and sorting", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-array-hofs-"));
   for (const fixture of [
@@ -546,6 +576,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1110-math-members.ts",
     "1111-math-random.ts",
     "1112-number-methods.ts",
+    "1113-string-methods.ts",
     "1115-parse-globals.ts",
     "1117-typeof-static-union.ts",
     "1118-object-spread-conditional.ts",

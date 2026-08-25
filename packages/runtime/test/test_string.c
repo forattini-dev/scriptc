@@ -143,6 +143,44 @@ static void divergence_asserts(void) {
   check_f64("charCodeAt-surrogate", "2", s, scr_str_char_code_at(s, 2),
             "56832", 5); /* 0xDE00 */
 
+  /* String-pattern replacement uses GetSubstitution with no captures. */
+  ScrStr *abc = scr_str_new("abc", 3);
+  ScrStr *b = scr_str_new("b", 1);
+  static const char template_bytes[] = "[$&]-$`-$'-$$-$1-$<x>";
+  ScrStr *template = scr_str_new(template_bytes, sizeof(template_bytes) - 1);
+  check_str("replace-substitution", "b", abc,
+            scr_str_replace(abc, b, template),
+            "a[b]-a-c-$-$1-$<x>c", 19);
+
+  ScrStr *aba = scr_str_new("aba", 3);
+  ScrStr *a = scr_str_new("a", 1);
+  static const char all_template_bytes[] = "<$`|$&|$'>";
+  ScrStr *all_template =
+      scr_str_new(all_template_bytes, sizeof(all_template_bytes) - 1);
+  check_str("replaceAll-substitution", "a", aba,
+            scr_str_replace_all(aba, a, all_template),
+            "<|a|ba>b<ab|a|>", 15);
+
+  ScrStr *empty = scr_str_new("", 0);
+  ScrStr *dash = scr_str_new("-", 1);
+  static const char replaced_two[] =
+      "-\xEF\xBF\xBD-\xEF\xBF\xBD-\xEF\xBF\xBD-\xEF\xBF\xBD-";
+  check_str("replaceAll-empty-astral", "-", two,
+            scr_str_replace_all(two, empty, dash),
+            replaced_two, sizeof(replaced_two) - 1);
+  check_str("replaceAll-empty-identity", "", s,
+            scr_str_replace_all(s, empty, empty), s->data, s->len);
+  check_str("at-negative", "-1", s, scr_str_at(s, -1), "b", 1);
+
+  scr_str_release(dash);
+  scr_str_release(empty);
+  scr_str_release(all_template);
+  scr_str_release(a);
+  scr_str_release(aba);
+  scr_str_release(template);
+  scr_str_release(b);
+  scr_str_release(abc);
+
   scr_str_release(two);
   scr_str_release(s);
 }

@@ -381,6 +381,10 @@ export const STR_METHODS: Record<
 > = {
   charCodeAt: { method: "charCodeAt", result: F64, minArgs: 1, maxArgs: 1 },
   charAt: { method: "charAt", result: STRING, minArgs: 1, maxArgs: 1 },
+  // `at` uses relative UTF-16 indexing. The ambient override intentionally
+  // narrows its result to string; out-of-range indices throw the existing
+  // catchable TypeError divergence instead of producing undefined.
+  at: { method: "at", result: STRING, minArgs: 1, maxArgs: 1 },
   indexOf: { method: "indexOf", result: F64, minArgs: 1, maxArgs: 2 },
   // includes with a position argument is indexOf's clamp exactly (the
   // spec routes both through StringIndexOf) — the emitter composes
@@ -411,6 +415,10 @@ export const STR_METHODS: Record<
   // lowering completes the default (lowerStringMethodCall).
   padStart: { method: "padStart", result: STRING, minArgs: 1, maxArgs: 2 },
   padEnd: { method: "padEnd", result: STRING, minArgs: 1, maxArgs: 2 },
+  // String-pattern replacement only. Regex patterns are claimed by
+  // lowerRegexMethodCall first; function replacement values are fenced.
+  replace: { method: "replace", result: STRING, minArgs: 2, maxArgs: 2 },
+  replaceAll: { method: "replaceAll", result: STRING, minArgs: 2, maxArgs: 2 },
   // The lre-backed pair (ECMA Default Case Conversion, final sigma
   // included — scr_regex.c): static now, no island needed; their presence
   // flips the regex LINK switch (moduleUsesRegex).
@@ -487,17 +495,10 @@ export const ISLAND_SURFACE = {
     toPrecision: { args: [F64], ret: STRING },
     toString: { args: [F64], ret: STRING },
   } as Record<string, IslandFnEntry | undefined>,
-  /** Methods on `string` receivers beyond the static strIntrinsic set
-   * (split/pad/trimStart/trimEnd moved to STR_METHODS — static now).
-   * replace/replaceAll take STRING patterns (no regex is declared). `at`
-   * returns `string`: out of range, the engine yields undefined and the
-   * validated exit refuses it with a catchable TypeError (the documented
-   * divergence from `string | undefined`). */
-  string: {
-    replace: { args: [STRING, STRING], ret: STRING },
-    replaceAll: { args: [STRING, STRING], ret: STRING },
-    at: { args: [F64], ret: STRING },
-  } as Record<string, IslandFnEntry | undefined>,
+  /** Methods on `string` receivers beyond the static strIntrinsic set.
+   * Kept as an explicit empty table so coverage generation and the island
+   * member gate continue to share one closed surface. */
+  string: {} as Record<string, IslandFnEntry | undefined>,
   /** Global functions: parseInt and isNaN are STATIC (lower-calls.ts →
    * num.parseInt/num.isNaN), and parseFloat/isFinite lower statically
    * over EXACTLY-typed arguments (a string for parseFloat, a number for

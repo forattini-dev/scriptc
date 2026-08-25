@@ -659,6 +659,10 @@ ScrStr *scr_str_to_upper(const ScrStr *s);
  * astral pair → U+FFFD (divergence, see above). Returns +1. */
 ScrStr *scr_str_char_at(ScrStr *s, double i);
 
+/* at(i): relative UTF-16 indexing. Out of range throws the documented
+ * catchable TypeError divergence instead of returning undefined. +1. */
+ScrStr *scr_str_at(ScrStr *s, double i);
+
 /* The string iterator's step (for-of over strings): the full code-POINT
  * character starting at UTF-16 index i — astral chars come back whole
  * (two units); the consuming loop advances by the result's length.
@@ -685,6 +689,14 @@ struct ScrArr *scr_str_split_limit(ScrStr *s, ScrStr *sep, double limit);
  * Borrow both; return +1. */
 ScrStr *scr_str_pad_start(ScrStr *s, double maxLength, ScrStr *fill);
 ScrStr *scr_str_pad_end(ScrStr *s, double maxLength, ScrStr *fill);
+
+/* replace/replaceAll with STRING patterns and STRING templates. Implements
+ * GetSubstitution ($$, $&, $`, $'); capture references stay literal because
+ * this surface has no captures. Empty search advances by one UTF-16 unit.
+ * Borrow all three; return +1. */
+ScrStr *scr_str_replace(ScrStr *s, ScrStr *search, ScrStr *replacement);
+ScrStr *scr_str_replace_all(ScrStr *s, ScrStr *search,
+                            ScrStr *replacement);
 
 /* isWellFormed()/toWellFormed(): storage is well-formed by invariant
  * (lone surrogates became U+FFFD at their producers, SEMANTICS.md 2), so

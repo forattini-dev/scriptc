@@ -1596,11 +1596,15 @@ export type IrSetIntrinsicMethod =
  * string[] — the empty separator splits per UTF-16 code unit (astral
  * halves become U+FFFD, divergence 2). `padStart`/`padEnd` take (target
  * length, fill) — the frontend completes an omitted fill to " ", Node's
- * default. `trimStart`/`trimEnd` are trim's one-sided halves. */
+ * default. `replace`/`replaceAll` take a string search pattern and string
+ * replacement template (regex patterns use regexIntrinsic); `at` uses a
+ * relative UTF-16 index and throws the documented TypeError divergence
+ * out of range. `trimStart`/`trimEnd` are trim's one-sided halves. */
 export type IrStrIntrinsicMethod =
   | "length"
   | "charCodeAt"
   | "charAt"
+  | "at"
   | "indexOf"
   | "includes"
   | "startsWith"
@@ -1614,6 +1618,8 @@ export type IrStrIntrinsicMethod =
   | "split"
   | "padStart"
   | "padEnd"
+  | "replace"
+  | "replaceAll"
   | "toLowerCase"
   | "toUpperCase"
   // isWellFormed()/toWellFormed() — no-ops over the runtime's well-formed
@@ -1625,6 +1631,14 @@ export type IrStrIntrinsicMethod =
   // index (astral chars come back whole where charAt truncates) — for-of
   // over strings desugars onto it, advancing by the result's length.
   | "cpAt";
+
+/** String intrinsics whose runtime implementation can raise a catchable
+ * exception. `at` is the project's documented string-only divergence: an
+ * out-of-range index throws instead of returning an unrepresentable
+ * undefined arm. */
+export const MAY_THROW_STR_METHODS: ReadonlySet<IrStrIntrinsicMethod> = new Set([
+  "at",
+]);
 
 /** The typed-array/Buffer method surface (bytesIntrinsic). Receiver/arg
  * conventions (validated): `length`/`byteLength` are property reads → f64;

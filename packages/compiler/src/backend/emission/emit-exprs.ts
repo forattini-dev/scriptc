@@ -3,7 +3,7 @@ import { InternalCompilerError } from "../../errors.js";
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordClone, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -1230,6 +1230,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_str_char_code_at(${r.name}, ${args[0]!.name})`);
           case "charAt":
             return E.newTemp(e.type, `scr_str_char_at(${r.name}, ${args[0]!.name})`);
+          case "at": {
+            const out = E.newTemp(e.type, `scr_str_at(${r.name}, ${args[0]!.name})`);
+            if (MAY_THROW_STR_METHODS.has(method)) E.emitPendingCheck();
+            return out;
+          }
           case "indexOf":
             return E.newTemp(
               e.type,
@@ -1281,6 +1286,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(
               e.type,
               `scr_str_pad_end(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
+            );
+          case "replace":
+            return E.newTemp(
+              e.type,
+              `scr_str_replace(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
+            );
+          case "replaceAll":
+            return E.newTemp(
+              e.type,
+              `scr_str_replace_all(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
             );
           // The lre-backed pair (scr_regex.c): the IR's presence flips the
           // regex link switch, so the symbols always resolve.

@@ -3374,8 +3374,8 @@
       "id": "stdlib.string.at",
       "kind": "stdlib",
       "name": "string.prototype.at",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "the lowered call form takes exactly 1 argument"
     },
     {
       "id": "stdlib.string.charAt",
@@ -3444,15 +3444,15 @@
       "id": "stdlib.string.replace",
       "kind": "stdlib",
       "name": "string.prototype.replace",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "the lowered call form takes exactly 2 arguments"
     },
     {
       "id": "stdlib.string.replaceAll",
       "kind": "stdlib",
       "name": "string.prototype.replaceAll",
-      "status": "dynamic-only",
-      "code": "SC2012"
+      "status": "static",
+      "note": "the lowered call form takes exactly 2 arguments"
     },
     {
       "id": "stdlib.string.slice",

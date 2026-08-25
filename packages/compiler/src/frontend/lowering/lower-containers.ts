@@ -5010,6 +5010,16 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         `'.split()' on a '${L.fmt(args[0]!.type)}' separator (pass a string, or a regex literal)`,
       );
     }
+    if (
+      (entry.method === "replace" || entry.method === "replaceAll") &&
+      (args[0]?.type.kind !== "string" || args[1]?.type.kind !== "string")
+    ) {
+      L.unsupported(
+        "SC1120",
+        call,
+        "string-pattern replacement with string templates (regex patterns lower separately; function replacements are unsupported)",
+      );
+    }
     // padStart/padEnd with the fill omitted: Node pads with " " — the
     // same call with the default made explicit.
     if ((entry.method === "padStart" || entry.method === "padEnd") && args.length === 1) {

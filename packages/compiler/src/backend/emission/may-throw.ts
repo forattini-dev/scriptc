@@ -1,7 +1,7 @@
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
-import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule } from "../../ir/nodes.js";
-import { isFfiCallbackParam, MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS } from "../../ir/nodes.js";
+import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule, IrStrIntrinsicMethod } from "../../ir/nodes.js";
+import { isFfiCallbackParam, MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS } from "../../ir/nodes.js";
 import { hasRetainedFfiCallback } from "../ffi-callbacks.js";
 
 /** Cheap may-throw analysis (cost discipline: functions that transitively
@@ -192,6 +192,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // RangeErrors (Node's bounds discipline); the rest trap or
           // cannot fail.
           if (MAY_THROW_BYTES_METHODS.has(rec["method"] as IrBytesIntrinsicMethod)) {
+            f.throws = true;
+          }
+          break;
+        case "strIntrinsic":
+          if (MAY_THROW_STR_METHODS.has(rec["method"] as IrStrIntrinsicMethod)) {
             f.throws = true;
           }
           break;

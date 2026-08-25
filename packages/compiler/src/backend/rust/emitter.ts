@@ -3672,6 +3672,9 @@ class RustEmitter {
         if (expr.method === "charAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
+        if (expr.method === "at" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
+        }
         if (expr.method === "charCodeAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_code_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
@@ -3680,6 +3683,9 @@ class RustEmitter {
         }
         if ((expr.method === "padStart" || expr.method === "padEnd") && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
           return `runtime::string_${expr.method === "padStart" ? "pad_start" : "pad_end"}(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])}, &(${this.emitExpr(expr.args[1])}))`;
+        }
+        if ((expr.method === "replace" || expr.method === "replaceAll") && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
+          return `runtime::string_${expr.method === "replace" ? "replace" : "replace_all"}(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), &(${this.emitExpr(expr.args[1])}))`;
         }
         if ((expr.method === "indexOf" || expr.method === "includes") && expr.args[0] !== undefined) {
           const index = `runtime::string_index_of(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1])})`;
