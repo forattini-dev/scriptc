@@ -3228,6 +3228,9 @@ class RustEmitter {
         if (expr.method === "slice") {
           return `runtime::string_slice(&(${this.emitExpr(expr.receiver)}), ${expr.args[0] === undefined ? "0.0" : this.emitExpr(expr.args[0])}, ${expr.args[1] === undefined ? "f64::INFINITY" : this.emitExpr(expr.args[1])})`;
         }
+        if (expr.method === "substring" && expr.args[0] !== undefined) {
+          return `runtime::string_substring(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])}, ${expr.args[1] === undefined ? "f64::INFINITY" : this.emitExpr(expr.args[1])})`;
+        }
         if (expr.method === "trim" && expr.args.length === 0) {
           return `runtime::string_trim(&(${this.emitExpr(expr.receiver)}))`;
         }
@@ -3279,7 +3282,9 @@ class RustEmitter {
         return expr.negated ? `!(${compare})` : `(${compare})`;
       }
       case "strCmp": {
-        if (expr.utf16) this.unsupported("UTF-16 string comparison", expr.loc);
+        if (expr.utf16) {
+          return `(runtime::string_compare_utf16(&(${this.emitExpr(expr.left)}), &(${this.emitExpr(expr.right)})) ${expr.op} 0)`;
+        }
         return `((${this.emitExpr(expr.left)}).as_ref() ${expr.op} (${this.emitExpr(expr.right)}).as_ref())`;
       }
       case "toString": {
@@ -4019,6 +4024,12 @@ class RustEmitter {
         }
         if (expr.fn === "num.parseInt" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
           return `runtime::number_parse_int(&(${this.emitExpr(arg)}), ${this.emitExpr(expr.args[1])})`;
+        }
+        if (expr.fn === "num.parseFloat" && expr.args.length === 1 && arg !== undefined) {
+          return `runtime::number_parse_float(&(${this.emitExpr(arg)}))`;
+        }
+        if (expr.fn === "string.lastIndexOf" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+          return `runtime::string_last_index_of(&(${this.emitExpr(arg)}), &(${this.emitExpr(secondArg)}))`;
         }
         if ((expr.fn === "num.isNaN" || expr.fn === "number.isNaN") && expr.args.length === 1 && arg !== undefined) {
           return `(${this.emitExpr(arg)}).is_nan()`;

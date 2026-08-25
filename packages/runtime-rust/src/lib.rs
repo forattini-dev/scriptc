@@ -3786,6 +3786,47 @@ pub fn string_index_of(value: &JsString, search: &JsString, from_index: f64) -> 
         .map_or(-1.0, |index| (start + index) as f64)
 }
 
+pub fn string_last_index_of(value: &JsString, search: &JsString) -> f64 {
+    let haystack: Vec<u16> = value.encode_utf16().collect();
+    let needle: Vec<u16> = search.encode_utf16().collect();
+    if needle.is_empty() {
+        return haystack.len() as f64;
+    }
+    haystack
+        .windows(needle.len())
+        .rposition(|window| window == needle)
+        .map_or(-1.0, |index| index as f64)
+}
+
+pub fn string_compare_utf16(left: &JsString, right: &JsString) -> i32 {
+    use std::cmp::Ordering;
+
+    match left.encode_utf16().cmp(right.encode_utf16()) {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    }
+}
+
+pub fn string_substring(value: &JsString, start: f64, end: f64) -> JsString {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let clamp = |index: f64| {
+        if index.is_nan() || index <= 0.0 {
+            0
+        } else if index == f64::INFINITY {
+            units.len()
+        } else {
+            index.trunc().min(units.len() as f64) as usize
+        }
+    };
+    let mut start = clamp(start);
+    let mut end = clamp(end);
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+    string_from_utf16(&units[start..end])
+}
+
 pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
     let units: Vec<u16> = value.encode_utf16().collect();
     let start = relative_string_index(start, units.len());
@@ -4060,6 +4101,65 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
             .unwrap_or(f64::INFINITY);
     }
     if negative { -result } else { result }
+}
+
+pub fn number_parse_float(value: &JsString) -> f64 {
+    let trimmed = value.trim_start_matches(javascript_whitespace);
+    let bytes = trimmed.as_bytes();
+    let mut index = 0usize;
+    let negative = if bytes.get(index) == Some(&b'-') {
+        index += 1;
+        true
+    } else {
+        if bytes.get(index) == Some(&b'+') {
+            index += 1;
+        }
+        false
+    };
+    if bytes[index..].starts_with(b"Infinity") {
+        return if negative {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+    }
+
+    let start = 0usize;
+    let mut integer_digits = 0usize;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+        integer_digits += 1;
+    }
+    let mut fraction_digits = 0usize;
+    if bytes.get(index) == Some(&b'.') {
+        let mut next = index + 1;
+        while bytes.get(next).is_some_and(u8::is_ascii_digit) {
+            next += 1;
+            fraction_digits += 1;
+        }
+        if integer_digits > 0 || fraction_digits > 0 {
+            index = next;
+        }
+    }
+    if integer_digits == 0 && fraction_digits == 0 {
+        return f64::NAN;
+    }
+
+    let mut end = index;
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        let mut next = index + 1;
+        if matches!(bytes.get(next), Some(b'+' | b'-')) {
+            next += 1;
+        }
+        let exponent_start = next;
+        while bytes.get(next).is_some_and(u8::is_ascii_digit) {
+            next += 1;
+        }
+        if next > exponent_start {
+            end = next;
+        }
+    }
+    trimmed[start..end].parse::<f64>().unwrap_or(f64::NAN)
 }
 
 fn fs_error_code(error: &std::io::Error) -> &'static str {
@@ -7258,6 +7358,30 @@ mod tests {
         assert!(math_round(-0.0).is_sign_negative());
         assert!(math_round(f64::NAN).is_nan());
         assert_eq!(math_round(f64::INFINITY), f64::INFINITY);
+    }
+
+    #[test]
+    fn parse_float_uses_the_longest_javascript_decimal_prefix() {
+        assert_eq!(number_parse_float(&string("  -2.5e-2tail")), -0.025);
+        assert_eq!(number_parse_float(&string(".5")), 0.5);
+        assert_eq!(number_parse_float(&string("1e")), 1.0);
+        assert_eq!(number_parse_float(&string("0x10")), 0.0);
+        assert_eq!(number_parse_float(&string("+Infinity!")), f64::INFINITY);
+        assert!(number_parse_float(&string("inf")).is_nan());
+        assert!(number_parse_float(&string("")).is_nan());
+        assert!(number_parse_float(&string("-0")).is_sign_negative());
+    }
+
+    #[test]
+    fn string_last_index_of_and_substring_use_utf16_indices() {
+        let value = string("😀ab😀ab");
+        assert_eq!(string_last_index_of(&value, &string("😀")), 4.0);
+        assert_eq!(string_last_index_of(&value, &empty_string()), 8.0);
+        assert_eq!(string_last_index_of(&value, &string("x")), -1.0);
+        assert_eq!(string_substring(&value, 6.0, 2.0).as_ref(), "ab😀");
+        assert_eq!(string_substring(&value, -3.0, 2.0).as_ref(), "😀");
+        assert!(string_compare_utf16(&string("😀"), &string("\u{e000}")) < 0);
+        assert_eq!(string_compare_utf16(&string("same"), &string("same")), 0);
     }
 
     #[test]
