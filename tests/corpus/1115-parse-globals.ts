@@ -1,7 +1,5 @@
-// @dynamic
-// The island-backed globals: parseFloat, parseInt (explicit radix), isNaN,
-// isFinite — the engine's own globals execute and the result exits to the
-// declared static type.
+// Native parseFloat, parseInt (explicit radix), isNaN, and isFinite keep
+// their declared scalar results available to the surrounding static code.
 console.log(parseFloat("3.14abc"), parseFloat("  42  "), parseFloat("abc"), parseFloat(".5"));
 console.log(parseFloat("1e3"), parseFloat("-2.5e-2"), parseFloat("Infinity"), parseFloat(""));
 console.log(parseInt("ff", 16), parseInt("0x1A", 16), parseInt("101", 2), parseInt("42abc", 10));
