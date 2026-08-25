@@ -35,6 +35,9 @@ export interface RustExpressionContext {
   emitClosure(expr: Extract<IrExpr, { kind: "closure" }>): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   emitEventEmitterCall(expr: Extract<IrExpr, { kind: "libCall" }>): string | null;
+  emitEventEmitterUpcast(value: string, source: IrType, loc: SrcLoc): string | null;
+  emitEventEmitterDowncast(value: string, source: IrType, target: IrType, loc: SrcLoc): string | null;
+  emitEventEmitterInstanceOf(value: string, source: IrType, target: string, loc: SrcLoc): string | null;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
   emitFileHandleTransferPromise(expr: Extract<IrExpr, { kind: "libCall" }>): string;
@@ -894,10 +897,10 @@ export class RustExpressionEmitter {
       }
       case "instanceOf": {
         if (expr.value.type.kind !== "object") this.context.unsupported("instanceof on a non-object", expr.loc);
-        if (expr.className === RUNTIME_EMITTER_CLASS && expr.value.type.className === RUNTIME_EMITTER_CLASS) {
-          const value = this.context.nextName("sc_rt");
-          return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; true }`;
-        }
+        const emitterTest = this.context.emitEventEmitterInstanceOf(
+          this.emitExpr(expr.value), expr.value.type, expr.className, expr.loc,
+        );
+        if (emitterTest !== null) return emitterTest;
         const runtimeTarget = RUNTIME_ERROR_CLASSES.get(expr.className);
         if (runtimeTarget !== undefined) {
           const value = this.context.nextName("sc_rt");
@@ -947,18 +950,9 @@ export class RustExpressionEmitter {
         const constructor = this.context.functions.get(`%${cls.name}.constructor`);
         if (constructor === undefined) this.context.unsupported(`missing constructor for '${cls.name}'`, expr.loc);
         const meta = this.context.classMetaOf(cls.name, expr.loc);
-        const object = this.context.nextName("sc_rt");
         const args = expr.args.map(() => this.context.nextName("sc_rt"));
-        const shapeFields = meta.hierarchy
-          ? this.context.hierarchyFields(meta.root)
-          : cls.fields.map((field) => ({ owner: meta, field }));
-        const fields = shapeFields.map(({ owner, field }) => {
-          const value = this.context.isEdgeValue(field.type) ? "None" : this.context.defaultValue(field.type, cls.loc);
-          return `${this.context.classFieldStorageName(owner, field.name)}: ${value}`;
-        }).join(", ");
-        const classTag = meta.hierarchy ? `sc_class_pre: ${meta.pre}, ` : "";
         const bindings = expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`).join(" ");
-        return `{ let ${object} = runtime::Gc::new(${this.context.classStructName(cls.name, expr.loc)} { ${classTag}${fields} }); ${bindings} ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+        return `{ ${bindings} ${this.context.classAllocation(meta, args, expr.loc)} }`;
       }
       case "newValue": {
         if (expr.callee.type.kind !== "classval") this.context.unsupported("newValue with non-class callee", expr.loc);
@@ -980,8 +974,18 @@ export class RustExpressionEmitter {
           const meta = this.context.classMetaOf(expr.value.type.className, expr.loc);
           return `${this.context.errorValueName()}::${this.context.errorValueVariant(meta)}(${this.emitExpr(expr.value)})`;
         }
+        if (expr.type.kind === "object" && expr.type.className === RUNTIME_EMITTER_CLASS) {
+          const converted = this.context.emitEventEmitterUpcast(this.emitExpr(expr.value), expr.value.type, expr.loc);
+          if (converted !== null) return converted;
+        }
         return this.emitExpr(expr.value);
       case "downcast":
+        {
+          const converted = this.context.emitEventEmitterDowncast(
+            this.emitExpr(expr.value), expr.value.type, expr.type, expr.loc,
+          );
+          if (converted !== null) return converted;
+        }
         if (expr.value.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(expr.value.type.className) &&
           expr.type.kind === "object" && this.context.classMeta.has(expr.type.className)) {
           const meta = this.context.classMetaOf(expr.type.className, expr.loc);

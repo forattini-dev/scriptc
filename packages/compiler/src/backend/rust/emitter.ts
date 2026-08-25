@@ -10,7 +10,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustStatements } from "./statements.js";
 import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import { RustDynamicEmitter } from "./dynamic.js";
@@ -131,6 +131,11 @@ class RustEmitter {
   });
   private readonly eventEmitter = new RustEventEmitterEmitter({
     listenerShapes: this.emitterListenerShapes,
+    emitterRoots: () => [...this.classMeta.values()].filter((meta) =>
+      meta === meta.root && this.isEmitterClass(meta.def.name)
+    ),
+    classMeta: (name, loc) => this.classMetaOf(name, loc),
+    isEmitterClass: (name) => this.isEmitterClass(name),
     isUsed: () => this.usesEventEmitter,
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
@@ -138,6 +143,7 @@ class RustEmitter {
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
     closureName: (shape) => this.closureName(shape),
+    classStructName: (name, loc) => this.classStructName(name, loc),
     closureShapeForType: (type, loc) => this.closureShapeForType(type, loc),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     sourceLoc: () => this.mod.functions[0]?.loc ?? { file: "<builtin>", start: 0, end: 0 },
@@ -259,6 +265,11 @@ class RustEmitter {
     emitClosure: (expr) => this.emitClosure(expr),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     emitEventEmitterCall: (expr) => this.eventEmitter.emitLibCall(expr),
+    emitEventEmitterUpcast: (value, source, loc) => this.eventEmitter.emitUpcast(value, source, loc),
+    emitEventEmitterDowncast: (value, source, target, loc) =>
+      this.eventEmitter.emitDowncast(value, source, target, loc),
+    emitEventEmitterInstanceOf: (value, source, target, loc) =>
+      this.eventEmitter.emitInstanceOf(value, source, target, loc),
     emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
     emitDynFromValue: (type, value, loc, functionName) => this.emitDynFromValue(type, value, loc, functionName),
     emitFileHandleTransferPromise: (expr) => this.emitFileHandleTransferPromise(expr),
@@ -403,6 +414,7 @@ class RustEmitter {
     errorValueVariant: (meta) => this.errorValueVariant(meta),
     hierarchyFields: (root) => this.hierarchyFields(root),
     isEdgeValue: (type) => this.isEdgeValue(type),
+    isEmitterClass: (name) => this.isEmitterClass(name),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isTracedHandle: (type) => this.isTracedHandle(type),
     isUnit: (type) => this.isUnit(type),
@@ -533,6 +545,7 @@ class RustEmitter {
   private checkModuleSurface(): void {
     for (const cls of this.classes.values()) {
       if (cls.base !== undefined && !this.classes.has(cls.base) &&
+        cls.base !== RUNTIME_EMITTER_CLASS &&
         (cls.base === "%DOMException" || !RUNTIME_ERROR_CLASSES.has(cls.base))) {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
@@ -1124,6 +1137,7 @@ class RustEmitter {
   }
 
   private classSubtree(meta: RustClassMeta): RustClassMeta[] { return this.metadata.classSubtree(meta); }
+  private isEmitterClass(name: string): boolean { return this.metadata.isEmitterClass(name); }
 
   private classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string {
     return this.metadata.classAllocation(meta, args, loc);

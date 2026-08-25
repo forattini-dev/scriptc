@@ -1,5 +1,5 @@
 import type { IrClassDef, IrExpr, IrFunction, IrModule, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleClassStruct, mangleField, mangleFunction } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 
@@ -47,6 +47,17 @@ export class RustMetadata {
       cls = this.context.classes.get(cls.base);
     }
     return null;
+  }
+
+  isEmitterClass(name: string): boolean {
+    const seen = new Set<string>();
+    let cls = this.context.classes.get(name);
+    while (cls !== undefined && !seen.has(cls.name)) {
+      seen.add(cls.name);
+      if (cls.base === RUNTIME_EMITTER_CLASS) return true;
+      cls = cls.base === undefined ? undefined : this.context.classes.get(cls.base);
+    }
+    return false;
   }
 
   errorClassRoots(): RustClassMeta[] {
@@ -125,8 +136,9 @@ export class RustMetadata {
       const value = this.context.isEdgeValue(field.type) ? "None" : this.context.defaultValue(field.type, meta.def.loc);
       return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
     }).join(", ");
-    const classTag = meta.hierarchy ? `sc_class_pre: ${meta.pre}, ` : "";
-    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+    const emitter = this.isEmitterClass(meta.def.name) ? "sc_emitter: Some(runtime::emitter_new::<ScEmitterListener>()), " : "";
+    const classTag = meta.hierarchy || this.isEmitterClass(meta.def.name) ? `sc_class_pre: ${meta.pre}, ` : "";
+    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
   }
 
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {

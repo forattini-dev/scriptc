@@ -1,11 +1,14 @@
 import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, typeKey } from "../../ir/nodes.js";
-import type { IrFuncType, RustClosureShape } from "./model.js";
+import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustEventEmitterContext {
   readonly listenerShapes: ReadonlyMap<string, RustClosureShape>;
+  emitterRoots(): RustClassMeta[];
+  classMeta(name: string, loc?: SrcLoc): RustClassMeta;
+  isEmitterClass(name: string): boolean;
   isUsed(): boolean;
   line(value: string): void;
   pushIndent(): void;
@@ -13,6 +16,7 @@ export interface RustEventEmitterContext {
   nextTemporary(): string;
   emitExpr(expr: IrExpr): string;
   closureName(shape: RustClosureShape): string;
+  classStructName(name: string, loc?: SrcLoc): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   sourceLoc(): SrcLoc;
@@ -52,9 +56,38 @@ export class RustEventEmitterEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("type ScEventEmitter = runtime::JsEventEmitter<ScEmitterListener>;");
+    this.context.line("type ScEmitterRegistry = runtime::JsEventEmitter<ScEmitterListener>;");
+    this.emitObjectDefinition();
     this.context.line("");
     this.emitMetaDispatchHelper();
+  }
+
+  emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
+    if (source.kind !== "object" || !this.context.isEmitterClass(source.className)) return null;
+    return `ScEventEmitter::${this.objectVariant(this.classMeta(source.className, loc).root)}(${value})`;
+  }
+
+  emitDowncast(value: string, source: IrType, target: IrType, loc: SrcLoc): string | null {
+    if (source.kind !== "object" || source.className !== RUNTIME_EMITTER_CLASS ||
+      target.kind !== "object" || !this.context.isEmitterClass(target.className)) return null;
+    const meta = this.classMeta(target.className, loc);
+    const variant = this.objectVariant(meta.root);
+    return `{ let sc_value = ${value}; match sc_value { ScEventEmitter::${variant}(object) => { if !object.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}) { unreachable!("scriptc invariant: invalid EventEmitter subclass downcast"); } object }, _ => unreachable!("scriptc invariant: invalid EventEmitter subclass downcast"), } }`;
+  }
+
+  emitInstanceOf(value: string, source: IrType, target: string, loc: SrcLoc): string | null {
+    if (source.kind !== "object") return null;
+    if (target === RUNTIME_EMITTER_CLASS) {
+      return `{ let sc_value = ${value}; let _ = sc_value; ${this.isEmitterObject(source) ? "true" : "false"} }`;
+    }
+    if (source.className !== RUNTIME_EMITTER_CLASS) return null;
+    if (!this.context.isEmitterClass(target)) {
+      return `{ let sc_value = ${value}; let _ = sc_value; false }`;
+    }
+    const targetRoot = this.classMeta(target, loc).root;
+    const targetPre = this.classPre(target, loc);
+    const targetMeta = this.classMeta(target, loc);
+    return `{ let sc_value = ${value}; match &sc_value { ScEventEmitter::${this.objectVariant(targetRoot)}(object) => object.with(|object| ${targetPre} <= object.sc_class_pre && object.sc_class_pre <= ${targetMeta.post}), _ => false, } }`;
   }
 
   emitLibCall(expr: RustLibCallExpr): string | null {
@@ -63,7 +96,8 @@ export class RustEventEmitterEmitter {
         if (expr.args.length !== 0 || !this.isBareEmitter(expr.type)) {
           this.context.unsupported("EventEmitter constructor shape", expr.loc);
         }
-        return "runtime::emitter_new::<ScEmitterListener>()";
+        return "ScEventEmitter::Bare(runtime::emitter_new::<ScEmitterListener>())";
+      case "emitter.ctor": return this.emitConstructor(expr);
       case "emitter.on": return this.emitOn(expr);
       case "emitter.off": return this.emitOff(expr);
       case "emitter.removeAll": return this.emitRemoveAll(expr);
@@ -84,38 +118,47 @@ export class RustEventEmitterEmitter {
     const [receiver, name, callback, once, prepend] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "func" ||
       once?.type.kind !== "bool" || prepend?.type.kind !== "bool" || expr.args.length !== 5 ||
-      !this.isBareEmitter(receiver.type) || !this.isBareEmitter(expr.type)) {
+      !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
       this.context.unsupported("EventEmitter listener registration shape", expr.loc);
     }
     const shape = this.listenerShape(callback.type, expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} let sc_identity = ${values[2]}.identity(); let _ = sc_emitter_emit_meta(&${values[0]}, "newListener", ${values[1]}.clone()); runtime::emitter_on(&${values[0]}, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${values[2]}.identity(); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${values[0]} }`;
+  }
+
+  private emitConstructor(expr: RustLibCallExpr): string {
+    const [receiver] = expr.args;
+    if (receiver === undefined || expr.args.length !== 1 || !this.isEmitterObject(receiver.type) ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("EventEmitter superclass constructor shape", expr.loc);
+    }
+    return `{ let sc_receiver = ${this.context.emitExpr(receiver)}; let _ = sc_emitter_registry(&sc_receiver); () }`;
   }
 
   private emitOff(expr: RustLibCallExpr): string {
     const [receiver, name, callback] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "func" ||
-      expr.args.length !== 3 || !this.isBareEmitter(receiver.type) || !this.isBareEmitter(expr.type)) {
+      expr.args.length !== 3 || !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
       this.context.unsupported("EventEmitter listener removal shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} if runtime::emitter_off(&${values[0]}, &${values[1]}, ${values[2]}.identity()) { let _ = sc_emitter_emit_meta(&${values[0]}, "removeListener", ${values[1]}.clone()); } ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} if runtime::emitter_off(&sc_emitter, &${values[1]}, ${values[2]}.identity()) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } ${values[0]} }`;
   }
 
   private emitRemoveAll(expr: RustLibCallExpr): string {
     const [receiver, name, everyEvent] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || everyEvent?.type.kind !== "bool" ||
-      expr.args.length !== 3 || !this.isBareEmitter(receiver.type) || !this.isBareEmitter(expr.type)) {
+      expr.args.length !== 3 || !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
       this.context.unsupported("EventEmitter removeAllListeners shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} if ${values[2]} { let sc_names = runtime::emitter_event_names_snapshot(&${values[0]}); for sc_name in sc_names { if sc_name.as_ref() == "removeListener" { continue; } while runtime::emitter_remove_last(&${values[0]}, &sc_name) { let _ = sc_emitter_emit_meta(&${values[0]}, "removeListener", sc_name.clone()); } } let sc_remove_listener = runtime::string("removeListener"); while runtime::emitter_remove_last(&${values[0]}, &sc_remove_listener) { let _ = sc_emitter_emit_meta(&${values[0]}, "removeListener", sc_remove_listener.clone()); } } else { while runtime::emitter_remove_last(&${values[0]}, &${values[1]}) { let _ = sc_emitter_emit_meta(&${values[0]}, "removeListener", ${values[1]}.clone()); } } ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} if ${values[2]} { let sc_names = runtime::emitter_event_names_snapshot(&sc_emitter); for sc_name in sc_names { if sc_name.as_ref() == "removeListener" { continue; } while runtime::emitter_remove_last(&sc_emitter, &sc_name) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", sc_name.clone()); } } let sc_remove_listener = runtime::string("removeListener"); while runtime::emitter_remove_last(&sc_emitter, &sc_remove_listener) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", sc_remove_listener.clone()); } } else { while runtime::emitter_remove_last(&sc_emitter, &${values[1]}) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } } ${values[0]} }`;
   }
 
   private emitEvent(expr: RustLibCallExpr, unhandledError = false): string {
     const [receiver, name, ...args] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || expr.type.kind !== "bool" ||
-      !this.isBareEmitter(receiver.type)) {
+      !this.isEmitterObject(receiver.type)) {
       this.context.unsupported("EventEmitter emit shape", expr.loc);
     }
     if (unhandledError && (args.length !== 1 || args[0]?.type.kind !== "object")) {
@@ -135,55 +178,57 @@ export class RustEventEmitterEmitter {
     const unhandled = unhandledError
       ? `if !sc_had_listeners { runtime::throw_value(${errorValue}.clone()); }`
       : "";
-    return `{ ${this.bind(expr.args, values)} let sc_snapshot = runtime::emitter_snapshot(&${values[0]}, &${values[1]}); let sc_had_listeners = !sc_snapshot.is_empty(); ${unhandled} for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&${values[0]}, &${values[1]}, sc_registration.registration); let _ = sc_emitter_emit_meta(&${values[0]}, "removeListener", ${values[1]}.clone()); } match sc_registration.callback { ${arms.join(" ")} } } sc_had_listeners }`;
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &${values[1]}); let sc_had_listeners = !sc_snapshot.is_empty(); ${unhandled} for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &${values[1]}, sc_registration.registration); let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } match sc_registration.callback { ${arms.join(" ")} } } sc_had_listeners }`;
   }
 
   private emitCount(expr: RustLibCallExpr): string {
     const [receiver, name] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || expr.args.length !== 2 ||
-      expr.type.kind !== "f64" || !this.isBareEmitter(receiver.type)) {
+      expr.type.kind !== "f64" || !this.isEmitterObject(receiver.type)) {
       this.context.unsupported("EventEmitter listenerCount shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} runtime::emitter_listener_count(&${values[0]}, &${values[1]}) }`;
+    return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_listener_count(&sc_emitter, &${values[1]}) }`;
   }
 
   private emitCountIdentity(expr: RustLibCallExpr): string {
     const [receiver, name, callback] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "func" ||
-      expr.args.length !== 3 || expr.type.kind !== "f64" || !this.isBareEmitter(receiver.type)) {
+      expr.args.length !== 3 || expr.type.kind !== "f64" || !this.isEmitterObject(receiver.type)) {
       this.context.unsupported("EventEmitter listenerCount callback shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} runtime::emitter_listener_count_identity(&${values[0]}, &${values[1]}, ${values[2]}.identity()) }`;
+    return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_listener_count_identity(&sc_emitter, &${values[1]}, ${values[2]}.identity()) }`;
   }
 
   private emitNames(expr: RustLibCallExpr): string {
     const [receiver] = expr.args;
-    if (receiver === undefined || expr.args.length !== 1 || !this.isBareEmitter(receiver.type) ||
+    if (receiver === undefined || expr.args.length !== 1 || !this.isEmitterObject(receiver.type) ||
       expr.type.kind !== "array" || expr.type.elem.kind !== "string") {
       this.context.unsupported("EventEmitter eventNames shape", expr.loc);
     }
-    return `runtime::emitter_event_names(&(${this.context.emitExpr(receiver)}))`;
+    const value = this.context.nextTemporary();
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_emitter = ${this.registry(value, receiver.type, expr.loc)}; runtime::emitter_event_names(&sc_emitter) }`;
   }
 
   private emitSetMax(expr: RustLibCallExpr): string {
     const [receiver, value] = expr.args;
     if (receiver === undefined || value?.type.kind !== "f64" || expr.args.length !== 2 ||
-      !this.isBareEmitter(receiver.type) || !this.isBareEmitter(expr.type)) {
+      !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
       this.context.unsupported("EventEmitter setMaxListeners shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} runtime::emitter_set_max(&${values[0]}, ${values[1]}); ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_set_max(&sc_emitter, ${values[1]}); ${values[0]} }`;
   }
 
   private emitGetMax(expr: RustLibCallExpr): string {
     const [receiver] = expr.args;
-    if (receiver === undefined || expr.args.length !== 1 || !this.isBareEmitter(receiver.type) ||
+    if (receiver === undefined || expr.args.length !== 1 || !this.isEmitterObject(receiver.type) ||
       expr.type.kind !== "f64") {
       this.context.unsupported("EventEmitter getMaxListeners shape", expr.loc);
     }
-    return `runtime::emitter_get_max(&(${this.context.emitExpr(receiver)}))`;
+    const value = this.context.nextTemporary();
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_emitter = ${this.registry(value, receiver.type, expr.loc)}; runtime::emitter_get_max(&sc_emitter) }`;
   }
 
   private emitSetDefaultMax(expr: RustLibCallExpr): string {
@@ -232,7 +277,7 @@ export class RustEventEmitterEmitter {
     }
     arms.push("ScEmitterListener::Never => unreachable!(\"scriptc invariant: impossible EventEmitter listener\"),");
     arms.push("_ => unreachable!(\"scriptc invariant: EventEmitter meta-listener signature\"),");
-    this.context.line("fn sc_emitter_emit_meta(sc_emitter: &ScEventEmitter, sc_meta_name: &str, sc_event_name: runtime::JsString) -> bool {");
+    this.context.line("fn sc_emitter_emit_meta(sc_emitter: &ScEmitterRegistry, sc_meta_name: &str, sc_event_name: runtime::JsString) -> bool {");
     this.context.pushIndent();
     this.context.line("let sc_meta_name = runtime::string(sc_meta_name);");
     this.context.line("let sc_snapshot = runtime::emitter_snapshot(sc_emitter, &sc_meta_name);");
@@ -255,6 +300,74 @@ export class RustEventEmitterEmitter {
     this.context.line("");
   }
 
+  private emitObjectDefinition(): void {
+    const roots = this.context.emitterRoots();
+    this.context.line("#[derive(Clone)]");
+    this.context.line("enum ScEventEmitter {");
+    this.context.pushIndent();
+    this.context.line("Bare(ScEmitterRegistry),");
+    for (const root of roots) {
+      this.context.line(`${this.objectVariant(root)}(runtime::Gc<${this.context.classStructName(root.def.name, root.def.loc)}>),`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("impl runtime::Trace for ScEventEmitter {");
+    this.context.pushIndent();
+    this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
+    this.context.pushIndent();
+    this.context.line("match self {");
+    this.context.pushIndent();
+    this.context.line("Self::Bare(value) => tracer.edge(value),");
+    for (const root of roots) this.context.line(`Self::${this.objectVariant(root)}(value) => tracer.edge(value),`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("impl runtime::HeapValue for ScEventEmitter {");
+    this.context.pushIndent();
+    this.context.line("fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("impl runtime::ArrayElement for ScEventEmitter {");
+    this.context.pushIndent();
+    this.context.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("impl PartialEq for ScEventEmitter {");
+    this.context.pushIndent();
+    this.context.line("fn eq(&self, other: &Self) -> bool {");
+    this.context.pushIndent();
+    this.context.line("match (self, other) {");
+    this.context.pushIndent();
+    this.context.line("(Self::Bare(left), Self::Bare(right)) => left.ptr_eq(right),");
+    for (const root of roots) {
+      const variant = this.objectVariant(root);
+      this.context.line(`(Self::${variant}(left), Self::${variant}(right)) => left.ptr_eq(right),`);
+    }
+    this.context.line("_ => false,");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("impl Eq for ScEventEmitter {}");
+    this.context.line("fn sc_emitter_registry(value: &ScEventEmitter) -> ScEmitterRegistry {");
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line("ScEventEmitter::Bare(registry) => registry.clone(),");
+    for (const root of roots) {
+      this.context.line(`ScEventEmitter::${this.objectVariant(root)}(object) => object.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone()),`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
   private listenerShape(type: IrFuncType, loc: SrcLoc): RustClosureShape {
     const shape = this.context.listenerShapes.get(typeKey(type));
     if (shape === undefined) this.context.unsupported("unregistered EventEmitter listener signature", loc);
@@ -265,6 +378,15 @@ export class RustEventEmitterEmitter {
     return args.map((arg, index) => `let ${values[index]} = ${this.context.emitExpr(arg)};`).join(" ");
   }
 
+  private bindWithRegistry(expr: RustLibCallExpr, values: readonly string[]): string {
+    const receiver = expr.args[0];
+    const value = values[0];
+    if (receiver === undefined || value === undefined) {
+      this.context.unsupported("EventEmitter receiver argument", expr.loc);
+    }
+    return `${this.bind(expr.args, values)} let sc_emitter = ${this.registry(value, receiver.type, expr.loc)};`;
+  }
+
   private requiredValue(values: readonly string[], index: number, loc: SrcLoc): string {
     const value = values[index];
     if (value === undefined) this.context.unsupported("EventEmitter argument arity", loc);
@@ -273,6 +395,32 @@ export class RustEventEmitterEmitter {
 
   private listenerVariant(shape: RustClosureShape): string {
     return `Closure${shape.index}`;
+  }
+
+  private objectVariant(root: RustClassMeta): string {
+    return `User${root.pre}`;
+  }
+
+  private classMeta(name: string, loc: SrcLoc): RustClassMeta {
+    return this.context.classMeta(name, loc);
+  }
+
+  private classPre(name: string, loc: SrcLoc): number {
+    return this.classMeta(name, loc).pre;
+  }
+
+  private isEmitterObject(type: IrType): boolean {
+    return type.kind === "object" &&
+      (type.className === RUNTIME_EMITTER_CLASS || this.context.isEmitterClass(type.className));
+  }
+
+  private registry(value: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind !== "object") this.context.unsupported("EventEmitter receiver type", loc);
+    if (type.className === RUNTIME_EMITTER_CLASS) return `sc_emitter_registry(&${value})`;
+    if (this.context.isEmitterClass(type.className)) {
+      return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
+    }
+    this.context.unsupported(`non-EventEmitter receiver '${type.className}'`, loc);
   }
 
   private isBareEmitter(type: IrType): boolean {

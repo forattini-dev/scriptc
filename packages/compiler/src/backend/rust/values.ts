@@ -275,7 +275,7 @@ export class RustValueEmitter {
 
   needsClone(type: IrType): boolean {
     return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
-      (type.kind === "object" && RUNTIME_ERROR_CLASSES.has(type.className)) || this.isTracedHandle(type);
+      (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
 
   arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string {
@@ -296,7 +296,8 @@ export class RustValueEmitter {
       case "func":
         return `${left}.ptr_eq(${right})`;
       case "object":
-        if (type.className === RUNTIME_EMITTER_CLASS || this.context.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
+        if (type.className === RUNTIME_EMITTER_CLASS) return `${left} == ${right}`;
+        if (this.context.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
         this.context.unsupported(`array identity for runtime object '${type.className}'`, loc);
       default:
         this.context.unsupported(`array ${sameValueZero ? "includes" : "indexOf"} element '${type.kind}'`, loc);
@@ -317,12 +318,12 @@ export class RustValueEmitter {
   isTracedHandle(type: IrType): boolean {
     return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) ||
-        type.className === RUNTIME_EMITTER_CLASS ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
 
   isEdgeValue(type: IrType): boolean {
-    return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn";
+    return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn" ||
+      (type.kind === "object" && type.className === RUNTIME_EMITTER_CLASS);
   }
 
   isHeapRoot(type: IrType): boolean {

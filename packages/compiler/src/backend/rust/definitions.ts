@@ -1,5 +1,5 @@
 import type { IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import {
   mangleClassStruct,
   mangleField,
@@ -48,6 +48,7 @@ export interface RustDefinitionContext {
   errorValueVariant(meta: RustClassMeta): string;
   hierarchyFields(root: RustClassMeta): { owner: RustClassMeta; field: RustClassMeta["def"]["fields"][number] }[];
   isEdgeValue(type: IrType): boolean;
+  isEmitterClass(name: string): boolean;
   isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;
   isTracedHandle(type: IrType): boolean;
   isUnit(type: IrType): boolean;
@@ -339,7 +340,9 @@ export class RustDefinitionEmitter {
           comparison = "std::rc::Rc::ptr_eq(left, right)";
           break;
         case "object":
-          comparison = RUNTIME_ERROR_CLASSES.has(arm.className) ? "std::ptr::eq(left, right)" : "left.ptr_eq(right)";
+          comparison = RUNTIME_ERROR_CLASSES.has(arm.className)
+            ? "std::ptr::eq(left, right)"
+            : arm.className === RUNTIME_EMITTER_CLASS ? "left == right" : "left.ptr_eq(right)";
           break;
         default:
           this.context.unsupported(`union equality arm '${arm.kind}'`);
@@ -472,9 +475,11 @@ export class RustDefinitionEmitter {
       const cls = meta.def;
       const struct = mangleClassStruct(cls.name);
       const fields = meta.hierarchy ? this.context.hierarchyFields(meta) : cls.fields.map((field) => ({ owner: meta, field }));
+      const emitterRooted = this.context.isEmitterClass(cls.name);
       this.context.line(`struct ${struct} {`);
       this.context.pushIndent();
-      if (meta.hierarchy) this.context.line("sc_class_pre: usize,");
+      if (meta.hierarchy || emitterRooted) this.context.line("sc_class_pre: usize,");
+      if (emitterRooted) this.context.line("sc_emitter: Option<ScEmitterRegistry>,");
       for (const { owner, field } of fields) {
         const fieldType = this.context.isEdgeValue(field.type)
           ? `Option<${this.context.rustType(field.type, cls.loc)}>`
@@ -487,6 +492,7 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.context.pushIndent();
+      if (emitterRooted) this.context.line("if let Some(edge) = &self.sc_emitter { tracer.edge(edge); }");
       for (const { owner, field } of fields) {
         if (!this.context.isEdgeValue(field.type)) continue;
         const name = this.context.classFieldStorageName(owner, field.name);
@@ -502,6 +508,7 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       this.context.line("fn clear_edges(&mut self) {");
       this.context.pushIndent();
+      if (emitterRooted) this.context.line("self.sc_emitter = None;");
       for (const { owner, field } of fields) {
         if (this.context.isEdgeValue(field.type)) this.context.line(`self.${this.context.classFieldStorageName(owner, field.name)} = None;`);
       }

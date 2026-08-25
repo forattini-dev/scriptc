@@ -2080,3 +2080,68 @@ test("Rust EventEmitter preserves unhandled errors, CJS identity, and the global
     }
   }
 }, 120_000);
+
+test.each([
+  "1645-ee-extends.ts",
+  "1654-ee-namespace.ts",
+])("Rust EventEmitter subclass preserves registry identity and hierarchy: %s", async (fixture) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-event-emitter-inheritance-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.slice(0, -3)),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust, fixture).toEqual(node);
+}, 240_000);
+
+test.each([
+  "2618-ee-emit-override.ts",
+  "2619-ee-override-chain.ts",
+  "2620-ee-override-once-order.ts",
+  "2621-ee-override-error-throw.ts",
+  "2622-ee-override-filter.ts",
+  "2623-ee-job-queue.ts",
+])("Rust EventEmitter subclass virtual override matches Node: %s", async (fixture) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-event-emitter-overrides-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.slice(0, -3)),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  if (fixture === "2621-ee-override-error-throw.ts") {
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(rust.exitCode, fixture).toBe(node.exitCode);
+    expect(rust.stderr, fixture).toContain("Uncaught Error: second");
+    expect(rust.stderr, fixture).not.toContain("Rust heap object(s) still live");
+  } else {
+    expect(rust, fixture).toEqual(node);
+  }
+}, 240_000);
