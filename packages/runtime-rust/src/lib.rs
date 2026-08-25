@@ -518,10 +518,132 @@ pub fn performance_now() -> f64 {
 }
 
 pub fn date_now() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("scriptc: system clock precedes the Unix epoch")
-        .as_millis() as f64
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as f64,
+        Err(error) => {
+            let duration = error.duration();
+            let millis = duration.as_millis() as f64;
+            if duration.subsec_nanos() % 1_000_000 == 0 {
+                -millis
+            } else {
+                -(millis + 1.0)
+            }
+        }
+    }
+}
+
+/// ECMAScript TimeClip for the read-only Date value representation.
+pub fn date_new_ms(ms: f64) -> f64 {
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
+        return f64::NAN;
+    }
+    let clipped = ms.trunc();
+    if clipped == 0.0 { 0.0 } else { clipped }
+}
+
+pub fn date_get_time(ms: f64) -> f64 {
+    ms
+}
+
+fn civil_from_days(day: i64) -> (i64, u64, u64) {
+    let z = day + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = (z - era * 146_097) as u64;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era as i64 + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let date = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = if month_prime < 10 {
+        month_prime + 3
+    } else {
+        month_prime - 9
+    };
+    if month <= 2 {
+        year += 1;
+    }
+    (year, month, date)
+}
+
+/// Date.prototype.toISOString over a TimeClip'd millisecond scalar.
+pub fn date_to_iso(ms: f64) -> JsString {
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
+        throw_range_error("Invalid time value".to_owned());
+    }
+    let time = ms.trunc();
+    let day = (time / 86_400_000.0).floor();
+    let millis_of_day = (time - day * 86_400_000.0) as i64;
+    let (year, month, date) = civil_from_days(day as i64);
+    let hours = millis_of_day / 3_600_000;
+    let minutes = millis_of_day / 60_000 % 60;
+    let seconds = millis_of_day / 1_000 % 60;
+    let millis = millis_of_day % 1_000;
+    let year_text = if year < 0 {
+        format!("-{:06}", -year)
+    } else if year > 9_999 {
+        format!("+{:06}", year)
+    } else {
+        format!("{:04}", year)
+    };
+    string(&format!(
+        "{year_text}-{month:02}-{date:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z"
+    ))
+}
+
+fn days_from_civil(mut year: i64, month: i32, date: i32) -> f64 {
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = (year - era * 400) as u64;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = ((153 * month_prime + 2) / 5 + date - 1) as u64;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    (era * 146_097 + day_of_era as i64 - 719_468) as f64
+}
+
+/// Date.UTC's MakeDay/MakeTime/TimeClip pipeline over numeric arguments.
+pub fn date_utc(
+    year: f64,
+    month: f64,
+    date: f64,
+    hours: f64,
+    minutes: f64,
+    seconds: f64,
+    ms: f64,
+) -> f64 {
+    if !year.is_finite()
+        || !month.is_finite()
+        || !date.is_finite()
+        || !hours.is_finite()
+        || !minutes.is_finite()
+        || !seconds.is_finite()
+        || !ms.is_finite()
+    {
+        return f64::NAN;
+    }
+    let mut year = year.trunc();
+    let month = month.trunc();
+    let date = date.trunc();
+    let hours = hours.trunc();
+    let minutes = minutes.trunc();
+    let seconds = seconds.trunc();
+    let ms = ms.trunc();
+    if year.abs() > 1_000_000.0 || month.abs() > 10_000_000.0 {
+        return f64::NAN;
+    }
+    if (0.0..=99.0).contains(&year) {
+        year += 1_900.0;
+    }
+    let month_cycles = (month / 12.0).floor();
+    let normalized_year = year + month_cycles;
+    let normalized_month = (month - month_cycles * 12.0) as i32;
+    let days = days_from_civil(normalized_year as i64, normalized_month + 1, 1) + (date - 1.0);
+    let time =
+        days * 86_400_000.0 + hours * 3_600_000.0 + minutes * 60_000.0 + seconds * 1_000.0 + ms;
+    if time.abs() > 8_640_000_000_000_000.0 {
+        return f64::NAN;
+    }
+    if time == 0.0 { 0.0 } else { time }
 }
 
 impl Tracer<'_> {
@@ -8068,6 +8190,66 @@ mod tests {
         assert_eq!(format_number(1e-6), "0.000001");
         assert_eq!(format_number(0.1 + 0.2), "0.30000000000000004");
         assert_eq!(display_number(-0.0), "-0");
+    }
+
+    #[test]
+    fn date_time_clip_and_iso_format_match_ecmascript() {
+        assert_eq!(date_new_ms(1.9), 1.0);
+        assert_eq!(date_new_ms(-1.9), -1.0);
+        assert!(date_new_ms(-0.0).is_sign_positive());
+        assert!(date_new_ms(f64::INFINITY).is_nan());
+        assert!(date_new_ms(8_640_000_000_000_001.0).is_nan());
+        assert_eq!(date_get_time(42.0), 42.0);
+
+        for (millis, expected) in [
+            (0.0, "1970-01-01T00:00:00.000Z"),
+            (-1.0, "1969-12-31T23:59:59.999Z"),
+            (253_402_300_800_000.0, "+010000-01-01T00:00:00.000Z"),
+            (-62_198_755_200_000.0, "-000001-01-01T00:00:00.000Z"),
+            (8_640_000_000_000_000.0, "+275760-09-13T00:00:00.000Z"),
+            (-8_640_000_000_000_000.0, "-271821-04-20T00:00:00.000Z"),
+        ] {
+            assert_eq!(date_to_iso(millis).as_ref(), expected);
+        }
+
+        let payload =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| date_to_iso(f64::NAN)))
+                .err()
+                .expect("an invalid Date must throw");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+        assert_eq!(caught_error_message(&caught).as_ref(), "Invalid time value");
+    }
+
+    #[test]
+    fn date_utc_rolls_components_and_clips_like_ecmascript() {
+        assert_eq!(
+            date_utc(2017.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            1_483_228_800_000.0
+        );
+        assert_eq!(
+            date_utc(2017.0, 13.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            1_517_443_200_000.0
+        );
+        assert_eq!(
+            date_utc(96.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+            823_230_245_006.0
+        );
+        assert_eq!(
+            date_utc(2017.0, 0.0, 60.0, 0.0, 0.0, 0.0, 0.0),
+            1_488_326_400_000.0
+        );
+        assert_eq!(
+            date_utc(2000.0, -3.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            938_736_000_000.0
+        );
+        assert_eq!(
+            date_utc(-1.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0),
+            -62_198_755_200_001.0
+        );
+        assert!(date_utc(f64::NAN, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
+        assert!(date_utc(1_000_001.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
+        assert!(date_utc(2017.0, 10_000_001.0, 1.0, 0.0, 0.0, 0.0, 0.0).is_nan());
     }
 
     #[test]

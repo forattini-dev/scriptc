@@ -1797,6 +1797,7 @@ class RustEmitter {
       const name = mangleGlobal(global.id);
       switch (global.type.kind) {
         case "f64":
+        case "date":
           this.line(`static ${name}: Cell<f64> = const { Cell::new(0.0) };`);
           break;
         case "bool":
@@ -4862,6 +4863,19 @@ class RustEmitter {
         if (expr.fn === "process.uptime" && expr.args.length === 0) return "runtime::process_uptime()";
         if (expr.fn === "perf.now" && expr.args.length === 0) return "runtime::performance_now()";
         if (expr.fn === "date.now" && expr.args.length === 0) return "runtime::date_now()";
+        if (expr.fn === "date.newNow" && expr.args.length === 0) return "runtime::date_now()";
+        if ((expr.fn === "date.newMs" || expr.fn === "date.getTime" || expr.fn === "date.valueOf") &&
+            expr.args.length === 1 && arg !== undefined) {
+          const runtimeFn = expr.fn === "date.newMs" ? "date_new_ms" : "date_get_time";
+          return `runtime::${runtimeFn}(${this.emitExpr(arg)})`;
+        }
+        if ((expr.fn === "date.toISOString" || expr.fn === "date.toISOStringValue") &&
+            expr.args.length === 1 && arg !== undefined) {
+          return `runtime::date_to_iso(${this.emitExpr(arg)})`;
+        }
+        if (expr.fn === "date.utc" && expr.args.length === 7) {
+          return `runtime::date_utc(${expr.args.map((value) => this.emitExpr(value)).join(", ")})`;
+        }
         if (expr.fn === "process.activeResources" && expr.args.length === 0) return "runtime::process_active_resources()";
         const processSample = new Map<string, string>([
           ["process.availableMemory", "process_available_memory"],
@@ -5599,6 +5613,7 @@ class RustEmitter {
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
       case "array": return "true";
+      case "date": return "true";
       case "bytes": return "true";
       case "map": return "true";
       case "set": return "true";
@@ -5638,7 +5653,7 @@ class RustEmitter {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
-      if (type.kind === "f64" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
+      if (type.kind === "f64" || type.kind === "date" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
       this.unsupported(`global read type '${type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -5660,7 +5675,7 @@ class RustEmitter {
       const name = mangleGlobal(id);
       if (this.isHeapRoot(global.type) || global.type.kind === "regex") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
-      if (global.type.kind === "f64" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
+      if (global.type.kind === "f64" || global.type.kind === "date" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.unsupported(`global assignment type '${global.type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -5693,6 +5708,7 @@ class RustEmitter {
     switch (type.kind) {
       case "void": return "()";
       case "f64": return "f64";
+      case "date": return "f64";
       case "bool": return "bool";
       case "string": return "runtime::JsString";
       case "classval": {
@@ -5746,6 +5762,7 @@ class RustEmitter {
   private defaultValue(type: IrType, loc: SrcLoc): string {
     switch (type.kind) {
       case "f64": return "0.0";
+      case "date": return "0.0";
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "array": return "runtime::array_new(Vec::new())";
