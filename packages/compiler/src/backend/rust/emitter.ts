@@ -2750,6 +2750,25 @@ class RustEmitter {
           const offset = expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1]);
           return `runtime::bytes_set_from(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${offset})`;
         }
+        if (expr.method === "join" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          const separator = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${separator} = ${this.emitExpr(expr.args[0])}; runtime::bytes_join(&${receiver}, &${separator}) }`;
+        }
+        if (expr.method === "toReversed" && expr.args.length === 0) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; runtime::bytes_to_reversed(&${receiver}) }`;
+        }
+        if (expr.method === "with" && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          const index = `sc_rt_${this.temporary++}`;
+          const value = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${index} = ${this.emitExpr(expr.args[0])}; let ${value} = ${this.emitExpr(expr.args[1])}; runtime::bytes_with(&${receiver}, ${index}, ${value}) }`;
+        }
+        if (expr.method === "toArray" && expr.args.length === 0) {
+          const receiver = `sc_rt_${this.temporary++}`;
+          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; runtime::bytes_to_array(&${receiver}) }`;
+        }
         if (expr.method === "toString" && expr.args[0] !== undefined) {
           const encoding = this.emitExpr(expr.args[0]);
           if (expr.args.length === 1) {
@@ -4295,11 +4314,24 @@ class RustEmitter {
       case "join": {
         const separator = argExprs[0];
         if (separator === undefined) this.unsupported("array join without a separator", expr.loc);
-        const elem = expr.receiver.type.elem;
-        if (elem.kind !== "f64" && elem.kind !== "bool" && elem.kind !== "string") {
-          this.unsupported(`array join element '${elem.kind}'`, expr.loc);
+        const separatorValue = `sc_rt_${this.temporary++}`;
+        if (elementType.kind === "union") {
+          const union = this.union(elementType.unionId, expr.loc);
+          const name = this.unionName(union.id);
+          const arms = union.arms.map((arm, tag) => {
+            const variant = `${name}::${this.unionVariant(tag)}`;
+            if (this.isUnit(arm)) return `${variant} => {},`;
+            if (arm.kind === "f64") return `${variant}(payload) => output.push_str(&runtime::format_number(*payload)),`;
+            if (arm.kind === "bool") return `${variant}(payload) => output.push_str(if *payload { "true" } else { "false" }),`;
+            if (arm.kind === "string") return `${variant}(payload) => output.push_str(payload),`;
+            this.unsupported(`array join union arm '${arm.kind}'`, expr.loc);
+          }).join(" ");
+          return `{ let ${receiver} = ${receiverExpr}; let ${separatorValue} = ${separator}; runtime::array_join_by(&${receiver}, &${separatorValue}, |value, output| match value { ${arms} }) }`;
         }
-        return `runtime::array_join(&(${receiverExpr}), &(${separator}))`;
+        if (elementType.kind !== "f64" && elementType.kind !== "bool" && elementType.kind !== "string") {
+          this.unsupported(`array join element '${elementType.kind}'`, expr.loc);
+        }
+        return `{ let ${receiver} = ${receiverExpr}; let ${separatorValue} = ${separator}; runtime::array_join(&${receiver}, &${separatorValue}) }`;
       }
       default:
         this.unsupported(`array intrinsic '${expr.method}'`, expr.loc);

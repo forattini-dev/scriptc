@@ -1498,6 +1498,7 @@ test("Rust typed-array construction, coercion, copies, views, and set match Node
     "1400-typedarray-basics.ts",
     "1401-typedarray-slice-set.ts",
     "1402-buffer-encodings.ts",
+    "2670-uint8array-copy-iterate.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);
     const result = await compile(entryPath, {

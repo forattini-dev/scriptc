@@ -1747,6 +1747,23 @@ pub fn array_join<T: JoinElement>(array: &JsArray<T>, separator: &JsString) -> J
     })
 }
 
+pub fn array_join_by<T, F>(array: &JsArray<T>, separator: &JsString, append: F) -> JsString
+where
+    T: ArrayElement,
+    F: Fn(&T, &mut String),
+{
+    array.with(|data| {
+        let mut output = String::new();
+        for (index, element) in data.elements.iter().enumerate() {
+            if index > 0 {
+                output.push_str(separator);
+            }
+            append(element, &mut output);
+        }
+        Rc::from(output)
+    })
+}
+
 pub fn array_pop<T: ArrayElement>(array: &JsArray<T>) -> T {
     array
         .with_mut(|data| data.elements.pop())
@@ -1818,12 +1835,16 @@ impl<T: ByteElement> ClearEdges for BytesData<T> {
 
 pub type JsBytes<T> = Gc<BytesData<T>>;
 
-pub fn bytes_empty<T: ByteElement>() -> JsBytes<T> {
+fn bytes_from_elements<T: ByteElement>(elements: Vec<T>) -> JsBytes<T> {
     Gc::new(BytesData {
-        storage: Rc::new(RefCell::new(Vec::new())),
+        length: elements.len(),
+        storage: Rc::new(RefCell::new(elements)),
         offset: 0,
-        length: 0,
     })
+}
+
+pub fn bytes_empty<T: ByteElement>() -> JsBytes<T> {
+    bytes_from_elements(Vec::new())
 }
 
 pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
@@ -1840,24 +1861,15 @@ pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
 }
 
 pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
-    bytes.with(|data| {
-        let copied = data.storage.borrow()[data.offset..data.offset + data.length].to_vec();
-        Gc::new(BytesData {
-            length: copied.len(),
-            storage: Rc::new(RefCell::new(copied)),
-            offset: 0,
-        })
-    })
+    let copied =
+        bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    bytes_from_elements(copied)
 }
 
 pub fn bytes_from_array<T: ByteElement>(array: &JsArray<f64>) -> JsBytes<T> {
     let elements: Vec<T> =
         array.with(|data| data.elements.iter().copied().map(T::from_number).collect());
-    Gc::new(BytesData {
-        length: elements.len(),
-        storage: Rc::new(RefCell::new(elements)),
-        offset: 0,
-    })
+    bytes_from_elements(elements)
 }
 
 pub fn bytes_len<T: ByteElement>(bytes: &JsBytes<T>) -> f64 {
@@ -1889,6 +1901,57 @@ pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
 pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
     let index = bytes_index(bytes, index);
     bytes.with(|data| data.storage.borrow_mut()[data.offset + index] = T::from_number(value));
+}
+
+pub fn bytes_join<T: ByteElement>(bytes: &JsBytes<T>, separator: &JsString) -> JsString {
+    bytes.with(|data| {
+        let storage = data.storage.borrow();
+        let mut output = String::new();
+        for (index, value) in storage[data.offset..data.offset + data.length]
+            .iter()
+            .enumerate()
+        {
+            if index > 0 {
+                output.push_str(separator);
+            }
+            output.push_str(&format_number(value.to_number()));
+        }
+        Rc::from(output)
+    })
+}
+
+pub fn bytes_to_reversed<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
+    let mut elements =
+        bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    elements.reverse();
+    bytes_from_elements(elements)
+}
+
+pub fn bytes_with<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) -> JsBytes<T> {
+    let length = bytes.with(|data| data.length);
+    let relative = if index.is_nan() { 0.0 } else { index.trunc() };
+    let actual = if relative >= 0.0 {
+        relative
+    } else {
+        length as f64 + relative
+    };
+    if !(actual >= 0.0) || actual >= length as f64 {
+        throw_range_error("Invalid typed array index".to_owned());
+    }
+    let mut elements =
+        bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    elements[actual as usize] = T::from_number(value);
+    bytes_from_elements(elements)
+}
+
+pub fn bytes_to_array<T: ByteElement>(bytes: &JsBytes<T>) -> JsArray<f64> {
+    let elements = bytes.with(|data| {
+        data.storage.borrow()[data.offset..data.offset + data.length]
+            .iter()
+            .map(|value| value.to_number())
+            .collect()
+    });
+    array_new(elements)
 }
 
 pub fn atomics_wait(bytes: &JsBytes<i32>, index: f64, expected: f64, timeout_ms: f64) -> JsString {
@@ -5229,6 +5292,48 @@ mod tests {
         assert_eq!(string_to_upper_case(&value).as_ref(), "SCRIPTC 42");
         assert!(string_includes(&value, &string("iptC"), 0.0));
         assert!(!string_includes(&value, &string("iptc"), 0.0));
+    }
+
+    #[test]
+    fn typed_array_copying_methods_coerce_values_and_preserve_the_source() {
+        let baseline = live_heap_objects();
+        {
+            let source = bytes_from_array::<u8>(&array_new(vec![5.0, 1.0, 4.0, 1.0, 3.0]));
+            assert_eq!(bytes_join(&source, &string(",")).as_ref(), "5,1,4,1,3");
+            let array_copy = bytes_to_array(&source);
+            array_set(&array_copy, 0.0, 99.0);
+            assert_eq!(array_get(&array_copy, 0.0), 99.0);
+            assert_eq!(bytes_get(&source, 0.0), 5.0);
+            let reversed = bytes_to_reversed(&source);
+            assert_eq!(bytes_join(&reversed, &string(",")).as_ref(), "3,1,4,1,5");
+            assert_eq!(bytes_join(&source, &string(",")).as_ref(), "5,1,4,1,3");
+            assert_eq!(
+                bytes_join(&bytes_with(&source, 1.0, -1.0), &string(",")).as_ref(),
+                "5,255,4,1,3"
+            );
+            assert_eq!(
+                bytes_join(&bytes_with(&source, -1.0, 260.0), &string(",")).as_ref(),
+                "5,1,4,1,4"
+            );
+            assert_eq!(
+                bytes_join(&bytes_with(&source, f64::NAN, 9.0), &string(",")).as_ref(),
+                "9,1,4,1,3"
+            );
+            for index in [5.0, -6.0, f64::INFINITY] {
+                let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    bytes_with(&source, index, 0.0)
+                }))
+                .err()
+                .expect("an out-of-range TypedArray.with index must throw");
+                let caught = caught_from_panic(payload);
+                assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+                assert_eq!(
+                    caught_error_message(&caught).as_ref(),
+                    "Invalid typed array index"
+                );
+            }
+        }
+        assert_eq!(live_heap_objects(), baseline);
     }
 
     #[test]
