@@ -1,13 +1,13 @@
 import type { IrExpr, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
+import type { RustStreamModel } from "./stream-model.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustReadableContext {
   readonly listenerShapes: ReadonlyMap<string, RustClosureShape>;
-  readonly readableReadShapes: ReadonlyMap<string, RustClosureShape>;
-  usesReadable(): boolean;
+  readonly streams: RustStreamModel;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -27,12 +27,12 @@ export class RustReadableEmitter {
   constructor(private readonly context: RustReadableContext) {}
 
   emitTypeDefinition(): void {
-    if (!this.context.usesReadable()) return;
+    if (!this.context.streams.usesReadable) return;
     this.context.line("#[derive(Clone)]");
     this.context.line("enum ScReadableRead {");
     this.context.pushIndent();
     this.context.line("Never,");
-    for (const shape of this.context.readableReadShapes.values()) {
+    for (const shape of this.context.streams.readableReadShapes.values()) {
       this.context.line(`${this.listenerVariant(shape)}(runtime::Gc<${this.context.closureName(shape)}>),`);
     }
     this.context.popIndent();
@@ -44,7 +44,7 @@ export class RustReadableEmitter {
     this.context.line("match self {");
     this.context.pushIndent();
     this.context.line("Self::Never => {},");
-    for (const shape of this.context.readableReadShapes.values()) {
+    for (const shape of this.context.streams.readableReadShapes.values()) {
       this.context.line(`Self::${this.listenerVariant(shape)}(callback) => tracer.edge(callback),`);
     }
     this.context.popIndent();
@@ -57,7 +57,7 @@ export class RustReadableEmitter {
   }
 
   emitDefinitions(): void {
-    if (!this.context.usesReadable()) return;
+    if (!this.context.streams.usesReadable) return;
     const loc = this.context.sourceLoc();
     const byteArms: string[] = [];
     const voidArms: string[] = [];
@@ -73,7 +73,7 @@ export class RustReadableEmitter {
         voidArms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
     }
-    for (const shape of this.context.readableReadShapes.values()) {
+    for (const shape of this.context.streams.readableReadShapes.values()) {
       if (shape.type.rest === true || shape.type.params.length !== 1 ||
         shape.type.params[0]?.kind !== "object" || shape.type.params[0].className !== "%Readable") continue;
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_readable.clone()"], loc);
@@ -186,7 +186,7 @@ export class RustReadableEmitter {
       if (read?.type.kind !== "func" || expr.args.length !== 5) {
         this.context.unsupported("Readable read callback shape", expr.loc);
       }
-      const shape = this.context.readableReadShapes.get(typeKey(read.type));
+      const shape = this.context.streams.readableReadShapes.get(typeKey(read.type));
       if (shape === undefined) this.context.unsupported("unregistered Readable read callback", expr.loc);
       callback = `Some(ScReadableRead::${this.listenerVariant(shape)}(${values[4]}))`;
     } else if (expr.args.length !== 4) {

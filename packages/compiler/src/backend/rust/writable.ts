@@ -1,15 +1,13 @@
 import type { IrExpr, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
+import type { RustStreamModel } from "./stream-model.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustWritableContext {
   readonly listenerShapes: ReadonlyMap<string, RustClosureShape>;
-  readonly writableWriteShapes: ReadonlyMap<string, RustClosureShape>;
-  readonly writableFinalShapes: ReadonlyMap<string, RustClosureShape>;
-  readonly writableDoneShapes: ReadonlyMap<string, RustClosureShape>;
-  usesWritable(): boolean;
+  readonly streams: RustStreamModel;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -27,15 +25,15 @@ export class RustWritableEmitter {
   constructor(private readonly context: RustWritableContext) {}
 
   emitTypeDefinition(): void {
-    if (!this.context.usesWritable()) return;
-    this.emitCallbackType("ScWritableWrite", this.context.writableWriteShapes);
-    this.emitCallbackType("ScWritableFinal", this.context.writableFinalShapes);
-    this.emitCallbackType("ScWritableDone", this.context.writableDoneShapes);
+    if (!this.context.streams.usesWritable) return;
+    this.emitCallbackType("ScWritableWrite", this.context.streams.writableWriteShapes);
+    this.emitCallbackType("ScWritableFinal", this.context.streams.writableFinalShapes);
+    this.emitCallbackType("ScWritableDone", this.context.streams.writableDoneShapes);
     this.context.line("type ScWritable = runtime::JsWritable<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>;");
   }
 
   emitDefinitions(): void {
-    if (!this.context.usesWritable()) return;
+    if (!this.context.streams.usesWritable) return;
     const loc = this.context.sourceLoc();
     const voidArms: string[] = [];
     for (const shape of this.context.listenerShapes.values()) {
@@ -104,7 +102,7 @@ export class RustWritableEmitter {
 
   private emitWriteDispatch(loc: SrcLoc): void {
     const arms: string[] = [];
-    for (const shape of this.context.writableWriteShapes.values()) {
+    for (const shape of this.context.streams.writableWriteShapes.values()) {
       const completionType = this.completionType(shape.type, "%Writable write", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
       const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
@@ -127,7 +125,7 @@ export class RustWritableEmitter {
 
   private emitDoneDispatch(loc: SrcLoc): void {
     const arms: string[] = [];
-    for (const shape of this.context.writableDoneShapes.values()) {
+    for (const shape of this.context.streams.writableDoneShapes.values()) {
       if (shape.type.rest === true || shape.type.params.length !== 0) continue;
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, [], loc);
       arms.push(`ScWritableDone::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
@@ -152,7 +150,7 @@ export class RustWritableEmitter {
 
   private emitFinalDispatch(loc: SrcLoc): void {
     const arms: string[] = [];
-    for (const shape of this.context.writableFinalShapes.values()) {
+    for (const shape of this.context.streams.writableFinalShapes.values()) {
       const completionType = this.completionType(shape.type, "%Writable final", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
       const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
@@ -187,7 +185,7 @@ export class RustWritableEmitter {
     if ((flags & 1) !== 0) {
       const callback = expr.args[callbackIndex];
       if (callback?.type.kind !== "func") this.context.unsupported("Writable write callback shape", expr.loc);
-      const shape = this.context.writableWriteShapes.get(typeKey(callback.type));
+      const shape = this.context.streams.writableWriteShapes.get(typeKey(callback.type));
       if (shape === undefined) this.context.unsupported("unregistered Writable write callback", expr.loc);
       write = `Some(ScWritableWrite::${this.variant(shape)}(${values[callbackIndex]}))`;
       callbackIndex += 1;
@@ -195,7 +193,7 @@ export class RustWritableEmitter {
     if ((flags & 2) !== 0) {
       const callback = expr.args[callbackIndex];
       if (callback?.type.kind !== "func") this.context.unsupported("Writable final callback shape", expr.loc);
-      const shape = this.context.writableFinalShapes.get(typeKey(callback.type));
+      const shape = this.context.streams.writableFinalShapes.get(typeKey(callback.type));
       if (shape === undefined) this.context.unsupported("unregistered Writable final callback", expr.loc);
       final = `Some(ScWritableFinal::${this.variant(shape)}(${values[callbackIndex]}))`;
       callbackIndex += 1;
@@ -221,7 +219,7 @@ export class RustWritableEmitter {
       if (callback.type.kind !== "func" || callback.type.params.length !== 0) {
         this.context.unsupported("Writable write completion callback", expr.loc);
       }
-      const shape = this.context.writableDoneShapes.get(typeKey(callback.type));
+      const shape = this.context.streams.writableDoneShapes.get(typeKey(callback.type));
       if (shape === undefined) this.context.unsupported("unregistered Writable completion callback", expr.loc);
       done = `ScWritableDone::${this.variant(shape)}(${values[2]})`;
     }
