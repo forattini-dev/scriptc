@@ -107,6 +107,10 @@ export class RustExpressionEmitter {
         return `runtime::string("${this.context.rustString(expr.value)}")`;
       case "regexLit":
         return `runtime::regex_new("${this.context.rustString(expr.pattern)}", "${this.context.rustString(expr.flags)}")`;
+      case "templateStrings": {
+        const cooked = expr.cooked.map((value) => `"${this.context.rustString(value)}"`).join(", ");
+        return `runtime::template_strings("${this.context.rustString(expr.key)}", &[${cooked}])`;
+      }
       case "boolLit":
         return expr.value ? "true" : "false";
       case "unitLit":

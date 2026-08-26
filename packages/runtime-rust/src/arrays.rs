@@ -61,6 +61,24 @@ impl<T: ArrayElement> ClearEdges for ArrayData<T> {
 
 pub type JsArray<T> = Gc<ArrayData<T>>;
 
+thread_local! {
+    static TEMPLATE_STRINGS: RefCell<HashMap<String, JsArray<JsString>>> = RefCell::new(HashMap::new());
+}
+
+pub fn template_strings(key: &str, cooked: &[&str]) -> JsArray<JsString> {
+    TEMPLATE_STRINGS.with(|instances| {
+        let mut instances = instances.borrow_mut();
+        instances
+            .entry(key.to_owned())
+            .or_insert_with(|| array_new(cooked.iter().map(|value| string(value)).collect()))
+            .clone()
+    })
+}
+
+pub fn template_strings_clear() {
+    TEMPLATE_STRINGS.with(|instances| instances.borrow_mut().clear());
+}
+
 pub fn array_new<T: ArrayElement>(elements: Vec<T>) -> JsArray<T> {
     Gc::new(ArrayData { elements })
 }

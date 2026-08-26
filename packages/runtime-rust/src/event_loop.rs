@@ -6,6 +6,7 @@
 pub fn finish() {
     fs_renames_finish();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
+    template_strings_clear();
     TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
     MICROTASKS.with(|tasks| tasks.borrow_mut().clear());

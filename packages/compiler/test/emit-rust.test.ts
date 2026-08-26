@@ -818,6 +818,7 @@ test.each([
   "1982-freeze-resolve-passthrough.ts",
   "1983-array-tuple-surfaces.ts",
   "1992-small-syntax.ts",
+  "2250-tagged-templates.ts",
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",

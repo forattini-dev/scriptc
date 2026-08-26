@@ -348,6 +348,18 @@
     }
 
     #[test]
+    fn template_strings_preserve_per_site_identity() {
+        let first = template_strings("first-site", &["a", "b"]);
+        let same = template_strings("first-site", &["a", "b"]);
+        let other = template_strings("other-site", &["a", "b"]);
+        assert!(array_ptr_eq(&first, &same));
+        assert!(!array_ptr_eq(&first, &other));
+        assert_eq!(array_get(&first, 0.0).as_ref(), "a");
+        assert_eq!(array_get(&first, 1.0).as_ref(), "b");
+        template_strings_clear();
+    }
+
+    #[test]
     fn array_ranges_follow_javascript_indices_and_preserve_reference_identity() {
         let baseline = live_heap_objects();
         {
