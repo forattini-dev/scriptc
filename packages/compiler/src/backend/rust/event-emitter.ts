@@ -92,7 +92,7 @@ export class RustEventEmitterEmitter {
     if (source.kind === "object" && source.className === "%Duplex") {
       return `ScEventEmitter::Duplex(${value})`;
     }
-    if (source.kind === "object" && source.className === "%Transform") {
+    if (source.kind === "object" && (source.className === "%Transform" || source.className === "%PassThrough")) {
       return `ScEventEmitter::Transform(${value})`;
     }
     if (source.kind !== "object" || !this.context.isEmitterClass(source.className)) return null;
@@ -175,7 +175,8 @@ export class RustEventEmitterEmitter {
     const startFlow = startsReadableFlow
       ? receiver.type.kind === "object" && receiver.type.className === "%Duplex"
         ? `sc_duplex_start_flowing(&${values[0]});`
-        : receiver.type.kind === "object" && receiver.type.className === "%Transform"
+        : receiver.type.kind === "object" &&
+            (receiver.type.className === "%Transform" || receiver.type.className === "%PassThrough")
           ? `sc_transform_start_flowing(&${values[0]});`
           : `runtime::readable_start_flowing(&${values[0]}); sc_readable_schedule(&${values[0]});`
       : "";
@@ -731,7 +732,7 @@ export class RustEventEmitterEmitter {
 
   private isEmitterObject(type: IrType): boolean {
     return type.kind === "object" &&
-      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" || type.className === "%Duplex" || type.className === "%Transform" ||
+      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" || type.className === "%Duplex" || type.className === "%Transform" || type.className === "%PassThrough" ||
         this.context.isEmitterClass(type.className));
   }
 
@@ -742,6 +743,7 @@ export class RustEventEmitterEmitter {
     if (type.className === "%Writable") return `runtime::writable_emitter(&${value})`;
     if (type.className === "%Duplex") return `runtime::duplex_emitter(&${value})`;
     if (type.className === "%Transform") return `runtime::transform_emitter(&${value})`;
+    if (type.className === "%PassThrough") return `runtime::transform_emitter(&${value})`;
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }

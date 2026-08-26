@@ -47,7 +47,8 @@ export class RustStreamModel {
       const args = node.args as StreamArgument[] | undefined;
       const receiver = args?.[0]?.type;
       const duplex = receiver?.kind === "object" && receiver.className === "%Duplex";
-      const transform = receiver?.kind === "object" && receiver.className === "%Transform";
+      const transform = receiver?.kind === "object" &&
+        (receiver.className === "%Transform" || receiver.className === "%PassThrough");
       if (duplex) this.usesDuplex = true;
       else if (transform) this.usesTransform = true;
       else this.usesWritable = true;
@@ -59,7 +60,7 @@ export class RustStreamModel {
         .set(typeKey(callback.type), shape);
       return true;
     }
-    if (node.fn === "transform.new") {
+    if (node.fn === "transform.new" || node.fn === "passthrough.new") {
       this.usesTransform = true;
       const args = node.args as StreamArgument[] | undefined;
       const flags = args?.[7];

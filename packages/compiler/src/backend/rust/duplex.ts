@@ -97,6 +97,7 @@ export class RustDuplexEmitter {
       }
       if (shape.type.params.length === 0) {
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, [], loc);
+        byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
     }

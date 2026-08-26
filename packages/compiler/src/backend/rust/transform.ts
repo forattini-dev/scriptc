@@ -51,8 +51,9 @@ export class RustTransformEmitter {
   }
 
   emitLibCall(expr: RustLibCallExpr): string | null {
+    if (expr.fn === "transform.new" || expr.fn === "passthrough.new") return this.emitNew(expr);
     const receiver = expr.args[0];
-    if (!this.isTransform(receiver)) return expr.fn === "transform.new" ? this.emitNew(expr) : null;
+    if (!this.isTransform(receiver)) return null;
     switch (expr.fn) {
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
@@ -60,6 +61,8 @@ export class RustTransformEmitter {
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
       case "writable.end": return this.emitEnd(expr);
+      case "writable.cork": return this.emitCork(expr);
+      case "writable.uncork": return this.emitUncork(expr);
       case "stream.prop": return this.emitProp(expr);
       default: return null;
     }
@@ -98,6 +101,7 @@ export class RustTransformEmitter {
       }
       if (shape.type.params.length === 0) {
         const call = this.context.emitClosureDispatch("callback", shape.type, [], loc);
+        byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
       }
     }
@@ -151,7 +155,7 @@ export class RustTransformEmitter {
       ], loc);
       arms.push(`ScTransformCallback::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
     }
-    arms.push("ScTransformCallback::Never => runtime::throw_error_code(\"The _transform() method is not implemented\".to_owned(), \"ERR_METHOD_NOT_IMPLEMENTED\"),");
+    arms.push("ScTransformCallback::Never => { if runtime::transform_is_passthrough(sc_transform) { sc_transform_emit_output(sc_transform, sc_chunk); let sc_writable = runtime::transform_writable(sc_transform); runtime::writable_complete_write(&sc_writable, sc_length); sc_transform_after_write(sc_transform, sc_done); } else { runtime::throw_error_code(\"The _transform() method is not implemented\".to_owned(), \"ERR_METHOD_NOT_IMPLEMENTED\"); } },");
     arms.push("_ => unreachable!(\"scriptc invariant: Transform callback signature\"),");
     this.context.line("fn sc_transform_call_write(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>, sc_length: usize, sc_done: ScTransformDone) {");
     this.context.pushIndent();
@@ -159,7 +163,7 @@ export class RustTransformEmitter {
     this.context.line(`match sc_callback { ${arms.join(" ")} }`);
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("fn sc_transform_drain_write(sc_transform: &ScTransform) { let sc_writable = runtime::transform_writable(sc_transform); let Some((sc_chunk, sc_length, sc_done)) = runtime::writable_take_write(&sc_writable) else { return; }; sc_transform_call_write(sc_transform, sc_chunk, sc_length, sc_done); }");
+    this.context.line("fn sc_transform_drain_write(sc_transform: &ScTransform) { let sc_writable = runtime::transform_writable(sc_transform); if runtime::writable_is_corked(&sc_writable) { return; } let Some((sc_chunk, sc_length, sc_done)) = runtime::writable_take_write(&sc_writable) else { return; }; sc_transform_call_write(sc_transform, sc_chunk, sc_length, sc_done); }");
     const doneArms: string[] = ["ScTransformDone::Never => {},"];
     for (const shape of this.context.streams.transformDoneShapes.values()) {
       const call = this.context.emitClosureDispatch("callback", shape.type, [], loc);
@@ -197,8 +201,10 @@ export class RustTransformEmitter {
 
   private emitNew(expr: RustLibCallExpr): string {
     const flagsExpr = expr.args[7];
+    const passthrough = expr.fn === "passthrough.new";
+    const expectedClass = passthrough ? "%PassThrough" : "%Transform";
     if (expr.args.length < 8 || flagsExpr?.kind !== "numLit" || expr.type.kind !== "object" ||
-      expr.type.className !== "%Transform") this.context.unsupported("Transform constructor shape", expr.loc);
+      expr.type.className !== expectedClass) this.context.unsupported("Transform constructor shape", expr.loc);
     const flags = flagsExpr.value;
     if ((flags & ~3) !== 0) this.context.unsupported("Transform constructor callback set", expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
@@ -222,7 +228,7 @@ export class RustTransformEmitter {
       index += 1;
     }
     if (index !== expr.args.length) this.context.unsupported("Transform constructor arity", expr.loc);
-    return `{ ${this.bind(expr.args, values)} let _ = (${values[5]}, ${values[6]}, ${values[7]}); let sc_emitter = runtime::emitter_new::<ScEmitterListener>(); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[0]}, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[1]}, ${values[2]}, ${values[3]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[4]}); runtime::transform_new(sc_duplex, ${transform}, ${flush}) }`;
+    return `{ ${this.bind(expr.args, values)} let _ = (${values[5]}, ${values[6]}, ${values[7]}); let sc_emitter = runtime::emitter_new::<ScEmitterListener>(); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[0]}, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[1]}, ${values[2]}, ${values[3]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[4]}); runtime::transform_new(sc_duplex, ${transform}, ${flush}, ${passthrough}) }`;
   }
 
   private emitWrite(expr: RustLibCallExpr, stringChunk: boolean): string {
@@ -244,7 +250,8 @@ export class RustTransformEmitter {
 
   private emitEnd(expr: RustLibCallExpr): string {
     const flagsExpr = expr.args[1];
-    if (flagsExpr?.kind !== "numLit" || expr.type.kind !== "object" || expr.type.className !== "%Transform") {
+    if (flagsExpr?.kind !== "numLit" || expr.type.kind !== "object" ||
+      (expr.type.className !== "%Transform" && expr.type.className !== "%PassThrough")) {
       this.context.unsupported("Transform end shape", expr.loc);
     }
     const flags = flagsExpr.value;
@@ -293,8 +300,25 @@ export class RustTransformEmitter {
     const values = expr.args.map(() => this.context.nextTemporary());
     const result = expr.type.kind === "f64"
       ? `match ${values[1]}.as_ref() { "readableHighWaterMark" | "readableLength" => runtime::readable_prop(&runtime::transform_readable(&${values[0]}), &${values[1]}), _ => runtime::writable_number_prop(&runtime::transform_writable(&${values[0]}), &${values[1]}), }`
-      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&${values[0]})), "readable" | "readableEnded" => runtime::readable_prop(&runtime::transform_readable(&${values[0]}), &${values[1]}) != 0.0, _ => runtime::writable_bool_prop(&runtime::transform_writable(&${values[0]}), &${values[1]}), }`;
+      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&${values[0]})), "readable" | "readableEnded" | "readableObjectMode" => runtime::readable_bool_prop(&runtime::transform_readable(&${values[0]}), &${values[1]}), _ => runtime::writable_bool_prop(&runtime::transform_writable(&${values[0]}), &${values[1]}), }`;
     return `{ ${this.bind(expr.args, values)} ${result} }`;
+  }
+
+  private emitCork(expr: RustLibCallExpr): string {
+    const receiver = expr.args[0];
+    if (receiver === undefined || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("Transform cork shape", expr.loc);
+    }
+    return `runtime::writable_cork(&runtime::transform_writable(&(${this.context.emitExpr(receiver)})))`;
+  }
+
+  private emitUncork(expr: RustLibCallExpr): string {
+    const receiver = expr.args[0];
+    if (receiver === undefined || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("Transform uncork shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_writable = runtime::transform_writable(&${value}); if runtime::writable_uncork(&sc_writable) { sc_transform_drain_write(&${value}); } }`;
   }
 
   private emitOutput(value: string, type: IrType, receiver: string, loc: SrcLoc): string {
@@ -322,7 +346,8 @@ export class RustTransformEmitter {
   }
 
   private isTransform(expr: IrExpr | undefined): boolean {
-    return expr?.type.kind === "object" && expr.type.className === "%Transform";
+    return expr?.type.kind === "object" &&
+      (expr.type.className === "%Transform" || expr.type.className === "%PassThrough");
   }
 
   private variant(shape: RustClosureShape): string {

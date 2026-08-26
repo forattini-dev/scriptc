@@ -411,6 +411,19 @@ where
     }
 }
 
+pub fn readable_bool_prop<L, R>(readable: &JsReadable<L, R>, name: &JsString) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| match name.as_ref() {
+        "readable" => !data.ended,
+        "readableEnded" => data.ended,
+        "readableObjectMode" | "destroyed" | "closed" => false,
+        _ => false,
+    })
+}
+
 pub fn readable_flowing<L, R>(readable: &JsReadable<L, R>) -> Option<bool>
 where
     L: Clone + Trace + 'static,

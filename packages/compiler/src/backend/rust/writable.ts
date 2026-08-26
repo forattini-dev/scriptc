@@ -67,6 +67,8 @@ export class RustWritableEmitter {
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
       case "writable.end": return this.emitEnd(expr);
+      case "writable.cork": return this.emitCork(expr);
+      case "writable.uncork": return this.emitUncork(expr);
       case "stream.prop": return this.isWritable(expr.args[0]?.type) ? this.emitProp(expr) : null;
       default: return null;
     }
@@ -135,6 +137,7 @@ export class RustWritableEmitter {
     this.context.line(`fn sc_writable_call_done(sc_done: ScWritableDone) { match sc_done { ${arms.join(" ")} } }`);
     this.context.line("fn sc_writable_drain_queue(sc_writable: &ScWritable) {");
     this.context.pushIndent();
+    this.context.line("if runtime::writable_is_corked(sc_writable) { return; }");
     this.context.line("let Some((sc_chunk, sc_length, sc_done)) = runtime::writable_take_write(sc_writable) else { return; };");
     this.context.line("sc_writable_call_write(sc_writable, sc_chunk, sc_length, sc_done);");
     this.context.popIndent();
@@ -280,6 +283,23 @@ export class RustWritableEmitter {
     }
     const helper = expr.type.kind === "f64" ? "writable_number_prop" : "writable_bool_prop";
     return `runtime::${helper}(&(${this.context.emitExpr(receiver)}), &(${this.context.emitExpr(name)}))`;
+  }
+
+  private emitCork(expr: RustLibCallExpr): string {
+    const receiver = expr.args[0];
+    if (receiver === undefined || !this.isWritable(receiver.type) || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("Writable cork shape", expr.loc);
+    }
+    return `runtime::writable_cork(&(${this.context.emitExpr(receiver)}))`;
+  }
+
+  private emitUncork(expr: RustLibCallExpr): string {
+    const receiver = expr.args[0];
+    if (receiver === undefined || !this.isWritable(receiver.type) || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("Writable uncork shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; if runtime::writable_uncork(&${value}) { sc_writable_drain_queue(&${value}); } }`;
   }
 
   private completionType(type: IrFuncType, what: string, loc: SrcLoc): IrFuncType {

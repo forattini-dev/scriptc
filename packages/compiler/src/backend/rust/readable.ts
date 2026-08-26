@@ -70,6 +70,7 @@ export class RustReadableEmitter {
       }
       if (shape.type.params.length === 0) {
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, [], loc);
+        byteArms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
         voidArms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
     }
@@ -121,16 +122,11 @@ export class RustReadableEmitter {
     this.context.pushIndent();
     this.context.line("runtime::readable_begin_drain(&sc_readable);");
     this.context.line("if runtime::readable_take_resume(&sc_readable, false) { sc_readable_emit_void(&sc_readable, \"resume\"); }");
-    this.context.line("loop {");
-    this.context.pushIndent();
-    this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_readable_emit_data(&sc_readable, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_readable_emit_void(&sc_readable, \"resume\"); } if !runtime::readable_is_flowing(&sc_readable) { break; } continue; }");
+    this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_readable_emit_data(&sc_readable, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_readable_emit_void(&sc_readable, \"resume\"); } runtime::readable_end_drain(&sc_readable); if runtime::readable_is_flowing(&sc_readable) { sc_readable_schedule(&sc_readable); } return; }");
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
-    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); break; }");
+    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("sc_readable_call_read(&sc_readable);");
     this.context.line("if runtime::readable_has_data_or_eof(&sc_readable) { runtime::readable_end_drain(&sc_readable); sc_readable_schedule(&sc_readable); return; }");
-    this.context.line("break;");
-    this.context.popIndent();
-    this.context.line("}");
     this.context.line("runtime::readable_end_drain(&sc_readable);");
     this.context.popIndent();
     this.context.line("}");
@@ -268,10 +264,12 @@ export class RustReadableEmitter {
   private emitProp(expr: RustLibCallExpr): string {
     const [receiver, name] = expr.args;
     if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
-      name?.type.kind !== "string" || expr.args.length !== 2 || expr.type.kind !== "f64") {
-      this.context.unsupported("Readable numeric property shape", expr.loc);
+      name?.type.kind !== "string" || expr.args.length !== 2 ||
+      (expr.type.kind !== "f64" && expr.type.kind !== "bool")) {
+      this.context.unsupported("Readable property shape", expr.loc);
     }
-    return `runtime::readable_prop(&(${this.context.emitExpr(receiver)}), &(${this.context.emitExpr(name)}))`;
+    const helper = expr.type.kind === "f64" ? "readable_prop" : "readable_bool_prop";
+    return `runtime::${helper}(&(${this.context.emitExpr(receiver)}), &(${this.context.emitExpr(name)}))`;
   }
 
   private emitPause(expr: RustLibCallExpr): string {

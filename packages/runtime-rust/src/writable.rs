@@ -28,6 +28,7 @@ where
     auto_destroy: bool,
     emit_close: bool,
     closed: bool,
+    corked: usize,
 }
 
 impl<L, W, F, C> Trace for WritableData<L, W, F, C>
@@ -106,6 +107,7 @@ where
         auto_destroy,
         emit_close,
         closed: false,
+        corked: 0,
     })
 }
 
@@ -327,6 +329,39 @@ where
     })
 }
 
+pub fn writable_cork<L, W, F, C>(writable: &JsWritable<L, W, F, C>)
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| data.corked = data.corked.saturating_add(1));
+}
+
+pub fn writable_uncork<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| {
+        data.corked = data.corked.saturating_sub(1);
+        data.corked == 0
+    })
+}
+
+pub fn writable_is_corked<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with(|data| data.corked != 0)
+}
+
 pub fn writable_number_prop<L, W, F, C>(
     writable: &JsWritable<L, W, F, C>,
     name: &JsString,
@@ -340,7 +375,7 @@ where
     writable.with(|data| match name.as_ref() {
         "writableLength" => data.writable_length as f64,
         "writableHighWaterMark" => data.high_water_mark as f64,
-        "writableCorked" => 0.0,
+        "writableCorked" => data.corked as f64,
         _ => 0.0,
     })
 }

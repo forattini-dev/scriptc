@@ -11,6 +11,7 @@ where
     duplex: Option<JsDuplex<L, R, W, F, C>>,
     transform_callback: Option<T>,
     flush_callback: Option<H>,
+    passthrough: bool,
 }
 
 impl<L, R, W, F, C, T, H> Trace for TransformData<L, R, W, F, C, T, H>
@@ -59,6 +60,7 @@ pub fn transform_new<L, R, W, F, C, T, H>(
     duplex: JsDuplex<L, R, W, F, C>,
     transform_callback: Option<T>,
     flush_callback: Option<H>,
+    passthrough: bool,
 ) -> JsTransform<L, R, W, F, C, T, H>
 where
     L: Clone + Trace + 'static,
@@ -73,6 +75,7 @@ where
         duplex: Some(duplex),
         transform_callback,
         flush_callback,
+        passthrough,
     })
 }
 
@@ -169,6 +172,21 @@ where
     H: Clone + Trace + 'static,
 {
     transform.with(|data| data.flush_callback.clone())
+}
+
+pub fn transform_is_passthrough<L, R, W, F, C, T, H>(
+    transform: &JsTransform<L, R, W, F, C, T, H>,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+    T: Clone + Trace + 'static,
+    H: Clone + Trace + 'static,
+{
+    transform.with(|data| data.passthrough)
 }
 
 pub fn transform_ptr_eq<L, R, W, F, C, T, H>(

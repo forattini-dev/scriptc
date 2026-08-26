@@ -209,6 +209,7 @@ export class RustValueEmitter {
         if (type.className === "%Writable") return "ScWritable";
         if (type.className === "%Duplex") return "ScDuplex";
         if (type.className === "%Transform") return "ScTransform";
+        if (type.className === "%PassThrough") return "ScTransform";
         if (!this.context.classes.has(type.className)) this.context.unsupported(`object type '${type.className}'`, loc);
         return `runtime::Gc<${this.context.classStructName(type.className, loc)}>`;
       }
@@ -341,6 +342,7 @@ export class RustValueEmitter {
         if (type.className === "%Writable") return `runtime::writable_ptr_eq(${left}, ${right})`;
         if (type.className === "%Duplex") return `runtime::duplex_ptr_eq(${left}, ${right})`;
         if (type.className === "%Transform") return `runtime::transform_ptr_eq(${left}, ${right})`;
+        if (type.className === "%PassThrough") return `runtime::transform_ptr_eq(${left}, ${right})`;
         if (this.context.classes.has(type.className)) return `${left}.ptr_eq(${right})`;
         this.context.unsupported(`array identity for runtime object '${type.className}'`, loc);
       default:
