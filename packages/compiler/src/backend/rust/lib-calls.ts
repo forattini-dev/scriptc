@@ -4,6 +4,7 @@ import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
 import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
+import { emitRustTlsCall } from "./tls.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -62,6 +63,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
+  const tlsCall = emitRustTlsCall(expr, context);
+  if (tlsCall !== null) return tlsCall;
   const httpCall = emitRustHttpCall(expr, context);
   if (httpCall !== null) return httpCall;
   const netCall = emitRustNetCall(expr, context);

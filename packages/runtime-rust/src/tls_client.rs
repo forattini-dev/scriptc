@@ -14,6 +14,7 @@ struct ScriptcServerVerifier {
     inner: Option<Arc<dyn rustls::client::danger::ServerCertVerifier>>,
     algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
     peer_shape: Arc<Mutex<TlsPeerShape>>,
+    reject_unauthorized: bool,
 }
 
 impl rustls::client::danger::ServerCertVerifier for ScriptcServerVerifier {
@@ -43,6 +44,9 @@ impl rustls::client::danger::ServerCertVerifier for ScriptcServerVerifier {
             Some(inner) => {
                 inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
             }
+            None if self.reject_unauthorized => Err(rustls::Error::InvalidCertificate(
+                rustls::CertificateError::UnknownIssuer,
+            )),
             None => Ok(rustls::client::danger::ServerCertVerified::assertion()),
         }
     }
@@ -139,35 +143,36 @@ fn tls_cert_is_self_signed(certificate: &[u8]) -> bool {
     tls_cert_names(certificate).is_some_and(|(issuer, subject)| issuer == subject)
 }
 
-fn tls_roots(ca: &str) -> Result<rustls::RootCertStore, String> {
+fn tls_roots(trust: &TlsTrust) -> Result<rustls::RootCertStore, String> {
     let mut roots = rustls::RootCertStore::empty();
-    if ca.is_empty() {
+    if trust.use_bundled {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        return Ok(roots);
     }
-    let mut cursor = std::io::Cursor::new(ca.as_bytes());
-    let certificates = rustls_pemfile::certs(&mut cursor)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "PEM routines: no start line".to_string())?;
-    if certificates.is_empty() {
-        return Err("PEM routines: no start line".to_string());
-    }
-    for certificate in certificates {
-        roots
-            .add(certificate)
-            .map_err(|_| "PEM routines: bad certificate".to_string())?;
+    for pem in &trust.pem_certificates {
+        let mut cursor = std::io::Cursor::new(pem.as_bytes());
+        let certificates = rustls_pemfile::certs(&mut cursor)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "PEM routines: no start line".to_string())?;
+        if certificates.is_empty() {
+            return Err("PEM routines: no start line".to_string());
+        }
+        for certificate in certificates {
+            roots
+                .add(certificate)
+                .map_err(|_| "PEM routines: bad certificate".to_string())?;
+        }
     }
     Ok(roots)
 }
 
 fn tls_config(
-    ca: &str,
+    trust: &TlsTrust,
     reject_unauthorized: bool,
     peer_shape: Arc<Mutex<TlsPeerShape>>,
 ) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let roots = Arc::new(tls_roots(ca)?);
-    let inner = if reject_unauthorized {
+    let roots = Arc::new(tls_roots(trust)?);
+    let inner = if reject_unauthorized && !roots.is_empty() {
         Some(
             rustls::client::WebPkiServerVerifier::builder_with_provider(roots, provider.clone())
                 .build()
@@ -181,6 +186,7 @@ fn tls_config(
         inner,
         algorithms: provider.signature_verification_algorithms,
         peer_shape,
+        reject_unauthorized,
     });
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -293,13 +299,13 @@ fn tls_exchange(
     host: String,
     port: u16,
     method: String,
-    ca: String,
+    trust: TlsTrust,
     reject_unauthorized: bool,
     timeout: f64,
     request: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
     let peer_shape = Arc::new(Mutex::new(TlsPeerShape::Unknown));
-    let config = tls_config(&ca, reject_unauthorized, peer_shape.clone())?;
+    let config = tls_config(&trust, reject_unauthorized, peer_shape.clone())?;
     let server_name = rustls::pki_types::ServerName::try_from(host.clone())
         .map_err(|_| format!("Invalid SNI name: {host}"))?;
     let mut socket = std::net::TcpStream::connect((host.as_str(), port))
@@ -354,19 +360,27 @@ fn http_tls_start(
     connection: Rc<RefCell<HttpClientConnection>>,
     output: Vec<u8>,
 ) {
-    let (host, port, method, ca, reject_unauthorized, timeout) = request.with(|request| {
+    let (host, port, method, trust, reject_unauthorized, timeout) = request.with(|request| {
         (
             request.host.to_string(),
             request.port,
             request.method.to_string(),
-            request.ca.to_string(),
+            tls_explicit_trust(request.ca.to_string()),
             request.reject_unauthorized,
             request.timeout,
         )
     });
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = tls_exchange(host, port, method, ca, reject_unauthorized, timeout, output);
+        let result = tls_exchange(
+            host,
+            port,
+            method,
+            trust,
+            reject_unauthorized,
+            timeout,
+            output,
+        );
         let _ = sender.send(result);
     });
     HTTP_TLS_JOBS.with(|jobs| {

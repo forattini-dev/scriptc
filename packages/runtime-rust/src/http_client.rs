@@ -389,16 +389,17 @@ pub fn https_client_request_callback(
     )
 }
 
-fn http_client_url_parts(input: &JsString) -> (JsString, f64, JsString) {
+fn http_client_url_parts(input: &JsString, secure: bool) -> (JsString, f64, JsString) {
     let url = url_new(input);
     let protocol = url_protocol(&url);
-    if protocol.as_ref() != "http:" {
+    let expected = if secure { "https:" } else { "http:" };
+    if protocol.as_ref() != expected {
         throw_type_error(format!(
-            "Protocol \"{protocol}\" not supported. Expected \"http:\""
+            "Protocol \"{protocol}\" not supported. Expected \"{expected}\""
         ));
     }
     let host = url_hostname(&url);
-    let port = url_port_or(&url, 80.0);
+    let port = url_port_or(&url, if secure { 443.0 } else { 80.0 });
     let path = string(&format!("{}{}", url_pathname(&url), url_search(&url)));
     (host, port, path)
 }
@@ -408,7 +409,7 @@ pub fn http_client_request_url(
     method: &JsString,
     auto_end: bool,
 ) -> JsHttpClientRequest {
-    let (host, port, path) = http_client_url_parts(input);
+    let (host, port, path) = http_client_url_parts(input, false);
     http_client_new(
         &host,
         port,
@@ -431,13 +432,57 @@ pub fn http_client_request_url_callback(
     callback: Rc<dyn Fn(JsHttpRequest)>,
     trace: NetTrace,
 ) -> JsHttpClientRequest {
-    let (host, port, path) = http_client_url_parts(input);
+    let (host, port, path) = http_client_url_parts(input, false);
     http_client_new(
         &host,
         port,
         &path,
         method,
         false,
+        0.0,
+        &array_new(Vec::new()),
+        auto_end,
+        true,
+        &empty_string(),
+        Some((callback, trace)),
+    )
+}
+
+pub fn https_client_request_url(
+    input: &JsString,
+    method: &JsString,
+    auto_end: bool,
+) -> JsHttpClientRequest {
+    let (host, port, path) = http_client_url_parts(input, true);
+    http_client_new(
+        &host,
+        port,
+        &path,
+        method,
+        true,
+        0.0,
+        &array_new(Vec::new()),
+        auto_end,
+        true,
+        &empty_string(),
+        None,
+    )
+}
+
+pub fn https_client_request_url_callback(
+    input: &JsString,
+    method: &JsString,
+    auto_end: bool,
+    callback: Rc<dyn Fn(JsHttpRequest)>,
+    trace: NetTrace,
+) -> JsHttpClientRequest {
+    let (host, port, path) = http_client_url_parts(input, true);
+    http_client_new(
+        &host,
+        port,
+        &path,
+        method,
+        true,
         0.0,
         &array_new(Vec::new()),
         auto_end,

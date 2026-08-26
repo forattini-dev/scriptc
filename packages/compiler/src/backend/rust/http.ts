@@ -240,22 +240,25 @@ export function emitRustHttpCall(
     const name = context.unionName(union.id);
     return `match runtime::http_request_status_code(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(numberTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
   }
-  if ((expr.fn === "http.requestUrl" || expr.fn === "http.requestUrlCb") &&
+  if ((expr.fn === "http.requestUrl" || expr.fn === "http.requestUrlCb" ||
+      expr.fn === "https.requestUrl" || expr.fn === "https.requestUrlCb") &&
       (expr.args.length === 3 || expr.args.length === 4)) {
     const [url, method, autoEnd, callbackExpr] = expr.args;
     if (url?.type.kind !== "string" || method?.type.kind !== "string" || autoEnd?.type.kind !== "bool") {
       context.unsupported(`${expr.fn} shape`, expr.loc);
     }
     const args = `&(${context.emitExpr(url)}), &(${context.emitExpr(method)}), ${context.emitExpr(autoEnd)}`;
-    if (expr.fn === "http.requestUrl") {
-      return `runtime::http_client_request_url(${args})`;
+    const secure = expr.fn.startsWith("https.");
+    const runtimePrefix = secure ? "https" : "http";
+    if (!expr.fn.endsWith("Cb")) {
+      return `runtime::${runtimePrefix}_client_request_url(${args})`;
     }
     const callbackType = callbackExpr?.type;
     if (callbackExpr === undefined || callbackType?.kind !== "func") {
-      context.unsupported("http.requestUrlCb callback", expr.loc);
+      context.unsupported(`${expr.fn} callback`, expr.loc);
     }
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
-      (invoke, trace) => `runtime::http_client_request_url_callback(${args}, ${invoke}, ${trace})`);
+      (invoke, trace) => `runtime::${runtimePrefix}_client_request_url_callback(${args}, ${invoke}, ${trace})`);
   }
   if ((expr.fn === "http.request" || expr.fn === "http.requestCb") &&
       (expr.args.length === 7 || expr.args.length === 8)) {

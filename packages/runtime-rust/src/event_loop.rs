@@ -8,6 +8,7 @@ pub fn finish() {
     children_finish();
     child_streams_finish();
     net_finish();
+    tls_ca_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();
