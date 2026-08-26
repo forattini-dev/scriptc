@@ -932,6 +932,10 @@ test.each([
   "2535-destructuring-assign-basics.ts",
   "2536-destructuring-assign-nested.ts",
   "2537-destructuring-assign-member-targets.ts",
+  "2538-destructuring-assign-class-source.ts",
+  "2539-class-instance-rest.ts",
+  "2540-accessor-destructuring-defaults.ts",
+  "2541-destructuring-eval-order.ts",
   "2558-rejection-events.cjs",
   "2562-intl-numberformat-en-us.ts",
   "2591-ambient-generic-traps.ts",
@@ -962,6 +966,11 @@ test.each([
   if (fixture === "2470-mockable-module-shape.js" && result.backend === "rust") {
     expect(await readFile(result.sourcePath, "utf8")).toContain(
       "Cannot add property '{}' to a fixed-shape object",
+    );
+  }
+  if (fixture === "2538-destructuring-assign-class-source.ts" && result.backend === "rust") {
+    expect(await readFile(result.sourcePath, "utf8")).toMatch(
+      /sc_fld_miss: Some\(sc_u_[A-Za-z0-9_]+::ScArm\d+\)/u,
     );
   }
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };

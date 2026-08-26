@@ -133,12 +133,21 @@ export class RustMetadata {
       ? this.hierarchyFields(meta.root)
       : meta.def.fields.map((field) => ({ owner: meta, field }));
     const fields = shapeFields.map(({ owner, field }) => {
-      const value = this.context.isEdgeValue(field.type) ? "None" : this.context.defaultValue(field.type, meta.def.loc);
+      const value = this.classFieldInitialValue(field.type, meta.def.loc);
       return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
     }).join(", ");
     const emitter = this.isEmitterClass(meta.def.name) ? "sc_emitter: Some(runtime::emitter_new::<ScEmitterListener>()), " : "";
     const classTag = meta.hierarchy || this.isEmitterClass(meta.def.name) ? `sc_class_pre: ${meta.pre}, ` : "";
     return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+  }
+
+  private classFieldInitialValue(type: IrType, loc: SrcLoc): string {
+    if (!this.context.isEdgeValue(type)) return this.context.defaultValue(type, loc);
+    if (type.kind !== "union") return "None";
+    const undefinedTag = this.union(type.unionId, loc).arms.findIndex((arm) => arm.kind === "undefinedT");
+    return undefinedTag < 0
+      ? "None"
+      : `Some(${this.unionName(type.unionId)}::${this.unionVariant(undefinedTag)})`;
   }
 
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {
