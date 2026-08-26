@@ -39,6 +39,7 @@ include!("crypto.rs");
 include!("collections.rs");
 include!("event_emitter.rs");
 include!("readable.rs");
+include!("writable.rs");
 include!("strings_and_process.rs");
 include!("os.rs");
 include!("filesystem.rs");

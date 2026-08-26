@@ -161,7 +161,8 @@ export class RustReadableEmitter {
       case "readable.resume": return this.emitResume(expr);
       case "readable.isPaused": return this.emitIsPaused(expr);
       case "readable.flowing": return this.emitFlowing(expr);
-      case "stream.prop": return this.emitProp(expr);
+      case "stream.prop": return expr.args[0]?.type.kind === "object" &&
+        expr.args[0].type.className === "%Readable" ? this.emitProp(expr) : null;
       case "stream.destroyErr": return this.emitDestroyError(expr);
       default: return null;
     }

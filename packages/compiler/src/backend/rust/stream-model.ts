@@ -1,0 +1,59 @@
+import type { IrType } from "../../ir/nodes.js";
+import { typeKey } from "../../ir/nodes.js";
+import type { IrFuncType, RustClosureShape } from "./model.js";
+
+type StreamNode = Record<string, unknown>;
+type StreamArgument = { kind?: string; type?: IrType; value?: unknown };
+
+/** Closure-shape discovery and usage state shared by the Rust stream emitters. */
+export class RustStreamModel {
+  usesReadable = false;
+  usesWritable = false;
+  readonly readableReadShapes = new Map<string, RustClosureShape>();
+  readonly writableWriteShapes = new Map<string, RustClosureShape>();
+  readonly writableFinalShapes = new Map<string, RustClosureShape>();
+
+  discover(
+    node: StreamNode,
+    ensureClosureShape: (type: IrFuncType) => RustClosureShape,
+    unsupported: (kind: string) => never,
+  ): boolean {
+    if (node.kind !== "libCall") return false;
+    if (node.fn === "readable.new") {
+      this.usesReadable = true;
+      const callback = (node.args as StreamArgument[] | undefined)?.[4];
+      if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
+      const shape = ensureClosureShape(callback.type);
+      this.readableReadShapes.set(typeKey(callback.type), shape);
+      return true;
+    }
+    if (node.fn !== "writable.new") return false;
+    this.usesWritable = true;
+    const args = node.args as StreamArgument[] | undefined;
+    const flags = args?.[3];
+    if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+      unsupported("malformed Writable callback flags IR");
+    }
+    let callbackIndex = 4;
+    for (let bit = 0; bit < 3; bit += 1) {
+      if ((flags.value & (1 << bit)) === 0) continue;
+      const callback = args?.[callbackIndex++];
+      if (callback?.type?.kind !== "func") unsupported("malformed Writable callback IR");
+      const shape = ensureClosureShape(callback.type);
+      if (bit === 0) this.writableWriteShapes.set(typeKey(callback.type), shape);
+      if (bit === 1) this.writableFinalShapes.set(typeKey(callback.type), shape);
+      if (bit <= 1) this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+    }
+    return true;
+  }
+
+  private markRuntimeCompletion(
+    callback: IrFuncType,
+    ensureClosureShape: (type: IrFuncType) => RustClosureShape,
+    unsupported: (kind: string) => never,
+  ): void {
+    const completion = callback.params.at(-1);
+    if (completion?.kind !== "func") unsupported("malformed Writable completion callback IR");
+    ensureClosureShape(completion).runtimeCallback = true;
+  }
+}

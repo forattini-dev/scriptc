@@ -134,6 +134,9 @@ export class RustFunctionValueEmitter {
       const passed = [`listener.as_ref().expect("scriptc: cleared live EventEmitter listener adapter")`, ...args];
       arms.push(`${this.context.closureName(shape)}::EventAdapter { listener, .. } => sc_emitter_dispatch_snapshot_${shape.index}(${passed.join(", ")})`);
     }
+    if (shape.runtimeCallback === true) {
+      arms.push(`${this.context.closureName(shape)}::RuntimeCallback { callback, .. } => callback.as_ref().expect("scriptc: cleared live runtime callback")(${args.join(", ")})`);
+    }
     return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
 

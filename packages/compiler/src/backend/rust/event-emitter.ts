@@ -2,10 +2,11 @@ import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 import { RustReadableEmitter, type RustReadableContext } from "./readable.js";
+import { RustWritableEmitter, type RustWritableContext } from "./writable.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
-export interface RustEventEmitterContext extends RustReadableContext {
+export interface RustEventEmitterContext extends RustReadableContext, RustWritableContext {
   readonly snapshotShapes: ReadonlyMap<string, RustClosureShape>;
   emitterRoots(): RustClassMeta[];
   classMeta(name: string, loc?: SrcLoc): RustClassMeta;
@@ -24,9 +25,11 @@ export interface RustEventEmitterContext extends RustReadableContext {
 /** Emit the module-specialized, strongly typed EventEmitter bridge. */
 export class RustEventEmitterEmitter {
   private readonly readable: RustReadableEmitter;
+  private readonly writable: RustWritableEmitter;
 
   constructor(private readonly context: RustEventEmitterContext) {
     this.readable = new RustReadableEmitter(context);
+    this.writable = new RustWritableEmitter(context);
   }
 
   emitDefinition(): void {
@@ -58,6 +61,7 @@ export class RustEventEmitterEmitter {
     this.context.line("}");
     this.context.line("type ScEmitterRegistry = runtime::JsEventEmitter<ScEmitterListener>;");
     this.readable.emitTypeDefinition();
+    this.writable.emitTypeDefinition();
     this.emitObjectDefinition();
     this.context.line("");
     this.emitMetaDispatchHelper();
@@ -65,11 +69,15 @@ export class RustEventEmitterEmitter {
     this.emitProcessExitDefinitions();
     this.emitProcessRejectionDefinitions();
     this.readable.emitDefinitions();
+    this.writable.emitDefinitions();
   }
 
   emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
     if (source.kind === "object" && source.className === "%Readable") {
       return `ScEventEmitter::Readable(${value})`;
+    }
+    if (source.kind === "object" && source.className === "%Writable") {
+      return `ScEventEmitter::Writable(${value})`;
     }
     if (source.kind !== "object" || !this.context.isEmitterClass(source.className)) return null;
     return `ScEventEmitter::${this.objectVariant(this.classMeta(source.className, loc).root)}(${value})`;
@@ -134,7 +142,7 @@ export class RustEventEmitterEmitter {
       case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
       case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
-      default: return this.readable.emitLibCall(expr);
+      default: return this.readable.emitLibCall(expr) ?? this.writable.emitLibCall(expr);
     }
   }
 
@@ -577,6 +585,7 @@ export class RustEventEmitterEmitter {
     this.context.pushIndent();
     this.context.line("Bare(ScEmitterRegistry),");
     if (this.context.usesReadable()) this.context.line("Readable(ScReadable),");
+    if (this.context.usesWritable()) this.context.line("Writable(ScWritable),");
     for (const root of roots) {
       this.context.line(`${this.objectVariant(root)}(runtime::Gc<${this.context.classStructName(root.def.name, root.def.loc)}>),`);
     }
@@ -590,6 +599,7 @@ export class RustEventEmitterEmitter {
     this.context.pushIndent();
     this.context.line("Self::Bare(value) => tracer.edge(value),");
     if (this.context.usesReadable()) this.context.line("Self::Readable(value) => runtime::readable_trace(value, tracer),");
+    if (this.context.usesWritable()) this.context.line("Self::Writable(value) => runtime::writable_trace(value, tracer),");
     for (const root of roots) this.context.line(`Self::${this.objectVariant(root)}(value) => tracer.edge(value),`);
     this.context.popIndent();
     this.context.line("}");
@@ -615,6 +625,7 @@ export class RustEventEmitterEmitter {
     this.context.pushIndent();
     this.context.line("(Self::Bare(left), Self::Bare(right)) => left.ptr_eq(right),");
     if (this.context.usesReadable()) this.context.line("(Self::Readable(left), Self::Readable(right)) => runtime::readable_ptr_eq(left, right),");
+    if (this.context.usesWritable()) this.context.line("(Self::Writable(left), Self::Writable(right)) => runtime::writable_ptr_eq(left, right),");
     for (const root of roots) {
       const variant = this.objectVariant(root);
       this.context.line(`(Self::${variant}(left), Self::${variant}(right)) => left.ptr_eq(right),`);
@@ -633,6 +644,7 @@ export class RustEventEmitterEmitter {
     this.context.pushIndent();
     this.context.line("ScEventEmitter::Bare(registry) => registry.clone(),");
     if (this.context.usesReadable()) this.context.line("ScEventEmitter::Readable(readable) => runtime::readable_emitter(readable),");
+    if (this.context.usesWritable()) this.context.line("ScEventEmitter::Writable(writable) => runtime::writable_emitter(writable),");
     for (const root of roots) {
       this.context.line(`ScEventEmitter::${this.objectVariant(root)}(object) => object.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone()),`);
     }
@@ -690,7 +702,7 @@ export class RustEventEmitterEmitter {
 
   private isEmitterObject(type: IrType): boolean {
     return type.kind === "object" &&
-      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" ||
+      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" ||
         this.context.isEmitterClass(type.className));
   }
 
@@ -698,6 +710,7 @@ export class RustEventEmitterEmitter {
     if (type.kind !== "object") this.context.unsupported("EventEmitter receiver type", loc);
     if (type.className === RUNTIME_EMITTER_CLASS) return `sc_emitter_registry(&${value})`;
     if (type.className === "%Readable") return `runtime::readable_emitter(&${value})`;
+    if (type.className === "%Writable") return `runtime::writable_emitter(&${value})`;
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }

@@ -23,6 +23,7 @@ import { RustFunctionValueEmitter } from "./function-values.js";
 import { RustDefinitionEmitter } from "./definitions.js";
 import { RustMetadata } from "./metadata.js";
 import { RustEventEmitterEmitter } from "./event-emitter.js";
+import { RustStreamModel } from "./stream-model.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 
@@ -85,8 +86,7 @@ class RustEmitter {
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
   private usesProcessRejectionEvents = false;
-  private usesReadable = false;
-  private readonly readableReadShapes = new Map<string, RustClosureShape>();
+  private readonly streams = new RustStreamModel();
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -143,8 +143,11 @@ class RustEmitter {
     isUsed: () => this.usesEventEmitter,
     usesProcessExitListeners: () => this.usesProcessExitListeners,
     usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
-    usesReadable: () => this.usesReadable,
-    readableReadShapes: this.readableReadShapes,
+    usesReadable: () => this.streams.usesReadable,
+    readableReadShapes: this.streams.readableReadShapes,
+    usesWritable: () => this.streams.usesWritable,
+    writableWriteShapes: this.streams.writableWriteShapes,
+    writableFinalShapes: this.streams.writableFinalShapes,
     dynTypeName: () => this.dynTypeName(),
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
@@ -627,12 +630,8 @@ class RustEmitter {
           this.emitterSnapshotShapes.set(typeKey(result.elem), shape);
         }
       }
-      if (node.kind === "libCall" && node.fn === "readable.new") {
-        this.usesEventEmitter = this.usesReadable = true;
-        const callback = (node.args as { type?: IrType }[] | undefined)?.[4];
-        if (callback?.type?.kind !== "func") this.unsupported("malformed Readable callback IR");
-        const shape = this.ensureClosureShape(callback.type);
-        this.readableReadShapes.set(typeKey(callback.type), shape);
+      if (this.streams.discover(node, (type) => this.ensureClosureShape(type), (kind) => this.unsupported(kind))) {
+        this.usesEventEmitter = true;
       }
       if (node.kind === "libCall" && (node.fn === "process.onExit" || node.fn === "process.offExit")) {
         this.usesEventEmitter = true;

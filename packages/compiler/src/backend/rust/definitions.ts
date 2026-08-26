@@ -78,6 +78,7 @@ export class RustDefinitionEmitter {
       const eventAdapter = this.context.emitterSnapshotShapes.has(typeKey(shape.type));
       const resolverType = this.context.promiseResolverTypes.get(typeKey(shape.type));
       const rejectorTypes = this.context.promiseRejectorTypes.get(typeKey(shape.type)) ?? [];
+      const runtimeCallback = shape.runtimeCallback === true;
       this.context.line(`enum ${name} {`);
       this.context.pushIndent();
       for (const target of shape.targets) {
@@ -99,6 +100,10 @@ export class RustDefinitionEmitter {
       });
       if (dynAdapter) this.context.line(`DynAdapter { value: Option<${this.context.dynTypeName()}> },`);
       if (eventAdapter) this.context.line("EventAdapter { listener: Option<ScEmitterListener>, identity: usize },");
+      if (runtimeCallback) {
+        const params = shape.type.params.map((type) => this.context.rustType(type)).join(", ");
+        this.context.line(`RuntimeCallback { callback: Option<std::rc::Rc<dyn Fn(${params}) -> ${this.context.rustType(shape.type.ret)}>>, trace: Option<std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>> },`);
+      }
       this.context.popIndent();
       this.context.line("}");
       this.context.line(`impl runtime::Trace for ${name} {`);
@@ -106,7 +111,7 @@ export class RustDefinitionEmitter {
       this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.context.pushIndent();
       const capturing = shape.targets.filter((target) => (target.captures?.length ?? 0) > 0);
-      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0 && !dynAdapter && !eventAdapter) {
+      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0 && !dynAdapter && !eventAdapter && !runtimeCallback) {
         this.context.line("let _ = tracer;");
       } else {
         this.context.line("match self {");
@@ -149,6 +154,13 @@ export class RustDefinitionEmitter {
           this.context.popIndent();
           this.context.line("},");
         }
+        if (runtimeCallback) {
+          this.context.line("Self::RuntimeCallback { trace, .. } => {");
+          this.context.pushIndent();
+          this.context.line("if let Some(trace) = trace { trace(tracer); }");
+          this.context.popIndent();
+          this.context.line("},");
+        }
         this.context.line("_ => {},");
         this.context.popIndent();
         this.context.line("}");
@@ -161,7 +173,7 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       this.context.line("fn clear_edges(&mut self) {");
       this.context.pushIndent();
-      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0 || dynAdapter || eventAdapter) {
+      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0 || dynAdapter || eventAdapter || runtimeCallback) {
         this.context.line("match self {");
         this.context.pushIndent();
         for (const target of capturing) {
@@ -180,6 +192,7 @@ export class RustDefinitionEmitter {
         });
         if (dynAdapter) this.context.line("Self::DynAdapter { value } => *value = None,");
         if (eventAdapter) this.context.line("Self::EventAdapter { listener, .. } => *listener = None,");
+        if (runtimeCallback) this.context.line("Self::RuntimeCallback { callback, trace } => { *callback = None; *trace = None; },");
         this.context.line("_ => {},");
         this.context.popIndent();
         this.context.line("}");

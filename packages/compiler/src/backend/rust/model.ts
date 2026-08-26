@@ -7,6 +7,7 @@ export interface RustClosureShape {
   readonly index: number;
   readonly type: IrFuncType;
   readonly targets: IrFunction[];
+  runtimeCallback?: boolean;
 }
 
 export interface RustClassMeta {
