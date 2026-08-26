@@ -719,6 +719,7 @@ test.each([
   "1541-union-keyed-reads.ts",
   "1546-union-element-reads.ts",
   "1562-optional-chain-tails.ts",
+  "1574-dyn-optional-method-number-keys.ts",
   "1581-declare-const-read.ts",
   "1854-ambient-declare-fn.ts",
   "2643-or-default-retag.ts",

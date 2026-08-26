@@ -4,6 +4,7 @@ import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
+import { emitRustOptionalChain } from "./optional-chains.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 
 export interface RustExpressionContext {
@@ -147,34 +148,8 @@ export class RustExpressionEmitter {
         }).join(", ");
         return `{ let ${left} = ${this.emitExpr(expr.left)}; match ${left} { ${arms} } }`;
       }
-      case "optChain": {
-        if (expr.receiver.type.kind !== "union") this.context.unsupported("optional chain over a non-union", expr.loc);
-        const source = this.context.union(expr.receiver.type.unionId, expr.loc);
-        const narrowedTags = source.arms.flatMap((arm, tag) => this.context.isUnit(arm) ? [] : [tag]);
-        const unitTags = source.arms.flatMap((arm, tag) => this.context.isUnit(arm) ? [tag] : []);
-        if (narrowedTags.length !== 1 || unitTags.length === 0) this.context.unsupported("optional chain union shape", expr.loc);
-        let absent: string;
-        if (expr.type.kind === "void") {
-          absent = "()";
-        } else {
-          if (expr.type.kind !== "union") this.context.unsupported("optional chain result without undefined union", expr.loc);
-          const result = this.context.union(expr.type.unionId, expr.loc);
-          const undefinedTag = result.arms.findIndex((arm) => arm.kind === "undefinedT");
-          if (undefinedTag < 0) this.context.unsupported("optional chain result without undefined arm", expr.loc);
-          absent = `${this.context.unionName(result.id)}::${this.context.unionVariant(undefinedTag)}`;
-        }
-        if (this.context.chainValues.has(expr.id)) this.context.unsupported(`nested optional chain '${expr.id}'`, expr.loc);
-        const payload = this.context.nextName("sc_chain");
-        this.context.chainValues.set(expr.id, payload);
-        const body = this.emitExpr(expr.body);
-        this.context.chainValues.delete(expr.id);
-        const sourceName = this.context.unionName(source.id);
-        const arms = source.arms.map((arm, tag) => {
-          const variant = `${sourceName}::${this.context.unionVariant(tag)}`;
-          return this.context.isUnit(arm) ? `${variant} => ${absent}` : `${variant}(${payload}) => ${body}`;
-        }).join(", ");
-        return `match ${this.emitExpr(expr.receiver)} { ${arms} }`;
-      }
+      case "optChain":
+        return emitRustOptionalChain(expr, this.context, (value) => this.emitExpr(value));
       case "chainRecv": {
         const value = this.context.chainValues.get(expr.id);
         if (value === undefined) this.context.unsupported(`optional-chain receiver '${expr.id}' outside its body`, expr.loc);

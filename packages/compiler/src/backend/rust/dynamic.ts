@@ -844,8 +844,25 @@ export class RustDynamicEmitter {
         return `{ let value = ${value}; match value { ${name}::Bytes(bytes) => runtime::bytes_copy(&bytes), value => sc_dyn_check_fail("bytes", &value), } }`;
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
+      case "union": {
+        if (!this.context.isRustJsonCompatible(type)) {
+          this.context.unsupported("dynamic checked cast to union", loc);
+        }
+        const union = this.context.union(type.unionId, loc);
+        const dyn = this.context.dynTypeName();
+        const name = this.context.unionName(union.id);
+        const rustType = this.context.rustType(type, loc);
+        const units = union.arms.flatMap((arm, tag) => {
+          if (arm.kind !== "undefinedT" && arm.kind !== "nullT") return [];
+          const source = arm.kind === "undefinedT" ? "Undefined" : "Null";
+          return [`${dyn}::${source} => ${name}::${this.context.unionVariant(tag)}`];
+        });
+        const decode = `let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message))`;
+        return units.length === 0
+          ? `{ let value = ${value}; ${decode} }`
+          : `{ let value = ${value}; match value { ${units.join(", ")}, value => { ${decode} }, } }`;
+      }
       case "array":
-      case "union":
       case "record": {
         if (type.kind === "record") {
           const shape = this.context.records.get(type.shapeId);
