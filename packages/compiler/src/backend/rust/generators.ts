@@ -154,6 +154,100 @@ function emitGeneratorIf(
   context.line("}");
 }
 
+function emitGeneratorFor(
+  fn: IrFunction,
+  statement: Extract<IrStmt, { kind: "for" }>,
+  remaining: readonly IrStmt[],
+  context: RustGeneratorBodyContext,
+  locals: Set<string>,
+  onComplete: (() => void) | null,
+): void {
+  if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.init) ||
+    containsYield(statement.cond) || containsYield(statement.update)) {
+    context.unsupported("labeled generator for or suspension outside its body", statement.loc);
+  }
+  if (statement.init !== null) {
+    context.emitStatements([statement.init]);
+    if (statement.init.kind === "varDecl") locals.add(statement.init.localId);
+  }
+  const condition: IrExpr = statement.cond ?? {
+    kind: "boolLit", value: true, type: { kind: "bool" }, loc: statement.loc,
+  };
+  emitGeneratorWhile(fn, {
+    kind: "while",
+    cond: condition,
+    body: statement.update === null ? statement.body : [...statement.body, statement.update],
+    loc: statement.loc,
+  }, remaining, context, locals, onComplete);
+}
+
+function generatorSwitchBranch(
+  statement: Extract<IrStmt, { kind: "switch" }>,
+  start: number,
+  context: RustGeneratorBodyContext,
+): IrStmt[] {
+  const result: IrStmt[] = [];
+  for (let index = start; index < statement.cases.length; index += 1) {
+    const candidate = statement.cases[index];
+    if (candidate === undefined) break;
+    for (const bodyStatement of candidate.body) {
+      if (bodyStatement.kind === "break") {
+        if (bodyStatement.label !== undefined) {
+          context.unsupported("labeled break in generator switch", bodyStatement.loc);
+        }
+        return result;
+      }
+      result.push(bodyStatement);
+    }
+  }
+  return result;
+}
+
+function emitGeneratorSwitch(
+  fn: IrFunction,
+  statement: Extract<IrStmt, { kind: "switch" }>,
+  remaining: readonly IrStmt[],
+  context: RustGeneratorBodyContext,
+  locals: ReadonlySet<string>,
+  onComplete: (() => void) | null,
+): void {
+  if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.disc)) {
+    context.unsupported("labeled generator switch or yield in its discriminant", statement.loc);
+  }
+  const kind = statement.disc.type.kind;
+  if (kind !== "f64" && kind !== "string" && kind !== "bool") {
+    context.unsupported(`generator switch discriminant '${kind}'`, statement.loc);
+  }
+  const disc = context.nextName("sc_generator_switch");
+  context.line(`let ${disc} = ${context.emitExpr(statement.disc)};`);
+  const tested = statement.cases.flatMap((candidate, index) =>
+    candidate.test === null ? [] : [{ candidate, index }]
+  );
+  for (const [{ candidate, index }, branch] of tested.map((entry, index) => [entry, index] as const)) {
+    if (candidate.test === null || candidate.test.type.kind !== kind) {
+      context.unsupported("generator switch case type mismatch", statement.loc);
+    }
+    const test = context.nextName("sc_generator_case");
+    const equality = kind === "string"
+      ? `${disc}.as_ref() == ${test}.as_ref()`
+      : `${disc} == ${test}`;
+    context.line(`${branch === 0 ? "if" : "else if"} { let ${test} = ${context.emitExpr(candidate.test)}; ${equality} } {`);
+    context.pushIndent();
+    emitGeneratorSequence(fn, [...generatorSwitchBranch(statement, index, context), ...remaining],
+      context, new Set(locals), onComplete);
+    context.popIndent();
+    context.line("}");
+  }
+  const defaultIndex = statement.cases.findIndex((candidate) => candidate.test === null);
+  if (tested.length > 0) context.line("else {");
+  context.pushIndent();
+  const fallback = defaultIndex < 0 ? remaining :
+    [...generatorSwitchBranch(statement, defaultIndex, context), ...remaining];
+  emitGeneratorSequence(fn, fallback, context, new Set(locals), onComplete);
+  context.popIndent();
+  if (tested.length > 0) context.line("}");
+}
+
 function emitGeneratorSequence(
   fn: IrFunction,
   statements: readonly IrStmt[],
@@ -171,6 +265,14 @@ function emitGeneratorSequence(
     }
     if (statement.kind === "while" && containsYield(statement.body)) {
       emitGeneratorWhile(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      return;
+    }
+    if (statement.kind === "for" && containsYield(statement.body)) {
+      emitGeneratorFor(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      return;
+    }
+    if (statement.kind === "switch" && containsYield(statement.cases)) {
+      emitGeneratorSwitch(fn, statement, statements.slice(index + 1), context, locals, onComplete);
       return;
     }
     if (statement.kind === "if") {

@@ -26,6 +26,7 @@ export interface RustStatementContext {
   nextTemporary(): string;
   nextLabel(prefix: "sc_loop" | "sc_continue" | "sc_switch" | "sc_block"): string;
   nextLoopTargetId(): number;
+  dynTypeName(): string;
   emitExpr(expr: IrExpr): string;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
   emitAssignment(id: string, value: string, loc: SrcLoc): void;
@@ -282,6 +283,10 @@ class RustStatementEmitter {
   }
 
   private emitForOf(stmt: Extract<IrStmt, { kind: "forOf" }>): void {
+    if (stmt.iterable.type.kind === "generator") {
+      this.emitGeneratorForOf(stmt);
+      return;
+    }
     if (stmt.iterable.type.kind !== "array") this.context.unsupported("for-of over a non-array", stmt.loc);
     const local = this.context.local(stmt.localId, stmt.loc);
     const array = this.context.nextTemporary();
@@ -312,6 +317,47 @@ class RustStatementEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`${index} += 1.0_f64;`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  private emitGeneratorForOf(stmt: Extract<IrStmt, { kind: "forOf" }>): void {
+    if (stmt.iterable.type.kind !== "generator") this.context.unsupported("generator for-of shape", stmt.loc);
+    const type = stmt.iterable.type;
+    const local = this.context.local(stmt.localId, stmt.loc);
+    const generator = this.context.nextTemporary();
+    const item = this.context.nextTemporary();
+    const loopLabel = this.context.nextLabel("sc_loop");
+    const continueTarget = this.context.nextLabel("sc_continue");
+    const next = type.nextT.kind === "dyn" ? `${this.context.dynTypeName()}::Undefined`
+      : type.nextT.kind === "undefinedT" || type.nextT.kind === "void" || type.nextT.kind === "nullT" ? "()"
+      : this.context.unsupported("generator for-of with a required next value", stmt.loc);
+    this.context.line("{");
+    this.context.pushIndent();
+    this.context.line(`let ${generator} = ${this.context.emitExpr(stmt.iterable)};`);
+    this.context.line(`'${loopLabel}: loop {`);
+    this.context.pushIndent();
+    this.context.line(`let ${item} = match runtime::generator_next(&${generator}, ${next}) {`);
+    this.context.pushIndent();
+    this.context.line("runtime::GeneratorStep::Yielded(value) => value,");
+    this.context.line(`runtime::GeneratorStep::Returned(_) => break '${loopLabel},`);
+    this.context.popIndent();
+    this.context.line("};");
+    this.context.line(`'${continueTarget}: {`);
+    this.context.pushIndent();
+    this.context.line(this.context.localIsBoxed(local)
+      ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(${item});`
+      : `let ${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = ${item};`);
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(), kind: "loop", labels: stmt.labels,
+      breakLabel: loopLabel, continueBlock: continueTarget, allowsContinue: true,
+    });
+    this.emit(stmt.body);
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();

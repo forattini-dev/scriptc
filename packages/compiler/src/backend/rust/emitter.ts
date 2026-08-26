@@ -941,6 +941,7 @@ class RustEmitter {
       nextTemporary: () => `sc_rt_${this.temporary++}`,
       nextLabel: (prefix) => `${prefix}_${this.temporary++}`,
       nextLoopTargetId: () => this.nextLoopTargetId++,
+      dynTypeName: () => this.dynTypeName(),
       emitExpr: (expr) => this.emitExpr(expr),
       emitRead: (id, type, loc) => this.emitRead(id, type, loc),
       emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
@@ -961,7 +962,6 @@ class RustEmitter {
       unsupported: (kind, loc) => this.unsupported(kind, loc),
     });
   }
-
   private emitStatement(statement: IrStmt): void {
     this.emitStatements([statement]);
   }
