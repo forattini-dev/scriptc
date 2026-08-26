@@ -79,6 +79,31 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const source = context.nextTemporary();
     return `{ let ${target} = ${context.emitExpr(arg)}; let ${source} = ${context.emitExpr(secondArg)}; sc_dyn_assign(&${target}, &${source}) }`;
   }
+  if (expr.fn === "dyn.packPush" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "void") {
+    const pack = context.nextTemporary();
+    const value = context.nextTemporary();
+    return `{ let ${pack} = ${context.emitExpr(arg)}; let ${value} = ${context.emitExpr(secondArg)}; sc_dyn_pack_push(&${pack}, ${value}); () }`;
+  }
+  if (expr.fn === "dyn.packPushSpread" && expr.args.length === 3 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.args[2]?.type.kind === "string" && expr.type.kind === "void") {
+    const pack = context.nextTemporary();
+    const source = context.nextTemporary();
+    const what = context.nextTemporary();
+    return `{ let ${pack} = ${context.emitExpr(arg)}; let ${source} = ${context.emitExpr(secondArg)}; let ${what} = ${context.emitExpr(expr.args[2])}; sc_dyn_pack_push_spread(&${pack}, &${source}, &${what}, false); () }`;
+  }
+  if (expr.fn === "dyn.packPushSpreadIter" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "void") {
+    const pack = context.nextTemporary();
+    const source = context.nextTemporary();
+    return `{ let ${pack} = ${context.emitExpr(arg)}; let ${source} = ${context.emitExpr(secondArg)}; sc_dyn_pack_push_spread(&${pack}, &${source}, &runtime::empty_string(), true); () }`;
+  }
+  if (expr.fn === "dyn.assignAll" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const target = context.nextTemporary();
+    const sources = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${sources} = ${context.emitExpr(secondArg)}; sc_dyn_assign_all(&${target}, &${sources}) }`;
+  }
   if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const keyExpr = expr.args[1];
     const valueExpr = expr.args[2];

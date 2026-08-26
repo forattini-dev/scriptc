@@ -697,6 +697,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2483-recursive-record-cycles.ts",
     "2582-jsval-object-statics.js",
     "2584-jsval-object-statics.js",
+    "2586-object-assign-spread.js",
     "2608-regex-named-groups.ts",
     "2609-regex-named-replace.ts",
     "2610-regex-named-matchall.ts",
