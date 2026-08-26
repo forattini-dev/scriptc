@@ -722,6 +722,7 @@ test.each([
   "1574-dyn-optional-method-number-keys.ts",
   "1581-declare-const-read.ts",
   "1630-inspect-scalars.ts",
+  "1631-inspect-arrays.ts",
   "1632-inspect-records.ts",
   "1854-ambient-declare-fn.ts",
   "2591-ambient-generic-traps.ts",
