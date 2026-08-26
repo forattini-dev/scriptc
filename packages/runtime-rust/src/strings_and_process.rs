@@ -654,6 +654,11 @@ pub fn process_cwd() -> JsString {
     )
 }
 
+pub fn process_chdir(path: &JsString) {
+    std::env::set_current_dir(path.as_ref())
+        .unwrap_or_else(|error| throw_fs_error("chdir", path, error));
+}
+
 pub fn process_pid() -> f64 {
     f64::from(std::process::id())
 }

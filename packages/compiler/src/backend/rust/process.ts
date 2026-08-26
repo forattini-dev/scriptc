@@ -1,0 +1,71 @@
+import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
+
+export function emitRustProcessCall(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+): string | null {
+  const arg = expr.args[0];
+  const secondArg = expr.args[1];
+  if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::process_exit(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "process.kill" && expr.args.length === 2 &&
+      arg?.type.kind === "f64" && secondArg?.type.kind === "string") {
+    return `runtime::process_kill_named(${context.emitExpr(arg)}, &(${context.emitExpr(secondArg)}))`;
+  }
+  if (expr.fn === "process.killNum" && expr.args.length === 2 &&
+      arg?.type.kind === "f64" && secondArg?.type.kind === "f64") {
+    return `runtime::process_kill_num(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)})`;
+  }
+  if (expr.fn === "process.isTTY" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::process_is_tty(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "process.stdinDestroy" && expr.args.length === 0) {
+    return "runtime::process_stdin_destroy()";
+  }
+  if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
+  if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
+  if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";
+  if (expr.fn === "process.pid" && expr.args.length === 0) return "runtime::process_pid()";
+  if (expr.fn === "process.getuid" && expr.args.length === 0) return "runtime::process_getuid()";
+  if (expr.fn === "process.getgid" && expr.args.length === 0) return "runtime::process_getgid()";
+  if (expr.fn === "process.execPath" && expr.args.length === 0) return "runtime::process_exec_path()";
+  if (expr.fn === "process.arch" && expr.args.length === 0) return "runtime::process_arch()";
+  if (expr.fn === "process.versionsNode" && expr.args.length === 0) return "runtime::process_versions_node()";
+  if (expr.fn === "process.versionsOpenssl" && expr.args.length === 0) return "runtime::process_versions_openssl()";
+  if (expr.fn === "process.chdir" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::process_chdir(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "process.envGet" && expr.args.length === 1 && arg !== undefined) {
+    if (expr.type.kind !== "union") context.unsupported("process.envGet without an optional result union", expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (stringTag < 0 || undefinedTag < 0) context.unsupported("process.envGet result union shape", expr.loc);
+    const name = context.unionName(union.id);
+    return `match runtime::process_env_get(&(${context.emitExpr(arg)})) { Some(value) => ${name}::${context.unionVariant(stringTag)}(value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
+  if (expr.fn === "process.envSet" && expr.args.length === 2 &&
+      arg?.type.kind === "string" && secondArg?.type.kind === "string") {
+    return `runtime::process_env_set(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
+  if (expr.fn === "process.envUnset" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::process_env_unset(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "process.envPairs" && expr.args.length === 0 &&
+      expr.type.kind === "array" && expr.type.elem.kind === "string") {
+    return "runtime::process_env_pairs()";
+  }
+  if ((expr.fn === "process.stdoutWriteBytes" || expr.fn === "process.stderrWriteBytes") &&
+      expr.args.length === 2 && arg?.type.kind === "bytes" && arg.type.elem === "u8" &&
+      secondArg?.type.kind === "string") {
+    const target = expr.fn === "process.stdoutWriteBytes" ? "stdout" : "stderr";
+    return `runtime::process_${target}_write_bytes(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
+  if ((expr.fn === "process.stdoutWrite" || expr.fn === "process.stderrWrite") &&
+      expr.args.length === 1 && arg?.type.kind === "string") {
+    const target = expr.fn === "process.stdoutWrite" ? "stdout" : "stderr";
+    return `runtime::process_${target}_write(&(${context.emitExpr(arg)}))`;
+  }
+  return null;
+}

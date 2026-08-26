@@ -910,6 +910,7 @@ test.each([
   "2678-util-parseargs.ts",
   "2679-util-parseargs-cjs.cjs",
   "2694-path-win32-full.ts",
+  "2697-process-chdir.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
@@ -1240,7 +1241,7 @@ test("Rust Buffer and StringDecoder byte surfaces match Node byte-for-byte", asy
 test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-refusal-"));
   const sourcePath = join(dir, "unsupported.ts");
-  await writeFile(sourcePath, 'import { homedir } from "node:os";\nconsole.log(homedir());\n');
+  await writeFile(sourcePath, "console.log(process.umask());\n");
   const result = await compile(sourcePath, {
     outDir: dir,
     outPath: join(dir, "unsupported"),
