@@ -150,6 +150,23 @@
     }
 
     #[test]
+    fn string_to_number_matches_javascript_whole_span_grammar() {
+        assert_eq!(number_from_string(&string("\u{a0}\u{feff}  \n")), 0.0);
+        assert_eq!(number_from_string(&string("+.5")), 0.5);
+        assert_eq!(number_from_string(&string("5.e3")), 5000.0);
+        assert_eq!(number_from_string(&string("0x20000000000001")), 2_f64.powi(53));
+        assert_eq!(number_from_string(&string("0x20000000000002")), 2_f64.powi(53) + 2.0);
+        assert_eq!(number_from_string(&string("0xffffffffffffffff")), u64::MAX as f64);
+        assert_eq!(number_from_string(&string("2.5e-324")).to_bits(), 1);
+        assert_eq!(number_from_string(&string("2e-324")).to_bits(), 0);
+        assert!(number_from_string(&string("-0")).is_sign_negative());
+        assert!(number_from_string(&string("-0x10")).is_nan());
+        assert!(number_from_string(&string("1e")).is_nan());
+        assert!(number_from_string(&string("12px")).is_nan());
+        assert!(number_from_string(&string(&format!("0x{}", "f".repeat(300)))).is_infinite());
+    }
+
+    #[test]
     fn uri_codecs_match_ecmascript_sets_utf8_and_errors() {
         let unchanged = string("AZaz09-_.!~*'()");
         let encoded = string_encode_uri_component(&unchanged);
