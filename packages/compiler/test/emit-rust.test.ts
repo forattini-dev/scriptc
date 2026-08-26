@@ -593,6 +593,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "979-unions-optional-chaining.ts",
     "980-exceptions-basics.ts",
     "984-exceptions-finally.ts",
+    "991-process-exit.ts",
     "1002-json-parse-cast.ts",
     "1004-json-parse-errors.ts",
     "1005-json-nested.ts",

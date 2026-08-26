@@ -77,6 +77,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const message = context.nextTemporary();
     return `{ let ${kind} = ${context.emitExpr(arg)}; let ${code} = ${context.emitExpr(secondArg)}; let ${message} = ${context.emitExpr(thirdArg)}; runtime::throw_node_coded(${kind}, &${code}, &${message}) }`;
   }
+  if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::process_exit(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_number(${context.emitExpr(arg)})`;
   }

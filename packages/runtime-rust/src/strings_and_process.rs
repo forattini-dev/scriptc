@@ -658,6 +658,13 @@ pub fn process_pid() -> f64 {
     f64::from(std::process::id())
 }
 
+pub fn process_exit(code: f64) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code as i32)
+}
+
 fn process_status_id(prefix: &str, id_flag: &str) -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
