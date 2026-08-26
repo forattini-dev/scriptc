@@ -85,6 +85,8 @@ class RustEmitter {
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
   private usesProcessRejectionEvents = false;
+  private usesReadable = false;
+  private readonly readableReadShapes = new Map<string, RustClosureShape>();
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -141,6 +143,8 @@ class RustEmitter {
     isUsed: () => this.usesEventEmitter,
     usesProcessExitListeners: () => this.usesProcessExitListeners,
     usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
+    usesReadable: () => this.usesReadable,
+    readableReadShapes: this.readableReadShapes,
     dynTypeName: () => this.dynTypeName(),
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
@@ -155,6 +159,9 @@ class RustEmitter {
     needsClone: (type) => this.needsClone(type),
     rustString: (value) => this.rustString(value),
     rustType: (type, loc) => this.rustType(type, loc),
+    union: (id, loc) => this.union(id, loc),
+    unionName: (id) => this.unionName(id),
+    unionVariant: (tag) => this.unionVariant(tag),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncControlEmitter = new RustAsyncControlEmitter({
@@ -605,8 +612,8 @@ class RustEmitter {
       const node = value as Record<string, unknown>;
       if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("emitter.")) {
         this.usesEventEmitter = true;
-        if (node.fn === "emitter.on" || node.fn === "emitter.onDyn") {
-          const callback = (node.args as { type?: IrType }[] | undefined)?.[node.fn === "emitter.on" ? 2 : 3];
+        if (node.fn === "emitter.on" || node.fn === "emitter.onData" || node.fn === "emitter.onDyn") {
+          const callback = (node.args as { type?: IrType }[] | undefined)?.[node.fn === "emitter.onDyn" ? 3 : 2];
           if (callback?.type?.kind !== "func") this.unsupported("malformed EventEmitter listener IR");
           const shape = this.ensureClosureShape(callback.type);
           this.emitterListenerShapes.set(typeKey(callback.type), shape);
@@ -619,6 +626,13 @@ class RustEmitter {
           const shape = this.ensureClosureShape(result.elem);
           this.emitterSnapshotShapes.set(typeKey(result.elem), shape);
         }
+      }
+      if (node.kind === "libCall" && node.fn === "readable.new") {
+        this.usesEventEmitter = this.usesReadable = true;
+        const callback = (node.args as { type?: IrType }[] | undefined)?.[4];
+        if (callback?.type?.kind !== "func") this.unsupported("malformed Readable callback IR");
+        const shape = this.ensureClosureShape(callback.type);
+        this.readableReadShapes.set(typeKey(callback.type), shape);
       }
       if (node.kind === "libCall" && (node.fn === "process.onExit" || node.fn === "process.offExit")) {
         this.usesEventEmitter = true;
@@ -1147,7 +1161,6 @@ class RustEmitter {
   private classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string {
     return this.metadata.classAllocation(meta, args, loc);
   }
-
   private classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {
     return this.metadata.classFieldName(className, fieldName, loc);
   }
