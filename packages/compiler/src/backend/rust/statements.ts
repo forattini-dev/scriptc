@@ -366,10 +366,12 @@ class RustStatementEmitter {
 
   private emitRecordKeySet(stmt: Extract<IrStmt, { kind: "recordKeySet" }>): void {
     const shape = this.context.record(stmt.shapeId);
-    if (shape?.indexValue === undefined) {
+    if (shape === undefined) this.context.unsupported(`keyed write on unknown record '${stmt.shapeId}'`, stmt.loc);
+    const indexValue = shape.indexValue ?? shape.fields[0]?.type;
+    if (indexValue === undefined || (shape.indexValue === undefined &&
+      (stmt.overflowOnly === true || !shape.fields.every((field) => typeKey(field.type) === typeKey(indexValue))))) {
       this.context.unsupported(`keyed write on non-indexed record '${stmt.shapeId}'`, stmt.loc);
     }
-    const indexValue = shape.indexValue;
     if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(indexValue)) {
       this.context.unsupported(`keyed write types for record '${stmt.shapeId}'`, stmt.loc);
     }
@@ -377,6 +379,14 @@ class RustStatementEmitter {
     const key = this.context.nextTemporary();
     const value = this.context.nextTemporary();
     const bindings = `let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${key} = ${this.context.emitExpr(stmt.key)}; let ${value} = ${this.context.emitExpr(stmt.value)};`;
+    if (shape.indexValue === undefined) {
+      const declared = shape.fields.map((field, index) => {
+        const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
+        return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`;
+      }).join(" ");
+      this.context.line(`{ ${bindings} ${declared} else { runtime::throw_type_error(format!("Cannot add property '{}' to a fixed-shape object", ${key})); } }`);
+      return;
+    }
     if (shape.fields.length === 0) {
       this.context.line(`{ ${bindings} runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
       return;

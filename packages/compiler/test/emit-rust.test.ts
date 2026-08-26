@@ -903,6 +903,7 @@ test.each([
   "2462-qs-stringify.ts",
   "2463-qs-escape-unescape.ts",
   "2464-qs-require-forms.cjs",
+  "2470-mockable-module-shape.js",
   "2471-record-keyed-write-hasown.js",
   "2473-option-table-widths.js",
   "2485-inspect-circular-refs.ts",
@@ -934,6 +935,11 @@ test.each([
     result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
   ).toBe(true);
   if (!result.ok) return;
+  if (fixture === "2470-mockable-module-shape.js" && result.backend === "rust") {
+    expect(await readFile(result.sourcePath, "utf8")).toContain(
+      "Cannot add property '{}' to a fixed-shape object",
+    );
+  }
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
   const nodeArgs = await nodeCorpusArgs(entryPath);
   const [node, rust] = await Promise.all([
