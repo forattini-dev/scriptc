@@ -878,6 +878,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "path.join" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::path_join(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "path.win32Join" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_join(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "path.resolve" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::path_resolve(&(${context.emitExpr(arg)}))`;
   }

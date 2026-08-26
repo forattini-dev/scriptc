@@ -46,6 +46,7 @@ include!("strings_and_process.rs");
 include!("os.rs");
 include!("filesystem.rs");
 include!("child_process_and_paths.rs");
+include!("windows_paths.rs");
 include!("json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");

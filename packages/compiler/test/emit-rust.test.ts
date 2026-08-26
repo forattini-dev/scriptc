@@ -766,6 +766,7 @@ test.each([
   "1483-array-slice.ts",
   "1527-logical-mixed-operands.ts",
   "1528-delete-records-env.ts",
+  "1533-path-platform-namespaces.ts",
   "1541-union-keyed-reads.ts",
   "1546-union-element-reads.ts",
   "1563-string-raw-fold.ts",
