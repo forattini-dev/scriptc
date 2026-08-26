@@ -79,6 +79,16 @@ fn http_client_dispatch_error(request: &JsHttpClientRequest, error: JsError) {
     }
 }
 
+fn http_client_dispatch_close(request: &JsHttpClientRequest) {
+    let listeners = request.with_mut(|request| {
+        request.destroyed = true;
+        std::mem::take(&mut request.close_listeners)
+    });
+    for listener in listeners {
+        (listener.invoke)();
+    }
+}
+
 fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) {
     loop {
         let next = {
@@ -226,6 +236,7 @@ fn http_client_new(
     port: f64,
     path: &JsString,
     method: &JsString,
+    secure: bool,
     headers: &JsArray<JsString>,
     auto_end: bool,
     callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
@@ -238,17 +249,52 @@ fn http_client_new(
         port: port_number,
         path: path.clone(),
         method: method.clone(),
+        secure,
         headers: http_client_headers(headers),
         body: Vec::new(),
         sent: false,
         destroyed: false,
         response_listeners: Vec::new(),
         error_listeners: Vec::new(),
+        close_listeners: Vec::new(),
     });
     if let Some((invoke, trace)) = callback {
         request.with_mut(|request| {
             request.response_listeners.push(HttpResponseListener { invoke, trace, once: true });
         });
+    }
+    let error_request = request.clone();
+    let error_trace = request.clone();
+    net_socket_on_error(
+        &socket,
+        Rc::new(move |error| http_client_dispatch_error(&error_request, error)),
+        Rc::new(move |tracer| tracer.edge(&error_trace)),
+        false,
+    );
+    let close_request = request.clone();
+    let close_trace = request.clone();
+    net_socket_on_close(
+        &socket,
+        Rc::new(move || http_client_dispatch_close(&close_request)),
+        Rc::new(move |tracer| tracer.edge(&close_trace)),
+        true,
+    );
+    if secure {
+        let secure_request = request.clone();
+        let secure_socket = socket.clone();
+        let secure_trace = request.clone();
+        net_socket_on_connect(
+            &socket,
+            Rc::new(move || {
+                http_client_dispatch_error(
+                    &secure_request,
+                    error_new("Error", string("TLS transport is not implemented yet")),
+                );
+                net_socket_destroy(&secure_socket);
+            }),
+            Rc::new(move |tracer| tracer.edge(&secure_trace)),
+            true,
+        );
     }
     let connection = Rc::new(RefCell::new(HttpClientConnection {
         request: request.clone(),
@@ -289,7 +335,7 @@ pub fn http_client_request(
     headers: &JsArray<JsString>,
     auto_end: bool,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, headers, auto_end, None)
+    http_client_new(host, port, path, method, false, headers, auto_end, None)
 }
 
 pub fn http_client_request_callback(
@@ -303,7 +349,37 @@ pub fn http_client_request_callback(
     callback: Rc<dyn Fn(JsHttpRequest)>,
     trace: NetTrace,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, headers, auto_end, Some((callback, trace)))
+    http_client_new(host, port, path, method, false, headers, auto_end, Some((callback, trace)))
+}
+
+pub fn https_client_request(
+    host: &JsString,
+    port: f64,
+    path: &JsString,
+    method: &JsString,
+    _timeout: f64,
+    headers: &JsArray<JsString>,
+    auto_end: bool,
+    _reject_unauthorized: bool,
+    _ca: &JsString,
+) -> JsHttpClientRequest {
+    http_client_new(host, port, path, method, true, headers, auto_end, None)
+}
+
+pub fn https_client_request_callback(
+    host: &JsString,
+    port: f64,
+    path: &JsString,
+    method: &JsString,
+    _timeout: f64,
+    headers: &JsArray<JsString>,
+    auto_end: bool,
+    _reject_unauthorized: bool,
+    _ca: &JsString,
+    callback: Rc<dyn Fn(JsHttpRequest)>,
+    trace: NetTrace,
+) -> JsHttpClientRequest {
+    http_client_new(host, port, path, method, true, headers, auto_end, Some((callback, trace)))
 }
 
 fn http_client_url_parts(input: &JsString) -> (JsString, f64, JsString) {
@@ -331,6 +407,7 @@ pub fn http_client_request_url(
         port,
         &path,
         method,
+        false,
         &array_new(Vec::new()),
         auto_end,
         None,
@@ -350,6 +427,7 @@ pub fn http_client_request_url_callback(
         port,
         &path,
         method,
+        false,
         &array_new(Vec::new()),
         auto_end,
         Some((callback, trace)),
@@ -378,6 +456,19 @@ pub fn http_client_on_error(
     });
 }
 
+pub fn http_client_on_close(
+    request: &JsHttpClientRequest,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+    _once: bool,
+) {
+    request.with_mut(|request| {
+        if !request.destroyed {
+            request.close_listeners.push(HttpVoidListener { invoke: callback, trace });
+        }
+    });
+}
+
 pub fn http_client_write_str(request: &JsHttpClientRequest, value: &JsString) {
     request.with_mut(|request| {
         if !request.sent && !request.destroyed {
@@ -401,6 +492,9 @@ pub fn http_client_end(request: &JsHttpClientRequest) {
         }
         request.sent = true;
         let socket = request.socket.clone()?;
+        if request.secure {
+            return Some((socket, None));
+        }
         let mut head = format!("{} {} HTTP/1.1\r\n", request.method, request.path);
         if http_header_index(&request.headers, "host").is_none() {
             if request.port == 80 {
@@ -424,13 +518,15 @@ pub fn http_client_end(request: &JsHttpClientRequest) {
         head.push_str("\r\n");
         let mut output = head.into_bytes();
         output.append(&mut request.body);
-        Some((socket, output))
+        Some((socket, Some(output)))
     });
     let Some((socket, output)) = output else {
         return;
     };
-    net_socket_queue(&socket, output);
-    net_socket_end(&socket);
+    if let Some(output) = output {
+        net_socket_queue(&socket, output);
+        net_socket_end(&socket);
+    }
 }
 
 pub fn http_client_end_str(request: &JsHttpClientRequest, value: &JsString) {

@@ -96,6 +96,33 @@ function emitDataListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_socket_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitSocketErrorListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr, onceExpr] = expr.args;
+  const parameter = callbackType.params[0];
+  if (receiver?.type.kind !== "netSocket" || callbackExpr === undefined ||
+      onceExpr?.type.kind !== "bool" || callbackType.params.length > 1 ||
+      (parameter !== undefined && (parameter.kind !== "object" || parameter.className !== "%Error"))) {
+    context.unsupported("net.sockOnError shape", expr.loc);
+  }
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const argument = context.hasErrorClassRoots()
+    ? `${context.errorValueName()}::Builtin(sc_error)`
+    : "sc_error";
+  const dispatch = context.emitClosureDispatch(
+    callback,
+    callbackType,
+    parameter === undefined ? [] : [argument],
+    expr.loc,
+  );
+  const errorName = parameter === undefined ? "_sc_error" : "sc_error";
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_socket_on_error(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |${errorName}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+}
+
 function emitCloseBind(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -215,6 +242,17 @@ export function emitRustNetCall(
   if (expr.fn === "net.serverClose" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_close(&(${context.emitExpr(expr.args[0])}))`;
   }
+  if (expr.fn === "net.serverCloseCb" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "netServer") {
+    const callbackExpr = expr.args[1];
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func" || callbackType.params.length !== 0) {
+      context.unsupported("net.serverCloseCb shape", expr.loc);
+    }
+    const server = context.emitExpr(expr.args[0]);
+    return emitVoidCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::net_server_close_direct_callback(&(${server}), ${invoke}, ${trace});`);
+  }
   if (expr.fn === "net.serverCloseBind" && expr.args.length === 1) return emitCloseBind(expr, context);
   if (expr.fn === "net.serverSetCloseOverride" && expr.args.length === 2) {
     const callbackType = expr.args[1]?.type;
@@ -317,6 +355,11 @@ export function emitRustNetCall(
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("net.sockOnData callback", expr.loc);
     return emitDataListener(expr, callbackType, context);
+  }
+  if (expr.fn === "net.sockOnError" && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported("net.sockOnError callback", expr.loc);
+    return emitSocketErrorListener(expr, callbackType, context);
   }
   if ((expr.fn === "net.sockOnEnd" || expr.fn === "net.sockOnClose" || expr.fn === "net.sockOnConnect") &&
       expr.args.length === 3 && expr.args[0]?.type.kind === "netSocket" && expr.args[2]?.type.kind === "bool") {

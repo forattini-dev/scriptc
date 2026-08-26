@@ -128,12 +128,14 @@ pub struct HttpClientRequestData {
     port: u16,
     path: JsString,
     method: JsString,
+    secure: bool,
     headers: Vec<(JsString, JsString)>,
     body: Vec<u8>,
     sent: bool,
     destroyed: bool,
     response_listeners: Vec<HttpResponseListener>,
     error_listeners: Vec<HttpErrorListener>,
+    close_listeners: Vec<HttpVoidListener>,
 }
 
 impl Trace for HttpClientRequestData {
@@ -145,6 +147,9 @@ impl Trace for HttpClientRequestData {
             (listener.trace)(tracer);
         }
         for listener in &self.error_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in &self.close_listeners {
             (listener.trace)(tracer);
         }
     }
@@ -159,6 +164,7 @@ impl ClearEdges for HttpClientRequestData {
         self.destroyed = true;
         self.response_listeners.clear();
         self.error_listeners.clear();
+        self.close_listeners.clear();
     }
 }
 

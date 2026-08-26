@@ -55,6 +55,13 @@ struct NetDataListener {
     once: bool,
 }
 
+#[derive(Clone)]
+struct NetErrorListener {
+    invoke: Rc<dyn Fn(JsError)>,
+    trace: NetTrace,
+    once: bool,
+}
+
 struct NetWrite {
     bytes: Vec<u8>,
     callback: Option<NetVoidListener>,
@@ -62,6 +69,7 @@ struct NetWrite {
 
 pub struct NetSocketData {
     stream: Option<std::net::TcpStream>,
+    connect_rx: Option<std::sync::mpsc::Receiver<Result<std::net::TcpStream, String>>>,
     server: Option<JsNetServer>,
     destroyed: bool,
     writable: bool,
@@ -77,6 +85,7 @@ pub struct NetSocketData {
     end_listeners: Vec<NetVoidListener>,
     close_listeners: Vec<NetVoidListener>,
     connect_listeners: Vec<NetVoidListener>,
+    error_listeners: Vec<NetErrorListener>,
 }
 
 impl Trace for NetSocketData {
@@ -96,6 +105,9 @@ impl Trace for NetSocketData {
         for listener in &self.connect_listeners {
             (listener.trace)(tracer);
         }
+        for listener in &self.error_listeners {
+            (listener.trace)(tracer);
+        }
         for write in &self.write_queue {
             if let Some(listener) = &write.callback {
                 (listener.trace)(tracer);
@@ -110,6 +122,7 @@ impl Trace for NetSocketData {
 impl ClearEdges for NetSocketData {
     fn clear_edges(&mut self) {
         self.stream = None;
+        self.connect_rx = None;
         self.server = None;
         self.destroyed = true;
         self.writable = false;
@@ -124,6 +137,7 @@ impl ClearEdges for NetSocketData {
         self.end_listeners.clear();
         self.close_listeners.clear();
         self.connect_listeners.clear();
+        self.error_listeners.clear();
     }
 }
 
@@ -180,6 +194,7 @@ enum NetTask {
     Listening(JsNetServer),
     Close(JsNetServer),
     SocketConnect(JsNetSocket),
+    SocketError(JsNetSocket, JsError),
     SocketEnd(JsNetSocket),
     SocketClose(JsNetSocket),
     Callback(NetVoidListener),
@@ -208,6 +223,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         .unwrap_or_else(|error| throw_error(format!("connect {}", fs_error_code(&error))));
     let socket = Gc::new(NetSocketData {
         stream: Some(stream),
+        connect_rx: None,
         server,
         destroyed: false,
         writable: true,
@@ -223,6 +239,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         end_listeners: Vec::new(),
         close_listeners: Vec::new(),
         connect_listeners: Vec::new(),
+        error_listeners: Vec::new(),
     });
     NET_SOCKETS.with(|sockets| sockets.borrow_mut().push(socket.clone()));
     socket
@@ -405,14 +422,34 @@ pub fn net_server_close(server: &JsNetServer) {
 
 pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
     let port = net_port(port);
-    let stream = std::net::TcpStream::connect((host.as_ref(), port))
-        .unwrap_or_else(|error| throw_error(format!("connect {}", fs_error_code(&error))));
-    let socket = net_socket_new(stream, None);
-    NET_TASKS.with(|tasks| {
-        tasks
-            .borrow_mut()
-            .push_back(NetTask::SocketConnect(socket.clone()))
+    let host = host.to_string();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::net::TcpStream::connect((host.as_str(), port))
+            .map_err(|error| format!("connect {} {host}:{port}", fs_error_code(&error)));
+        let _ = sender.send(result);
     });
+    let socket = Gc::new(NetSocketData {
+        stream: None,
+        connect_rx: Some(receiver),
+        server: None,
+        destroyed: false,
+        writable: true,
+        flowing: false,
+        read_ended: false,
+        end_requested: false,
+        close_emitted: false,
+        bytes_written: 0,
+        write_queue: VecDeque::new(),
+        write_offset: 0,
+        finish_listeners: Vec::new(),
+        data_listeners: Vec::new(),
+        end_listeners: Vec::new(),
+        close_listeners: Vec::new(),
+        connect_listeners: Vec::new(),
+        error_listeners: Vec::new(),
+    });
+    NET_SOCKETS.with(|sockets| sockets.borrow_mut().push(socket.clone()));
     socket
 }
 
@@ -493,6 +530,23 @@ pub fn net_socket_on_connect(
 ) {
     net_socket_on_void(socket, callback, trace, once, |socket| {
         &mut socket.connect_listeners
+    });
+}
+
+pub fn net_socket_on_error(
+    socket: &JsNetSocket,
+    callback: Rc<dyn Fn(JsError)>,
+    trace: NetTrace,
+    once: bool,
+) {
+    socket.with_mut(|socket| {
+        if !socket.destroyed {
+            socket.error_listeners.push(NetErrorListener {
+                invoke: callback,
+                trace,
+                once,
+            });
+        }
     });
 }
 
@@ -624,6 +678,7 @@ pub fn net_socket_destroy(socket: &JsNetSocket) {
         if let Some(stream) = socket.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
+        socket.connect_rx = None;
         socket.destroyed = true;
         socket.writable = false;
         socket.write_queue.clear();
@@ -689,6 +744,20 @@ fn net_dispatch_task(task: NetTask) {
                 (listener.invoke)();
             }
         }
+        NetTask::SocketError(socket, error) => {
+            let listeners = socket.with_mut(|socket| {
+                let listeners = socket.error_listeners.clone();
+                socket.error_listeners.retain(|listener| !listener.once);
+                listeners
+            });
+            if listeners.is_empty() {
+                throw_value(error);
+            }
+            for listener in listeners {
+                (listener.invoke)(error.clone());
+            }
+            net_socket_destroy(&socket);
+        }
         NetTask::SocketEnd(socket) => {
             let (listeners, should_close) = socket.with_mut(|socket| {
                 socket.data_listeners.clear();
@@ -718,6 +787,7 @@ fn net_dispatch_task(task: NetTask) {
                 socket.data_listeners.clear();
                 socket.end_listeners.clear();
                 socket.connect_listeners.clear();
+                socket.error_listeners.clear();
                 (
                     std::mem::take(&mut socket.close_listeners),
                     socket.server.take(),
@@ -766,6 +836,51 @@ fn net_accept_one() -> bool {
     true
 }
 
+fn net_socket_connect_one() -> bool {
+    let task = NET_SOCKETS.with(|sockets| {
+        sockets.borrow().iter().find_map(|candidate| {
+            candidate.with_mut(|socket| {
+                let result = socket.connect_rx.as_ref()?.try_recv();
+                match result {
+                    Ok(Ok(stream)) => {
+                        socket.connect_rx = None;
+                        match stream.set_nonblocking(true) {
+                            Ok(()) => {
+                                socket.stream = Some(stream);
+                                Some(NetTask::SocketConnect(candidate.clone()))
+                            }
+                            Err(error) => Some(NetTask::SocketError(
+                                candidate.clone(),
+                                error_new("Error", string(&format!("connect {}", fs_error_code(&error)))),
+                            )),
+                        }
+                    }
+                    Ok(Err(message)) => {
+                        socket.connect_rx = None;
+                        Some(NetTask::SocketError(
+                            candidate.clone(),
+                            error_new("Error", string(&message)),
+                        ))
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        socket.connect_rx = None;
+                        Some(NetTask::SocketError(
+                            candidate.clone(),
+                            error_new("Error", string("connect worker stopped")),
+                        ))
+                    }
+                }
+            })
+        })
+    });
+    let Some(task) = task else {
+        return false;
+    };
+    NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(task));
+    true
+}
+
 fn net_socket_flush_one() -> bool {
     enum Flush {
         Idle,
@@ -778,6 +893,9 @@ fn net_socket_flush_one() -> bool {
         sockets.borrow().iter().find_map(|candidate| {
             let outcome = candidate.with_mut(|socket| {
                 if socket.destroyed || !socket.writable {
+                    return Flush::Idle;
+                }
+                if socket.connect_rx.is_some() {
                     return Flush::Idle;
                 }
                 if let Some(write) = socket.write_queue.front() {
@@ -866,6 +984,9 @@ fn net_socket_read_one() -> bool {
                 if socket.destroyed || socket.read_ended {
                     return None;
                 }
+                if socket.connect_rx.is_some() {
+                    return None;
+                }
                 let Some(stream) = socket.stream.as_mut() else {
                     return Some(ReadEvent::Close(candidate.clone()));
                 };
@@ -937,7 +1058,7 @@ fn net_dispatch_one() -> bool {
         net_dispatch_task(task);
         return true;
     }
-    net_accept_one() || net_socket_flush_one() || net_socket_read_one()
+    net_accept_one() || net_socket_connect_one() || net_socket_flush_one() || net_socket_read_one()
 }
 
 fn net_pending() -> bool {

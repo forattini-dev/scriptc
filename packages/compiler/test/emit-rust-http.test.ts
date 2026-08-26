@@ -13,6 +13,7 @@ test.each([
   "1750-http-agent-options.ts",
   "1781-http-server-shapes.cjs",
   "2644-http-client-url-argument.ts",
+  "2672-http-request-response-callback.ts",
   "2696-http-server-net-roundtrip.ts",
   "2689-http-server-timeout-properties.ts",
 ])("Rust HTTP corpus matches Node: %s", async (fixtureName) => {

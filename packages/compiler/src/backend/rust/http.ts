@@ -133,6 +133,22 @@ function emitClientErrorListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_client_on_error(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |${errorName}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitClientCloseListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr, onceExpr] = expr.args;
+  if (receiver?.type.kind !== "httpClientReq" || callbackExpr === undefined ||
+      onceExpr?.type.kind !== "bool" || callbackType.params.length !== 0) {
+    context.unsupported("http.clientOnClose shape", expr.loc);
+  }
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_client_on_close(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+}
+
 export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -260,6 +276,26 @@ export function emitRustHttpCall(
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::http_client_request_callback(${args}, ${invoke}, ${trace})`);
   }
+  if ((expr.fn === "https.request" || expr.fn === "https.requestCb") &&
+      (expr.args.length === 9 || expr.args.length === 10)) {
+    const [host, port, path, method, timeout, headers, autoEnd, reject, ca, callbackExpr] = expr.args;
+    if (host?.type.kind !== "string" || port?.type.kind !== "f64" || path?.type.kind !== "string" ||
+        method?.type.kind !== "string" || timeout?.type.kind !== "f64" || headers?.type.kind !== "array" ||
+        headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool" || reject?.type.kind !== "bool" ||
+        ca?.type.kind !== "string") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const args = `&(${context.emitExpr(host)}), ${context.emitExpr(port)}, &(${context.emitExpr(path)}), &(${context.emitExpr(method)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(headers)}), ${context.emitExpr(autoEnd)}, ${context.emitExpr(reject)}, &(${context.emitExpr(ca)})`;
+    if (expr.fn === "https.request") {
+      return `runtime::https_client_request(${args})`;
+    }
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("https.requestCb callback", expr.loc);
+    }
+    return emitResponseCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::https_client_request_callback(${args}, ${invoke}, ${trace})`);
+  }
   if (expr.fn === "http.clientOnResponse" && expr.args.length === 3) {
     const [receiver, callbackExpr, once] = expr.args;
     const callbackType = callbackExpr?.type;
@@ -274,6 +310,11 @@ export function emitRustHttpCall(
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.clientOnError callback", expr.loc);
     return emitClientErrorListener(expr, callbackType, context);
+  }
+  if (expr.fn === "http.clientOnClose" && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported("http.clientOnClose callback", expr.loc);
+    return emitClientCloseListener(expr, callbackType, context);
   }
   if ((expr.fn === "http.clientWrite" || expr.fn === "http.clientEndStr") &&
       expr.args.length === 2 && expr.args[0]?.type.kind === "httpClientReq" &&
