@@ -44,7 +44,7 @@ export interface RustExpressionContext {
   emitEventEmitterDowncast(value: string, source: IrType, target: IrType, loc: SrcLoc): string | null;
   emitEventEmitterInstanceOf(value: string, source: IrType, target: string, loc: SrcLoc): string | null;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
-  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string, liveRef?: boolean): string;
   emitFileHandleTransferPromise(expr: Extract<IrExpr, { kind: "libCall" }>): string;
   emitFsRenameCallback(expr: Extract<IrExpr, { kind: "libCall" }>): string;
   emitMapIntrinsic(expr: Extract<IrExpr, { kind: "mapIntrinsic" }>): string;
@@ -312,7 +312,7 @@ export class RustExpressionEmitter {
         return `{ let ${object}: runtime::JsMap<runtime::JsString, ${this.context.dynTypeName()}> = runtime::map_new(); ${fields} ${this.context.dynTypeName()}::Object(${object}) }`;
       }
       case "dynFrom":
-        return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "");
+        return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
       case "dynCall": {
         if ((expr.spreads?.length ?? 0) > 0) this.context.unsupported("dynamic call spreads", expr.loc);
         const callee = this.context.nextName("sc_rt");

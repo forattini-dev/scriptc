@@ -5,6 +5,7 @@
 /// traced array/record object was released.
 pub fn finish() {
     fs_renames_finish();
+    live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();
     TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());

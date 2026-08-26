@@ -25,6 +25,7 @@ pub type JsString = Rc<str>;
 include!("regex.rs");
 include!("clock_and_date.rs");
 include!("heap.rs");
+include!("live_refs.rs");
 include!("event_loop.rs");
 include!("promises.rs");
 include!("generators.rs");
@@ -52,6 +53,7 @@ include!("json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");
 include!("network.rs");
+include!("util_parse_args.rs");
 
 #[cfg(test)]
 mod tests {

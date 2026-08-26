@@ -175,6 +175,51 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`impl runtime::ParseArgsValue for ${name} {`);
+    this.context.pushIndent();
+    this.context.line("fn parse_args_kind(&self) -> runtime::ParseArgsKind { match self {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined => runtime::ParseArgsKind::Undefined,`);
+    this.context.line(`${name}::Null => runtime::ParseArgsKind::Null,`);
+    this.context.line(`${name}::Number(..) => runtime::ParseArgsKind::Number,`);
+    this.context.line(`${name}::Boolean(..) => runtime::ParseArgsKind::Boolean,`);
+    this.context.line(`${name}::String(..) => runtime::ParseArgsKind::String,`);
+    this.context.line(`${name}::Array(..) => runtime::ParseArgsKind::Array,`);
+    this.context.line(`${name}::Object(..) => runtime::ParseArgsKind::Object,`);
+    this.context.line("_ => runtime::ParseArgsKind::Other,");
+    this.context.popIndent();
+    this.context.line("} }");
+    this.context.line(`fn parse_args_bool(&self) -> Option<bool> { if let ${name}::Boolean(value) = self { Some(*value) } else { None } }`);
+    this.context.line(`fn parse_args_number(&self) -> Option<f64> { if let ${name}::Number(value) = self { Some(*value) } else { None } }`);
+    this.context.line(`fn parse_args_string(&self) -> Option<runtime::JsString> { if let ${name}::String(value) = self { Some(value.clone()) } else { None } }`);
+    this.context.line(`fn parse_args_array_len(&self) -> Option<usize> { if let ${name}::Array(value) = self { Some(runtime::array_len(value) as usize) } else { None } }`);
+    this.context.line(`fn parse_args_array_get(&self, index: usize) -> Option<Self> { if let ${name}::Array(value) = self { (index < runtime::array_len(value) as usize).then(|| runtime::array_get(value, index as f64)) } else { None } }`);
+    this.context.line(`fn parse_args_array_push(&self, item: Self) { let ${name}::Array(value) = self else { unreachable!("scriptc: parseArgs push target is not an array") }; runtime::array_push(value, item); }`);
+    this.context.line(`fn parse_args_object_entries(&self) -> Option<Vec<(runtime::JsString, Self)>> { if let ${name}::Object(value) = self { Some(runtime::map_string_entries_js_order(value)) } else { None } }`);
+    this.context.line(`fn parse_args_object_set(&self, key: runtime::JsString, field: Self) { let ${name}::Object(value) = self else { unreachable!("scriptc: parseArgs set target is not an object") }; runtime::map_set_by(value, key, field, |left, right| left.as_ref() == right.as_ref()); }`);
+    this.context.line(`fn parse_args_undefined() -> Self { ${name}::Undefined }`);
+    this.context.line(`fn parse_args_number_value(value: f64) -> Self { ${name}::Number(value) }`);
+    this.context.line(`fn parse_args_bool_value(value: bool) -> Self { ${name}::Boolean(value) }`);
+    this.context.line(`fn parse_args_string_value(value: runtime::JsString) -> Self { ${name}::String(value) }`);
+    this.context.line(`fn parse_args_array_value() -> Self { ${name}::Array(runtime::array_new(Vec::new())) }`);
+    this.context.line(`fn parse_args_object_value() -> Self { ${name}::Object(runtime::map_new()) }`);
+    this.context.line("fn parse_args_specific_type(&self) -> String { sc_dyn_specific_type(self) }");
+    this.context.line("fn parse_args_inspect_lite(&self) -> String { match self {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined => "undefined".to_owned(),`);
+    this.context.line(`${name}::Null => "null".to_owned(),`);
+    this.context.line(`${name}::Number(value) => runtime::display_number(*value),`);
+    this.context.line(`${name}::Boolean(value) => runtime::display_bool(*value),`);
+    this.context.line(`${name}::String(value) => format!("'{}'", value),`);
+    this.context.line(`${name}::Array(..) => "[ ... ]".to_owned(),`);
+    this.context.line(`${name}::Object(..) => "{ ... }".to_owned(),`);
+    this.context.line(`${name}::Bytes(..) => "<Buffer ...>".to_owned(),`);
+    this.context.line("_ => \"[object]\".to_owned(),");
+    this.context.popIndent();
+    this.context.line("} }");
+    this.context.line("fn parse_args_display(&self) -> String { sc_dyn_to_string(self).to_string() }");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_deep_copy(value: &${name}) -> ${name} {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -692,6 +737,7 @@ export class RustDynamicEmitter {
     this.context.line('runtime::throw_type_error("Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned());');
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("if !what.is_empty() { runtime::throw_type_error(what.to_string()); }");
     this.context.line("let description = match source {");
     this.context.pushIndent();
     this.context.line(`${name}::Undefined => "undefined".to_owned(),`);
@@ -995,7 +1041,7 @@ export class RustDynamicEmitter {
     return this.emitDynFromValue(type, value, loc);
   }
 
-  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = ""): string {
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     const name = this.context.dynTypeName();
     switch (type.kind) {
       case "dyn": return value;
@@ -1004,7 +1050,7 @@ export class RustDynamicEmitter {
       case "string": return `${name}::String(${value})`;
       case "bytes": {
         if (type.elem !== "u8") this.context.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
-        return `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
+        return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
       }
       case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
@@ -1026,9 +1072,9 @@ export class RustDynamicEmitter {
         const element = this.emitDynFromValue(
           type.elem,
           `runtime::array_get(&${source}, ${index})`,
-          loc,
+          loc, "", liveRef,
         );
-        return `{ let ${source} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); let mut ${index} = 0.0; while ${index} < runtime::array_len(&${source}) { runtime::array_push(&${output}, ${element}); ${index} += 1.0; } ${name}::Array(${output}) }`;
+        return `{ let ${source} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); let mut ${index} = 0.0; while ${index} < runtime::array_len(&${source}) { runtime::array_push(&${output}, ${element}); ${index} += 1.0; } ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${source}); ` : ""}${name}::Array(${output}) }`;
       }
       case "union": {
         const union = this.context.union(type.unionId, loc);
@@ -1036,9 +1082,9 @@ export class RustDynamicEmitter {
         const arms = union.arms.map((arm, tag) => {
           const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
           if (this.context.isUnit(arm)) {
-            return `${variant} => ${this.emitDynFromValue(arm, "()", loc)}`;
+            return `${variant} => ${this.emitDynFromValue(arm, "()", loc, "", liveRef)}`;
           }
-          return `${variant}(payload) => ${this.emitDynFromValue(arm, "payload", loc)}`;
+          return `${variant}(payload) => ${this.emitDynFromValue(arm, "payload", loc, "", liveRef)}`;
         }).join(", ");
         return `{ let ${unionValue} = ${value}; match ${unionValue} { ${arms} } }`;
       }
@@ -1055,7 +1101,7 @@ export class RustDynamicEmitter {
       case "record": {
         const shape = this.context.records.get(type.shapeId);
         if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
-          return `sc_dyn_deep_copy(&${name}::Object(${value}))`;
+          return liveRef ? `{ let source = ${value}; let mirror = match sc_dyn_deep_copy(&${name}::Object(source.clone())) { ${name}::Object(value) => value, _ => unreachable!() }; runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Object(mirror) }` : `sc_dyn_deep_copy(&${name}::Object(${value}))`;
         }
         if (shape?.indexValue !== undefined && shape.fields.length === 0) {
           const source = this.context.nextTemporary();
@@ -1064,9 +1110,9 @@ export class RustDynamicEmitter {
           const field = this.emitDynFromValue(
             shape.indexValue,
             `runtime::map_iter_value(&${source}, ${index})`,
-            loc,
+            loc, "", liveRef,
           );
-          return `{ let ${source} = ${value}; let ${output}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${output}, key, ${field}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; } ${name}::Object(${output}) }`;
+          return `{ let ${source} = ${value}; let ${output}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${output}, key, ${field}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; } ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${source}); ` : ""}${name}::Object(${output}) }`;
         }
         if (shape === undefined || shape.indexValue !== undefined) {
           this.context.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
@@ -1081,10 +1127,10 @@ export class RustDynamicEmitter {
           const fieldValue = this.context.isEdgeValue(field.type)
             ? `${stored}.as_ref().expect("scriptc: cleared live dynamic record field").clone()`
             : this.context.needsClone(field.type) ? `${stored}.clone()` : stored;
-          const dynamic = this.emitDynFromValue(field.type, fieldValue, loc);
+          const dynamic = this.emitDynFromValue(field.type, fieldValue, loc, "", liveRef);
           return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
         }).join(" ");
-        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} }); ${name}::Object(${object}) }`;
+        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${object}.identity(), ${record}); ` : ""}${name}::Object(${object}) }`;
       }
       default:
         this.context.unsupported(`dynamic boxing from '${type.kind}'`, loc);
@@ -1100,7 +1146,7 @@ export class RustDynamicEmitter {
       case "bytes": {
         if (type.elem !== "u8") this.context.unsupported(`dynamic checked cast to bytes<${type.elem}>`, loc);
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) => runtime::bytes_copy(&bytes), value => sc_dyn_check_fail("bytes", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or_else(|| runtime::bytes_copy(&bytes)), value => sc_dyn_check_fail("bytes", &value), } }`;
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
       case "object": {
@@ -1133,14 +1179,15 @@ export class RustDynamicEmitter {
           const shape = this.context.records.get(type.shapeId);
           if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
             const name = this.context.dynTypeName();
-            return `{ let value = ${value}; match &value { ${name}::Object(..) => match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }, _ => sc_dyn_check_fail("object", &value), } }`;
+            return `{ let value = ${value}; match &value { ${name}::Object(object) => runtime::live_dyn_ref_get(object.identity()).unwrap_or_else(|| match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }), _ => sc_dyn_check_fail("object", &value), } }`;
           }
         }
         if (!this.context.isRustJsonCompatible(type)) {
           this.context.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
         }
         const rustType = this.context.rustType(type, loc);
-        return `{ let value = ${value}; let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message)) }`;
+        const live = type.kind === "array" ? `${this.context.dynTypeName()}::Array(mirror)` : `${this.context.dynTypeName()}::Object(mirror)`;
+        return `{ let value = ${value}; let live: Option<${rustType}> = match &value { ${live} => runtime::live_dyn_ref_get(mirror.identity()), _ => None }; live.unwrap_or_else(|| { let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message)) }) }`;
       }
       default:
         this.context.unsupported(`dynamic checked cast to '${type.kind}'`, loc);

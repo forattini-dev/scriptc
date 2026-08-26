@@ -907,6 +907,8 @@ test.each([
   "2654-top-level-await-unrelated-rejection.ts",
   "2664-top-level-await-same-checkpoint-rejection.ts",
   "2665-top-level-await-unhandled-listener-liveness.ts",
+  "2678-util-parseargs.ts",
+  "2679-util-parseargs-cjs.cjs",
   "2694-path-win32-full.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));

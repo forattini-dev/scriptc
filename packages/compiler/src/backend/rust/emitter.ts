@@ -287,7 +287,7 @@ class RustEmitter {
     emitEventEmitterInstanceOf: (value, source, target, loc) =>
       this.eventEmitter.emitInstanceOf(value, source, target, loc),
     emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
-    emitDynFromValue: (type, value, loc, functionName) => this.emitDynFromValue(type, value, loc, functionName),
+    emitDynFromValue: (type, value, loc, functionName, liveRef) => this.emitDynFromValue(type, value, loc, functionName, liveRef),
     emitFileHandleTransferPromise: (expr) => this.emitFileHandleTransferPromise(expr),
     emitFsRenameCallback: (expr) => this.emitFsRenameCallback(expr),
     emitMapIntrinsic: (expr) => this.emitMapIntrinsic(expr),
@@ -415,8 +415,8 @@ class RustEmitter {
     setCurrentAsyncResult: (result) => { this.currentAsyncResult = result; },
     setCurrentAsyncLocals: (locals) => { this.currentAsyncLocals = locals; },
     emitDynamicDefinition: () => this.dynamicEmitter.emitDynamicDefinition(),
-    emitDynFromValue: (type, value, loc, functionName) =>
-      this.dynamicEmitter.emitDynFromValue(type, value, loc, functionName),
+    emitDynFromValue: (type, value, loc, functionName, liveRef) =>
+      this.dynamicEmitter.emitDynFromValue(type, value, loc, functionName, liveRef),
     emitDynCheckValue: (type, value, loc) => this.dynamicEmitter.emitDynCheckValue(type, value, loc),
     emitAsyncStatements: (statements, onComplete) => this.emitAsyncStatements(statements, onComplete),
     emitExpr: (expr) => this.emitExpr(expr),
@@ -820,8 +820,8 @@ class RustEmitter {
 
   private emitDynamicDefinition(): void { this.definitionEmitter.emitDynamicDefinition(); }
 
-  private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = ""): string {
-    return this.definitionEmitter.emitDynFromValue(type, value, loc, functionName);
+  private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
+    return this.definitionEmitter.emitDynFromValue(type, value, loc, functionName, liveRef);
   }
 
   private emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {

@@ -6,6 +6,10 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "util.parseArgs" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    return `runtime::util_parse_args(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";
   if (expr.fn === "dyn.defineProps" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
@@ -37,6 +41,27 @@ export function emitRustDynamicLibCall(
     const pack = context.nextTemporary();
     const source = context.nextTemporary();
     return `{ let ${pack} = ${context.emitExpr(arg)}; let ${source} = ${context.emitExpr(secondArg)}; sc_dyn_pack_push_spread(&${pack}, &${source}, &runtime::empty_string(), true); () }`;
+  }
+  if (expr.fn === "dyn.iterPack" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.type.kind === "dyn") {
+    const source = context.nextTemporary();
+    const what = context.nextTemporary();
+    const pack = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${source} = ${context.emitExpr(arg)}; let ${what} = ${context.emitExpr(secondArg)}; let ${pack} = ${dyn}::Array(runtime::array_new(Vec::new())); sc_dyn_pack_push_spread(&${pack}, &${source}, &${what}, true); ${pack} }`;
+  }
+  if (expr.fn === "dyn.arrLen" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "f64") {
+    const value = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${context.emitExpr(arg)}; match &${value} { ${dyn}::Array(array) => runtime::array_len(array), _ => 0.0 } }`;
+  }
+  if (expr.fn === "dyn.arrAt" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "f64" && expr.type.kind === "dyn") {
+    const value = context.nextTemporary();
+    const index = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${index} = ${context.emitExpr(secondArg)}; match &${value} { ${dyn}::Array(array) if ${index} >= 0.0 && ${index} < runtime::array_len(array) => runtime::array_get(array, ${index}), _ => ${dyn}::Undefined } }`;
   }
   if (expr.fn === "dyn.assignAll" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "dyn") {

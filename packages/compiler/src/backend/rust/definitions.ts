@@ -34,7 +34,7 @@ export interface RustDefinitionContext {
   setCurrentAsyncResult(result: string | null): void;
   setCurrentAsyncLocals(locals: Set<string> | null): void;
   emitDynamicDefinition(): void;
-  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string, liveRef?: boolean): string;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
   assignmentExpr(id: string, value: string, loc: SrcLoc): string;
@@ -216,8 +216,8 @@ export class RustDefinitionEmitter {
     this.context.emitDynamicDefinition();
   }
 
-  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = ""): string {
-    return this.context.emitDynFromValue(type, value, loc, functionName);
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
+    return this.context.emitDynFromValue(type, value, loc, functionName, liveRef);
   }
 
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
