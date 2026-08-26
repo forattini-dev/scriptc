@@ -832,6 +832,7 @@ test.each([
   "2015-generators-yieldstar.ts",
   "2016-generators-rc-stress.ts",
   "2017-generators-async.ts",
+  "2018-generators-uncaught.ts",
   "2019-generators-loops.ts",
   "2042-any-flow-loops.ts",
   "2053-typeof-static-fold.ts",
@@ -877,7 +878,17 @@ test.each([
     runToExit(process.execPath, nodeArgs, env),
     runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
-  expect(rust, fixture).toEqual(node);
+  const directive = (await readFile(entryPath, "utf8")).split("\n", 2)
+    .map((line) => /^\/\/ @exit:\s*(\d+)\s*$/u.exec(line)?.[1])
+    .find((value) => value !== undefined);
+  if (directive === undefined || Number(directive) === 0) {
+    expect(rust, fixture).toEqual(node);
+  } else {
+    expect(rust.stdout, fixture).toBe(node.stdout);
+    expect(node.exitCode, fixture).toBe(Number(directive));
+    expect(rust.exitCode, fixture).toBe(Number(directive));
+    expect(rust.stderr, fixture).not.toContain("Rust heap object(s) still live");
+  }
 }, 240_000);
 
 test.each([
