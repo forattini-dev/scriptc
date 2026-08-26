@@ -854,6 +854,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "buffer.isEncoding" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::buffer_is_encoding(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "text.decode" && expr.args.length === 1 && arg?.type.kind === "bytes" && arg.type.elem === "u8") {
+    return `runtime::text_decode(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "text.decodeLegacy" && expr.args.length === 2 &&
+    arg?.type.kind === "bytes" && arg.type.elem === "u8" && expr.args[1]?.type.kind === "f64") {
+    return `runtime::text_decode_legacy(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])})`;
+  }
   if ((expr.fn === "strdec.write" || expr.fn === "strdec.next") && expr.args.length === 3 &&
     arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
     const encoding = context.nextTemporary();

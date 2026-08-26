@@ -9,6 +9,40 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const output = resolve(root, "packages/runtime/src/scr_text_decoder_data.h");
+const rustOutput = resolve(root, "packages/runtime-rust/data/text-decoder.bin");
+
+function writeRustBinary(tables, ranges) {
+  const binary = Buffer.alloc(tables.length * 2 + ranges.length * 12);
+  let offset = 0;
+  for (const value of tables) {
+    binary.writeUInt16LE(value & 0xffff, offset);
+    offset += 2;
+  }
+  for (const { start, end, cp } of ranges) {
+    binary.writeUInt32LE(start, offset);
+    binary.writeUInt32LE(end, offset + 4);
+    binary.writeUInt32LE(cp, offset + 8);
+    offset += 12;
+  }
+  writeFileSync(rustOutput, binary);
+}
+
+if (process.argv.includes("--rust-from-header")) {
+  const header = readFileSync(output, "utf8");
+  const tableText = header.slice(header.indexOf("static const uint16_t"), header.indexOf("typedef struct"));
+  const tables = [...tableText.matchAll(/0x([0-9a-f]+)/g)].map((match) => Number.parseInt(match[1], 16));
+  const ranges = [...header.matchAll(/\{ (\d+)u, (\d+)u, 0x([0-9a-f]+)u \}/g)].map((match) => ({
+    start: Number(match[1]),
+    end: Number(match[2]),
+    cp: Number.parseInt(match[3], 16),
+  }));
+  if (tables.length !== 84966 || ranges.length === 0) {
+    throw new Error(`unexpected committed TextDecoder data shape (${tables.length} tables, ${ranges.length} ranges)`);
+  }
+  writeRustBinary(tables, ranges);
+  console.log(`wrote ${rustOutput} from the committed C oracle (${ranges.length} gb18030 ranges)`);
+  process.exit(0);
+}
 
 const pinnedNodeVersion = readFileSync(resolve(root, ".node-version"), "utf8").trim();
 if (process.versions.node !== pinnedNodeVersion) {
@@ -86,6 +120,7 @@ const chunks = [
   `#define SCR_TD_SINGLE_COUNT ${singleByteNames.length}`,
   "static const uint16_t scr_td_single[SCR_TD_SINGLE_COUNT][128] = {",
 ];
+const binaryTables = [];
 
 for (const label of singleByteNames) {
   const decoder = new TextDecoder(label);
@@ -94,6 +129,7 @@ for (const label of singleByteNames) {
     if (points.length !== 1) throw new Error(`${label} byte ${hex(i + 0x80, 2)} did not decode once`);
     return points[0];
   });
+  binaryTables.push(...values);
   chunks.push(`  /* ${label} */ {`, emitRows(values, 4, 12, "    "), "  },");
 }
 chunks.push("};", "");
@@ -103,6 +139,7 @@ const gb = denseTable("gb18030", 126 * 190, (pointer) => {
   const trail = pointer % 190;
   return [lead, trail + (trail < 0x3f ? 0x40 : 0x41)];
 });
+binaryTables.push(...gb);
 chunks.push(
   "static const uint16_t scr_td_gb18030[126 * 190] = {",
   emitRows(gb),
@@ -115,12 +152,14 @@ const big5 = denseTable("big5", 126 * 157, (pointer) => {
   const trail = pointer % 157;
   return [lead, trail + (trail < 0x3f ? 0x40 : 0x62)];
 });
+binaryTables.push(...big5);
 chunks.push("static const uint16_t scr_td_big5[126 * 157] = {", emitRows(big5), "};", "");
 
 const jis0208 = denseTable("euc-jp", 94 * 94, (pointer) => [
   Math.floor(pointer / 94) + 0xa1,
   pointer % 94 + 0xa1,
 ]);
+binaryTables.push(...jis0208);
 chunks.push("static const uint16_t scr_td_jis0208[94 * 94] = {", emitRows(jis0208), "};", "");
 
 const jis0212 = denseTable("euc-jp", 94 * 94, (pointer) => [
@@ -128,6 +167,7 @@ const jis0212 = denseTable("euc-jp", 94 * 94, (pointer) => [
   Math.floor(pointer / 94) + 0xa1,
   pointer % 94 + 0xa1,
 ]);
+binaryTables.push(...jis0212);
 chunks.push("static const uint16_t scr_td_jis0212[94 * 94] = {", emitRows(jis0212), "};", "");
 
 const shiftJis = denseTable("shift_jis", 60 * 188, (pointer) => {
@@ -136,12 +176,14 @@ const shiftJis = denseTable("shift_jis", 60 * 188, (pointer) => {
   const trail = pointer % 188;
   return [leadByte, trail + (trail < 0x3f ? 0x40 : 0x41)];
 });
+binaryTables.push(...shiftJis);
 chunks.push("static const uint16_t scr_td_shift_jis[60 * 188] = {", emitRows(shiftJis), "};", "");
 
 const eucKr = denseTable("euc-kr", 94 * 94, (pointer) => [
   Math.floor(pointer / 94) + 0xa1,
   pointer % 94 + 0xa1,
 ]);
+binaryTables.push(...eucKr);
 chunks.push("static const uint16_t scr_td_euc_kr[94 * 94] = {", emitRows(eucKr), "};", "");
 
 // Four-byte gb18030 mappings form long consecutive runs. Record the runs,
@@ -179,4 +221,8 @@ chunks.push(
 );
 
 writeFileSync(output, chunks.join("\n"));
-console.log(`wrote ${output} (${singleByteNames.length} single-byte tables, ${gbRanges.length} gb18030 ranges)`);
+writeRustBinary(binaryTables, gbRanges);
+console.log(
+  `wrote ${output} and ${rustOutput} ` +
+    `(${singleByteNames.length} single-byte tables, ${gbRanges.length} gb18030 ranges)`,
+);

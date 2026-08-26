@@ -755,6 +755,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 
 test.each([
   "991-process-exit.ts",
+  "1423-text-codec.ts",
   "1445-exit-process-exit.ts",
   "1446-exit-uncaught.ts",
   "518-promise-void-union-callbacks.ts",

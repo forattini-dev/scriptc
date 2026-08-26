@@ -35,6 +35,7 @@ include!("assert_shapes.rs");
 include!("arrays.rs");
 include!("bytes.rs");
 include!("bytes_encoding.rs");
+include!("text_decoder.rs");
 include!("crypto.rs");
 include!("collections.rs");
 include!("event_emitter.rs");
@@ -59,5 +60,6 @@ mod tests {
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
     include!("tests/language_and_heap.rs");
+    include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
 }
