@@ -659,6 +659,35 @@ pub fn process_chdir(path: &JsString) {
         .unwrap_or_else(|error| throw_fs_error("chdir", path, error));
 }
 
+#[cfg(all(not(windows), not(target_os = "wasi")))]
+pub fn process_umask(mask: f64) -> f64 {
+    use rustix::fs::Mode;
+
+    let read_only = mask < 0.0;
+    let next = Mode::from_bits_truncate(if read_only { 0 } else { mask as u32 });
+    let previous = rustix::process::umask(next);
+    if read_only {
+        rustix::process::umask(previous);
+    }
+    f64::from(previous.bits())
+}
+
+#[cfg(windows)]
+static PROCESS_UMASK: Mutex<u32> = Mutex::new(0);
+
+#[cfg(target_os = "wasi")]
+static PROCESS_UMASK: Mutex<u32> = Mutex::new(0o22);
+
+#[cfg(any(windows, target_os = "wasi"))]
+pub fn process_umask(mask: f64) -> f64 {
+    let mut current = PROCESS_UMASK.lock().expect("scriptc: process umask lock poisoned");
+    let previous = *current;
+    if mask >= 0.0 {
+        *current = (mask as u32) & 0o777;
+    }
+    f64::from(previous)
+}
+
 pub fn process_pid() -> f64 {
     f64::from(std::process::id())
 }

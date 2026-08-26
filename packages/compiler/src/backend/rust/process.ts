@@ -36,6 +36,9 @@ export function emitRustProcessCall(
   if (expr.fn === "process.chdir" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::process_chdir(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "process.umask" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::process_umask(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "process.envGet" && expr.args.length === 1 && arg !== undefined) {
     if (expr.type.kind !== "union") context.unsupported("process.envGet without an optional result union", expr.loc);
     const union = context.union(expr.type.unionId, expr.loc);
