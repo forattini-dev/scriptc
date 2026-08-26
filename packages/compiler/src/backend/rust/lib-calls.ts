@@ -38,6 +38,7 @@ export interface RustLibCallContext {
   hasErrorClassRoots(): boolean;
   errorValueName(): string;
   rustString(value: string): string;
+  rustType(type: IrType, loc?: SrcLoc): string;
   emitPromiseFromSync(
     args: readonly IrExpr[],
     operation: (value: (index: number) => string) => string,
@@ -56,6 +57,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";
+  if (expr.fn === "global.undefRead" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::throw_undefined_global::<${context.rustType(expr.type, expr.loc)}>(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "dyn.defineProps" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
     const target = context.nextTemporary();

@@ -1014,6 +1014,7 @@ export class RustExpressionEmitter {
           hasErrorClassRoots: () => this.context.errorClassRoots().length > 0,
           errorValueName: () => this.context.errorValueName(),
           rustString: (value) => this.context.rustString(value),
+          rustType: (type, loc) => this.context.rustType(type, loc),
           emitPromiseFromSync: (args, operation) => this.context.emitPromiseFromSync(args, operation),
           emitFileHandleTransferPromise: (value) => this.context.emitFileHandleTransferPromise(value),
           emitFsRenameCallback: (value) => this.context.emitFsRenameCallback(value),

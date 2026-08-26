@@ -108,6 +108,10 @@ pub fn throw_reference_error(message: String) -> ! {
     })
 }
 
+pub fn throw_undefined_global<T>(name: &JsString) -> T {
+    throw_reference_error(format!("{name} is not defined"))
+}
+
 pub fn throw_error(message: String) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),

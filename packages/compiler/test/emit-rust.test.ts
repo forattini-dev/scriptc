@@ -719,8 +719,10 @@ test.each([
   "1541-union-keyed-reads.ts",
   "1546-union-element-reads.ts",
   "1562-optional-chain-tails.ts",
+  "1581-declare-const-read.ts",
+  "1854-ambient-declare-fn.ts",
   "2643-or-default-retag.ts",
-])("Rust environment writes, mixed logical values, and keyed unions match Node: %s", async (fixture) => {
+])("Rust environment, logical, keyed-union, and ambient reads match Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
@@ -740,6 +742,34 @@ test.each([
     runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   expect(rust, fixture).toEqual(node);
+}, 240_000);
+
+test.each([
+  ["2592-ambient-trap-uncaught.ts", "t is not defined"],
+  ["2614-trap-binding-later-writes.ts", "numLiteral is not defined"],
+])("Rust uncaught ambient read preserves exit, stdout, and ReferenceError: %s", async (fixture, message) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ambient-exit-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.exitCode).toBe(node.exitCode);
+  expect(node.stderr).toContain(`ReferenceError: ${message}`);
+  expect(rust.stderr).toContain(`Uncaught ReferenceError: ${message}`);
+  expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 240_000);
 
 test("Rust record clones preserve evaluation across async suspension", async () => {
