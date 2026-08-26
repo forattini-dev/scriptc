@@ -408,6 +408,9 @@ class RustEmitter {
       this.dynamicEmitter.emitDynFromValue(type, value, loc, functionName),
     emitDynCheckValue: (type, value, loc) => this.dynamicEmitter.emitDynCheckValue(type, value, loc),
     emitAsyncStatements: (statements, onComplete) => this.emitAsyncStatements(statements, onComplete),
+    emitExpr: (expr) => this.emitExpr(expr),
+    assignmentExpr: (id, value, loc) => this.assignmentExpr(id, value, loc),
+    emitExprWithValues: (expr, values) => this.expressionEmitter.emitExprWithValues(expr, values),
     emitStatements: (statements) => this.emitStatements(statements),
     captureField: (index) => this.captureField(index),
     classFieldName: (className, fieldName, loc) => this.classFieldName(className, fieldName, loc),
@@ -448,7 +451,6 @@ class RustEmitter {
     isEdgeValue: (type) => this.isEdgeValue(type),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
-
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.functions.set(fn.name, fn);
     for (const cls of mod.classes ?? []) {
@@ -549,7 +551,6 @@ class RustEmitter {
     this.line("}");
     return `${this.lines.join("\n")}\n`;
   }
-
   private checkModuleSurface(): void {
     for (const cls of this.classes.values()) {
       if (cls.base !== undefined && !this.classes.has(cls.base) &&

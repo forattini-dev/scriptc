@@ -27,6 +27,7 @@ include!("clock_and_date.rs");
 include!("heap.rs");
 include!("event_loop.rs");
 include!("promises.rs");
+include!("generators.rs");
 include!("errors.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
@@ -47,6 +48,7 @@ include!("numeric_ops.rs");
 mod tests {
     use super::*;
 
+    include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
     include!("tests/language_and_heap.rs");
 }

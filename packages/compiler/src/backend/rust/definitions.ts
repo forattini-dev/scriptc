@@ -1,4 +1,4 @@
-import type { IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import {
   mangleClassStruct,
@@ -10,6 +10,7 @@ import {
   mangleRawParam,
   mangleRecordStruct,
 } from "../mangle.js";
+import { emitRustGeneratorBody } from "./generators.js";
 import type { RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
@@ -36,6 +37,9 @@ export interface RustDefinitionContext {
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
+  assignmentExpr(id: string, value: string, loc: SrcLoc): string;
+  emitExpr(expr: IrExpr): string;
+  emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitStatements(statements: readonly IrStmt[]): void;
   captureField(index: number): string;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
@@ -720,6 +724,7 @@ export class RustDefinitionEmitter {
         case "union":
         case "func":
         case "promise":
+        case "generator":
         case "regex":
         case "symbol":
         case "url":
@@ -742,7 +747,6 @@ export class RustDefinitionEmitter {
   }
 
   emitFunction(fn: IrFunction): void {
-    if (fn.generator !== undefined) this.context.unsupported(`generator function '${fn.name}'`, fn.loc);
     for (const local of fn.locals) {
       this.context.rustType(local.type, fn.loc);
     }
@@ -758,18 +762,22 @@ export class RustDefinitionEmitter {
     params.push(...fn.params.map((param) => {
       const local = fn.locals.find((candidate) => candidate.id === param.localId);
       if (local === undefined) this.context.unsupported(`missing parameter local '${param.localId}'`, fn.loc);
-      const boxed = local.boxed || fn.async === true;
+      const boxed = local.boxed || fn.async === true || fn.generator !== undefined;
       const name = boxed ? mangleRawParam(param.localId) : mangleLocal(param.localId);
       return `${local.mutable && !boxed ? "mut " : ""}${name}: ${this.context.rustType(param.type, fn.loc)}`;
     }));
     const returnType = this.context.rustType(fn.returnType, fn.loc);
-    const emittedReturnType = fn.async ? `runtime::JsPromise<${returnType}>` : returnType;
+    const generatorType: IrType | null = fn.generator === undefined ? null : {
+      kind: "generator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT,
+    };
+    const emittedReturnType = fn.async ? `runtime::JsPromise<${returnType}>` :
+      generatorType === null ? returnType : this.context.rustType(generatorType, fn.loc);
     this.context.line(`fn ${mangleFunction(fn.name)}(${params.join(", ")})${emittedReturnType === "()" ? "" : ` -> ${emittedReturnType}`} {`);
     this.context.pushIndent();
     this.context.setCurrentFunction(fn);
     for (const param of fn.params) {
       const local = fn.locals.find((candidate) => candidate.id === param.localId);
-      if (local !== undefined && (local.boxed || fn.async === true)) {
+      if (local !== undefined && (local.boxed || fn.async === true || fn.generator !== undefined)) {
         this.context.line(`let ${mangleLocal(param.localId)} = runtime::cell_new(${mangleRawParam(param.localId)});`);
       }
     }
@@ -794,6 +802,8 @@ export class RustDefinitionEmitter {
       this.context.popIndent();
       this.context.line("});");
       this.context.line(result);
+    } else if (fn.generator !== undefined) {
+      emitRustGeneratorBody(fn, this.context);
     } else {
       this.context.emitStatements(fn.body);
       if (fn.returnType.kind !== "void") {

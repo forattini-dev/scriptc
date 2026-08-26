@@ -144,9 +144,11 @@ export class RustFunctionValueEmitter {
   }
 
   emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string {
-    if ((expr.left.type.kind === "regex" || expr.left.type.kind === "symbol" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams") &&
+    if ((expr.left.type.kind === "regex" || expr.left.type.kind === "symbol" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams" || expr.left.type.kind === "generator") &&
         (expr.op === "===" || expr.op === "!==")) {
-      const compare = `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
+      const compare = expr.left.type.kind === "generator"
+        ? `runtime::generator_ptr_eq(&(${left}), &(${right}))`
+        : `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
     if (expr.left.type.kind === "func" && expr.right.type.kind === "func" &&

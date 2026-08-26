@@ -824,6 +824,8 @@ test.each([
   "1990-labels-basics.ts",
   "1991-for-in-loops.ts",
   "1992-small-syntax.ts",
+  "2010-generators-basics.ts",
+  "2013-generators-sent-values.ts",
   "2042-any-flow-loops.ts",
   "2053-typeof-static-fold.ts",
   "2060-empty-tuple.ts",

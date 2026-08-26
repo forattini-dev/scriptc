@@ -91,6 +91,7 @@ export class RustValueEmitter {
       case "object": return "true";
       case "func": return "true";
       case "promise": return "true";
+      case "generator": return "true";
       case "regex": return "true";
       case "symbol": return "true";
       case "url": return "true";
@@ -119,7 +120,7 @@ export class RustValueEmitter {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams") {
+      if (this.isHeapRoot(type) || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator") {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
@@ -143,7 +144,7 @@ export class RustValueEmitter {
     const global = this.context.globals.get(id);
     if (global !== undefined) {
       const name = mangleGlobal(id);
-      if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "symbol" || global.type.kind === "url" || global.type.kind === "searchParams") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
+      if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "symbol" || global.type.kind === "url" || global.type.kind === "searchParams" || global.type.kind === "generator") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
       if (global.type.kind === "f64" || global.type.kind === "date" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.context.unsupported(`global assignment type '${global.type.kind}'`, loc);
@@ -162,7 +163,8 @@ export class RustValueEmitter {
   localIsBoxed(local: IrFunction["locals"][number]): boolean {
     return this.context.isForcedBoxed(local.id)
       || local.boxed === true
-      || this.context.currentFunction()?.async === true;
+      || this.context.currentFunction()?.async === true
+      || this.context.currentFunction()?.generator !== undefined;
   }
 
   rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
@@ -215,6 +217,11 @@ export class RustValueEmitter {
         return `runtime::Gc<${this.context.closureName(shape)}>`;
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
+      case "generator": {
+        const channel = (value: IrType): string =>
+          value.kind === "undefinedT" || value.kind === "nullT" ? "()" : this.rustType(value, loc);
+        return `runtime::JsGenerator<${channel(type.yieldT)}, ${channel(type.retT)}, ${channel(type.nextT)}>`;
+      }
       case "regex": return "runtime::JsRegex";
       case "symbol": return "runtime::JsSymbol";
       case "url": return "runtime::JsUrl";
@@ -296,7 +303,7 @@ export class RustValueEmitter {
   }
 
   needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
+    return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
       (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
 

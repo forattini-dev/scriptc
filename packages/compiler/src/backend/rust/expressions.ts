@@ -2,6 +2,7 @@ import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrU
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
+import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
@@ -1033,6 +1034,7 @@ export class RustExpressionEmitter {
             ).join(" ");
           },
         });
+      case "genResume": return emitRustGeneratorResume(expr, this.context, (value) => this.emitExpr(value));
       case "awaitExpr":
       case "awaitUnionExpr":
         this.context.unsupported("async suspension outside the Rust state-machine subset", expr.loc);
