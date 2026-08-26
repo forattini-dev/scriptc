@@ -22,6 +22,24 @@ pub fn console_error(values: &[String]) {
     eprintln!("{}", values.join(" "));
 }
 
+pub fn process_stdout_write(value: &JsString) -> bool {
+    use std::io::Write;
+    std::io::stdout()
+        .lock()
+        .write_all(value.as_bytes())
+        .expect("scriptc: stdout write failed");
+    true
+}
+
+pub fn process_stderr_write(value: &JsString) -> bool {
+    use std::io::Write;
+    std::io::stderr()
+        .lock()
+        .write_all(value.as_bytes())
+        .expect("scriptc: stderr write failed");
+    true
+}
+
 pub fn to_int32(value: f64) -> i32 {
     if !value.is_finite() || value == 0.0 {
         return 0;

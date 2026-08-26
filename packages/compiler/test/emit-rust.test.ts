@@ -710,6 +710,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "1460-console-error-warn.ts",
   "1464-env-writes.ts",
   "1465-env-value.ts",
   "1477-in-expressions.ts",
@@ -727,11 +728,13 @@ test.each([
   "1633-inspect-map-set.ts",
   "1634-inspect-classes.ts",
   "1635-inspect-buffer.ts",
+  "1636-util-format.ts",
   "1637-inspect-dyn.ts",
   "1638-inspect-cjs.cjs",
   "1674-symbol-inspect.ts",
   "1854-ambient-declare-fn.ts",
   "2440-console-inspect-args.ts",
+  "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",
   "2591-ambient-generic-traps.ts",
   "2643-or-default-retag.ts",
