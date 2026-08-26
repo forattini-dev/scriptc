@@ -62,6 +62,10 @@ pub fn url_host(value: &JsUrl) -> JsString {
     }
 }
 
+pub fn url_port_or(value: &JsUrl, default_port: f64) -> f64 {
+    value.value.borrow().port().map_or(default_port, f64::from)
+}
+
 pub fn url_pathname(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
     if value.extra_file_slashes == 0 {

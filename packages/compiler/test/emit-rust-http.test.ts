@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 test.each([
   "1543-set-server-handles.ts",
   "1750-http-agent-options.ts",
+  "1781-http-server-shapes.cjs",
+  "2644-http-client-url-argument.ts",
   "2696-http-server-net-roundtrip.ts",
   "2689-http-server-timeout-properties.ts",
 ])("Rust HTTP corpus matches Node: %s", async (fixtureName) => {
@@ -18,7 +20,7 @@ test.each([
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-http-"));
   const result = await compile(fixture, {
     outDir: dir,
-    outPath: join(dir, fixtureName.slice(0, -3)),
+    outPath: join(dir, fixtureName.replace(/\.[^.]+$/, "")),
     backend: "rust",
     optimization: "dev",
   });

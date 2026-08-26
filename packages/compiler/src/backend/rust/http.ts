@@ -106,6 +106,33 @@ function emitResponseCallback(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); ${runtimeCall(`std::rc::Rc::new(move |sc_response| { let _ = ${dispatch}; })`, `std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))`)} }`;
 }
 
+function emitClientErrorListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr, onceExpr] = expr.args;
+  const parameter = callbackType.params[0];
+  if (receiver?.type.kind !== "httpClientReq" || callbackExpr === undefined ||
+      onceExpr?.type.kind !== "bool" || callbackType.params.length > 1 ||
+      (parameter !== undefined && (parameter.kind !== "object" || parameter.className !== "%Error"))) {
+    context.unsupported("http.clientOnError shape", expr.loc);
+  }
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const argument = context.hasErrorClassRoots()
+    ? `${context.errorValueName()}::Builtin(sc_error)`
+    : "sc_error";
+  const dispatch = context.emitClosureDispatch(
+    callback,
+    callbackType,
+    parameter === undefined ? [] : [argument],
+    expr.loc,
+  );
+  const errorName = parameter === undefined ? "_sc_error" : "sc_error";
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_client_on_error(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |${errorName}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+}
+
 export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -197,6 +224,23 @@ export function emitRustHttpCall(
     const name = context.unionName(union.id);
     return `match runtime::http_request_status_code(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(numberTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
   }
+  if ((expr.fn === "http.requestUrl" || expr.fn === "http.requestUrlCb") &&
+      (expr.args.length === 3 || expr.args.length === 4)) {
+    const [url, method, autoEnd, callbackExpr] = expr.args;
+    if (url?.type.kind !== "string" || method?.type.kind !== "string" || autoEnd?.type.kind !== "bool") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const args = `&(${context.emitExpr(url)}), &(${context.emitExpr(method)}), ${context.emitExpr(autoEnd)}`;
+    if (expr.fn === "http.requestUrl") {
+      return `runtime::http_client_request_url(${args})`;
+    }
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("http.requestUrlCb callback", expr.loc);
+    }
+    return emitResponseCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::http_client_request_url_callback(${args}, ${invoke}, ${trace})`);
+  }
   if ((expr.fn === "http.request" || expr.fn === "http.requestCb") &&
       (expr.args.length === 7 || expr.args.length === 8)) {
     const [host, port, path, method, timeout, headers, autoEnd, callbackExpr] = expr.args;
@@ -225,6 +269,11 @@ export function emitRustHttpCall(
     }
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::http_client_on_response(&(${context.emitExpr(receiver)}), ${invoke}, ${trace}, ${context.emitExpr(once)});`);
+  }
+  if (expr.fn === "http.clientOnError" && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported("http.clientOnError callback", expr.loc);
+    return emitClientErrorListener(expr, callbackType, context);
   }
   if ((expr.fn === "http.clientWrite" || expr.fn === "http.clientEndStr") &&
       expr.args.length === 2 && expr.args[0]?.type.kind === "httpClientReq" &&
