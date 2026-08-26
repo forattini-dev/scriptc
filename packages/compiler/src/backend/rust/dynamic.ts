@@ -884,6 +884,17 @@ export class RustDynamicEmitter {
         if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
           return `sc_dyn_deep_copy(&${name}::Object(${value}))`;
         }
+        if (shape?.indexValue !== undefined && shape.fields.length === 0) {
+          const source = this.context.nextTemporary();
+          const output = this.context.nextTemporary();
+          const index = this.context.nextTemporary();
+          const field = this.emitDynFromValue(
+            shape.indexValue,
+            `runtime::map_iter_value(&${source}, ${index})`,
+            loc,
+          );
+          return `{ let ${source} = ${value}; let ${output}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${output}, key, ${field}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; } ${name}::Object(${output}) }`;
+        }
         if (shape === undefined || shape.indexValue !== undefined) {
           this.context.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
         }
