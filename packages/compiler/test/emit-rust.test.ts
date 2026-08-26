@@ -2174,3 +2174,65 @@ test.each([
   ]);
   expect(rust, fixture).toEqual(node);
 }, 240_000);
+
+test.each([
+  "1600-assert-passing.ts",
+  "1602-assert-caught-error.ts",
+  "1603-assert-scalar-messages.ts",
+  "1604-assert-deep-structures.ts",
+  "1605-assert-import-forms.ts",
+  "1606-assert-strict-module.ts",
+  "1607-assert-throws-match.ts",
+  "1680-assert-bytes.ts",
+  "1681-assert-funcs.ts",
+  "1721-assert-throws-regex-class.ts",
+  "1725-assert-symbols.ts",
+  "2487-recursive-deep-equal.ts",
+])("Rust assertions preserve static verdicts and Node messages: %s", async (fixture) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-assertions-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust, fixture).toEqual(node);
+}, 240_000);
+
+test("Rust uncaught AssertionError preserves stdout, exit status, and heap cleanup", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-assertion-exit-"));
+  const fixture = "1601-assert-fail-exit.ts";
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "1601-assert-fail-exit"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(result.ok, result.ok ? fixture : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.exitCode).toBe(node.exitCode);
+  expect(rust.stderr).toContain("Uncaught AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:");
+  expect(rust.stderr).not.toContain("Rust heap object(s) still live");
+}, 240_000);

@@ -1021,6 +1021,10 @@ export class RustExpressionEmitter {
           emitFileHandleTransferPromise: (value) => this.context.emitFileHandleTransferPromise(value),
           emitFsRenameCallback: (value) => this.context.emitFsRenameCallback(value),
           emitClosureDispatch: (callee, type, args, loc) => this.context.emitClosureDispatch(callee, type, args, loc),
+          functionIdentity: (value, type, loc, borrowed = false) => {
+            const shape = this.context.closureShapeForType(type, loc);
+            return `sc_closure_identity_${shape.index}(${borrowed ? value : `&${value}`})`;
+          },
           emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);

@@ -321,6 +321,11 @@ pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
 }
 
 pub fn error_to_string(error: &JsError) -> JsString {
+    if error.name == "AssertionError" {
+        if let Some(code) = &error.code {
+            return error_to_string_parts(&format!("{} [{code}]", error.name), &error.message);
+        }
+    }
     error_to_string_parts(&error.name, &error.message)
 }
 
@@ -436,6 +441,324 @@ fn throw_assertion_error(message: String) -> ! {
         code: Some("ERR_ASSERTION".to_owned()),
         dom: None,
     })
+}
+
+pub fn assert_ok(pass: bool, message: &JsString) {
+    if !pass {
+        throw_assertion_error(message.to_string());
+    }
+}
+
+pub fn assert_same_value_f64(left: f64, right: f64) -> bool {
+    if left == right {
+        return left != 0.0 || left.is_sign_negative() == right.is_sign_negative();
+    }
+    left.is_nan() && right.is_nan()
+}
+
+fn assert_inspect_string(value: &str) -> String {
+    let quote = if !value.contains('\'') {
+        '\''
+    } else if !value.contains('"') {
+        '"'
+    } else {
+        '`'
+    };
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push(quote);
+    for character in value.chars() {
+        if character == quote || character == '\\' {
+            output.push('\\');
+            output.push(character);
+        } else {
+            match character {
+                '\u{0008}' => output.push_str("\\b"),
+                '\t' => output.push_str("\\t"),
+                '\n' => output.push_str("\\n"),
+                '\u{000c}' => output.push_str("\\f"),
+                '\r' => output.push_str("\\r"),
+                '\u{0000}'..='\u{001f}' | '\u{007f}' => {
+                    output.push_str(&format!("\\x{:02X}", character as u32));
+                }
+                _ => output.push(character),
+            }
+        }
+    }
+    output.push(quote);
+    output
+}
+
+fn assert_not_equal_message(actual: &str, deep: bool, message: &JsString, has_message: bool) -> ! {
+    if has_message {
+        throw_assertion_error(message.to_string());
+    }
+    let header = if deep {
+        "Expected \"actual\" not to be strictly deep-equal to:"
+    } else {
+        "Expected \"actual\" to be strictly unequal to:"
+    };
+    throw_assertion_error(format!(
+        "{header}{}{actual}",
+        if actual.len() > 5 { "\n\n" } else { " " }
+    ))
+}
+
+fn assert_equal_message(
+    actual: &str,
+    expected: &str,
+    quote_count: usize,
+    both_zero: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) -> ! {
+    let header = if has_message && !message.is_empty() {
+        message.to_string()
+    } else if deep {
+        "Expected values to be strictly deep-equal:".to_owned()
+    } else {
+        "Expected values to be strictly equal:".to_owned()
+    };
+    if actual.len() + expected.len() - (2 * quote_count) <= 12 && !both_zero {
+        throw_assertion_error(format!("{header}\n\n{actual} !== {expected}\n"));
+    }
+    let mut output = format!("{header}\n+ actual - expected\n\n+ {actual}\n- {expected}");
+    if actual.len() + expected.len() <= 80 {
+        let mismatch = actual
+            .bytes()
+            .zip(expected.bytes())
+            .position(|(left, right)| left != right);
+        if let Some(index) = mismatch.filter(|index| *index >= 3) {
+            output.push('\n');
+            output.push_str(&" ".repeat(index + 2));
+            output.push('^');
+        }
+    }
+    output.push('\n');
+    throw_assertion_error(output)
+}
+
+pub fn assert_eq_f64(
+    left: f64,
+    right: f64,
+    negated: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = assert_same_value_f64(left, right);
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    let actual = display_number(left);
+    if negated {
+        assert_not_equal_message(&actual, deep, message, has_message);
+    }
+    assert_equal_message(
+        &actual,
+        &display_number(right),
+        0,
+        left == 0.0 && right == 0.0,
+        deep,
+        message,
+        has_message,
+    )
+}
+
+pub fn assert_eq_string(
+    left: &JsString,
+    right: &JsString,
+    negated: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = left.as_ref() == right.as_ref();
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    let actual = assert_inspect_string(left);
+    if negated {
+        assert_not_equal_message(&actual, deep, message, has_message);
+    }
+    assert_equal_message(
+        &actual,
+        &assert_inspect_string(right),
+        2,
+        false,
+        deep,
+        message,
+        has_message,
+    )
+}
+
+pub fn assert_eq_bool(
+    left: bool,
+    right: bool,
+    negated: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = left == right;
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    let actual = if left { "true" } else { "false" };
+    if negated {
+        assert_not_equal_message(actual, deep, message, has_message);
+    }
+    assert_equal_message(
+        actual,
+        if right { "true" } else { "false" },
+        0,
+        false,
+        deep,
+        message,
+        has_message,
+    )
+}
+
+pub fn assert_eq_symbol(
+    left: &JsSymbol,
+    right: &JsSymbol,
+    negated: bool,
+    deep: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = symbol_ptr_eq(left, right);
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    let actual = symbol_to_string(left);
+    if negated {
+        assert_not_equal_message(&actual, deep, message, has_message);
+    }
+    assert_equal_message(
+        &actual,
+        &symbol_to_string(right),
+        0,
+        false,
+        deep,
+        message,
+        has_message,
+    )
+}
+
+pub fn assert_ref_eq_bytes<T: ByteElement>(
+    left: &JsBytes<T>,
+    right: &JsBytes<T>,
+    negated: bool,
+    brands_equal: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = left.ptr_eq(right);
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    if has_message && (negated || !message.is_empty()) {
+        throw_assertion_error(message.to_string());
+    }
+    let header = if negated {
+        "Expected \"actual\" not to be reference-equal to \"expected\":"
+    } else if brands_equal && bytes_deep_equals(left, right) {
+        "Values have same structure but are not reference-equal:"
+    } else {
+        "Expected \"actual\" to be reference-equal to \"expected\":"
+    };
+    throw_assertion_error(header.to_owned())
+}
+
+pub fn assert_ref_eq_function(
+    left: usize,
+    right: usize,
+    negated: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let same = left == right;
+    if (negated && !same) || (!negated && same) {
+        return;
+    }
+    if has_message && (negated || !message.is_empty()) {
+        throw_assertion_error(message.to_string());
+    }
+    throw_assertion_error(if negated {
+        "Expected \"actual\" not to be reference-equal to \"expected\":".to_owned()
+    } else {
+        "Expected \"actual\" to be reference-equal to \"expected\":".to_owned()
+    })
+}
+
+pub fn assert_match(
+    input: &JsString,
+    regex: &JsRegex,
+    negated: bool,
+    message: &JsString,
+    has_message: bool,
+) {
+    let matched = regex_hits(regex, input);
+    if (negated && !matched) || (!negated && matched) {
+        return;
+    }
+    if has_message {
+        throw_assertion_error(message.to_string());
+    }
+    let head = if negated {
+        "The input was expected to not match the regular expression "
+    } else {
+        "The input did not match the regular expression "
+    };
+    throw_assertion_error(format!(
+        "{head}/{}/{}. Input:\n\n{}\n",
+        regex_source(regex),
+        regex_flags(regex),
+        assert_inspect_string(input),
+    ))
+}
+
+pub fn assert_throws_regex(
+    regex: &JsRegex,
+    actual: &JsString,
+    message: &JsString,
+    has_message: bool,
+) {
+    if regex_hits(regex, actual) {
+        return;
+    }
+    if has_message {
+        throw_assertion_error(message.to_string());
+    }
+    throw_assertion_error(format!(
+        "The input did not match the regular expression /{}/{}. Input:\n\n{}\n",
+        regex_source(regex),
+        regex_flags(regex),
+        assert_inspect_string(actual),
+    ))
+}
+
+thread_local! {
+    static ASSERT_DEEP_PAIRS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn assert_deep_pair_enter(left: usize, right: usize) -> bool {
+    ASSERT_DEEP_PAIRS.with(|pairs| {
+        let mut pairs = pairs.borrow_mut();
+        if pairs.contains(&(left, right)) {
+            true
+        } else {
+            pairs.push((left, right));
+            false
+        }
+    })
+}
+
+pub fn assert_deep_pair_leave() {
+    ASSERT_DEEP_PAIRS.with(|pairs| {
+        let _ = pairs.borrow_mut().pop();
+    });
 }
 
 pub fn assert_dyn_result(equal: bool, negated: bool, message: &JsString, has_message: bool) {

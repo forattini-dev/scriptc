@@ -1,6 +1,7 @@
 pub trait ByteElement: Copy + Default + 'static {
     fn from_number(value: f64) -> Self;
     fn to_number(self) -> f64;
+    fn same_bits(self, other: Self) -> bool;
 }
 
 impl ByteElement for u8 {
@@ -9,6 +10,9 @@ impl ByteElement for u8 {
     }
     fn to_number(self) -> f64 {
         f64::from(self)
+    }
+    fn same_bits(self, other: Self) -> bool {
+        self == other
     }
 }
 
@@ -19,6 +23,9 @@ impl ByteElement for u32 {
     fn to_number(self) -> f64 {
         f64::from(self)
     }
+    fn same_bits(self, other: Self) -> bool {
+        self == other
+    }
 }
 
 impl ByteElement for i32 {
@@ -28,6 +35,9 @@ impl ByteElement for i32 {
     fn to_number(self) -> f64 {
         f64::from(self)
     }
+    fn same_bits(self, other: Self) -> bool {
+        self == other
+    }
 }
 
 impl ByteElement for f32 {
@@ -36,6 +46,9 @@ impl ByteElement for f32 {
     }
     fn to_number(self) -> f64 {
         f64::from(self)
+    }
+    fn same_bits(self, other: Self) -> bool {
+        self.to_bits() == other.to_bits()
     }
 }
 
@@ -226,6 +239,18 @@ fn bytes_validate_offset(name: &str, value: f64, max: f64) {
 
 pub fn bytes_equals(left: &JsBytes<u8>, right: &JsBytes<u8>) -> bool {
     bytes_u8_values(left) == bytes_u8_values(right)
+}
+
+pub fn bytes_deep_equals<T: ByteElement>(left: &JsBytes<T>, right: &JsBytes<T>) -> bool {
+    let left =
+        left.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    let right =
+        right.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.same_bits(right))
 }
 
 pub fn bytes_compare(

@@ -86,6 +86,11 @@ pub fn regex_test(regex: &JsRegex, text: &JsString) -> bool {
     found.is_some()
 }
 
+pub fn regex_hits(regex: &JsRegex, text: &JsString) -> bool {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    regex_find(regex, &units, 0, false).is_some()
+}
+
 fn regex_match_row(units: &[u16], matched: &regress::Match) -> JsArray<JsString> {
     let mut values = Vec::with_capacity(matched.captures.len() + 1);
     values.push(string_from_utf16(&units[matched.range()]));
