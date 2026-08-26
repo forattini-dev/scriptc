@@ -40,10 +40,10 @@ struct ImmediateTask {
 }
 
 fn timer_delay(delay_ms: f64) -> std::time::Duration {
-    let delay_ms = if delay_ms.is_finite() && delay_ms > 0.0 {
-        delay_ms.trunc().min(f64::from(i32::MAX)) as u64
+    let delay_ms = if delay_ms.is_finite() && delay_ms >= 1.0 && delay_ms <= f64::from(i32::MAX) {
+        delay_ms.trunc() as u64
     } else {
-        0
+        1
     };
     std::time::Duration::from_millis(delay_ms)
 }
