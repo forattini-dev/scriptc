@@ -80,6 +80,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_exit(${context.emitExpr(arg)})`;
   }
+  if (expr.fn === "process.isTTY" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::process_is_tty(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "process.stdinDestroy" && expr.args.length === 0) {
+    return "runtime::process_stdin_destroy()";
+  }
   if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_number(${context.emitExpr(arg)})`;
   }

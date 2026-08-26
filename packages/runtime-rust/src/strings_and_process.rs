@@ -665,6 +665,18 @@ pub fn process_exit(code: f64) -> ! {
     std::process::exit(code as i32)
 }
 
+pub fn process_is_tty(fd: f64) -> bool {
+    use std::io::IsTerminal;
+    match fd as i32 {
+        0 => std::io::stdin().is_terminal(),
+        1 => std::io::stdout().is_terminal(),
+        2 => std::io::stderr().is_terminal(),
+        _ => false,
+    }
+}
+
+pub fn process_stdin_destroy() {}
+
 fn process_status_id(prefix: &str, id_flag: &str) -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
