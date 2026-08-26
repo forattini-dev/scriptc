@@ -124,11 +124,15 @@ pub type JsHttpResponse = Gc<HttpResponseData>;
 
 pub struct HttpClientRequestData {
     socket: Option<JsNetSocket>,
+    connection: Option<Rc<RefCell<HttpClientConnection>>>,
     host: JsString,
     port: u16,
     path: JsString,
     method: JsString,
     secure: bool,
+    timeout: f64,
+    reject_unauthorized: bool,
+    ca: JsString,
     headers: Vec<(JsString, JsString)>,
     body: Vec<u8>,
     sent: bool,
@@ -158,6 +162,7 @@ impl Trace for HttpClientRequestData {
 impl ClearEdges for HttpClientRequestData {
     fn clear_edges(&mut self) {
         self.socket = None;
+        self.connection = None;
         self.headers.clear();
         self.body.clear();
         self.sent = true;

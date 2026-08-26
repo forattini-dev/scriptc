@@ -57,6 +57,7 @@ include!("numeric_ops.rs");
 include!("network.rs");
 include!("http.rs");
 include!("http_client.rs");
+include!("tls_client.rs");
 include!("util_parse_args.rs");
 
 #[cfg(test)]

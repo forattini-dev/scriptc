@@ -1058,11 +1058,16 @@ fn net_dispatch_one() -> bool {
         net_dispatch_task(task);
         return true;
     }
-    net_accept_one() || net_socket_connect_one() || net_socket_flush_one() || net_socket_read_one()
+    http_tls_dispatch_one()
+        || net_accept_one()
+        || net_socket_connect_one()
+        || net_socket_flush_one()
+        || net_socket_read_one()
 }
 
 fn net_pending() -> bool {
-    NET_TASKS.with(|tasks| !tasks.borrow().is_empty())
+    http_tls_pending()
+        || NET_TASKS.with(|tasks| !tasks.borrow().is_empty())
         || NET_SERVERS.with(|servers| {
             servers
                 .borrow()
@@ -1086,6 +1091,7 @@ fn net_wait(timeout: Option<std::time::Duration>) {
 }
 
 fn net_finish() {
+    http_tls_finish();
     NET_TASKS.with(|tasks| tasks.borrow_mut().clear());
     let servers = NET_SERVERS.with(|servers| std::mem::take(&mut *servers.borrow_mut()));
     for server in servers {

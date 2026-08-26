@@ -282,10 +282,13 @@ export function emitRustHttpCall(
     if (host?.type.kind !== "string" || port?.type.kind !== "f64" || path?.type.kind !== "string" ||
         method?.type.kind !== "string" || timeout?.type.kind !== "f64" || headers?.type.kind !== "array" ||
         headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool" || reject?.type.kind !== "bool" ||
-        ca?.type.kind !== "string") {
+        (ca?.type.kind !== "string" && (ca?.type.kind !== "bytes" || ca.type.elem !== "u8"))) {
       context.unsupported(`${expr.fn} shape`, expr.loc);
     }
-    const args = `&(${context.emitExpr(host)}), ${context.emitExpr(port)}, &(${context.emitExpr(path)}), &(${context.emitExpr(method)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(headers)}), ${context.emitExpr(autoEnd)}, ${context.emitExpr(reject)}, &(${context.emitExpr(ca)})`;
+    const caValue = ca.type.kind === "string"
+      ? context.emitExpr(ca)
+      : `runtime::bytes_to_string(&(${context.emitExpr(ca)}), &runtime::string("utf8"))`;
+    const args = `&(${context.emitExpr(host)}), ${context.emitExpr(port)}, &(${context.emitExpr(path)}), &(${context.emitExpr(method)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(headers)}), ${context.emitExpr(autoEnd)}, ${context.emitExpr(reject)}, &(${caValue})`;
     if (expr.fn === "https.request") {
       return `runtime::https_client_request(${args})`;
     }

@@ -14,7 +14,10 @@ path = "src/lib.rs"
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
 getrandom = "=0.4.3"
 regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "=2.2.0"
 url = "=2.5.0"
+webpki-roots = "=1.0.9"
 
 [profile.release]
 codegen-units = 1

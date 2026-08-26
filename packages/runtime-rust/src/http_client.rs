@@ -1,5 +1,4 @@
 struct HttpClientConnection {
-    request: JsHttpClientRequest,
     buffer: Vec<u8>,
     response: Option<JsHttpRequest>,
     body_remaining: Option<usize>,
@@ -9,7 +8,6 @@ struct HttpClientConnection {
 
 impl HttpClientConnection {
     fn trace(&self, tracer: &mut Tracer<'_>) {
-        tracer.edge(&self.request);
         if let Some(response) = &self.response {
             tracer.edge(response);
         }
@@ -162,7 +160,11 @@ fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) {
     }
 }
 
-fn http_client_feed(connection: &Rc<RefCell<HttpClientConnection>>, bytes: &[u8]) {
+fn http_client_feed(
+    connection: &Rc<RefCell<HttpClientConnection>>,
+    request: &JsHttpClientRequest,
+    bytes: &[u8],
+) {
     let created = {
         let mut connection = connection.borrow_mut();
         connection.buffer.extend_from_slice(bytes);
@@ -175,12 +177,12 @@ fn http_client_feed(connection: &Rc<RefCell<HttpClientConnection>>, bytes: &[u8]
             let Some((status, status_message, headers, content_length, chunked)) =
                 http_parse_response_head(&connection.buffer[..head_len])
             else {
-                let socket = connection.request.with(|request| request.socket.clone());
+                let socket = request.with(|request| request.socket.clone());
                 if let Some(socket) = socket {
                     net_socket_destroy(&socket);
                 }
                 http_client_dispatch_error(
-                    &connection.request,
+                    request,
                     error_new("Error", string("Parse Error")),
                 );
                 return;
@@ -188,7 +190,7 @@ fn http_client_feed(connection: &Rc<RefCell<HttpClientConnection>>, bytes: &[u8]
             connection.buffer.drain(..head_len);
             connection.body_remaining = content_length;
             connection.chunked = chunked;
-            let socket = connection.request.with(|request| request.socket.clone());
+            let socket = request.with(|request| request.socket.clone());
             let response = Gc::new(HttpRequestData {
                 socket,
                 method: empty_string(),
@@ -202,7 +204,7 @@ fn http_client_feed(connection: &Rc<RefCell<HttpClientConnection>>, bytes: &[u8]
                 end_listeners: Vec::new(),
             });
             connection.response = Some(response.clone());
-            Some((connection.request.clone(), response))
+            Some((request.clone(), response))
         }
     };
     if let Some((request, response)) = created {
@@ -237,19 +239,26 @@ fn http_client_new(
     path: &JsString,
     method: &JsString,
     secure: bool,
+    timeout: f64,
     headers: &JsArray<JsString>,
     auto_end: bool,
+    reject_unauthorized: bool,
+    ca: &JsString,
     callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
 ) -> JsHttpClientRequest {
     let port_number = net_port(port);
-    let socket = net_socket_connect(port, host);
+    let socket = (!secure).then(|| net_socket_connect(port, host));
     let request = Gc::new(HttpClientRequestData {
-        socket: Some(socket.clone()),
+        socket: socket.clone(),
+        connection: None,
         host: host.clone(),
         port: port_number,
         path: path.clone(),
         method: method.clone(),
         secure,
+        timeout,
+        reject_unauthorized,
+        ca: ca.clone(),
         headers: http_client_headers(headers),
         body: Vec::new(),
         sent: false,
@@ -263,63 +272,51 @@ fn http_client_new(
             request.response_listeners.push(HttpResponseListener { invoke, trace, once: true });
         });
     }
-    let error_request = request.clone();
-    let error_trace = request.clone();
-    net_socket_on_error(
-        &socket,
-        Rc::new(move |error| http_client_dispatch_error(&error_request, error)),
-        Rc::new(move |tracer| tracer.edge(&error_trace)),
-        false,
-    );
-    let close_request = request.clone();
-    let close_trace = request.clone();
-    net_socket_on_close(
-        &socket,
-        Rc::new(move || http_client_dispatch_close(&close_request)),
-        Rc::new(move |tracer| tracer.edge(&close_trace)),
-        true,
-    );
-    if secure {
-        let secure_request = request.clone();
-        let secure_socket = socket.clone();
-        let secure_trace = request.clone();
-        net_socket_on_connect(
-            &socket,
-            Rc::new(move || {
-                http_client_dispatch_error(
-                    &secure_request,
-                    error_new("Error", string("TLS transport is not implemented yet")),
-                );
-                net_socket_destroy(&secure_socket);
-            }),
-            Rc::new(move |tracer| tracer.edge(&secure_trace)),
-            true,
-        );
-    }
     let connection = Rc::new(RefCell::new(HttpClientConnection {
-        request: request.clone(),
         buffer: Vec::new(),
         response: None,
         body_remaining: None,
         chunked: false,
         chunk_remaining: None,
     }));
-    let data_connection = connection.clone();
-    let data_trace = connection.clone();
-    net_socket_on_data(
-        &socket,
-        Rc::new(move |chunk| http_client_feed(&data_connection, &bytes_u8_values(&chunk))),
-        Rc::new(move |tracer| data_trace.borrow().trace(tracer)),
-        false,
-    );
-    let end_connection = connection.clone();
-    let end_trace = connection;
-    net_socket_on_end(
-        &socket,
-        Rc::new(move || http_client_eof(&end_connection)),
-        Rc::new(move |tracer| end_trace.borrow().trace(tracer)),
-        true,
-    );
+    request.with_mut(|request| request.connection = Some(connection.clone()));
+    if let Some(socket) = socket {
+        let error_request = request.clone();
+        let error_trace = request.clone();
+        net_socket_on_error(
+            &socket,
+            Rc::new(move |error| http_client_dispatch_error(&error_request, error)),
+            Rc::new(move |tracer| tracer.edge(&error_trace)),
+            false,
+        );
+        let close_request = request.clone();
+        let close_trace = request.clone();
+        net_socket_on_close(
+            &socket,
+            Rc::new(move || http_client_dispatch_close(&close_request)),
+            Rc::new(move |tracer| tracer.edge(&close_trace)),
+            true,
+        );
+        let data_connection = connection.clone();
+        let data_request = request.clone();
+        let data_trace = connection.clone();
+        net_socket_on_data(
+            &socket,
+            Rc::new(move |chunk| {
+                http_client_feed(&data_connection, &data_request, &bytes_u8_values(&chunk));
+            }),
+            Rc::new(move |tracer| data_trace.borrow().trace(tracer)),
+            false,
+        );
+        let end_connection = connection.clone();
+        let end_trace = connection;
+        net_socket_on_end(
+            &socket,
+            Rc::new(move || http_client_eof(&end_connection)),
+            Rc::new(move |tracer| end_trace.borrow().trace(tracer)),
+            true,
+        );
+    }
     if auto_end {
         http_client_end(&request);
     }
@@ -335,7 +332,9 @@ pub fn http_client_request(
     headers: &JsArray<JsString>,
     auto_end: bool,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, false, headers, auto_end, None)
+    http_client_new(
+        host, port, path, method, false, _timeout, headers, auto_end, true, &empty_string(), None,
+    )
 }
 
 pub fn http_client_request_callback(
@@ -349,7 +348,10 @@ pub fn http_client_request_callback(
     callback: Rc<dyn Fn(JsHttpRequest)>,
     trace: NetTrace,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, false, headers, auto_end, Some((callback, trace)))
+    http_client_new(
+        host, port, path, method, false, _timeout, headers, auto_end, true, &empty_string(),
+        Some((callback, trace)),
+    )
 }
 
 pub fn https_client_request(
@@ -360,10 +362,12 @@ pub fn https_client_request(
     _timeout: f64,
     headers: &JsArray<JsString>,
     auto_end: bool,
-    _reject_unauthorized: bool,
-    _ca: &JsString,
+    reject_unauthorized: bool,
+    ca: &JsString,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, true, headers, auto_end, None)
+    http_client_new(
+        host, port, path, method, true, _timeout, headers, auto_end, reject_unauthorized, ca, None,
+    )
 }
 
 pub fn https_client_request_callback(
@@ -374,12 +378,15 @@ pub fn https_client_request_callback(
     _timeout: f64,
     headers: &JsArray<JsString>,
     auto_end: bool,
-    _reject_unauthorized: bool,
-    _ca: &JsString,
+    reject_unauthorized: bool,
+    ca: &JsString,
     callback: Rc<dyn Fn(JsHttpRequest)>,
     trace: NetTrace,
 ) -> JsHttpClientRequest {
-    http_client_new(host, port, path, method, true, headers, auto_end, Some((callback, trace)))
+    http_client_new(
+        host, port, path, method, true, _timeout, headers, auto_end, reject_unauthorized, ca,
+        Some((callback, trace)),
+    )
 }
 
 fn http_client_url_parts(input: &JsString) -> (JsString, f64, JsString) {
@@ -408,8 +415,11 @@ pub fn http_client_request_url(
         &path,
         method,
         false,
+        0.0,
         &array_new(Vec::new()),
         auto_end,
+        true,
+        &empty_string(),
         None,
     )
 }
@@ -428,8 +438,11 @@ pub fn http_client_request_url_callback(
         &path,
         method,
         false,
+        0.0,
         &array_new(Vec::new()),
         auto_end,
+        true,
+        &empty_string(),
         Some((callback, trace)),
     )
 }
@@ -485,47 +498,56 @@ pub fn http_client_write_bytes(request: &JsHttpClientRequest, value: &JsBytes<u8
     });
 }
 
+fn http_client_serialize(request: &mut HttpClientRequestData) -> Vec<u8> {
+    let mut head = format!("{} {} HTTP/1.1\r\n", request.method, request.path);
+    if http_header_index(&request.headers, "host").is_none() {
+        let default_port = if request.secure { 443 } else { 80 };
+        if request.port == default_port {
+            head.push_str(&format!("Host: {}\r\n", request.host));
+        } else {
+            head.push_str(&format!("Host: {}:{}\r\n", request.host, request.port));
+        }
+    }
+    for (name, value) in &request.headers {
+        head.push_str(name);
+        head.push_str(": ");
+        head.push_str(value);
+        head.push_str("\r\n");
+    }
+    if http_header_index(&request.headers, "connection").is_none() {
+        head.push_str("Connection: keep-alive\r\n");
+    }
+    if !request.body.is_empty() && http_header_index(&request.headers, "content-length").is_none() {
+        head.push_str(&format!("Content-Length: {}\r\n", request.body.len()));
+    }
+    head.push_str("\r\n");
+    let mut output = head.into_bytes();
+    output.append(&mut request.body);
+    output
+}
+
 pub fn http_client_end(request: &JsHttpClientRequest) {
-    let output = request.with_mut(|request| {
-        if request.sent || request.destroyed {
+    let dispatch = request.with_mut(|request_data| {
+        if request_data.sent || request_data.destroyed {
             return None;
         }
-        request.sent = true;
-        let socket = request.socket.clone()?;
-        if request.secure {
-            return Some((socket, None));
+        request_data.sent = true;
+        let output = http_client_serialize(request_data);
+        if request_data.secure {
+            let connection = request_data.connection.clone()?;
+            Some((None, Some(connection), output))
+        } else {
+            Some((request_data.socket.clone(), None, output))
         }
-        let mut head = format!("{} {} HTTP/1.1\r\n", request.method, request.path);
-        if http_header_index(&request.headers, "host").is_none() {
-            if request.port == 80 {
-                head.push_str(&format!("Host: {}\r\n", request.host));
-            } else {
-                head.push_str(&format!("Host: {}:{}\r\n", request.host, request.port));
-            }
-        }
-        for (name, value) in &request.headers {
-            head.push_str(name);
-            head.push_str(": ");
-            head.push_str(value);
-            head.push_str("\r\n");
-        }
-        if http_header_index(&request.headers, "connection").is_none() {
-            head.push_str("Connection: keep-alive\r\n");
-        }
-        if !request.body.is_empty() && http_header_index(&request.headers, "content-length").is_none() {
-            head.push_str(&format!("Content-Length: {}\r\n", request.body.len()));
-        }
-        head.push_str("\r\n");
-        let mut output = head.into_bytes();
-        output.append(&mut request.body);
-        Some((socket, Some(output)))
     });
-    let Some((socket, output)) = output else {
+    let Some((socket, connection, output)) = dispatch else {
         return;
     };
-    if let Some(output) = output {
+    if let Some(socket) = socket {
         net_socket_queue(&socket, output);
         net_socket_end(&socket);
+    } else if let Some(connection) = connection {
+        http_tls_start(request, connection, output);
     }
 }
 
@@ -540,12 +562,16 @@ pub fn http_client_end_bytes(request: &JsHttpClientRequest, value: &JsBytes<u8>)
 }
 
 pub fn http_client_destroy(request: &JsHttpClientRequest) {
-    let socket = request.with_mut(|request| {
+    let (socket, secure, already_destroyed) = request.with_mut(|request| {
+        let already_destroyed = request.destroyed;
         request.destroyed = true;
-        request.socket.clone()
+        (request.socket.clone(), request.secure, already_destroyed)
     });
     if let Some(socket) = socket {
         net_socket_destroy(&socket);
+    } else if secure && !already_destroyed {
+        http_tls_cancel(request);
+        http_client_dispatch_close(request);
     }
 }
 
