@@ -75,6 +75,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`(${this.dyn}::Array(left), ${this.dyn}::Array(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Object(left), ${this.dyn}::Object(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Promise(left), ${this.dyn}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
+    this.context.line(`(${this.dyn}::NetServer(left), ${this.dyn}::NetServer(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::NetSocket(left), ${this.dyn}::NetSocket(right)) => left.ptr_eq(right),`);
     for (const pattern of this.functionVariants()) {
       this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);

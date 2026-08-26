@@ -55,6 +55,7 @@ include!("json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");
 include!("network.rs");
+include!("http.rs");
 include!("util_parse_args.rs");
 
 #[cfg(test)]

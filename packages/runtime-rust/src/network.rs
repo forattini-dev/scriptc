@@ -138,6 +138,7 @@ pub struct NetServerData {
     close_listeners: Vec<NetVoidListener>,
     connection_listeners: Vec<NetConnectionListener>,
     close_override: Option<(Rc<dyn Fn()>, NetTrace)>,
+    http: Option<HttpServerState>,
 }
 
 impl Trace for NetServerData {
@@ -166,6 +167,7 @@ impl ClearEdges for NetServerData {
         self.close_listeners.clear();
         self.connection_listeners.clear();
         self.close_override = None;
+        self.http = None;
     }
 }
 
@@ -233,6 +235,7 @@ pub fn net_server_new() -> JsNetServer {
         close_listeners: Vec::new(),
         connection_listeners: Vec::new(),
         close_override: None,
+        http: None,
     })
 }
 

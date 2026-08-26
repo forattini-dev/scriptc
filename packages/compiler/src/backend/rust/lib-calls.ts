@@ -2,6 +2,7 @@ import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
+import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
@@ -61,6 +62,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
+  const httpCall = emitRustHttpCall(expr, context);
+  if (httpCall !== null) return httpCall;
   const netCall = emitRustNetCall(expr, context);
   if (netCall !== null) return netCall;
   const arg = expr.args[0];

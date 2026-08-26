@@ -62,6 +62,7 @@ export class RustDynamicEmitter {
     this.context.line("Bytes(runtime::JsBytes<u8>),");
     this.context.line("Buffer(runtime::JsBytes<u8>),");
     this.context.line("Promise(runtime::JsPromiseHandle),");
+    this.context.line("NetServer(runtime::JsNetServer),");
     this.context.line("NetSocket(runtime::JsNetSocket),");
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
@@ -84,6 +85,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
     this.context.line("Self::Buffer(value) => tracer.edge(value),");
     this.context.line("Self::Promise(value) => runtime::promise_handle_trace(value, tracer),");
+    this.context.line("Self::NetServer(value) => tracer.edge(value),");
     this.context.line("Self::NetSocket(value) => tracer.edge(value),");
     this.context.line("_ => {},");
     this.context.popIndent();
@@ -125,6 +127,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
@@ -241,6 +244,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::Promise(value) => ${name}::Promise(value.clone()),`);
+    this.context.line(`${name}::NetServer(value) => ${name}::NetServer(value.clone()),`);
     this.context.line(`${name}::NetSocket(value) => ${name}::NetSocket(value.clone()),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -293,6 +297,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(..) => Err(format!("bytes at {path} is not JSON data")),`);
     this.context.line(`${name}::Buffer(..) => Err(format!("buffer at {path} is not JSON data")),`);
     this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::NetServer(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetSocket(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -351,6 +356,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(..) => "array",`);
     this.context.line(`${name}::Object(..) => "object",`);
     this.context.line(`${name}::Promise(..) => "promise",`);
+    this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
@@ -382,6 +388,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(..) => "string",`);
     this.context.line(`${name}::Bytes(..) => "object",`);
     this.context.line(`${name}::Buffer(..) => "object",`);
+    this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
@@ -471,6 +478,12 @@ export class RustDynamicEmitter {
     this.context.line(`_ => ${name}::Undefined,`);
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::NetServer(server) => {`);
+    this.context.pushIndent();
+    this.context.line("let Some(selector) = runtime::http_server_timeout_selector(key) else { return " + `${name}::Undefined; };`);
+    this.context.line(`match runtime::http_server_timeout_value(server, selector) { Some(runtime::JsHttpTimeout::Undefined) | None => ${name}::Undefined, Some(runtime::JsHttpTimeout::Number(value)) => ${name}::Number(value), Some(runtime::JsHttpTimeout::String(value)) => ${name}::String(value), }`);
+    this.context.popIndent();
+    this.context.line("},");
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, properties) => {`);
       this.context.pushIndent();
@@ -516,6 +529,13 @@ export class RustDynamicEmitter {
     this.context.line("runtime::array_set(array, index as f64, field);");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::NetServer(server) => {`);
+    this.context.pushIndent();
+    this.context.line("let Some(selector) = runtime::http_server_timeout_selector(&key) else { sc_dyn_key_set_error(value, &key); };");
+    this.context.line(`let stored = match &field { ${name}::Undefined => runtime::http_server_timeout_set_undefined(server, selector), ${name}::Number(number) => runtime::http_server_timeout_set_number_dynamic(server, selector, *number), ${name}::String(text) => runtime::http_server_timeout_set_string(server, selector, text), _ => false, };`);
+    this.context.line("if !stored { sc_dyn_key_set_error(value, &key); }");
+    this.context.popIndent();
+    this.context.line("},");
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_set_by(properties, key, field, |left, right| left.as_ref() == right.as_ref()),`);
     }
@@ -536,6 +556,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(value) => runtime::bytes_join(value, &runtime::string(",")),`);
     this.context.line(`${name}::Buffer(value) => runtime::bytes_to_string(value, &runtime::string("utf8")),`);
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
+    this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -585,6 +606,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
     this.context.line(`${name}::Promise(..) => "an instance of Promise".to_owned(),`);
+    this.context.line(`${name}::NetServer(..) => "an instance of Server".to_owned(),`);
     this.context.line(`${name}::NetSocket(..) => "an instance of Socket".to_owned(),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => format!("function {function_name}"),`);
@@ -762,6 +784,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::NetSocket(..) => runtime::string("Socket {}"),`);
+    this.context.line(`${name}::NetServer(..) => runtime::string("Server {}"),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
     }
@@ -862,6 +885,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
+    this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
     this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -915,6 +939,7 @@ export class RustDynamicEmitter {
     this.context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
     this.context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
     this.context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
+    this.context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::Bytes(left), ${name}::Bytes(right)) => {`);
     this.context.pushIndent();
@@ -981,6 +1006,7 @@ export class RustDynamicEmitter {
         return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
       }
       case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
+      case "netServer": return `${name}::NetServer(${value})`;
       case "netSocket": return `${name}::NetSocket(${value})`;
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
@@ -1088,6 +1114,10 @@ export class RustDynamicEmitter {
       case "netSocket": {
         const name = this.context.dynTypeName();
         return `{ let value = ${value}; match value { ${name}::NetSocket(socket) => socket, value => sc_dyn_check_fail("Socket", &value), } }`;
+      }
+      case "netServer": {
+        const name = this.context.dynTypeName();
+        return `{ let value = ${value}; match value { ${name}::NetServer(server) => server, value => sc_dyn_check_fail("Server", &value), } }`;
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
       case "object": {
