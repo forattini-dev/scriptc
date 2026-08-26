@@ -1136,15 +1136,22 @@ export class RustExpressionEmitter {
         const cls = this.context.classDef(expr.className, expr.loc);
         const field = cls.fields.find((candidate) => candidate.name === expr.field);
         if (field === undefined) this.context.unsupported(`unknown class field '${expr.className}.${expr.field}'`, expr.loc);
-        if (expr.fieldDyn || field.type.kind !== "f64") {
-          this.context.unsupported(`increment/decrement of checked-dynamic class field '${expr.className}.${expr.field}'`, expr.loc);
-        }
         const object = this.context.nextName("sc_rt");
         const old = this.context.nextName("sc_rt");
         const next = this.context.nextName("sc_rt");
         const operation = expr.op === "+" ? "+" : "-";
         const result = expr.prefix ? next : old;
         const name = this.context.classFieldName(expr.className, field.name, expr.loc);
+        if (expr.fieldDyn) {
+          if (field.type.kind !== "dyn") {
+            this.context.unsupported(`malformed checked-dynamic class field '${expr.className}.${expr.field}'`, expr.loc);
+          }
+          const dynamic = this.context.dynTypeName();
+          return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with_mut(|object| { let ${old} = sc_dyn_check_number(object.${name}.as_ref().expect("scriptc: cleared live dynamic class field").clone()); let ${next} = ${old} ${operation} 1.0; object.${name} = Some(${dynamic}::Number(${next})); ${result} }) }`;
+        }
+        if (field.type.kind !== "f64") {
+          this.context.unsupported(`increment/decrement of class field '${expr.className}.${expr.field}'`, expr.loc);
+        }
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with_mut(|object| { let ${old} = object.${name}; let ${next} = ${old} ${operation} 1.0; object.${name} = ${next}; ${result} }) }`;
       }
       default:
