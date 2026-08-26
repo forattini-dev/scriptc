@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
+getrandom = "=0.4.3"
 regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
 url = "=2.5.0"
 
