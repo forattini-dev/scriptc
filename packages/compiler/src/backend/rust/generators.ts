@@ -32,10 +32,18 @@ function generatorStepType(fn: IrFunction, context: RustGeneratorBodyContext): s
   return `runtime::GeneratorStep<${channelType(fn.generator.yieldT, context, fn.loc)}, ${channelType(fn.returnType, context, fn.loc)}>`;
 }
 
+interface GeneratorFlow {
+  emitReturn(value: string): void;
+  emitThrow(reason: string): void;
+  emitBreak(): void;
+  emitContinue(): void;
+}
+
 function emitGeneratorValue(
   fn: IrFunction,
   expr: IrExpr,
   context: RustGeneratorBodyContext,
+  flow: GeneratorFlow,
   consume: (value: string) => void,
 ): void {
   if (expr.kind === "yieldExpr") {
@@ -43,7 +51,7 @@ function emitGeneratorValue(
     if (yielded === null || fn.generator === undefined) {
       context.unsupported("generator yield without a typed value", expr.loc);
     }
-    emitGeneratorValue(fn, yielded, context, (yieldedValue) => {
+    emitGeneratorValue(fn, yielded, context, flow, (yieldedValue) => {
       const next = context.nextName("sc_generator_next");
       context.line(`let sc_yielded = ${yieldedValue};`);
       context.line("runtime::generator_suspend(&sc_generator, move |sc_generator, sc_command| {");
@@ -55,8 +63,16 @@ function emitGeneratorValue(
       consume(expr.type.kind === "void" ? "()" : `${next}.clone()`);
       context.popIndent();
       context.line("},");
-      context.line("runtime::GeneratorCommand::Return(value) => runtime::GeneratorStep::Returned(value),");
-      context.line("runtime::GeneratorCommand::Throw(reason) => runtime::rethrow_caught(reason),");
+      context.line("runtime::GeneratorCommand::Return(value) => {");
+      context.pushIndent();
+      flow.emitReturn("value");
+      context.popIndent();
+      context.line("},");
+      context.line("runtime::GeneratorCommand::Throw(reason) => {");
+      context.pushIndent();
+      flow.emitThrow("reason");
+      context.popIndent();
+      context.line("},");
       context.popIndent();
       context.line("}");
       context.popIndent();
@@ -66,22 +82,22 @@ function emitGeneratorValue(
     return;
   }
   if (expr.kind === "bin") {
-    emitGeneratorValue(fn, expr.left, context, (left) => {
-      emitGeneratorValue(fn, expr.right, context, (right) => {
+    emitGeneratorValue(fn, expr.left, context, flow, (left) => {
+      emitGeneratorValue(fn, expr.right, context, flow, (right) => {
         consume(context.emitExprWithValues(expr, [[expr.left, left], [expr.right, right]]));
       });
     });
     return;
   }
   if (expr.kind === "dynCheck" && containsYield(expr.value)) {
-    emitGeneratorValue(fn, expr.value, context, (value) => {
+    emitGeneratorValue(fn, expr.value, context, flow, (value) => {
       consume(context.emitExprWithValues(expr, [[expr.value, value]]));
     });
     return;
   }
   if (expr.kind === "genResume" && expr.arg !== null && containsYield(expr.arg)) {
     const argument = expr.arg;
-    emitGeneratorValue(fn, argument, context, (value) => {
+    emitGeneratorValue(fn, argument, context, flow, (value) => {
       consume(context.emitExprWithValues(expr, [[argument, value]]));
     });
     return;
@@ -96,6 +112,7 @@ function emitGeneratorWhile(
   remaining: readonly IrStmt[],
   context: RustGeneratorBodyContext,
   locals: ReadonlySet<string>,
+  flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
   if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.cond)) {
@@ -123,17 +140,23 @@ function emitGeneratorWhile(
     "sc_generator",
     ...active.map((local) => `${mangleLocal(local.id)}.clone()`),
   ].join(", ")})`;
+  const bodyFlow: GeneratorFlow = {
+    ...flow,
+    emitBreak: () => emitGeneratorSequence(fn, remaining, context,
+      new Set(locals), flow, onComplete),
+    emitContinue: () => context.line(`return ${call};`),
+  };
   context.line(`fn ${helper}(${params.join(", ")}) -> ${generatorStepType(fn, context)} {`);
   context.pushIndent();
   context.line(`if ${context.emitExpr(statement.cond)} {`);
   context.pushIndent();
-  emitGeneratorSequence(fn, statement.body, context, new Set(locals), () => {
+  emitGeneratorSequence(fn, statement.body, context, new Set(locals), bodyFlow, () => {
     context.line(`return ${call};`);
   });
   context.popIndent();
   context.line("} else {");
   context.pushIndent();
-  emitGeneratorSequence(fn, remaining, context, new Set(locals), onComplete);
+  emitGeneratorSequence(fn, remaining, context, new Set(locals), flow, onComplete);
   context.popIndent();
   context.line("}");
   context.popIndent();
@@ -147,16 +170,17 @@ function emitGeneratorIf(
   remaining: readonly IrStmt[],
   context: RustGeneratorBodyContext,
   locals: ReadonlySet<string>,
+  flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
   if (containsYield(statement.cond)) context.unsupported("yield in generator if condition", statement.loc);
   context.line(`if ${context.emitExpr(statement.cond)} {`);
   context.pushIndent();
-  emitGeneratorSequence(fn, [...statement.then, ...remaining], context, new Set(locals), onComplete);
+  emitGeneratorSequence(fn, [...statement.then, ...remaining], context, new Set(locals), flow, onComplete);
   context.popIndent();
   context.line("} else {");
   context.pushIndent();
-  emitGeneratorSequence(fn, [...(statement.else_ ?? []), ...remaining], context, new Set(locals), onComplete);
+  emitGeneratorSequence(fn, [...(statement.else_ ?? []), ...remaining], context, new Set(locals), flow, onComplete);
   context.popIndent();
   context.line("}");
 }
@@ -167,6 +191,7 @@ function emitGeneratorFor(
   remaining: readonly IrStmt[],
   context: RustGeneratorBodyContext,
   locals: Set<string>,
+  flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
   if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.init) ||
@@ -185,7 +210,7 @@ function emitGeneratorFor(
     cond: condition,
     body: statement.update === null ? statement.body : [...statement.body, statement.update],
     loc: statement.loc,
-  }, remaining, context, locals, onComplete);
+  }, remaining, context, locals, flow, onComplete);
 }
 
 function generatorSwitchBranch(
@@ -216,6 +241,7 @@ function emitGeneratorSwitch(
   remaining: readonly IrStmt[],
   context: RustGeneratorBodyContext,
   locals: ReadonlySet<string>,
+  flow: GeneratorFlow,
   onComplete: (() => void) | null,
 ): void {
   if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.disc)) {
@@ -241,7 +267,7 @@ function emitGeneratorSwitch(
     context.line(`${branch === 0 ? "if" : "else if"} { let ${test} = ${context.emitExpr(candidate.test)}; ${equality} } {`);
     context.pushIndent();
     emitGeneratorSequence(fn, [...generatorSwitchBranch(statement, index, context), ...remaining],
-      context, new Set(locals), onComplete);
+      context, new Set(locals), flow, onComplete);
     context.popIndent();
     context.line("}");
   }
@@ -250,9 +276,89 @@ function emitGeneratorSwitch(
   context.pushIndent();
   const fallback = defaultIndex < 0 ? remaining :
     [...generatorSwitchBranch(statement, defaultIndex, context), ...remaining];
-  emitGeneratorSequence(fn, fallback, context, new Set(locals), onComplete);
+  emitGeneratorSequence(fn, fallback, context, new Set(locals), flow, onComplete);
   context.popIndent();
   if (tested.length > 0) context.line("}");
+}
+
+function emitGeneratorTry(
+  fn: IrFunction,
+  statement: Extract<IrStmt, { kind: "tryCatch" }>,
+  remaining: readonly IrStmt[],
+  context: RustGeneratorBodyContext,
+  locals: ReadonlySet<string>,
+  outerFlow: GeneratorFlow,
+  onComplete: (() => void) | null,
+): void {
+  const active = [...locals].map((id) => {
+    const local = fn.locals.find((candidate) => candidate.id === id);
+    if (local === undefined) context.unsupported(`unknown generator local '${id}'`, statement.loc);
+    return local;
+  });
+  const emitFinally = (complete: () => void): void => {
+    if (statement.finallyBody === null) complete();
+    else emitGeneratorSequence(fn, statement.finallyBody, context,
+      new Set(locals), outerFlow, complete);
+  };
+  const pushHandler = (emitHandler: (reason: string) => void): void => {
+    const reason = context.nextName("sc_generator_reason");
+    context.line("runtime::generator_push_panic_handler(&sc_generator, {");
+    context.pushIndent();
+    for (const local of active) {
+      const name = mangleLocal(local.id);
+      context.line(`let ${name} = ${name}.clone();`);
+    }
+    context.line(`move |sc_generator, ${reason}| {`);
+    context.pushIndent();
+    emitHandler(reason);
+    context.popIndent();
+    context.line("}");
+    context.popIndent();
+    context.line("});");
+  };
+  const emitRemaining = (): void =>
+    emitGeneratorSequence(fn, remaining, context, new Set(locals), outerFlow, onComplete);
+  const emitCatch = (reason: string): void => {
+    if (statement.catchBody === null) {
+      emitFinally(() => outerFlow.emitThrow(reason));
+      return;
+    }
+    const catchLocals = new Set(locals);
+    if (statement.catchLocalId !== null) {
+      const local = fn.locals.find((candidate) => candidate.id === statement.catchLocalId);
+      if (local === undefined) context.unsupported("missing generator catch local", statement.loc);
+      context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<runtime::Caught> = runtime::cell_new(${reason});`);
+      catchLocals.add(local.id);
+    } else {
+      context.line(`let _ = ${reason};`);
+    }
+    const hasFinally = statement.finallyBody !== null;
+    if (hasFinally) pushHandler((caught) => emitFinally(() => outerFlow.emitThrow(caught)));
+    const leaveCatch = (complete: () => void): void => {
+      if (hasFinally) context.line("runtime::generator_pop_panic_handler(&sc_generator);");
+      emitFinally(complete);
+    };
+    const catchFlow: GeneratorFlow = {
+      ...outerFlow,
+      emitReturn: (value) => leaveCatch(() => outerFlow.emitReturn(value)),
+      emitThrow: (caught) => leaveCatch(() => outerFlow.emitThrow(caught)),
+    };
+    emitGeneratorSequence(fn, statement.catchBody, context, catchLocals, catchFlow,
+      () => leaveCatch(emitRemaining));
+  };
+  pushHandler(emitCatch);
+  const leaveTry = (complete: () => void): void => {
+    context.line("runtime::generator_pop_panic_handler(&sc_generator);");
+    complete();
+  };
+  const tryFlow: GeneratorFlow = {
+    ...outerFlow,
+    emitReturn: (value) => leaveTry(() => emitFinally(() => outerFlow.emitReturn(value))),
+    emitThrow: (reason) => leaveTry(() => emitCatch(reason)),
+  };
+  emitGeneratorSequence(fn, statement.tryBody, context, new Set(locals), tryFlow, () => {
+    leaveTry(() => emitFinally(emitRemaining));
+  });
 }
 
 function emitGeneratorSequence(
@@ -260,6 +366,7 @@ function emitGeneratorSequence(
   statements: readonly IrStmt[],
   context: RustGeneratorBodyContext,
   locals: Set<string>,
+  flow: GeneratorFlow,
   onComplete: (() => void) | null = null,
 ): void {
   for (let index = 0; index < statements.length; index += 1) {
@@ -267,19 +374,32 @@ function emitGeneratorSequence(
     if (statement === undefined) break;
     if (statement.kind === "return") {
       const value = statement.value === null ? "None" : `Some(${context.emitExpr(statement.value)})`;
-      context.line(`return runtime::GeneratorStep::Returned(${value});`);
+      flow.emitReturn(value);
+      return;
+    }
+    if (statement.kind === "break" || statement.kind === "continue") {
+      if (statement.label !== undefined) {
+        context.unsupported(`labeled generator ${statement.kind}`, statement.loc);
+      }
+      if (statement.kind === "break") flow.emitBreak();
+      else flow.emitContinue();
+      return;
+    }
+    if (statement.kind === "tryCatch") {
+      emitGeneratorTry(fn, statement, statements.slice(index + 1),
+        context, locals, flow, onComplete);
       return;
     }
     if (statement.kind === "while" && containsYield(statement.body)) {
-      emitGeneratorWhile(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      emitGeneratorWhile(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
     if (statement.kind === "for" && containsYield(statement.body)) {
-      emitGeneratorFor(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      emitGeneratorFor(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
     if (statement.kind === "switch" && containsYield(statement.cases)) {
-      emitGeneratorSwitch(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      emitGeneratorSwitch(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
     if (statement.kind === "block" && containsYield(statement.body)) {
@@ -287,11 +407,11 @@ function emitGeneratorSequence(
         context.unsupported("labeled generator block", statement.loc);
       }
       emitGeneratorSequence(fn, [...statement.body, ...statements.slice(index + 1)],
-        context, locals, onComplete);
+        context, locals, flow, onComplete);
       return;
     }
     if (statement.kind === "if") {
-      emitGeneratorIf(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      emitGeneratorIf(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
     const nested = statement.kind === "assign" ? statement.value
@@ -299,7 +419,7 @@ function emitGeneratorSequence(
       : statement.kind === "exprStmt" ? statement.expr
       : null;
     if (nested !== null && containsYield(nested)) {
-      emitGeneratorValue(fn, nested, context, (value) => {
+      emitGeneratorValue(fn, nested, context, flow, (value) => {
         if (statement.kind === "assign") {
           context.line(context.assignmentExpr(statement.localId, value, statement.loc));
         } else if (statement.kind === "varDecl") {
@@ -310,7 +430,7 @@ function emitGeneratorSequence(
         } else {
           context.line(`let _ = ${value};`);
         }
-        emitGeneratorSequence(fn, statements.slice(index + 1), context, locals, onComplete);
+        emitGeneratorSequence(fn, statements.slice(index + 1), context, locals, flow, onComplete);
       });
       return;
     }
@@ -334,10 +454,16 @@ export function emitRustGeneratorBody(fn: IrFunction, context: RustGeneratorBody
   context.line(`runtime::generator_new::<${channels}, _>(move |sc_generator, sc_command| {`);
   context.pushIndent();
   context.line("let _ = sc_command;");
+  const flow: GeneratorFlow = {
+    emitReturn: (value) => context.line(`return runtime::GeneratorStep::Returned(${value});`),
+    emitThrow: (reason) => context.line(`runtime::rethrow_caught(${reason})`),
+    emitBreak: () => context.unsupported("generator break outside a loop", fn.loc),
+    emitContinue: () => context.unsupported("generator continue outside a loop", fn.loc),
+  };
   emitGeneratorSequence(fn, fn.body, context, new Set([
     ...fn.params.map((param) => param.localId),
     ...(fn.captures ?? []).map((capture) => capture.localId),
-  ]));
+  ]), flow);
   context.popIndent();
   context.line("})");
 }
@@ -376,8 +502,21 @@ export function emitRustGeneratorResume(
   if (undefinedTag < 0) context.unsupported("generator result without undefined arm", expr.loc);
   const wrap = (type: IrType, value: string): string => {
     const tag = valueUnion.arms.findIndex((arm) => typeKey(arm) === typeKey(type));
-    if (tag < 0) context.unsupported(`generator result missing '${type.kind}' arm`, expr.loc);
-    return `${context.unionName(valueUnion.id)}::${context.unionVariant(tag)}(${value})`;
+    if (tag >= 0) return `${context.unionName(valueUnion.id)}::${context.unionVariant(tag)}(${value})`;
+    if (type.kind !== "union") {
+      context.unsupported(`generator result missing '${type.kind}' arm`, expr.loc);
+    }
+    const source = context.union(type.unionId, expr.loc);
+    const arms = source.arms.map((arm, sourceTag) => {
+      const targetTag = valueUnion.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
+      if (targetTag < 0) context.unsupported(`generator result missing '${arm.kind}' arm`, expr.loc);
+      const sourceVariant = `${context.unionName(source.id)}::${context.unionVariant(sourceTag)}`;
+      const targetVariant = `${context.unionName(valueUnion.id)}::${context.unionVariant(targetTag)}`;
+      return arm.kind === "undefinedT" || arm.kind === "nullT" || arm.kind === "void"
+        ? `${sourceVariant} => ${targetVariant}`
+        : `${sourceVariant}(payload) => ${targetVariant}(payload)`;
+    }).join(", ");
+    return `match ${value} { ${arms} }`;
   };
   const undefinedValue = `${context.unionName(valueUnion.id)}::${context.unionVariant(undefinedTag)}`;
   const record = (done: boolean, value: string): string => {

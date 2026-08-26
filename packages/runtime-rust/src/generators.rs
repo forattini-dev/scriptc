@@ -19,10 +19,13 @@ pub enum GeneratorStep<Y, R> {
 
 type GeneratorContinuation<Y, R, N> =
     Box<dyn FnOnce(JsGenerator<Y, R, N>, GeneratorCommand<N, R>) -> GeneratorStep<Y, R>>;
+type GeneratorPanicHandler<Y, R, N> =
+    Box<dyn FnOnce(JsGenerator<Y, R, N>, Caught) -> GeneratorStep<Y, R>>;
 
 struct GeneratorData<Y, R, N> {
     state: GeneratorState,
     continuation: Option<GeneratorContinuation<Y, R, N>>,
+    panic_handlers: Vec<GeneratorPanicHandler<Y, R, N>>,
 }
 
 /// Safe, synchronous JavaScript generator handle. The suspended continuation
@@ -51,7 +54,26 @@ where
     JsGenerator(Rc::new(RefCell::new(GeneratorData {
         state: GeneratorState::Unstarted,
         continuation: Some(Box::new(start)),
+        panic_handlers: Vec::new(),
     })))
+}
+
+pub fn generator_push_panic_handler<Y, R, N, F>(generator: &JsGenerator<Y, R, N>, handler: F)
+where
+    F: FnOnce(JsGenerator<Y, R, N>, Caught) -> GeneratorStep<Y, R> + 'static,
+{
+    let mut data = generator.0.borrow_mut();
+    assert_eq!(data.state, GeneratorState::Executing);
+    data.panic_handlers.push(Box::new(handler));
+}
+
+pub fn generator_pop_panic_handler<Y, R, N>(generator: &JsGenerator<Y, R, N>) {
+    let mut data = generator.0.borrow_mut();
+    assert_eq!(data.state, GeneratorState::Executing);
+    let _ = data
+        .panic_handlers
+        .pop()
+        .expect("scriptc: generator panic-handler stack underflow");
 }
 
 pub fn generator_suspend<Y, R, N, F>(generator: &JsGenerator<Y, R, N>, continuation: F)
@@ -87,11 +109,13 @@ fn generator_resume<Y, R, N>(
                 GeneratorCommand::Return(value) => {
                     data.state = GeneratorState::Done;
                     data.continuation = None;
+                    data.panic_handlers.clear();
                     return GeneratorStep::Returned(value);
                 }
                 GeneratorCommand::Throw(reason) => {
                     data.state = GeneratorState::Done;
                     data.continuation = None;
+                    data.panic_handlers.clear();
                     rethrow_caught(reason);
                 }
                 GeneratorCommand::Next(value) => {
@@ -136,16 +160,27 @@ fn generator_finish_resume<Y, R, N>(
                 GeneratorStep::Returned(_) => {
                     data.state = GeneratorState::Done;
                     data.continuation = None;
+                    data.panic_handlers.clear();
                 }
             }
             step
         }
         Err(payload) => {
-            let mut data = generator.0.borrow_mut();
-            data.state = GeneratorState::Done;
-            data.continuation = None;
-            drop(data);
-            std::panic::resume_unwind(payload)
+            let handler = {
+                let mut data = generator.0.borrow_mut();
+                data.state = GeneratorState::Done;
+                data.continuation = None;
+                data.panic_handlers.pop()
+            };
+            let Some(handler) = handler else {
+                std::panic::resume_unwind(payload);
+            };
+            let reason = caught_from_panic(payload);
+            generator.0.borrow_mut().state = GeneratorState::Executing;
+            let handled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handler(generator.clone(), reason)
+            }));
+            generator_finish_resume(generator, handled)
         }
     }
 }

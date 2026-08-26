@@ -39,3 +39,21 @@ fn generator_throw_closes_an_unstarted_generator_and_preserves_the_reason() {
     assert_eq!(caught_narrow::<JsString>(&caught).as_ref(), "early");
     assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(None)));
 }
+
+#[test]
+fn generator_panic_handler_survives_suspension_and_handles_body_throws() {
+    let generator: JsGenerator<f64, JsString, ()> = generator_new(|generator, _| {
+        generator_push_panic_handler(&generator, |_generator, reason| {
+            GeneratorStep::Returned(Some(caught_narrow::<JsString>(&reason)))
+        });
+        generator_suspend(&generator, |_generator, _| throw_value(string("inside")));
+        GeneratorStep::Yielded(1.0)
+    });
+
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Yielded(1.0)));
+    match generator_next(&generator, ()) {
+        GeneratorStep::Returned(Some(value)) => assert_eq!(value.as_ref(), "inside"),
+        _ => panic!("the parked panic handler must convert the throw into a return"),
+    }
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(None)));
+}
