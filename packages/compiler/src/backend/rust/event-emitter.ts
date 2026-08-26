@@ -3,10 +3,11 @@ import { RUNTIME_EMITTER_CLASS, typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 import { RustReadableEmitter, type RustReadableContext } from "./readable.js";
 import { RustWritableEmitter, type RustWritableContext } from "./writable.js";
+import { RustDuplexEmitter, type RustDuplexContext } from "./duplex.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
-export interface RustEventEmitterContext extends RustReadableContext, RustWritableContext {
+export interface RustEventEmitterContext extends RustReadableContext, RustWritableContext, RustDuplexContext {
   readonly snapshotShapes: ReadonlyMap<string, RustClosureShape>;
   emitterRoots(): RustClassMeta[];
   classMeta(name: string, loc?: SrcLoc): RustClassMeta;
@@ -26,10 +27,12 @@ export interface RustEventEmitterContext extends RustReadableContext, RustWritab
 export class RustEventEmitterEmitter {
   private readonly readable: RustReadableEmitter;
   private readonly writable: RustWritableEmitter;
+  private readonly duplex: RustDuplexEmitter;
 
   constructor(private readonly context: RustEventEmitterContext) {
     this.readable = new RustReadableEmitter(context);
     this.writable = new RustWritableEmitter(context);
+    this.duplex = new RustDuplexEmitter(context);
   }
 
   emitDefinition(): void {
@@ -62,6 +65,7 @@ export class RustEventEmitterEmitter {
     this.context.line("type ScEmitterRegistry = runtime::JsEventEmitter<ScEmitterListener>;");
     this.readable.emitTypeDefinition();
     this.writable.emitTypeDefinition();
+    this.duplex.emitTypeDefinition();
     this.emitObjectDefinition();
     this.context.line("");
     this.emitMetaDispatchHelper();
@@ -70,6 +74,7 @@ export class RustEventEmitterEmitter {
     this.emitProcessRejectionDefinitions();
     this.readable.emitDefinitions();
     this.writable.emitDefinitions();
+    this.duplex.emitDefinitions();
   }
 
   emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
@@ -78,6 +83,9 @@ export class RustEventEmitterEmitter {
     }
     if (source.kind === "object" && source.className === "%Writable") {
       return `ScEventEmitter::Writable(${value})`;
+    }
+    if (source.kind === "object" && source.className === "%Duplex") {
+      return `ScEventEmitter::Duplex(${value})`;
     }
     if (source.kind !== "object" || !this.context.isEmitterClass(source.className)) return null;
     return `ScEventEmitter::${this.objectVariant(this.classMeta(source.className, loc).root)}(${value})`;
@@ -142,7 +150,7 @@ export class RustEventEmitterEmitter {
       case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
       case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
-      default: return this.readable.emitLibCall(expr) ?? this.writable.emitLibCall(expr);
+      default: return this.duplex.emitLibCall(expr) ?? this.readable.emitLibCall(expr) ?? this.writable.emitLibCall(expr);
     }
   }
 
@@ -156,7 +164,9 @@ export class RustEventEmitterEmitter {
     const shape = this.listenerShape(callback.type, expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
     const startFlow = startsReadableFlow
-      ? `runtime::readable_start_flowing(&${values[0]}); sc_readable_schedule(&${values[0]});`
+      ? receiver.type.kind === "object" && receiver.type.className === "%Duplex"
+        ? `sc_duplex_start_flowing(&${values[0]});`
+        : `runtime::readable_start_flowing(&${values[0]}); sc_readable_schedule(&${values[0]});`
       : "";
     const scheduleReadable = receiver.type.kind === "object" && receiver.type.className === "%Readable" &&
       name.kind === "strLit" && name.value === "readable" ? `sc_readable_schedule_notification(&${values[0]});` : "";
@@ -586,6 +596,7 @@ export class RustEventEmitterEmitter {
     this.context.line("Bare(ScEmitterRegistry),");
     if (this.context.streams.usesReadable) this.context.line("Readable(ScReadable),");
     if (this.context.streams.usesWritable) this.context.line("Writable(ScWritable),");
+    if (this.context.streams.usesDuplex) this.context.line("Duplex(ScDuplex),");
     for (const root of roots) {
       this.context.line(`${this.objectVariant(root)}(runtime::Gc<${this.context.classStructName(root.def.name, root.def.loc)}>),`);
     }
@@ -600,6 +611,7 @@ export class RustEventEmitterEmitter {
     this.context.line("Self::Bare(value) => tracer.edge(value),");
     if (this.context.streams.usesReadable) this.context.line("Self::Readable(value) => runtime::readable_trace(value, tracer),");
     if (this.context.streams.usesWritable) this.context.line("Self::Writable(value) => runtime::writable_trace(value, tracer),");
+    if (this.context.streams.usesDuplex) this.context.line("Self::Duplex(value) => runtime::duplex_trace(value, tracer),");
     for (const root of roots) this.context.line(`Self::${this.objectVariant(root)}(value) => tracer.edge(value),`);
     this.context.popIndent();
     this.context.line("}");
@@ -626,6 +638,7 @@ export class RustEventEmitterEmitter {
     this.context.line("(Self::Bare(left), Self::Bare(right)) => left.ptr_eq(right),");
     if (this.context.streams.usesReadable) this.context.line("(Self::Readable(left), Self::Readable(right)) => runtime::readable_ptr_eq(left, right),");
     if (this.context.streams.usesWritable) this.context.line("(Self::Writable(left), Self::Writable(right)) => runtime::writable_ptr_eq(left, right),");
+    if (this.context.streams.usesDuplex) this.context.line("(Self::Duplex(left), Self::Duplex(right)) => runtime::duplex_ptr_eq(left, right),");
     for (const root of roots) {
       const variant = this.objectVariant(root);
       this.context.line(`(Self::${variant}(left), Self::${variant}(right)) => left.ptr_eq(right),`);
@@ -645,6 +658,7 @@ export class RustEventEmitterEmitter {
     this.context.line("ScEventEmitter::Bare(registry) => registry.clone(),");
     if (this.context.streams.usesReadable) this.context.line("ScEventEmitter::Readable(readable) => runtime::readable_emitter(readable),");
     if (this.context.streams.usesWritable) this.context.line("ScEventEmitter::Writable(writable) => runtime::writable_emitter(writable),");
+    if (this.context.streams.usesDuplex) this.context.line("ScEventEmitter::Duplex(duplex) => runtime::duplex_emitter(duplex),");
     for (const root of roots) {
       this.context.line(`ScEventEmitter::${this.objectVariant(root)}(object) => object.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone()),`);
     }
@@ -702,7 +716,7 @@ export class RustEventEmitterEmitter {
 
   private isEmitterObject(type: IrType): boolean {
     return type.kind === "object" &&
-      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" ||
+      (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" || type.className === "%Duplex" ||
         this.context.isEmitterClass(type.className));
   }
 
@@ -711,6 +725,7 @@ export class RustEventEmitterEmitter {
     if (type.className === RUNTIME_EMITTER_CLASS) return `sc_emitter_registry(&${value})`;
     if (type.className === "%Readable") return `runtime::readable_emitter(&${value})`;
     if (type.className === "%Writable") return `runtime::writable_emitter(&${value})`;
+    if (type.className === "%Duplex") return `runtime::duplex_emitter(&${value})`;
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }

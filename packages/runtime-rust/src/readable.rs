@@ -101,6 +101,14 @@ where
     })
 }
 
+pub fn readable_set_emitter<L, R>(readable: &JsReadable<L, R>, emitter: JsEventEmitter<L>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.emitter = Some(emitter));
+}
+
 pub fn readable_trace<L, R>(readable: &JsReadable<L, R>, tracer: &mut Tracer<'_>)
 where
     L: Clone + Trace + 'static,

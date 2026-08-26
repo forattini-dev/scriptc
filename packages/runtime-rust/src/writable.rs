@@ -124,6 +124,18 @@ where
     })
 }
 
+pub fn writable_set_emitter<L, W, F, C>(
+    writable: &JsWritable<L, W, F, C>,
+    emitter: JsEventEmitter<L>,
+) where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| data.emitter = Some(emitter));
+}
+
 pub fn writable_trace<L, W, F, C>(
     writable: &JsWritable<L, W, F, C>,
     tracer: &mut Tracer<'_>,
