@@ -2190,6 +2190,7 @@ test.each([
   "1724-assert-iferror.ts",
   "1725-assert-symbols.ts",
   "1770-assert-dyn-strict.ts",
+  "1771-assert-dyn-deep.ts",
   "1772-assert-dyn-js.cjs",
   "2285-iferror-dyn.cjs",
   "2487-recursive-deep-equal.ts",
@@ -2217,13 +2218,16 @@ test.each([
   expect(rust, fixture).toEqual(node);
 }, 240_000);
 
-test("Rust uncaught AssertionError preserves stdout, exit status, and heap cleanup", async () => {
+test.each([
+  ["1601-assert-fail-exit.ts", "Expected values to be strictly equal:"],
+  ["1727-assert-throws-shape-exit.ts", "Expected values to be strictly deep-equal:"],
+  ["1773-assert-dyn-exit.ts", "Expected values to be strictly equal:"],
+])("Rust uncaught AssertionError preserves stdout, exit status, and heap cleanup: %s", async (fixture, message) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-assertion-exit-"));
-  const fixture = "1601-assert-fail-exit.ts";
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "1601-assert-fail-exit"),
+    outPath: join(dir, fixture.replace(/\.ts$/, "")),
     backend: "rust",
     optimization: "dev",
   });
@@ -2238,6 +2242,6 @@ test("Rust uncaught AssertionError preserves stdout, exit status, and heap clean
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.exitCode).toBe(node.exitCode);
-  expect(rust.stderr).toContain("Uncaught AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:");
+  expect(rust.stderr).toContain(`Uncaught AssertionError [ERR_ASSERTION]: ${message}`);
   expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 240_000);
