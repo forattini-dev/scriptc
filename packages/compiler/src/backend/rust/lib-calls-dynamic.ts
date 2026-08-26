@@ -83,6 +83,14 @@ export function emitRustDynamicLibCall(
   if (expr.fn === "dyn.typeof" && expr.args.length === 1 && arg?.type.kind === "dyn") {
     return `sc_dyn_typeof(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "dyn.toString" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
+      secondArg?.type.kind === "string" && expr.args[2]?.type.kind === "string") {
+    const value = context.nextTemporary();
+    const encoding = context.nextTemporary();
+    const spelling = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${encoding} = ${context.emitExpr(secondArg)}; let ${spelling} = ${context.emitExpr(expr.args[2])}; match &${value} { ${dyn}::Undefined | ${dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading 'toString')", sc_dyn_kind(&${value}))), ${dyn}::Bytes(bytes) | ${dyn}::Buffer(bytes) => runtime::bytes_to_string(bytes, &${encoding}), _ => { let _ = ${spelling}; sc_dyn_to_string(&${value}) }, } }`;
+  }
   if ((expr.fn === "dyn.objKeys" || expr.fn === "dyn.objValues" || expr.fn === "dyn.objEntries") &&
     expr.args.length === 1 && arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     const value = context.nextTemporary();

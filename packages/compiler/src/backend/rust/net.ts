@@ -81,7 +81,8 @@ function emitDataListener(
   }
   const parameter = callbackType.params[0];
   if (callbackType.params.length > 1 ||
-      (parameter !== undefined && (parameter.kind !== "bytes" || parameter.elem !== "u8"))) {
+      (parameter !== undefined && parameter.kind !== "dyn" &&
+        (parameter.kind !== "bytes" || parameter.elem !== "u8"))) {
     context.unsupported("net data callback parameter", expr.loc);
   }
   const callback = context.nextTemporary();
@@ -89,7 +90,7 @@ function emitDataListener(
   const dispatch = context.emitClosureDispatch(
     callback,
     callbackType,
-    parameter === undefined ? [] : ["sc_chunk"],
+    parameter === undefined ? [] : [parameter.kind === "dyn" ? `${context.dynTypeName()}::Buffer(sc_chunk)` : "sc_chunk"],
     expr.loc,
   );
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_socket_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
@@ -168,6 +169,26 @@ export function emitRustNetCall(
     return emitVoidCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::net_server_listen_callback(&(${server}), ${port}, ${invoke}, ${trace});`);
   }
+  if (expr.fn === "net.listenOpts" && expr.args.length === 4 &&
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
+    return `runtime::net_server_listen_options(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])})`;
+  }
+  if (expr.fn === "net.listenOptsCb" && expr.args.length === 5 &&
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
+    const callbackExpr = expr.args[4];
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("net.listenOptsCb callback", expr.loc);
+    }
+    const server = context.emitExpr(expr.args[0]);
+    const port = context.emitExpr(expr.args[1]);
+    const host = context.emitExpr(expr.args[2]);
+    const exclusive = context.emitExpr(expr.args[3]);
+    return emitVoidCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::net_server_listen_options_callback(&(${server}), ${port}, &(${host}), ${exclusive}, ${invoke}, ${trace});`);
+  }
   if (expr.fn === "net.serverPort" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_port(&(${context.emitExpr(expr.args[0])}))`;
   }
@@ -238,6 +259,27 @@ export function emitRustNetCall(
   }
   if (expr.fn === "net.sockEnd" && expr.args.length === 1 && expr.args[0]?.type.kind === "netSocket") {
     return `runtime::net_socket_end(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if ((expr.fn === "net.sockPause" || expr.fn === "net.sockResume") && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "netSocket") {
+    const fn = expr.fn === "net.sockPause" ? "net_socket_pause" : "net_socket_resume";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if (expr.fn === "net.sockSetNoDelay" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "netSocket" && expr.args[1]?.type.kind === "bool") {
+    return `runtime::net_socket_set_no_delay(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;
+  }
+  if (expr.fn === "net.sockDestroySoon" && expr.args.length === 1 && expr.args[0]?.type.kind === "netSocket") {
+    return `runtime::net_socket_destroy_soon(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if ((expr.fn === "net.sockBytesWritten" || expr.fn === "net.sockReadable" ||
+      expr.fn === "net.sockDestroyed" || expr.fn === "net.sockWritable") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "netSocket") {
+    const fn = expr.fn === "net.sockBytesWritten" ? "net_socket_bytes_written"
+      : expr.fn === "net.sockReadable" ? "net_socket_readable"
+      : expr.fn === "net.sockDestroyed" ? "net_socket_destroyed"
+      : "net_socket_writable";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}))`;
   }
   if (expr.fn === "net.sockOnData" && expr.args.length === 3) {
     const callbackType = expr.args[1]?.type;

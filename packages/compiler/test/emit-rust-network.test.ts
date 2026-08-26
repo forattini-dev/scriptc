@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile);
 
 test.each([
   "1567-server-close-override.ts",
+  "1797-dyn-handle-socket.cjs",
+  "2640-net-dyn-socket-compat.cjs",
   "2695-net-typed-roundtrip.ts",
 ])("Rust TCP corpus matches Node: %s", async (fixtureName) => {
   const fixture = resolve("tests/corpus", fixtureName);

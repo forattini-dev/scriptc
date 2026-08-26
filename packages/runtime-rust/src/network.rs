@@ -51,6 +51,11 @@ struct NetDataListener {
     once: bool,
 }
 
+struct NetWrite {
+    bytes: Vec<u8>,
+    callback: Option<NetVoidListener>,
+}
+
 pub struct NetSocketData {
     stream: Option<std::net::TcpStream>,
     server: Option<JsNetServer>,
@@ -60,8 +65,10 @@ pub struct NetSocketData {
     read_ended: bool,
     end_requested: bool,
     close_emitted: bool,
-    write_queue: VecDeque<Vec<u8>>,
+    bytes_written: usize,
+    write_queue: VecDeque<NetWrite>,
     write_offset: usize,
+    finish_listeners: Vec<NetVoidListener>,
     data_listeners: Vec<NetDataListener>,
     end_listeners: Vec<NetVoidListener>,
     close_listeners: Vec<NetVoidListener>,
@@ -85,6 +92,14 @@ impl Trace for NetSocketData {
         for listener in &self.connect_listeners {
             (listener.trace)(tracer);
         }
+        for write in &self.write_queue {
+            if let Some(listener) = &write.callback {
+                (listener.trace)(tracer);
+            }
+        }
+        for listener in &self.finish_listeners {
+            (listener.trace)(tracer);
+        }
     }
 }
 
@@ -99,6 +114,8 @@ impl ClearEdges for NetSocketData {
         self.end_requested = true;
         self.write_queue.clear();
         self.write_offset = 0;
+        self.bytes_written = 0;
+        self.finish_listeners.clear();
         self.data_listeners.clear();
         self.end_listeners.clear();
         self.close_listeners.clear();
@@ -156,6 +173,7 @@ enum NetTask {
     SocketConnect(JsNetSocket),
     SocketEnd(JsNetSocket),
     SocketClose(JsNetSocket),
+    Callback(NetVoidListener),
 }
 
 thread_local! {
@@ -188,8 +206,10 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         read_ended: false,
         end_requested: false,
         close_emitted: false,
+        bytes_written: 0,
         write_queue: VecDeque::new(),
         write_offset: 0,
+        finish_listeners: Vec::new(),
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
         close_listeners: Vec::new(),
@@ -275,9 +295,9 @@ fn net_server_register(server: &JsNetServer) {
     });
 }
 
-pub fn net_server_listen(server: &JsNetServer, port: f64) {
+fn net_server_listen_host(server: &JsNetServer, port: f64, host: &str) {
     let port = net_port(port);
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port))
+    let listener = std::net::TcpListener::bind((host, port))
         .unwrap_or_else(|error| throw_error(format!("listen {}", fs_error_code(&error))));
     listener
         .set_nonblocking(true)
@@ -295,6 +315,19 @@ pub fn net_server_listen(server: &JsNetServer, port: f64) {
     NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::Listening(server.clone())));
 }
 
+pub fn net_server_listen(server: &JsNetServer, port: f64) {
+    net_server_listen_host(server, port, "127.0.0.1");
+}
+
+pub fn net_server_listen_options(
+    server: &JsNetServer,
+    port: f64,
+    host: &JsString,
+    _exclusive: bool,
+) {
+    net_server_listen_host(server, port, host);
+}
+
 pub fn net_server_listen_callback(
     server: &JsNetServer,
     port: f64,
@@ -303,6 +336,18 @@ pub fn net_server_listen_callback(
 ) {
     net_server_on_listening(server, callback, trace, true);
     net_server_listen(server, port);
+}
+
+pub fn net_server_listen_options_callback(
+    server: &JsNetServer,
+    port: f64,
+    host: &JsString,
+    exclusive: bool,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+) {
+    net_server_on_listening(server, callback, trace, true);
+    net_server_listen_options(server, port, host, exclusive);
 }
 
 pub fn net_server_port(server: &JsNetServer) -> f64 {
@@ -444,8 +489,41 @@ pub fn net_socket_on_connect(
 fn net_socket_queue(socket: &JsNetSocket, bytes: Vec<u8>) {
     socket.with_mut(|socket| {
         if !socket.destroyed && socket.writable && !socket.end_requested && !bytes.is_empty() {
-            socket.write_queue.push_back(bytes);
+            socket.bytes_written += bytes.len();
+            socket.write_queue.push_back(NetWrite {
+                bytes,
+                callback: None,
+            });
         }
+    });
+}
+
+pub fn net_socket_after_write(socket: &JsNetSocket, callback: Rc<dyn Fn()>, trace: NetTrace) {
+    let listener = NetVoidListener {
+        invoke: callback,
+        trace,
+        once: true,
+    };
+    let pending = socket.with_mut(|socket| {
+        if let Some(write) = socket.write_queue.back_mut() {
+            write.callback = Some(listener.clone());
+            false
+        } else {
+            true
+        }
+    });
+    if pending {
+        NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::Callback(listener)));
+    }
+}
+
+pub fn net_socket_on_finish(socket: &JsNetSocket, callback: Rc<dyn Fn()>, trace: NetTrace) {
+    socket.with_mut(|socket| {
+        socket.finish_listeners.push(NetVoidListener {
+            invoke: callback,
+            trace,
+            once: true,
+        });
     });
 }
 
@@ -472,6 +550,59 @@ pub fn net_socket_end_str(socket: &JsNetSocket, value: &JsString) {
 
 pub fn net_socket_end_bytes(socket: &JsNetSocket, value: &JsBytes<u8>) {
     net_socket_write_bytes(socket, value);
+    net_socket_end(socket);
+}
+
+pub fn net_socket_destroyed(socket: &JsNetSocket) -> bool {
+    socket.with(|socket| socket.destroyed)
+}
+
+pub fn net_socket_writable(socket: &JsNetSocket) -> bool {
+    socket.with(|socket| socket.writable && !socket.destroyed)
+}
+
+pub fn net_socket_readable(socket: &JsNetSocket) -> bool {
+    socket.with(|socket| !socket.read_ended && !socket.destroyed)
+}
+
+pub fn net_socket_bytes_written(socket: &JsNetSocket) -> f64 {
+    socket.with(|socket| socket.bytes_written as f64)
+}
+
+pub fn net_socket_remote_address(socket: &JsNetSocket) -> Option<JsString> {
+    socket.with(|socket| {
+        socket
+            .stream
+            .as_ref()
+            .and_then(|stream| stream.peer_addr().ok())
+            .map(|address| string(&address.ip().to_string()))
+    })
+}
+
+pub fn net_socket_pause(socket: &JsNetSocket) -> JsNetSocket {
+    socket.with_mut(|socket| socket.flowing = false);
+    socket.clone()
+}
+
+pub fn net_socket_resume(socket: &JsNetSocket) -> JsNetSocket {
+    socket.with_mut(|socket| {
+        if !socket.destroyed && !socket.read_ended {
+            socket.flowing = true;
+        }
+    });
+    socket.clone()
+}
+
+pub fn net_socket_set_no_delay(socket: &JsNetSocket, enabled: bool) -> JsNetSocket {
+    socket.with(|socket| {
+        if let Some(stream) = &socket.stream {
+            let _ = stream.set_nodelay(enabled);
+        }
+    });
+    socket.clone()
+}
+
+pub fn net_socket_destroy_soon(socket: &JsNetSocket) {
     net_socket_end(socket);
 }
 
@@ -573,6 +704,7 @@ fn net_dispatch_task(task: NetTask) {
                 socket.writable = false;
                 socket.stream = None;
                 socket.write_queue.clear();
+                socket.finish_listeners.clear();
                 socket.data_listeners.clear();
                 socket.end_listeners.clear();
                 socket.connect_listeners.clear();
@@ -588,6 +720,7 @@ fn net_dispatch_task(task: NetTask) {
                 net_server_connection_closed(&server);
             }
         }
+        NetTask::Callback(listener) => (listener.invoke)(),
     }
 }
 
@@ -623,8 +756,9 @@ fn net_accept_one() -> bool {
 fn net_socket_flush_one() -> bool {
     enum Flush {
         Idle,
-        Progress,
-        Close(JsNetSocket),
+        Progress(Option<NetVoidListener>),
+        Finish(Vec<NetVoidListener>),
+        Close(JsNetSocket, Vec<NetVoidListener>),
     }
 
     let outcome = NET_SOCKETS.with(|sockets| {
@@ -633,23 +767,27 @@ fn net_socket_flush_one() -> bool {
                 if socket.destroyed || !socket.writable {
                     return Flush::Idle;
                 }
-                if let Some(chunk) = socket.write_queue.front() {
+                if let Some(write) = socket.write_queue.front() {
                     let Some(stream) = socket.stream.as_mut() else {
-                        return Flush::Close(candidate.clone());
+                        return Flush::Close(candidate.clone(), Vec::new());
                     };
-                    match std::io::Write::write(stream, &chunk[socket.write_offset..]) {
+                    match std::io::Write::write(stream, &write.bytes[socket.write_offset..]) {
                         Ok(0) => Flush::Idle,
                         Ok(length) => {
                             socket.write_offset += length;
-                            if socket.write_offset == chunk.len() {
-                                socket.write_queue.pop_front();
+                            let callback = if socket.write_offset == write.bytes.len() {
                                 socket.write_offset = 0;
-                            }
-                            Flush::Progress
+                                socket.write_queue.pop_front().and_then(|write| write.callback)
+                            } else {
+                                None
+                            };
+                            Flush::Progress(callback)
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Flush::Idle,
-                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => Flush::Progress,
-                        Err(_) => Flush::Close(candidate.clone()),
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                            Flush::Progress(None)
+                        }
+                        Err(_) => Flush::Close(candidate.clone(), Vec::new()),
                     }
                 } else if socket.end_requested {
                     if let Some(stream) = socket.stream.as_ref() {
@@ -657,9 +795,12 @@ fn net_socket_flush_one() -> bool {
                     }
                     socket.writable = false;
                     if socket.read_ended {
-                        Flush::Close(candidate.clone())
+                        Flush::Close(
+                            candidate.clone(),
+                            std::mem::take(&mut socket.finish_listeners),
+                        )
                     } else {
-                        Flush::Progress
+                        Flush::Finish(std::mem::take(&mut socket.finish_listeners))
                     }
                 } else {
                     Flush::Idle
@@ -672,8 +813,26 @@ fn net_socket_flush_one() -> bool {
         })
     });
     match outcome {
-        Some(Flush::Progress) => true,
-        Some(Flush::Close(socket)) => {
+        Some(Flush::Progress(callback)) => {
+            if let Some(callback) = callback {
+                NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::Callback(callback)));
+            }
+            true
+        }
+        Some(Flush::Finish(callbacks)) => {
+            NET_TASKS.with(|tasks| {
+                tasks
+                    .borrow_mut()
+                    .extend(callbacks.into_iter().map(NetTask::Callback));
+            });
+            true
+        }
+        Some(Flush::Close(socket, callbacks)) => {
+            NET_TASKS.with(|tasks| {
+                tasks
+                    .borrow_mut()
+                    .extend(callbacks.into_iter().map(NetTask::Callback));
+            });
             net_socket_destroy(&socket);
             true
         }
@@ -691,12 +850,28 @@ fn net_socket_read_one() -> bool {
     let event = NET_SOCKETS.with(|sockets| {
         sockets.borrow().iter().find_map(|candidate| {
             candidate.with_mut(|socket| {
-                if socket.destroyed || socket.read_ended || !socket.flowing {
+                if socket.destroyed || socket.read_ended {
                     return None;
                 }
                 let Some(stream) = socket.stream.as_mut() else {
                     return Some(ReadEvent::Close(candidate.clone()));
                 };
+                if !socket.flowing {
+                    if !socket.end_requested {
+                        return None;
+                    }
+                    let mut probe = [0_u8; 1];
+                    return match stream.peek(&mut probe) {
+                        Ok(0) => {
+                            socket.read_ended = true;
+                            Some(ReadEvent::End(candidate.clone()))
+                        }
+                        Ok(_) => None,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => None,
+                        Err(_) => Some(ReadEvent::Close(candidate.clone())),
+                    };
+                }
                 let mut buffer = vec![0_u8; 65_536];
                 match std::io::Read::read(stream, &mut buffer) {
                     Ok(0) => {

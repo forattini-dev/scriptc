@@ -71,9 +71,11 @@ class RustDynamicInvokeEmitter {
     this.context.line(`(${this.dyn}::Boolean(left), ${this.dyn}::Boolean(right)) => left == right,`);
     this.context.line(`(${this.dyn}::String(left), ${this.dyn}::String(right)) => left.as_ref() == right.as_ref(),`);
     this.context.line(`(${this.dyn}::Bytes(left), ${this.dyn}::Bytes(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${this.dyn}::Buffer(left), ${this.dyn}::Buffer(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Array(left), ${this.dyn}::Array(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Object(left), ${this.dyn}::Object(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Promise(left), ${this.dyn}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
+    this.context.line(`(${this.dyn}::NetSocket(left), ${this.dyn}::NetSocket(right)) => left.ptr_eq(right),`);
     for (const pattern of this.functionVariants()) {
       this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);
     }
@@ -225,7 +227,9 @@ class RustDynamicInvokeEmitter {
     this.emitStringArm();
     this.emitArrayArm();
     this.emitBytesArm();
+    this.emitBufferArm();
     this.emitPromiseArm();
+    this.emitNetSocketArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("}");
@@ -313,6 +317,49 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { length + index } else { index }; if actual < 0.0 || actual >= length { ${this.dyn}::Undefined } else { ${this.dyn}::Number(runtime::bytes_get(bytes, actual)) } },`);
     this.context.line(`"slice" | "subarray" => ${this.dyn}::Bytes(runtime::bytes_slice(bytes, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, length, callee_name), false)),`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
+    this.close("}");
+    this.close("},");
+  }
+
+  private emitBufferArm(): void {
+    this.open(`${this.dyn}::Buffer(bytes) => {`);
+    this.context.line("let length = runtime::bytes_len(bytes);");
+    this.open("match method {");
+    this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { length + index } else { index }; if actual < 0.0 || actual >= length { ${this.dyn}::Undefined } else { ${this.dyn}::Number(runtime::bytes_get(bytes, actual)) } },`);
+    this.context.line(`"slice" | "subarray" => ${this.dyn}::Buffer(runtime::bytes_slice(bytes, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, length, callee_name), false)),`);
+    this.context.line(`"toString" => { let encoding = match args.first() { None | Some(${this.dyn}::Undefined) => runtime::string("utf8"), Some(${this.dyn}::String(value)) => value.clone(), value => sc_dyn_arg_type_fail("encoding", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; ${this.dyn}::String(runtime::bytes_to_string(bytes, &encoding)) },`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    this.close("}");
+    this.close("},");
+  }
+
+  private emitNetSocketArm(): void {
+    this.open(`${this.dyn}::NetSocket(socket) => {`);
+    this.open("match method {");
+    this.context.line(`"write" => { match args.first() { Some(${this.dyn}::String(value)) => runtime::net_socket_write_str(socket, value), Some(${this.dyn}::Bytes(value) | ${this.dyn}::Buffer(value)) => runtime::net_socket_write_bytes(socket, value), value => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer, TypedArray, or DataView", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = match (args.get(1), args.get(2)) { (_, Some(value)) => Some(value.clone()), (Some(${this.dyn}::String(_)) | None | Some(${this.dyn}::Undefined), None) => None, (Some(value), None) => Some(value.clone()), }; if let Some(callback) = callback { let traced = callback.clone(); runtime::net_socket_after_write(socket, std::rc::Rc::new(move || { let _ = sc_dyn_call(&callback, &[], "callback"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer))); } ${this.dyn}::Boolean(true) },`);
+    this.context.line(`"end" => { match args.first() { None | Some(${this.dyn}::Undefined) => runtime::net_socket_end(socket), Some(${this.dyn}::String(value)) => runtime::net_socket_end_str(socket, value), Some(${this.dyn}::Bytes(value) | ${this.dyn}::Buffer(value)) => runtime::net_socket_end_bytes(socket, value), value => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer, TypedArray, or DataView", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = match (args.get(1), args.get(2)) { (_, Some(value)) => Some(value.clone()), (Some(${this.dyn}::String(_)) | None | Some(${this.dyn}::Undefined), None) => None, (Some(value), None) => Some(value.clone()), }; if let Some(callback) = callback { let traced = callback.clone(); runtime::net_socket_on_finish(socket, std::rc::Rc::new(move || { let _ = sc_dyn_call(&callback, &[], "callback"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer))); } recv.clone() },`);
+    this.context.line(`"destroy" => { runtime::net_socket_destroy(socket); recv.clone() },`);
+    this.context.line(`"destroySoon" => { runtime::net_socket_destroy_soon(socket); recv.clone() },`);
+    this.context.line(`"pause" => { let _ = runtime::net_socket_pause(socket); recv.clone() },`);
+    this.context.line(`"resume" => { let _ = runtime::net_socket_resume(socket); recv.clone() },`);
+    this.context.line(`"setNoDelay" => { let enabled = match args.first() { None | Some(${this.dyn}::Undefined) => true, Some(${this.dyn}::Boolean(value)) => *value, _ => true }; let _ = runtime::net_socket_set_no_delay(socket, enabled); recv.clone() },`);
+    this.context.line(`"on" | "once" | "addListener" => {`);
+    this.context.pushIndent();
+    this.context.line(`let event = match args.first() { Some(${this.dyn}::String(value)) => value.as_ref(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
+    this.context.line(`let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined);`);
+    this.context.line("let traced = callback.clone();");
+    this.context.line("let once = method == \"once\";");
+    this.open("match event {");
+    this.context.line(`"data" => runtime::net_socket_on_data(socket, std::rc::Rc::new(move |chunk| { let _ = sc_dyn_call(&callback, &[${this.dyn}::Buffer(chunk)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
+    for (const [event, runtime] of [["end", "net_socket_on_end"], ["close", "net_socket_on_close"], ["connect", "net_socket_on_connect"]] as const) {
+      this.context.line(`"${event}" => runtime::${runtime}(socket, std::rc::Rc::new(move || { let _ = sc_dyn_call(&callback, &[], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
+    }
+    this.context.line('_ => runtime::throw_error(format!("dynamic socket event \'{event}\' is not supported yet")),');
+    this.close("}");
+    this.context.line("recv.clone()");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("}");
     this.close("},");
   }
