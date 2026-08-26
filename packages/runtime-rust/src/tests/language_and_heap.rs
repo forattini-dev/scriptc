@@ -385,6 +385,16 @@
     }
 
     #[test]
+    fn dynamic_conversion_guard_rejects_cycles_and_recovers_after_unwind() {
+        let outer = dyn_from_enter(41);
+        let nested = dyn_from_enter(42);
+        drop(nested);
+        assert!(std::panic::catch_unwind(|| dyn_from_enter(41)).is_err());
+        drop(outer);
+        drop(dyn_from_enter(41));
+    }
+
+    #[test]
     fn template_strings_preserve_per_site_identity() {
         let first = template_strings("first-site", &["a", "b"]);
         let same = template_strings("first-site", &["a", "b"]);

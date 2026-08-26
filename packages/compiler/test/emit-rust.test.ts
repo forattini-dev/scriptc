@@ -914,6 +914,7 @@ test.each([
   "2483-recursive-record-cycles.ts",
   "2484-json-stringify-circular.ts",
   "2485-inspect-circular-refs.ts",
+  "2486-recursive-record-boundaries.ts",
   "2488-ast-walker.ts",
   "2490-find-miss-null-compare.ts",
   "2491-strict-unit-compare-no-arm.ts",
@@ -972,6 +973,11 @@ test.each([
     expect(await readFile(result.sourcePath, "utf8")).toMatch(
       /sc_fld_miss: Some\(sc_u_[A-Za-z0-9_]+::ScArm\d+\)/u,
     );
+  }
+  if (fixture === "2486-recursive-record-boundaries.ts" && result.backend === "rust") {
+    const source = await readFile(result.sourcePath, "utf8");
+    expect(source).toContain("fn sc_dyn_from_");
+    expect(source).toContain("runtime::dyn_from_enter");
   }
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
   const nodeArgs = await nodeCorpusArgs(entryPath);
@@ -1143,6 +1149,34 @@ console.log((nested as { items: number[] }).items.length);
   expect(outcome.stderr).toContain(
     "Uncaught TypeError: expected number at $.items[1], got string",
   );
+}, 120_000);
+
+test("Rust recursive typed-to-dynamic copies reject cycles before recursion", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-cycle-"));
+  const entryPath = join(dir, "dyn-cycle.ts");
+  await writeFile(entryPath, `
+interface Link { next: Link | null }
+const link: Link = { next: null };
+link.next = link;
+const boxed: unknown = link;
+console.log(boxed);
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "dyn-cycle"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  const outcome = await runToExit(result.binaryPath);
+  expect(outcome.stderr).toContain(
+    "cannot convert a circular structure into a checked-dynamic value",
+  );
+  expect(outcome.stderr).not.toContain("stack overflow");
 }, 120_000);
 
 test("Rust dynamic objects, arrays, strings, and function properties match Node", async () => {

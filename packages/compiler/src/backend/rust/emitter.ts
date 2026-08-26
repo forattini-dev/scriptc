@@ -26,7 +26,6 @@ import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
-
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
@@ -513,6 +512,7 @@ class RustEmitter {
       this.emitFunction(fn);
       this.line("");
     }
+    this.dynamicEmitter.emitDynFromDefinitions();
     const entry = this.functions.get(this.mod.entry);
     if (entry === undefined) this.unsupported(`missing entry '${this.mod.entry}'`);
     if (entry.params.length !== 0 || entry.returnType.kind !== "void") {

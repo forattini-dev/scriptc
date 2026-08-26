@@ -1,12 +1,11 @@
 import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
-import { mangleField } from "../mangle.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
+import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
-import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustDynamicContext {
   usesDyn(): boolean;
@@ -41,7 +40,11 @@ export interface RustDynamicContext {
 }
 
 export class RustDynamicEmitter {
-  constructor(private readonly context: RustDynamicContext) {}
+  private readonly dynFrom: RustDynamicFromEmitter;
+
+  constructor(private readonly context: RustDynamicContext) {
+    this.dynFrom = new RustDynamicFromEmitter(context);
+  }
 
   emitDynamicDefinition(): void {
     if (!this.context.usesDyn()) return;
@@ -1000,123 +1003,11 @@ export class RustDynamicEmitter {
   }
 
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
-    const name = this.context.dynTypeName();
-    switch (type.kind) {
-      case "dyn": return value;
-      case "f64": return `${name}::Number(${value})`;
-      case "bool": return `${name}::Boolean(${value})`;
-      case "string": return `${name}::String(${value})`;
-      case "bytes": {
-        if (type.elem !== "u8") this.context.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
-        return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
-      }
-      case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
-      case "netServer": return `${name}::NetServer(${value})`;
-      case "netSocket": return `${name}::NetSocket(${value})`;
-      case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
-      case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
-      case "func": {
-        const shape = this.context.closureShapeForType(type, loc);
-        if (!this.context.dynBoxedFunctionShapes.has(typeKey(type))) {
-          this.context.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
-        }
-        if (this.context.usesDynamicInvoke()) {
-          return `sc_dyn_box_function_${shape.index}(${value}, runtime::string("${this.context.rustString(functionName)}"))`;
-        }
-        return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, runtime::string("${this.context.rustString(functionName)}"), runtime::map_new())`;
-      }
-      case "array": {
-        const source = this.context.nextTemporary();
-        const output = this.context.nextTemporary();
-        const index = this.context.nextTemporary();
-        const element = this.emitDynFromValue(
-          type.elem,
-          `runtime::array_get(&${source}, ${index})`,
-          loc, "", liveRef,
-        );
-        return `{ let ${source} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); let mut ${index} = 0.0; while ${index} < runtime::array_len(&${source}) { runtime::array_push(&${output}, ${element}); ${index} += 1.0; } ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${source}); ` : ""}${name}::Array(${output}) }`;
-      }
-      case "union": {
-        const union = this.context.union(type.unionId, loc);
-        const unionValue = this.context.nextTemporary();
-        const arms = union.arms.map((arm, tag) => {
-          const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
-          if (this.context.isUnit(arm)) {
-            return `${variant} => ${this.emitDynFromValue(arm, "()", loc, "", liveRef)}`;
-          }
-          return `${variant}(payload) => ${this.emitDynFromValue(arm, "payload", loc, "", liveRef)}`;
-        }).join(", ");
-        return `{ let ${unionValue} = ${value}; match ${unionValue} { ${arms} } }`;
-      }
-      case "object": {
-        if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
-          this.context.unsupported(`dynamic boxing from object '${type.className}'`, loc);
-        }
-        if (this.context.errorClassRoots().length > 0) {
-          this.context.unsupported("dynamic Error boxing alongside user Error subclasses", loc);
-        }
-        const error = this.context.nextTemporary();
-        return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
-      }
-      case "record": {
-        const shape = this.context.records.get(type.shapeId);
-        if (shape?.tuple) {
-          const record = this.context.nextTemporary();
-          const output = this.context.nextTemporary();
-          const fields = [...shape.fields]
-            .sort((left, right) => Number(left.name) - Number(right.name))
-            .map((field) => {
-              const stored = `${record}.${mangleField(field.name)}`;
-              const fieldValue = this.context.isEdgeValue(field.type)
-                ? `${stored}.as_ref().expect("scriptc: cleared live dynamic tuple field").clone()`
-                : this.context.needsClone(field.type) ? `${stored}.clone()` : stored;
-              return `runtime::array_push(&${output}, ${this.emitDynFromValue(field.type, fieldValue, loc, "", liveRef)});`;
-            }).join(" ");
-          return `{ let ${record} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${record}); ` : ""}${name}::Array(${output}) }`;
-        }
-        if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
-          return liveRef ? `{ let source = ${value}; let mirror = match sc_dyn_deep_copy(&${name}::Object(source.clone())) { ${name}::Object(value) => value, _ => unreachable!() }; runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Object(mirror) }` : `sc_dyn_deep_copy(&${name}::Object(${value}))`;
-        }
-        if (shape?.indexValue !== undefined && shape.fields.length === 0) {
-          const source = this.context.nextTemporary();
-          const output = this.context.nextTemporary();
-          const index = this.context.nextTemporary();
-          const field = this.emitDynFromValue(
-            shape.indexValue,
-            `runtime::map_iter_value(&${source}, ${index})`,
-            loc, "", liveRef,
-          );
-          return `{ let ${source} = ${value}; let ${output}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${output}, key, ${field}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; } ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${source}); ` : ""}${name}::Object(${output}) }`;
-        }
-        if (shape === undefined) {
-          this.context.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
-        }
-        const record = this.context.nextTemporary();
-        const object = this.context.nextTemporary();
-        const byName = new Map(shape.fields.map((field) => [field.name, field]));
-        const fields = (shape.declaredOrder ?? shape.fields.map((field) => field.name)).map((fieldName) => {
-          const field = byName.get(fieldName);
-          if (field === undefined) this.context.unsupported(`missing declared record field '${type.shapeId}.${fieldName}'`, loc);
-          const stored = `${record}.${mangleField(field.name)}`;
-          const fieldValue = this.context.isEdgeValue(field.type)
-            ? `${stored}.as_ref().expect("scriptc: cleared live dynamic record field").clone()`
-            : this.context.needsClone(field.type) ? `${stored}.clone()` : stored;
-          const dynamic = this.emitDynFromValue(field.type, fieldValue, loc, "", liveRef);
-          return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
-        }).join(" ");
-        const overflow = shape.indexValue === undefined ? "" : (() => {
-          const source = this.context.nextTemporary();
-          const index = this.context.nextTemporary();
-          const dynamic = shape.indexValue.kind === "dyn"
-            ? `runtime::map_iter_value(&${source}, ${index})`
-            : this.emitDynFromValue(shape.indexValue, `runtime::map_iter_value(&${source}, ${index})`, loc, "", liveRef);
-          return `let ${source} = ${record}.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let sc_key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${object}, sc_key, ${dynamic}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; }`;
-        })();
-        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} ${overflow} }); ${liveRef ? `runtime::live_dyn_ref_store(${object}.identity(), ${record}); ` : ""}${name}::Object(${object}) }`;
-      }
-      default:
-        this.context.unsupported(`dynamic boxing from '${type.kind}'`, loc);
-    }
+    return this.dynFrom.emit(type, value, loc, functionName, liveRef);
+  }
+
+  emitDynFromDefinitions(): void {
+    this.dynFrom.emitDefinitions();
   }
 
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
