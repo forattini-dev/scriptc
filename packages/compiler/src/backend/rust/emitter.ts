@@ -71,6 +71,8 @@ class RustEmitter {
   private capturedReturnDepth = 0;
   private readonly loopTargets: {
     id: number;
+    kind: "loop" | "switch" | "block";
+    labels: readonly string[] | undefined;
     breakLabel: string;
     continueBlock: string | null;
     allowsContinue: boolean;

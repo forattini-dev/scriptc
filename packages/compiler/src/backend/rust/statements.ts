@@ -5,6 +5,8 @@ import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustLoopTarget {
   readonly id: number;
+  readonly kind: "loop" | "switch" | "block";
+  readonly labels: readonly string[] | undefined;
   readonly breakLabel: string;
   readonly continueBlock: string | null;
   readonly allowsContinue: boolean;
@@ -22,7 +24,7 @@ export interface RustStatementContext {
   pushIndent(): void;
   popIndent(): void;
   nextTemporary(): string;
-  nextLabel(prefix: "sc_loop" | "sc_continue" | "sc_switch"): string;
+  nextLabel(prefix: "sc_loop" | "sc_continue" | "sc_switch" | "sc_block"): string;
   nextLoopTargetId(): number;
   emitExpr(expr: IrExpr): string;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
@@ -105,6 +107,9 @@ class RustStatementEmitter {
       case "while":
         this.emitWhile(stmt);
         return;
+      case "doWhile":
+        this.emitDoWhile(stmt);
+        return;
       case "switch":
         this.emitSwitch(stmt);
         return;
@@ -158,12 +163,31 @@ class RustStatementEmitter {
         this.emitContinue(stmt);
         return;
       case "block":
-        if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled block", stmt.loc);
-        this.context.line("{");
-        this.context.pushIndent();
-        this.emit(stmt.body);
-        this.context.popIndent();
-        this.context.line("}");
+        if ((stmt.labels?.length ?? 0) === 0) {
+          this.context.line("{");
+          this.context.pushIndent();
+          this.emit(stmt.body);
+          this.context.popIndent();
+          this.context.line("}");
+          return;
+        }
+        {
+          const blockLabel = this.context.nextLabel("sc_block");
+          this.context.line(`'${blockLabel}: {`);
+          this.context.pushIndent();
+          this.context.loopTargets.push({
+            id: this.context.nextLoopTargetId(),
+            kind: "block",
+            labels: stmt.labels,
+            breakLabel: blockLabel,
+            continueBlock: null,
+            allowsContinue: false,
+          });
+          this.emit(stmt.body);
+          this.context.loopTargets.pop();
+          this.context.popIndent();
+          this.context.line("}");
+        }
         return;
       case "tryCatch":
         this.emitTryCatch(stmt);
@@ -172,17 +196,21 @@ class RustStatementEmitter {
         this.emitRuntimeFence(stmt);
         return;
       default:
-        this.context.unsupported(`statement '${stmt.kind}'`, stmt.loc);
+        {
+          const exhaustive: never = stmt;
+          void exhaustive;
+        }
     }
   }
 
   private emitWhile(stmt: Extract<IrStmt, { kind: "while" }>): void {
-    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled while", stmt.loc);
     const loopLabel = this.context.nextLabel("sc_loop");
     this.context.line(`'${loopLabel}: while ${this.context.emitExpr(stmt.cond)} {`);
     this.context.pushIndent();
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(),
+      kind: "loop",
+      labels: stmt.labels,
       breakLabel: loopLabel,
       continueBlock: null,
       allowsContinue: true,
@@ -193,8 +221,31 @@ class RustStatementEmitter {
     this.context.line("}");
   }
 
+  private emitDoWhile(stmt: Extract<IrStmt, { kind: "doWhile" }>): void {
+    const loopLabel = this.context.nextLabel("sc_loop");
+    const continueTarget = this.context.nextLabel("sc_continue");
+    this.context.line(`'${loopLabel}: loop {`);
+    this.context.pushIndent();
+    this.context.line(`'${continueTarget}: {`);
+    this.context.pushIndent();
+    this.context.loopTargets.push({
+      id: this.context.nextLoopTargetId(),
+      kind: "loop",
+      labels: stmt.labels,
+      breakLabel: loopLabel,
+      continueBlock: continueTarget,
+      allowsContinue: true,
+    });
+    this.emit(stmt.body);
+    this.context.loopTargets.pop();
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`if !(${this.context.emitExpr(stmt.cond)}) { break '${loopLabel}; }`);
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
   private emitFor(stmt: Extract<IrStmt, { kind: "for" }>): void {
-    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled for", stmt.loc);
     this.context.line("{");
     this.context.pushIndent();
     if (stmt.init !== null) this.emitStatement(stmt.init);
@@ -206,6 +257,8 @@ class RustStatementEmitter {
     this.context.pushIndent();
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(),
+      kind: "loop",
+      labels: stmt.labels,
       breakLabel: loopLabel,
       continueBlock: continueTarget,
       allowsContinue: true,
@@ -229,7 +282,6 @@ class RustStatementEmitter {
   }
 
   private emitForOf(stmt: Extract<IrStmt, { kind: "forOf" }>): void {
-    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled for-of", stmt.loc);
     if (stmt.iterable.type.kind !== "array") this.context.unsupported("for-of over a non-array", stmt.loc);
     const local = this.context.local(stmt.localId, stmt.loc);
     const array = this.context.nextTemporary();
@@ -249,6 +301,8 @@ class RustStatementEmitter {
       : `let ${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = runtime::array_get(&${array}, ${index});`);
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(),
+      kind: "loop",
+      labels: stmt.labels,
       breakLabel: loopLabel,
       continueBlock: continueTarget,
       allowsContinue: true,
@@ -351,8 +405,10 @@ class RustStatementEmitter {
   }
 
   private emitBreak(stmt: Extract<IrStmt, { kind: "break" }>): void {
-    if (stmt.label !== undefined) this.context.unsupported("labeled break", stmt.loc);
-    const target = this.context.loopTargets.at(-1);
+    const label = stmt.label;
+    const target = label === undefined
+      ? this.context.loopTargets.findLast((candidate) => candidate.kind !== "block")
+      : this.context.loopTargets.findLast((candidate) => candidate.labels?.includes(label) === true);
     if (target === undefined) this.context.unsupported("break outside a Rust-supported loop", stmt.loc);
     this.context.line(this.crossesCompletionBoundary(target)
       ? `return runtime::Completion::Break(${target.id});`
@@ -360,8 +416,9 @@ class RustStatementEmitter {
   }
 
   private emitContinue(stmt: Extract<IrStmt, { kind: "continue" }>): void {
-    if (stmt.label !== undefined) this.context.unsupported("labeled continue", stmt.loc);
-    const target = this.context.loopTargets.findLast((candidate) => candidate.allowsContinue);
+    const target = this.context.loopTargets.findLast((candidate) =>
+      candidate.kind === "loop" && (stmt.label === undefined || candidate.labels?.includes(stmt.label) === true)
+    );
     if (target === undefined) this.context.unsupported("continue outside a Rust-supported loop", stmt.loc);
     if (this.crossesCompletionBoundary(target)) {
       this.context.line(`return runtime::Completion::Continue(${target.id});`);
@@ -505,7 +562,6 @@ class RustStatementEmitter {
   }
 
   private emitSwitch(stmt: Extract<IrStmt, { kind: "switch" }>): void {
-    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled switch", stmt.loc);
     const kind = stmt.disc.type.kind;
     if (kind !== "f64" && kind !== "string" && kind !== "bool") {
       this.context.unsupported(`switch discriminant '${kind}'`, stmt.loc);
@@ -548,6 +604,8 @@ class RustStatementEmitter {
     this.context.pushIndent();
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(),
+      kind: "switch",
+      labels: stmt.labels,
       breakLabel: switchLabel,
       continueBlock: null,
       allowsContinue: false,
