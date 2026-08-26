@@ -5,6 +5,7 @@
 /// traced array/record object was released.
 pub fn finish() {
     fs_renames_finish();
+    children_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();
@@ -410,13 +411,17 @@ pub fn run_event_loop() {
         if fs_renames_dispatch_one() {
             continue;
         }
-
         let has_referenced_work = TIMER_TASKS
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
-            || fs_renames_pending();
+            || fs_renames_pending()
+            || children_referenced_pending()
+            || children_failed_pending();
         if !has_referenced_work {
             break;
+        }
+        if children_dispatch_one() {
+            continue;
         }
 
         let now = std::time::Instant::now();
@@ -487,6 +492,12 @@ pub fn run_event_loop() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             fs_renames_wait(wait);
+            continue;
+        }
+        if children_referenced_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            children_wait(wait);
             continue;
         }
         let Some(next_due) = next_due else { break };
