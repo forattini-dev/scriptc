@@ -104,6 +104,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "insp.str" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::inspect_string(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "insp.regex" && expr.args.length === 1 && arg?.type.kind === "regex") {
+    return `runtime::inspect_regex(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "insp.buffer" && expr.args.length === 1 &&
+    arg?.type.kind === "bytes" && arg.type.elem === "u8") {
+    return `runtime::inspect_buffer(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "insp.begin" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_begin(${context.emitExpr(arg)})`;
   }

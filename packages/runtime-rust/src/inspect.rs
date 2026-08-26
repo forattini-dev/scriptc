@@ -217,6 +217,35 @@ pub fn inspect_string(value: &JsString) -> JsString {
     string(&output)
 }
 
+pub fn inspect_regex(regex: &JsRegex) -> JsString {
+    string(&format!(
+        "/{}/{}",
+        regex_source(regex).as_ref(),
+        regex_flags(regex).as_ref()
+    ))
+}
+
+pub fn inspect_buffer(bytes: &JsBytes<u8>) -> JsString {
+    let length = bytes_len(bytes) as usize;
+    let shown = length.min(50);
+    let mut output = String::from("<Buffer ");
+    for index in 0..shown {
+        if index > 0 {
+            output.push(' ');
+        }
+        output.push_str(&format!("{:02x}", bytes_get(bytes, index as f64) as u8));
+    }
+    if length > shown {
+        let remaining = length - shown;
+        output.push_str(&format!(
+            " ... {remaining} more byte{}",
+            if remaining == 1 { "" } else { "s" }
+        ));
+    }
+    output.push('>');
+    string(&output)
+}
+
 pub fn inspect_begin(recurse: f64) {
     INSPECT_CURRENT_DEPTH.with(|depth| depth.set(recurse));
     INSPECT_FRAMES.with(|frames| {
