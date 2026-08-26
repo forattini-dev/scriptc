@@ -18,6 +18,8 @@ where
 {
     emitter: Option<JsEventEmitter<L>>,
     read_callback: Option<R>,
+    destroy_callback: Option<R>,
+    errored: Option<JsError>,
     chunks: VecDeque<JsBytes<u8>>,
     buffered_length: usize,
     high_water_mark: usize,
@@ -31,6 +33,9 @@ where
     resume_after_data: bool,
     readable_scheduled: bool,
     pipes: Vec<ReadablePipe>,
+    destroyed: bool,
+    closed: bool,
+    emit_close: bool,
 }
 
 impl<L, R> Trace for ReadableData<L, R>
@@ -44,6 +49,12 @@ where
         }
         if let Some(callback) = &self.read_callback {
             callback.trace(tracer);
+        }
+        if let Some(callback) = &self.destroy_callback {
+            callback.trace(tracer);
+        }
+        if let Some(error) = &self.errored {
+            error.trace(tracer);
         }
         for chunk in &self.chunks {
             tracer.edge(chunk);
@@ -63,6 +74,8 @@ where
     fn clear_edges(&mut self) {
         self.emitter = None;
         self.read_callback = None;
+        self.destroy_callback = None;
+        self.errored = None;
         self.chunks.clear();
         self.buffered_length = 0;
         self.pipes.clear();
@@ -79,7 +92,12 @@ fn stream_default_byte_high_water_mark() -> usize {
     }
 }
 
-pub fn readable_new<L, R>(high_water_mark: f64, read_callback: Option<R>) -> JsReadable<L, R>
+pub fn readable_new<L, R>(
+    high_water_mark: f64,
+    emit_close: bool,
+    read_callback: Option<R>,
+    destroy_callback: Option<R>,
+) -> JsReadable<L, R>
 where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
@@ -92,6 +110,8 @@ where
     Gc::new(ReadableData {
         emitter: Some(emitter_new()),
         read_callback,
+        destroy_callback,
+        errored: None,
         chunks: VecDeque::new(),
         buffered_length: 0,
         high_water_mark,
@@ -105,6 +125,9 @@ where
         resume_after_data: false,
         readable_scheduled: false,
         pipes: Vec::new(),
+        destroyed: false,
+        closed: false,
+        emit_close,
     })
 }
 
@@ -332,7 +355,7 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| {
-        if data.flowing != Some(true) || data.scheduled || data.draining || data.ended {
+        if data.flowing != Some(true) || data.scheduled || data.draining || data.ended || data.destroyed {
             return false;
         }
         data.scheduled = true;
@@ -377,6 +400,53 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with(|data| data.read_callback.clone())
+}
+
+pub fn readable_destroy_callback<L, R>(readable: &JsReadable<L, R>) -> Option<R>
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.destroy_callback.clone())
+}
+
+pub fn readable_destroy<L, R>(readable: &JsReadable<L, R>, error: Option<JsError>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.destroyed {
+            return false;
+        }
+        data.destroyed = true;
+        if data.errored.is_none() {
+            data.errored = error;
+        }
+        true
+    })
+}
+
+pub fn readable_error<L, R>(readable: &JsReadable<L, R>) -> Option<JsError>
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.errored.clone())
+}
+
+pub fn readable_take_destroy_close<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.closed || !data.emit_close {
+            return false;
+        }
+        data.closed = true;
+        true
+    })
 }
 
 pub fn readable_has_data_or_eof<L, R>(readable: &JsReadable<L, R>) -> bool
@@ -513,7 +583,7 @@ where
         "readableLength" => readable_length(readable),
         "readableHighWaterMark" => readable.with(|data| data.high_water_mark as f64),
         "readableEnded" => if readable.with(|data| data.ended) { 1.0 } else { 0.0 },
-        "destroyed" => 0.0,
+        "destroyed" => if readable.with(|data| data.destroyed) { 1.0 } else { 0.0 },
         _ => 0.0,
     }
 }
@@ -524,9 +594,11 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with(|data| match name.as_ref() {
-        "readable" => !data.ended,
+        "readable" => !data.ended && !data.destroyed && data.errored.is_none(),
         "readableEnded" => data.ended,
-        "readableObjectMode" | "destroyed" | "closed" => false,
+        "destroyed" => data.destroyed,
+        "closed" => data.closed,
+        "readableObjectMode" => false,
         _ => false,
     })
 }

@@ -1,4 +1,4 @@
-import type { IrExpr, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 import type { RustStreamModel } from "./stream-model.js";
@@ -17,6 +17,10 @@ export interface RustWritableContext {
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   sourceLoc(): SrcLoc;
+  union(id: string, loc?: SrcLoc): IrUnionDef;
+  unionName(id: string): string;
+  unionVariant(tag: number): string;
+  rustType(type: IrType, loc?: SrcLoc): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -36,13 +40,21 @@ export class RustWritableEmitter {
     if (!this.context.streams.usesWritable) return;
     const loc = this.context.sourceLoc();
     const voidArms: string[] = [];
+    const errorArms: string[] = [];
     for (const shape of this.context.listenerShapes.values()) {
       if (shape.type.rest !== true && shape.type.params.length === 0) {
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, [], loc);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
+        errorArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
+      }
+      if (shape.type.rest !== true && shape.type.params.length === 1 &&
+        shape.type.params[0]?.kind === "object" && shape.type.params[0].className === "%Error") {
+        const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_error.clone()"], loc);
+        errorArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
     }
     voidArms.push("_ => unreachable!(\"scriptc invariant: Writable lifecycle listener signature\"),");
+    errorArms.push("_ => unreachable!(\"scriptc invariant: Writable error listener signature\"),");
     this.context.line("fn sc_writable_emit_void(sc_writable: &ScWritable, sc_event: &str) {");
     this.context.pushIndent();
     this.context.line("let sc_emitter = runtime::writable_emitter(sc_writable);");
@@ -55,6 +67,22 @@ export class RustWritableEmitter {
     this.context.line("} }");
     this.context.popIndent();
     this.context.line("}");
+    if (this.context.streams.usesWritableDestroy) {
+      this.context.line(`fn sc_writable_emit_error(sc_writable: &ScWritable, sc_error: ${this.standardErrorType(loc)}) {`);
+      this.context.pushIndent();
+      this.context.line("let sc_emitter = runtime::writable_emitter(sc_writable);");
+      this.context.line("let sc_name = runtime::string(\"error\");");
+      this.context.line("let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &sc_name);");
+      this.context.line("if sc_snapshot.is_empty() { runtime::throw_value(sc_error); }");
+      this.context.line("for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &sc_name, sc_registration.registration); } match sc_registration.callback {");
+      this.context.pushIndent();
+      for (const arm of errorArms) this.context.line(arm);
+      this.context.popIndent();
+      this.context.line("} }");
+      this.context.popIndent();
+      this.context.line("}");
+      this.context.line("fn sc_writable_finish_destroy(sc_writable: &ScWritable, sc_error: Option<runtime::JsError>) { if let Some(sc_error) = sc_error { let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || sc_writable_emit_error(&sc_writable, sc_error))); } let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || { if runtime::writable_take_destroy_close(&sc_writable) { sc_writable_emit_void(&sc_writable, \"close\"); } })); }");
+    }
     this.emitWriteDispatch(loc);
     this.emitDoneDispatch(loc);
     this.emitFinalDispatch(loc);
@@ -70,6 +98,9 @@ export class RustWritableEmitter {
       case "writable.cork": return this.emitCork(expr);
       case "writable.uncork": return this.emitUncork(expr);
       case "stream.prop": return this.isWritable(expr.args[0]?.type) ? this.emitProp(expr) : null;
+      case "stream.destroy": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, false) : null;
+      case "stream.destroyErr": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, true) : null;
+      case "stream.errored": return this.isWritable(expr.args[0]?.type) ? this.emitErrored(expr) : null;
       default: return null;
     }
   }
@@ -303,6 +334,32 @@ export class RustWritableEmitter {
     return `{ let ${value} = ${this.context.emitExpr(receiver)}; if runtime::writable_uncork(&${value}) { sc_writable_drain_queue(&${value}); } }`;
   }
 
+  private emitDestroy(expr: RustLibCallExpr, hasError: boolean): string {
+    const [receiver, error] = expr.args;
+    if (receiver === undefined || !this.isWritable(receiver.type) || expr.type.kind !== "object" || expr.type.className !== "%Writable" ||
+      expr.args.length !== (hasError ? 2 : 1) || (hasError &&
+        (error?.type.kind !== "object" || error.type.className !== "%Error"))) {
+      this.context.unsupported(`Writable destroy${hasError ? "(error)" : ""} shape`, expr.loc);
+    }
+    this.standardErrorType(expr.loc);
+    const writableValue = this.context.nextTemporary();
+    const errorValue = hasError ? this.context.nextTemporary() : null;
+    const bindings = [`let ${writableValue} = ${this.context.emitExpr(receiver)};`];
+    if (errorValue !== null && error !== undefined) bindings.push(`let ${errorValue} = ${this.context.emitExpr(error)};`);
+    const errorOption = errorValue === null ? "Option::<runtime::JsError>::None" : `Some(${errorValue})`;
+    return `{ ${bindings.join(" ")} let sc_error = ${errorOption}; if runtime::writable_destroy(&${writableValue}, sc_error.clone()) { sc_writable_finish_destroy(&${writableValue}, sc_error); } ${writableValue} }`;
+  }
+
+  private emitErrored(expr: RustLibCallExpr): string {
+    const receiver = expr.args[0];
+    if (receiver === undefined || !this.isWritable(receiver.type) || expr.args.length !== 1 || expr.type.kind !== "union") {
+      this.context.unsupported("Writable errored property shape", expr.loc);
+    }
+    const error = this.errorUnionValue(expr.type, "sc_error", expr.loc);
+    const clean = this.errorUnionValue(expr.type, null, expr.loc);
+    return `match runtime::writable_error(&(${this.context.emitExpr(receiver)})) { Some(sc_error) => ${error}, None => ${clean}, }`;
+  }
+
   private completionType(type: IrFuncType, what: string, loc: SrcLoc): IrFuncType {
     const completion = type.params.at(-1);
     if (completion?.kind !== "func") this.context.unsupported(`${what} completion shape`, loc);
@@ -319,5 +376,25 @@ export class RustWritableEmitter {
 
   private variant(shape: RustClosureShape): string {
     return `Closure${shape.index}`;
+  }
+
+  private errorUnionValue(type: IrType, error: string | null, loc: SrcLoc): string {
+    if (type.kind !== "union") this.context.unsupported("stream error union", loc);
+    const union = this.context.union(type.unionId, loc);
+    const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    if (errorTag < 0 || nullTag < 0) this.context.unsupported("stream error union arms", loc);
+    const name = this.context.unionName(union.id);
+    return error === null
+      ? `${name}::${this.context.unionVariant(nullTag)}`
+      : `${name}::${this.context.unionVariant(errorTag)}(${error})`;
+  }
+
+  private standardErrorType(loc: SrcLoc): string {
+    const errorType = this.context.rustType({ kind: "object", className: "%Error" }, loc);
+    if (errorType !== "runtime::JsError") {
+      this.context.unsupported("stream destruction with a custom Error hierarchy", loc);
+    }
+    return errorType;
   }
 }

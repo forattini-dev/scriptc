@@ -11,7 +11,10 @@ export class RustStreamModel {
   usesWritable = false;
   usesDuplex = false;
   usesTransform = false;
+  usesReadableDestroy = false;
+  usesWritableDestroy = false;
   readonly readableReadShapes = new Map<string, RustClosureShape>();
+  readonly readableDestroyShapes = new Map<string, RustClosureShape>();
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
   readonly writableFinalShapes = new Map<string, RustClosureShape>();
   readonly writableDoneShapes = new Map<string, RustClosureShape>();
@@ -29,6 +32,19 @@ export class RustStreamModel {
     unsupported: (kind: string) => never,
   ): boolean {
     if (node.kind !== "libCall") return false;
+    if (node.fn === "stream.destroy" || node.fn === "stream.destroyErr") {
+      const receiver = (node.args as StreamArgument[] | undefined)?.[0]?.type;
+      if (receiver?.kind === "object" && receiver.className === "%Readable") {
+        this.usesReadable = true;
+        this.usesReadableDestroy = true;
+        return true;
+      }
+      if (receiver?.kind === "object" && receiver.className === "%Writable") {
+        this.usesWritable = true;
+        this.usesWritableDestroy = true;
+        return true;
+      }
+    }
     if (node.fn === "readable.new") {
       this.usesReadable = true;
       const args = node.args as StreamArgument[] | undefined;
@@ -36,11 +52,18 @@ export class RustStreamModel {
       if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
         unsupported("malformed Readable callback flags IR");
       }
-      if ((flags.value & 1) === 0) return true;
-      const callback = args?.[4];
-      if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
-      const shape = ensureClosureShape(callback.type);
-      this.readableReadShapes.set(typeKey(callback.type), shape);
+      let callbackIndex = 4;
+      for (let bit = 0; bit < 2; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
+        const shape = ensureClosureShape(callback.type);
+        if (bit === 0) this.readableReadShapes.set(typeKey(callback.type), shape);
+        if (bit === 1) {
+          this.readableDestroyShapes.set(typeKey(callback.type), shape);
+          this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        }
+      }
       return true;
     }
     if (node.fn === "writable.write" || node.fn === "writable.writeStr") {

@@ -800,6 +800,7 @@ test.each([
   "1691-stream-transform.ts",
   "1692-stream-pipe.ts",
   "1693-stream-pipe-backpressure.ts",
+  "1694-stream-destroy.ts",
   "1695-stream-props.ts",
   "1696-stream-read-inside-read.ts",
   "1697-stream-tick-vs-timer.ts",

@@ -35,6 +35,8 @@ where
     closed: bool,
     corked: usize,
     drain_resumes: Vec<WritableDrainResume>,
+    destroyed: bool,
+    errored: Option<JsError>,
 }
 
 impl<L, W, F, C> Trace for WritableData<L, W, F, C>
@@ -61,6 +63,9 @@ where
         for resume in &self.drain_resumes {
             (resume.trace)(tracer);
         }
+        if let Some(error) = &self.errored {
+            error.trace(tracer);
+        }
     }
 }
 
@@ -78,6 +83,7 @@ where
         self.queue.clear();
         self.writable_length = 0;
         self.drain_resumes.clear();
+        self.errored = None;
     }
 }
 
@@ -119,6 +125,8 @@ where
         closed: false,
         corked: 0,
         drain_resumes: Vec::new(),
+        destroyed: false,
+        errored: None,
     })
 }
 
@@ -206,6 +214,9 @@ where
     C: Clone + Trace + 'static,
 {
     writable.with_mut(|data| {
+        if data.destroyed {
+            return false;
+        }
         data.writable_length = data
             .writable_length
             .saturating_add(bytes_len(&chunk) as usize);
@@ -368,6 +379,54 @@ where
     })
 }
 
+pub fn writable_destroy<L, W, F, C>(
+    writable: &JsWritable<L, W, F, C>,
+    error: Option<JsError>,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| {
+        if data.destroyed {
+            return false;
+        }
+        data.destroyed = true;
+        if data.errored.is_none() {
+            data.errored = error;
+        }
+        true
+    })
+}
+
+pub fn writable_error<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> Option<JsError>
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with(|data| data.errored.clone())
+}
+
+pub fn writable_take_destroy_close<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| {
+        if data.closed || !data.emit_close {
+            return false;
+        }
+        data.closed = true;
+        true
+    })
+}
+
 pub fn writable_cork<L, W, F, C>(writable: &JsWritable<L, W, F, C>)
 where
     L: Clone + Trace + 'static,
@@ -430,11 +489,11 @@ where
     C: Clone + Trace + 'static,
 {
     writable.with(|data| match name.as_ref() {
-        "writable" => !data.ended,
+        "writable" => !data.ended && !data.destroyed && data.errored.is_none(),
         "writableEnded" => data.ended,
         "writableFinished" => data.finished,
         "writableNeedDrain" => data.need_drain,
-        "destroyed" => data.closed,
+        "destroyed" => data.destroyed,
         "closed" => data.closed,
         _ => false,
     })
