@@ -328,6 +328,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "num.sameValue" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
     return `runtime::number_same_value(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)})`;
   }
+  if (expr.fn === "intl.numFormatEnUs" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::intl_number_format_en_us(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "error.toString" && expr.args.length === 1 && arg !== undefined) {
     const receiverExpr = context.stripCasts(arg);
     if (receiverExpr.type.kind === "object" && context.hasClassMeta(receiverExpr.type.className)) {

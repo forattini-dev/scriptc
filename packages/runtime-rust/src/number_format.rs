@@ -419,6 +419,143 @@ fn decimal_exponent(value: f64) -> i32 {
     plain.len() as i32 - 1
 }
 
+fn shortest_decimal_digits(value: f64) -> (Vec<u8>, i32) {
+    debug_assert!(value > 0.0 && value.is_finite());
+    let rendered = format_number(value);
+    if let Some((mantissa, exponent)) = rendered.split_once('e') {
+        let mut digits = mantissa
+            .bytes()
+            .filter(|byte| *byte != b'.')
+            .collect::<Vec<_>>();
+        while digits.len() > 1 && digits.last() == Some(&b'0') {
+            digits.pop();
+        }
+        let exponent = exponent
+            .parse::<i32>()
+            .expect("scriptc: shortest number has an invalid exponent");
+        return (digits, exponent + 1);
+    }
+
+    if let Some(decimal) = rendered.find('.') {
+        let bytes = rendered.as_bytes();
+        if bytes[0] == b'0' {
+            let first = bytes
+                .iter()
+                .position(|byte| byte.is_ascii_digit() && *byte != b'0')
+                .expect("scriptc: non-zero shortest number has no non-zero digit");
+            let mut digits = bytes[first..].to_vec();
+            while digits.len() > 1 && digits.last() == Some(&b'0') {
+                digits.pop();
+            }
+            return (digits, decimal as i32 - first as i32 + 1);
+        }
+
+        let mut digits = bytes
+            .iter()
+            .copied()
+            .filter(|byte| *byte != b'.')
+            .collect::<Vec<_>>();
+        while digits.len() > 1 && digits.last() == Some(&b'0') {
+            digits.pop();
+        }
+        return (digits, decimal as i32);
+    }
+
+    let exponent = rendered.len() as i32;
+    let mut digits = rendered.into_bytes();
+    while digits.len() > 1 && digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    (digits, exponent)
+}
+
+fn increment_decimal_digits(digits: &mut Vec<u8>) -> bool {
+    for digit in digits.iter_mut().rev() {
+        if *digit != b'9' {
+            *digit += 1;
+            return false;
+        }
+        *digit = b'0';
+    }
+    digits.clear();
+    digits.push(b'1');
+    true
+}
+
+/// The embedded `en-US` default decimal formatter used by
+/// `Intl.NumberFormat` and `Number.prototype.toLocaleString`.
+pub fn intl_number_format_en_us(value: f64) -> JsString {
+    if value.is_nan() {
+        return string("NaN");
+    }
+    if value == f64::INFINITY {
+        return string("∞");
+    }
+    if value == f64::NEG_INFINITY {
+        return string("-∞");
+    }
+
+    let negative = value.is_sign_negative();
+    if value == 0.0 {
+        return string(if negative { "-0" } else { "0" });
+    }
+
+    let (mut digits, mut exponent) = shortest_decimal_digits(value.abs());
+    let kept = exponent + 3;
+    if kept < digits.len() as i32 {
+        let round_up = kept >= 0 && digits[kept as usize] >= b'5';
+        digits.truncate(kept.max(0) as usize);
+        if round_up && increment_decimal_digits(&mut digits) {
+            exponent += 1;
+        } else if digits.is_empty() {
+            return string(if negative { "-0" } else { "0" });
+        }
+    }
+
+    let mut fraction = [b'0'; 3];
+    for (offset, digit) in fraction.iter_mut().enumerate() {
+        let index = exponent + offset as i32;
+        if index >= 0 && index < digits.len() as i32 {
+            *digit = digits[index as usize];
+        }
+    }
+    let fraction_len = fraction
+        .iter()
+        .rposition(|digit| *digit != b'0')
+        .map_or(0, |index| index + 1);
+
+    let integer_digits = exponent.max(1) as usize;
+    let grouping = integer_digits.saturating_sub(1) / 3;
+    let mut output = String::with_capacity(
+        usize::from(negative) + integer_digits + grouping + usize::from(fraction_len > 0) + fraction_len,
+    );
+    if negative {
+        output.push('-');
+    }
+    if exponent <= 0 {
+        output.push('0');
+    } else {
+        for index in 0..exponent as usize {
+            if index > 0 && (exponent as usize - index) % 3 == 0 {
+                output.push(',');
+            }
+            output.push(if index < digits.len() {
+                digits[index] as char
+            } else {
+                '0'
+            });
+        }
+    }
+    if fraction_len > 0 {
+        output.push('.');
+        output.push_str(
+            std::str::from_utf8(&fraction[..fraction_len])
+                .expect("scriptc: Intl formatter emitted non-ASCII fraction digits"),
+        );
+    }
+    Rc::from(output)
+}
+
 pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
     let digits = if fraction_digits.is_nan() {
         0.0

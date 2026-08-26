@@ -58,6 +58,26 @@
     }
 
     #[test]
+    fn intl_en_us_formats_shortest_decimal_with_default_grouping() {
+        for (value, expected) in [
+            (1.0005, "1.001"),
+            (7.995, "7.995"),
+            (999.9995, "1,000"),
+            (0.0005, "0.001"),
+            (-0.0005, "-0.001"),
+            (0.00049, "0"),
+            (1e23, "100,000,000,000,000,000,000,000"),
+            (9_007_199_254_740_993.0, "9,007,199,254,740,992"),
+            (-0.0, "-0"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "∞"),
+            (f64::NEG_INFINITY, "-∞"),
+        ] {
+            assert_eq!(intl_number_format_en_us(value).as_ref(), expected);
+        }
+    }
+
+    #[test]
     fn exponential_number_formatting_reuses_shortest_ecmascript_digits() {
         for (value, expected) in [
             (1234.5678, "1.2345678e+3"),

@@ -899,6 +899,7 @@ test.each([
   "2485-inspect-circular-refs.ts",
   "2500-net-autosel-timeout.ts",
   "2558-rejection-events.cjs",
+  "2562-intl-numberformat-en-us.ts",
   "2591-ambient-generic-traps.ts",
   "2613-for-init-uninitialized-let.ts",
   "2643-or-default-retag.ts",
