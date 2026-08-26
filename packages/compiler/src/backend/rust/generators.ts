@@ -79,6 +79,13 @@ function emitGeneratorValue(
     });
     return;
   }
+  if (expr.kind === "genResume" && expr.arg !== null && containsYield(expr.arg)) {
+    const argument = expr.arg;
+    emitGeneratorValue(fn, argument, context, (value) => {
+      consume(context.emitExprWithValues(expr, [[argument, value]]));
+    });
+    return;
+  }
   if (containsYield(expr)) context.unsupported("nested generator value in the Rust state-machine subset", expr.loc);
   consume(context.emitExpr(expr));
 }
@@ -273,6 +280,14 @@ function emitGeneratorSequence(
     }
     if (statement.kind === "switch" && containsYield(statement.cases)) {
       emitGeneratorSwitch(fn, statement, statements.slice(index + 1), context, locals, onComplete);
+      return;
+    }
+    if (statement.kind === "block" && containsYield(statement.body)) {
+      if ((statement.labels?.length ?? 0) > 0) {
+        context.unsupported("labeled generator block", statement.loc);
+      }
+      emitGeneratorSequence(fn, [...statement.body, ...statements.slice(index + 1)],
+        context, locals, onComplete);
       return;
     }
     if (statement.kind === "if") {

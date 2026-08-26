@@ -826,6 +826,7 @@ test.each([
   "1992-small-syntax.ts",
   "2010-generators-basics.ts",
   "2013-generators-sent-values.ts",
+  "2015-generators-yieldstar.ts",
   "2016-generators-rc-stress.ts",
   "2017-generators-async.ts",
   "2019-generators-loops.ts",
