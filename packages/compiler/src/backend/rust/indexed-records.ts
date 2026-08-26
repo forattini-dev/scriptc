@@ -25,7 +25,7 @@ export function emitRustRecordKeyGetValues(
   keyExpr: string,
 ): string {
   const shape = context.records.get(expr.shapeId);
-  if (shape === undefined || shape.indexValue === undefined) {
+  if (shape === undefined) {
     context.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
   }
   const indexValue = shape.indexValue;
@@ -71,12 +71,16 @@ export function emitRustRecordKeyGetValues(
       const value = surface(field.type, ownField(field.type, stored));
       return `if ${key}.as_ref() == "${context.rustString(field.name)}" { return ${value}; }`;
     }).join(" ");
+    const miss = missingRecordValue(expr, context);
+    if (indexValue === undefined) {
+      return `{ ${bindings} ${object}.with(|${record}| { ${declared} ${miss} }) }`;
+    }
     const overflow = `${record}.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow")`;
     const lookup = `runtime::map_get_by(${overflow}, &${key}, |left, right| left.as_ref() == right.as_ref())`;
-    const miss = missingRecordValue(expr, context);
     const present = surface(indexValue, "value");
     return `{ ${bindings} ${object}.with(|${record}| { ${declared} match ${lookup} { Some(value) => ${present}, None => ${miss}, } }) }`;
   }
+  if (indexValue === undefined) context.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
   const lookup = `runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref())`;
   if (indexValue.kind === "dyn" && expr.type.kind === "dyn") {
     return `{ ${bindings} ${lookup}.unwrap_or(${context.dynTypeName()}::Undefined) }`;
