@@ -369,6 +369,9 @@ export class RustDefinitionEmitter {
         case "childStream":
         case "netServer":
         case "netSocket":
+        case "httpReq":
+        case "httpRes":
+        case "httpClientReq":
         case "record":
         case "func":
         case "promise":
@@ -738,6 +741,9 @@ export class RustDefinitionEmitter {
         case "childStream":
         case "netServer":
         case "netSocket":
+        case "httpReq":
+        case "httpRes":
+        case "httpClientReq":
         case "map":
         case "set":
         case "record":

@@ -9,6 +9,8 @@ import { compile } from "../src/index.js";
 const execFileAsync = promisify(execFile);
 
 test.each([
+  "1543-set-server-handles.ts",
+  "2696-http-server-net-roundtrip.ts",
   "2689-http-server-timeout-properties.ts",
 ])("Rust HTTP corpus matches Node: %s", async (fixtureName) => {
   const fixture = resolve("tests/corpus", fixtureName);

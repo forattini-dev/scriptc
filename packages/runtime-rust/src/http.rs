@@ -5,10 +5,128 @@ pub enum JsHttpTimeout {
     String(JsString),
 }
 
+#[derive(Clone)]
+struct HttpRequestListener {
+    invoke: Rc<dyn Fn(JsHttpRequest, JsHttpResponse)>,
+    trace: NetTrace,
+    once: bool,
+}
+
+#[derive(Clone)]
+struct HttpDataListener {
+    invoke: Rc<dyn Fn(JsBytes<u8>)>,
+    trace: NetTrace,
+    once: bool,
+}
+
+#[derive(Clone)]
+struct HttpVoidListener {
+    invoke: Rc<dyn Fn()>,
+    trace: NetTrace,
+}
+
 pub struct HttpServerState {
     timeouts: [JsHttpTimeout; 5],
     join_duplicate_headers: bool,
+    request_listeners: Vec<HttpRequestListener>,
 }
+
+impl HttpServerState {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for listener in &self.request_listeners {
+            (listener.trace)(tracer);
+        }
+    }
+}
+
+pub struct HttpRequestData {
+    socket: Option<JsNetSocket>,
+    method: JsString,
+    url: JsString,
+    status_code: Option<f64>,
+    status_message: Option<JsString>,
+    headers: Vec<(JsString, JsString, JsString)>,
+    body: Vec<u8>,
+    ended: bool,
+    data_listeners: Vec<HttpDataListener>,
+    end_listeners: Vec<HttpVoidListener>,
+}
+
+impl Trace for HttpRequestData {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(socket) = &self.socket {
+            tracer.edge(socket);
+        }
+        for listener in &self.data_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in &self.end_listeners {
+            (listener.trace)(tracer);
+        }
+    }
+}
+
+impl ClearEdges for HttpRequestData {
+    fn clear_edges(&mut self) {
+        self.socket = None;
+        self.headers.clear();
+        self.body.clear();
+        self.ended = true;
+        self.data_listeners.clear();
+        self.end_listeners.clear();
+    }
+}
+
+pub type JsHttpRequest = Gc<HttpRequestData>;
+
+pub struct HttpResponseData {
+    socket: Option<JsNetSocket>,
+    status_code: f64,
+    status_message: JsString,
+    headers: Vec<(JsString, JsString)>,
+    headers_sent: bool,
+    chunked: bool,
+    ended: bool,
+}
+
+impl Trace for HttpResponseData {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(socket) = &self.socket {
+            tracer.edge(socket);
+        }
+    }
+}
+
+impl ClearEdges for HttpResponseData {
+    fn clear_edges(&mut self) {
+        self.socket = None;
+        self.headers.clear();
+        self.headers_sent = true;
+        self.ended = true;
+    }
+}
+
+pub type JsHttpResponse = Gc<HttpResponseData>;
+
+pub struct HttpClientRequestData {
+    socket: Option<JsNetSocket>,
+}
+
+impl Trace for HttpClientRequestData {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(socket) = &self.socket {
+            tracer.edge(socket);
+        }
+    }
+}
+
+impl ClearEdges for HttpClientRequestData {
+    fn clear_edges(&mut self) {
+        self.socket = None;
+    }
+}
+
+pub type JsHttpClientRequest = Gc<HttpClientRequestData>;
 
 fn http_timeout_index(selector: f64) -> usize {
     let index = selector as usize;
@@ -51,9 +169,469 @@ pub fn http_server_new() -> JsNetServer {
                 JsHttpTimeout::Number(1_000.0),
             ],
             join_duplicate_headers: false,
+            request_listeners: Vec::new(),
         });
     });
     server
+}
+
+pub fn http_server_new_callback(
+    callback: Rc<dyn Fn(JsHttpRequest, JsHttpResponse)>,
+    trace: NetTrace,
+) -> JsNetServer {
+    let server = http_server_new();
+    server.with_mut(|server| {
+        server
+            .http
+            .as_mut()
+            .expect("scriptc invariant: request listener on a net.Server")
+            .request_listeners
+            .push(HttpRequestListener {
+                invoke: callback,
+                trace,
+                once: false,
+            });
+    });
+    server
+}
+
+pub fn http_server_on_request(
+    server: &JsNetServer,
+    callback: Rc<dyn Fn(JsHttpRequest, JsHttpResponse)>,
+    trace: NetTrace,
+    once: bool,
+) {
+    server.with_mut(|server| {
+        server
+            .http
+            .as_mut()
+            .expect("scriptc invariant: request listener on a net.Server")
+            .request_listeners
+            .push(HttpRequestListener { invoke: callback, trace, once });
+    });
+}
+
+struct HttpServerConnection {
+    server: JsNetServer,
+    socket: JsNetSocket,
+    buffer: Vec<u8>,
+    request: Option<JsHttpRequest>,
+    body_remaining: usize,
+}
+
+impl HttpServerConnection {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        tracer.edge(&self.server);
+        tracer.edge(&self.socket);
+        if let Some(request) = &self.request {
+            tracer.edge(request);
+        }
+    }
+}
+
+type ParsedHttpHead = (JsString, JsString, Vec<(JsString, JsString, JsString)>, usize);
+
+fn http_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
+}
+
+fn http_parse_request_head(bytes: &[u8]) -> Option<ParsedHttpHead> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut lines = text[..text.len().saturating_sub(4)].split("\r\n");
+    let mut request_line = lines.next()?.split_whitespace();
+    let method = string(request_line.next()?);
+    let url = string(request_line.next()?);
+    let version = request_line.next()?;
+    if request_line.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return None;
+    }
+    let mut headers = Vec::new();
+    let mut content_length = 0_usize;
+    for line in lines {
+        let (raw_name, raw_value) = line.split_once(':')?;
+        let name = raw_name.trim();
+        let value = raw_value.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let lower = name.to_ascii_lowercase();
+        if lower == "content-length" {
+            content_length = value.parse().ok()?;
+        }
+        headers.push((string(name), string(&lower), string(value)));
+    }
+    Some((method, url, headers, content_length))
+}
+
+fn http_dispatch_data(request: &JsHttpRequest) {
+    let (listeners, body) = request.with_mut(|request| {
+        if request.body.is_empty() || request.data_listeners.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let listeners = request.data_listeners.clone();
+        request.data_listeners.retain(|listener| !listener.once);
+        (listeners, std::mem::take(&mut request.body))
+    });
+    if body.is_empty() {
+        return;
+    }
+    let chunk = bytes_from_elements(body);
+    for listener in listeners {
+        (listener.invoke)(chunk.clone());
+    }
+}
+
+fn http_request_push(request: &JsHttpRequest, bytes: &[u8]) {
+    request.with_mut(|request| request.body.extend_from_slice(bytes));
+    http_dispatch_data(request);
+}
+
+fn http_request_finish(request: &JsHttpRequest) {
+    http_dispatch_data(request);
+    let listeners = request.with_mut(|request| {
+        if request.ended {
+            return Vec::new();
+        }
+        request.ended = true;
+        std::mem::take(&mut request.end_listeners)
+    });
+    for listener in listeners {
+        (listener.invoke)();
+    }
+}
+
+fn http_server_feed(connection: &Rc<RefCell<HttpServerConnection>>, bytes: &[u8]) {
+    let (listeners, request, response, body, finish) = {
+        let mut connection = connection.borrow_mut();
+        if let Some(request) = connection.request.clone() {
+            let take = bytes.len().min(connection.body_remaining);
+            connection.body_remaining -= take;
+            (
+                Vec::new(),
+                request,
+                None,
+                bytes[..take].to_vec(),
+                connection.body_remaining == 0,
+            )
+        } else {
+            connection.buffer.extend_from_slice(bytes);
+            let Some(head_len) = http_header_end(&connection.buffer) else {
+                return;
+            };
+            let Some((method, url, headers, content_length)) =
+                http_parse_request_head(&connection.buffer[..head_len])
+            else {
+                net_socket_destroy(&connection.socket);
+                return;
+            };
+            let request = Gc::new(HttpRequestData {
+                socket: Some(connection.socket.clone()),
+                method,
+                url,
+                status_code: None,
+                status_message: None,
+                headers,
+                body: Vec::new(),
+                ended: false,
+                data_listeners: Vec::new(),
+                end_listeners: Vec::new(),
+            });
+            let response = Gc::new(HttpResponseData {
+                socket: Some(connection.socket.clone()),
+                status_code: 200.0,
+                status_message: empty_string(),
+                headers: Vec::new(),
+                headers_sent: false,
+                chunked: false,
+                ended: false,
+            });
+            let available = connection.buffer.len() - head_len;
+            let take = available.min(content_length);
+            let body = connection.buffer[head_len..head_len + take].to_vec();
+            connection.body_remaining = content_length - take;
+            let finish = connection.body_remaining == 0;
+            connection.buffer.clear();
+            connection.request = Some(request.clone());
+            let listeners = connection.server.with_mut(|server| {
+                let Some(http) = server.http.as_mut() else {
+                    return Vec::new();
+                };
+                let listeners = http.request_listeners.clone();
+                http.request_listeners.retain(|listener| !listener.once);
+                listeners
+            });
+            (listeners, request, Some(response), body, finish)
+        }
+    };
+    if let Some(response) = response {
+        for listener in listeners {
+            (listener.invoke)(request.clone(), response.clone());
+        }
+    }
+    if !body.is_empty() {
+        http_request_push(&request, &body);
+    }
+    if finish {
+        http_request_finish(&request);
+    }
+}
+
+fn http_server_accept(server: &JsNetServer, socket: &JsNetSocket) {
+    let connection = Rc::new(RefCell::new(HttpServerConnection {
+        server: server.clone(),
+        socket: socket.clone(),
+        buffer: Vec::new(),
+        request: None,
+        body_remaining: 0,
+    }));
+    let invoke_connection = connection.clone();
+    let trace_connection = connection;
+    net_socket_on_data(
+        socket,
+        Rc::new(move |chunk| {
+            let bytes = bytes_u8_values(&chunk);
+            http_server_feed(&invoke_connection, &bytes);
+        }),
+        Rc::new(move |tracer| trace_connection.borrow().trace(tracer)),
+        false,
+    );
+}
+
+pub fn http_request_url(request: &JsHttpRequest) -> JsString {
+    request.with(|request| request.url.clone())
+}
+
+pub fn http_request_method(request: &JsHttpRequest) -> JsString {
+    request.with(|request| request.method.clone())
+}
+
+pub fn http_request_header(request: &JsHttpRequest, name: &JsString) -> Option<JsString> {
+    request.with(|request| {
+        request
+            .headers
+            .iter()
+            .find(|(_, lower, _)| lower.as_ref() == name.to_ascii_lowercase())
+            .map(|(_, _, value)| value.clone())
+    })
+}
+
+pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {
+    request.with(|request| request.status_code)
+}
+
+pub fn http_request_status_message(request: &JsHttpRequest) -> Option<JsString> {
+    request.with(|request| request.status_message.clone())
+}
+
+pub fn http_request_on_data(
+    request: &JsHttpRequest,
+    callback: Rc<dyn Fn(JsBytes<u8>)>,
+    trace: NetTrace,
+    once: bool,
+) {
+    request.with_mut(|request| {
+        if !request.ended {
+            request.data_listeners.push(HttpDataListener { invoke: callback, trace, once });
+        }
+    });
+    http_dispatch_data(request);
+}
+
+pub fn http_request_on_end(
+    request: &JsHttpRequest,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+    _once: bool,
+) {
+    request.with_mut(|request| {
+        if !request.ended {
+            request.end_listeners.push(HttpVoidListener { invoke: callback, trace });
+        }
+    });
+}
+
+fn http_header_index(headers: &[(JsString, JsString)], name: &str) -> Option<usize> {
+    headers.iter().position(|(stored, _)| stored.eq_ignore_ascii_case(name))
+}
+
+fn http_reason_phrase(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "unknown",
+    }
+}
+
+pub fn http_response_status_get(response: &JsHttpResponse) -> f64 {
+    response.with(|response| response.status_code)
+}
+
+pub fn http_response_status_set(response: &JsHttpResponse, status: f64) {
+    response.with_mut(|response| response.status_code = status);
+}
+
+pub fn http_response_status_message_get(response: &JsHttpResponse) -> JsString {
+    response.with(|response| {
+        if response.status_message.is_empty() {
+            string(http_reason_phrase(response.status_code as u16))
+        } else {
+            response.status_message.clone()
+        }
+    })
+}
+
+pub fn http_response_status_message_set(response: &JsHttpResponse, message: &JsString) {
+    response.with_mut(|response| response.status_message = message.clone());
+}
+
+pub fn http_response_set_header(response: &JsHttpResponse, name: &JsString, value: &JsString) {
+    response.with_mut(|response| {
+        if let Some(index) = http_header_index(&response.headers, name) {
+            response.headers[index] = (name.clone(), value.clone());
+        } else {
+            response.headers.push((name.clone(), value.clone()));
+        }
+    });
+}
+
+pub fn http_response_write_head(response: &JsHttpResponse, status: f64) {
+    response.with_mut(|response| {
+        if !response.headers_sent {
+            response.status_code = status;
+        }
+    });
+    if let Some((socket, head)) = http_response_head(response, None) {
+        net_socket_queue(&socket, head);
+    }
+}
+
+pub fn http_response_write_str(response: &JsHttpResponse, value: &JsString) {
+    http_response_write_raw(response, value.as_bytes());
+}
+
+pub fn http_response_write_bytes(response: &JsHttpResponse, value: &JsBytes<u8>) {
+    http_response_write_raw(response, &bytes_u8_values(value));
+}
+
+fn http_response_head(
+    response: &JsHttpResponse,
+    body_length: Option<usize>,
+) -> Option<(JsNetSocket, Vec<u8>)> {
+    response.with_mut(|response| {
+        if response.ended || response.headers_sent {
+            return None;
+        }
+        response.headers_sent = true;
+        let status = response.status_code as u16;
+        let reason = if response.status_message.is_empty() {
+            http_reason_phrase(status)
+        } else {
+            response.status_message.as_ref()
+        };
+        let mut head = format!("HTTP/1.1 {status} {reason}\r\n");
+        for (name, value) in &response.headers {
+            head.push_str(name);
+            head.push_str(": ");
+            head.push_str(value);
+            head.push_str("\r\n");
+        }
+        if http_header_index(&response.headers, "content-length").is_none() &&
+            http_header_index(&response.headers, "transfer-encoding").is_none()
+        {
+            if let Some(length) = body_length {
+                head.push_str(&format!("Content-Length: {length}\r\n"));
+            } else {
+                head.push_str("Transfer-Encoding: chunked\r\n");
+                response.chunked = true;
+            }
+        } else {
+            response.chunked = response.headers.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("transfer-encoding") &&
+                    value.split(',').any(|token| token.trim().eq_ignore_ascii_case("chunked"))
+            });
+        }
+        if http_header_index(&response.headers, "connection").is_none() {
+            head.push_str("Connection: close\r\n");
+        }
+        head.push_str("\r\n");
+        response.socket.clone().map(|socket| (socket, head.into_bytes()))
+    })
+}
+
+fn http_chunk(bytes: &[u8]) -> Vec<u8> {
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    let mut chunk = format!("{:x}\r\n", bytes.len()).into_bytes();
+    chunk.extend_from_slice(bytes);
+    chunk.extend_from_slice(b"\r\n");
+    chunk
+}
+
+fn http_response_write_raw(response: &JsHttpResponse, bytes: &[u8]) {
+    if let Some((socket, head)) = http_response_head(response, None) {
+        net_socket_queue(&socket, head);
+    }
+    let target = response.with(|response| {
+        if response.ended {
+            None
+        } else {
+            response.socket.clone().map(|socket| (socket, response.chunked))
+        }
+    });
+    let Some((socket, chunked)) = target else {
+        return;
+    };
+    let output = if chunked { http_chunk(bytes) } else { bytes.to_vec() };
+    net_socket_queue(&socket, output);
+}
+
+fn http_response_end_raw(response: &JsHttpResponse, tail: &[u8]) {
+    let fresh = http_response_head(response, Some(tail.len()));
+    let target = response.with_mut(|response| {
+        if response.ended {
+            return None;
+        }
+        response.ended = true;
+        response.socket.clone().map(|socket| (socket, response.chunked))
+    });
+    let Some((socket, chunked)) = target else {
+        return;
+    };
+    if let Some((_, mut head)) = fresh {
+        head.extend_from_slice(tail);
+        net_socket_queue(&socket, head);
+    } else if chunked {
+        let mut output = http_chunk(tail);
+        output.extend_from_slice(b"0\r\n\r\n");
+        net_socket_queue(&socket, output);
+    } else {
+        net_socket_queue(&socket, tail.to_vec());
+    }
+    net_socket_end(&socket);
+}
+
+pub fn http_response_end(response: &JsHttpResponse) {
+    http_response_end_raw(response, &[]);
+}
+
+pub fn http_response_end_str(response: &JsHttpResponse, value: &JsString) {
+    http_response_end_raw(response, value.as_bytes());
+}
+
+pub fn http_response_end_bytes(response: &JsHttpResponse, value: &JsBytes<u8>) {
+    http_response_end_raw(response, &bytes_u8_values(value));
+}
+
+pub fn http_response_headers_sent(response: &JsHttpResponse) -> bool {
+    response.with(|response| response.headers_sent)
 }
 
 pub fn http_server_join_duplicate_headers(server: &JsNetServer) {

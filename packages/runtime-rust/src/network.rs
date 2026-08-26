@@ -155,6 +155,9 @@ impl Trace for NetServerData {
         if let Some((_, trace)) = &self.close_override {
             trace(tracer);
         }
+        if let Some(http) = &self.http {
+            http.trace(tracer);
+        }
     }
 }
 
@@ -754,6 +757,9 @@ fn net_accept_one() -> bool {
     });
     server.with_mut(|server| server.connections += 1);
     let socket = net_socket_new(stream, Some(server.clone()));
+    if server.with(|server| server.http.is_some()) {
+        http_server_accept(&server, &socket);
+    }
     for listener in listeners {
         (listener.invoke)(socket.clone());
     }
