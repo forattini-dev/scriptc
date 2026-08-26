@@ -23,19 +23,32 @@ pub trait JsonValue {
 }
 
 pub trait JsonObject: Trace + ClearEdges + 'static {
+    const IS_ARRAY: bool = false;
+
     fn write_json_object(&self, writer: &mut JsonWriter);
+}
+
+enum JsonEdge {
+    Property(String),
+    Index(usize),
+}
+
+struct JsonSeen {
+    identity: usize,
+    is_array: bool,
+    edge: Option<JsonEdge>,
 }
 
 pub struct JsonWriter {
     output: String,
-    stack: HashSet<usize>,
+    stack: Vec<JsonSeen>,
 }
 
 impl JsonWriter {
     fn new() -> Self {
         Self {
             output: String::new(),
-            stack: HashSet::new(),
+            stack: Vec::new(),
         }
     }
 
@@ -55,11 +68,12 @@ impl JsonWriter {
         self.output.push('}');
     }
 
-    pub fn element<T: JsonValue>(&mut self, first: &mut bool, value: &T) {
+    pub fn element<T: JsonValue>(&mut self, first: &mut bool, index: usize, value: &T) {
         if !*first {
             self.output.push(',');
         }
         *first = false;
+        self.set_edge(JsonEdge::Index(index));
         value.write_json(self);
     }
 
@@ -73,7 +87,41 @@ impl JsonWriter {
         *first = false;
         self.write_string(name);
         self.output.push(':');
+        self.set_edge(JsonEdge::Property(name.to_owned()));
         value.write_json(self);
+    }
+
+    fn set_edge(&mut self, edge: JsonEdge) {
+        if let Some(container) = self.stack.last_mut() {
+            container.edge = Some(edge);
+        }
+    }
+
+    fn circular_message(&self, start: usize) -> String {
+        let mut message = String::from("Converting circular structure to JSON\n    --> starting at ");
+        push_json_constructor(&mut message, self.stack[start].is_array);
+        let end = self.stack.len();
+        let hops = end - 1 - start;
+        if hops <= 3 {
+            for index in start + 1..end {
+                push_json_hop(&mut message, &self.stack, index);
+            }
+        } else {
+            push_json_hop(&mut message, &self.stack, start + 1);
+            push_json_hop(&mut message, &self.stack, start + 2);
+            message.push_str("\n    |     ...");
+            push_json_hop(&mut message, &self.stack, end - 1);
+        }
+        message.push_str("\n    --- ");
+        push_json_edge(
+            &mut message,
+            self.stack[end - 1]
+                .edge
+                .as_ref()
+                .expect("scriptc: circular JSON edge was not recorded"),
+        );
+        message.push_str(" closes the circle");
+        message
     }
 
     pub fn write_null(&mut self) {
@@ -99,6 +147,41 @@ impl JsonWriter {
         }
         self.output.push('"');
     }
+}
+
+fn push_json_edge(output: &mut String, edge: &JsonEdge) {
+    match edge {
+        JsonEdge::Property(name) => {
+            output.push_str("property '");
+            output.push_str(name);
+            output.push('\'');
+        }
+        JsonEdge::Index(index) => {
+            output.push_str("index ");
+            output.push_str(&index.to_string());
+        }
+    }
+}
+
+fn push_json_constructor(output: &mut String, is_array: bool) {
+    output.push_str(if is_array {
+        "object with constructor 'Array'"
+    } else {
+        "object with constructor 'Object'"
+    });
+}
+
+fn push_json_hop(output: &mut String, stack: &[JsonSeen], index: usize) {
+    output.push_str("\n    |     ");
+    push_json_edge(
+        output,
+        stack[index - 1]
+            .edge
+            .as_ref()
+            .expect("scriptc: circular JSON edge was not recorded"),
+    );
+    output.push_str(" -> ");
+    push_json_constructor(output, stack[index].is_array);
 }
 
 impl JsonValue for f64 {
@@ -129,11 +212,20 @@ where
 {
     fn write_json(&self, writer: &mut JsonWriter) {
         let id = self.identity();
-        if !writer.stack.insert(id) {
-            throw_type_error("Converting circular structure to JSON".to_owned());
+        if let Some(start) = writer.stack.iter().position(|entry| entry.identity == id) {
+            throw_type_error(writer.circular_message(start));
         }
+        writer.stack.push(JsonSeen {
+            identity: id,
+            is_array: T::IS_ARRAY,
+            edge: None,
+        });
         self.with(|value| value.write_json_object(writer));
-        assert!(writer.stack.remove(&id));
+        let entry = writer
+            .stack
+            .pop()
+            .expect("scriptc: JSON container stack underflow");
+        assert_eq!(entry.identity, id);
     }
 }
 
@@ -141,11 +233,13 @@ impl<T> JsonObject for ArrayData<T>
 where
     T: ArrayElement + JsonValue,
 {
+    const IS_ARRAY: bool = true;
+
     fn write_json_object(&self, writer: &mut JsonWriter) {
         writer.begin_array();
         let mut first = true;
-        for value in &self.elements {
-            writer.element(&mut first, value);
+        for (index, value) in self.elements.iter().enumerate() {
+            writer.element(&mut first, index, value);
         }
         writer.end_array();
     }

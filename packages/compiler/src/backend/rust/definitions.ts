@@ -456,6 +456,7 @@ export class RustDefinitionEmitter {
       if (this.context.isRustJsonCompatible({ kind: "record", shapeId: shape.id })) {
         this.context.line(`impl runtime::JsonObject for ${struct} {`);
         this.context.pushIndent();
+        if (shape.tuple) this.context.line("const IS_ARRAY: bool = true;");
         this.context.line("fn write_json_object(&self, writer: &mut runtime::JsonWriter) {");
         this.context.pushIndent();
         this.context.line(shape.tuple ? "writer.begin_array();" : "writer.begin_object();");
@@ -472,7 +473,7 @@ export class RustDefinitionEmitter {
             ? `${stored}.as_ref().expect("scriptc: cleared live JSON record field")`
             : `&${stored}`;
           this.context.line(shape.tuple
-            ? `writer.element(&mut first, ${value});`
+            ? `writer.element(&mut first, ${Number(field.name)}, ${value});`
             : `writer.property(&mut first, "${this.context.rustString(field.name)}", ${value});`);
         }
         if (shape.indexValue !== undefined) {
