@@ -143,6 +143,26 @@ function emitCloseOverride(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_server_set_close_override(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
+function attemptTimeoutValidation(value: string, dyn: string, name: string): string {
+  return `match &${value} { ${dyn}::Number(sc_number) => runtime::net_validate_attempt_timeout(*sc_number, "${name}"), sc_value => sc_dyn_prop_type_fail("${name}", "of type number", sc_value), }`;
+}
+
+function emitConnectOptionsCheck(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const optionsExpr = expr.args[0];
+  const fenceExpr = expr.args[1];
+  if (optionsExpr?.type.kind !== "dyn" || fenceExpr?.type.kind !== "string") {
+    context.unsupported("net.connectOptsChk shape", expr.loc);
+  }
+  const options = context.nextTemporary();
+  const fence = context.nextTemporary();
+  const value = context.nextTemporary();
+  const dyn = context.dynTypeName();
+  const checks = ["objectMode", "readableObjectMode", "writableObjectMode"]
+    .map((key) => `let ${value} = sc_dyn_key_get(&${options}, &runtime::string("${key}"), false); if !matches!(&${value}, ${dyn}::Undefined) && sc_dyn_is_truthy(&${value}) { sc_dyn_arg_value_fail("options.${key}", "is not supported", &${value}); }`)
+    .join(" ");
+  return `{ let ${options} = ${context.emitExpr(optionsExpr)}; let ${fence} = ${context.emitExpr(fenceExpr)}; if !matches!(&${options}, ${dyn}::Object(..)) { sc_dyn_arg_type_fail("options", "of type object", &${options}); } ${checks} let ${value} = sc_dyn_key_get(&${options}, &runtime::string("port"), false); if !matches!(&${value}, ${dyn}::Undefined) { let sc_ok = match &${value} { ${dyn}::Number(sc_number) => sc_number.is_finite() && sc_number.trunc() == *sc_number && (0.0..65_536.0).contains(sc_number), ${dyn}::String(sc_text) => { let sc_number = runtime::number_from_string(sc_text); !sc_text.is_empty() && sc_number.is_finite() && sc_number.trunc() == sc_number && (0.0..65_536.0).contains(&sc_number) }, _ => false, }; if !sc_ok { runtime::throw_range_error_code(format!("options.port should be >= 0 and < 65536. Received {}", sc_dyn_specific_type(&${value})), "ERR_SOCKET_BAD_PORT"); } } let ${value} = sc_dyn_key_get(&${options}, &runtime::string("host"), false); if !matches!(&${value}, ${dyn}::Undefined | ${dyn}::String(..)) { sc_dyn_prop_type_fail("options.host", "of type string", &${value}); } let ${value} = sc_dyn_key_get(&${options}, &runtime::string("autoSelectFamily"), false); if !matches!(&${value}, ${dyn}::Undefined | ${dyn}::Boolean(..)) { sc_dyn_prop_type_fail("options.autoSelectFamily", "of type boolean", &${value}); } let ${value} = sc_dyn_key_get(&${options}, &runtime::string("autoSelectFamilyAttemptTimeout"), false); if !matches!(&${value}, ${dyn}::Undefined) { ${attemptTimeoutValidation(value, dyn, "options.autoSelectFamilyAttemptTimeout")} } runtime::throw_error_code(${fence}.to_string(), "SC2020") }`;
+}
+
 export function emitRustNetCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -233,6 +253,18 @@ export function emitRustNetCall(
   if (expr.fn === "net.connect" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "f64" && expr.args[1]?.type.kind === "string") {
     return `runtime::net_socket_connect(${context.emitExpr(expr.args[0])}, &(${context.emitExpr(expr.args[1])}))`;
+  }
+  if (expr.fn === "net.connectAttempt" && expr.args.length === 3 &&
+      expr.args[0]?.type.kind === "f64" && expr.args[1]?.type.kind === "string" &&
+      expr.args[2]?.type.kind === "dyn") {
+    const port = context.nextTemporary();
+    const host = context.nextTemporary();
+    const attempt = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${port} = ${context.emitExpr(expr.args[0])}; let ${host} = ${context.emitExpr(expr.args[1])}; let ${attempt} = ${context.emitExpr(expr.args[2])}; ${attemptTimeoutValidation(attempt, dyn, "options.autoSelectFamilyAttemptTimeout")} runtime::net_socket_connect(${port}, &${host}) }`;
+  }
+  if (expr.fn === "net.connectOptsChk" && expr.args.length === 2) {
+    return emitConnectOptionsCheck(expr, context);
   }
   if (expr.fn === "net.connectCb" && expr.args.length === 3 &&
       expr.args[0]?.type.kind === "f64" && expr.args[1]?.type.kind === "string") {

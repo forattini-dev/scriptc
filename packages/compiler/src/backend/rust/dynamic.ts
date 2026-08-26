@@ -5,6 +5,7 @@ import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
+import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustDynamicContext {
   usesDyn(): boolean;
@@ -358,6 +359,19 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_is_truthy(value: &${name}) -> bool {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined | ${name}::Null => false,`);
+    this.context.line(`${name}::Number(value) => *value != 0.0 && !value.is_nan(),`);
+    this.context.line(`${name}::Boolean(value) => *value,`);
+    this.context.line(`${name}::String(value) => !value.is_empty(),`);
+    this.context.line("_ => true,");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_typeof(value: &${name}) -> runtime::JsString {`);
     this.context.pushIndent();
     this.context.line("let kind = match value {");
@@ -582,6 +596,17 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_arg_type_fail(name: &str, expected: &str, value: &${name}) -> ! {`);
     this.context.pushIndent();
     this.context.line("runtime::throw_type_error_code(format!(\"The \\\"{name}\\\" argument must be {expected}. Received {}\", sc_dyn_specific_type(value)), \"ERR_INVALID_ARG_TYPE\")");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_prop_type_fail(name: &str, expected: &str, value: &${name}) -> ! {`);
+    this.context.pushIndent();
+    this.context.line("runtime::throw_type_error_code(format!(\"The \\\"{name}\\\" property must be {expected}. Received {}\", sc_dyn_specific_type(value)), \"ERR_INVALID_ARG_TYPE\")");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_arg_value_fail(name: &str, reason: &str, value: &${name}) -> ! {`);
+    this.context.pushIndent();
+    this.context.line("let category = if name.contains('.') { \"property\" } else { \"argument\" };");
+    this.context.line("runtime::throw_type_error_code(format!(\"The {category} '{name}' {reason}. Received {}\", runtime::ParseArgsValue::parse_args_inspect_lite(value)), \"ERR_INVALID_ARG_VALUE\")");
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_function_identity(value: &${name}) -> Option<usize> {`);
@@ -1018,7 +1043,7 @@ export class RustDynamicEmitter {
           );
           return `{ let ${source} = ${value}; let ${output}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${output}, key, ${field}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; } ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${source}); ` : ""}${name}::Object(${output}) }`;
         }
-        if (shape === undefined || shape.indexValue !== undefined) {
+        if (shape === undefined) {
           this.context.unsupported(`dynamic boxing from record '${type.shapeId}'`, loc);
         }
         const record = this.context.nextTemporary();
@@ -1034,7 +1059,15 @@ export class RustDynamicEmitter {
           const dynamic = this.emitDynFromValue(field.type, fieldValue, loc, "", liveRef);
           return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
         }).join(" ");
-        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${object}.identity(), ${record}); ` : ""}${name}::Object(${object}) }`;
+        const overflow = shape.indexValue === undefined ? "" : (() => {
+          const source = this.context.nextTemporary();
+          const index = this.context.nextTemporary();
+          const dynamic = shape.indexValue.kind === "dyn"
+            ? `runtime::map_iter_value(&${source}, ${index})`
+            : this.emitDynFromValue(shape.indexValue, `runtime::map_iter_value(&${source}, ${index})`, loc, "", liveRef);
+          return `let ${source} = ${record}.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone(); let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(&${source}) { if runtime::map_iter_live(&${source}, ${index}) { let sc_key = runtime::map_iter_key(&${source}, ${index}); runtime::map_set_by(&${object}, sc_key, ${dynamic}, |left, right| left.as_ref() == right.as_ref()); } ${index} += 1.0; }`;
+        })();
+        return `{ let ${record} = ${value}; let ${object}: runtime::JsMap<runtime::JsString, ${name}> = runtime::map_new(); ${record}.with(|${record}| { ${fields} ${overflow} }); ${liveRef ? `runtime::live_dyn_ref_store(${object}.identity(), ${record}); ` : ""}${name}::Object(${object}) }`;
       }
       default:
         this.context.unsupported(`dynamic boxing from '${type.kind}'`, loc);

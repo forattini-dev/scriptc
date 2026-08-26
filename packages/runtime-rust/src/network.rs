@@ -6,11 +6,11 @@ pub fn net_get_auto_select_family_attempt_timeout() -> f64 {
     NET_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT.with(Cell::get)
 }
 
-pub fn net_set_auto_select_family_attempt_timeout(value: f64) {
+pub fn net_validate_attempt_timeout(value: f64, name: &str) {
     if !value.is_finite() || value.trunc() != value {
         throw_range_error_code(
             format!(
-                "The value of \"value\" is out of range. It must be an integer. Received {}",
+                "The value of \"{name}\" is out of range. It must be an integer. Received {}",
                 display_number(value)
             ),
             "ERR_OUT_OF_RANGE",
@@ -19,12 +19,16 @@ pub fn net_set_auto_select_family_attempt_timeout(value: f64) {
     if !(1.0..=2_147_483_647.0).contains(&value) {
         throw_range_error_code(
             format!(
-                "The value of \"value\" is out of range. It must be >= 1 && <= 2147483647. Received {}",
+                "The value of \"{name}\" is out of range. It must be >= 1 && <= 2147483647. Received {}",
                 display_number(value)
             ),
             "ERR_OUT_OF_RANGE",
         );
     }
+}
+
+pub fn net_set_auto_select_family_attempt_timeout(value: f64) {
+    net_validate_attempt_timeout(value, "value");
     NET_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT.with(|timeout| timeout.set(value.max(10.0)));
 }
 

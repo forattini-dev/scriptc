@@ -83,6 +83,15 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const message = context.nextTemporary();
     return `{ let ${kind} = ${context.emitExpr(arg)}; let ${code} = ${context.emitExpr(secondArg)}; let ${message} = ${context.emitExpr(thirdArg)}; runtime::throw_node_coded(${kind}, &${code}, &${message}) }`;
   }
+  if ((expr.fn === "error.argTypeThrow" || expr.fn === "error.propTypeThrow") &&
+      expr.args.length === 3 && arg?.type.kind === "string" &&
+      secondArg?.type.kind === "string" && thirdArg?.type.kind === "dyn") {
+    const name = context.nextTemporary();
+    const expected = context.nextTemporary();
+    const value = context.nextTemporary();
+    const helper = expr.fn === "error.argTypeThrow" ? "sc_dyn_arg_type_fail" : "sc_dyn_prop_type_fail";
+    return `{ let ${name} = ${context.emitExpr(arg)}; let ${expected} = ${context.emitExpr(secondArg)}; let ${value} = ${context.emitExpr(thirdArg)}; ${helper}(&${name}, &${expected}, &${value}) }`;
+  }
   if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_exit(${context.emitExpr(arg)})`;
   }
