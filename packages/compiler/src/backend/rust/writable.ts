@@ -123,6 +123,7 @@ export class RustWritableEmitter {
     this.context.line(`match sc_callback { ${arms.join(" ")} }`);
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("fn sc_writable_end_from_pipe(sc_writable: &ScWritable) { runtime::writable_mark_ended(sc_writable); let sc_finish: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_writable = sc_writable.clone(); move || { if runtime::writable_take_prefinish(&sc_writable) { sc_writable_emit_void(&sc_writable, \"prefinish\"); } if runtime::writable_schedule_finish(&sc_writable) { let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || { runtime::writable_mark_finished(&sc_writable); sc_writable_emit_void(&sc_writable, \"finish\"); if runtime::writable_take_close(&sc_writable) { sc_writable_emit_void(&sc_writable, \"close\"); } })); } } }); let sc_finish_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_writable = sc_writable.clone(); move |tracer| tracer.edge(&sc_writable) }); sc_writable_call_final(sc_writable, sc_finish, sc_finish_trace); }");
   }
 
   private emitDoneDispatch(loc: SrcLoc): void {

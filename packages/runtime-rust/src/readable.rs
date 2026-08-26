@@ -1,3 +1,13 @@
+#[derive(Clone)]
+struct ReadablePipe {
+    identity: usize,
+    end: bool,
+    write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
+    finish: Rc<dyn Fn()>,
+    unpipe: Rc<dyn Fn()>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+}
+
 pub struct ReadableData<L, R>
 where
     L: Clone + Trace + 'static,
@@ -17,6 +27,7 @@ where
     resume_pending: bool,
     resume_after_data: bool,
     readable_scheduled: bool,
+    pipes: Vec<ReadablePipe>,
 }
 
 impl<L, R> Trace for ReadableData<L, R>
@@ -34,6 +45,9 @@ where
         for chunk in &self.chunks {
             tracer.edge(chunk);
         }
+        for pipe in &self.pipes {
+            (pipe.trace)(tracer);
+        }
     }
 }
 
@@ -47,6 +61,7 @@ where
         self.read_callback = None;
         self.chunks.clear();
         self.buffered_length = 0;
+        self.pipes.clear();
     }
 }
 
@@ -85,6 +100,7 @@ where
         resume_pending: false,
         resume_after_data: false,
         readable_scheduled: false,
+        pipes: Vec::new(),
     })
 }
 
@@ -365,6 +381,86 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with(|data| !data.chunks.is_empty() || data.eof)
+}
+
+pub fn readable_add_pipe<L, R>(
+    readable: &JsReadable<L, R>,
+    identity: usize,
+    end: bool,
+    write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
+    finish: Rc<dyn Fn()>,
+    unpipe: Rc<dyn Fn()>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+) where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        data.pipes.push(ReadablePipe {
+            identity,
+            end,
+            write,
+            finish,
+            unpipe,
+            trace,
+        });
+    });
+}
+
+pub fn readable_write_pipes<L, R>(readable: &JsReadable<L, R>, chunk: JsBytes<u8>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let pipes = readable.with(|data| data.pipes.clone());
+    let mut paused = false;
+    for pipe in pipes {
+        if !(pipe.write)(chunk.clone()) {
+            paused = true;
+        }
+    }
+    if paused {
+        readable.with_mut(|data| data.flowing = Some(false));
+    }
+}
+
+pub fn readable_end_pipes<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let pipes = readable.with(|data| data.pipes.clone());
+    for pipe in pipes {
+        if pipe.end {
+            (pipe.finish)();
+        }
+    }
+}
+
+pub fn readable_unpipe<L, R>(readable: &JsReadable<L, R>, identity: Option<usize>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let removed = readable.with_mut(|data| {
+        let mut removed = Vec::new();
+        let mut retained = Vec::with_capacity(data.pipes.len());
+        for pipe in data.pipes.drain(..) {
+            if identity.is_none_or(|candidate| candidate == pipe.identity) {
+                removed.push(pipe);
+            } else {
+                retained.push(pipe);
+            }
+        }
+        data.pipes = retained;
+        if !removed.is_empty() {
+            data.flowing = Some(false);
+        }
+        removed
+    });
+    for pipe in removed {
+        (pipe.unpipe)();
+    }
 }
 
 pub fn readable_take_push_after_eof<L, R>(readable: &JsReadable<L, R>) -> bool

@@ -94,6 +94,7 @@ export class RustReadableEmitter {
     for (const arm of byteArms) this.context.line(arm);
     this.context.popIndent();
     this.context.line("} }");
+    this.context.line("runtime::readable_write_pipes(sc_readable, sc_chunk);");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_readable_emit_void(sc_readable: &ScReadable, sc_event: &str) {");
@@ -124,7 +125,7 @@ export class RustReadableEmitter {
     this.context.line("if runtime::readable_take_resume(&sc_readable, false) { sc_readable_emit_void(&sc_readable, \"resume\"); }");
     this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_readable_emit_data(&sc_readable, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_readable_emit_void(&sc_readable, \"resume\"); } runtime::readable_end_drain(&sc_readable); if runtime::readable_is_flowing(&sc_readable) { sc_readable_schedule(&sc_readable); } return; }");
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
-    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); runtime::readable_end_drain(&sc_readable); return; }");
+    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); runtime::readable_end_pipes(&sc_readable); sc_readable_emit_void(&sc_readable, \"close\"); runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("sc_readable_call_read(&sc_readable);");
     this.context.line("if runtime::readable_has_data_or_eof(&sc_readable) { runtime::readable_end_drain(&sc_readable); sc_readable_schedule(&sc_readable); return; }");
     this.context.line("runtime::readable_end_drain(&sc_readable);");

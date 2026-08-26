@@ -158,9 +158,97 @@ export class RustEventEmitterEmitter {
       case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
       case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
+      case "readable.pipe": return this.emitPipe(expr);
+      case "readable.unpipe": return this.emitUnpipe(expr);
       default: return this.transform.emitLibCall(expr) ?? this.duplex.emitLibCall(expr) ??
         this.readable.emitLibCall(expr) ?? this.writable.emitLibCall(expr);
     }
+  }
+
+  private emitPipe(expr: RustLibCallExpr): string {
+    const [source, destination, end] = expr.args;
+    if (source?.type.kind !== "object" || destination?.type.kind !== "object" ||
+      end?.type.kind !== "bool" || expr.args.length !== 3 ||
+      expr.type.kind !== "object" || expr.type.className !== destination.type.className) {
+      this.context.unsupported("Readable pipe shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const sourceValue = this.requiredValue(values, 0, expr.loc);
+    const destinationValue = this.requiredValue(values, 1, expr.loc);
+    const endValue = this.requiredValue(values, 2, expr.loc);
+    const readable = this.pipeReadable(sourceValue, source.type.className, expr.loc);
+    const write = this.pipeWrite(destinationValue, destination.type.className, expr.loc);
+    const finish = this.pipeEnd(destinationValue, destination.type.className, expr.loc);
+    const unpipe = this.pipeEvent("sc_destination", destination.type.className, "unpipe", expr.loc);
+    const pipe = this.pipeEvent(destinationValue, destination.type.className, "pipe", expr.loc);
+    const start = this.pipeStart(sourceValue, source.type.className, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; let sc_identity = ${destinationValue}.identity(); let sc_write: std::rc::Rc<dyn Fn(runtime::JsBytes<u8>) -> bool> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move |sc_chunk| { ${write} } }); let sc_finish: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move || { ${finish} } }); let sc_unpipe: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move || { ${unpipe} } }); let sc_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move |tracer| tracer.edge(&sc_destination) }); runtime::readable_add_pipe(&sc_readable, sc_identity, ${endValue}, sc_write, sc_finish, sc_unpipe, sc_trace); ${pipe} ${start} ${destinationValue} }`;
+  }
+
+  private emitUnpipe(expr: RustLibCallExpr): string {
+    const source = expr.args[0];
+    if (source?.type.kind !== "object" || (expr.args.length !== 1 && expr.args.length !== 2) ||
+      expr.type.kind !== "object" || expr.type.className !== source.type.className) {
+      this.context.unsupported("Readable unpipe shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const sourceValue = this.requiredValue(values, 0, expr.loc);
+    const readable = this.pipeReadable(sourceValue, source.type.className, expr.loc);
+    const identity = values[1] === undefined ? "None" : `Some(${values[1]}.identity())`;
+    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; runtime::readable_unpipe(&sc_readable, ${identity}); ${sourceValue} }`;
+  }
+
+  private pipeReadable(value: string, className: string, loc: SrcLoc): string {
+    if (className === "%Readable") return `${value}.clone()`;
+    if (className === "%Duplex") return `runtime::duplex_readable(&${value})`;
+    if (className === "%Transform" || className === "%PassThrough") {
+      return `runtime::transform_readable(&${value})`;
+    }
+    this.context.unsupported(`pipe source '${className}'`, loc);
+  }
+
+  private pipeWrite(value: string, className: string, loc: SrcLoc): string {
+    void value;
+    if (className === "%Writable") {
+      return "let sc_result = runtime::writable_enqueue(&sc_destination, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_destination); sc_result";
+    }
+    if (className === "%Transform" || className === "%PassThrough") {
+      return "let sc_writable = runtime::transform_writable(&sc_destination); let sc_result = runtime::writable_enqueue(&sc_writable, sc_chunk, ScTransformDone::Never); sc_transform_drain_write(&sc_destination); sc_result";
+    }
+    if (className === "%Duplex") {
+      return "let sc_writable = runtime::duplex_writable(&sc_destination); let sc_result = runtime::writable_enqueue(&sc_writable, sc_chunk, ScDuplexDone::Never); sc_duplex_write_drain(&sc_destination); sc_result";
+    }
+    this.context.unsupported(`pipe destination '${className}'`, loc);
+  }
+
+  private pipeEnd(value: string, className: string, loc: SrcLoc): string {
+    void value;
+    if (className === "%Writable") return "sc_writable_end_from_pipe(&sc_destination);";
+    if (className === "%Transform" || className === "%PassThrough") {
+      return "sc_transform_end_from_pipe(&sc_destination);";
+    }
+    this.context.unsupported(`pipe end destination '${className}'`, loc);
+  }
+
+  private pipeEvent(value: string, className: string, event: string, loc: SrcLoc): string {
+    const receiver = `&${value}`;
+    if (className === "%Writable") return `sc_writable_emit_void(${receiver}, "${event}");`;
+    if (className === "%Transform" || className === "%PassThrough") {
+      return `sc_transform_emit_void(${receiver}, "${event}");`;
+    }
+    if (className === "%Duplex") return `sc_duplex_emit_void(${receiver}, "${event}");`;
+    this.context.unsupported(`pipe event destination '${className}'`, loc);
+  }
+
+  private pipeStart(value: string, className: string, loc: SrcLoc): string {
+    if (className === "%Readable") {
+      return `runtime::readable_start_flowing(&${value}); sc_readable_schedule(&${value});`;
+    }
+    if (className === "%Duplex") return `sc_duplex_start_flowing(&${value});`;
+    if (className === "%Transform" || className === "%PassThrough") {
+      return `sc_transform_start_flowing(&${value});`;
+    }
+    this.context.unsupported(`pipe flow source '${className}'`, loc);
   }
 
   private emitOn(expr: RustLibCallExpr, startsReadableFlow = false): string {

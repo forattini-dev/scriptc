@@ -106,6 +106,7 @@ export class RustDuplexEmitter {
     this.context.line("fn sc_duplex_emit_data(sc_duplex: &ScDuplex, sc_chunk: runtime::JsBytes<u8>) {");
     this.context.pushIndent();
     this.emitEventLoop("sc_duplex", "data", byteArms);
+    this.context.line("runtime::readable_write_pipes(&runtime::duplex_readable(sc_duplex), sc_chunk);");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_duplex_emit_void(sc_duplex: &ScDuplex, sc_event: &str) {");
@@ -149,7 +150,7 @@ export class RustDuplexEmitter {
     this.context.line("if runtime::readable_take_resume(&sc_readable, false) { sc_duplex_emit_void(&sc_duplex, \"resume\"); }");
     this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_duplex_emit_data(&sc_duplex, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_duplex_emit_void(&sc_duplex, \"resume\"); } runtime::readable_end_drain(&sc_readable); sc_duplex_read_schedule(&sc_duplex); return; }");
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
-    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_duplex_emit_void(&sc_duplex, \"end\"); if runtime::duplex_take_close(&sc_duplex) { sc_duplex_emit_void(&sc_duplex, \"close\"); } runtime::readable_end_drain(&sc_readable); return; }");
+    this.context.line("if runtime::readable_take_end(&sc_readable) { sc_duplex_emit_void(&sc_duplex, \"end\"); runtime::readable_end_pipes(&sc_readable); if runtime::duplex_take_close(&sc_duplex) { sc_duplex_emit_void(&sc_duplex, \"close\"); } runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("sc_duplex_call_read(&sc_duplex, &sc_readable);");
     this.context.line("runtime::readable_end_drain(&sc_readable);");
     this.context.line("if runtime::readable_has_data_or_eof(&sc_readable) { sc_duplex_read_schedule(&sc_duplex); }");

@@ -110,6 +110,7 @@ export class RustTransformEmitter {
     this.context.line("fn sc_transform_emit_data(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>) {");
     this.context.pushIndent();
     this.emitEventLoop("data", byteArms);
+    this.context.line("runtime::readable_write_pipes(&runtime::transform_readable(sc_transform), sc_chunk);");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_transform_emit_void(sc_transform: &ScTransform, sc_event: &str) {");
@@ -132,7 +133,7 @@ export class RustTransformEmitter {
   }
 
   private emitReadableHelpers(): void {
-    this.context.line("fn sc_transform_read_drain(sc_transform: ScTransform) { let sc_readable = runtime::transform_readable(&sc_transform); runtime::readable_begin_drain(&sc_readable); if runtime::readable_take_resume(&sc_readable, false) { sc_transform_emit_void(&sc_transform, \"resume\"); } if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_transform_emit_data(&sc_transform, sc_chunk); runtime::readable_end_drain(&sc_readable); sc_transform_read_schedule(&sc_transform); return; } if runtime::readable_take_end(&sc_readable) { sc_transform_emit_void(&sc_transform, \"end\"); let sc_duplex = runtime::transform_duplex(&sc_transform); if runtime::duplex_take_close(&sc_duplex) { sc_transform_emit_void(&sc_transform, \"close\"); } runtime::readable_end_drain(&sc_readable); return; } runtime::readable_end_drain(&sc_readable); }");
+    this.context.line("fn sc_transform_read_drain(sc_transform: ScTransform) { let sc_readable = runtime::transform_readable(&sc_transform); runtime::readable_begin_drain(&sc_readable); if runtime::readable_take_resume(&sc_readable, false) { sc_transform_emit_void(&sc_transform, \"resume\"); } if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_transform_emit_data(&sc_transform, sc_chunk); runtime::readable_end_drain(&sc_readable); sc_transform_read_schedule(&sc_transform); return; } if runtime::readable_take_end(&sc_readable) { sc_transform_emit_void(&sc_transform, \"end\"); runtime::readable_end_pipes(&sc_readable); let sc_duplex = runtime::transform_duplex(&sc_transform); if runtime::duplex_take_close(&sc_duplex) { sc_transform_emit_void(&sc_transform, \"close\"); } runtime::readable_end_drain(&sc_readable); return; } runtime::readable_end_drain(&sc_readable); }");
     this.context.line("fn sc_transform_read_schedule(sc_transform: &ScTransform) { let sc_readable = runtime::transform_readable(sc_transform); if runtime::readable_schedule(&sc_readable) { let sc_transform = sc_transform.clone(); runtime::process_next_tick(Box::new(move || sc_transform_read_drain(sc_transform))); } }");
     this.context.line("fn sc_transform_start_flowing(sc_transform: &ScTransform) { let sc_readable = runtime::transform_readable(sc_transform); runtime::readable_start_flowing(&sc_readable); sc_transform_read_schedule(sc_transform); }");
   }
@@ -197,6 +198,7 @@ export class RustTransformEmitter {
     this.context.line(`match sc_callback { ${arms.join(" ")} }`);
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("fn sc_transform_end_from_pipe(sc_transform: &ScTransform) { let sc_writable = runtime::transform_writable(sc_transform); runtime::writable_mark_ended(&sc_writable); let sc_finish: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_transform = sc_transform.clone(); move || { let sc_readable = runtime::transform_readable(&sc_transform); let _ = runtime::readable_push_null(&sc_readable); sc_transform_read_schedule(&sc_transform); let sc_writable = runtime::transform_writable(&sc_transform); if runtime::writable_take_prefinish(&sc_writable) { sc_transform_emit_void(&sc_transform, \"prefinish\"); } if runtime::writable_schedule_finish(&sc_writable) { let sc_transform = sc_transform.clone(); runtime::process_next_tick(Box::new(move || { let sc_writable = runtime::transform_writable(&sc_transform); runtime::writable_mark_finished(&sc_writable); sc_transform_emit_void(&sc_transform, \"finish\"); let sc_duplex = runtime::transform_duplex(&sc_transform); if runtime::duplex_take_close(&sc_duplex) { sc_transform_emit_void(&sc_transform, \"close\"); } })); } } }); let sc_finish_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_transform = sc_transform.clone(); move |tracer| tracer.edge(&sc_transform) }); sc_transform_call_flush(sc_transform, sc_finish, sc_finish_trace); }");
   }
 
   private emitNew(expr: RustLibCallExpr): string {
