@@ -24,6 +24,21 @@ pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
     Rc::from(result)
 }
 
+pub fn string_raw(raw: &JsArray<JsString>, substitutions: &JsArray<JsString>) -> JsString {
+    let raw_len = array_len(raw);
+    let substitutions_len = array_len(substitutions);
+    let mut output = String::new();
+    let mut index = 0.0;
+    while index < raw_len {
+        output.push_str(&array_get(raw, index));
+        if index + 1.0 < raw_len && index < substitutions_len {
+            output.push_str(&array_get(substitutions, index));
+        }
+        index += 1.0;
+    }
+    Rc::from(output)
+}
+
 pub fn string_is_well_formed(_value: &JsString) -> bool {
     true
 }

@@ -56,6 +56,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (eventEmitterCall !== null) return eventEmitterCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "string.raw" && expr.args.length === 2 &&
+    arg?.type.kind === "array" && arg.type.elem.kind === "string" &&
+    secondArg?.type.kind === "array" && secondArg.type.elem.kind === "string") {
+    const raw = context.nextTemporary();
+    const substitutions = context.nextTemporary();
+    return `{ let ${raw} = ${context.emitExpr(arg)}; let ${substitutions} = ${context.emitExpr(secondArg)}; runtime::string_raw(&${raw}, &${substitutions}) }`;
+  }
   if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";
   if (expr.fn === "global.undefRead" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::throw_undefined_global::<${context.rustType(expr.type, expr.loc)}>(&(${context.emitExpr(arg)}))`;

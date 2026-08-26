@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { compile } from "../src/index.js";
@@ -36,8 +36,23 @@ function runToExit(
 
 async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   const source = await readFile(entryPath, "utf8");
+  const sources = [source];
+  if (/[/\\]main\.(?:ts|js|mjs|cjs)$/u.test(entryPath)) {
+    const pending = [dirname(entryPath)];
+    while (pending.length !== 0) {
+      const directory = pending.pop();
+      if (directory === undefined) break;
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) pending.push(path);
+        else if (path !== entryPath && [".ts", ".js", ".mjs", ".cjs"].includes(extname(path))) {
+          sources.push(await readFile(path, "utf8"));
+        }
+      }
+    }
+  }
   const transform = source.split("\n", 2).some((line) => /^\/\/ @transform-types\s*$/u.test(line)) ||
-    /\benum\s+[A-Za-z_$]/u.test(source);
+    sources.some((input) => /\benum\s+[A-Za-z_$]/u.test(input));
   return transform
     ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning", entryPath]
     : [entryPath];
@@ -662,8 +677,8 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1792-searchparams-encoding.ts",
     "1793-searchparams-iteration.ts",
     "1794-searchparams-url-live.ts",
-    "1980-primitive-proto-statics.ts",
-    "1981-date-utc.ts",
+  "1980-primitive-proto-statics.ts",
+  "1981-date-utc.ts",
     "2140-uri-component-codecs.ts",
     "2191-uri-encoders.ts",
     "2193-discarded-stdlib-reads.ts",
@@ -728,6 +743,8 @@ test.each([
   "1528-delete-records-env.ts",
   "1541-union-keyed-reads.ts",
   "1546-union-element-reads.ts",
+  "1563-string-raw-fold.ts",
+  "1564-string-raw.ts",
   "1562-optional-chain-tails.ts",
   "1574-dyn-optional-method-number-keys.ts",
   "1581-declare-const-read.ts",
@@ -784,6 +801,23 @@ test.each([
   "1881-default-anon/main.ts",
   "1882-default-cjs-interop/main.ts",
   "1883-default-exports/main.ts",
+  "1890-ns-imports/main.ts",
+  "1891-ns-reexport/main.ts",
+  "1943-class-statics-expanded.ts",
+  "1944-class-values-modules/main.ts",
+  "1950-generic-fn-values.ts",
+  "1954-generic-modules/main.ts",
+  "1960-namespace-basics.ts",
+  "1961-namespace-nested.ts",
+  "1962-namespace-classes.ts",
+  "1963-namespace-aliases.ts",
+  "1964-namespace-type-only.ts",
+  "1965-namespace-ambient.ts",
+  "1966-namespace-modules/main.ts",
+  "1968-namespace-import-eq-snapshot.ts",
+  "1982-freeze-resolve-passthrough.ts",
+  "1983-array-tuple-surfaces.ts",
+  "1992-small-syntax.ts",
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",

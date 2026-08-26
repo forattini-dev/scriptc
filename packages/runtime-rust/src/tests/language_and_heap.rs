@@ -282,6 +282,17 @@
     }
 
     #[test]
+    fn string_raw_interleaves_available_substitutions() {
+        let raw = array_new(vec![string("a"), string("b"), string("c")]);
+        let substitutions = array_new(vec![string("1"), string("2"), string("dropped")]);
+        assert_eq!(string_raw(&raw, &substitutions).as_ref(), "a1b2c");
+        assert_eq!(
+            string_raw(&array_new(vec![string("only")]), &substitutions).as_ref(),
+            "only"
+        );
+    }
+
+    #[test]
     fn math_random_stays_in_javascript_range_and_varies() {
         let first = math_random();
         let mut varied = false;
