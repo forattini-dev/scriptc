@@ -60,6 +60,63 @@ impl<T: HeapValue> ClearEdges for PromiseData<T> {
 
 pub type JsPromise<T> = Gc<PromiseData<T>>;
 
+#[derive(Clone)]
+pub struct JsPromiseHandle {
+    identity: usize,
+    catch: Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>,
+}
+
+pub fn promise_handle_identity(handle: &JsPromiseHandle) -> usize {
+    handle.identity
+}
+
+pub fn promise_handle_catch(
+    handle: &JsPromiseHandle,
+    callback: Box<dyn FnOnce(Caught)>,
+) -> JsPromiseHandle {
+    (handle.catch)(callback)
+}
+
+pub fn promise_set_unhandled_rejection_handler(
+    handler: Option<Box<dyn FnMut(Caught, JsPromiseHandle)>>,
+) {
+    UNHANDLED_REJECTION_HANDLER.with(|slot| *slot.borrow_mut() = handler);
+}
+
+pub fn promise_set_rejection_handled_handler(
+    handler: Option<Box<dyn FnMut(JsPromiseHandle)>>,
+) {
+    REJECTION_HANDLED_HANDLER.with(|slot| *slot.borrow_mut() = handler);
+}
+
+fn promise_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandle {
+    let identity = promise.identity();
+    let source = promise.clone();
+    JsPromiseHandle {
+        identity,
+        catch: Rc::new(move |callback| {
+            let result = promise_new::<()>();
+            let target = result.clone();
+            promise_then(
+                &source,
+                Box::new(move |outcome| match outcome {
+                    Ok(_) => {
+                        let _ = promise_fulfill(&target, ());
+                    }
+                    Err(reason) => {
+                        let guard = target.clone();
+                        promise_run_segment(&guard, move || {
+                            callback(reason);
+                            let _ = promise_fulfill(&target, ());
+                        });
+                    }
+                }),
+            );
+            promise_handle(&result)
+        }),
+    }
+}
+
 pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
     Gc::new(PromiseData {
         state: PromiseState::Pending(Vec::new()),
@@ -291,9 +348,11 @@ fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<
 
 pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
     let mut reaction = Some(reaction);
-    let settled = promise.with_mut(|data| {
+    let (settled, rejection_handled) = promise.with_mut(|data| {
+        let rejection_handled = data.reported;
+        data.reported = false;
         data.handled = true;
-        match &mut data.state {
+        let settled = match &mut data.state {
             PromiseState::Pending(reactions) => {
                 reactions.push(reaction.take().expect("scriptc: missing promise reaction"));
                 None
@@ -306,8 +365,17 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
                 .as_ref()
                 .expect("scriptc: cleared rejected promise")
                 .clone())),
-        }
+        };
+        (settled, rejection_handled)
     });
+    if rejection_handled {
+        let handle = promise_handle(promise);
+        REJECTION_HANDLED_HANDLER.with(|handler| {
+            if let Some(handler) = handler.borrow_mut().as_mut() {
+                handler(handle);
+            }
+        });
+    }
     if let Some(outcome) = settled {
         promise_schedule(
             reaction.expect("scriptc: settled promise consumed its reaction"),
@@ -386,8 +454,20 @@ pub fn promise_reject<T: HeapValue>(promise: &JsPromise<T>, reason: Caught) -> b
                 Some(reason)
             });
             if let Some(reason) = unhandled {
-                eprintln!("UnhandledPromiseRejection: {}", caught_to_string(&reason));
-                UNHANDLED_REJECTION.with(|flag| flag.set(true));
+                let handle = promise_handle(&candidate);
+                let delivered = UNHANDLED_REJECTION_HANDLER.with(|handler| {
+                    let mut handler = handler.borrow_mut();
+                    let Some(handler) = handler.as_mut() else {
+                        return false;
+                    };
+                    candidate.with_mut(|data| data.handled = true);
+                    handler(reason.clone(), handle);
+                    true
+                });
+                if !delivered {
+                    eprintln!("UnhandledPromiseRejection: {}", caught_to_string(&reason));
+                    UNHANDLED_REJECTION.with(|flag| flag.set(true));
+                }
             }
         }));
     });

@@ -12,6 +12,8 @@ pub fn finish() {
     MICROTASKS.with(|tasks| tasks.borrow_mut().clear());
     NEXT_TICKS.with(|tasks| tasks.borrow_mut().clear());
     PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
+    UNHANDLED_REJECTION_HANDLER.with(|handler| *handler.borrow_mut() = None);
+    REJECTION_HANDLED_HANDLER.with(|handler| *handler.borrow_mut() = None);
     collect_cycles();
     if std::env::var_os("SCRIPTC_RUST_HEAP_AUDIT").is_some() {
         let live = live_heap_objects();

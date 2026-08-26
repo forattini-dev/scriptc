@@ -689,6 +689,49 @@
     }
 
     #[test]
+    fn promise_rejection_events_preserve_identity_and_late_catches() {
+        init();
+        let baseline = live_heap_objects();
+        let unhandled_count = Rc::new(Cell::new(0));
+        let handled_count = Rc::new(Cell::new(0));
+        let catch_count = Rc::new(Cell::new(0));
+
+        let handled_observer = handled_count.clone();
+        promise_set_rejection_handled_handler(Some(Box::new(move |_| {
+            handled_observer.set(handled_observer.get() + 1);
+        })));
+        let unhandled_observer = unhandled_count.clone();
+        let catch_observer = catch_count.clone();
+        promise_set_unhandled_rejection_handler(Some(Box::new(move |reason, promise| {
+            assert_eq!(caught_to_string(&reason).as_ref(), "late");
+            unhandled_observer.set(unhandled_observer.get() + 1);
+            let caught = catch_observer.clone();
+            let _ = promise_handle_catch(
+                &promise,
+                Box::new(move |reason| {
+                    assert_eq!(caught_to_string(&reason).as_ref(), "late");
+                    caught.set(caught.get() + 1);
+                }),
+            );
+        })));
+
+        let promise = promise_rejected::<f64>(caught_value(string("late")));
+        let identity = promise.identity();
+        let handle = promise_handle(&promise);
+        assert_eq!(promise_handle_identity(&handle), identity);
+        run_event_loop();
+        assert_eq!(unhandled_count.get(), 1);
+        assert_eq!(handled_count.get(), 1);
+        assert_eq!(catch_count.get(), 1);
+        assert!(!had_unhandled_rejection());
+
+        drop(handle);
+        drop(promise);
+        finish();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promise_map_transforms_fulfillments_and_forwards_rejections() {
         let baseline = live_heap_objects();
         {
