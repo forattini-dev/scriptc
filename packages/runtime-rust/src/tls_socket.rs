@@ -1,6 +1,7 @@
 struct TlsSocketState {
-    connection: rustls::ClientConnection,
+    connection: rustls::Connection,
     verify_state: Arc<Mutex<TlsVerifyState>>,
+    server_side: bool,
     established: bool,
     authorized: bool,
     authorization_error: Option<String>,
@@ -42,8 +43,9 @@ pub fn tls_socket_connect(
     let socket = net_socket_connect(port, host);
     socket.with_mut(|socket| {
         socket.tls = Some(TlsSocketState {
-            connection,
+            connection: rustls::Connection::Client(connection),
             verify_state,
+            server_side: false,
             established: false,
             authorized: false,
             authorization_error: None,
@@ -110,12 +112,14 @@ fn tls_socket_handshake(
     match tls.connection.complete_io(stream) {
         Ok(_) if tls.connection.is_handshaking() => Some(TlsSocketAction::Progress),
         Ok(_) => {
-            let verify = tls
-                .verify_state
-                .lock()
-                .expect("scriptc: TLS verify-state lock poisoned");
-            tls.authorized = verify.checked && verify.authorization_error.is_none();
-            tls.authorization_error = verify.authorization_error.clone();
+            if !tls.server_side {
+                let verify = tls
+                    .verify_state
+                    .lock()
+                    .expect("scriptc: TLS verify-state lock poisoned");
+                tls.authorized = verify.checked && verify.authorization_error.is_none();
+                tls.authorization_error = verify.authorization_error.clone();
+            }
             tls.established = true;
             Some(TlsSocketAction::Connect(handle.clone()))
         }
@@ -126,12 +130,14 @@ fn tls_socket_handshake(
             if tls.connection.is_handshaking() {
                 None
             } else {
-                let verify = tls
-                    .verify_state
-                    .lock()
-                    .expect("scriptc: TLS verify-state lock poisoned");
-                tls.authorized = verify.checked && verify.authorization_error.is_none();
-                tls.authorization_error = verify.authorization_error.clone();
+                if !tls.server_side {
+                    let verify = tls
+                        .verify_state
+                        .lock()
+                        .expect("scriptc: TLS verify-state lock poisoned");
+                    tls.authorized = verify.checked && verify.authorization_error.is_none();
+                    tls.authorization_error = verify.authorization_error.clone();
+                }
                 tls.established = true;
                 Some(TlsSocketAction::Connect(handle.clone()))
             }
@@ -298,7 +304,9 @@ fn tls_socket_dispatch_one() -> bool {
     match action {
         Some(TlsSocketAction::Progress) => true,
         Some(TlsSocketAction::Connect(socket)) => {
-            NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::SocketConnect(socket)));
+            if !tls_server_established(&socket) {
+                NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(NetTask::SocketConnect(socket)));
+            }
             true
         }
         Some(TlsSocketAction::Callback(callback)) => {
@@ -314,14 +322,14 @@ fn tls_socket_dispatch_one() -> bool {
             true
         }
         Some(TlsSocketAction::Data(socket, bytes)) => {
-            let listeners = socket.with_mut(|socket| {
+            let (listeners, encoding_utf8) = socket.with_mut(|socket| {
                 let snapshot = socket.data_listeners.clone();
                 socket.data_listeners.retain(|listener| !listener.once);
-                snapshot
+                (snapshot, socket.encoding_utf8)
             });
             let chunk = bytes_from_elements(bytes);
             for listener in listeners {
-                (listener.invoke)(chunk.clone());
+                (listener.invoke)(chunk.clone(), encoding_utf8);
             }
             true
         }
@@ -330,12 +338,16 @@ fn tls_socket_dispatch_one() -> bool {
             true
         }
         Some(TlsSocketAction::Error(socket, message)) => {
-            NET_TASKS.with(|tasks| {
-                tasks.borrow_mut().push_back(NetTask::SocketError(
-                    socket,
-                    error_new("Error", string(&message)),
-                ));
-            });
+            if socket.with(|data| data.tls.as_ref().is_some_and(|tls| tls.server_side)) {
+                net_socket_destroy(&socket);
+            } else {
+                NET_TASKS.with(|tasks| {
+                    tasks.borrow_mut().push_back(NetTask::SocketError(
+                        socket,
+                        error_new("Error", string(&message)),
+                    ));
+                });
+            }
             true
         }
         Some(TlsSocketAction::Close(socket)) => {

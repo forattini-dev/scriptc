@@ -67,7 +67,10 @@ function emitConnectionListener(
     parameter === undefined ? [] : ["sc_socket"],
     expr.loc,
   );
-  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_server_on_connection(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_socket| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+  const runtimeFn = expr.fn === "net.serverOnSecureConnection"
+    ? "tls_server_on_secure_connection"
+    : "net_server_on_connection";
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${runtimeFn}(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_socket| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
 function emitDataListener(
@@ -87,13 +90,17 @@ function emitDataListener(
   }
   const callback = context.nextTemporary();
   const traced = context.nextTemporary();
+  const encoded = context.nextTemporary();
+  const argument = parameter?.kind === "dyn"
+    ? `if ${encoded} { ${context.dynTypeName()}::String(runtime::bytes_to_string(&sc_chunk, &runtime::string("utf8"))) } else { ${context.dynTypeName()}::Buffer(sc_chunk) }`
+    : "sc_chunk";
   const dispatch = context.emitClosureDispatch(
     callback,
     callbackType,
-    parameter === undefined ? [] : [parameter.kind === "dyn" ? `${context.dynTypeName()}::Buffer(sc_chunk)` : "sc_chunk"],
+    parameter === undefined ? [] : [argument],
     expr.loc,
   );
-  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_socket_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::net_socket_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk, ${encoded}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
 function emitSocketErrorListener(
@@ -283,7 +290,8 @@ export function emitRustNetCall(
     return emitVoidCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::net_server_on_listening(&(${server}), ${invoke}, ${trace}, ${once});`);
   }
-  if (expr.fn === "net.serverOnConnection" && expr.args.length === 3) {
+  if ((expr.fn === "net.serverOnConnection" || expr.fn === "net.serverOnSecureConnection") &&
+      expr.args.length === 3) {
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("net.serverOnConnection callback", expr.loc);
     return emitConnectionListener(expr, callbackType, context);
@@ -320,6 +328,10 @@ export function emitRustNetCall(
       expr.args[0]?.type.kind === "netSocket" && expr.args[1]?.type.kind === "string") {
     const fn = expr.fn === "net.sockWrite" ? "net_socket_write_str" : "net_socket_end_str";
     return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
+  if (expr.fn === "net.sockSetEncoding" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "netSocket" && expr.args[1]?.type.kind === "string") {
+    return `runtime::net_socket_set_encoding(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
   }
   if ((expr.fn === "net.sockWriteBytes" || expr.fn === "net.sockEndBytes") && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "netSocket" && expr.args[1]?.type.kind === "bytes" &&

@@ -1,9 +1,12 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { compile } from "../src/index.js";
+
+const execFileAsync = promisify(execFile);
 
 interface HttpsFixtureOutcome {
   stdout: Buffer;
@@ -69,7 +72,9 @@ test.each([
   "https-client-url",
   "https-ca-default",
   "tls-client-connect",
-])("Rust TLS client matches Node over real HTTPS: %s", async (fixture) => {
+  "tls-echo",
+  "https-hello",
+])("Rust TLS/HTTPS fixture matches Node: %s", async (fixture) => {
   const fixtureRoot = resolve("tests/fixtures/server/cases", fixture);
   const entry = join(fixtureRoot, "main.ts");
   const driver = join(fixtureRoot, "driver.mjs");
@@ -91,4 +96,26 @@ test.each([
   expect(rust.stdout.equals(node.stdout)).toBe(true);
   expect(rust.exitCode).toBe(node.exitCode);
   expect(rust.driverStdout).toBe(node.driverStdout);
+}, 180_000);
+
+test("Rust TLS clients and servers interoperate in one event loop", async () => {
+  const entry = resolve("tests/fixtures/server/cases/tls-connect-basic/main.ts");
+  const output = await mkdtemp(join(tmpdir(), "scriptc-rust-tls-roundtrip-"));
+  const compiled = await compile(entry, {
+    backend: "rust",
+    optimization: "dev",
+    outDir: output,
+    outPath: join(output, "program"),
+  });
+  expect(
+    compiled.ok,
+    compiled.ok ? entry : compiled.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!compiled.ok) return;
+  const node = await execFileAsync(process.execPath, ["--no-warnings", entry]);
+  const rust = await execFileAsync(compiled.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
 }, 180_000);

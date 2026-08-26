@@ -351,7 +351,7 @@ class RustDynamicInvokeEmitter {
     this.context.line("let traced = callback.clone();");
     this.context.line("let once = method == \"once\";");
     this.open("match event {");
-    this.context.line(`"data" => runtime::net_socket_on_data(socket, std::rc::Rc::new(move |chunk| { let _ = sc_dyn_call(&callback, &[${this.dyn}::Buffer(chunk)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
+    this.context.line(`"data" => runtime::net_socket_on_data(socket, std::rc::Rc::new(move |chunk, encoding_utf8| { let value = if encoding_utf8 { ${this.dyn}::String(runtime::bytes_to_string(&chunk, &runtime::string("utf8"))) } else { ${this.dyn}::Buffer(chunk) }; let _ = sc_dyn_call(&callback, &[value], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
     for (const [event, runtime] of [["end", "net_socket_on_end"], ["close", "net_socket_on_close"], ["connect", "net_socket_on_connect"]] as const) {
       this.context.line(`"${event}" => runtime::${runtime}(socket, std::rc::Rc::new(move || { let _ = sc_dyn_call(&callback, &[], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
     }

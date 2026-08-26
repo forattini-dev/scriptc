@@ -71,6 +71,59 @@ function emitTlsConnect(expr: RustLibCallExpr, context: RustLibCallContext): str
   return `{ let ${portArg} = ${context.emitExpr(portExpr)}; let ${hostArg} = ${context.emitExpr(hostExpr)}; let ${options} = ${context.emitExpr(optionsExpr)}; if !matches!(&${options}, ${dyn}::Undefined | ${dyn}::Null | ${dyn}::Object(..)) { sc_dyn_arg_type_fail("options", "of type object", &${options}); } if sc_dyn_has_own(&${options}, &runtime::string("checkServerIdentity")) { let ${checkIdentity} = ${optionValue(options, "checkServerIdentity", dyn)}; if sc_dyn_typeof(&${checkIdentity}).as_ref() != "function" { sc_dyn_prop_type_fail("options.checkServerIdentity", "of type function", &${checkIdentity}); } runtime::throw_error("tls.connect option 'checkServerIdentity' has no static lowering — custom identity verification has no lowering — the runtime verifies against the servername/host".to_owned()); } ${fence} let ${portValue} = ${optionValue(options, "port", dyn)}; let ${port} = if ${portArg} >= 0.0 { ${portArg} } else { match &${portValue} { ${dyn}::Number(sc_number) => *sc_number, ${dyn}::String(sc_text) => runtime::number_from_string(sc_text), sc_value => sc_dyn_arg_type_fail("options.port", "of type number", sc_value), } }; let ${hostValue} = ${optionValue(options, "host", dyn)}; let sc_option_host = match &${hostValue} { ${dyn}::Undefined => None, ${dyn}::String(sc_text) => Some(sc_text.clone()), sc_value => sc_dyn_prop_type_fail("options.host", "of type string", sc_value), }; let ${host} = if !${hostArg}.is_empty() { ${hostArg} } else { sc_option_host.unwrap_or_else(|| runtime::string("localhost")) }; let ${rejectValue} = ${optionValue(options, "rejectUnauthorized", dyn)}; let ${reject} = if matches!(&${rejectValue}, ${dyn}::Undefined) { true } else { sc_dyn_is_truthy(&${rejectValue}) }; let ${caValue} = ${optionValue(options, "ca", dyn)}; let ${ca} = ${caExtract}; let ${servernameValue} = ${optionValue(options, "servername", dyn)}; let ${servername} = match &${servernameValue} { ${dyn}::Undefined => ${host}.clone(), ${dyn}::String(sc_text) => sc_text.clone(), sc_value => sc_dyn_prop_type_fail("options.servername", "of type string", sc_value), }; ${call} }`;
 }
 
+function emitPemBinding(
+  arg: RustLibCallExpr["args"][number],
+  name: string,
+  context: RustLibCallContext,
+  expr: RustLibCallExpr,
+): string {
+  if (arg.type.kind === "string") return `let ${name} = ${context.emitExpr(arg)};`;
+  if (arg.type.kind === "bytes" && arg.type.elem === "u8") {
+    const bytes = context.nextTemporary();
+    return `let ${bytes} = ${context.emitExpr(arg)}; let ${name} = runtime::bytes_to_string(&${bytes}, &runtime::string("utf8"));`;
+  }
+  return context.unsupported("TLS server PEM argument", expr.loc);
+}
+
+function emitTlsServer(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const [certExpr, keyExpr, callbackExpr] = expr.args;
+  if (certExpr === undefined || keyExpr === undefined) {
+    context.unsupported(`${expr.fn} shape`, expr.loc);
+  }
+  const cert = context.nextTemporary();
+  const key = context.nextTemporary();
+  const setup = `${emitPemBinding(certExpr, cert, context, expr)} ${emitPemBinding(keyExpr, key, context, expr)}`;
+  if (expr.fn === "tls.createServer") {
+    return `{ ${setup} runtime::tls_server_new(&${cert}, &${key}) }`;
+  }
+  if (callbackExpr?.type.kind !== "func") {
+    return context.unsupported(`${expr.fn} callback`, expr.loc);
+  }
+  const callbackType = callbackExpr.type;
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  if (expr.fn === "tls.createServerCb") {
+    const parameter = callbackType.params[0];
+    if (callbackType.params.length > 1 ||
+        (parameter !== undefined && parameter.kind !== "netSocket")) {
+      context.unsupported("TLS secureConnection listener parameters", expr.loc);
+    }
+    const dispatch = context.emitClosureDispatch(
+      callback, callbackType, parameter === undefined ? [] : ["sc_socket"], expr.loc,
+    );
+    return `{ ${setup} let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::tls_server_new_callback(&${cert}, &${key}, std::rc::Rc::new(move |sc_socket| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))) }`;
+  }
+  const [request, response] = callbackType.params;
+  if (callbackType.params.length > 2 ||
+      (request !== undefined && request.kind !== "httpReq") ||
+      (response !== undefined && response.kind !== "httpRes")) {
+    context.unsupported("HTTPS request listener parameters", expr.loc);
+  }
+  const args = callbackType.params.map((_, index) => index === 0 ? "sc_request" : "sc_response");
+  const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
+  return `{ ${setup} let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::https_server_new_callback(&${cert}, &${key}, std::rc::Rc::new(move |sc_request, sc_response| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))) }`;
+}
+
 export function emitRustTlsCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -89,6 +142,11 @@ export function emitRustTlsCall(
   if ((expr.fn === "tls.connect" || expr.fn === "tls.connectCb") &&
       (expr.args.length === 3 || expr.args.length === 4)) {
     return emitTlsConnect(expr, context);
+  }
+  if ((expr.fn === "tls.createServer" && expr.args.length === 2) ||
+      ((expr.fn === "tls.createServerCb" || expr.fn === "https.createServer") &&
+        expr.args.length === 3)) {
+    return emitTlsServer(expr, context);
   }
   if (expr.fn === "tls.sockAuthorized" && expr.args.length === 1 &&
       arg?.type.kind === "netSocket") {

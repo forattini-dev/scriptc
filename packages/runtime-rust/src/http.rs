@@ -435,7 +435,7 @@ fn http_server_accept(server: &JsNetServer, socket: &JsNetSocket) {
     let trace_connection = connection;
     net_socket_on_data(
         socket,
-        Rc::new(move |chunk| {
+        Rc::new(move |chunk, _encoding_utf8| {
             let bytes = bytes_u8_values(&chunk);
             http_server_feed(&invoke_connection, &bytes);
         }),
@@ -557,6 +557,21 @@ pub fn http_response_write_head(response: &JsHttpResponse, status: f64) {
     if let Some((socket, head)) = http_response_head(response, None) {
         net_socket_queue(&socket, head);
     }
+}
+
+pub fn http_response_write_head_n(
+    response: &JsHttpResponse,
+    status: f64,
+    names: &JsArray<JsString>,
+    values: &JsArray<JsString>,
+) {
+    let length = array_len(names).min(array_len(values)) as usize;
+    for index in 0..length {
+        let name = array_get(names, index as f64);
+        let value = array_get(values, index as f64);
+        http_response_set_header(response, &name, &value);
+    }
+    http_response_write_head(response, status);
 }
 
 pub fn http_response_write_str(response: &JsHttpResponse, value: &JsString) {

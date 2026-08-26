@@ -302,7 +302,7 @@ fn http_client_new(
         let data_trace = connection.clone();
         net_socket_on_data(
             &socket,
-            Rc::new(move |chunk| {
+            Rc::new(move |chunk, _encoding_utf8| {
                 http_client_feed(&data_connection, &data_request, &bytes_u8_values(&chunk));
             }),
             Rc::new(move |tracer| data_trace.borrow().trace(tracer)),

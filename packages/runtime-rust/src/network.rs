@@ -50,7 +50,7 @@ struct NetConnectionListener {
 
 #[derive(Clone)]
 struct NetDataListener {
-    invoke: Rc<dyn Fn(JsBytes<u8>)>,
+    invoke: Rc<dyn Fn(JsBytes<u8>, bool)>,
     trace: NetTrace,
     once: bool,
 }
@@ -75,6 +75,7 @@ pub struct NetSocketData {
     destroyed: bool,
     writable: bool,
     flowing: bool,
+    encoding_utf8: bool,
     read_ended: bool,
     end_requested: bool,
     close_emitted: bool,
@@ -129,6 +130,7 @@ impl ClearEdges for NetSocketData {
         self.destroyed = true;
         self.writable = false;
         self.flowing = false;
+        self.encoding_utf8 = false;
         self.read_ended = true;
         self.end_requested = true;
         self.write_queue.clear();
@@ -155,6 +157,7 @@ pub struct NetServerData {
     connection_listeners: Vec<NetConnectionListener>,
     close_override: Option<(Rc<dyn Fn()>, NetTrace)>,
     http: Option<HttpServerState>,
+    tls_config: Option<Arc<rustls::ServerConfig>>,
 }
 
 impl Trace for NetServerData {
@@ -187,6 +190,7 @@ impl ClearEdges for NetServerData {
         self.connection_listeners.clear();
         self.close_override = None;
         self.http = None;
+        self.tls_config = None;
     }
 }
 
@@ -231,6 +235,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         destroyed: false,
         writable: true,
         flowing: false,
+        encoding_utf8: false,
         read_ended: false,
         end_requested: false,
         close_emitted: false,
@@ -259,6 +264,7 @@ pub fn net_server_new() -> JsNetServer {
         connection_listeners: Vec::new(),
         close_override: None,
         http: None,
+        tls_config: None,
     })
 }
 
@@ -440,6 +446,7 @@ pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
         destroyed: false,
         writable: true,
         flowing: false,
+        encoding_utf8: false,
         read_ended: false,
         end_requested: false,
         close_emitted: false,
@@ -470,7 +477,7 @@ pub fn net_socket_connect_callback(
 
 pub fn net_socket_on_data(
     socket: &JsNetSocket,
-    callback: Rc<dyn Fn(JsBytes<u8>)>,
+    callback: Rc<dyn Fn(JsBytes<u8>, bool)>,
     trace: NetTrace,
     once: bool,
 ) {
@@ -484,6 +491,17 @@ pub fn net_socket_on_data(
             });
         }
     });
+}
+
+pub fn net_socket_set_encoding(socket: &JsNetSocket, encoding: &JsString) {
+    match encoding.as_ref() {
+        "utf8" | "utf-8" => socket.with_mut(|socket| socket.encoding_utf8 = true),
+        "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2"
+        | "ucs-2" | "utf16le" | "utf-16le" => throw_error(format!(
+            "setEncoding('{encoding}') is not supported yet (only 'utf8' here)"
+        )),
+        _ => throw_type_error_code(format!("Unknown encoding: {encoding}"), "ERR_UNKNOWN_ENCODING"),
+    }
 }
 
 fn net_socket_on_void(
@@ -675,9 +693,9 @@ pub fn net_socket_destroy_soon(socket: &JsNetSocket) {
 }
 
 pub fn net_socket_destroy(socket: &JsNetSocket) {
-    let schedule = socket.with_mut(|socket| {
+    let (schedule, server) = socket.with_mut(|socket| {
         if socket.destroyed {
-            return false;
+            return (false, None);
         }
         if let Some(stream) = socket.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -688,9 +706,12 @@ pub fn net_socket_destroy(socket: &JsNetSocket) {
         socket.writable = false;
         socket.write_queue.clear();
         socket.write_offset = 0;
-        !socket.close_emitted
+        (!socket.close_emitted, socket.server.take())
     });
     NET_SOCKETS.with(|sockets| sockets.borrow_mut().retain(|candidate| !candidate.ptr_eq(socket)));
+    if let Some(server) = server {
+        net_server_connection_closed(&server);
+    }
     if schedule {
         NET_TASKS.with(|tasks| {
             tasks
@@ -779,9 +800,9 @@ fn net_dispatch_task(task: NetTask) {
             }
         }
         NetTask::SocketClose(socket) => {
-            let (listeners, server) = socket.with_mut(|socket| {
+            let listeners = socket.with_mut(|socket| {
                 if socket.close_emitted {
-                    return (Vec::new(), None);
+                    return Vec::new();
                 }
                 socket.close_emitted = true;
                 socket.destroyed = true;
@@ -794,16 +815,10 @@ fn net_dispatch_task(task: NetTask) {
                 socket.end_listeners.clear();
                 socket.connect_listeners.clear();
                 socket.error_listeners.clear();
-                (
-                    std::mem::take(&mut socket.close_listeners),
-                    socket.server.take(),
-                )
+                std::mem::take(&mut socket.close_listeners)
             });
             for listener in listeners {
                 (listener.invoke)();
-            }
-            if let Some(server) = server {
-                net_server_connection_closed(&server);
             }
         }
         NetTask::Callback(listener) => (listener.invoke)(),
@@ -833,6 +848,9 @@ fn net_accept_one() -> bool {
     });
     server.with_mut(|server| server.connections += 1);
     let socket = net_socket_new(stream, Some(server.clone()));
+    if tls_server_accept(&server, &socket) {
+        return true;
+    }
     if server.with(|server| server.http.is_some()) {
         http_server_accept(&server, &socket);
     }
@@ -1042,14 +1060,14 @@ fn net_socket_read_one() -> bool {
     });
     match event {
         Some(ReadEvent::Data(socket, bytes)) => {
-            let listeners = socket.with_mut(|socket| {
+            let (listeners, encoding_utf8) = socket.with_mut(|socket| {
                 let snapshot = socket.data_listeners.clone();
                 socket.data_listeners.retain(|listener| !listener.once);
-                snapshot
+                (snapshot, socket.encoding_utf8)
             });
             let chunk = bytes_from_elements(bytes);
             for listener in listeners {
-                (listener.invoke)(chunk.clone());
+                (listener.invoke)(chunk.clone(), encoding_utf8);
             }
             true
         }

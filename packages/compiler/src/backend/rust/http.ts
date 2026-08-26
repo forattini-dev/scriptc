@@ -206,6 +206,12 @@ export function emitRustHttpCall(
       expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "f64") {
     return `runtime::http_response_write_head(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;
   }
+  if (expr.fn === "http.resWriteHeadN" && expr.args.length === 4 &&
+      expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "array" && expr.args[2].type.elem.kind === "string" &&
+      expr.args[3]?.type.kind === "array" && expr.args[3].type.elem.kind === "string") {
+    return `runtime::http_response_write_head_n(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}), &(${context.emitExpr(expr.args[3])}))`;
+  }
   if ((expr.fn === "http.resWrite" || expr.fn === "http.resEndStr") && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "string") {
     const fn = expr.fn === "http.resWrite" ? "http_response_write_str" : "http_response_end_str";
