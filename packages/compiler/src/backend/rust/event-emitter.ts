@@ -148,6 +148,8 @@ export class RustEventEmitterEmitter {
       case "readable.push": return this.emitReadablePush(expr, false);
       case "readable.pushStr": return this.emitReadablePush(expr, true);
       case "readable.pushNull": return this.emitReadablePushNull(expr);
+      case "readable.read": return this.emitReadableRead(expr);
+      case "readable.unshift": return this.emitReadableUnshift(expr);
       case "readable.pause": return this.emitReadablePause(expr);
       case "readable.resume": return this.emitReadableResume(expr);
       case "readable.isPaused": return this.emitReadableIsPaused(expr);
@@ -169,7 +171,9 @@ export class RustEventEmitterEmitter {
     const startFlow = startsReadableFlow
       ? `runtime::readable_start_flowing(&${values[0]}); sc_readable_schedule(&${values[0]});`
       : "";
-    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}; let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${startFlow} ${values[0]} }`;
+    const scheduleReadable = receiver.type.kind === "object" && receiver.type.className === "%Readable" &&
+      name.kind === "strLit" && name.value === "readable" ? `sc_readable_schedule_notification(&${values[0]});` : "";
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}; let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${startFlow} ${scheduleReadable} ${values[0]} }`;
   }
 
   private emitConstructor(expr: RustLibCallExpr): string {
@@ -464,7 +468,7 @@ export class RustEventEmitterEmitter {
     const pushed = stringChunk
       ? `runtime::readable_push_string(&${values[0]}, &${values[1]})`
       : `runtime::readable_push(&${values[0]}, ${values[1]})`;
-    return `{ ${this.bind(expr.args, values)} let sc_result = ${pushed}; sc_readable_schedule(&${values[0]}); sc_result }`;
+    return `{ ${this.bind(expr.args, values)} let sc_result = ${pushed}; sc_readable_schedule(&${values[0]}); sc_readable_schedule_notification(&${values[0]}); sc_result }`;
   }
 
   private emitReadablePushNull(expr: RustLibCallExpr): string {
@@ -474,7 +478,31 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("Readable null push shape", expr.loc);
     }
     const value = this.context.nextTemporary();
-    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_result = runtime::readable_push_null(&${value}); sc_readable_schedule(&${value}); sc_result }`;
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_result = runtime::readable_push_null(&${value}); sc_readable_schedule(&${value}); sc_readable_schedule_notification(&${value}); sc_result }`;
+  }
+
+  private emitReadableRead(expr: RustLibCallExpr): string {
+    const [receiver, size] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      size?.type.kind !== "f64" || expr.args.length !== 2 || expr.type.kind !== "union") {
+      this.context.unsupported("Readable read shape", expr.loc);
+    }
+    const union = this.context.union(expr.type.unionId, expr.loc);
+    const bytesTag = union.arms.findIndex((arm) => arm.kind === "bytes" && arm.elem === "u8");
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    if (bytesTag < 0 || nullTag < 0) this.context.unsupported("Readable read result union", expr.loc);
+    const name = this.context.unionName(union.id);
+    return `match runtime::readable_read(&(${this.context.emitExpr(receiver)}), ${this.context.emitExpr(size)}) { Some(value) => ${name}::${this.context.unionVariant(bytesTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, }`;
+  }
+
+  private emitReadableUnshift(expr: RustLibCallExpr): string {
+    const [receiver, chunk] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      chunk?.type.kind !== "bytes" || chunk.type.elem !== "u8" || expr.args.length !== 2 ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("Readable unshift shape", expr.loc);
+    }
+    return `runtime::readable_unshift(&(${this.context.emitExpr(receiver)}), ${this.context.emitExpr(chunk)})`;
   }
 
   private emitReadableProp(expr: RustLibCallExpr): string {
@@ -787,6 +815,14 @@ export class RustEventEmitterEmitter {
     this.context.line("fn sc_readable_schedule(sc_readable: &ScReadable) {");
     this.context.pushIndent();
     this.context.line("if runtime::readable_schedule(sc_readable) { let sc_readable = sc_readable.clone(); runtime::process_next_tick(Box::new(move || sc_readable_drain(sc_readable))); }");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_readable_schedule_notification(sc_readable: &ScReadable) {");
+    this.context.pushIndent();
+    this.context.line("let sc_emitter = runtime::readable_emitter(sc_readable);");
+    this.context.line("if runtime::emitter_listener_count(&sc_emitter, &runtime::string(\"readable\")) == 0.0 || !runtime::readable_schedule_notification(sc_readable) { return; }");
+    this.context.line("let sc_readable = sc_readable.clone();");
+    this.context.line("runtime::process_next_tick(Box::new(move || { runtime::readable_begin_notification(&sc_readable); sc_readable_emit_void(&sc_readable, \"readable\"); if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); } }));");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("");

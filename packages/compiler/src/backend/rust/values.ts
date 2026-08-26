@@ -245,6 +245,12 @@ export class RustValueEmitter {
       case "map": return "runtime::map_new()";
       case "set": return "runtime::set_new()";
       case "classval": return "0";
+      case "union": {
+        const union = this.context.union(type.unionId, loc);
+        const tag = union.arms.findIndex((arm) => arm.kind === "undefinedT" || arm.kind === "nullT");
+        if (tag >= 0) return `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
+        this.context.unsupported("uninitialized union without an empty arm", loc);
+      }
       default: this.context.unsupported(`uninitialized '${type.kind}' local`, loc);
     }
   }

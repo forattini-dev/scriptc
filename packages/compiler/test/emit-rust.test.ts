@@ -792,6 +792,7 @@ test.each([
   "1674-symbol-inspect.ts",
   "1679-console-dyn.js",
   "1685-stream-readable-basics.ts",
+  "1686-stream-readable-paused.ts",
   "1687-stream-readable-flow-control.ts",
   "1696-stream-read-inside-read.ts",
   "1697-stream-tick-vs-timer.ts",

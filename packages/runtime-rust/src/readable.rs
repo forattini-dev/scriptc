@@ -16,6 +16,7 @@ where
     push_after_eof: bool,
     resume_pending: bool,
     resume_after_data: bool,
+    readable_scheduled: bool,
 }
 
 impl<L, R> Trace for ReadableData<L, R>
@@ -75,6 +76,7 @@ where
         push_after_eof: false,
         resume_pending: false,
         resume_after_data: false,
+        readable_scheduled: false,
     })
 }
 
@@ -138,6 +140,81 @@ where
 {
     readable.with_mut(|data| data.eof = true);
     false
+}
+
+pub fn readable_unshift<L, R>(readable: &JsReadable<L, R>, chunk: JsBytes<u8>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
+        data.chunks.push_front(chunk);
+    });
+}
+
+pub fn readable_read<L, R>(readable: &JsReadable<L, R>, size: f64) -> Option<JsBytes<u8>>
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let (available, eof) = readable.with(|data| (data.buffered_length, data.eof));
+    if available == 0 {
+        return None;
+    }
+    let requested = if size.is_finite() && size >= 0.0 {
+        size.trunc() as usize
+    } else {
+        available
+    };
+    if requested == 0 || (requested > available && !eof) {
+        return None;
+    }
+    let wanted = requested.min(available);
+    let mut remaining = wanted;
+    let mut pieces = Vec::new();
+    readable.with_mut(|data| {
+        while remaining > 0 {
+            let chunk = data.chunks.pop_front().expect("scriptc: Readable length without chunks");
+            let length = bytes_len(&chunk) as usize;
+            if length <= remaining {
+                remaining -= length;
+                pieces.push(chunk);
+            } else {
+                pieces.push(bytes_slice(&chunk, 0.0, remaining as f64, false));
+                data.chunks.push_front(bytes_slice(&chunk, remaining as f64, length as f64, false));
+                remaining = 0;
+            }
+        }
+        data.buffered_length -= wanted;
+    });
+    if pieces.len() == 1 {
+        pieces.pop()
+    } else {
+        Some(buffer_concat(&array_new(pieces)))
+    }
+}
+
+pub fn readable_schedule_notification<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.readable_scheduled || (data.chunks.is_empty() && !data.eof) {
+            return false;
+        }
+        data.readable_scheduled = true;
+        true
+    })
+}
+
+pub fn readable_begin_notification<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.readable_scheduled = false);
 }
 
 pub fn readable_start_flowing<L, R>(readable: &JsReadable<L, R>)
