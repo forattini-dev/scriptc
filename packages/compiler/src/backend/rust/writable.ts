@@ -146,7 +146,7 @@ export class RustWritableEmitter {
     this.context.line("fn sc_writable_after_write(sc_writable: &ScWritable, sc_done: ScWritableDone) {");
     this.context.pushIndent();
     this.context.line("sc_writable_drain_queue(sc_writable);");
-    this.context.line("if runtime::writable_take_drain(sc_writable) { sc_writable_emit_void(sc_writable, \"drain\"); }");
+    this.context.line("if runtime::writable_take_drain(sc_writable) { sc_writable_emit_void(sc_writable, \"drain\"); runtime::writable_resume_sources(sc_writable); }");
     this.context.line("sc_writable_call_done(sc_done);");
     this.context.popIndent();
     this.context.line("}");

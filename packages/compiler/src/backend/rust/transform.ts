@@ -171,7 +171,7 @@ export class RustTransformEmitter {
       doneArms.push(`ScTransformDone::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
     }
     this.context.line(`fn sc_transform_call_done(sc_done: ScTransformDone) { match sc_done { ${doneArms.join(" ")} } }`);
-    this.context.line("fn sc_transform_after_write(sc_transform: &ScTransform, sc_done: ScTransformDone) { sc_transform_drain_write(sc_transform); let sc_writable = runtime::transform_writable(sc_transform); if runtime::writable_take_drain(&sc_writable) { sc_transform_emit_void(sc_transform, \"drain\"); } sc_transform_call_done(sc_done); }");
+    this.context.line("fn sc_transform_after_write(sc_transform: &ScTransform, sc_done: ScTransformDone) { sc_transform_drain_write(sc_transform); let sc_writable = runtime::transform_writable(sc_transform); if runtime::writable_take_drain(&sc_writable) { sc_transform_emit_void(sc_transform, \"drain\"); runtime::writable_resume_sources(&sc_writable); } sc_transform_call_done(sc_done); }");
   }
 
   private emitFlushHelpers(loc: SrcLoc): void {

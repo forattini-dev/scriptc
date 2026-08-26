@@ -6,6 +6,11 @@ where
     callback: C,
 }
 
+struct WritableDrainResume {
+    resume: Rc<dyn Fn()>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+}
+
 pub struct WritableData<L, W, F, C>
 where
     L: Clone + Trace + 'static,
@@ -29,6 +34,7 @@ where
     emit_close: bool,
     closed: bool,
     corked: usize,
+    drain_resumes: Vec<WritableDrainResume>,
 }
 
 impl<L, W, F, C> Trace for WritableData<L, W, F, C>
@@ -52,6 +58,9 @@ where
             tracer.edge(&entry.chunk);
             entry.callback.trace(tracer);
         }
+        for resume in &self.drain_resumes {
+            (resume.trace)(tracer);
+        }
     }
 }
 
@@ -68,6 +77,7 @@ where
         self.final_callback = None;
         self.queue.clear();
         self.writable_length = 0;
+        self.drain_resumes.clear();
     }
 }
 
@@ -108,6 +118,7 @@ where
         emit_close,
         closed: false,
         corked: 0,
+        drain_resumes: Vec::new(),
     })
 }
 
@@ -256,6 +267,34 @@ where
         data.need_drain = false;
         true
     })
+}
+
+pub fn writable_add_drain_resume<L, W, F, C>(
+    writable: &JsWritable<L, W, F, C>,
+    resume: Rc<dyn Fn()>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+) where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| {
+        data.drain_resumes.push(WritableDrainResume { resume, trace });
+    });
+}
+
+pub fn writable_resume_sources<L, W, F, C>(writable: &JsWritable<L, W, F, C>)
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    let resumes = writable.with_mut(|data| std::mem::take(&mut data.drain_resumes));
+    for resume in resumes {
+        (resume.resume)();
+    }
 }
 
 pub fn writable_mark_ended<L, W, F, C>(writable: &JsWritable<L, W, F, C>)

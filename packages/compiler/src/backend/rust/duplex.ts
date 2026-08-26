@@ -182,7 +182,7 @@ export class RustDuplexEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_duplex_write_drain(sc_duplex: &ScDuplex) { let sc_writable = runtime::duplex_writable(sc_duplex); let Some((sc_chunk, sc_length, sc_done)) = runtime::writable_take_write(&sc_writable) else { return; }; sc_duplex_call_write(sc_duplex, &sc_writable, sc_chunk, sc_length, sc_done); }");
-    this.context.line("fn sc_duplex_after_write(sc_duplex: &ScDuplex, sc_done: ScDuplexDone) { sc_duplex_write_drain(sc_duplex); let sc_writable = runtime::duplex_writable(sc_duplex); if runtime::writable_take_drain(&sc_writable) { sc_duplex_emit_void(sc_duplex, \"drain\"); } match sc_done { ScDuplexDone::Never => {}, _ => unreachable!(\"scriptc invariant: Duplex completion callback signature\"), } }");
+    this.context.line("fn sc_duplex_after_write(sc_duplex: &ScDuplex, sc_done: ScDuplexDone) { sc_duplex_write_drain(sc_duplex); let sc_writable = runtime::duplex_writable(sc_duplex); if runtime::writable_take_drain(&sc_writable) { sc_duplex_emit_void(sc_duplex, \"drain\"); runtime::writable_resume_sources(&sc_writable); } match sc_done { ScDuplexDone::Never => {}, _ => unreachable!(\"scriptc invariant: Duplex completion callback signature\"), } }");
   }
 
   private emitNew(expr: RustLibCallExpr): string {

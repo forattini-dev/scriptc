@@ -5,6 +5,9 @@ struct ReadablePipe {
     write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
     finish: Rc<dyn Fn()>,
     unpipe: Rc<dyn Fn()>,
+    resume: Rc<dyn Fn()>,
+    resume_trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+    backpressure: Rc<dyn Fn(Rc<dyn Fn()>, Rc<dyn Fn(&mut Tracer<'_>)>)>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
@@ -47,6 +50,7 @@ where
         }
         for pipe in &self.pipes {
             (pipe.trace)(tracer);
+            (pipe.resume_trace)(tracer);
         }
     }
 }
@@ -390,6 +394,9 @@ pub fn readable_add_pipe<L, R>(
     write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
     finish: Rc<dyn Fn()>,
     unpipe: Rc<dyn Fn()>,
+    resume: Rc<dyn Fn()>,
+    resume_trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+    backpressure: Rc<dyn Fn(Rc<dyn Fn()>, Rc<dyn Fn(&mut Tracer<'_>)>)>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 ) where
     L: Clone + Trace + 'static,
@@ -402,6 +409,9 @@ pub fn readable_add_pipe<L, R>(
             write,
             finish,
             unpipe,
+            resume,
+            resume_trace,
+            backpressure,
             trace,
         });
     });
@@ -417,6 +427,7 @@ where
     for pipe in pipes {
         if !(pipe.write)(chunk.clone()) {
             paused = true;
+            (pipe.backpressure)(pipe.resume.clone(), pipe.resume_trace.clone());
         }
     }
     if paused {

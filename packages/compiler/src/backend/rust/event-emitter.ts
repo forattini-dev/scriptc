@@ -182,7 +182,9 @@ export class RustEventEmitterEmitter {
     const unpipe = this.pipeEvent("sc_destination", destination.type.className, "unpipe", expr.loc);
     const pipe = this.pipeEvent(destinationValue, destination.type.className, "pipe", expr.loc);
     const start = this.pipeStart(sourceValue, source.type.className, expr.loc);
-    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; let sc_identity = ${destinationValue}.identity(); let sc_write: std::rc::Rc<dyn Fn(runtime::JsBytes<u8>) -> bool> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move |sc_chunk| { ${write} } }); let sc_finish: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move || { ${finish} } }); let sc_unpipe: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move || { ${unpipe} } }); let sc_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_destination = ${destinationValue}.clone(); move |tracer| tracer.edge(&sc_destination) }); runtime::readable_add_pipe(&sc_readable, sc_identity, ${endValue}, sc_write, sc_finish, sc_unpipe, sc_trace); ${pipe} ${start} ${destinationValue} }`;
+    const resume = this.pipeResume(source.type.className, expr.loc);
+    const backpressure = this.pipeBackpressure(destination.type.className, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; let sc_identity = ${destinationValue}.identity(); let sc_destination_shared = std::rc::Rc::new(${destinationValue}.clone()); let sc_source_shared = std::rc::Rc::new(${sourceValue}.clone()); let sc_write: std::rc::Rc<dyn Fn(runtime::JsBytes<u8>) -> bool> = std::rc::Rc::new({ let sc_destination_shared = sc_destination_shared.clone(); move |sc_chunk| { let sc_destination = sc_destination_shared.as_ref(); ${write} } }); let sc_finish: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination_shared = sc_destination_shared.clone(); move || { let sc_destination = sc_destination_shared.as_ref(); ${finish} } }); let sc_unpipe: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_destination_shared = sc_destination_shared.clone(); move || { let sc_destination = sc_destination_shared.as_ref(); ${unpipe} } }); let sc_resume: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let sc_source_shared = sc_source_shared.clone(); move || { let sc_source = sc_source_shared.as_ref(); ${resume} } }); let sc_resume_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_source_shared = sc_source_shared.clone(); move |tracer| tracer.edge(sc_source_shared.as_ref()) }); let sc_backpressure: std::rc::Rc<dyn Fn(std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>)> = std::rc::Rc::new({ let sc_destination_shared = sc_destination_shared.clone(); move |sc_resume, sc_resume_trace| { let sc_destination = sc_destination_shared.as_ref(); ${backpressure} } }); let sc_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new({ let sc_destination_shared = sc_destination_shared.clone(); move |tracer| tracer.edge(sc_destination_shared.as_ref()) }); runtime::readable_add_pipe(&sc_readable, sc_identity, ${endValue}, sc_write, sc_finish, sc_unpipe, sc_resume, sc_resume_trace, sc_backpressure, sc_trace); ${pipe} ${start} ${destinationValue} }`;
   }
 
   private emitUnpipe(expr: RustLibCallExpr): string {
@@ -249,6 +251,30 @@ export class RustEventEmitterEmitter {
       return `sc_transform_start_flowing(&${value});`;
     }
     this.context.unsupported(`pipe flow source '${className}'`, loc);
+  }
+
+  private pipeResume(className: string, loc: SrcLoc): string {
+    if (className === "%Readable") {
+      return "runtime::readable_resume(&sc_source); sc_readable_schedule(&sc_source);";
+    }
+    if (className === "%Duplex") return "sc_duplex_start_flowing(&sc_source);";
+    if (className === "%Transform" || className === "%PassThrough") {
+      return "sc_transform_start_flowing(&sc_source);";
+    }
+    this.context.unsupported(`pipe resume source '${className}'`, loc);
+  }
+
+  private pipeBackpressure(className: string, loc: SrcLoc): string {
+    if (className === "%Writable") {
+      return "runtime::writable_add_drain_resume(&sc_destination, sc_resume, sc_resume_trace);";
+    }
+    if (className === "%Transform" || className === "%PassThrough") {
+      return "runtime::writable_add_drain_resume(&runtime::transform_writable(&sc_destination), sc_resume, sc_resume_trace);";
+    }
+    if (className === "%Duplex") {
+      return "runtime::writable_add_drain_resume(&runtime::duplex_writable(&sc_destination), sc_resume, sc_resume_trace);";
+    }
+    this.context.unsupported(`pipe backpressure destination '${className}'`, loc);
   }
 
   private emitOn(expr: RustLibCallExpr, startsReadableFlow = false): string {
