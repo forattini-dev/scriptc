@@ -12,6 +12,7 @@ export class RustStreamModel {
   readonly readableReadShapes = new Map<string, RustClosureShape>();
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
   readonly writableFinalShapes = new Map<string, RustClosureShape>();
+  readonly writableDoneShapes = new Map<string, RustClosureShape>();
 
   discover(
     node: StreamNode,
@@ -25,6 +26,15 @@ export class RustStreamModel {
       if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
       const shape = ensureClosureShape(callback.type);
       this.readableReadShapes.set(typeKey(callback.type), shape);
+      return true;
+    }
+    if (node.fn === "writable.write" || node.fn === "writable.writeStr") {
+      this.usesWritable = true;
+      const callback = (node.args as StreamArgument[] | undefined)?.[2];
+      if (callback === undefined) return true;
+      if (callback.type?.kind !== "func") unsupported("malformed Writable write completion IR");
+      const shape = ensureClosureShape(callback.type);
+      this.writableDoneShapes.set(typeKey(callback.type), shape);
       return true;
     }
     if (node.fn !== "writable.new") return false;

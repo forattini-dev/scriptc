@@ -148,6 +148,7 @@ class RustEmitter {
     usesWritable: () => this.streams.usesWritable,
     writableWriteShapes: this.streams.writableWriteShapes,
     writableFinalShapes: this.streams.writableFinalShapes,
+    writableDoneShapes: this.streams.writableDoneShapes,
     dynTypeName: () => this.dynTypeName(),
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
