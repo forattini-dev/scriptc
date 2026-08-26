@@ -203,6 +203,9 @@ export class RustFunctionValueEmitter {
         if (arm.kind === "string") return `${variant}(value) => value`;
         if (arm.kind === "f64") return `${variant}(value) => runtime::number_to_string(value)`;
         if (arm.kind === "bool") return `${variant}(value) => runtime::bool_to_string(value)`;
+        if (arm.kind === "bytes" && arm.elem === "u8") {
+          return `${variant}(value) => runtime::bytes_to_string(&value, &runtime::string("utf8"))`;
+        }
         this.context.unsupported(`toString union arm '${arm.kind}'`, loc);
       }).join(", ");
       return `match ${operand} { ${arms} }`;

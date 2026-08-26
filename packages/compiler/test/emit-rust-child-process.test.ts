@@ -44,12 +44,37 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
 
-  const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [fixture]),
-    execFileAsync(result.binaryPath, [], {
-      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
-    }),
-  ]);
+  const node = await execFileAsync(process.execPath, [fixture]);
+  const rust = await execFileAsync(result.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
+  expect(rust.stdout, fixtureName).toBe(node.stdout);
+  expect(rust.stderr, fixtureName).toBe(node.stderr);
+});
+
+test.each([
+  "1565-spawn-pipe-streams.ts",
+  "1566-child-duck-interface.ts",
+  "1657-spawn-async-neutral.ts",
+])("Rust async child pipe corpus matches Node: %s", async (fixtureName) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-child-pipes-"));
+  const fixture = resolve("tests/corpus", fixtureName);
+  const result = await compile(fixture, {
+    outDir: dir,
+    outPath: join(dir, fixtureName.slice(0, -3)),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const node = await execFileAsync(process.execPath, [fixture]);
+  const rust = await execFileAsync(result.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
   expect(rust.stdout, fixtureName).toBe(node.stdout);
   expect(rust.stderr, fixtureName).toBe(node.stderr);
 });
@@ -69,10 +94,11 @@ test("Rust unhandled child error preserves corpus 1363 exit behavior", async () 
   ).toBe(true);
   if (!result.ok) return;
 
-  const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [fixture], process.env),
-    runToExit(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
-  ]);
+  const node = await runToExit(process.execPath, [fixture], process.env);
+  const rust = await runToExit(result.binaryPath, [], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  });
   expect(rust).toEqual(node);
 });
 
@@ -98,12 +124,10 @@ console.log("spawn returned");
   ).toBe(true);
   if (!result.ok) return;
 
-  const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entry]),
-    execFileAsync(result.binaryPath, [], {
-      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
-    }),
-  ]);
+  const node = await execFileAsync(process.execPath, [entry]);
+  const rust = await execFileAsync(result.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 });

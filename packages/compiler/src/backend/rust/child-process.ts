@@ -86,6 +86,66 @@ function emitErrorListener(
   return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_on_error(&${child}, Box::new(move |${errorName}| { let _ = ${dispatch}; }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
+function emitChildStreamAccess(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+): string {
+  const receiver = expr.args[0];
+  if (receiver === undefined) context.unsupported(`${expr.fn} without a receiver`, expr.loc);
+  if (expr.type.kind !== "union") context.unsupported(`${expr.fn} without a union result`, expr.loc);
+  const union = context.union(expr.type.unionId, expr.loc);
+  const streamTag = union.arms.findIndex((arm) => arm.kind === "childStream");
+  const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+  if (streamTag < 0 || nullTag < 0) context.unsupported(`${expr.fn} union shape`, expr.loc);
+  const name = context.unionName(union.id);
+  const accessor = expr.fn === "child.stdout" ? "stdout" : "stderr";
+  return `match runtime::child_${accessor}(&(${context.emitExpr(receiver)})) { Some(value) => ${name}::${context.unionVariant(streamTag)}(value), None => ${name}::${context.unionVariant(nullTag)}, }`;
+}
+
+function emitStreamDataListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiverExpr, callbackExpr, onceExpr] = expr.args;
+  if (receiverExpr?.type.kind !== "childStream" || callbackExpr === undefined || onceExpr?.type.kind !== "bool") {
+    context.unsupported("child stream data listener arguments", expr.loc);
+  }
+  const stream = context.nextTemporary();
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const parameter = callbackType.params[0];
+  let args: string[] = [];
+  if (parameter?.kind === "bytes" && parameter.elem === "u8") {
+    args = ["sc_chunk"];
+  } else if (parameter?.kind === "union") {
+    const union = context.union(parameter.unionId, expr.loc);
+    const bytesTag = union.arms.findIndex((arm) => arm.kind === "bytes" && arm.elem === "u8");
+    if (bytesTag < 0) context.unsupported("child stream data union shape", expr.loc);
+    args = [`${context.unionName(union.id)}::${context.unionVariant(bytesTag)}(sc_chunk)`];
+  } else if (parameter !== undefined) {
+    context.unsupported("child stream data listener parameter", expr.loc);
+  }
+  const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
+  return `{ let ${stream} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_stream_on_data(&${stream}, std::rc::Rc::new(move |sc_chunk| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+}
+
+function emitStreamEndListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiverExpr, callbackExpr] = expr.args;
+  if (receiverExpr?.type.kind !== "childStream" || callbackExpr === undefined) {
+    context.unsupported("child stream end listener arguments", expr.loc);
+  }
+  const stream = context.nextTemporary();
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${stream} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_stream_on_end(&${stream}, std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+}
+
 export function emitRustChildProcessCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -104,8 +164,9 @@ export function emitRustChildProcessCall(
         envPairs?.type.kind !== "array" || envPairs.type.elem.kind !== "string" || cwd?.type.kind !== "string") {
       context.unsupported("cp.spawnOpts argument shape", expr.loc);
     }
-    if ([stdinMode.value, stdoutMode.value, stderrMode.value].some((mode) => mode !== 0 && mode !== 1)) {
-      context.unsupported("cp.spawnOpts with fd or piped stdio", expr.loc);
+    if ((stdinMode.value !== 0 && stdinMode.value !== 1) ||
+        [stdoutMode.value, stderrMode.value].some((mode) => mode !== 0 && mode !== 1 && mode !== 3)) {
+      context.unsupported("cp.spawnOpts with fd stdio or piped stdin", expr.loc);
     }
     return `runtime::child_spawn_options(&(${context.emitExpr(command)}), &(${context.emitExpr(arguments_)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${context.emitExpr(detached)}, ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), &(${context.emitExpr(cwd)}))`;
   }
@@ -114,6 +175,10 @@ export function emitRustChildProcessCall(
     const empty = expr.fn === "child.pid" ? "undefinedT" : "nullT";
     const accessor = expr.fn === "child.pid" ? "pid" : "exit_code";
     return unionArgument(expr.type, `runtime::child_${accessor}(&(${context.emitExpr(expr.args[0])}))`, empty, context, expr);
+  }
+  if ((expr.fn === "child.stdout" || expr.fn === "child.stderr") && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "child") {
+    return emitChildStreamAccess(expr, context);
   }
   if (expr.fn === "child.killed" && expr.args.length === 1 && expr.args[0]?.type.kind === "child") {
     return `runtime::child_killed(&(${context.emitExpr(expr.args[0])}))`;
@@ -137,6 +202,13 @@ export function emitRustChildProcessCall(
     return expr.fn === "child.onExit"
       ? emitExitListener(expr, callbackType, context)
       : emitErrorListener(expr, callbackType, context);
+  }
+  if ((expr.fn === "stream.onData" || expr.fn === "stream.onEnd") && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported(`${expr.fn} callback shape`, expr.loc);
+    return expr.fn === "stream.onData"
+      ? emitStreamDataListener(expr, callbackType, context)
+      : emitStreamEndListener(expr, callbackType, context);
   }
   return null;
 }

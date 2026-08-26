@@ -366,6 +366,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
+        case "childStream":
         case "record":
         case "func":
         case "promise":
@@ -732,6 +733,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
+        case "childStream":
         case "map":
         case "set":
         case "record":

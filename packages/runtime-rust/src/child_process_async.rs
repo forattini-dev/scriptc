@@ -19,6 +19,8 @@ pub struct ChildData {
     killed: bool,
     settled: bool,
     referenced: bool,
+    stdout: Option<JsChildStream>,
+    stderr: Option<JsChildStream>,
     exit_listeners: Vec<ChildExitListener>,
     error_listeners: Vec<ChildErrorListener>,
 }
@@ -31,6 +33,12 @@ impl Trace for ChildData {
         for listener in &self.error_listeners {
             (listener.trace)(tracer);
         }
+        if let Some(stream) = &self.stdout {
+            tracer.edge(stream);
+        }
+        if let Some(stream) = &self.stderr {
+            tracer.edge(stream);
+        }
     }
 }
 
@@ -41,6 +49,8 @@ impl ClearEdges for ChildData {
         self.spawn_error = None;
         self.spawn_errno = None;
         self.process = None;
+        self.stdout = None;
+        self.stderr = None;
         self.settled = true;
         self.referenced = false;
     }
@@ -155,15 +165,39 @@ fn child_spawn_error(command: &JsString, error: std::io::Error) -> JsError {
     }
 }
 
-fn child_register(command: &JsString, spawned: std::io::Result<std::process::Child>) -> JsChild {
-    let (process, spawn_error, spawn_errno, pid) = match spawned {
-        Ok(child) => {
+fn child_register(
+    command: &JsString,
+    spawned: std::io::Result<std::process::Child>,
+    stdout_piped: bool,
+    stderr_piped: bool,
+) -> JsChild {
+    let (process, spawn_error, spawn_errno, pid, stdout, stderr) = match spawned {
+        Ok(mut child) => {
             let pid = child.id();
-            (Some(child), None, None, Some(pid))
+            let stdout = stdout_piped.then(|| {
+                child_stream_new(ChildPipeReader::Stdout(
+                    child.stdout.take().expect("scriptc: missing piped child stdout"),
+                ))
+            });
+            let stderr = stderr_piped.then(|| {
+                child_stream_new(ChildPipeReader::Stderr(
+                    child.stderr.take().expect("scriptc: missing piped child stderr"),
+                ))
+            });
+            (Some(child), None, None, Some(pid), stdout, stderr)
         }
         Err(error) => {
             let errno = error.raw_os_error();
-            (None, Some(child_spawn_error(command, error)), errno, None)
+            let stdout = stdout_piped.then(child_stream_husk);
+            let stderr = stderr_piped.then(child_stream_husk);
+            (
+                None,
+                Some(child_spawn_error(command, error)),
+                errno,
+                None,
+                stdout,
+                stderr,
+            )
         }
     };
     let child = Gc::new(ChildData {
@@ -175,6 +209,8 @@ fn child_register(command: &JsString, spawned: std::io::Result<std::process::Chi
         killed: false,
         settled: false,
         referenced: true,
+        stdout,
+        stderr,
         exit_listeners: Vec::new(),
         error_listeners: Vec::new(),
     });
@@ -206,7 +242,14 @@ pub fn child_spawn_options(
     }
     let mut child_command = match child_command(command, arguments, detached, cwd) {
         Ok(child_command) => child_command,
-        Err(error) => return child_register(command, Err(error)),
+        Err(error) => {
+            return child_register(
+                command,
+                Err(error),
+                stdout_mode == 3,
+                stderr_mode == 3,
+            );
+        }
     };
     if has_env {
         child_command.env_clear();
@@ -226,18 +269,31 @@ pub fn child_spawn_options(
     } else {
         Stdio::null()
     });
-    child_command.stdout(if stdout_mode == 1 {
-        Stdio::inherit()
-    } else {
-        Stdio::null()
+    child_command.stdout(match stdout_mode {
+        1 => Stdio::inherit(),
+        3 => Stdio::piped(),
+        _ => Stdio::null(),
     });
-    child_command.stderr(if stderr_mode == 1 {
-        Stdio::inherit()
-    } else {
-        Stdio::null()
+    child_command.stderr(match stderr_mode {
+        1 => Stdio::inherit(),
+        3 => Stdio::piped(),
+        _ => Stdio::null(),
     });
 
-    child_register(command, child_command.spawn())
+    child_register(
+        command,
+        child_command.spawn(),
+        stdout_mode == 3,
+        stderr_mode == 3,
+    )
+}
+
+pub fn child_stdout(child: &JsChild) -> Option<JsChildStream> {
+    child.with(|child| child.stdout.clone())
+}
+
+pub fn child_stderr(child: &JsChild) -> Option<JsChildStream> {
+    child.with(|child| child.stderr.clone())
 }
 
 pub fn child_pid(child: &JsChild) -> Option<f64> {
@@ -411,6 +467,16 @@ fn children_dispatch_one() -> bool {
     let Some((index, outcome)) = ready else {
         return false;
     };
+    let child = ASYNC_CHILDREN.with(|children| children.borrow()[index].clone());
+    let (stdout, stderr) = child.with(|child| (child.stdout.clone(), child.stderr.clone()));
+    if matches!(outcome, ChildOutcome::Exit(..)) {
+        if let Some(stream) = &stdout {
+            child_stream_drain_after_exit(stream);
+        }
+        if let Some(stream) = &stderr {
+            child_stream_drain_after_exit(stream);
+        }
+    }
     let child = ASYNC_CHILDREN.with(|children| children.borrow_mut().remove(index));
     let (exit_listeners, error_listeners) = child.with_mut(|child| {
         child.settled = true;
@@ -434,6 +500,12 @@ fn children_dispatch_one() -> bool {
             }
             for listener in error_listeners {
                 (listener.invoke)(error.clone());
+            }
+            if let Some(stream) = stdout {
+                child_stream_fail(&stream);
+            }
+            if let Some(stream) = stderr {
+                child_stream_fail(&stream);
             }
         }
     }
