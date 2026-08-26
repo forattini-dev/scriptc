@@ -73,6 +73,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`(${this.dyn}::Bytes(left), ${this.dyn}::Bytes(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Array(left), ${this.dyn}::Array(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::Object(left), ${this.dyn}::Object(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${this.dyn}::Promise(left), ${this.dyn}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
     for (const pattern of this.functionVariants()) {
       this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);
     }
@@ -224,6 +225,7 @@ class RustDynamicInvokeEmitter {
     this.emitStringArm();
     this.emitArrayArm();
     this.emitBytesArm();
+    this.emitPromiseArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("}");
@@ -234,6 +236,15 @@ class RustDynamicInvokeEmitter {
     this.context.line(`let member = runtime::map_get_by(object, &runtime::string(method), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dyn}::Undefined);`);
     this.context.line("let _this_guard = sc_dyn_this_push(recv.clone());");
     this.context.line("sc_dyn_call(&member, args, callee_name)");
+    this.close("},");
+  }
+
+  private emitPromiseArm(): void {
+    this.open(`${this.dyn}::Promise(promise) => {`);
+    this.open("match method {");
+    this.context.line(`"catch" => { let callback = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let next = runtime::promise_handle_catch(promise, Box::new(move |reason| { let reason = sc_dyn_from_caught(reason); let _ = sc_dyn_call(&callback, &[reason], "handler"); })); ${this.dyn}::Promise(next) },`);
+    this.context.line(`_ => runtime::throw_type_error(format!("recv.{method} is not a function")),`);
+    this.close("}");
     this.close("},");
   }
 

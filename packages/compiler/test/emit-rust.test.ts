@@ -861,6 +861,7 @@ test.each([
   "2053-typeof-static-fold.ts",
   "2060-empty-tuple.ts",
   "2106-comma-expressions.ts",
+  "2212-unhandled-rejection-listener.cjs",
   "2250-tagged-templates.ts",
   "2253-union-coercions.ts",
   "2320-await-unit.ts",
@@ -878,9 +879,13 @@ test.each([
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",
+  "2558-rejection-events.cjs",
   "2591-ambient-generic-traps.ts",
   "2613-for-init-uninitialized-let.ts",
   "2643-or-default-retag.ts",
+  "2654-top-level-await-unrelated-rejection.ts",
+  "2664-top-level-await-same-checkpoint-rejection.ts",
+  "2665-top-level-await-unhandled-listener-liveness.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);

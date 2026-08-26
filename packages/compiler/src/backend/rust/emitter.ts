@@ -84,6 +84,7 @@ class RustEmitter {
   private usesDynamicInvoke = false;
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
+  private usesProcessRejectionEvents = false;
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -139,6 +140,8 @@ class RustEmitter {
     isEmitterClass: (name) => this.isEmitterClass(name),
     isUsed: () => this.usesEventEmitter,
     usesProcessExitListeners: () => this.usesProcessExitListeners,
+    usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
+    dynTypeName: () => this.dynTypeName(),
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
     popIndent: () => { this.indent -= 1; },
@@ -488,8 +491,8 @@ class RustEmitter {
     }
     this.line("");
     this.emitClosureDefinitions();
-    this.eventEmitter.emitDefinition();
     this.emitDynamicDefinition();
+    this.eventEmitter.emitDefinition();
     this.emitUnionDefinitions();
     this.emitRecordDefinitions();
     this.emitClassDefinitions();
@@ -518,6 +521,7 @@ class RustEmitter {
       usesDyn: this.usesDyn,
       usesDynamicInvoke: this.usesDynamicInvoke,
       usesProcessExitListeners: this.usesProcessExitListeners,
+      usesProcessRejectionEvents: this.usesProcessRejectionEvents,
     }));
     return `${this.lines.join("\n")}\n`;
   }
@@ -623,6 +627,11 @@ class RustEmitter {
         if (callback?.type?.kind !== "func") this.unsupported("malformed process exit listener IR");
         const shape = this.ensureClosureShape(callback.type);
         this.emitterListenerShapes.set(typeKey(callback.type), shape);
+      }
+      if (node.kind === "libCall" && typeof node.fn === "string" &&
+        ["process.onUnhandledRejection", "process.offUnhandledRejection", "process.onRejectionHandled", "process.offRejectionHandled"].includes(node.fn)) {
+        this.usesEventEmitter = true;
+        this.usesProcessRejectionEvents = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {

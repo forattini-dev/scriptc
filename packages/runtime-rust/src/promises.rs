@@ -64,6 +64,7 @@ pub type JsPromise<T> = Gc<PromiseData<T>>;
 pub struct JsPromiseHandle {
     identity: usize,
     catch: Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
 pub fn promise_handle_identity(handle: &JsPromiseHandle) -> usize {
@@ -77,21 +78,26 @@ pub fn promise_handle_catch(
     (handle.catch)(callback)
 }
 
+pub fn promise_handle_trace(handle: &JsPromiseHandle, tracer: &mut Tracer<'_>) {
+    (handle.trace)(tracer);
+}
+
 pub fn promise_set_unhandled_rejection_handler(
-    handler: Option<Box<dyn FnMut(Caught, JsPromiseHandle)>>,
+    handler: Option<Rc<dyn Fn(Caught, JsPromiseHandle)>>,
 ) {
     UNHANDLED_REJECTION_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
 
 pub fn promise_set_rejection_handled_handler(
-    handler: Option<Box<dyn FnMut(JsPromiseHandle)>>,
+    handler: Option<Rc<dyn Fn(JsPromiseHandle)>>,
 ) {
     REJECTION_HANDLED_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
 
-fn promise_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandle {
+pub fn promise_to_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandle {
     let identity = promise.identity();
     let source = promise.clone();
+    let traced_source = promise.clone();
     JsPromiseHandle {
         identity,
         catch: Rc::new(move |callback| {
@@ -112,8 +118,9 @@ fn promise_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandle {
                     }
                 }),
             );
-            promise_handle(&result)
+            promise_to_handle(&result)
         }),
+        trace: Rc::new(move |tracer| tracer.edge(&traced_source)),
     }
 }
 
@@ -137,6 +144,22 @@ pub fn promise_rejected<T: HeapValue>(reason: Caught) -> JsPromise<T> {
     let promise = promise_new();
     let _ = promise_reject(&promise, reason);
     promise
+}
+
+pub fn promise_track_entry(promise: &JsPromise<()>) {
+    ENTRY_PROMISE_OUTCOME.with(|outcome| *outcome.borrow_mut() = None);
+    promise_then(
+        promise,
+        Box::new(|outcome| ENTRY_PROMISE_OUTCOME.with(|slot| *slot.borrow_mut() = Some(outcome))),
+    );
+}
+
+pub fn promise_entry_failed() -> bool {
+    ENTRY_PROMISE_OUTCOME.with(|outcome| matches!(&*outcome.borrow(), Some(Err(_))))
+}
+
+pub fn promise_take_entry_outcome() -> Option<Result<(), Caught>> {
+    ENTRY_PROMISE_OUTCOME.with(|outcome| outcome.borrow_mut().take())
 }
 
 pub fn promise_from_sync<T, F>(operation: F) -> JsPromise<T>
@@ -369,12 +392,9 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
         (settled, rejection_handled)
     });
     if rejection_handled {
-        let handle = promise_handle(promise);
-        REJECTION_HANDLED_HANDLER.with(|handler| {
-            if let Some(handler) = handler.borrow_mut().as_mut() {
-                handler(handle);
-            }
-        });
+        let handle = promise_to_handle(promise);
+        let handler = REJECTION_HANDLED_HANDLER.with(|handler| handler.borrow().clone());
+        if let Some(handler) = handler { handler(handle); }
     }
     if let Some(outcome) = settled {
         promise_schedule(
@@ -454,16 +474,13 @@ pub fn promise_reject<T: HeapValue>(promise: &JsPromise<T>, reason: Caught) -> b
                 Some(reason)
             });
             if let Some(reason) = unhandled {
-                let handle = promise_handle(&candidate);
-                let delivered = UNHANDLED_REJECTION_HANDLER.with(|handler| {
-                    let mut handler = handler.borrow_mut();
-                    let Some(handler) = handler.as_mut() else {
-                        return false;
-                    };
+                let handle = promise_to_handle(&candidate);
+                let handler = UNHANDLED_REJECTION_HANDLER.with(|handler| handler.borrow().clone());
+                let delivered = if let Some(handler) = handler {
                     candidate.with_mut(|data| data.handled = true);
                     handler(reason.clone(), handle);
                     true
-                });
+                } else { false };
                 if !delivered {
                     eprintln!("UnhandledPromiseRejection: {}", caught_to_string(&reason));
                     UNHANDLED_REJECTION.with(|flag| flag.set(true));

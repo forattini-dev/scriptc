@@ -58,6 +58,7 @@ export class RustDynamicEmitter {
     this.context.line("Boolean(bool),");
     this.context.line("String(runtime::JsString),");
     this.context.line("Bytes(runtime::JsBytes<u8>),");
+    this.context.line("Promise(runtime::JsPromiseHandle),");
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     for (const shape of boxedShapes) {
@@ -77,6 +78,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
+    this.context.line("Self::Promise(value) => runtime::promise_handle_trace(value, tracer),");
     this.context.line("_ => {},");
     this.context.popIndent();
     this.context.line("}");
@@ -115,6 +117,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
     }
@@ -182,6 +185,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
+    this.context.line(`${name}::Promise(value) => ${name}::Promise(value.clone()),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
@@ -231,6 +235,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
     this.context.line(`${name}::Bytes(..) => Err(format!("bytes at {path} is not JSON data")),`);
+    this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let mut elements = Vec::new();");
@@ -286,6 +291,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(..) => "bytes",`);
     this.context.line(`${name}::Array(..) => "array",`);
     this.context.line(`${name}::Object(..) => "object",`);
+    this.context.line(`${name}::Promise(..) => "promise",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
@@ -309,6 +315,16 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("};");
     this.context.line("runtime::string(kind)");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_from_caught(caught: runtime::Caught) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line(`if runtime::caught_is::<${name}>(&caught) { runtime::caught_narrow::<${name}>(&caught) }`);
+    this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
+    this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
+    this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
+    this.context.line("else if runtime::caught_is_error(&caught) { sc_dyn_error_box(&runtime::caught_error_value(&caught)) }");
+    this.context.line(`else { ${name}::Object(runtime::map_new()) }`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_dyn_key_index(key: &runtime::JsString) -> Option<usize> {");
@@ -433,6 +449,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Bytes(value) => runtime::bytes_join(value, &runtime::string(",")),`);
+    this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let mut output = String::new();");
@@ -479,6 +496,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(..) => "an instance of Uint8Array".to_owned(),`);
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
+    this.context.line(`${name}::Promise(..) => "an instance of Promise".to_owned(),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => format!("function {function_name}"),`);
     }
@@ -726,6 +744,7 @@ export class RustDynamicEmitter {
     this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(&format!(\"Uint8Array({}) [\", length as usize)), &runtime::string(\"]\"), recurse + 1.0, true, more)");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::Promise(..) => runtime::string("Promise { <pending> }"),`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
     this.context.line("let length = runtime::array_len(array);");
@@ -830,6 +849,13 @@ export class RustDynamicEmitter {
     this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| runtime::error_is_class(error, target)))");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> runtime::JsError {`);
+    this.context.pushIndent();
+    this.context.line(`let ${name}::Object(object) = &value else { return sc_dyn_check_fail("Error", &value); };`);
+    this.context.line("let identity = object.identity();");
+    this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).map(|(_, error, _)| error.clone())).unwrap_or_else(|| sc_dyn_check_fail(\"Error\", &value))");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line("fn sc_dyn_error_cache_clear() {");
     this.context.pushIndent();
     this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().clear());");
@@ -864,6 +890,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
+    this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let identity = value.identity();");
@@ -979,6 +1006,7 @@ export class RustDynamicEmitter {
         if (type.elem !== "u8") this.context.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
         return `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
       }
+      case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
       case "func": {
@@ -1075,6 +1103,12 @@ export class RustDynamicEmitter {
         return `{ let value = ${value}; match value { ${name}::Bytes(bytes) => runtime::bytes_copy(&bytes), value => sc_dyn_check_fail("bytes", &value), } }`;
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
+      case "object": {
+        if (!RUNTIME_ERROR_CLASSES.has(type.className) || this.context.errorClassRoots().length > 0) {
+          this.context.unsupported(`dynamic checked cast to object '${type.className}'`, loc);
+        }
+        return `sc_dyn_error_unbox(${value})`;
+      }
       case "union": {
         if (!this.context.isRustJsonCompatible(type)) {
           this.context.unsupported("dynamic checked cast to union", loc);

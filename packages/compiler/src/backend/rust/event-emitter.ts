@@ -12,6 +12,8 @@ export interface RustEventEmitterContext {
   isEmitterClass(name: string): boolean;
   isUsed(): boolean;
   usesProcessExitListeners(): boolean;
+  usesProcessRejectionEvents(): boolean;
+  dynTypeName(): string;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -65,6 +67,7 @@ export class RustEventEmitterEmitter {
     this.emitMetaDispatchHelper();
     this.emitSnapshotDispatchHelpers();
     this.emitProcessExitDefinitions();
+    this.emitProcessRejectionDefinitions();
   }
 
   emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
@@ -126,6 +129,10 @@ export class RustEventEmitterEmitter {
       case "process.exit": return this.context.usesProcessExitListeners()
         ? this.emitProcessExit(expr)
         : null;
+      case "process.onUnhandledRejection": return this.emitProcessRejectionOn(expr, true);
+      case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
+      case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
+      case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
       default: return null;
     }
   }
@@ -395,6 +402,74 @@ export class RustEventEmitterEmitter {
     this.context.pushIndent();
     this.context.line("sc_process_run_exit(sc_code);");
     this.context.line("runtime::process_exit(sc_code)");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("");
+  }
+
+  private emitProcessRejectionOn(expr: RustLibCallExpr, unhandled: boolean): string {
+    const [callback, once] = expr.args;
+    if (callback?.type.kind !== "dyn" || once?.type.kind !== "bool" || expr.args.length !== 2 ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("process rejection listener registration shape", expr.loc);
+    }
+    return `sc_process_rejection_on(${unhandled}, ${this.context.emitExpr(callback)}, ${this.context.emitExpr(once)})`;
+  }
+
+  private emitProcessRejectionOff(expr: RustLibCallExpr, unhandled: boolean): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process rejection listener removal shape", expr.loc);
+    }
+    return `sc_process_rejection_off(${unhandled}, ${this.context.emitExpr(callback)})`;
+  }
+
+  private emitProcessRejectionDefinitions(): void {
+    if (!this.context.usesProcessRejectionEvents()) return;
+    const dyn = this.context.dynTypeName();
+    this.context.line("#[derive(Clone)]");
+    this.context.line(`struct ScProcessRejectionListener { registration: usize, callback: ${dyn}, identity: usize, once: bool }`);
+    this.context.line("thread_local! {");
+    this.context.pushIndent();
+    this.context.line("static SC_PROCESS_UNHANDLED_REJECTION: std::cell::RefCell<Vec<ScProcessRejectionListener>> = const { std::cell::RefCell::new(Vec::new()) };");
+    this.context.line("static SC_PROCESS_REJECTION_HANDLED: std::cell::RefCell<Vec<ScProcessRejectionListener>> = const { std::cell::RefCell::new(Vec::new()) };");
+    this.context.line("static SC_PROCESS_REJECTION_REGISTRATION: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_rejection_sync_hooks() {");
+    this.context.pushIndent();
+    this.context.line(`if SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow().is_empty()) { runtime::promise_set_unhandled_rejection_handler(None); } else { runtime::promise_set_unhandled_rejection_handler(Some(std::rc::Rc::new(|reason, promise| sc_process_rejection_fire(true, vec![sc_dyn_from_caught(reason), ${dyn}::Promise(promise)])))); }`);
+    this.context.line(`if SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow().is_empty()) { runtime::promise_set_rejection_handled_handler(None); } else { runtime::promise_set_rejection_handled_handler(Some(std::rc::Rc::new(|promise| sc_process_rejection_fire(false, vec![${dyn}::Promise(promise)])))); }`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_rejection_on(unhandled: bool, callback: ${dyn}, once: bool) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("let registration = SC_PROCESS_REJECTION_REGISTRATION.with(|next| { let value = next.get(); next.set(value.checked_add(1).expect(\"scriptc: process rejection registration overflow\")); value });");
+    this.context.line("let listener = ScProcessRejectionListener { registration, callback, identity, once };");
+    this.context.line("if unhandled { SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow_mut().push(listener)); } else { SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow_mut().push(listener)); }");
+    this.context.line("sc_process_rejection_sync_hooks();");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_rejection_off(unhandled: bool, callback: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("let remove = |listeners: &mut Vec<ScProcessRejectionListener>| { if let Some(index) = listeners.iter().rposition(|listener| listener.identity == identity) { listeners.remove(index); } }; ");
+    this.context.line("if unhandled { SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| remove(&mut listeners.borrow_mut())); } else { SC_PROCESS_REJECTION_HANDLED.with(|listeners| remove(&mut listeners.borrow_mut())); }");
+    this.context.line("sc_process_rejection_sync_hooks();");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_rejection_fire(unhandled: bool, args: Vec<${dyn}>) {`);
+    this.context.pushIndent();
+    this.context.line("let snapshot = if unhandled { SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow().clone()) } else { SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow().clone()) };");
+    this.context.line("for listener in snapshot { if listener.once { if unhandled { SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow_mut().retain(|candidate| candidate.registration != listener.registration)); } else { SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow_mut().retain(|candidate| candidate.registration != listener.registration)); } sc_process_rejection_sync_hooks(); } let _ = sc_dyn_call(&listener.callback, &args, \"listener\"); }");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_rejection_clear() {");
+    this.context.pushIndent();
+    this.context.line("SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow_mut().clear());");
+    this.context.line("SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow_mut().clear());");
+    this.context.line("sc_process_rejection_sync_hooks();");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("");

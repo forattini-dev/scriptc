@@ -24,8 +24,9 @@ thread_local! {
     static NEXT_TICKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
     static PROMISE_CHECKS: RefCell<VecDeque<Box<dyn FnOnce()>>> = const { RefCell::new(VecDeque::new()) };
     static UNHANDLED_REJECTION: Cell<bool> = const { Cell::new(false) };
-    static UNHANDLED_REJECTION_HANDLER: RefCell<Option<Box<dyn FnMut(Caught, JsPromiseHandle)>>> = const { RefCell::new(None) };
-    static REJECTION_HANDLED_HANDLER: RefCell<Option<Box<dyn FnMut(JsPromiseHandle)>>> = const { RefCell::new(None) };
+    static UNHANDLED_REJECTION_HANDLER: RefCell<Option<Rc<dyn Fn(Caught, JsPromiseHandle)>>> = const { RefCell::new(None) };
+    static REJECTION_HANDLED_HANDLER: RefCell<Option<Rc<dyn Fn(JsPromiseHandle)>>> = const { RefCell::new(None) };
+    static ENTRY_PROMISE_OUTCOME: RefCell<Option<Result<(), Caught>>> = const { RefCell::new(None) };
     static EVENT_TURN: Cell<u64> = const { Cell::new(0) };
     static EVENT_PHASE: Cell<u8> = const { Cell::new(0) };
     static FIRING_TIMER_ID: Cell<u64> = const { Cell::new(0) };
@@ -49,6 +50,7 @@ pub fn init() {
     UNHANDLED_REJECTION.with(|unhandled| unhandled.set(false));
     UNHANDLED_REJECTION_HANDLER.with(|handler| *handler.borrow_mut() = None);
     REJECTION_HANDLED_HANDLER.with(|handler| *handler.borrow_mut() = None);
+    ENTRY_PROMISE_OUTCOME.with(|outcome| *outcome.borrow_mut() = None);
 }
 
 fn process_elapsed() -> std::time::Duration {

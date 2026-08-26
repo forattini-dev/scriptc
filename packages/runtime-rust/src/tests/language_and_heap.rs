@@ -697,12 +697,12 @@
         let catch_count = Rc::new(Cell::new(0));
 
         let handled_observer = handled_count.clone();
-        promise_set_rejection_handled_handler(Some(Box::new(move |_| {
+        promise_set_rejection_handled_handler(Some(Rc::new(move |_| {
             handled_observer.set(handled_observer.get() + 1);
         })));
         let unhandled_observer = unhandled_count.clone();
         let catch_observer = catch_count.clone();
-        promise_set_unhandled_rejection_handler(Some(Box::new(move |reason, promise| {
+        promise_set_unhandled_rejection_handler(Some(Rc::new(move |reason, promise| {
             assert_eq!(caught_to_string(&reason).as_ref(), "late");
             unhandled_observer.set(unhandled_observer.get() + 1);
             let caught = catch_observer.clone();
@@ -717,7 +717,7 @@
 
         let promise = promise_rejected::<f64>(caught_value(string("late")));
         let identity = promise.identity();
-        let handle = promise_handle(&promise);
+        let handle = promise_to_handle(&promise);
         assert_eq!(promise_handle_identity(&handle), identity);
         run_event_loop();
         assert_eq!(unhandled_count.get(), 1);
