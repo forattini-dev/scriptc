@@ -34,6 +34,15 @@ function runToExit(
   });
 }
 
+async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
+  const source = await readFile(entryPath, "utf8");
+  const transform = source.split("\n", 2).some((line) => /^\/\/ @transform-types\s*$/u.test(line)) ||
+    /\benum\s+[A-Za-z_$]/u.test(source);
+  return transform
+    ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning", entryPath]
+    : [entryPath];
+}
+
 test("Rust emitter compiles recursive scalar IR without unsafe or C", async () => {
   expect(validateModule(fibModule)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-emit-"));
@@ -757,10 +766,15 @@ test.each([
   "1822-static-block-js.js",
   "1823-static-instance-method-names.ts",
   "1824-for-of-destructuring-defaults.ts",
+  "1831-enum-string-const-reverse.ts",
   "1836-var-loop-capture.ts",
   "1837-var-undefined-hoisting.ts",
   "1838-var-modules/main.ts",
   "1839-var-js/main.cjs",
+  "1850-overload-basics.ts",
+  "1851-overload-return-narrowing.ts",
+  "1852-overload-class-members.ts",
+  "1853-overload-modules/main.ts",
   "1854-ambient-declare-fn.ts",
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
@@ -782,8 +796,9 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
+  const nodeArgs = await nodeCorpusArgs(entryPath);
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath], env),
+    runToExit(process.execPath, nodeArgs, env),
     runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   expect(rust, fixture).toEqual(node);
@@ -2075,9 +2090,7 @@ test("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and 
       result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
     ).toBe(true);
     if (!result.ok) continue;
-    const nodeArgs = /\benum\s+[A-Za-z_$]/u.test(await readFile(entryPath, "utf8"))
-      ? ["--no-warnings", "--experimental-transform-types", entryPath]
-      : [entryPath];
+    const nodeArgs = await nodeCorpusArgs(entryPath);
     const [node, rust] = await Promise.all([
       runToExit(process.execPath, nodeArgs),
       runToExit(result.binaryPath, [], {
