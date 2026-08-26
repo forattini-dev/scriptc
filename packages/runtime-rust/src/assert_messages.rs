@@ -330,3 +330,23 @@ pub fn assert_dyn_message(
         has_message,
     )
 }
+
+pub fn assert_if_error_detail(detail: &str) -> ! {
+    throw_assertion_error(format!("ifError got unwanted exception: {detail}"))
+}
+
+pub fn assert_if_error_parts(name: &JsString, message: &JsString) -> ! {
+    assert_if_error_detail(if message.is_empty() { name } else { message })
+}
+
+pub fn assert_if_error_f64(value: f64) -> ! {
+    assert_if_error_detail(&display_number(value))
+}
+
+pub fn assert_if_error_string(value: &JsString) -> ! {
+    assert_if_error_detail(&assert_inspect_string(value))
+}
+
+pub fn assert_if_error_bool(value: bool) -> ! {
+    assert_if_error_detail(if value { "true" } else { "false" })
+}

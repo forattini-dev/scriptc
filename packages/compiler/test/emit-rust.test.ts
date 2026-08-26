@@ -2186,9 +2186,11 @@ test.each([
   "1680-assert-bytes.ts",
   "1681-assert-funcs.ts",
   "1721-assert-throws-regex-class.ts",
+  "1724-assert-iferror.ts",
   "1725-assert-symbols.ts",
   "1770-assert-dyn-strict.ts",
   "1772-assert-dyn-js.cjs",
+  "2285-iferror-dyn.cjs",
   "2487-recursive-deep-equal.ts",
 ])("Rust assertions preserve static verdicts and Node messages: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-assertions-"));

@@ -958,6 +958,24 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
     return `runtime::assert_deep_result(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])})`;
   }
+  if (expr.fn === "assert.ifErrorErr" && expr.args.length === 1 && arg?.type.kind === "object") {
+    const value = context.nextTemporary();
+    const nameHelper = !context.hasErrorClassRoots() ? "runtime::error_name" : "sc_error_name";
+    const messageHelper = !context.hasErrorClassRoots() ? "runtime::error_message" : "sc_error_message";
+    return `{ let ${value} = ${context.emitExpr(arg)}; runtime::assert_if_error_parts(&${nameHelper}(&${value}), &${messageHelper}(&${value})) }`;
+  }
+  if (expr.fn === "assert.ifErrorF64" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::assert_if_error_f64(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "assert.ifErrorStr" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::assert_if_error_string(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "assert.ifErrorBool" && expr.args.length === 1 && arg?.type.kind === "bool") {
+    return `runtime::assert_if_error_bool(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "assert.ifErrorDyn" && expr.args.length === 1 && arg?.type.kind === "dyn") {
+    return `sc_dyn_assert_if_error(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "assert.shapeBegin" && expr.args.length === 1 &&
     arg?.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(arg.type.className)) {
     if (context.hasErrorClassRoots()) {

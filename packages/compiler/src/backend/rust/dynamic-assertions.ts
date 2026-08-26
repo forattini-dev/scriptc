@@ -80,4 +80,22 @@ export function emitRustDynamicAssertions(
   context.line(`runtime::assert_dyn_message(equal, &actual_text, &expected_text, sc_dyn_assert_is_object(actual), sc_dyn_assert_is_object(expected), sc_dyn_assert_is_function(actual), sc_dyn_assert_is_function(expected), matches!(actual, ${name}::String(..)), matches!(expected, ${name}::String(..)), both_zero, negated, deep, message, has_message);`);
   context.popIndent();
   context.line("}");
+
+  context.line(`fn sc_dyn_assert_if_error(value: &${name}) {`);
+  context.pushIndent();
+  context.line(`if matches!(value, ${name}::Undefined | ${name}::Null) { return; }`);
+  context.line(`if let ${name}::Object(object) = value {`);
+  context.pushIndent();
+  context.line("if runtime::map_has_by(object, &runtime::string(\"%error\"), |left, right| left.as_ref() == right.as_ref()) {");
+  context.pushIndent();
+  context.line(`let message = match runtime::map_get_by(object, &runtime::string("message"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);
+  context.line(`let error_name = match runtime::map_get_by(object, &runtime::string("name"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);
+  context.line("runtime::assert_if_error_parts(&error_name, &message);");
+  context.popIndent();
+  context.line("}");
+  context.popIndent();
+  context.line("}");
+  context.line("runtime::assert_if_error_detail(&sc_dyn_assert_inspect(value, 0));");
+  context.popIndent();
+  context.line("}");
 }
