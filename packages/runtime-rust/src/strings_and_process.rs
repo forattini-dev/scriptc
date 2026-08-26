@@ -241,6 +241,26 @@ pub fn string_len(value: &JsString) -> f64 {
     value.encode_utf16().count() as f64
 }
 
+pub fn string_code_point_at_string(value: &JsString, index: f64) -> JsString {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
+        return empty_string();
+    }
+    let target = index as usize;
+    let mut position = 0usize;
+    for character in value.chars() {
+        let width = character.len_utf16();
+        if target == position {
+            return Rc::from(character.to_string());
+        }
+        if width == 2 && target == position + 1 {
+            return string("\u{fffd}");
+        }
+        position += width;
+    }
+    empty_string()
+}
+
 pub fn string_char_at(value: &JsString, index: f64) -> JsString {
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
     if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
@@ -825,7 +845,11 @@ pub fn number_parse_int(value: &JsString, radix: f64) -> f64 {
             .parse::<f64>()
             .unwrap_or(f64::INFINITY);
     }
-    if negative { -result } else { result }
+    if negative {
+        -result
+    } else {
+        result
+    }
 }
 
 pub fn number_parse_float(value: &JsString) -> f64 {

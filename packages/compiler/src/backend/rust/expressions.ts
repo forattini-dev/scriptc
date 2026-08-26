@@ -176,6 +176,9 @@ export class RustExpressionEmitter {
         if (expr.method === "toWellFormed" && expr.args.length === 0) {
           return `runtime::string_to_well_formed(&(${this.emitExpr(expr.receiver)}))`;
         }
+        if (expr.method === "cpAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_code_point_at_string(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
+        }
         if (expr.method === "charAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
