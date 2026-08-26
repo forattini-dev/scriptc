@@ -367,6 +367,8 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "childStream":
+        case "netServer":
+        case "netSocket":
         case "record":
         case "func":
         case "promise":
@@ -734,6 +736,8 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "childStream":
+        case "netServer":
+        case "netSocket":
         case "map":
         case "set":
         case "record":

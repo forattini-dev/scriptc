@@ -629,6 +629,11 @@ class RustEmitter {
       if (this.streams.discover(node, (type) => this.ensureClosureShape(type), (kind) => this.unsupported(kind))) {
         this.usesEventEmitter = true;
       }
+      if (node.kind === "libCall" && node.fn === "net.serverCloseBind") {
+        const type = node.type as IrType | undefined;
+        if (type?.kind !== "func") this.unsupported("malformed net.serverCloseBind IR");
+        this.ensureClosureShape(type).runtimeCallback = true;
+      }
       if (node.kind === "libCall" && (node.fn === "process.onExit" || node.fn === "process.offExit")) {
         this.usesEventEmitter = true;
         this.usesProcessExitListeners = true;
