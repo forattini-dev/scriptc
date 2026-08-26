@@ -79,6 +79,33 @@ test.each([
   expect(rust.stderr, fixtureName).toBe(node.stderr);
 });
 
+test.each([
+  "1461-process-pid-getuid-kill.ts",
+  "1472-errno-code.ts",
+  "1535-spawn-fd-stdio.ts",
+])("Rust process signals and fd stdio match Node: %s", async (fixtureName) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-process-fd-"));
+  const fixture = resolve("tests/corpus", fixtureName);
+  const result = await compile(fixture, {
+    outDir: dir,
+    outPath: join(dir, fixtureName.slice(0, -3)),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const node = await execFileAsync(process.execPath, [fixture]);
+  const rust = await execFileAsync(result.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
+  expect(rust.stdout, fixtureName).toBe(node.stdout);
+  expect(rust.stderr, fixtureName).toBe(node.stderr);
+});
+
 test("Rust unhandled child error preserves corpus 1363 exit behavior", async () => {
   const fixture = resolve("tests/corpus/1363-spawn-unhandled-error.ts");
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-child-unhandled-"));

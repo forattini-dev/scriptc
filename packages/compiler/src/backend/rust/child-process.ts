@@ -156,19 +156,20 @@ export function emitRustChildProcessCall(
     return `runtime::child_spawn(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
   }
   if (expr.fn === "cp.spawnOpts" && expr.args.length === 11) {
-    const [command, arguments_, stdinMode, stdoutMode, stderrMode, , , detached, hasEnv, envPairs, cwd] = expr.args;
+    const [command, arguments_, stdinMode, stdoutMode, stderrMode, stdoutFd, stderrFd, detached, hasEnv, envPairs, cwd] = expr.args;
     if (command?.type.kind !== "string" || arguments_?.type.kind !== "array" ||
         arguments_.type.elem.kind !== "string" || stdinMode?.kind !== "numLit" ||
         stdoutMode?.kind !== "numLit" || stderrMode?.kind !== "numLit" ||
+        stdoutFd?.type.kind !== "f64" || stderrFd?.type.kind !== "f64" ||
         detached?.type.kind !== "bool" || hasEnv?.type.kind !== "bool" ||
         envPairs?.type.kind !== "array" || envPairs.type.elem.kind !== "string" || cwd?.type.kind !== "string") {
       context.unsupported("cp.spawnOpts argument shape", expr.loc);
     }
     if ((stdinMode.value !== 0 && stdinMode.value !== 1) ||
-        [stdoutMode.value, stderrMode.value].some((mode) => mode !== 0 && mode !== 1 && mode !== 3)) {
-      context.unsupported("cp.spawnOpts with fd stdio or piped stdin", expr.loc);
+        [stdoutMode.value, stderrMode.value].some((mode) => mode < 0 || mode > 3)) {
+      context.unsupported("cp.spawnOpts with piped or fd stdin", expr.loc);
     }
-    return `runtime::child_spawn_options(&(${context.emitExpr(command)}), &(${context.emitExpr(arguments_)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${context.emitExpr(detached)}, ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), &(${context.emitExpr(cwd)}))`;
+    return `runtime::child_spawn_options(&(${context.emitExpr(command)}), &(${context.emitExpr(arguments_)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, ${context.emitExpr(stdoutFd)}, ${context.emitExpr(stderrFd)}, ${context.emitExpr(detached)}, ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), &(${context.emitExpr(cwd)}))`;
   }
   if ((expr.fn === "child.pid" || expr.fn === "child.exitCode") && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "child") {

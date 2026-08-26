@@ -69,6 +69,8 @@ pub fn child_spawn(command: &JsString, arguments: &JsArray<JsString>) -> JsChild
         0.0,
         0.0,
         0.0,
+        0.0,
+        0.0,
         false,
         false,
         &array_new(Vec::new()),
@@ -218,6 +220,25 @@ fn child_register(
     child
 }
 
+fn child_stdio_from_fd(fd: f64) -> std::process::Stdio {
+    let id =
+        if fd.is_finite() && fd.fract() == 0.0 && fd >= i32::MIN as f64 && fd <= i32::MAX as f64 {
+            fd as i32
+        } else {
+            throw_fs_fd_error("dup", "EBADF", "bad file descriptor")
+        };
+    OPEN_FILES.with(|files| {
+        let files = files.borrow();
+        let Some(file) = files.get(&id) else {
+            throw_fs_fd_error("dup", "EBADF", "bad file descriptor")
+        };
+        std::process::Stdio::from(
+            file.try_clone()
+                .unwrap_or_else(|error| throw_fs_fd_io_error("dup", error)),
+        )
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn child_spawn_options(
     command: &JsString,
@@ -225,6 +246,8 @@ pub fn child_spawn_options(
     stdin_mode: f64,
     stdout_mode: f64,
     stderr_mode: f64,
+    stdout_fd: f64,
+    stderr_fd: f64,
     detached: bool,
     has_env: bool,
     env_pairs: &JsArray<JsString>,
@@ -271,11 +294,13 @@ pub fn child_spawn_options(
     });
     child_command.stdout(match stdout_mode {
         1 => Stdio::inherit(),
+        2 => child_stdio_from_fd(stdout_fd),
         3 => Stdio::piped(),
         _ => Stdio::null(),
     });
     child_command.stderr(match stderr_mode {
         1 => Stdio::inherit(),
+        2 => child_stdio_from_fd(stderr_fd),
         3 => Stdio::piped(),
         _ => Stdio::null(),
     });
@@ -313,27 +338,43 @@ pub fn child_unref(child: &JsChild) {
 }
 
 #[cfg(unix)]
-fn child_send_signal(pid: u32, signal: &str) -> bool {
+fn process_signal_send(pid: i32, signal: &str) -> Result<(), &'static str> {
     use std::process::{Command, Stdio};
 
-    let argument = signal
-        .strip_prefix("SIG")
-        .map_or_else(|| format!("-{signal}"), |name| format!("-{name}"));
-    let mut command = Command::new("kill");
+    let launcher = ["/usr/bin/kill", "/bin/kill"]
+        .into_iter()
+        .find(|candidate| std::path::Path::new(candidate).is_file())
+        .unwrap_or("kill");
+    let mut command = Command::new(launcher);
     process_env_apply(&mut command);
     command
-        .arg(argument)
+        .env("LC_ALL", "C")
+        .arg("-s")
+        .arg(signal.strip_prefix("SIG").unwrap_or(signal))
+        .arg("--")
         .arg(pid.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .stderr(Stdio::piped());
+    let output = command.output().map_err(|_| "EIO")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    if stderr.contains("no such process") {
+        Err("ESRCH")
+    } else if stderr.contains("operation not permitted") || stderr.contains("permission denied") {
+        Err("EPERM")
+    } else if stderr.contains("invalid argument") || stderr.contains("invalid signal") {
+        Err("EINVAL")
+    } else {
+        Err("EIO")
+    }
 }
 
 #[cfg(not(unix))]
-fn child_send_signal(_pid: u32, _signal: &str) -> bool {
-    false
+fn process_signal_send(_pid: i32, _signal: &str) -> Result<(), &'static str> {
+    Err("ENOSYS")
 }
 
 fn child_signal_number(name: &str) -> Option<i32> {
@@ -379,7 +420,7 @@ pub fn child_kill(child: &JsChild, signal: &JsString) -> bool {
     let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id)) else {
         return false;
     };
-    let sent = child_send_signal(pid, signal);
+    let sent = process_signal_send(pid as i32, signal).is_ok();
     if sent {
         child.with_mut(|child| child.killed = true);
     }
@@ -390,11 +431,40 @@ pub fn child_kill_num(child: &JsChild, signal: f64) -> bool {
     let Some(pid) = child.with(|child| child.process.as_ref().map(std::process::Child::id)) else {
         return false;
     };
-    let sent = child_send_signal(pid, &(signal as i32).to_string());
+    let sent = process_signal_send(pid as i32, &(signal as i32).to_string()).is_ok();
     if sent {
         child.with_mut(|child| child.killed = true);
     }
     sent
+}
+
+fn process_kill_pid(pid: f64) -> i32 {
+    if pid.is_finite() && pid.fract() == 0.0 && pid >= i32::MIN as f64 && pid <= i32::MAX as f64 {
+        return pid as i32;
+    }
+    throw_type_error(format!(
+        "The \"pid\" argument must be of type number. Received type number ({})",
+        format_number(pid)
+    ))
+}
+
+fn process_kill_send(pid: i32, signal: &str) -> bool {
+    match process_signal_send(pid, signal) {
+        Ok(()) => true,
+        Err(code) => throw_error_code(format!("kill {code}"), code),
+    }
+}
+
+pub fn process_kill_named(pid: f64, signal: &JsString) -> bool {
+    let pid = process_kill_pid(pid);
+    if child_signal_number(signal).is_none() {
+        throw_type_error(format!("Unknown signal: {signal}"));
+    }
+    process_kill_send(pid, signal)
+}
+
+pub fn process_kill_num(pid: f64, signal: f64) -> bool {
+    process_kill_send(process_kill_pid(pid), &(signal as i32).to_string())
 }
 
 pub fn child_on_exit(
