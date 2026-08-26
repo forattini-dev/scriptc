@@ -484,6 +484,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "os.homedir" && expr.args.length === 0) return "runtime::os_homedir()";
   if (expr.fn === "os.tmpdir" && expr.args.length === 0) return "runtime::os_tmpdir()";
+  if (expr.fn === "os.userName" && expr.args.length === 0) return "runtime::os_user_name()";
+  if (expr.fn === "os.userShell" && expr.args.length === 0) return "runtime::os_user_shell()";
+  if (expr.fn === "os.userHomedir" && expr.args.length === 0) return "runtime::os_user_homedir()";
+  if (expr.fn === "os.type" && expr.args.length === 0) return "runtime::os_type()";
+  if (expr.fn === "os.release" && expr.args.length === 0) return "runtime::os_release()";
+  if (expr.fn === "os.totalmem" && expr.args.length === 0) return "runtime::os_totalmem()";
   if (expr.fn === "crypto.randomUUID" && expr.args.length === 0) return "runtime::crypto_random_uuid()";
   if (expr.fn === "crypto.randomBytes" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::crypto_random_bytes(${context.emitExpr(arg)})`;

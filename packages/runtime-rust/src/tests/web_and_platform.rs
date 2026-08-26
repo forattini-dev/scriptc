@@ -631,6 +631,15 @@
     }
 
     #[test]
+    fn operating_system_identity_values_are_available() {
+        assert!(!os_type().is_empty());
+        assert!(!os_release().is_empty());
+        assert!(os_totalmem() > 0.0);
+        assert!(!os_user_name().is_empty());
+        assert!(!os_user_homedir().is_empty());
+    }
+
+    #[test]
     fn buffer_numeric_methods_follow_node_coercion_and_error_order() {
         let baseline = live_heap_objects();
         {
