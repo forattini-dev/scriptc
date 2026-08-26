@@ -819,6 +819,7 @@ test.each([
   "1982-freeze-resolve-passthrough.ts",
   "1983-array-tuple-surfaces.ts",
   "1990-labels-basics.ts",
+  "1991-for-in-loops.ts",
   "1992-small-syntax.ts",
   "2250-tagged-templates.ts",
   "2402-labeled-break-kill.ts",
