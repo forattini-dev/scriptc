@@ -734,6 +734,8 @@ test.each([
   "1639-versions-openssl-probe.ts",
   "1642-object-fromentries-rows.ts",
   "1643-metadata-dyn-return.cjs",
+  "1655-spawnsync-neutral.ts",
+  "1656-execsync-neutral.ts",
   "1674-symbol-inspect.ts",
   "1854-ambient-declare-fn.ts",
   "2440-console-inspect-args.ts",
