@@ -341,6 +341,7 @@ export class RustDefinitionEmitter {
           comparison = "left.as_ref() == right.as_ref()";
           break;
         case "array":
+        case "bytes":
         case "map":
         case "set":
         case "stats":

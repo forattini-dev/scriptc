@@ -12,6 +12,15 @@ export function emitRustRecordKeyGet(
   context: IndexedRecordContext,
   emitExpr: (expr: IrExpr) => string,
 ): string {
+  return emitRustRecordKeyGetValues(expr, context, emitExpr(expr.obj), emitExpr(expr.key));
+}
+
+export function emitRustRecordKeyGetValues(
+  expr: Extract<IrExpr, { kind: "recordKeyGet" }>,
+  context: IndexedRecordContext,
+  objectExpr: string,
+  keyExpr: string,
+): string {
   const shape = context.records.get(expr.shapeId);
   if (shape === undefined || shape.indexValue === undefined || shape.fields.length !== 0) {
     context.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
@@ -20,7 +29,7 @@ export function emitRustRecordKeyGet(
   if (expr.key.type.kind !== "string") context.unsupported("indexed record key type", expr.loc);
   const object = context.nextName("sc_rt");
   const key = context.nextName("sc_rt");
-  const bindings = `let ${object} = ${emitExpr(expr.obj)}; let ${key} = ${emitExpr(expr.key)};`;
+  const bindings = `let ${object} = ${objectExpr}; let ${key} = ${keyExpr};`;
   const lookup = `runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref())`;
   if (indexValue.kind === "dyn" && expr.type.kind === "dyn") {
     return `{ ${bindings} ${lookup}.unwrap_or(${context.dynTypeName()}::Undefined) }`;

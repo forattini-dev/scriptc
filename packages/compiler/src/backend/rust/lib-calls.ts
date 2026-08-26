@@ -224,6 +224,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     expr.type.kind === "array" && expr.type.elem.kind === "string") {
     return "runtime::process_env_pairs()";
   }
+  if ((expr.fn === "process.stdoutWriteBytes" || expr.fn === "process.stderrWriteBytes") &&
+    expr.args.length === 2 && arg?.type.kind === "bytes" && arg.type.elem === "u8" &&
+    secondArg?.type.kind === "string") {
+    const target = expr.fn === "process.stdoutWriteBytes" ? "stdout" : "stderr";
+    return `runtime::process_${target}_write_bytes(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "num.parseInt" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::number_parse_int(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])})`;
   }

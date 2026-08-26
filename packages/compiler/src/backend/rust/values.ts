@@ -405,6 +405,7 @@ export class RustValueEmitter {
       case "bool":
       case "string":
       case "array":
+      case "bytes":
       case "record":
       case "object":
       case "classval":

@@ -4,6 +4,7 @@ import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
+import { emitRustUnionKeyGet } from "./union-key-get.js";
 
 export interface RustExpressionContext {
   readonly chainValues: Map<string, string>;
@@ -822,6 +823,8 @@ export class RustExpressionEmitter {
         }).join(", ");
         return `{ let ${value} = ${this.emitExpr(expr.value)}; match &${value} { ${arms} } }`;
       }
+      case "unionKeyGet":
+        return emitRustUnionKeyGet(expr, this.context, (value) => this.emitExpr(value));
       case "unionIsTag": {
         const union = this.context.union(expr.unionId, expr.loc);
         const arm = union.arms[expr.tag];

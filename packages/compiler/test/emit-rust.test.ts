@@ -716,8 +716,11 @@ test.each([
   "1483-array-slice.ts",
   "1527-logical-mixed-operands.ts",
   "1528-delete-records-env.ts",
+  "1541-union-keyed-reads.ts",
+  "1546-union-element-reads.ts",
+  "1562-optional-chain-tails.ts",
   "2643-or-default-retag.ts",
-])("Rust environment writes and mixed logical values match Node: %s", async (fixture) => {
+])("Rust environment writes, mixed logical values, and keyed unions match Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
@@ -1889,12 +1892,14 @@ test("Rust uncaught Error subclass matches the official exit-one corpus", async 
   expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 120_000);
 
-test("Rust typed-array construction, coercion, copies, views, and set match Node", async () => {
+test("Rust typed arrays, byte unions, copies, views, and set match Node", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-bytes-"));
   for (const fixture of [
     "1400-typedarray-basics.ts",
     "1401-typedarray-slice-set.ts",
     "1402-buffer-encodings.ts",
+    "1405-bytes-unions-arrays.ts",
+    "1455-lambda-union-return-adoption.ts",
     "2670-uint8array-copy-iterate.ts",
   ]) {
     const entryPath = resolve("tests/corpus", fixture);

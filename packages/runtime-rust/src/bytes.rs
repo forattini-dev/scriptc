@@ -103,6 +103,34 @@ pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
     bytes_from_elements(copied)
 }
 
+pub fn process_stdout_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
+    use std::io::Write;
+    let _ = encoding;
+    bytes
+        .with(|data| {
+            let storage = data.storage.borrow();
+            std::io::stdout()
+                .lock()
+                .write_all(&storage[data.offset..data.offset + data.length])
+        })
+        .expect("scriptc: stdout write failed");
+    true
+}
+
+pub fn process_stderr_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
+    use std::io::Write;
+    let _ = encoding;
+    bytes
+        .with(|data| {
+            let storage = data.storage.borrow();
+            std::io::stderr()
+                .lock()
+                .write_all(&storage[data.offset..data.offset + data.length])
+        })
+        .expect("scriptc: stderr write failed");
+    true
+}
+
 pub fn bytes_from_array<T: ByteElement>(array: &JsArray<f64>) -> JsBytes<T> {
     let elements: Vec<T> =
         array.with(|data| data.elements.iter().copied().map(T::from_number).collect());
