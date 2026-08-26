@@ -99,7 +99,26 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return "runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\")";
   }
   if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
-    return `runtime::string(&runtime::display_number(${context.emitExpr(arg)}))`;
+    return `runtime::inspect_number(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "insp.str" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::inspect_string(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "insp.begin" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::inspect_begin(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "insp.entry" && expr.args.length === 2 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "bool") {
+    return `runtime::inspect_entry(&(${context.emitExpr(arg)}), ${context.emitExpr(secondArg)})`;
+  }
+  if (expr.fn === "insp.moreItems" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::inspect_more_items(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "insp.end" && expr.args.length === 6 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "string" &&
+    expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "f64" &&
+    expr.args[4]?.type.kind === "bool" && expr.args[5]?.type.kind === "bool") {
+    return `runtime::inspect_end(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])}, ${context.emitExpr(expr.args[4])}, ${context.emitExpr(expr.args[5])})`;
   }
   if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const depth = expr.args[1];

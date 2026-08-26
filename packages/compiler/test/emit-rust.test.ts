@@ -721,9 +721,12 @@ test.each([
   "1562-optional-chain-tails.ts",
   "1574-dyn-optional-method-number-keys.ts",
   "1581-declare-const-read.ts",
+  "1630-inspect-scalars.ts",
+  "1632-inspect-records.ts",
   "1854-ambient-declare-fn.ts",
+  "2591-ambient-generic-traps.ts",
   "2643-or-default-retag.ts",
-])("Rust environment, logical, keyed-union, and ambient reads match Node: %s", async (fixture) => {
+])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {

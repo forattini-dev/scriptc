@@ -28,6 +28,7 @@ include!("heap.rs");
 include!("event_loop.rs");
 include!("promises.rs");
 include!("errors.rs");
+include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");
 include!("arrays.rs");
