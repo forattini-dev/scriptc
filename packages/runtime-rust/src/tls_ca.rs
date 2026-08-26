@@ -7,7 +7,10 @@ struct TlsTrust {
 thread_local! {
     // None is Node's original default store. Some, including Some([]),
     // is the live replacement installed by setDefaultCACertificates.
-    static TLS_DEFAULT_CA_CERTIFICATES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    static TLS_DEFAULT_CA_CERTIFICATES: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
+    static TLS_BUNDLED_CA_CERTIFICATES: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
+    static TLS_SYSTEM_CA_CERTIFICATES: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
+    static TLS_EXTRA_CA_CERTIFICATES: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
 }
 
 fn tls_split_pem_certificates(input: &str) -> Vec<String> {
@@ -67,14 +70,17 @@ fn tls_extra_ca_certificates() -> Vec<String> {
 }
 
 fn tls_default_trust() -> TlsTrust {
-    TLS_DEFAULT_CA_CERTIFICATES.with(|certificates| match &*certificates.borrow() {
+    TLS_DEFAULT_CA_CERTIFICATES.with(|certificates| match certificates.borrow().clone() {
         None => TlsTrust {
             use_bundled: true,
             pem_certificates: Vec::new(),
         },
         Some(certificates) => TlsTrust {
             use_bundled: false,
-            pem_certificates: certificates.clone(),
+            pem_certificates: array_values(&certificates)
+                .into_iter()
+                .map(|certificate| certificate.to_string())
+                .collect(),
         },
     })
 }
@@ -104,19 +110,41 @@ fn tls_ca_array(values: Vec<String>) -> JsArray<JsString> {
     array_new(values.into_iter().map(|value| string(&value)).collect())
 }
 
+fn tls_bundled_ca_array() -> JsArray<JsString> {
+    TLS_BUNDLED_CA_CERTIFICATES.with(|cached| {
+        cached
+            .borrow_mut()
+            .get_or_insert_with(|| tls_ca_array(tls_bundled_ca_certificates()))
+            .clone()
+    })
+}
+
+fn tls_system_ca_array() -> JsArray<JsString> {
+    TLS_SYSTEM_CA_CERTIFICATES.with(|cached| {
+        cached
+            .borrow_mut()
+            .get_or_insert_with(|| tls_ca_array(tls_bundled_ca_certificates()))
+            .clone()
+    })
+}
+
+fn tls_extra_ca_array() -> JsArray<JsString> {
+    TLS_EXTRA_CA_CERTIFICATES.with(|cached| {
+        cached
+            .borrow_mut()
+            .get_or_insert_with(|| tls_ca_array(tls_extra_ca_certificates()))
+            .clone()
+    })
+}
+
 pub fn tls_ca_get(kind: &JsString) -> JsArray<JsString> {
     match kind.as_ref() {
         "default" => TLS_DEFAULT_CA_CERTIFICATES.with(|certificates| {
-            tls_ca_array(
-                certificates
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(tls_bundled_ca_certificates),
-            )
+            certificates.borrow().clone().unwrap_or_else(tls_bundled_ca_array)
         }),
-        "bundled" => tls_ca_array(tls_bundled_ca_certificates()),
-        "system" => tls_ca_array(tls_bundled_ca_certificates()),
-        "extra" => tls_ca_array(tls_extra_ca_certificates()),
+        "bundled" => tls_bundled_ca_array(),
+        "system" => tls_system_ca_array(),
+        "extra" => tls_extra_ca_array(),
         value => throw_type_error_code(
             format!("The argument 'type' is invalid. Received '{value}'"),
             "ERR_INVALID_ARG_VALUE",
@@ -125,7 +153,7 @@ pub fn tls_ca_get(kind: &JsString) -> JsArray<JsString> {
 }
 
 pub fn tls_ca_root() -> JsArray<JsString> {
-    tls_ca_array(tls_bundled_ca_certificates())
+    tls_bundled_ca_array()
 }
 
 pub fn tls_ca_set_default(certificates: &JsArray<JsString>) {
@@ -143,13 +171,16 @@ pub fn tls_ca_set_default(certificates: &JsArray<JsString>) {
             .any(|certificate| !tls_split_pem_certificates(certificate).is_empty())
     {
         throw_error_code(
-            "Failed to parse certificate".to_string(),
+            "No valid certificates found in the provided array".to_string(),
             "ERR_CRYPTO_OPERATION_FAILED",
         );
     }
-    TLS_DEFAULT_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = Some(unique));
+    TLS_DEFAULT_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = Some(tls_ca_array(unique)));
 }
 
 fn tls_ca_finish() {
     TLS_DEFAULT_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
+    TLS_BUNDLED_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
+    TLS_SYSTEM_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
+    TLS_EXTRA_CA_CERTIFICATES.with(|stored| *stored.borrow_mut() = None);
 }
