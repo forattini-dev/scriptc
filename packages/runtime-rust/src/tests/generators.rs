@@ -24,3 +24,18 @@ fn generator_return_closes_an_unstarted_generator_without_running_it() {
     assert!(matches!(generator_return(&generator, Some(5.0)), GeneratorStep::Returned(Some(5.0))));
     assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(None)));
 }
+
+#[test]
+fn generator_throw_closes_an_unstarted_generator_and_preserves_the_reason() {
+    let generator: JsGenerator<f64, f64, ()> =
+        generator_new(|_, _| panic!("an unstarted generator body must not run on throw"));
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        generator_throw(&generator, caught_value(string("early")))
+    }))
+    .err()
+    .expect("throw on an unstarted generator must propagate");
+    let caught = caught_from_panic(payload);
+
+    assert_eq!(caught_narrow::<JsString>(&caught).as_ref(), "early");
+    assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(None)));
+}

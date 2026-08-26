@@ -363,7 +363,6 @@ export function emitRustGeneratorResume(
   if (expr.gen.type.kind !== "generator" || expr.type.kind !== "record") {
     context.unsupported("generator resume shape", expr.loc);
   }
-  if (expr.mode === "throw") context.unsupported("generator throw resume", expr.loc);
   const generatorType = expr.gen.type;
   const shape = context.records.get(expr.type.shapeId);
   const doneField = shape?.fields.find((field) => field.name === "done");
@@ -399,12 +398,15 @@ export function emitRustGeneratorResume(
   const argument = context.nextName("sc_generator_arg");
   let argumentExpr: string;
   if (expr.arg !== null) argumentExpr = emitExpr(expr.arg);
+  else if (expr.mode === "throw") context.unsupported("valueless generator throw", expr.loc);
   else if (expr.mode === "return") argumentExpr = "None";
   else if (generatorType.nextT.kind === "dyn") argumentExpr = `${context.dynTypeName()}::Undefined`;
   else if (generatorType.nextT.kind === "undefinedT" || generatorType.nextT.kind === "void") argumentExpr = "()";
   else context.unsupported("valueless generator next", expr.loc);
   const call = expr.mode === "next"
     ? `runtime::generator_next(&${generator}, ${argument})`
-    : `runtime::generator_return(&${generator}, ${expr.arg === null ? argument : `Some(${argument})`})`;
+    : expr.mode === "return"
+      ? `runtime::generator_return(&${generator}, ${expr.arg === null ? argument : `Some(${argument})`})`
+      : `runtime::generator_throw(&${generator}, runtime::caught_value(${argument}))`;
   return `{ let ${generator} = ${emitExpr(expr.gen)}; let ${argument} = ${argumentExpr}; match ${call} { ${yielded}, ${returned}, runtime::GeneratorStep::Returned(None) => ${record(true, undefinedValue)}, } }`;
 }
