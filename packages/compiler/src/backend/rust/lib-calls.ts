@@ -881,6 +881,32 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "path.win32Join" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::path_win32_join(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "path.win32Resolve" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_resolve(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32Normalize" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_normalize(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32Dirname" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_dirname(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32Extname" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_extname(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32IsAbsolute" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_is_absolute(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32ToNamespacedPath" && expr.args.length === 1 && arg !== undefined) {
+    return `runtime::path_win32_to_namespaced_path(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "path.win32Basename" && expr.args.length === 2 &&
+    arg !== undefined && secondArg !== undefined) {
+    return `runtime::path_win32_basename(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
+  if (expr.fn === "path.win32Relative" && expr.args.length === 2 &&
+    arg !== undefined && secondArg !== undefined) {
+    return `runtime::path_win32_relative(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "path.resolve" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::path_resolve(&(${context.emitExpr(arg)}))`;
   }

@@ -640,28 +640,6 @@
     }
 
     #[test]
-    fn windows_path_join_handles_drives_unc_and_dot_segments() {
-        let join = |parts: &[&str]| {
-            path_win32_join(&array_new(parts.iter().map(|part| string(part)).collect()))
-        };
-        for (parts, expected) in [
-            (&["C:\\ProgramData", "portless", "service"][..], "C:\\ProgramData\\portless\\service"),
-            (&["a", "..", "b", ".", "c"][..], "b\\c"),
-            (&["..", "..", "up"][..], "..\\..\\up"),
-            (&["C:\\", "windows\\..\\temp\\", ""][..], "C:\\temp\\"),
-            (&["\\\\server", "share", "folder"][..], "\\\\server\\share\\folder"),
-            (&["\\\\server\\share", "file.txt"][..], "\\\\server\\share\\file.txt"),
-            (&["/", "/foo", "bar/"][..], "\\foo\\bar\\"),
-            (&["C:", "file.txt"][..], "C:\\file.txt"),
-            (&[""][..], "."),
-            (&["", ""][..], "."),
-            (&[".", "x"][..], "x"),
-        ] {
-            assert_eq!(join(parts).as_ref(), expected);
-        }
-    }
-
-    #[test]
     fn net_auto_select_family_attempt_timeout_validates_and_clamps() {
         net_set_auto_select_family_attempt_timeout(300.0);
         assert_eq!(net_get_auto_select_family_attempt_timeout(), 300.0);

@@ -59,4 +59,5 @@ mod tests {
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
     include!("tests/language_and_heap.rs");
+    include!("tests/windows_paths.rs");
 }
