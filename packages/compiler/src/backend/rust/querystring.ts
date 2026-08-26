@@ -1,5 +1,40 @@
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
+interface RustLineContext {
+  line(value: string): void;
+  pushIndent(): void;
+  popIndent(): void;
+}
+
+export function emitRustQuerystringDynImpl(name: string, context: RustLineContext): void {
+  context.line(`impl runtime::QuerystringDyn for ${name} {`);
+  context.pushIndent();
+  context.line("fn querystring_object_entries(&self) -> Option<Vec<(runtime::JsString, Self)>> {");
+  context.pushIndent();
+  context.line("match self { Self::Object(value) => Some(runtime::map_string_entries_js_order(value)), _ => None }");
+  context.popIndent();
+  context.line("}");
+  context.line("fn querystring_array_values(&self) -> Option<Vec<Self>> {");
+  context.pushIndent();
+  context.line("match self { Self::Array(value) => Some(runtime::array_values(value)), _ => None }");
+  context.popIndent();
+  context.line("}");
+  context.line("fn querystring_scalar(&self) -> runtime::JsString {");
+  context.pushIndent();
+  context.line("match self {");
+  context.pushIndent();
+  context.line("Self::String(value) => value.clone(),");
+  context.line("Self::Number(value) if value.is_finite() => runtime::string(&runtime::format_number(*value)),");
+  context.line("Self::Boolean(value) => runtime::string(if *value { \"true\" } else { \"false\" }),");
+  context.line("_ => runtime::empty_string(),");
+  context.popIndent();
+  context.line("}");
+  context.popIndent();
+  context.line("}");
+  context.popIndent();
+  context.line("}");
+}
+
 export function emitRustQuerystringCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,

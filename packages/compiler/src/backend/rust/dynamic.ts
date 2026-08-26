@@ -4,6 +4,7 @@ import { mangleField } from "../mangle.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
+import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
@@ -104,32 +105,7 @@ export class RustDynamicEmitter {
     this.context.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`impl runtime::QuerystringDyn for ${name} {`);
-    this.context.pushIndent();
-    this.context.line("fn querystring_object_entries(&self) -> Option<Vec<(runtime::JsString, Self)>> {");
-    this.context.pushIndent();
-    this.context.line("match self { Self::Object(value) => Some(runtime::map_string_entries_js_order(value)), _ => None }");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("fn querystring_array_values(&self) -> Option<Vec<Self>> {");
-    this.context.pushIndent();
-    this.context.line("match self { Self::Array(value) => Some(runtime::array_values(value)), _ => None }");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("fn querystring_scalar(&self) -> runtime::JsString {");
-    this.context.pushIndent();
-    this.context.line("match self {");
-    this.context.pushIndent();
-    this.context.line("Self::String(value) => value.clone(),");
-    this.context.line("Self::Number(value) if value.is_finite() => runtime::string(&runtime::format_number(*value)),");
-    this.context.line("Self::Boolean(value) => runtime::string(if *value { \"true\" } else { \"false\" }),");
-    this.context.line("_ => runtime::empty_string(),");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
+    emitRustQuerystringDynImpl(name, this.context);
     this.context.line(`impl runtime::JsonValue for ${name} {`);
     this.context.pushIndent();
     this.context.line("fn write_json(&self, writer: &mut runtime::JsonWriter) {");
@@ -1084,6 +1060,20 @@ export class RustDynamicEmitter {
       }
       case "record": {
         const shape = this.context.records.get(type.shapeId);
+        if (shape?.tuple) {
+          const record = this.context.nextTemporary();
+          const output = this.context.nextTemporary();
+          const fields = [...shape.fields]
+            .sort((left, right) => Number(left.name) - Number(right.name))
+            .map((field) => {
+              const stored = `${record}.${mangleField(field.name)}`;
+              const fieldValue = this.context.isEdgeValue(field.type)
+                ? `${stored}.as_ref().expect("scriptc: cleared live dynamic tuple field").clone()`
+                : this.context.needsClone(field.type) ? `${stored}.clone()` : stored;
+              return `runtime::array_push(&${output}, ${this.emitDynFromValue(field.type, fieldValue, loc, "", liveRef)});`;
+            }).join(" ");
+          return `{ let ${record} = ${value}; let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${record}); ` : ""}${name}::Array(${output}) }`;
+        }
         if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
           return liveRef ? `{ let source = ${value}; let mirror = match sc_dyn_deep_copy(&${name}::Object(source.clone())) { ${name}::Object(value) => value, _ => unreachable!() }; runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Object(mirror) }` : `sc_dyn_deep_copy(&${name}::Object(${value}))`;
         }

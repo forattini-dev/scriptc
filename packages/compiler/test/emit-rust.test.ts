@@ -754,6 +754,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "913-records-index-iteration.ts",
   "991-process-exit.ts",
   "1423-text-codec.ts",
   "1445-exit-process-exit.ts",
@@ -902,6 +903,8 @@ test.each([
   "2462-qs-stringify.ts",
   "2463-qs-escape-unescape.ts",
   "2464-qs-require-forms.cjs",
+  "2471-record-keyed-write-hasown.js",
+  "2473-option-table-widths.js",
   "2485-inspect-circular-refs.ts",
   "2500-net-autosel-timeout.ts",
   "2558-rejection-events.cjs",
