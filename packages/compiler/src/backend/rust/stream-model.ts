@@ -10,6 +10,7 @@ export class RustStreamModel {
   usesReadable = false;
   usesWritable = false;
   usesDuplex = false;
+  usesTransform = false;
   readonly readableReadShapes = new Map<string, RustClosureShape>();
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
   readonly writableFinalShapes = new Map<string, RustClosureShape>();
@@ -18,6 +19,9 @@ export class RustStreamModel {
   readonly duplexWriteShapes = new Map<string, RustClosureShape>();
   readonly duplexFinalShapes = new Map<string, RustClosureShape>();
   readonly duplexDoneShapes = new Map<string, RustClosureShape>();
+  readonly transformCallbackShapes = new Map<string, RustClosureShape>();
+  readonly transformFlushShapes = new Map<string, RustClosureShape>();
+  readonly transformDoneShapes = new Map<string, RustClosureShape>();
 
   discover(
     node: StreamNode,
@@ -43,13 +47,35 @@ export class RustStreamModel {
       const args = node.args as StreamArgument[] | undefined;
       const receiver = args?.[0]?.type;
       const duplex = receiver?.kind === "object" && receiver.className === "%Duplex";
+      const transform = receiver?.kind === "object" && receiver.className === "%Transform";
       if (duplex) this.usesDuplex = true;
+      else if (transform) this.usesTransform = true;
       else this.usesWritable = true;
       const callback = args?.[2];
       if (callback === undefined) return true;
       if (callback.type?.kind !== "func") unsupported("malformed Writable write completion IR");
       const shape = ensureClosureShape(callback.type);
-      (duplex ? this.duplexDoneShapes : this.writableDoneShapes).set(typeKey(callback.type), shape);
+      (duplex ? this.duplexDoneShapes : transform ? this.transformDoneShapes : this.writableDoneShapes)
+        .set(typeKey(callback.type), shape);
+      return true;
+    }
+    if (node.fn === "transform.new") {
+      this.usesTransform = true;
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[7];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported("malformed Transform callback flags IR");
+      }
+      let callbackIndex = 8;
+      for (let bit = 0; bit < 3; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed Transform callback IR");
+        const shape = ensureClosureShape(callback.type);
+        if (bit === 0) this.transformCallbackShapes.set(typeKey(callback.type), shape);
+        if (bit === 1) this.transformFlushShapes.set(typeKey(callback.type), shape);
+        if (bit <= 1) this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+      }
       return true;
     }
     if (node.fn === "duplex.new") {

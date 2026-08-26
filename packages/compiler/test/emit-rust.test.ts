@@ -797,6 +797,7 @@ test.each([
   "1688-stream-writable-basics.ts",
   "1689-stream-writable-async-drain.ts",
   "1690-stream-duplex.ts",
+  "1691-stream-transform.ts",
   "1696-stream-read-inside-read.ts",
   "1697-stream-tick-vs-timer.ts",
   "1698-stream-uncaught-error.ts",

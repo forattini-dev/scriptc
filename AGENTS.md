@@ -30,6 +30,19 @@ contend for cores. Direct local runs default to two workers, two nested native
 compiler jobs per worker, and one Cargo job. Full local suites share one
 cross-lane advisory lock.
 
+On a workstation that must remain responsive, wrap focused or local commands
+with the repository's hard resource limiter:
+
+```bash
+pnpm limit -- pnpm exec vitest run <test-file> -t <focused-test> --maxWorkers=1
+```
+
+The wrapper uses a transient user cgroup and defaults to half of one CPU, a
+2 GiB memory-high threshold, a 3 GiB hard memory limit, no swap, and one test,
+native compiler, and Cargo worker. Override the ceilings only through the
+documented `SCRIPTC_LIMIT_*` environment variables when the machine has spare
+capacity.
+
 Corpus programs are differential tests against Node: every program runs under Node and as a compiled native binary, and stdout, stderr, and exit codes must match byte-for-byte. A new feature lands with corpus programs that pin its behavior both ways.
 
 Test location follows scope:
