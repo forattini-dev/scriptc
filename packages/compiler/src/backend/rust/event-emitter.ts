@@ -11,6 +11,7 @@ export interface RustEventEmitterContext {
   classMeta(name: string, loc?: SrcLoc): RustClassMeta;
   isEmitterClass(name: string): boolean;
   isUsed(): boolean;
+  usesProcessExitListeners(): boolean;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -63,6 +64,7 @@ export class RustEventEmitterEmitter {
     this.context.line("");
     this.emitMetaDispatchHelper();
     this.emitSnapshotDispatchHelpers();
+    this.emitProcessExitDefinitions();
   }
 
   emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
@@ -119,6 +121,11 @@ export class RustEventEmitterEmitter {
       case "emitter.setDefaultMax": return this.emitSetDefaultMax(expr);
       case "emitter.setDefaultMaxChk": return this.emitSetDefaultMaxChecked(expr);
       case "emitter.getDefaultMax": return this.emitGetDefaultMax(expr);
+      case "process.onExit": return this.emitProcessOnExit(expr);
+      case "process.offExit": return this.emitProcessOffExit(expr);
+      case "process.exit": return this.context.usesProcessExitListeners()
+        ? this.emitProcessExit(expr)
+        : null;
       default: return null;
     }
   }
@@ -326,6 +333,71 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("EventEmitter default max-listeners read shape", expr.loc);
     }
     return "runtime::emitter_get_default_max()";
+  }
+
+  private emitProcessOnExit(expr: RustLibCallExpr): string {
+    const [callback, once] = expr.args;
+    if (callback?.type.kind !== "func" || once?.type.kind !== "bool" || expr.args.length !== 2 ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("process exit listener registration shape", expr.loc);
+    }
+    const shape = this.listenerShape(callback.type, expr.loc);
+    const callbackValue = this.context.nextTemporary();
+    const onceValue = this.context.nextTemporary();
+    return `{ let ${callbackValue} = ${this.context.emitExpr(callback)}; let ${onceValue} = ${this.context.emitExpr(once)}; let sc_identity = ${this.functionIdentity(callbackValue, callback.type, expr.loc)}; SC_PROCESS_EXIT_LISTENERS.with(|listeners| listeners.borrow_mut().push((ScEmitterListener::${this.listenerVariant(shape)}(${callbackValue}), sc_identity, ${onceValue}))); () }`;
+  }
+
+  private emitProcessOffExit(expr: RustLibCallExpr): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "func" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process exit listener removal shape", expr.loc);
+    }
+    const callbackValue = this.context.nextTemporary();
+    return `{ let ${callbackValue} = ${this.context.emitExpr(callback)}; let sc_identity = ${this.functionIdentity(callbackValue, callback.type, expr.loc)}; SC_PROCESS_EXIT_LISTENERS.with(|listeners| { let mut listeners = listeners.borrow_mut(); if let Some(index) = listeners.iter().rposition(|(_, identity, _)| *identity == sc_identity) { listeners.remove(index); } }); () }`;
+  }
+
+  private emitProcessExit(expr: RustLibCallExpr): string {
+    const [code] = expr.args;
+    if (code?.type.kind !== "f64" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process exit shape", expr.loc);
+    }
+    return `sc_process_exit(${this.context.emitExpr(code)})`;
+  }
+
+  private emitProcessExitDefinitions(): void {
+    if (!this.context.usesProcessExitListeners()) return;
+    const loc = this.context.sourceLoc();
+    const arms: string[] = [];
+    for (const shape of this.context.listenerShapes.values()) {
+      if (shape.type.rest === true || shape.type.params.length > 1) continue;
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind !== "f64") continue;
+      const args = shape.type.params.length === 0 ? [] : ["sc_code"];
+      const dispatch = this.context.emitClosureDispatch("callback", shape.type, args, loc);
+      arms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
+    }
+    arms.push("_ => unreachable!(\"scriptc invariant: process exit listener signature\"),");
+    this.context.line("thread_local! {");
+    this.context.pushIndent();
+    this.context.line("static SC_PROCESS_EXIT_LISTENERS: std::cell::RefCell<Vec<(ScEmitterListener, usize, bool)>> = const { std::cell::RefCell::new(Vec::new()) };");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_run_exit(sc_code: f64) {");
+    this.context.pushIndent();
+    this.context.line("let sc_listeners = SC_PROCESS_EXIT_LISTENERS.with(|listeners| std::mem::take(&mut *listeners.borrow_mut()));");
+    this.context.line("for (sc_callback, _, _) in sc_listeners {");
+    this.context.pushIndent();
+    this.context.line(`match sc_callback { ${arms.join(" ")} }`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_exit(sc_code: f64) -> ! {");
+    this.context.pushIndent();
+    this.context.line("sc_process_run_exit(sc_code);");
+    this.context.line("runtime::process_exit(sc_code)");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("");
   }
 
   private listenerArguments(

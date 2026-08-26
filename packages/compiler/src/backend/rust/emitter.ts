@@ -23,8 +23,8 @@ import { RustFunctionValueEmitter } from "./function-values.js";
 import { RustDefinitionEmitter } from "./definitions.js";
 import { RustMetadata } from "./metadata.js";
 import { RustEventEmitterEmitter } from "./event-emitter.js";
+import { emitRustProgramEntry } from "./program-entry.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
-import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
@@ -83,6 +83,7 @@ class RustEmitter {
   private usesDyn = false;
   private usesDynamicInvoke = false;
   private usesEventEmitter = false;
+  private usesProcessExitListeners = false;
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
     emitExpr: (expr) => this.emitExpr(expr),
@@ -137,6 +138,7 @@ class RustEmitter {
     classMeta: (name, loc) => this.classMetaOf(name, loc),
     isEmitterClass: (name) => this.isEmitterClass(name),
     isUsed: () => this.usesEventEmitter,
+    usesProcessExitListeners: () => this.usesProcessExitListeners,
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
     popIndent: () => { this.indent -= 1; },
@@ -507,48 +509,16 @@ class RustEmitter {
     if (entry.params.length !== 0 || entry.returnType.kind !== "void") {
       this.unsupported("entry signature", entry.loc);
     }
-    this.line("fn main() {");
-    this.indent += 1;
-    this.line("runtime::init();");
-    this.line("let _sc_execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
-    this.indent += 1;
-    this.line(entry.async
-      ? `let _sc_main_promise = ${mangleFunction(entry.name)}();`
-      : `${mangleFunction(entry.name)}();`);
-    this.line("runtime::run_event_loop();");
-    this.line("let _sc_unhandled_rejection = runtime::had_unhandled_rejection();");
-    if (entry.async) this.line("drop(_sc_main_promise);");
-    this.line("_sc_unhandled_rejection");
-    this.indent -= 1;
-    this.line("}));");
-    this.line("let (_sc_unhandled_rejection, _sc_uncaught) = match _sc_execution {");
-    this.indent += 1;
-    this.line("Ok(unhandled) => (unhandled, None),");
-    this.line("Err(payload) => {");
-    this.indent += 1;
-    this.line("let caught = runtime::caught_from_panic(payload);");
-    this.line(`let message = ${this.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string"}(&caught);`);
-    this.line("drop(caught);");
-    this.line("(false, Some(message))");
-    this.indent -= 1;
-    this.line("},");
-    this.indent -= 1;
-    this.line("};");
-    for (const global of this.globals.values()) {
-      if (this.isHeapRoot(global.type)) {
-        this.line(`${mangleGlobal(global.id)}.with(|slot| *slot.borrow_mut() = None);`);
-      }
-    }
-    for (const fnName of this.internedClosureTargets) {
-      this.line(`${mangleFnClosure(fnName)}.with(|slot| *slot.borrow_mut() = None);`);
-    }
-    if (this.usesDyn) this.line("sc_dyn_error_cache_clear();");
-    if (this.usesDynamicInvoke) this.line("sc_dyn_function_cache_clear();");
-    this.line("runtime::finish();");
-    this.line("if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }");
-    this.line("if _sc_unhandled_rejection { std::process::exit(1); }");
-    this.indent -= 1;
-    this.line("}");
+    this.lines.push(...emitRustProgramEntry({
+      entryName: entry.name,
+      entryAsync: entry.async === true,
+      hasErrorClasses: this.errorClassRoots().length !== 0,
+      heapGlobalIds: [...this.globals.values()].filter((global) => this.isHeapRoot(global.type)).map((global) => global.id),
+      internedClosureNames: [...this.internedClosureTargets],
+      usesDyn: this.usesDyn,
+      usesDynamicInvoke: this.usesDynamicInvoke,
+      usesProcessExitListeners: this.usesProcessExitListeners,
+    }));
     return `${this.lines.join("\n")}\n`;
   }
   private checkModuleSurface(): void {
@@ -645,6 +615,14 @@ class RustEmitter {
           const shape = this.ensureClosureShape(result.elem);
           this.emitterSnapshotShapes.set(typeKey(result.elem), shape);
         }
+      }
+      if (node.kind === "libCall" && (node.fn === "process.onExit" || node.fn === "process.offExit")) {
+        this.usesEventEmitter = true;
+        this.usesProcessExitListeners = true;
+        const callback = (node.args as { type?: IrType }[] | undefined)?.[0];
+        if (callback?.type?.kind !== "func") this.unsupported("malformed process exit listener IR");
+        const shape = this.ensureClosureShape(callback.type);
+        this.emitterListenerShapes.set(typeKey(callback.type), shape);
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {

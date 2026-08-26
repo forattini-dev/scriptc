@@ -363,13 +363,17 @@ pub fn process_available_memory() -> f64 {
 
 pub fn run_event_loop() {
     let mut turn = 0_u64;
+    let mut first_checkpoint = true;
     loop {
         EVENT_TURN.with(|current| current.set(turn));
-        let next_tick = NEXT_TICKS.with(|tasks| tasks.borrow_mut().pop_front());
-        if let Some(next_tick) = next_tick {
-            EVENT_PHASE.with(|phase| phase.set(4));
-            next_tick();
-            continue;
+        let skip_ticks = std::mem::replace(&mut first_checkpoint, false);
+        if !skip_ticks {
+            let next_tick = NEXT_TICKS.with(|tasks| tasks.borrow_mut().pop_front());
+            if let Some(next_tick) = next_tick {
+                EVENT_PHASE.with(|phase| phase.set(4));
+                next_tick();
+                continue;
+            }
         }
         let mut microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
         if microtask.is_some() {
@@ -378,6 +382,9 @@ pub fn run_event_loop() {
                 callback();
                 microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
             }
+            continue;
+        }
+        if skip_ticks && NEXT_TICKS.with(|tasks| !tasks.borrow().is_empty()) {
             continue;
         }
 
