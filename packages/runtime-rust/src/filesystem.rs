@@ -257,27 +257,6 @@ pub fn fs_realpath(path: &JsString) -> JsString {
     }
 }
 
-pub fn os_tmpdir() -> JsString {
-    let value = std::env::var_os("TMPDIR")
-        .or_else(|| std::env::var_os("TMP"))
-        .or_else(|| std::env::var_os("TEMP"))
-        .map(|value| value.to_string_lossy().into_owned())
-        .unwrap_or_else(|| {
-            if cfg!(target_os = "windows") {
-                "."
-            } else {
-                "/tmp"
-            }
-            .to_owned()
-        });
-    let trimmed = if value.len() > 1 {
-        value.trim_end_matches(['/', '\\'])
-    } else {
-        value.as_str()
-    };
-    Rc::from(trimmed)
-}
-
 pub fn fs_mkdtemp(prefix: &JsString) -> JsString {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);

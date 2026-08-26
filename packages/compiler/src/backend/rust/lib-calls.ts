@@ -479,6 +479,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fs.realpathSync" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_realpath(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "os.homedir" && expr.args.length === 0) return "runtime::os_homedir()";
   if (expr.fn === "os.tmpdir" && expr.args.length === 0) return "runtime::os_tmpdir()";
   if (expr.fn === "fs.mkdtempSync" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_mkdtemp(&(${context.emitExpr(arg)}))`;
