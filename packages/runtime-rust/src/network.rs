@@ -70,6 +70,7 @@ struct NetWrite {
 pub struct NetSocketData {
     stream: Option<std::net::TcpStream>,
     connect_rx: Option<std::sync::mpsc::Receiver<Result<std::net::TcpStream, String>>>,
+    tls: Option<TlsSocketState>,
     server: Option<JsNetServer>,
     destroyed: bool,
     writable: bool,
@@ -123,6 +124,7 @@ impl ClearEdges for NetSocketData {
     fn clear_edges(&mut self) {
         self.stream = None;
         self.connect_rx = None;
+        self.tls = None;
         self.server = None;
         self.destroyed = true;
         self.writable = false;
@@ -224,6 +226,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
     let socket = Gc::new(NetSocketData {
         stream: Some(stream),
         connect_rx: None,
+        tls: None,
         server,
         destroyed: false,
         writable: true,
@@ -432,6 +435,7 @@ pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
     let socket = Gc::new(NetSocketData {
         stream: None,
         connect_rx: Some(receiver),
+        tls: None,
         server: None,
         destroyed: false,
         writable: true,
@@ -679,6 +683,7 @@ pub fn net_socket_destroy(socket: &JsNetSocket) {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         socket.connect_rx = None;
+        socket.tls = None;
         socket.destroyed = true;
         socket.writable = false;
         socket.write_queue.clear();
@@ -782,6 +787,7 @@ fn net_dispatch_task(task: NetTask) {
                 socket.destroyed = true;
                 socket.writable = false;
                 socket.stream = None;
+                socket.tls = None;
                 socket.write_queue.clear();
                 socket.finish_listeners.clear();
                 socket.data_listeners.clear();
@@ -847,7 +853,11 @@ fn net_socket_connect_one() -> bool {
                         match stream.set_nonblocking(true) {
                             Ok(()) => {
                                 socket.stream = Some(stream);
-                                Some(NetTask::SocketConnect(candidate.clone()))
+                                if socket.tls.is_some() {
+                                    None
+                                } else {
+                                    Some(NetTask::SocketConnect(candidate.clone()))
+                                }
                             }
                             Err(error) => Some(NetTask::SocketError(
                                 candidate.clone(),
@@ -896,6 +906,9 @@ fn net_socket_flush_one() -> bool {
                     return Flush::Idle;
                 }
                 if socket.connect_rx.is_some() {
+                    return Flush::Idle;
+                }
+                if socket.tls.is_some() {
                     return Flush::Idle;
                 }
                 if let Some(write) = socket.write_queue.front() {
@@ -987,6 +1000,9 @@ fn net_socket_read_one() -> bool {
                 if socket.connect_rx.is_some() {
                     return None;
                 }
+                if socket.tls.is_some() {
+                    return None;
+                }
                 let Some(stream) = socket.stream.as_mut() else {
                     return Some(ReadEvent::Close(candidate.clone()));
                 };
@@ -1061,6 +1077,7 @@ fn net_dispatch_one() -> bool {
     http_tls_dispatch_one()
         || net_accept_one()
         || net_socket_connect_one()
+        || tls_socket_dispatch_one()
         || net_socket_flush_one()
         || net_socket_read_one()
 }

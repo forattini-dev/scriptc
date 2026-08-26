@@ -90,6 +90,16 @@ fn tls_explicit_trust(ca: String) -> TlsTrust {
     }
 }
 
+fn tls_option_trust(ca: Option<String>) -> TlsTrust {
+    match ca {
+        None => tls_default_trust(),
+        Some(ca) => TlsTrust {
+            use_bundled: false,
+            pem_certificates: vec![ca],
+        },
+    }
+}
+
 fn tls_ca_array(values: Vec<String>) -> JsArray<JsString> {
     array_new(values.into_iter().map(|value| string(&value)).collect())
 }

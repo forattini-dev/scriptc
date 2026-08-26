@@ -9,11 +9,18 @@ enum TlsPeerShape {
     SelfSignedInChain,
 }
 
+#[derive(Debug, Default)]
+struct TlsVerifyState {
+    peer_shape: TlsPeerShape,
+    checked: bool,
+    authorization_error: Option<String>,
+}
+
 #[derive(Debug)]
 struct ScriptcServerVerifier {
     inner: Option<Arc<dyn rustls::client::danger::ServerCertVerifier>>,
     algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
-    peer_shape: Arc<Mutex<TlsPeerShape>>,
+    state: Arc<Mutex<TlsVerifyState>>,
     reject_unauthorized: bool,
 }
 
@@ -36,18 +43,30 @@ impl rustls::client::danger::ServerCertVerifier for ScriptcServerVerifier {
         } else {
             TlsPeerShape::LeafOnly
         };
-        *self
-            .peer_shape
-            .lock()
-            .expect("scriptc: TLS peer-shape lock poisoned") = shape;
-        match &self.inner {
+        let verdict = match &self.inner {
             Some(inner) => {
                 inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
             }
-            None if self.reject_unauthorized => Err(rustls::Error::InvalidCertificate(
+            None => Err(rustls::Error::InvalidCertificate(
                 rustls::CertificateError::UnknownIssuer,
             )),
-            None => Ok(rustls::client::danger::ServerCertVerified::assertion()),
+        };
+        {
+            let mut state = self
+                .state
+                .lock()
+                .expect("scriptc: TLS verify-state lock poisoned");
+            state.peer_shape = shape;
+            state.checked = true;
+            state.authorization_error = verdict
+                .as_ref()
+                .err()
+                .map(|error| tls_authorization_code(error, shape));
+        }
+        if self.reject_unauthorized {
+            verdict
+        } else {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
         }
     }
 
@@ -168,11 +187,11 @@ fn tls_roots(trust: &TlsTrust) -> Result<rustls::RootCertStore, String> {
 fn tls_config(
     trust: &TlsTrust,
     reject_unauthorized: bool,
-    peer_shape: Arc<Mutex<TlsPeerShape>>,
+    state: Arc<Mutex<TlsVerifyState>>,
 ) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let roots = Arc::new(tls_roots(trust)?);
-    let inner = if reject_unauthorized && !roots.is_empty() {
+    let inner = if !roots.is_empty() {
         Some(
             rustls::client::WebPkiServerVerifier::builder_with_provider(roots, provider.clone())
                 .build()
@@ -185,7 +204,7 @@ fn tls_config(
     let verifier = Arc::new(ScriptcServerVerifier {
         inner,
         algorithms: provider.signature_verification_algorithms,
-        peer_shape,
+        state,
         reject_unauthorized,
     });
     let config = rustls::ClientConfig::builder_with_provider(provider)
@@ -195,6 +214,29 @@ fn tls_config(
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     Ok(config)
+}
+
+fn tls_authorization_code(error: &rustls::Error, peer_shape: TlsPeerShape) -> String {
+    match error {
+        rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer) => {
+            match peer_shape {
+                TlsPeerShape::SelfSigned => "DEPTH_ZERO_SELF_SIGNED_CERT",
+                TlsPeerShape::SelfSignedInChain => "SELF_SIGNED_CERT_IN_CHAIN",
+                _ => "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+            }
+        }
+        rustls::Error::InvalidCertificate(rustls::CertificateError::Expired) => {
+            "CERT_HAS_EXPIRED"
+        }
+        rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidYet) => {
+            "CERT_NOT_YET_VALID"
+        }
+        rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForName) => {
+            "ERR_TLS_CERT_ALTNAME_INVALID"
+        }
+        _ => "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    }
+    .to_string()
 }
 
 fn tls_error_message(error: &std::io::Error, peer_shape: TlsPeerShape) -> String {
@@ -304,8 +346,8 @@ fn tls_exchange(
     timeout: f64,
     request: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let peer_shape = Arc::new(Mutex::new(TlsPeerShape::Unknown));
-    let config = tls_config(&trust, reject_unauthorized, peer_shape.clone())?;
+    let verify_state = Arc::new(Mutex::new(TlsVerifyState::default()));
+    let config = tls_config(&trust, reject_unauthorized, verify_state.clone())?;
     let server_name = rustls::pki_types::ServerName::try_from(host.clone())
         .map_err(|_| format!("Invalid SNI name: {host}"))?;
     let mut socket = std::net::TcpStream::connect((host.as_str(), port))
@@ -326,9 +368,10 @@ fn tls_exchange(
         .map_err(|error| error.to_string())?;
     while connection.is_handshaking() {
         if let Err(error) = connection.complete_io(&mut socket) {
-            let shape = *peer_shape
+            let shape = verify_state
                 .lock()
-                .expect("scriptc: TLS peer-shape lock poisoned");
+                .expect("scriptc: TLS verify-state lock poisoned")
+                .peer_shape;
             return Err(tls_error_message(&error, shape));
         }
     }

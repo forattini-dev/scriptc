@@ -351,6 +351,20 @@ export function emitRustNetCall(
       : "net_socket_writable";
     return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}))`;
   }
+  if ((expr.fn === "net.sockRemoteAddress" || expr.fn === "net.sockEncrypted") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "netSocket" &&
+      expr.type.kind === "union") {
+    const union = context.union(expr.type.unionId, expr.loc);
+    const valueKind = expr.fn === "net.sockRemoteAddress" ? "string" : "bool";
+    const valueTag = union.arms.findIndex((arm) => arm.kind === valueKind);
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (valueTag < 0 || undefinedTag < 0) context.unsupported(`${expr.fn} result`, expr.loc);
+    const helper = expr.fn === "net.sockRemoteAddress"
+      ? "net_socket_remote_address"
+      : "tls_socket_encrypted";
+    const name = context.unionName(union.id);
+    return `match runtime::${helper}(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(valueTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
   if (expr.fn === "net.sockOnData" && expr.args.length === 3) {
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("net.sockOnData callback", expr.loc);

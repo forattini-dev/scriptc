@@ -68,6 +68,7 @@ test.each([
   "https-client-chain",
   "https-client-url",
   "https-ca-default",
+  "tls-client-connect",
 ])("Rust TLS client matches Node over real HTTPS: %s", async (fixture) => {
   const fixtureRoot = resolve("tests/fixtures/server/cases", fixture);
   const entry = join(fixtureRoot, "main.ts");

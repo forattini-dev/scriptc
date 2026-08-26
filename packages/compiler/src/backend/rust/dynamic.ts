@@ -475,6 +475,9 @@ export class RustDynamicEmitter {
     this.context.line(`"readable" => ${name}::Boolean(runtime::net_socket_readable(socket)),`);
     this.context.line(`"bytesWritten" => ${name}::Number(runtime::net_socket_bytes_written(socket)),`);
     this.context.line(`"remoteAddress" => runtime::net_socket_remote_address(socket).map(${name}::String).unwrap_or(${name}::Undefined),`);
+    this.context.line(`"encrypted" => runtime::tls_socket_encrypted(socket).map(${name}::Boolean).unwrap_or(${name}::Undefined),`);
+    this.context.line(`"authorized" => ${name}::Boolean(runtime::tls_socket_authorized(socket)),`);
+    this.context.line(`"authorizationError" => runtime::tls_socket_authorization_error(socket).map(${name}::String).unwrap_or(${name}::Null),`);
     this.context.line(`_ => ${name}::Undefined,`);
     this.context.popIndent();
     this.context.line("},");

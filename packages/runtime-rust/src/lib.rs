@@ -59,6 +59,7 @@ include!("http.rs");
 include!("http_client.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
+include!("tls_socket.rs");
 include!("util_parse_args.rs");
 
 #[cfg(test)]
