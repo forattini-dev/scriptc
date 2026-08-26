@@ -183,6 +183,7 @@ export class RustFunctionValueEmitter {
     if (type.kind === "f64") return `runtime::number_to_string(${operand})`;
     if (type.kind === "bool") return `runtime::bool_to_string(${operand})`;
     if (type.kind === "dyn") return `sc_dyn_to_string(&(${operand}))`;
+    if (type.kind === "record") return `{ let _ = ${operand}; runtime::string("[object Object]") }`;
     if (type.kind === "caught") {
       const helper = this.context.errorClassRoots().length === 0 ? "runtime::caught_to_string" : "sc_caught_to_string";
       return `${helper}(&(${operand}))`;
