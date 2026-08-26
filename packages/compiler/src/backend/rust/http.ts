@@ -84,6 +84,28 @@ function emitIncomingEndListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_request_on_end(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitResponseCallback(
+  callbackExpr: RustLibCallExpr["args"][number],
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+  expr: RustLibCallExpr,
+  runtimeCall: (invoke: string, trace: string) => string,
+): string {
+  const parameter = callbackType.params[0];
+  if (callbackType.params.length > 1 || (parameter !== undefined && parameter.kind !== "httpReq")) {
+    context.unsupported("HTTP response callback parameter", expr.loc);
+  }
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(
+    callback,
+    callbackType,
+    parameter === undefined ? [] : ["sc_response"],
+    expr.loc,
+  );
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); ${runtimeCall(`std::rc::Rc::new(move |sc_response| { let _ = ${dispatch}; })`, `std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))`)} }`;
+}
+
 export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -164,6 +186,65 @@ export function emitRustHttpCall(
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.reqOnEnd callback", expr.loc);
     return emitIncomingEndListener(expr, callbackType, context);
+  }
+  if (expr.fn === "http.reqStatusCode" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpReq") {
+    if (expr.type.kind !== "union") context.unsupported("http.reqStatusCode result", expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const numberTag = union.arms.findIndex((arm) => arm.kind === "f64");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (numberTag < 0 || undefinedTag < 0) context.unsupported("http.reqStatusCode result union", expr.loc);
+    const name = context.unionName(union.id);
+    return `match runtime::http_request_status_code(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(numberTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
+  if ((expr.fn === "http.request" || expr.fn === "http.requestCb") &&
+      (expr.args.length === 7 || expr.args.length === 8)) {
+    const [host, port, path, method, timeout, headers, autoEnd, callbackExpr] = expr.args;
+    if (host?.type.kind !== "string" || port?.type.kind !== "f64" || path?.type.kind !== "string" ||
+        method?.type.kind !== "string" || timeout?.type.kind !== "f64" || headers?.type.kind !== "array" ||
+        headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const args = `&(${context.emitExpr(host)}), ${context.emitExpr(port)}, &(${context.emitExpr(path)}), &(${context.emitExpr(method)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(headers)}), ${context.emitExpr(autoEnd)}`;
+    if (expr.fn === "http.request") {
+      return `runtime::http_client_request(${args})`;
+    }
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("http.requestCb callback", expr.loc);
+    }
+    return emitResponseCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::http_client_request_callback(${args}, ${invoke}, ${trace})`);
+  }
+  if (expr.fn === "http.clientOnResponse" && expr.args.length === 3) {
+    const [receiver, callbackExpr, once] = expr.args;
+    const callbackType = callbackExpr?.type;
+    if (receiver?.type.kind !== "httpClientReq" || callbackExpr === undefined ||
+        callbackType?.kind !== "func" || once?.type.kind !== "bool") {
+      context.unsupported("http.clientOnResponse shape", expr.loc);
+    }
+    return emitResponseCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::http_client_on_response(&(${context.emitExpr(receiver)}), ${invoke}, ${trace}, ${context.emitExpr(once)});`);
+  }
+  if ((expr.fn === "http.clientWrite" || expr.fn === "http.clientEndStr") &&
+      expr.args.length === 2 && expr.args[0]?.type.kind === "httpClientReq" &&
+      expr.args[1]?.type.kind === "string") {
+    const fn = expr.fn === "http.clientWrite" ? "http_client_write_str" : "http_client_end_str";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
+  if ((expr.fn === "http.clientWriteBytes" || expr.fn === "http.clientEndBytes") &&
+      expr.args.length === 2 && expr.args[0]?.type.kind === "httpClientReq" &&
+      expr.args[1]?.type.kind === "bytes" && expr.args[1].type.elem === "u8") {
+    const fn = expr.fn === "http.clientWriteBytes" ? "http_client_write_bytes" : "http_client_end_bytes";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
+  if ((expr.fn === "http.clientEnd" || expr.fn === "http.clientDestroy" ||
+      expr.fn === "http.clientDestroyed") && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpClientReq") {
+    const fn = expr.fn === "http.clientEnd" ? "http_client_end"
+      : expr.fn === "http.clientDestroy" ? "http_client_destroy"
+      : "http_client_destroyed";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}))`;
   }
   if (expr.fn === "http.serverJoinDupHeaders" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "netServer") {

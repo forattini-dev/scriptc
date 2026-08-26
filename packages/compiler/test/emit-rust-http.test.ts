@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 test.each([
   "1543-set-server-handles.ts",
+  "1750-http-agent-options.ts",
   "2696-http-server-net-roundtrip.ts",
   "2689-http-server-timeout-properties.ts",
 ])("Rust HTTP corpus matches Node: %s", async (fixtureName) => {
