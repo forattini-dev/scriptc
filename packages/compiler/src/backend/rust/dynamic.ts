@@ -621,6 +621,37 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_obj_keys(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 0) }`);
     this.context.line(`fn sc_dyn_obj_values(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 1) }`);
     this.context.line(`fn sc_dyn_obj_entries(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 2) }`);
+    this.context.line(`fn sc_dyn_assign_from(target: &${name}, source: &${name}) {`);
+    this.context.pushIndent();
+    this.context.line(`let ${name}::Object(target) = target else { return; };`);
+    this.context.line("match source {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Object(source) => {`);
+    this.context.pushIndent();
+    this.context.line("let mut index = 0.0;");
+    this.context.line("while index < runtime::map_iter_count(source) {");
+    this.context.pushIndent();
+    this.context.line("if runtime::map_iter_live(source, index) { let key = runtime::map_iter_key(source, index); let value = runtime::map_iter_value(source, index); runtime::map_set_by(target, key, value, |left, right| left.as_ref() == right.as_ref()); }");
+    this.context.line("index += 1.0;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`${name}::Array(source) => { let mut index = 0.0; while index < runtime::array_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), runtime::array_get(source, index), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
+    this.context.line(`${name}::Bytes(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
+    this.context.line(`${name}::String(source) => for (index, character) in source.chars().enumerate() { runtime::map_set_by(target, runtime::string(&index.to_string()), ${name}::String(runtime::string(&character.to_string())), |left, right| left.as_ref() == right.as_ref()); },`);
+    this.context.line("_ => {},");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_assign(target: &${name}, source: &${name}) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line(`if matches!(target, ${name}::Undefined | ${name}::Null) { runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()); }`);
+    this.context.line("sc_dyn_assign_from(target, source);");
+    this.context.line("target.clone() ");
+    this.context.popIndent();
+    this.context.line("}");
   }
 
   emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {
