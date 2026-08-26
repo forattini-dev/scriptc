@@ -53,37 +53,117 @@ thread_local! {
 }
 
 pub fn child_spawn(command: &JsString, arguments: &JsArray<JsString>) -> JsChild {
-    use std::process::{Command, Stdio};
+    child_spawn_options(
+        command,
+        arguments,
+        0.0,
+        0.0,
+        0.0,
+        false,
+        false,
+        &array_new(Vec::new()),
+        &string(""),
+    )
+}
+
+#[cfg(unix)]
+fn detached_launcher() -> Option<&'static str> {
+    ["/usr/bin/setsid", "/bin/setsid"]
+        .into_iter()
+        .find(|launcher| std::path::Path::new(launcher).is_file())
+}
+
+#[cfg(unix)]
+fn detached_program(command: &JsString, cwd: &JsString) -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let command_path = std::path::Path::new(command.as_ref());
+    let candidates: Vec<std::path::PathBuf> = if command_path.components().count() > 1 {
+        let candidate = if command_path.is_absolute() || cwd.is_empty() {
+            command_path.to_path_buf()
+        } else {
+            std::path::Path::new(cwd.as_ref()).join(command_path)
+        };
+        vec![candidate]
+    } else {
+        let path = process_env_get(&string("PATH")).unwrap_or_else(|| string("/bin:/usr/bin"));
+        std::env::split_paths(std::ffi::OsStr::new(path.as_ref()))
+            .map(|directory| directory.join(command_path))
+            .collect()
+    };
+    let mut permission_denied = false;
+    for candidate in candidates {
+        let Ok(metadata) = std::fs::metadata(&candidate) else {
+            continue;
+        };
+        if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+            return Ok(candidate);
+        }
+        permission_denied = true;
+    }
+    Err(std::io::Error::from_raw_os_error(if permission_denied {
+        13
+    } else {
+        2
+    }))
+}
+
+fn child_command(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    detached: bool,
+    cwd: &JsString,
+) -> std::io::Result<std::process::Command> {
+    use std::process::Command;
+
+    #[cfg(unix)]
+    if let Some(launcher) = detached.then(detached_launcher).flatten() {
+        let program = detached_program(command, cwd)?;
+        let mut child_command = Command::new(launcher);
+        child_command.arg(program);
+        arguments.with(|arguments| {
+            child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+        });
+        return Ok(child_command);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = detached;
+        let _ = cwd;
+    }
 
     let mut child_command = Command::new(command.as_ref());
-    process_env_apply(&mut child_command);
     arguments.with(|arguments| {
         child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
     });
-    child_command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    #[cfg(unix)]
+    if detached {
+        use std::os::unix::process::CommandExt;
+        child_command.process_group(0);
+    }
+    Ok(child_command)
+}
 
-    let (process, spawn_error, spawn_errno, pid) = match child_command.spawn() {
+fn child_spawn_error(command: &JsString, error: std::io::Error) -> JsError {
+    let code = fs_error_code(&error);
+    JsError {
+        identity: Rc::new(()),
+        name: "Error".to_owned(),
+        message: format!("spawn {command} {code}"),
+        code: Some(code.to_owned()),
+        dom: None,
+    }
+}
+
+fn child_register(command: &JsString, spawned: std::io::Result<std::process::Child>) -> JsChild {
+    let (process, spawn_error, spawn_errno, pid) = match spawned {
         Ok(child) => {
             let pid = child.id();
             (Some(child), None, None, Some(pid))
         }
         Err(error) => {
-            let code = fs_error_code(&error);
-            (
-                None,
-                Some(JsError {
-                    identity: Rc::new(()),
-                    name: "Error".to_owned(),
-                    message: format!("spawn {command} {code}"),
-                    code: Some(code.to_owned()),
-                    dom: None,
-                }),
-                error.raw_os_error(),
-                None,
-            )
+            let errno = error.raw_os_error();
+            (None, Some(child_spawn_error(command, error)), errno, None)
         }
     };
     let child = Gc::new(ChildData {
@@ -100,6 +180,64 @@ pub fn child_spawn(command: &JsString, arguments: &JsArray<JsString>) -> JsChild
     });
     ASYNC_CHILDREN.with(|children| children.borrow_mut().push(child.clone()));
     child
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn child_spawn_options(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+    detached: bool,
+    has_env: bool,
+    env_pairs: &JsArray<JsString>,
+    cwd: &JsString,
+) -> JsChild {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let stdin_mode = to_int32(stdin_mode);
+    let stdout_mode = to_int32(stdout_mode);
+    let stderr_mode = to_int32(stderr_mode);
+    if stdout_mode == 1 || stderr_mode == 1 {
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+    }
+    let mut child_command = match child_command(command, arguments, detached, cwd) {
+        Ok(child_command) => child_command,
+        Err(error) => return child_register(command, Err(error)),
+    };
+    if has_env {
+        child_command.env_clear();
+        env_pairs.with(|pairs| {
+            for pair in pairs.elements.chunks_exact(2) {
+                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            }
+        });
+    } else {
+        process_env_apply(&mut child_command);
+    }
+    if !cwd.is_empty() {
+        child_command.current_dir(cwd.as_ref());
+    }
+    child_command.stdin(if stdin_mode == 1 {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    });
+    child_command.stdout(if stdout_mode == 1 {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    });
+    child_command.stderr(if stderr_mode == 1 {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    });
+
+    child_register(command, child_command.spawn())
 }
 
 pub fn child_pid(child: &JsChild) -> Option<f64> {
@@ -267,6 +405,7 @@ fn children_dispatch_one() -> bool {
             .borrow()
             .iter()
             .enumerate()
+            .rev()
             .find_map(|(index, child)| child_poll(child).map(|outcome| (index, outcome)))
     });
     let Some((index, outcome)) = ready else {
