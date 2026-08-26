@@ -7,8 +7,7 @@ struct AssertDiffLine<'a> {
 fn assert_lines_equal(left: &str, right: &str, comma: bool) -> bool {
     left == right
         || (comma
-            && (left.strip_suffix(',') == Some(right)
-                || right.strip_suffix(',') == Some(left)))
+            && (left.strip_suffix(',') == Some(right) || right.strip_suffix(',') == Some(left)))
 }
 
 fn assert_myers_diff<'a>(
@@ -29,8 +28,7 @@ fn assert_myers_diff<'a>(
         for diagonal in (-(depth as isize)..=depth as isize).step_by(2) {
             let offset = (diagonal + max as isize) as usize;
             let mut x = if diagonal == -(depth as isize)
-                || (diagonal != depth as isize
-                    && frontier[offset - 1] < frontier[offset + 1])
+                || (diagonal != depth as isize && frontier[offset - 1] < frontier[offset + 1])
             {
                 frontier[offset + 1]
             } else {
@@ -333,6 +331,21 @@ pub fn assert_dyn_message(
 
 pub fn assert_if_error_detail(detail: &str) -> ! {
     throw_assertion_error(format!("ifError got unwanted exception: {detail}"))
+}
+
+pub fn assert_unwanted_rejection(
+    actual_message: &JsString,
+    message: &JsString,
+    has_message: bool,
+) -> ! {
+    let separator = if has_message {
+        format!(": {message}")
+    } else {
+        ".".to_owned()
+    };
+    throw_assertion_error(format!(
+        "Got unwanted rejection{separator}\nActual message: \"{actual_message}\""
+    ))
 }
 
 pub fn assert_if_error_parts(name: &JsString, message: &JsString) -> ! {

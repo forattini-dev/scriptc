@@ -2,6 +2,7 @@ import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, Src
 import { typeKey } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
 import type { IrAwaitExpr } from "./model.js";
+import { rustAsyncExpressionOperands } from "./async-values.js";
 
 export interface RustAsyncHandlers {
   readonly fallthrough: () => void;
@@ -26,6 +27,7 @@ export interface RustAsyncControlContext {
   setCurrentAsyncLocals(locals: Set<string> | null): void;
   adjustAsyncProtectedReturnDepth(delta: number): void;
   emitExpr(expr: IrExpr): string;
+  emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitStatement(statement: IrStmt): void;
   emitAssignment(id: string, value: string, loc: SrcLoc): void;
   emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void;
@@ -250,9 +252,9 @@ export class RustAsyncControlEmitter {
         : null,
       );
       if (awaited === null) {
-        if ((nested?.kind === "bin" || nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "recordLit" || nested?.kind === "recordClone" || nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
-          nested?.kind === "arrIntrinsic" || nested?.kind === "mapIntrinsic") &&
+        if (nested !== null && ((nested.kind === "bin" || nested.kind === "toString" || nested.kind === "strConcat" ||
+          nested.kind === "recordLit" || nested.kind === "recordClone" || nested.kind === "arrayGet" || nested.kind === "bytesNew" ||
+          nested.kind === "arrIntrinsic" || nested.kind === "mapIntrinsic") || rustAsyncExpressionOperands(nested) !== null) &&
           this.containsAsyncSuspension(nested)) {
           this.context.emitAsyncValue(nested, (value) => {
             if (stmt.kind === "assign") {
@@ -613,10 +615,11 @@ export class RustAsyncControlEmitter {
           terminal = "await";
           break;
         }
-        if ((nested?.kind === "unionWrap" || nested?.kind === "bin" ||
-          nested?.kind === "toString" || nested?.kind === "strConcat" ||
-          nested?.kind === "arrayGet" || nested?.kind === "bytesNew" ||
-          nested?.kind === "mapIntrinsic" || nested?.kind === "recordClone") &&
+        if (nested !== null && ((nested.kind === "unionWrap" || nested.kind === "bin" ||
+          nested.kind === "toString" || nested.kind === "strConcat" ||
+          nested.kind === "arrayGet" || nested.kind === "bytesNew" ||
+          nested.kind === "mapIntrinsic" || nested.kind === "recordClone") ||
+          rustAsyncExpressionOperands(nested) !== null) &&
           this.containsAsyncSuspension(nested)) {
           this.emitAsyncProtectedValue(nested, exitLocals, handlers, (value) => {
             if (current.kind === "assign") {
@@ -849,6 +852,19 @@ export class RustAsyncControlEmitter {
           handlers,
           () => consume(clone),
         );
+      });
+      return;
+    }
+    const operands = rustAsyncExpressionOperands(expr);
+    if (operands !== null && operands.some((operand) => this.containsAsyncSuspension(operand))) {
+      this.context.emitAsyncProtectedValues(operands, exitLocals, handlers, (values) => {
+        consume(this.context.emitExprWithValues(
+          expr,
+          operands.map((operand, index) => [
+            operand,
+            values[index] ?? this.context.unsupported("missing async expression operand", operand.loc),
+          ] as const),
+        ));
       });
       return;
     }

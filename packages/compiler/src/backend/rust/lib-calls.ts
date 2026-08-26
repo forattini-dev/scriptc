@@ -1021,6 +1021,17 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const toString = context.hasErrorClassRoots() ? "sc_error_to_string" : "runtime::error_to_string";
     return `{ let ${regex} = ${context.emitExpr(arg)}; let ${error} = ${context.emitExpr(secondArg)}; let ${message} = ${context.emitExpr(expr.args[2])}; let ${hasMessage} = ${context.emitExpr(expr.args[3])}; let sc_actual = ${toString}(&${error}); runtime::assert_throws_regex(&${regex}, &sc_actual, &${message}, ${hasMessage}) }`;
   }
+  if (expr.fn === "assert.regexErrTest" && expr.args.length === 2 &&
+    arg?.type.kind === "regex" && secondArg?.type.kind === "object") {
+    const toString = context.hasErrorClassRoots() ? "sc_error_to_string" : "runtime::error_to_string";
+    return `runtime::regex_hits(&(${context.emitExpr(arg)}), &${toString}(&(${context.emitExpr(secondArg)})))`;
+  }
+  if (expr.fn === "assert.unwantedRejection" && expr.args.length === 3 &&
+    arg?.type.kind === "object" && secondArg?.type.kind === "string" &&
+    expr.args[2]?.type.kind === "bool") {
+    const messageHelper = context.hasErrorClassRoots() ? "sc_error_message" : "runtime::error_message";
+    return `runtime::assert_unwanted_rejection(&${messageHelper}(&(${context.emitExpr(arg)})), &(${context.emitExpr(secondArg)}), ${context.emitExpr(expr.args[2])})`;
+  }
   if (expr.fn === "class.name" && expr.args.length === 1 && arg !== undefined && arg.type.kind === "classval") {
     const value = context.nextTemporary();
     const arms = context.classNameArms(arg.type.className, expr.loc);

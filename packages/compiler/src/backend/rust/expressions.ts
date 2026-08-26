@@ -78,9 +78,23 @@ export interface RustExpressionContext {
 }
 
 export class RustExpressionEmitter {
+  private replacements: ReadonlyMap<IrExpr, string> | null = null;
+
   constructor(private readonly context: RustExpressionContext) {}
 
+  emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string {
+    const previous = this.replacements;
+    this.replacements = new Map([...(previous ?? []), ...values]);
+    try {
+      return this.emitExpr(expr);
+    } finally {
+      this.replacements = previous;
+    }
+  }
+
   emitExpr(expr: IrExpr): string {
+    const replacement = this.replacements?.get(expr);
+    if (replacement !== undefined) return replacement;
     switch (expr.kind) {
       case "numLit":
         return this.context.numberLiteral(expr.value);

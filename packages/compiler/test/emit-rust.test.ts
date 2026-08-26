@@ -978,7 +978,7 @@ test("Rust Buffer and StringDecoder byte surfaces match Node byte-for-byte", asy
 test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-refusal-"));
   const sourcePath = join(dir, "unsupported.ts");
-  await writeFile(sourcePath, "console.log(/x/.test('x'));\n");
+  await writeFile(sourcePath, 'import { homedir } from "node:os";\nconsole.log(homedir());\n');
   const result = await compile(sourcePath, {
     outDir: dir,
     outPath: join(dir, "unsupported"),
@@ -2183,10 +2183,13 @@ test.each([
   "1605-assert-import-forms.ts",
   "1606-assert-strict-module.ts",
   "1607-assert-throws-match.ts",
+  "1609-assert-async.ts",
   "1680-assert-bytes.ts",
   "1681-assert-funcs.ts",
   "1720-assert-throws-shape.ts",
   "1721-assert-throws-regex-class.ts",
+  "1722-assert-rejects.ts",
+  "1723-assert-does-not-reject.ts",
   "1724-assert-iferror.ts",
   "1725-assert-symbols.ts",
   "1770-assert-dyn-strict.ts",

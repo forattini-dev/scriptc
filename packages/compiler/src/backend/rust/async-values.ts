@@ -23,6 +23,7 @@ export interface RustAsyncValueContext {
   ): void;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
   emitExpr(expr: IrExpr): string;
+  emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string;
   emitArrayGetValues(expr: Extract<IrExpr, { kind: "arrayGet" }>, array: string, index: string): string;
   emitBytesNewValue(expr: Extract<IrExpr, { kind: "bytesNew" }>, source: string | null): string;
@@ -37,6 +38,21 @@ export interface RustAsyncValueContext {
   unionName(id: string): string;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
+}
+
+export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | null {
+  switch (expr.kind) {
+    case "libCall":
+    case "call":
+    case "intrinsic":
+      return expr.args;
+    case "arrayLit":
+      return expr.elems;
+    case "jsonStringify":
+      return [expr.value];
+    default:
+      return null;
+  }
 }
 
 export class RustAsyncValueEmitter {
@@ -112,6 +128,19 @@ export class RustAsyncValueEmitter {
         this.emitAsyncValues(expr.args, (args) => {
           consume(this.context.emitArrayIntrinsicValues(expr, receiver, args));
         });
+      });
+      return;
+    }
+    const operands = rustAsyncExpressionOperands(expr);
+    if (operands !== null && operands.some((operand) => this.context.containsAsyncSuspension(operand))) {
+      this.emitAsyncValues(operands, (values) => {
+        consume(this.context.emitExprWithValues(
+          expr,
+          operands.map((operand, index) => [
+            operand,
+            values[index] ?? this.context.unsupported("missing async expression operand", operand.loc),
+          ] as const),
+        ));
       });
       return;
     }
