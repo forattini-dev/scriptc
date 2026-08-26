@@ -901,6 +901,7 @@ test.each([
   "2461-qs-parse-options.ts",
   "2462-qs-stringify.ts",
   "2463-qs-escape-unescape.ts",
+  "2464-qs-require-forms.cjs",
   "2485-inspect-circular-refs.ts",
   "2500-net-autosel-timeout.ts",
   "2558-rejection-events.cjs",
