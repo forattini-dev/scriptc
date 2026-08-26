@@ -104,6 +104,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "insp.str" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::inspect_string(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "insp.key" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::inspect_key(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "insp.regex" && expr.args.length === 1 && arg?.type.kind === "regex") {
     return `runtime::inspect_regex(&(${context.emitExpr(arg)}))`;
   }
@@ -113,6 +116,23 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "insp.begin" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_begin(${context.emitExpr(arg)})`;
+  }
+  if (expr.fn === "insp.circCheck" && expr.args.length === 1 && arg !== undefined) {
+    const value = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; runtime::inspect_circular_check(${value}.identity()) }`;
+  }
+  if (expr.fn === "insp.seenPush" && expr.args.length === 1 && arg !== undefined) {
+    const value = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; runtime::inspect_seen_push(${value}.identity()) }`;
+  }
+  if (expr.fn === "insp.refWrap" && expr.args.length === 2 && arg !== undefined &&
+    secondArg?.type.kind === "string") {
+    const value = context.nextTemporary();
+    const rendered = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${rendered} = ${context.emitExpr(secondArg)}; runtime::inspect_ref_wrap(${value}.identity(), &${rendered}) }`;
+  }
+  if (expr.fn === "insp.circular" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::inspect_circular(${context.emitExpr(arg)})`;
   }
   if (expr.fn === "insp.entry" && expr.args.length === 2 &&
     arg?.type.kind === "string" && secondArg?.type.kind === "bool") {
@@ -128,17 +148,17 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return `runtime::inspect_end(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])}, ${context.emitExpr(expr.args[4])}, ${context.emitExpr(expr.args[5])})`;
   }
   if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
-    const depth = expr.args[1];
-    const colors = expr.args[2];
-    if (depth === undefined || colors === undefined) context.unsupported("dynamic inspect arguments", expr.loc);
+    const recurse = expr.args[1];
+    const depth = expr.args[2];
+    if (recurse === undefined || depth === undefined) context.unsupported("dynamic inspect arguments", expr.loc);
     const value = context.nextTemporary();
-    return `{ let ${value} = ${context.emitExpr(arg)}; let _ = ${context.emitExpr(depth)}; let _ = ${context.emitExpr(colors)}; sc_dyn_inspect(&${value}) }`;
+    return `{ let ${value} = ${context.emitExpr(arg)}; sc_dyn_inspect(&${value}, ${context.emitExpr(recurse)}, ${context.emitExpr(depth)}) }`;
   }
   if (expr.fn === "insp.dynS" && expr.args.length === 2 && arg?.type.kind === "dyn") {
     const depth = expr.args[1];
     if (depth === undefined) context.unsupported("dynamic string inspection depth", expr.loc);
     const value = context.nextTemporary();
-    return `{ let ${value} = ${context.emitExpr(arg)}; let _ = ${context.emitExpr(depth)}; sc_dyn_inspect_s(&${value}) }`;
+    return `{ let ${value} = ${context.emitExpr(arg)}; sc_dyn_inspect_s(&${value}, ${context.emitExpr(depth)}) }`;
   }
   if (expr.fn === "json.parse" && expr.args.length === 1 && arg?.type.kind === "string" && expr.type.kind === "dyn") {
     return `runtime::json_parse_typed::<${context.dynTypeName()}>(&(${context.emitExpr(arg)}))`;

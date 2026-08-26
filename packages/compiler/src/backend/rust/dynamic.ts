@@ -453,23 +453,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_inspect(value: &${name}) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line("match value {");
-    this.context.pushIndent();
-    for (const shape of boxedShapes) {
-      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
-    }
-    this.context.line("_ => sc_dyn_to_string(value),");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_inspect_s(value: &${name}) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line(`match value { ${name}::String(text) => text.clone(), _ => sc_dyn_inspect(value), }`);
-    this.context.popIndent();
-    this.context.line("}");
+    this.emitDynamicInspectDefinition(boxedShapes);
     this.context.line(`fn sc_dyn_specific_type(value: &${name}) -> String {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -565,6 +549,97 @@ export class RustDynamicEmitter {
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
+  }
+
+  emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {
+    const name = this.context.dynTypeName();
+    this.context.line(`fn sc_dyn_inspect(value: &${name}, recurse: f64, depth: f64) -> runtime::JsString {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined => runtime::string("undefined"),`);
+    this.context.line(`${name}::Null => runtime::string("null"),`);
+    this.context.line(`${name}::Number(value) => runtime::inspect_number(*value),`);
+    this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
+    this.context.line(`${name}::String(value) => runtime::inspect_string(value),`);
+    this.context.line(`${name}::Bytes(value) => {`);
+    this.context.pushIndent();
+    this.context.line("let length = runtime::bytes_len(value);");
+    this.context.line("if length == 0.0 { return runtime::string(\"Uint8Array(0) []\"); }");
+    this.context.line("if recurse > depth { return runtime::string(\"[Uint8Array]\"); }");
+    this.context.line("runtime::inspect_begin(recurse + 1.0);");
+    this.context.line("let shown = length.min(100.0);");
+    this.context.line("let mut index = 0.0;");
+    this.context.line("while index < shown {");
+    this.context.pushIndent();
+    this.context.line("runtime::inspect_entry(&runtime::inspect_number(runtime::bytes_get(value, index)), true);");
+    this.context.line("index += 1.0;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("let more = length > 100.0;");
+    this.context.line("if more { runtime::inspect_entry(&runtime::inspect_more_items(length - 100.0), true); }");
+    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(&format!(\"Uint8Array({}) [\", length as usize)), &runtime::string(\"]\"), recurse + 1.0, true, more)");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`${name}::Array(array) => {`);
+    this.context.pushIndent();
+    this.context.line("let length = runtime::array_len(array);");
+    this.context.line("if length == 0.0 { return runtime::string(\"[]\"); }");
+    this.context.line("if recurse > depth { return runtime::string(\"[Array]\"); }");
+    this.context.line("runtime::inspect_begin(recurse + 1.0);");
+    this.context.line("let shown = length.min(100.0);");
+    this.context.line("let mut index = 0.0;");
+    this.context.line("while index < shown {");
+    this.context.pushIndent();
+    this.context.line("let element = runtime::array_get(array, index);");
+    this.context.line(`let is_number = matches!(&element, ${name}::Number(_));`);
+    this.context.line("runtime::inspect_entry(&sc_dyn_inspect(&element, recurse + 1.0, depth), is_number);");
+    this.context.line("index += 1.0;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("let more = length > 100.0;");
+    this.context.line("if more {");
+    this.context.pushIndent();
+    this.context.line("let next = runtime::array_get(array, 100.0);");
+    this.context.line(`runtime::inspect_entry(&runtime::inspect_more_items(length - 100.0), matches!(&next, ${name}::Number(_)));`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(\"[\"), &runtime::string(\"]\"), recurse + 1.0, true, more)");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`${name}::Object(object) => {`);
+    this.context.pushIndent();
+    this.context.line("let keys = runtime::map_string_keys_js_order(object);");
+    this.context.line("let length = runtime::array_len(&keys);");
+    this.context.line("if length == 0.0 { return runtime::string(\"{}\"); }");
+    this.context.line("if recurse > depth { return runtime::string(\"[Object]\"); }");
+    this.context.line("runtime::inspect_begin(recurse + 1.0);");
+    this.context.line("let mut index = 0.0;");
+    this.context.line("while index < length {");
+    this.context.pushIndent();
+    this.context.line("let key = runtime::array_get(&keys, index);");
+    this.context.line("let field = runtime::map_get_by(object, &key, |left, right| left.as_ref() == right.as_ref()).expect(\"scriptc: missing dynamic object field\");");
+    this.context.line("let rendered = sc_dyn_inspect(&field, recurse + 1.0, depth);");
+    this.context.line("let entry = runtime::string(&format!(\"{}: {}\", runtime::inspect_key(&key), rendered));");
+    this.context.line("runtime::inspect_entry(&entry, false);");
+    this.context.line("index += 1.0;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(\"{\"), &runtime::string(\"}\"), recurse + 1.0, false, false)");
+    this.context.popIndent();
+    this.context.line("},");
+    for (const shape of boxedShapes) {
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_inspect_s(value: &${name}, depth: f64) -> runtime::JsString {`);
+    this.context.pushIndent();
+    this.context.line(`match value { ${name}::String(text) => text.clone(), _ => sc_dyn_inspect(value, 0.0, depth), }`);
+    this.context.popIndent();
+    this.context.line("}");
   }
 
   emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {

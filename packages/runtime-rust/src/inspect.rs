@@ -5,6 +5,8 @@ struct InspectFrame {
 std::thread_local! {
     static INSPECT_FRAMES: RefCell<Vec<InspectFrame>> = const { RefCell::new(Vec::new()) };
     static INSPECT_CURRENT_DEPTH: Cell<f64> = const { Cell::new(0.0) };
+    static INSPECT_SEEN: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    static INSPECT_CIRCULAR: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 fn inspect_utf16_len(value: &str) -> usize {
@@ -217,6 +219,22 @@ pub fn inspect_string(value: &JsString) -> JsString {
     string(&output)
 }
 
+pub fn inspect_key(value: &JsString) -> JsString {
+    if value.as_ref() == "__proto__" {
+        return string("['__proto__']");
+    }
+    let mut characters = value.chars();
+    let bare = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_');
+    if bare {
+        value.clone()
+    } else {
+        string(&inspect_quote(value))
+    }
+}
+
 pub fn inspect_regex(regex: &JsRegex) -> JsString {
     string(&format!(
         "/{}/{}",
@@ -247,12 +265,52 @@ pub fn inspect_buffer(bytes: &JsBytes<u8>) -> JsString {
 }
 
 pub fn inspect_begin(recurse: f64) {
+    if recurse == 1.0 {
+        INSPECT_SEEN.with(|seen| seen.borrow_mut().clear());
+        INSPECT_CIRCULAR.with(|circular| circular.borrow_mut().clear());
+    }
     INSPECT_CURRENT_DEPTH.with(|depth| depth.set(recurse));
     INSPECT_FRAMES.with(|frames| {
         frames.borrow_mut().push(InspectFrame {
             entries: Vec::new(),
         });
     });
+}
+
+pub fn inspect_circular_check(identity: usize) -> f64 {
+    if !INSPECT_SEEN.with(|seen| seen.borrow().contains(&identity)) {
+        return 0.0;
+    }
+    INSPECT_CIRCULAR.with(|circular| {
+        let mut circular = circular.borrow_mut();
+        if let Some(index) = circular.iter().position(|candidate| *candidate == identity) {
+            (index + 1) as f64
+        } else {
+            circular.push(identity);
+            circular.len() as f64
+        }
+    })
+}
+
+pub fn inspect_seen_push(identity: usize) {
+    INSPECT_SEEN.with(|seen| seen.borrow_mut().push(identity));
+}
+
+pub fn inspect_circular(id: f64) -> JsString {
+    string(&format!("[Circular *{}]", id as usize))
+}
+
+pub fn inspect_ref_wrap(identity: usize, value: &JsString) -> JsString {
+    INSPECT_SEEN.with(|seen| {
+        seen.borrow_mut().pop();
+    });
+    INSPECT_CIRCULAR.with(|circular| {
+        let circular = circular.borrow();
+        let Some(index) = circular.iter().position(|candidate| *candidate == identity) else {
+            return value.clone();
+        };
+        string(&format!("<ref *{}> {value}", index + 1))
+    })
 }
 
 pub fn inspect_entry(value: &JsString, is_number: bool) {
