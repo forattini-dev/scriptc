@@ -14,6 +14,8 @@ where
     scheduled: bool,
     draining: bool,
     push_after_eof: bool,
+    resume_pending: bool,
+    resume_after_data: bool,
 }
 
 impl<L, R> Trace for ReadableData<L, R>
@@ -71,6 +73,8 @@ where
         scheduled: false,
         draining: false,
         push_after_eof: false,
+        resume_pending: false,
+        resume_after_data: false,
     })
 }
 
@@ -141,7 +145,72 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    readable.with_mut(|data| data.flowing = Some(true));
+    readable.with_mut(|data| {
+        if data.flowing != Some(true) {
+            data.flowing = Some(true);
+            data.resume_pending = true;
+            data.resume_after_data = false;
+        }
+    });
+}
+
+pub fn readable_pause<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.flowing == Some(false) {
+            return false;
+        }
+        data.flowing = Some(false);
+        data.resume_pending = false;
+        true
+    })
+}
+
+pub fn readable_resume<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.flowing != Some(true) {
+            data.flowing = Some(true);
+            data.resume_pending = true;
+            data.resume_after_data = !data.chunks.is_empty();
+        }
+    });
+}
+
+pub fn readable_is_paused<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.flowing == Some(false))
+}
+
+pub fn readable_is_flowing<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.flowing == Some(true))
+}
+
+pub fn readable_take_resume<L, R>(readable: &JsReadable<L, R>, after_data: bool) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if !data.resume_pending || data.resume_after_data != after_data {
+            return false;
+        }
+        data.resume_pending = false;
+        true
+    })
 }
 
 pub fn readable_schedule<L, R>(readable: &JsReadable<L, R>) -> bool
