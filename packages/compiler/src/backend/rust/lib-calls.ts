@@ -1,10 +1,11 @@
-import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
 import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
 import { emitRustProcessCall } from "./process.js";
+import { emitRustQuerystringCall } from "./querystring.js";
 import { emitRustTlsCall } from "./tls.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
@@ -35,6 +36,7 @@ export interface RustLibCallContext {
   emitExpr(expr: IrExpr): string;
   unsupported(kind: string, loc?: SrcLoc): never;
   dynTypeName(): string;
+  record(id: string, loc?: SrcLoc): IrRecordShape;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
   unionVariant(tag: number): string;
@@ -72,6 +74,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (netCall !== null) return netCall;
   const processCall = emitRustProcessCall(expr, context);
   if (processCall !== null) return processCall;
+  const querystringCall = emitRustQuerystringCall(expr, context);
+  if (querystringCall !== null) return querystringCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];
@@ -222,12 +226,6 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "str.decodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::string_decode_uri_component(&(${context.emitExpr(arg)}))`;
-  }
-  if (expr.fn === "qs.escape" && expr.args.length === 1 && arg?.type.kind === "string") {
-    return `runtime::querystring_escape(&(${context.emitExpr(arg)}))`;
-  }
-  if (expr.fn === "qs.unescape" && expr.args.length === 1 && arg?.type.kind === "string") {
-    return `runtime::querystring_unescape(&(${context.emitExpr(arg)}))`;
   }
   if ((expr.fn === "str.atob" || expr.fn === "str.btoa") && expr.args.length === 1 && arg?.type.kind === "dyn") {
     const value = context.nextTemporary();

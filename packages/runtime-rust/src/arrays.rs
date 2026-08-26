@@ -92,6 +92,10 @@ pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
     array.with(|data| data.elements[index].clone())
 }
 
+pub fn array_values<T: ArrayElement>(array: &JsArray<T>) -> Vec<T> {
+    array.with(|data| data.elements.clone())
+}
+
 pub fn array_set<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) {
     let len = array_len(array) as usize;
     let index = array_index(index, true, len);

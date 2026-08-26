@@ -1008,6 +1008,11 @@ export class RustExpressionEmitter {
           emitExpr: (value) => this.emitExpr(value),
           unsupported: (kind, loc) => this.context.unsupported(kind, loc),
           dynTypeName: () => this.context.dynTypeName(),
+          record: (id, loc) => {
+            const record = this.context.records.get(id);
+            if (record === undefined) this.context.unsupported(`unknown record shape '${id}'`, loc);
+            return record;
+          },
           union: (id, loc) => this.context.union(id, loc),
           unionName: (id) => this.context.unionName(id),
           unionVariant: (tag) => this.context.unionVariant(tag),
