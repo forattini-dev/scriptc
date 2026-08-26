@@ -86,6 +86,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "process.stdinDestroy" && expr.args.length === 0) {
     return "runtime::process_stdin_destroy()";
   }
+  if (expr.fn === "net.getAutoSelTimeout" && expr.args.length === 0 && expr.type.kind === "f64") {
+    return "runtime::net_get_auto_select_family_attempt_timeout()";
+  }
+  if (expr.fn === "net.setAutoSelTimeout" && expr.args.length === 1 &&
+    arg?.type.kind === "f64" && expr.type.kind === "void") {
+    return `runtime::net_set_auto_select_family_attempt_timeout(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_number(${context.emitExpr(arg)})`;
   }

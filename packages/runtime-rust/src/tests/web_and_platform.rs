@@ -640,6 +640,47 @@
     }
 
     #[test]
+    fn net_auto_select_family_attempt_timeout_validates_and_clamps() {
+        net_set_auto_select_family_attempt_timeout(300.0);
+        assert_eq!(net_get_auto_select_family_attempt_timeout(), 300.0);
+        net_set_auto_select_family_attempt_timeout(1.0);
+        assert_eq!(net_get_auto_select_family_attempt_timeout(), 10.0);
+
+        for (value, message) in [
+            (
+                -0.0,
+                "The value of \"value\" is out of range. It must be >= 1 && <= 2147483647. Received -0",
+            ),
+            (
+                1.5,
+                "The value of \"value\" is out of range. It must be an integer. Received 1.5",
+            ),
+            (
+                f64::NAN,
+                "The value of \"value\" is out of range. It must be an integer. Received NaN",
+            ),
+            (
+                f64::INFINITY,
+                "The value of \"value\" is out of range. It must be an integer. Received Infinity",
+            ),
+            (
+                2_147_483_648.0,
+                "The value of \"value\" is out of range. It must be >= 1 && <= 2147483647. Received 2147483648",
+            ),
+        ] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                net_set_auto_select_family_attempt_timeout(value)
+            }))
+            .expect_err("an invalid attempt timeout must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
+            assert_eq!(caught_error_code(&caught).as_deref(), Some("ERR_OUT_OF_RANGE"));
+            assert_eq!(caught_error_message(&caught).as_ref(), message);
+        }
+        net_set_auto_select_family_attempt_timeout(250.0);
+    }
+
+    #[test]
     fn buffer_numeric_methods_follow_node_coercion_and_error_order() {
         let baseline = live_heap_objects();
         {

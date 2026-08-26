@@ -49,6 +49,7 @@ include!("child_process_and_paths.rs");
 include!("json.rs");
 include!("number_format.rs");
 include!("numeric_ops.rs");
+include!("network.rs");
 
 #[cfg(test)]
 mod tests {

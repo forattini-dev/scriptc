@@ -896,6 +896,7 @@ test.each([
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",
+  "2500-net-autosel-timeout.ts",
   "2558-rejection-events.cjs",
   "2591-ambient-generic-traps.ts",
   "2613-for-init-uninitialized-let.ts",
