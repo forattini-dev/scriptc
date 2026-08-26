@@ -326,6 +326,18 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.emitDynamicObjectWalkDefinition();
+    this.context.line(`fn sc_dyn_has_own(value: &${name}, key: &runtime::JsString) -> bool {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
+    this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
+    this.context.line(`${name}::Array(array) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
+    this.context.line("_ => false,");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);
     this.context.pushIndent();
     this.context.line("match value {");

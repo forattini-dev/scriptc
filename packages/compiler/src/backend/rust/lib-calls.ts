@@ -95,6 +95,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
       : expr.fn === "dyn.objValues" ? "sc_dyn_obj_values" : "sc_dyn_obj_entries";
     return `{ let ${value} = ${context.emitExpr(arg)}; ${helper}(&${value}) }`;
   }
+  if (expr.fn === "dyn.hasOwn" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.type.kind === "bool") {
+    const value = context.nextTemporary();
+    const key = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; sc_dyn_has_own(&${value}, &${key}) }`;
+  }
   if (expr.fn === "dyn.errInstanceof" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "f64") {
     const value = context.nextTemporary();
