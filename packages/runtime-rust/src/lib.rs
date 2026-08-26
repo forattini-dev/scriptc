@@ -45,6 +45,7 @@ include!("writable.rs");
 include!("duplex.rs");
 include!("transform.rs");
 include!("strings_and_process.rs");
+include!("querystring.rs");
 include!("os.rs");
 include!("filesystem.rs");
 include!("child_process_and_paths.rs");
@@ -72,4 +73,5 @@ mod tests {
     include!("tests/language_and_heap.rs");
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
+    include!("tests/querystring.rs");
 }

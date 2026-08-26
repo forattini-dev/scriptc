@@ -109,7 +109,7 @@ fn uri_hex_byte(bytes: &[u8], index: usize) -> Option<u8> {
     Some((high << 4) | low)
 }
 
-pub fn string_decode_uri_component(value: &JsString) -> JsString {
+fn string_decode_uri_component_try(value: &JsString) -> Option<JsString> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0usize;
@@ -120,9 +120,7 @@ pub fn string_decode_uri_component(value: &JsString) -> JsString {
             continue;
         }
 
-        let Some(leading) = uri_hex_byte(bytes, index) else {
-            throw_uri_error("URI malformed".to_owned());
-        };
+        let leading = uri_hex_byte(bytes, index)?;
         index += 3;
         if leading < 0x80 {
             decoded.push(leading);
@@ -137,26 +135,29 @@ pub fn string_decode_uri_component(value: &JsString) -> JsString {
             0xf0 => (3, 0x90, 0xbf),
             0xf1..=0xf3 => (3, 0x80, 0xbf),
             0xf4 => (3, 0x80, 0x8f),
-            _ => throw_uri_error("URI malformed".to_owned()),
+            _ => return None,
         };
         decoded.push(leading);
         for continuation_index in 0..continuations {
-            let Some(continuation) = uri_hex_byte(bytes, index) else {
-                throw_uri_error("URI malformed".to_owned());
-            };
+            let continuation = uri_hex_byte(bytes, index)?;
             let valid = if continuation_index == 0 {
                 (first_low..=first_high).contains(&continuation)
             } else {
                 (0x80..=0xbf).contains(&continuation)
             };
             if !valid {
-                throw_uri_error("URI malformed".to_owned());
+                return None;
             }
             decoded.push(continuation);
             index += 3;
         }
     }
-    Rc::from(String::from_utf8(decoded).expect("validated URI bytes are UTF-8"))
+    Some(Rc::from(String::from_utf8(decoded).ok()?))
+}
+
+pub fn string_decode_uri_component(value: &JsString) -> JsString {
+    string_decode_uri_component_try(value)
+        .unwrap_or_else(|| throw_uri_error("URI malformed".to_owned()))
 }
 
 fn base64_value(byte: u8) -> Option<u8> {

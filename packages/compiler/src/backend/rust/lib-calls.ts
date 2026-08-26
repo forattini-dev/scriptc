@@ -223,6 +223,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "str.decodeUriComponent" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::string_decode_uri_component(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "qs.escape" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::querystring_escape(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "qs.unescape" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::querystring_unescape(&(${context.emitExpr(arg)}))`;
+  }
   if ((expr.fn === "str.atob" || expr.fn === "str.btoa") && expr.args.length === 1 && arg?.type.kind === "dyn") {
     const value = context.nextTemporary();
     const helper = expr.fn === "str.atob" ? "string_atob" : "string_btoa";

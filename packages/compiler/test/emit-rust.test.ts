@@ -897,6 +897,7 @@ test.each([
   "2415-dowhile-break-trailing-test.ts",
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
+  "2463-qs-escape-unescape.ts",
   "2485-inspect-circular-refs.ts",
   "2500-net-autosel-timeout.ts",
   "2558-rejection-events.cjs",
