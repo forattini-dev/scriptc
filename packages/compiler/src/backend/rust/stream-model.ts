@@ -22,7 +22,13 @@ export class RustStreamModel {
     if (node.kind !== "libCall") return false;
     if (node.fn === "readable.new") {
       this.usesReadable = true;
-      const callback = (node.args as StreamArgument[] | undefined)?.[4];
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[3];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported("malformed Readable callback flags IR");
+      }
+      if ((flags.value & 1) === 0) return true;
+      const callback = args?.[4];
       if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
       const shape = ensureClosureShape(callback.type);
       this.readableReadShapes.set(typeKey(callback.type), shape);

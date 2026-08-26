@@ -88,7 +88,7 @@ where
     let high_water_mark = if high_water_mark.is_finite() && high_water_mark >= 0.0 {
         high_water_mark.trunc() as usize
     } else {
-        16 * 1024
+        stream_default_byte_high_water_mark()
     };
     Gc::new(WritableData {
         emitter: Some(emitter_new()),

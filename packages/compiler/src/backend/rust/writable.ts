@@ -107,7 +107,9 @@ export class RustWritableEmitter {
     for (const shape of this.context.writableWriteShapes.values()) {
       const completionType = this.completionType(shape.type, "%Writable write", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
-      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |sc_error| { let _ = sc_error; if sc_called.replace(true) { return; } runtime::writable_complete_write(&sc_writable, sc_length); sc_writable_after_write(&sc_writable, sc_done.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); move |tracer| { tracer.edge(&sc_writable); runtime::Trace::trace(&sc_done, tracer); } })) })`;
+      const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
+      const ignoreParams = completionParams.length === 0 ? "" : `let _ = (${completionParams.join(", ")});`;
+      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |${completionParams.join(", ")}| { ${ignoreParams} if sc_called.replace(true) { return; } runtime::writable_complete_write(&sc_writable, sc_length); sc_writable_after_write(&sc_writable, sc_done.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); move |tracer| { tracer.edge(&sc_writable); runtime::Trace::trace(&sc_done, tracer); } })) })`;
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, [
         "sc_writable.clone()", "sc_chunk.clone()", "runtime::string(\"buffer\")", completion,
       ], loc);
@@ -153,7 +155,9 @@ export class RustWritableEmitter {
     for (const shape of this.context.writableFinalShapes.values()) {
       const completionType = this.completionType(shape.type, "%Writable final", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
-      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_finish = sc_finish.clone(); move |sc_error| { let _ = sc_error; sc_finish(); } })), trace: Some(sc_finish_trace.clone()) })`;
+      const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
+      const ignoreParams = completionParams.length === 0 ? "" : `let _ = (${completionParams.join(", ")});`;
+      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_finish = sc_finish.clone(); move |${completionParams.join(", ")}| { ${ignoreParams} sc_finish(); } })), trace: Some(sc_finish_trace.clone()) })`;
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_writable.clone()", completion], loc);
       arms.push(`ScWritableFinal::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
     }

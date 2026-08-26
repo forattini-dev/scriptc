@@ -127,7 +127,8 @@ export class RustReadableEmitter {
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
     this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); break; }");
     this.context.line("sc_readable_call_read(&sc_readable);");
-    this.context.line("if !runtime::readable_has_data_or_eof(&sc_readable) { break; }");
+    this.context.line("if runtime::readable_has_data_or_eof(&sc_readable) { runtime::readable_end_drain(&sc_readable); sc_readable_schedule(&sc_readable); return; }");
+    this.context.line("break;");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("runtime::readable_end_drain(&sc_readable);");
@@ -154,6 +155,7 @@ export class RustReadableEmitter {
       case "readable.new": return this.emitNew(expr);
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
+      case "readable.pushU": return this.emitPushUnion(expr);
       case "readable.pushNull": return this.emitPushNull(expr);
       case "readable.read": return this.emitRead(expr);
       case "readable.unshift": return this.emitUnshift(expr);
@@ -169,17 +171,28 @@ export class RustReadableEmitter {
   }
 
   private emitNew(expr: RustLibCallExpr): string {
-    const [highWaterMark, objectMode, autoDestroy, flags, callback] = expr.args;
-    if (highWaterMark?.type.kind !== "f64" || objectMode?.type.kind !== "bool" ||
-      autoDestroy?.type.kind !== "bool" || flags?.type.kind !== "f64" ||
-      callback?.type.kind !== "func" || expr.args.length !== 5 ||
+    const [highWaterMark, autoDestroy, emitClose, flagsExpr] = expr.args;
+    if (highWaterMark?.type.kind !== "f64" || autoDestroy?.type.kind !== "bool" ||
+      emitClose?.type.kind !== "bool" || flagsExpr?.kind !== "numLit" ||
       expr.type.kind !== "object" || expr.type.className !== "%Readable") {
       this.context.unsupported("Readable constructor shape", expr.loc);
     }
-    const shape = this.context.readableReadShapes.get(typeKey(callback.type));
-    if (shape === undefined) this.context.unsupported("unregistered Readable read callback", expr.loc);
+    const flags = flagsExpr.value;
+    if ((flags & ~1) !== 0) this.context.unsupported("Readable constructor callback set", expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} let _ = (${values[1]}, ${values[2]}, ${values[3]}); runtime::readable_new(${values[0]}, ScReadableRead::${this.listenerVariant(shape)}(${values[4]})) }`;
+    let callback = "Option::<ScReadableRead>::None";
+    if ((flags & 1) !== 0) {
+      const read = expr.args[4];
+      if (read?.type.kind !== "func" || expr.args.length !== 5) {
+        this.context.unsupported("Readable read callback shape", expr.loc);
+      }
+      const shape = this.context.readableReadShapes.get(typeKey(read.type));
+      if (shape === undefined) this.context.unsupported("unregistered Readable read callback", expr.loc);
+      callback = `Some(ScReadableRead::${this.listenerVariant(shape)}(${values[4]}))`;
+    } else if (expr.args.length !== 4) {
+      this.context.unsupported("Readable constructor arity", expr.loc);
+    }
+    return `{ ${this.bind(expr.args, values)} let _ = (${values[1]}, ${values[2]}, ${values[3]}); runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[0]}, ${callback}) }`;
   }
 
   private emitPush(expr: RustLibCallExpr, stringChunk: boolean): string {
@@ -204,6 +217,28 @@ export class RustReadableEmitter {
     }
     const value = this.context.nextTemporary();
     return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_result = runtime::readable_push_null(&${value}); sc_readable_schedule(&${value}); sc_readable_schedule_notification(&${value}); sc_result }`;
+  }
+
+  private emitPushUnion(expr: RustLibCallExpr): string {
+    const [receiver, chunk] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      chunk?.type.kind !== "union" || expr.args.length !== 2 || expr.type.kind !== "bool") {
+      this.context.unsupported("Readable union push shape", expr.loc);
+    }
+    const union = this.context.union(chunk.type.unionId, expr.loc);
+    const name = this.context.unionName(union.id);
+    const arms = union.arms.map((arm, tag) => {
+      const variant = `${name}::${this.context.unionVariant(tag)}`;
+      if (arm.kind === "bytes" && arm.elem === "u8") {
+        return `${variant}(value) => runtime::readable_push(&sc_readable, value)`;
+      }
+      if (arm.kind === "string") {
+        return `${variant}(value) => runtime::readable_push_string(&sc_readable, &value)`;
+      }
+      if (arm.kind === "nullT") return `${variant} => runtime::readable_push_null(&sc_readable)`;
+      this.context.unsupported(`Readable union push arm '${arm.kind}'`, expr.loc);
+    });
+    return `{ let sc_readable = ${this.context.emitExpr(receiver)}; let sc_chunk = ${this.context.emitExpr(chunk)}; let sc_result = match sc_chunk { ${arms.join(", ")} }; sc_readable_schedule(&sc_readable); sc_readable_schedule_notification(&sc_readable); sc_result }`;
   }
 
   private emitRead(expr: RustLibCallExpr): string {

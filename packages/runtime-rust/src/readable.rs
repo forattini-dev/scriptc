@@ -52,7 +52,15 @@ where
 
 pub type JsReadable<L, R> = Gc<ReadableData<L, R>>;
 
-pub fn readable_new<L, R>(high_water_mark: f64, read_callback: R) -> JsReadable<L, R>
+fn stream_default_byte_high_water_mark() -> usize {
+    if cfg!(target_os = "windows") {
+        16 * 1024
+    } else {
+        64 * 1024
+    }
+}
+
+pub fn readable_new<L, R>(high_water_mark: f64, read_callback: Option<R>) -> JsReadable<L, R>
 where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
@@ -60,11 +68,11 @@ where
     let high_water_mark = if high_water_mark.is_finite() && high_water_mark >= 0.0 {
         high_water_mark.trunc() as usize
     } else {
-        16 * 1024
+        stream_default_byte_high_water_mark()
     };
     Gc::new(ReadableData {
         emitter: Some(emitter_new()),
-        read_callback: Some(read_callback),
+        read_callback,
         chunks: VecDeque::new(),
         buffered_length: 0,
         high_water_mark,

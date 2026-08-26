@@ -814,6 +814,7 @@ test.each([
   "1804-timers-module.ts",
   "1805-timer-callback-args.ts",
   "1806-timer-delay-trunc.ts",
+  "1810-stream-options-const-record.ts",
   "1820-static-block-basics.ts",
   "1821-static-block-order.ts",
   "1822-static-block-js.js",
