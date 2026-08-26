@@ -886,7 +886,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const deep = context.nextTemporary();
     const message = context.nextTemporary();
     const hasMessage = context.nextTemporary();
-    return `{ let ${actual} = ${context.emitExpr(arg)}; let ${expected} = ${context.emitExpr(secondArg)}; let ${negated} = ${context.emitExpr(expr.args[2])}; let ${deep} = ${context.emitExpr(expr.args[3])}; let ${message} = ${context.emitExpr(expr.args[4])}; let ${hasMessage} = ${context.emitExpr(expr.args[5])}; runtime::assert_dyn_result(sc_dyn_equal(&${actual}, &${expected}, ${deep}), ${negated}, &${message}, ${hasMessage}); () }`;
+    return `{ let ${actual} = ${context.emitExpr(arg)}; let ${expected} = ${context.emitExpr(secondArg)}; let ${negated} = ${context.emitExpr(expr.args[2])}; let ${deep} = ${context.emitExpr(expr.args[3])}; let ${message} = ${context.emitExpr(expr.args[4])}; let ${hasMessage} = ${context.emitExpr(expr.args[5])}; sc_dyn_assert_message(&${actual}, &${expected}, ${negated}, ${deep}, &${message}, ${hasMessage}); () }`;
   }
   if (expr.fn === "assert.ok" && expr.args.length === 2 &&
     arg?.type.kind === "bool" && secondArg?.type.kind === "string") {

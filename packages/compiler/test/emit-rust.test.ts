@@ -2187,13 +2187,15 @@ test.each([
   "1681-assert-funcs.ts",
   "1721-assert-throws-regex-class.ts",
   "1725-assert-symbols.ts",
+  "1770-assert-dyn-strict.ts",
+  "1772-assert-dyn-js.cjs",
   "2487-recursive-deep-equal.ts",
 ])("Rust assertions preserve static verdicts and Node messages: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-assertions-"));
   const entryPath = resolve("tests/corpus", fixture);
   const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    outPath: join(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
     backend: "rust",
     optimization: "dev",
   });

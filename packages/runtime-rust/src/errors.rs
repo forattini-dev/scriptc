@@ -456,7 +456,7 @@ pub fn assert_same_value_f64(left: f64, right: f64) -> bool {
     left.is_nan() && right.is_nan()
 }
 
-fn assert_inspect_string(value: &str) -> String {
+pub fn assert_inspect_string(value: &str) -> String {
     let quote = if !value.contains('\'') {
         '\''
     } else if !value.contains('"') {
@@ -759,19 +759,6 @@ pub fn assert_deep_pair_leave() {
     ASSERT_DEEP_PAIRS.with(|pairs| {
         let _ = pairs.borrow_mut().pop();
     });
-}
-
-pub fn assert_dyn_result(equal: bool, negated: bool, message: &JsString, has_message: bool) {
-    if (negated && !equal) || (!negated && equal) {
-        return;
-    }
-    throw_assertion_error(if has_message {
-        message.to_string()
-    } else if negated {
-        "Expected values to be strictly unequal".to_owned()
-    } else {
-        "Expected values to be strictly equal".to_owned()
-    })
 }
 
 pub fn assert_deep_result(equal: bool, negated: bool, message: &JsString, has_message: bool) {

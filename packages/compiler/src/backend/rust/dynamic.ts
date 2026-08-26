@@ -2,6 +2,7 @@ import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
+import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustDynamicContext {
@@ -562,6 +563,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
     if (this.context.usesDynamicInvoke()) emitRustDynamicInvoke(this.context, boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
+    emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
   }
 
