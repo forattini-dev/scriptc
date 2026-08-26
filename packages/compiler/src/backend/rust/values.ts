@@ -291,9 +291,10 @@ export class RustValueEmitter {
         return `${left}.as_ref() == ${right}.as_ref()`;
       case "symbol":
         return `runtime::symbol_ptr_eq(${left}, ${right})`;
+      case "func":
+        return `${this.functionIdentity(left, type, loc)} == ${this.functionIdentity(right, type, loc)}`;
       case "array":
       case "record":
-      case "func":
         return `${left}.ptr_eq(${right})`;
       case "object":
         if (type.className === RUNTIME_EMITTER_CLASS) return `${left} == ${right}`;
@@ -309,6 +310,11 @@ export class RustValueEmitter {
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
     this.context.unsupported(`map key '${type.kind}'`, loc);
+  }
+
+  private functionIdentity(value: string, type: IrFuncType, loc: SrcLoc): string {
+    const shape = this.context.closureShapeForType(type, loc);
+    return `sc_closure_identity_${shape.index}(${value})`;
   }
 
   mapStoredKey(value: string, type: IrType): string {

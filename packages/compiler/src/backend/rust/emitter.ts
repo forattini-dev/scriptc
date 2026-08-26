@@ -61,6 +61,7 @@ class RustEmitter {
   private readonly dynBoxedFunctionShapes = new Set<string>();
   private readonly dynAdapterShapes = new Set<string>();
   private readonly emitterListenerShapes = new Map<string, RustClosureShape>();
+  private readonly emitterSnapshotShapes = new Map<string, RustClosureShape>();
   private readonly promiseResolverTypes = new Map<string, IrType>();
   private readonly promiseRejectorTypes = new Map<string, IrType[]>();
   private readonly internedClosureTargets = new Set<string>();
@@ -131,6 +132,7 @@ class RustEmitter {
   });
   private readonly eventEmitter = new RustEventEmitterEmitter({
     listenerShapes: this.emitterListenerShapes,
+    snapshotShapes: this.emitterSnapshotShapes,
     emitterRoots: () => [...this.classMeta.values()].filter((meta) =>
       meta === meta.root && this.isEmitterClass(meta.def.name)
     ),
@@ -149,6 +151,7 @@ class RustEmitter {
     sourceLoc: () => this.mod.functions[0]?.loc ?? { file: "<builtin>", start: 0, end: 0 },
     needsClone: (type) => this.needsClone(type),
     rustString: (value) => this.rustString(value),
+    rustType: (type, loc) => this.rustType(type, loc),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncControlEmitter = new RustAsyncControlEmitter({
@@ -344,6 +347,7 @@ class RustEmitter {
   private readonly functionValueEmitter = new RustFunctionValueEmitter({
     closureTargets: this.closureTargets,
     dynAdapterShapes: this.dynAdapterShapes,
+    emitterSnapshotShapes: this.emitterSnapshotShapes,
     functions: this.functions,
     promiseRejectorTypes: this.promiseRejectorTypes,
     promiseResolverTypes: this.promiseResolverTypes,
@@ -382,6 +386,7 @@ class RustEmitter {
     closureShapes: this.closureShapes,
     closureTargets: this.closureTargets,
     dynAdapterShapes: this.dynAdapterShapes,
+    emitterSnapshotShapes: this.emitterSnapshotShapes,
     globals: this.globals,
     internedClosureTargets: this.internedClosureTargets,
     promiseRejectorTypes: this.promiseRejectorTypes,
@@ -622,11 +627,19 @@ class RustEmitter {
       const node = value as Record<string, unknown>;
       if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("emitter.")) {
         this.usesEventEmitter = true;
-        if (node.fn === "emitter.on") {
-          const callback = (node.args as { type?: IrType }[] | undefined)?.[2];
+        if (node.fn === "emitter.on" || node.fn === "emitter.onDyn") {
+          const callback = (node.args as { type?: IrType }[] | undefined)?.[node.fn === "emitter.on" ? 2 : 3];
           if (callback?.type?.kind !== "func") this.unsupported("malformed EventEmitter listener IR");
           const shape = this.ensureClosureShape(callback.type);
           this.emitterListenerShapes.set(typeKey(callback.type), shape);
+        }
+        if (node.fn === "emitter.listeners") {
+          const result = node.type as IrType | undefined;
+          if (result?.kind !== "array" || result.elem.kind !== "func") {
+            this.unsupported("malformed EventEmitter listeners IR");
+          }
+          const shape = this.ensureClosureShape(result.elem);
+          this.emitterSnapshotShapes.set(typeKey(result.elem), shape);
         }
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||

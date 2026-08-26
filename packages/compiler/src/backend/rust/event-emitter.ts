@@ -6,6 +6,7 @@ type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustEventEmitterContext {
   readonly listenerShapes: ReadonlyMap<string, RustClosureShape>;
+  readonly snapshotShapes: ReadonlyMap<string, RustClosureShape>;
   emitterRoots(): RustClassMeta[];
   classMeta(name: string, loc?: SrcLoc): RustClassMeta;
   isEmitterClass(name: string): boolean;
@@ -22,6 +23,7 @@ export interface RustEventEmitterContext {
   sourceLoc(): SrcLoc;
   needsClone(type: IrType): boolean;
   rustString(value: string): string;
+  rustType(type: IrType, loc?: SrcLoc): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -60,6 +62,7 @@ export class RustEventEmitterEmitter {
     this.emitObjectDefinition();
     this.context.line("");
     this.emitMetaDispatchHelper();
+    this.emitSnapshotDispatchHelpers();
   }
 
   emitUpcast(value: string, source: IrType, loc: SrcLoc): string | null {
@@ -100,15 +103,21 @@ export class RustEventEmitterEmitter {
       case "emitter.ctor": return this.emitConstructor(expr);
       case "emitter.on": return this.emitOn(expr);
       case "emitter.off": return this.emitOff(expr);
+      case "emitter.checkListener": return this.emitCheckListener(expr);
+      case "emitter.onDyn": return this.emitOnDynamic(expr);
+      case "emitter.offDyn": return this.emitOffDynamic(expr);
       case "emitter.removeAll": return this.emitRemoveAll(expr);
       case "emitter.emit": return this.emitEvent(expr);
       case "emitter.emitError": return this.emitEvent(expr, true);
       case "emitter.count": return this.emitCount(expr);
       case "emitter.countFn": return this.emitCountIdentity(expr);
       case "emitter.names": return this.emitNames(expr);
+      case "emitter.listeners": return this.emitListeners(expr);
       case "emitter.setMax": return this.emitSetMax(expr);
+      case "emitter.setMaxChk": return this.emitSetMaxChecked(expr);
       case "emitter.getMax": return this.emitGetMax(expr);
       case "emitter.setDefaultMax": return this.emitSetDefaultMax(expr);
+      case "emitter.setDefaultMaxChk": return this.emitSetDefaultMaxChecked(expr);
       case "emitter.getDefaultMax": return this.emitGetDefaultMax(expr);
       default: return null;
     }
@@ -123,7 +132,7 @@ export class RustEventEmitterEmitter {
     }
     const shape = this.listenerShape(callback.type, expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${values[2]}.identity(); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}; let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${values[0]} }`;
   }
 
   private emitConstructor(expr: RustLibCallExpr): string {
@@ -142,7 +151,38 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("EventEmitter listener removal shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bindWithRegistry(expr, values)} if runtime::emitter_off(&sc_emitter, &${values[1]}, ${values[2]}.identity()) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } ${values[0]} }`;
+    return `{ ${this.bindWithRegistry(expr, values)} if runtime::emitter_off(&sc_emitter, &${values[1]}, ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } ${values[0]} }`;
+  }
+
+  private emitCheckListener(expr: RustLibCallExpr): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("EventEmitter dynamic listener check shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    return `{ let ${value} = ${this.context.emitExpr(callback)}; if sc_dyn_function_identity(&${value}).is_none() { sc_dyn_arg_type_fail("listener", "of type function", &${value}); } () }`;
+  }
+
+  private emitOnDynamic(expr: RustLibCallExpr): string {
+    const [receiver, name, callback, adapter, once, prepend] = expr.args;
+    if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "dyn" ||
+      adapter?.type.kind !== "func" || once?.type.kind !== "bool" || prepend?.type.kind !== "bool" ||
+      expr.args.length !== 6 || !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
+      this.context.unsupported("EventEmitter dynamic listener registration shape", expr.loc);
+    }
+    const shape = this.listenerShape(adapter.type, expr.loc);
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[3]}), sc_identity, ${values[4]}, ${values[5]}); ${values[0]} }`;
+  }
+
+  private emitOffDynamic(expr: RustLibCallExpr): string {
+    const [receiver, name, callback] = expr.args;
+    if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "dyn" ||
+      expr.args.length !== 3 || !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
+      this.context.unsupported("EventEmitter dynamic listener removal shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); if runtime::emitter_off(&sc_emitter, &${values[1]}, sc_identity) { let _ = sc_emitter_emit_meta(&sc_emitter, "removeListener", ${values[1]}.clone()); } ${values[0]} }`;
   }
 
   private emitRemoveAll(expr: RustLibCallExpr): string {
@@ -198,7 +238,7 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("EventEmitter listenerCount callback shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_listener_count_identity(&sc_emitter, &${values[1]}, ${values[2]}.identity()) }`;
+    return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_listener_count_identity(&sc_emitter, &${values[1]}, ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}) }`;
   }
 
   private emitNames(expr: RustLibCallExpr): string {
@@ -211,6 +251,28 @@ export class RustEventEmitterEmitter {
     return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_emitter = ${this.registry(value, receiver.type, expr.loc)}; runtime::emitter_event_names(&sc_emitter) }`;
   }
 
+  private emitListeners(expr: RustLibCallExpr): string {
+    const [receiver, name] = expr.args;
+    if (receiver === undefined || name?.type.kind !== "string" || expr.args.length !== 2 ||
+      !this.isEmitterObject(receiver.type) || expr.type.kind !== "array" || expr.type.elem.kind !== "func") {
+      this.context.unsupported("EventEmitter listeners snapshot shape", expr.loc);
+    }
+    const target = this.context.snapshotShapes.get(typeKey(expr.type.elem));
+    if (target === undefined) this.context.unsupported("unregistered EventEmitter listeners snapshot", expr.loc);
+    const arms: string[] = [];
+    for (const source of this.context.listenerShapes.values()) {
+      if (!this.snapshotCompatible(source.type, target.type)) continue;
+      const variant = `ScEmitterListener::${this.listenerVariant(source)}(callback)`;
+      const value = typeKey(source.type) === typeKey(target.type)
+        ? "callback"
+        : `runtime::Gc::new(${this.context.closureName(target)}::EventAdapter { listener: Some(ScEmitterListener::${this.listenerVariant(source)}(callback)), identity: sc_identity })`;
+      arms.push(`${variant} => ${value},`);
+    }
+    arms.push("_ => unreachable!(\"scriptc invariant: EventEmitter listeners signature mismatched its event\"),");
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &${values[1]}); let mut sc_values = Vec::with_capacity(sc_snapshot.len()); for sc_registration in sc_snapshot { let sc_identity = sc_registration.identity; let sc_callback = match sc_registration.callback { ${arms.join(" ")} }; sc_values.push(sc_callback); } runtime::array_new(sc_values) }`;
+  }
+
   private emitSetMax(expr: RustLibCallExpr): string {
     const [receiver, value] = expr.args;
     if (receiver === undefined || value?.type.kind !== "f64" || expr.args.length !== 2 ||
@@ -219,6 +281,16 @@ export class RustEventEmitterEmitter {
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     return `{ ${this.bindWithRegistry(expr, values)} runtime::emitter_set_max(&sc_emitter, ${values[1]}); ${values[0]} }`;
+  }
+
+  private emitSetMaxChecked(expr: RustLibCallExpr): string {
+    const [receiver, value] = expr.args;
+    if (receiver === undefined || value?.type.kind !== "dyn" || expr.args.length !== 2 ||
+      !this.isEmitterObject(receiver.type) || !this.isEmitterObject(expr.type)) {
+      this.context.unsupported("EventEmitter checked setMaxListeners shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bindWithRegistry(expr, values)} match &${values[1]} { sc_dyn_value::Number(value) => runtime::emitter_set_max(&sc_emitter, *value), value => sc_dyn_arg_type_fail("setMaxListeners", "of type number", value), } ${values[0]} }`;
   }
 
   private emitGetMax(expr: RustLibCallExpr): string {
@@ -237,6 +309,16 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("EventEmitter default max-listeners write shape", expr.loc);
     }
     return `runtime::emitter_set_default_max(${this.context.emitExpr(value)})`;
+  }
+
+  private emitSetDefaultMaxChecked(expr: RustLibCallExpr): string {
+    const [value, name] = expr.args;
+    if (value?.type.kind !== "dyn" || name?.type.kind !== "string" || expr.args.length !== 2 ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("EventEmitter checked default max-listeners shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} match &${values[0]} { sc_dyn_value::Number(value) => runtime::emitter_set_default_max_named(*value, &${values[1]}), value => sc_dyn_arg_type_fail(&${values[1]}, "of type number", value), } }`;
   }
 
   private emitGetDefaultMax(expr: RustLibCallExpr): string {
@@ -298,6 +380,41 @@ export class RustEventEmitterEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line("");
+  }
+
+  private emitSnapshotDispatchHelpers(): void {
+    const loc = this.context.sourceLoc();
+    for (const target of this.context.snapshotShapes.values()) {
+      const params = target.type.params.map((type, index) =>
+        `sc_arg_${index}: ${this.context.rustType(type, loc)}`,
+      );
+      this.context.line(`fn sc_emitter_dispatch_snapshot_${target.index}(sc_listener: &ScEmitterListener${params.length === 0 ? "" : `, ${params.join(", ")}`}) {`);
+      this.context.pushIndent();
+      this.context.line("match sc_listener {");
+      this.context.pushIndent();
+      for (const source of this.context.listenerShapes.values()) {
+        if (!this.snapshotCompatible(source.type, target.type)) continue;
+        const args = source.type.params.map((type, index) =>
+          this.context.needsClone(type) ? `sc_arg_${index}.clone()` : `sc_arg_${index}`,
+        );
+        const dispatch = this.context.emitClosureDispatch("callback", source.type, args, loc);
+        this.context.line(`ScEmitterListener::${this.listenerVariant(source)}(callback) => { let _ = ${dispatch}; },`);
+      }
+      this.context.line("_ => unreachable!(\"scriptc invariant: EventEmitter snapshot adapter signature\"),");
+      this.context.popIndent();
+      this.context.line("}");
+      this.context.popIndent();
+      this.context.line("}");
+      this.context.line("");
+    }
+  }
+
+  private snapshotCompatible(source: IrFuncType, target: IrFuncType): boolean {
+    if (source.rest === true || target.rest === true || source.params.length > target.params.length) return false;
+    return source.params.every((param, index) => {
+      const targetParam = target.params[index];
+      return targetParam !== undefined && typeKey(param) === typeKey(targetParam);
+    });
   }
 
   private emitObjectDefinition(): void {
@@ -372,6 +489,11 @@ export class RustEventEmitterEmitter {
     const shape = this.context.listenerShapes.get(typeKey(type));
     if (shape === undefined) this.context.unsupported("unregistered EventEmitter listener signature", loc);
     return shape;
+  }
+
+  private functionIdentity(value: string, type: IrFuncType, loc: SrcLoc): string {
+    const shape = this.context.closureShapeForType(type, loc);
+    return `sc_closure_identity_${shape.index}(&${value})`;
   }
 
   private bind(args: readonly IrExpr[], values: readonly string[]): string {

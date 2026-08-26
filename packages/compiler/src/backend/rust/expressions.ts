@@ -848,10 +848,15 @@ export class RustExpressionEmitter {
         const union = this.context.union(expr.unionId, expr.loc);
         const arm = union.arms[expr.tag];
         if (arm?.kind !== "func") this.context.unsupported(`invalid function union tag '${expr.unionId}:${expr.tag}'`, expr.loc);
+        if (expr.func.type.kind !== "func") this.context.unsupported("union function equality operand", expr.loc);
         const unionValue = this.context.nextName("sc_rt");
         const functionValue = this.context.nextName("sc_rt");
         const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(expr.tag)}`;
-        const test = `{ let ${unionValue} = ${this.emitExpr(expr.union)}; let ${functionValue} = ${this.emitExpr(expr.func)}; match &${unionValue} { ${variant}(payload) => payload.identity() == ${functionValue}.identity(), _ => false, } }`;
+        const unionShape = this.context.closureShapeForType(arm, expr.loc);
+        const functionShape = this.context.closureShapeForType(expr.func.type, expr.loc);
+        const unionIdentity = `sc_closure_identity_${unionShape.index}(payload)`;
+        const functionIdentity = `sc_closure_identity_${functionShape.index}(&${functionValue})`;
+        const test = `{ let ${unionValue} = ${this.emitExpr(expr.union)}; let ${functionValue} = ${this.emitExpr(expr.func)}; match &${unionValue} { ${variant}(payload) => ${unionIdentity} == ${functionIdentity}, _ => false, } }`;
         return expr.negated ? `!(${test})` : test;
       }
       case "closure":

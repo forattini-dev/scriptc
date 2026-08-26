@@ -17,6 +17,7 @@ export interface RustDefinitionContext {
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
   readonly closureTargets: ReadonlyMap<string, RustClosureShape>;
   readonly dynAdapterShapes: ReadonlySet<string>;
+  readonly emitterSnapshotShapes: ReadonlyMap<string, RustClosureShape>;
   readonly globals: ReadonlyMap<string, IrGlobal>;
   readonly internedClosureTargets: ReadonlySet<string>;
   readonly promiseRejectorTypes: ReadonlyMap<string, IrType[]>;
@@ -69,6 +70,7 @@ export class RustDefinitionEmitter {
     for (const shape of this.context.closureShapes.values()) {
       const name = this.context.closureName(shape);
       const dynAdapter = this.context.dynAdapterShapes.has(typeKey(shape.type));
+      const eventAdapter = this.context.emitterSnapshotShapes.has(typeKey(shape.type));
       const resolverType = this.context.promiseResolverTypes.get(typeKey(shape.type));
       const rejectorTypes = this.context.promiseRejectorTypes.get(typeKey(shape.type)) ?? [];
       this.context.line(`enum ${name} {`);
@@ -91,6 +93,7 @@ export class RustDefinitionEmitter {
         this.context.line(`PromiseRejector${index} { promise: Option<runtime::JsPromise<${this.context.rustType(promiseType)}>> },`);
       });
       if (dynAdapter) this.context.line(`DynAdapter { value: Option<${this.context.dynTypeName()}> },`);
+      if (eventAdapter) this.context.line("EventAdapter { listener: Option<ScEmitterListener>, identity: usize },");
       this.context.popIndent();
       this.context.line("}");
       this.context.line(`impl runtime::Trace for ${name} {`);
@@ -98,7 +101,7 @@ export class RustDefinitionEmitter {
       this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.context.pushIndent();
       const capturing = shape.targets.filter((target) => (target.captures?.length ?? 0) > 0);
-      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0 && !dynAdapter) {
+      if (capturing.length === 0 && resolverType === undefined && rejectorTypes.length === 0 && !dynAdapter && !eventAdapter) {
         this.context.line("let _ = tracer;");
       } else {
         this.context.line("match self {");
@@ -134,6 +137,13 @@ export class RustDefinitionEmitter {
           this.context.popIndent();
           this.context.line("},");
         }
+        if (eventAdapter) {
+          this.context.line("Self::EventAdapter { listener, .. } => {");
+          this.context.pushIndent();
+          this.context.line("if let Some(edge) = listener { runtime::Trace::trace(edge, tracer); }");
+          this.context.popIndent();
+          this.context.line("},");
+        }
         this.context.line("_ => {},");
         this.context.popIndent();
         this.context.line("}");
@@ -146,7 +156,7 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       this.context.line("fn clear_edges(&mut self) {");
       this.context.pushIndent();
-      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0 || dynAdapter) {
+      if (capturing.length > 0 || resolverType !== undefined || rejectorTypes.length > 0 || dynAdapter || eventAdapter) {
         this.context.line("match self {");
         this.context.pushIndent();
         for (const target of capturing) {
@@ -164,12 +174,20 @@ export class RustDefinitionEmitter {
           this.context.line(`Self::PromiseRejector${index} { promise } => *promise = None,`);
         });
         if (dynAdapter) this.context.line("Self::DynAdapter { value } => *value = None,");
+        if (eventAdapter) this.context.line("Self::EventAdapter { listener, .. } => *listener = None,");
         this.context.line("_ => {},");
         this.context.popIndent();
         this.context.line("}");
       }
       this.context.popIndent();
       this.context.line("}");
+      this.context.popIndent();
+      this.context.line("}");
+      this.context.line(`fn sc_closure_identity_${shape.index}(value: &runtime::Gc<${name}>) -> usize {`);
+      this.context.pushIndent();
+      this.context.line(eventAdapter
+        ? `value.with(|closure| match closure { ${name}::EventAdapter { identity, .. } => *identity, _ => value.identity(), })`
+        : "value.identity()");
       this.context.popIndent();
       this.context.line("}");
       this.context.line("");

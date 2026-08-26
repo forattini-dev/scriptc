@@ -148,6 +148,25 @@ pub fn throw_type_error(message: String) -> ! {
     })
 }
 
+pub fn dynamic_specific_string(value: &str) -> String {
+    if value.encode_utf16().count() + 2 <= 28 {
+        return format!("type string ('{value}')");
+    }
+    let prefix: String = value
+        .chars()
+        .scan(0usize, |units, character| {
+            let next = *units + character.len_utf16();
+            if next > 24 {
+                None
+            } else {
+                *units = next;
+                Some(character)
+            }
+        })
+        .collect();
+    format!("type string ('{prefix}...)")
+}
+
 pub fn throw_syntax_error(message: String) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),
@@ -429,6 +448,19 @@ pub fn assert_dyn_result(equal: bool, negated: bool, message: &JsString, has_mes
         "Expected values to be strictly unequal".to_owned()
     } else {
         "Expected values to be strictly equal".to_owned()
+    })
+}
+
+pub fn assert_deep_result(equal: bool, negated: bool, message: &JsString, has_message: bool) {
+    if (negated && !equal) || (!negated && equal) {
+        return;
+    }
+    throw_assertion_error(if has_message && (negated || !message.is_empty()) {
+        message.to_string()
+    } else if negated {
+        "Expected \"actual\" not to be strictly deep-equal to:".to_owned()
+    } else {
+        "Expected values to be strictly deep-equal:".to_owned()
     })
 }
 

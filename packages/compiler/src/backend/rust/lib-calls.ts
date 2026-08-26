@@ -887,6 +887,11 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const hasMessage = context.nextTemporary();
     return `{ let ${actual} = ${context.emitExpr(arg)}; let ${expected} = ${context.emitExpr(secondArg)}; let ${negated} = ${context.emitExpr(expr.args[2])}; let ${deep} = ${context.emitExpr(expr.args[3])}; let ${message} = ${context.emitExpr(expr.args[4])}; let ${hasMessage} = ${context.emitExpr(expr.args[5])}; runtime::assert_dyn_result(sc_dyn_equal(&${actual}, &${expected}, ${deep}), ${negated}, &${message}, ${hasMessage}); () }`;
   }
+  if (expr.fn === "assert.deepResult" && expr.args.length === 4 &&
+    arg?.type.kind === "bool" && secondArg?.type.kind === "bool" &&
+    expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
+    return `runtime::assert_deep_result(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])})`;
+  }
   if (expr.fn === "assert.shapeBegin" && expr.args.length === 1 &&
     arg?.type.kind === "object" && RUNTIME_ERROR_CLASSES.has(arg.type.className)) {
     if (context.hasErrorClassRoots()) {

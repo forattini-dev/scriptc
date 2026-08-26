@@ -2145,3 +2145,32 @@ test.each([
     expect(rust, fixture).toEqual(node);
   }
 }, 240_000);
+
+test.each([
+  "1677-emitter-listeners.ts",
+  "1678-emitter-dyn-listeners.cjs",
+  "2574-emitter-max-listeners-ladders.cjs",
+  "2624-ee-override-js.cjs",
+])("Rust EventEmitter preserves listener introspection and checked dynamic contracts: %s", async (fixture) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-event-emitter-dynamic-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.replace(/\.(?:c?js|ts)$/, "")),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath]),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust, fixture).toEqual(node);
+}, 240_000);

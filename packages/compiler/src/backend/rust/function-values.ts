@@ -6,6 +6,7 @@ import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 export interface RustFunctionValueContext {
   readonly closureTargets: ReadonlyMap<string, RustClosureShape>;
   readonly dynAdapterShapes: ReadonlySet<string>;
+  readonly emitterSnapshotShapes: ReadonlyMap<string, RustClosureShape>;
   readonly functions: ReadonlyMap<string, IrFunction>;
   readonly promiseRejectorTypes: ReadonlyMap<string, IrType[]>;
   readonly promiseResolverTypes: ReadonlyMap<string, IrType>;
@@ -129,6 +130,10 @@ export class RustFunctionValueEmitter {
       }
       arms.push(`${this.context.closureName(shape)}::DynAdapter { value } => { let sc_dyn_args = [${dynamicArgs}]; ${result} }`);
     }
+    if (this.context.emitterSnapshotShapes.has(typeKey(shape.type))) {
+      const passed = [`listener.as_ref().expect("scriptc: cleared live EventEmitter listener adapter")`, ...args];
+      arms.push(`${this.context.closureName(shape)}::EventAdapter { listener, .. } => sc_emitter_dispatch_snapshot_${shape.index}(${passed.join(", ")})`);
+    }
     return `${callee}.with(|closure| match closure { ${arms.join(", ")} })`;
   }
 
@@ -142,6 +147,11 @@ export class RustFunctionValueEmitter {
     if ((expr.left.type.kind === "regex" || expr.left.type.kind === "symbol" || expr.left.type.kind === "url" || expr.left.type.kind === "searchParams") &&
         (expr.op === "===" || expr.op === "!==")) {
       const compare = `std::rc::Rc::ptr_eq(&(${left}), &(${right}))`;
+      return expr.op === "!==" ? `!(${compare})` : compare;
+    }
+    if (expr.left.type.kind === "func" && expr.right.type.kind === "func" &&
+        (expr.op === "===" || expr.op === "!==")) {
+      const compare = `${this.functionIdentity(left, expr.left.type, expr.loc)} == ${this.functionIdentity(right, expr.right.type, expr.loc)}`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
     if (this.context.isTracedHandle(expr.left.type) && (expr.op === "===" || expr.op === "!==")) {
@@ -192,6 +202,11 @@ export class RustFunctionValueEmitter {
       return `match ${operand} { ${arms} }`;
     }
     this.context.unsupported(`toString from '${type.kind}'`, loc);
+  }
+
+  private functionIdentity(value: string, type: IrFuncType, loc: SrcLoc): string {
+    const shape = this.context.closureShapeForType(type, loc);
+    return `sc_closure_identity_${shape.index}(&(${value}))`;
   }
 
   emitPromiseFromSync(

@@ -310,7 +310,11 @@ where
 }
 
 pub fn emitter_set_default_max(value: f64) {
-    validate_max_listeners(value, "setMaxListeners");
+    emitter_set_default_max_named(value, "setMaxListeners");
+}
+
+pub fn emitter_set_default_max_named(value: f64, name: &str) {
+    validate_max_listeners(value, name);
     EVENT_EMITTER_DEFAULT_MAX.with(|current| current.set(value));
 }
 

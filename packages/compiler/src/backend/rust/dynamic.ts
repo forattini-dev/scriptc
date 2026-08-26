@@ -469,6 +469,42 @@ export class RustDynamicEmitter {
     this.context.line(`match value { ${name}::String(text) => text.clone(), _ => sc_dyn_inspect(value), }`);
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_specific_type(value: &${name}) -> String {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined => "undefined".to_owned(),`);
+    this.context.line(`${name}::Null => "null".to_owned(),`);
+    this.context.line(`${name}::Number(value) => format!("type number ({})", runtime::format_number(*value)),`);
+    this.context.line(`${name}::Boolean(value) => format!("type boolean ({value})"),`);
+    this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
+    this.context.line(`${name}::Bytes(..) => "an instance of Uint8Array".to_owned(),`);
+    this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
+    this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
+    for (const shape of boxedShapes) {
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => format!("function {function_name}"),`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_arg_type_fail(name: &str, expected: &str, value: &${name}) -> ! {`);
+    this.context.pushIndent();
+    this.context.line("runtime::throw_type_error_code(format!(\"The \\\"{name}\\\" argument must be {expected}. Received {}\", sc_dyn_specific_type(value)), \"ERR_INVALID_ARG_TYPE\")");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_function_identity(value: &${name}) -> Option<usize> {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    for (const shape of boxedShapes) {
+      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(closure, _, _) => Some(sc_closure_identity_${shape.index}(closure)),`);
+    }
+    this.context.line("_ => None,");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_check_fail(expected: &str, value: &${name}) -> ! {`);
     this.context.pushIndent();
     this.context.line("runtime::throw_type_error(format!(\"expected {expected} at $, got {}\", sc_dyn_kind(value)))");
