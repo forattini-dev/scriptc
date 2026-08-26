@@ -119,3 +119,29 @@ test("Rust TLS clients and servers interoperate in one event loop", async () => 
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 }, 180_000);
+
+test.each([
+  "2330-tls-server-runtime-options.cjs",
+  "2331-tls-server-options-typed.ts",
+  "2690-https-server-timeout-option.ts",
+])("Rust TLS server options corpus matches Node: %s", async (fixture) => {
+  const entry = resolve("tests/corpus", fixture);
+  const output = await mkdtemp(join(tmpdir(), "scriptc-rust-tls-options-"));
+  const compiled = await compile(entry, {
+    backend: "rust",
+    optimization: "dev",
+    outDir: output,
+    outPath: join(output, "program"),
+  });
+  expect(
+    compiled.ok,
+    compiled.ok ? fixture : compiled.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!compiled.ok) return;
+  const node = await execFileAsync(process.execPath, ["--no-warnings", entry]);
+  const rust = await execFileAsync(compiled.binaryPath, [], {
+    env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+  });
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+}, 180_000);

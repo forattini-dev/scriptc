@@ -16,6 +16,17 @@ const TLS_CONNECT_FENCED_OPTIONS = [
   "writable",
 ] as const;
 
+const TLS_SERVER_FENCED_OPTIONS = [
+  "ALPNProtocols", "ALPNCallback", "allowHalfOpen", "ciphers",
+  "clientCertEngine", "crl", "dhparam", "ecdhCurve", "enableTrace",
+  "handshakeTimeout", "highWaterMark", "honorCipherOrder", "keepAlive",
+  "keepAliveInitialDelay", "maxVersion", "minVersion", "noDelay",
+  "passphrase", "pauseOnConnect", "pfx", "privateKeyEngine",
+  "privateKeyIdentifier", "pskCallback", "pskIdentityHint", "requestOCSP",
+  "secureContext", "secureOptions", "secureProtocol", "sessionIdContext",
+  "sessionTimeout", "sigalgs", "ticketKeys",
+] as const;
+
 function optionValue(options: string, key: string, dyn: string): string {
   return `match &${options} { ${dyn}::Object(..) => sc_dyn_key_get(&${options}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
 }
@@ -85,16 +96,18 @@ function emitPemBinding(
   return context.unsupported("TLS server PEM argument", expr.loc);
 }
 
-function emitTlsServer(expr: RustLibCallExpr, context: RustLibCallContext): string {
-  const [certExpr, keyExpr, callbackExpr] = expr.args;
-  if (certExpr === undefined || keyExpr === undefined) {
-    context.unsupported(`${expr.fn} shape`, expr.loc);
-  }
-  const cert = context.nextTemporary();
-  const key = context.nextTemporary();
-  const setup = `${emitPemBinding(certExpr, cert, context, expr)} ${emitPemBinding(keyExpr, key, context, expr)}`;
-  if (expr.fn === "tls.createServer") {
-    return `{ ${setup} runtime::tls_server_new(&${cert}, &${key}) }`;
+function emitTlsServerFromPem(
+  expr: RustLibCallExpr,
+  setup: string,
+  cert: string,
+  key: string,
+  callbackExpr: RustLibCallExpr["args"][number] | undefined,
+  context: RustLibCallContext,
+): string {
+  const https = expr.fn.startsWith("https.");
+  if (callbackExpr === undefined) {
+    const runtimeFn = https ? "https_server_new" : "tls_server_new";
+    return `{ ${setup} runtime::${runtimeFn}(&${cert}, &${key}) }`;
   }
   if (callbackExpr?.type.kind !== "func") {
     return context.unsupported(`${expr.fn} callback`, expr.loc);
@@ -102,7 +115,7 @@ function emitTlsServer(expr: RustLibCallExpr, context: RustLibCallContext): stri
   const callbackType = callbackExpr.type;
   const callback = context.nextTemporary();
   const traced = context.nextTemporary();
-  if (expr.fn === "tls.createServerCb") {
+  if (!https) {
     const parameter = callbackType.params[0];
     if (callbackType.params.length > 1 ||
         (parameter !== undefined && parameter.kind !== "netSocket")) {
@@ -122,6 +135,65 @@ function emitTlsServer(expr: RustLibCallExpr, context: RustLibCallContext): stri
   const args = callbackType.params.map((_, index) => index === 0 ? "sc_request" : "sc_response");
   const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
   return `{ ${setup} let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::https_server_new_callback(&${cert}, &${key}, std::rc::Rc::new(move |sc_request, sc_response| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))) }`;
+}
+
+function emitTlsServer(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const [certExpr, keyExpr, callbackExpr] = expr.args;
+  if (certExpr === undefined || keyExpr === undefined) {
+    context.unsupported(`${expr.fn} shape`, expr.loc);
+  }
+  const cert = context.nextTemporary();
+  const key = context.nextTemporary();
+  const setup = `${emitPemBinding(certExpr, cert, context, expr)} ${emitPemBinding(keyExpr, key, context, expr)}`;
+  return emitTlsServerFromPem(expr, setup, cert, key, callbackExpr, context);
+}
+
+function pemDynString(value: string, what: string, dyn: string): string {
+  return `match &${value} { ${dyn}::String(sc_text) => sc_text.clone(), ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => runtime::bytes_to_string(sc_bytes, &runtime::string("utf8")), ${dyn}::Array(sc_values) => { let sc_length = runtime::array_len(sc_values) as usize; if sc_length == 0 { runtime::throw_error(format!("{} holding an empty array has no static lowering — pass PEM material", ${what})); } if sc_length > 1 { runtime::throw_error(format!("{} with more than one array entry has no static lowering — one cert/key pair per server here", ${what})); } let sc_entry = runtime::array_get(sc_values, 0.0); match &sc_entry { ${dyn}::String(sc_text) => sc_text.clone(), ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => runtime::bytes_to_string(sc_bytes, &runtime::string("utf8")), sc_value => sc_dyn_arg_type_fail(${what}.as_ref(), "of type string or an instance of Buffer or Uint8Array", sc_value), } }, ${dyn}::Undefined | ${dyn}::Null => runtime::throw_error(format!("{} holding undefined has no static lowering — pass PEM material (a string or a Buffer)", ${what})), sc_value => sc_dyn_arg_type_fail(${what}.as_ref(), "of type string or an instance of Buffer or Uint8Array", sc_value), }`;
+}
+
+function emitPemDyn(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const [valueExpr, whatExpr] = expr.args;
+  if (valueExpr?.type.kind !== "dyn" || whatExpr?.type.kind !== "string") {
+    return context.unsupported("tls.pemDyn shape", expr.loc);
+  }
+  const value = context.nextTemporary();
+  const what = context.nextTemporary();
+  const pem = pemDynString(value, what, context.dynTypeName());
+  return `{ let ${value} = ${context.emitExpr(valueExpr)}; let ${what} = ${context.emitExpr(whatExpr)}; let sc_pem = ${pem}; runtime::buffer_from_string(&sc_pem, &runtime::string("utf8")) }`;
+}
+
+function emitTlsServerDynamic(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const [optionsExpr, callbackExpr] = expr.args;
+  if (optionsExpr?.type.kind !== "dyn") {
+    return context.unsupported(`${expr.fn} shape`, expr.loc);
+  }
+  const dyn = context.dynTypeName();
+  const options = context.nextTemporary();
+  const certValue = context.nextTemporary();
+  const keyValue = context.nextTemporary();
+  const cert = context.nextTemporary();
+  const key = context.nextTemporary();
+  const api = expr.fn.startsWith("https.") ? "https.createServer" : "tls.createServer";
+  const requestCert = context.nextTemporary();
+  const sni = context.nextTemporary();
+  const fences = TLS_SERVER_FENCED_OPTIONS.map((name) => {
+    const value = context.nextTemporary();
+    return `let ${value} = ${optionValue(options, name, dyn)}; if !matches!(&${value}, ${dyn}::Undefined) { runtime::throw_error(format!("${api} option '${name}' has no static lowering — cert and key (PEM strings or Buffers) are the honestly-implemented members of a runtime options record")); }`;
+  }).join(" ");
+  const certWhat = `runtime::string("a ${api} 'cert' option")`;
+  const keyWhat = `runtime::string("a ${api} 'key' option")`;
+  let timeout = "";
+  let after = "";
+  if (expr.fn.startsWith("https.")) {
+    const timeoutValue = context.nextTemporary();
+    const timeoutOption = context.nextTemporary();
+    timeout = `let ${timeoutValue} = ${optionValue(options, "keepAliveTimeoutBuffer", dyn)}; let ${timeoutOption} = match &${timeoutValue} { ${dyn}::Undefined => None, ${dyn}::Number(sc_number) => Some(*sc_number), sc_value => sc_dyn_arg_type_fail("keepAliveTimeoutBuffer", "of type number", sc_value), };`;
+    after = `runtime::http_server_timeout_option_set(&sc_server, 4.0, ${timeoutOption});`;
+  }
+  const setup = `let ${options} = ${context.emitExpr(optionsExpr)}; if !matches!(&${options}, ${dyn}::Object(..)) { sc_dyn_arg_type_fail("options", "of type object", &${options}); } ${timeout} let ${requestCert} = ${optionValue(options, "requestCert", dyn)}; if !matches!(&${requestCert}, ${dyn}::Undefined) && sc_dyn_is_truthy(&${requestCert}) { runtime::throw_error("${api} option 'requestCert' has no static lowering — client-certificate handshakes are not modeled; requestCert stays false".to_owned()); } let ${sni} = ${optionValue(options, "SNICallback", dyn)}; if !matches!(&${sni}, ${dyn}::Undefined) { runtime::throw_error("${api} option 'SNICallback' has no static lowering — serve one cert/key pair here".to_owned()); } ${fences} let ${certValue} = ${optionValue(options, "cert", dyn)}; let ${keyValue} = ${optionValue(options, "key", dyn)}; if matches!(&${certValue}, ${dyn}::Undefined) || matches!(&${keyValue}, ${dyn}::Undefined) { runtime::throw_error("${api} without both cert and key has no static lowering — the supported options are { cert, key } (PEM strings or Buffers)".to_owned()); } let ${cert} = ${pemDynString(certValue, certWhat, dyn)}; let ${key} = ${pemDynString(keyValue, keyWhat, dyn)};`;
+  const call = emitTlsServerFromPem(expr, "", cert, key, callbackExpr, context);
+  return `{ ${setup} let sc_server = ${call}; ${after} sc_server }`;
 }
 
 export function emitRustTlsCall(
@@ -147,6 +219,12 @@ export function emitRustTlsCall(
       ((expr.fn === "tls.createServerCb" || expr.fn === "https.createServer") &&
         expr.args.length === 3)) {
     return emitTlsServer(expr, context);
+  }
+  if (expr.fn === "tls.pemDyn" && expr.args.length === 2) {
+    return emitPemDyn(expr, context);
+  }
+  if (["tls.createServerDyn", "tls.createServerDynCb", "https.createServerDyn", "https.createServerDynCb"].includes(expr.fn)) {
+    return emitTlsServerDynamic(expr, context);
   }
   if (expr.fn === "tls.sockAuthorized" && expr.args.length === 1 &&
       arg?.type.kind === "netSocket") {

@@ -53,6 +53,12 @@ pub fn https_server_new_callback(
     server
 }
 
+pub fn https_server_new(cert: &JsString, key: &JsString) -> JsNetServer {
+    let server = http_server_new();
+    tls_server_attach(&server, cert, key);
+    server
+}
+
 pub fn tls_server_on_secure_connection(
     server: &JsNetServer,
     callback: Rc<dyn Fn(JsNetSocket)>,
