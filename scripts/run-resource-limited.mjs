@@ -18,6 +18,7 @@ const properties = [
   `MemoryMax=${process.env.SCRIPTC_LIMIT_MEMORY ?? "3G"}`,
   "MemorySwapMax=0",
   "IOWeight=1",
+  "IOSchedulingClass=idle",
   "Nice=19",
   "TasksMax=64",
 ];
