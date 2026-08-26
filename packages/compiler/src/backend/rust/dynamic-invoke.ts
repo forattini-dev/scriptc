@@ -38,6 +38,7 @@ class RustDynamicInvokeEmitter {
     this.emitFunctionCacheHelpers();
     this.emitDefinePropertiesHelper();
     this.emitArrayCallbacks();
+    this.emitArraySortHelpers();
     this.emitDispatcher();
   }
 
@@ -119,6 +120,33 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"findIndex" => ${this.dyn}::Number(-1.0),`);
     this.context.line("_ => unreachable!(\"scriptc invariant: invalid dynamic array iterator\"),");
     this.close("}");
+    this.close("}");
+  }
+
+  private emitArraySortHelpers(): void {
+    this.open(`fn sc_dyn_sort_compare(left: &${this.dyn}, right: &${this.dyn}, comparator: Option<&${this.dyn}>) -> std::cmp::Ordering {`);
+    this.context.line(`if matches!(left, ${this.dyn}::Undefined) { return if matches!(right, ${this.dyn}::Undefined) { std::cmp::Ordering::Equal } else { std::cmp::Ordering::Greater }; }`);
+    this.context.line(`if matches!(right, ${this.dyn}::Undefined) { return std::cmp::Ordering::Less; }`);
+    this.open("if let Some(comparator) = comparator {");
+    this.context.line("let result = sc_dyn_call(comparator, &[left.clone(), right.clone()], \"comparefn\");");
+    this.open("let value = match result {");
+    this.context.line(`${this.dyn}::Number(value) => value,`);
+    this.context.line(`${this.dyn}::Boolean(value) => if value { 1.0 } else { 0.0 },`);
+    this.context.line("_ => 0.0,");
+    this.close("};");
+    this.context.line("return if value < 0.0 { std::cmp::Ordering::Less } else if value > 0.0 { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal };");
+    this.close("}");
+    this.context.line("sc_dyn_to_string(left).as_bytes().cmp(sc_dyn_to_string(right).as_bytes())");
+    this.close("}");
+
+    const callable = this.functionPatterns === ""
+      ? `${this.dyn}::Undefined`
+      : `${this.dyn}::Undefined | ${this.functionPatterns}`;
+    this.open(`fn sc_dyn_array_sort(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}]) -> ${this.dyn} {`);
+    this.context.line(`let comparator = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
+    this.context.line(`if !matches!(&comparator, ${callable}) { runtime::throw_type_error(format!("The comparison function must be either a function or undefined: {}", sc_dyn_to_string(&comparator))); }`);
+    this.context.line(`let comparator = if matches!(&comparator, ${this.dyn}::Undefined) { None } else { Some(&comparator) };`);
+    this.context.line(`${this.dyn}::Array(runtime::array_sort_by_snapshot(array, |left, right| sc_dyn_sort_compare(left, right, comparator)))`);
     this.close("}");
   }
 
@@ -259,6 +287,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"join" => { let separator = match args.first() { None | Some(${this.dyn}::Undefined) => runtime::string(","), Some(value) => sc_dyn_to_string(value), }; ${this.dyn}::String(runtime::array_join_by(array, &separator, |element, output| { if !matches!(element, ${this.dyn}::Undefined | ${this.dyn}::Null) { output.push_str(sc_dyn_to_string(element).as_ref()); } })) },`);
     this.context.line(`"concat" => { let output = runtime::array_slice(array, 0.0, length); for arg in args { match arg { ${this.dyn}::Array(items) => { runtime::array_extend(&output, items); }, value => { runtime::array_push(&output, value.clone()); }, } } ${this.dyn}::Array(output) },`);
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
+    this.context.line('"sort" => sc_dyn_array_sort(array, args),');
     this.context.line("\"forEach\" | \"map\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
     this.context.line("\"splice\" | \"reduce\" | \"reduceRight\" | \"flat\" | \"fill\" | \"copyWithin\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");

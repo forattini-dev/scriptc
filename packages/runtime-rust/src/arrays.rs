@@ -137,6 +137,21 @@ pub fn array_reverse<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
     array.clone()
 }
 
+pub fn array_sort_by_snapshot<T, F>(array: &JsArray<T>, mut compare: F) -> JsArray<T>
+where
+    T: ArrayElement,
+    F: FnMut(&T, &T) -> std::cmp::Ordering,
+{
+    let mut elements = array.with(|data| data.elements.clone());
+    elements.sort_by(|left, right| compare(left, right));
+    array.with_mut(|data| {
+        for (stored, sorted) in data.elements.iter_mut().zip(elements) {
+            *stored = sorted;
+        }
+    });
+    array.clone()
+}
+
 fn array_relative_index(index: f64, length: usize) -> usize {
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
     if index == f64::NEG_INFINITY {
