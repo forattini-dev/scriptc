@@ -168,10 +168,86 @@ where
     }
 }
 
+pub fn json_write_map_properties<V>(
+    writer: &mut JsonWriter,
+    first: &mut bool,
+    map: &JsMap<JsString, V>,
+) where
+    V: HeapValue + JsonValue,
+{
+    map.with(|data| {
+        for position in map_string_entry_order(data) {
+            let (key, value) = data.entries[position]
+                .as_ref()
+                .expect("scriptc: ordered JSON property points at a tombstone");
+            writer.property(first, key, value);
+        }
+    });
+}
+
 pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     let mut writer = JsonWriter::new();
     value.write_json(&mut writer);
     Rc::from(writer.output)
+}
+
+pub fn json_stringify_indented<T: JsonValue>(value: &T, indent: &str) -> JsString {
+    let compact = json_stringify(value);
+    if indent.is_empty() {
+        return compact;
+    }
+    let mut output = String::with_capacity(compact.len() + indent.len() * 4);
+    let mut chars = compact.chars().peekable();
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(ch) = chars.next() {
+        if in_string {
+            output.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                output.push(ch);
+            }
+            '{' | '[' => {
+                output.push(ch);
+                depth += 1;
+                let close = if ch == '{' { '}' } else { ']' };
+                if chars.peek() != Some(&close) {
+                    output.push('\n');
+                    output.push_str(&indent.repeat(depth));
+                }
+            }
+            '}' | ']' => {
+                depth = depth
+                    .checked_sub(1)
+                    .expect("scriptc: malformed compact JSON nesting");
+                let open = if ch == '}' { '{' } else { '[' };
+                if !output.ends_with(open) {
+                    output.push('\n');
+                    output.push_str(&indent.repeat(depth));
+                }
+                output.push(ch);
+            }
+            ',' => {
+                output.push(',');
+                output.push('\n');
+                output.push_str(&indent.repeat(depth));
+            }
+            ':' => output.push_str(": "),
+            _ => output.push(ch),
+        }
+    }
+    Rc::from(output)
 }
 
 pub enum JsonNode {

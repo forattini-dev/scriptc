@@ -5,6 +5,7 @@ import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
+import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 
 export interface RustExpressionContext {
@@ -284,10 +285,9 @@ export class RustExpressionEmitter {
           this.context.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
         }
         const indent = (expr as typeof expr & { indent?: string }).indent;
-        if (indent && expr.value.type.kind !== "f64" && expr.value.type.kind !== "bool" && expr.value.type.kind !== "string") {
-          this.context.unsupported("JSON.stringify indentation for composite values", expr.loc);
-        }
-        return `runtime::json_stringify(&(${value}))`;
+        return indent
+          ? `runtime::json_stringify_indented(&(${value}), "${this.context.rustString(indent)}")`
+          : `runtime::json_stringify(&(${value}))`;
       }
       case "dynArrLit": {
         const array = this.context.nextName("sc_rt");
@@ -616,8 +616,7 @@ export class RustExpressionEmitter {
         if (expr.type.kind !== "record") this.context.unsupported("record literal with a non-record type", expr.loc);
         const shape = this.context.records.get(expr.type.shapeId);
         if (shape === undefined) this.context.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
-        if (shape.indexValue !== undefined) {
-          if (shape.fields.length !== 0) this.context.unsupported(`hybrid indexed record literal '${shape.id}'`, expr.loc);
+        if (shape.indexValue !== undefined && shape.fields.length === 0) {
           const map = this.context.nextName("sc_rt");
           const entries = expr.fields.map((entry) => {
             if (entry.drop) this.context.unsupported("dropped indexed record field", expr.loc);
@@ -628,11 +627,25 @@ export class RustExpressionEmitter {
         }
         const values = new Map<string, string>();
         const bindings: string[] = [];
+        const indexValue = shape.indexValue;
+        let overflow: string | null = null;
+        if (indexValue !== undefined) {
+          overflow = this.context.nextName("sc_rt");
+          const value = indexValue.kind === "dyn"
+            ? this.context.dynTypeName()
+            : this.context.rustType(indexValue, expr.loc);
+          bindings.push(`let ${overflow}: runtime::JsMap<runtime::JsString, ${value}> = runtime::map_new();`);
+        }
         for (const entry of expr.fields) {
-          if (entry.overflow || entry.drop) this.context.unsupported("record overflow/drop fields", expr.loc);
           const temp = this.context.nextName("sc_rt");
           bindings.push(`let ${temp} = ${this.emitExpr(entry.value)};`);
-          values.set(entry.name, temp);
+          if (entry.drop) continue;
+          if (entry.overflow) {
+            if (overflow === null) this.context.unsupported("record overflow field", expr.loc);
+            bindings.push(`runtime::map_set_by(&${overflow}, runtime::string("${this.context.rustString(entry.name)}"), ${temp}, |left, right| left.as_ref() == right.as_ref());`);
+          } else {
+            values.set(entry.name, temp);
+          }
         }
         const fields = shape.fields.map((field) => {
           const value = values.get(field.name);
@@ -640,7 +653,8 @@ export class RustExpressionEmitter {
           const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
           return `${mangleField(field.name)}: ${stored}`;
         }).join(", ");
-        return `{ ${bindings.join(" ")} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
+        const overflowField = overflow === null ? "" : `, ${RUST_RECORD_OVERFLOW}: Some(${overflow})`;
+        return `{ ${bindings.join(" ")} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields}${overflowField} }) }`;
       }
       case "recordClone": {
         const source = this.context.nextName("sc_rt");
@@ -666,10 +680,14 @@ export class RustExpressionEmitter {
       }
       case "recordOvfKeys": {
         const shape = this.context.records.get(expr.shapeId);
-        if (shape?.indexValue === undefined || shape.fields.length !== 0) {
+        if (shape?.indexValue === undefined) {
           this.context.unsupported(`indexed record keys '${expr.shapeId}'`, expr.loc);
         }
-        return `runtime::map_string_keys_js_order(&(${this.emitExpr(expr.obj)}))`;
+        if (shape.fields.length === 0) {
+          return `runtime::map_string_keys_js_order(&(${this.emitExpr(expr.obj)}))`;
+        }
+        const object = this.context.nextName("sc_rt");
+        return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with(|record| runtime::map_string_keys_js_order(record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"))) }`;
       }
       case "caughtToDyn": {
         const caught = this.context.nextName("sc_rt");

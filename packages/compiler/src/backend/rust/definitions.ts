@@ -11,6 +11,7 @@ import {
   mangleRecordStruct,
 } from "../mangle.js";
 import type { RustClassMeta, RustClosureShape } from "./model.js";
+import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustDefinitionContext {
   readonly classMeta: ReadonlyMap<string, RustClassMeta>;
@@ -377,11 +378,9 @@ export class RustDefinitionEmitter {
 
   emitRecordDefinitions(): void {
     for (const shape of this.context.records.values()) {
-      // Some intrinsic-only surfaces, notably process.env, carry an indexed
-      // record type through the IR even though every operation lowers to a
-      // dedicated libCall. Do not reject those unused nominal shapes here;
-      // rustType still fences an indexed record if a value actually escapes.
-      if (shape.indexValue !== undefined) continue;
+      // Pure index-signature records are represented directly by JsMap.
+      // Hybrid shapes retain their declared slots and embed a map for extras.
+      if (shape.indexValue !== undefined && shape.fields.length === 0) continue;
       const struct = mangleRecordStruct(shape.id);
       this.context.line(`struct ${struct} {`);
       this.context.pushIndent();
@@ -390,6 +389,12 @@ export class RustDefinitionEmitter {
           ? `Option<${this.context.rustType(field.type)}>`
           : this.context.rustType(field.type);
         this.context.line(`${mangleField(field.name)}: ${fieldType},`);
+      }
+      if (shape.indexValue !== undefined) {
+        const value = shape.indexValue.kind === "dyn"
+          ? this.context.dynTypeName()
+          : this.context.rustType(shape.indexValue);
+        this.context.line(`${RUST_RECORD_OVERFLOW}: Option<runtime::JsMap<runtime::JsString, ${value}>>,`);
       }
       this.context.popIndent();
       this.context.line("}");
@@ -405,6 +410,9 @@ export class RustDefinitionEmitter {
             : `if let Some(edge) = &self.${name} { runtime::Trace::trace(edge, tracer); }`);
         }
       }
+      if (shape.indexValue !== undefined) {
+        this.context.line(`if let Some(edge) = &self.${RUST_RECORD_OVERFLOW} { tracer.edge(edge); }`);
+      }
       this.context.popIndent();
       this.context.line("}");
       this.context.popIndent();
@@ -416,6 +424,7 @@ export class RustDefinitionEmitter {
       for (const field of shape.fields) {
         if (this.context.isEdgeValue(field.type)) this.context.line(`self.${mangleField(field.name)} = None;`);
       }
+      if (shape.indexValue !== undefined) this.context.line(`self.${RUST_RECORD_OVERFLOW} = None;`);
       this.context.popIndent();
       this.context.line("}");
       this.context.popIndent();
@@ -441,6 +450,9 @@ export class RustDefinitionEmitter {
           this.context.line(shape.tuple
             ? `writer.element(&mut first, ${value});`
             : `writer.property(&mut first, "${this.context.rustString(field.name)}", ${value});`);
+        }
+        if (shape.indexValue !== undefined) {
+          this.context.line(`runtime::json_write_map_properties(writer, &mut first, self.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"));`);
         }
         this.context.line(shape.tuple ? "writer.end_array();" : "writer.end_object();");
         this.context.popIndent();
@@ -476,6 +488,27 @@ export class RustDefinitionEmitter {
             }
           }
           this.context.line(`${mangleField(field.name)}: ${this.context.isEdgeValue(field.type) ? `Some(${decoded})` : decoded},`);
+        }
+        if (shape.indexValue !== undefined) {
+          const value = shape.indexValue.kind === "dyn"
+            ? this.context.dynTypeName()
+            : this.context.rustType(shape.indexValue);
+          const declared = shape.fields.length === 0
+            ? "false"
+            : `matches!(key.as_str(), ${shape.fields.map((field) => `"${this.context.rustString(field.name)}"`).join(" | ")})`;
+          this.context.line(`${RUST_RECORD_OVERFLOW}: Some({`);
+          this.context.pushIndent();
+          this.context.line(`let overflow: runtime::JsMap<runtime::JsString, ${value}> = runtime::map_new();`);
+          this.context.line("for (key, node) in values {");
+          this.context.pushIndent();
+          this.context.line(`if ${declared} { continue; }`);
+          this.context.line(`let value = <${value} as runtime::JsonDecode>::decode_json(node, &runtime::json_property_path(path, key))?;`);
+          this.context.line("runtime::map_set_by(&overflow, runtime::string(key), value, |left, right| left.as_ref() == right.as_ref());");
+          this.context.popIndent();
+          this.context.line("}");
+          this.context.line("overflow");
+          this.context.popIndent();
+          this.context.line("}),");
         }
         this.context.popIndent();
         this.context.line("})");

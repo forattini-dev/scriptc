@@ -5,8 +5,9 @@ import type { RustExpressionContext } from "./expressions.js";
 import { emitRustRecordKeyGetValues } from "./indexed-records.js";
 
 type UnionKeyGetContext = Pick<RustExpressionContext,
-  "dynTypeName" | "isEdgeValue" | "isUnit" | "needsClone" | "nextName" |
-  "records" | "union" | "unionName" | "unionVariant" | "unsupported"
+  "dynTypeName" | "emitDynFromValue" | "isEdgeValue" | "isUnit" |
+  "needsClone" | "nextName" | "records" | "rustString" | "union" |
+  "unionName" | "unionVariant" | "unsupported"
 >;
 
 export function emitRustUnionKeyGet(

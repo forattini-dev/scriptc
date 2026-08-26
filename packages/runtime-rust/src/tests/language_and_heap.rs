@@ -310,6 +310,10 @@
             json_stringify(&record).as_ref(),
             r#"{"2":"two","10":"ten","name":"n","tail":"t"}"#
         );
+        assert_eq!(
+            json_stringify_indented(&record, "  ").as_ref(),
+            "{\n  \"2\": \"two\",\n  \"10\": \"ten\",\n  \"name\": \"n\",\n  \"tail\": \"t\"\n}"
+        );
     }
 
     #[test]

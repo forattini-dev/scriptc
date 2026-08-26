@@ -190,14 +190,11 @@ export class RustValueEmitter {
       case "record": {
         const shape = this.context.records.get(type.shapeId);
         if (shape === undefined) this.context.unsupported(`unknown record type '${type.shapeId}'`, loc);
-        if (shape.indexValue !== undefined) {
-          if (shape.fields.length === 0) {
-            const value = shape.indexValue.kind === "dyn"
-              ? this.context.dynTypeName()
-              : this.rustType(shape.indexValue, loc);
-            return `runtime::JsMap<runtime::JsString, ${value}>`;
-          }
-          this.context.unsupported(`indexed record value '${type.shapeId}'`, loc);
+        if (shape.indexValue !== undefined && shape.fields.length === 0) {
+          const value = shape.indexValue.kind === "dyn"
+            ? this.context.dynTypeName()
+            : this.rustType(shape.indexValue, loc);
+          return `runtime::JsMap<runtime::JsString, ${value}>`;
         }
         return `runtime::Gc<${mangleRecordStruct(type.shapeId)}>`;
       }
@@ -381,10 +378,8 @@ export class RustValueEmitter {
         const shape = this.context.records.get(type.shapeId);
         if (shape === undefined) return false;
         const next = new Set(visiting).add(key);
-        if (shape.indexValue !== undefined) {
-          return shape.fields.length === 0 && this.isRustJsonCompatible(shape.indexValue, next);
-        }
-        return shape.fields.every((field) => this.isRustJsonCompatible(field.type, next));
+        return shape.fields.every((field) => this.isRustJsonCompatible(field.type, next)) &&
+          (shape.indexValue === undefined || this.isRustJsonCompatible(shape.indexValue, next));
       }
       case "union": {
         const key = `union:${type.unionId}`;

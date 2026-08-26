@@ -3,6 +3,7 @@ import { shapeHasAccessorSlots } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustAsyncHandlers } from "./async-control.js";
 import type { IrAwaitExpr } from "./model.js";
+import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustAsyncValueContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
@@ -34,6 +35,8 @@ export interface RustAsyncValueContext {
   needsClone(type: IrType): boolean;
   isEdgeValue(type: IrType): boolean;
   isUnit(type: IrType): boolean;
+  rustString(value: string): string;
+  rustType(type: IrType, loc?: SrcLoc): string;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
   unionVariant(tag: number): string;
@@ -157,18 +160,28 @@ export class RustAsyncValueEmitter {
     consume: (value: string) => void,
     index = 0,
     values = new Map<string, string>(),
+    overflowValues: readonly (readonly [string, string])[] = [],
   ): void {
     if (expr.type.kind !== "record") this.context.unsupported("async record literal with a non-record type", expr.loc);
     const shape = this.context.records.get(expr.type.shapeId);
     if (shape === undefined) this.context.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
     const entry = expr.fields[index];
     if (entry !== undefined) {
-      if (entry.overflow || entry.drop) this.context.unsupported("async record overflow/drop fields", expr.loc);
       this.emitAsyncValue(entry.value, (value) => {
         const next = new Map(values);
-        next.set(entry.name, value);
-        this.emitAsyncRecord(expr, consume, index + 1, next);
+        if (!entry.overflow && !entry.drop) next.set(entry.name, value);
+        const overflow = entry.overflow ? [...overflowValues, [entry.name, value] as const] : overflowValues;
+        this.emitAsyncRecord(expr, consume, index + 1, next, overflow);
       });
+      return;
+    }
+    if (shape.indexValue !== undefined && shape.fields.length === 0) {
+      const map = this.context.nextName("sc_async_record");
+      const valueType = this.context.rustType(shape.indexValue, expr.loc);
+      const entries = overflowValues.map(([name, value]) =>
+        `runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`
+      ).join(" ");
+      consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} ${map} }`);
       return;
     }
     const fields = shape.fields.map((field) => {
@@ -176,7 +189,16 @@ export class RustAsyncValueEmitter {
       if (value === undefined) this.context.unsupported(`missing async record field '${shape.id}.${field.name}'`, expr.loc);
       return `${mangleField(field.name)}: ${this.context.isEdgeValue(field.type) ? `Some(${value})` : value}`;
     }).join(", ");
-    consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
+    if (shape.indexValue === undefined) {
+      consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
+      return;
+    }
+    const map = this.context.nextName("sc_async_record");
+    const valueType = this.context.rustType(shape.indexValue, expr.loc);
+    const entries = overflowValues.map(([name, value]) =>
+      `runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`
+    ).join(" ");
+    consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields}, ${RUST_RECORD_OVERFLOW}: Some(${map}) }) }`);
   }
 
   recordCloneShape(

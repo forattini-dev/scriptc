@@ -1,6 +1,7 @@
 import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleLocal } from "../mangle.js";
+import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustLoopTarget {
   readonly id: number;
@@ -26,6 +27,7 @@ export interface RustStatementContext {
   emitExpr(expr: IrExpr): string;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
   emitAssignment(id: string, value: string, loc: SrcLoc): void;
+  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   local(id: string, loc: SrcLoc): IrFunction["locals"][number];
   localIsBoxed(local: IrFunction["locals"][number]): boolean;
   forceBoxedLocal(id: string, forced: boolean): void;
@@ -264,16 +266,34 @@ class RustStatementEmitter {
 
   private emitRecordKeySet(stmt: Extract<IrStmt, { kind: "recordKeySet" }>): void {
     const shape = this.context.record(stmt.shapeId);
-    if (shape?.indexValue === undefined || shape.fields.length !== 0) {
+    if (shape?.indexValue === undefined) {
       this.context.unsupported(`keyed write on non-indexed record '${stmt.shapeId}'`, stmt.loc);
     }
-    if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(shape.indexValue)) {
+    const indexValue = shape.indexValue;
+    if (stmt.key.type.kind !== "string" || typeKey(stmt.value.type) !== typeKey(indexValue)) {
       this.context.unsupported(`keyed write types for record '${stmt.shapeId}'`, stmt.loc);
     }
     const object = this.context.nextTemporary();
     const key = this.context.nextTemporary();
     const value = this.context.nextTemporary();
-    this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${key} = ${this.context.emitExpr(stmt.key)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
+    const bindings = `let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${key} = ${this.context.emitExpr(stmt.key)}; let ${value} = ${this.context.emitExpr(stmt.value)};`;
+    if (shape.fields.length === 0) {
+      this.context.line(`{ ${bindings} runtime::map_set_by(&${object}, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref()); }`);
+      return;
+    }
+    const declared = (stmt.overflowOnly ? [] : shape.fields).map((field, index) => {
+      const checked = indexValue.kind === "dyn"
+        ? this.context.emitDynCheckValue(field.type, value, stmt.loc)
+        : value;
+      const stored = this.context.isEdgeValue(field.type) ? `Some(${checked})` : checked;
+      return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`;
+    });
+    const overflow = `${object}.with(|record| record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone())`;
+    const setOverflow = `let overflow = ${overflow}; runtime::map_set_by(&overflow, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
+    const dispatch = declared.length === 0
+      ? setOverflow
+      : `${declared.join(" ")} else { ${setOverflow} }`;
+    this.context.line(`{ ${bindings} ${dispatch} }`);
   }
 
   private emitRecordKeyDelete(stmt: Extract<IrStmt, { kind: "recordKeyDelete" }>): void {

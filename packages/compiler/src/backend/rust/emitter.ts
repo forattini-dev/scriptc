@@ -24,11 +24,7 @@ import { RustDefinitionEmitter } from "./definitions.js";
 import { RustMetadata } from "./metadata.js";
 import { RustEventEmitterEmitter } from "./event-emitter.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
-import {
-  mangleFnClosure,
-  mangleFunction,
-  mangleGlobal,
-} from "../mangle.js";
+import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 
@@ -225,6 +221,8 @@ class RustEmitter {
     needsClone: (type) => this.needsClone(type),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isUnit: (type) => this.isUnit(type),
+    rustString: (value) => this.rustString(value),
+    rustType: (type, loc) => this.rustType(type, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
     unionVariant: (tag) => this.unionVariant(tag),
@@ -943,6 +941,7 @@ class RustEmitter {
       emitExpr: (expr) => this.emitExpr(expr),
       emitRead: (id, type, loc) => this.emitRead(id, type, loc),
       emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
+      emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
       local: (id, loc) => this.local(id, loc),
       localIsBoxed: (local) => this.localIsBoxed(local),
       forceBoxedLocal: (id, forced) => {
