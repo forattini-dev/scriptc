@@ -681,30 +681,82 @@ pub fn process_arch() -> JsString {
 }
 
 thread_local! {
-    static PROCESS_ENV_WRITES: RefCell<HashMap<String, Option<JsString>>> = RefCell::new(HashMap::new());
+    static PROCESS_ENV_WRITES: RefCell<Vec<(String, Option<JsString>)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn process_env_name_eq(left: &str, right: &str) -> bool {
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
+fn process_env_write(name: &JsString, value: Option<JsString>) {
+    PROCESS_ENV_WRITES.with(|writes| {
+        let mut writes = writes.borrow_mut();
+        if let Some((_, stored)) = writes
+            .iter_mut()
+            .find(|(stored, _)| process_env_name_eq(stored, name))
+        {
+            *stored = value;
+        } else {
+            writes.push((name.to_string(), value));
+        }
+    });
 }
 
 pub fn process_env_get(name: &JsString) -> Option<JsString> {
-    if let Some(value) =
-        PROCESS_ENV_WRITES.with(|writes| writes.borrow().get(name.as_ref()).cloned())
-    {
+    if let Some(value) = PROCESS_ENV_WRITES.with(|writes| {
+        writes
+            .borrow()
+            .iter()
+            .find(|(stored, _)| process_env_name_eq(stored, name))
+            .map(|(_, value)| value.clone())
+    }) {
         return value;
     }
     std::env::var_os(name.as_ref()).map(|value| Rc::from(value.to_string_lossy().as_ref()))
 }
 
 pub fn process_env_set(name: &JsString, value: &JsString) {
-    PROCESS_ENV_WRITES.with(|writes| {
-        writes
-            .borrow_mut()
-            .insert(name.to_string(), Some(value.clone()));
-    });
+    process_env_write(name, Some(value.clone()));
 }
 
 pub fn process_env_unset(name: &JsString) {
+    process_env_write(name, None);
+}
+
+pub fn process_env_pairs() -> JsArray<JsString> {
     PROCESS_ENV_WRITES.with(|writes| {
-        writes.borrow_mut().insert(name.to_string(), None);
-    });
+        let writes = writes.borrow();
+        let mut seen = Vec::new();
+        let mut pairs = Vec::new();
+        for (name, value) in std::env::vars_os() {
+            let name = name.to_string_lossy().into_owned();
+            seen.push(name.clone());
+            let value = writes
+                .iter()
+                .find(|(stored, _)| process_env_name_eq(stored, &name))
+                .map_or_else(
+                    || Some(Rc::from(value.to_string_lossy().as_ref())),
+                    |(_, value)| value.clone(),
+                );
+            if let Some(value) = value {
+                pairs.push(Rc::from(name));
+                pairs.push(value);
+            }
+        }
+        for (name, value) in writes.iter() {
+            if !seen.iter().any(|seen| process_env_name_eq(seen, name)) {
+                if let Some(value) = value {
+                    pairs.push(Rc::from(name.as_str()));
+                    pairs.push(value.clone());
+                }
+            }
+        }
+        array_new(pairs)
+    })
 }
 
 pub fn process_env_apply(command: &mut std::process::Command) {

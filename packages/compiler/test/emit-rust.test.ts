@@ -710,9 +710,12 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "1464-env-writes.ts",
+  "1465-env-value.ts",
   "1477-in-expressions.ts",
   "1483-array-slice.ts",
   "1527-logical-mixed-operands.ts",
+  "1528-delete-records-env.ts",
   "2643-or-default-retag.ts",
 ])("Rust environment writes and mixed logical values match Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));

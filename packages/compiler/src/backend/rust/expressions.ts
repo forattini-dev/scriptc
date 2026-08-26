@@ -2,6 +2,7 @@ import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrU
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
+import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 
 export interface RustExpressionContext {
@@ -682,31 +683,7 @@ export class RustExpressionEmitter {
         return `(${this.emitExpr(expr.obj)}).with(|record| ${result})`;
       }
       case "recordKeyGet": {
-        const shape = this.context.records.get(expr.shapeId);
-        if (shape === undefined || shape.indexValue === undefined || shape.fields.length !== 0) {
-          this.context.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);
-        }
-        const indexValue = shape.indexValue;
-        if (expr.key.type.kind !== "string") this.context.unsupported("indexed record key type", expr.loc);
-        const object = this.context.nextName("sc_rt");
-        const key = this.context.nextName("sc_rt");
-        if (indexValue.kind === "dyn" && expr.type.kind === "dyn") {
-          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.context.dynTypeName()}::Undefined) }`;
-        }
-        if (expr.type.kind === "union") {
-          const union = this.context.union(expr.type.unionId, expr.loc);
-          const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(indexValue));
-          const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
-          if (valueTag < 0 || undefinedTag < 0) {
-            this.context.unsupported(`indexed record optional read result '${expr.shapeId}'`, expr.loc);
-          }
-          const name = this.context.unionName(union.id);
-          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; match runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()) { Some(value) => ${name}::${this.context.unionVariant(valueTag)}(value), None => ${name}::${this.context.unionVariant(undefinedTag)}, } }`;
-        }
-        if (typeKey(indexValue) !== typeKey(expr.type)) {
-          this.context.unsupported(`indexed record read result '${expr.shapeId}'`, expr.loc);
-        }
-        return `{ let ${object} = ${this.emitExpr(expr.obj)}; let ${key} = ${this.emitExpr(expr.key)}; runtime::map_get_by(&${object}, &${key}, |left, right| left.as_ref() == right.as_ref()).expect("scriptc: missing statically-known indexed record key") }`;
+        return emitRustRecordKeyGet(expr, this.context, (value) => this.emitExpr(value));
       }
       case "recordOvfKeys": {
         const shape = this.context.records.get(expr.shapeId);

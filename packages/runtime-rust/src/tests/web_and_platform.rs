@@ -886,6 +886,10 @@
         assert_eq!(process_env_get(&name), None);
         process_env_set(&name, &value);
         assert_eq!(process_env_get(&name).as_deref(), Some("written"));
+        let pairs = process_env_pairs();
+        assert!(pairs.with(|pairs| pairs.elements.chunks_exact(2).any(|pair| {
+            pair[0].as_ref() == name.as_ref() && pair[1].as_ref() == value.as_ref()
+        })));
 
         #[cfg(unix)]
         {
@@ -898,6 +902,8 @@
 
         process_env_unset(&name);
         assert_eq!(process_env_get(&name), None);
+        assert!(!process_env_pairs().with(|pairs| pairs.elements.chunks_exact(2)
+            .any(|pair| pair[0].as_ref() == name.as_ref())));
     }
 
     #[test]

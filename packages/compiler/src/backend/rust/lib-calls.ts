@@ -220,6 +220,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "process.envUnset" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::process_env_unset(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "process.envPairs" && expr.args.length === 0 &&
+    expr.type.kind === "array" && expr.type.elem.kind === "string") {
+    return "runtime::process_env_pairs()";
+  }
   if (expr.fn === "num.parseInt" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::number_parse_int(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])})`;
   }
