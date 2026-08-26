@@ -29,6 +29,7 @@ include!("event_loop.rs");
 include!("promises.rs");
 include!("errors.rs");
 include!("assert_messages.rs");
+include!("assert_shapes.rs");
 include!("arrays.rs");
 include!("bytes.rs");
 include!("bytes_encoding.rs");

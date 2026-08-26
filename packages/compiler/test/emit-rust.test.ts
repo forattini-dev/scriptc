@@ -2185,6 +2185,7 @@ test.each([
   "1607-assert-throws-match.ts",
   "1680-assert-bytes.ts",
   "1681-assert-funcs.ts",
+  "1720-assert-throws-shape.ts",
   "1721-assert-throws-regex-class.ts",
   "1724-assert-iferror.ts",
   "1725-assert-symbols.ts",

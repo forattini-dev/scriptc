@@ -988,6 +988,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     arg?.type.kind === "f64" && secondArg?.type.kind === "string") {
     return `runtime::assert_shape_string(${context.emitExpr(arg)}, &(${context.emitExpr(secondArg)}))`;
   }
+  if (expr.fn === "assert.shapeRe" && expr.args.length === 2 &&
+    arg?.type.kind === "f64" && secondArg?.type.kind === "regex") {
+    return `runtime::assert_shape_regex(${context.emitExpr(arg)}, &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "assert.shapeEnd" && expr.args.length === 2 &&
     arg?.type.kind === "string" && secondArg?.type.kind === "bool") {
     return `runtime::assert_shape_end(&(${context.emitExpr(arg)}), ${context.emitExpr(secondArg)})`;

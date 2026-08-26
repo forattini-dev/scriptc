@@ -774,60 +774,6 @@ pub fn assert_deep_result(equal: bool, negated: bool, message: &JsString, has_me
     })
 }
 
-thread_local! {
-    static ASSERT_SHAPE: RefCell<Option<(JsError, [Option<JsString>; 3])>> = const { RefCell::new(None) };
-}
-
-pub fn assert_shape_begin(error: &JsError) {
-    ASSERT_SHAPE.with(|shape| {
-        *shape.borrow_mut() = Some((error.clone(), [None, None, None]));
-    });
-}
-
-pub fn assert_shape_string(key: f64, value: &JsString) {
-    let index = key as usize;
-    ASSERT_SHAPE.with(|shape| {
-        let mut shape = shape.borrow_mut();
-        let (_, slots) = shape
-            .as_mut()
-            .expect("scriptc: assertion shape slot without begin");
-        let slot = slots
-            .get_mut(index)
-            .expect("scriptc: invalid assertion shape slot");
-        *slot = Some(value.clone());
-    });
-}
-
-pub fn assert_shape_end(message: &JsString, has_message: bool) {
-    let (error, slots) = ASSERT_SHAPE.with(|shape| {
-        shape
-            .borrow_mut()
-            .take()
-            .expect("scriptc: assertion shape end without begin")
-    });
-    let actual = [
-        error_code(&error),
-        Some(error_message(&error)),
-        Some(error_name(&error)),
-    ];
-    let matches = slots
-        .iter()
-        .zip(actual.iter())
-        .all(|(expected, actual)| match expected {
-            None => true,
-            Some(expected) => actual
-                .as_ref()
-                .is_some_and(|actual| actual.as_ref() == expected.as_ref()),
-        });
-    if !matches {
-        throw_assertion_error(if has_message {
-            message.to_string()
-        } else {
-            "Expected values to be strictly deep-equal".to_owned()
-        });
-    }
-}
-
 pub fn assert_throws_none(
     rejection: bool,
     expected_name: &JsString,
