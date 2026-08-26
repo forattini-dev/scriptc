@@ -684,6 +684,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2193-discarded-stdlib-reads.ts",
     "2281-domexception-atob-btoa.cjs",
     "2283-structured-clone.cjs",
+    "2286-dyn-object-walks.cjs",
     "2350-nan-global.ts",
     "2366-string-well-formed.ts",
     "2367-regexp-escape.ts",

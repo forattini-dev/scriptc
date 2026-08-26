@@ -325,6 +325,7 @@ export class RustDynamicEmitter {
     this.context.line("Some(index)");
     this.context.popIndent();
     this.context.line("}");
+    this.emitDynamicObjectWalkDefinition();
     this.context.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -549,6 +550,65 @@ export class RustDynamicEmitter {
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
+  }
+
+  emitDynamicObjectWalkDefinition(): void {
+    const name = this.context.dynTypeName();
+    this.context.line(`fn sc_dyn_obj_walk_push(output: &runtime::JsArray<${name}>, mode: u8, key: runtime::JsString, value: ${name}) {`);
+    this.context.pushIndent();
+    this.context.line("let item = match mode {");
+    this.context.pushIndent();
+    this.context.line(`0 => ${name}::String(key),`);
+    this.context.line("1 => value,");
+    this.context.line(`_ => ${name}::Array(runtime::array_new(vec![${name}::String(key), value])),`);
+    this.context.popIndent();
+    this.context.line("};");
+    this.context.line("runtime::array_push(output, item);");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_obj_walk(value: &${name}, mode: u8) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
+    this.context.line(`${name}::Object(object) => for (key, field) in runtime::map_string_entries_js_order(object) { sc_dyn_obj_walk_push(&output, mode, key, field); },`);
+    this.context.line(`${name}::Array(array) => {`);
+    this.context.pushIndent();
+    this.context.line("let mut index = 0usize;");
+    this.context.line("while index < runtime::array_len(array) as usize {");
+    this.context.pushIndent();
+    this.context.line("sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), runtime::array_get(array, index as f64));");
+    this.context.line("index += 1;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`${name}::Bytes(bytes) => {`);
+    this.context.pushIndent();
+    this.context.line("let mut index = 0usize;");
+    this.context.line("while index < runtime::bytes_len(bytes) as usize {");
+    this.context.pushIndent();
+    this.context.line(`sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), ${name}::Number(runtime::bytes_get(bytes, index as f64)));`);
+    this.context.line("index += 1;");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line(`${name}::String(text) => for (index, character) in text.chars().enumerate() {`);
+    this.context.pushIndent();
+    this.context.line(`sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), ${name}::String(runtime::string(&character.to_string())));`);
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line("_ => {},");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`${name}::Array(output)`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_obj_keys(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 0) }`);
+    this.context.line(`fn sc_dyn_obj_values(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 1) }`);
+    this.context.line(`fn sc_dyn_obj_entries(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 2) }`);
   }
 
   emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {

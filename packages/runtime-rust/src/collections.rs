@@ -209,6 +209,22 @@ pub fn map_string_keys_js_order<V: HeapValue>(map: &JsMap<JsString, V>) -> JsArr
     }))
 }
 
+pub fn map_string_entries_js_order<V: HeapValue>(
+    map: &JsMap<JsString, V>,
+) -> Vec<(JsString, V)> {
+    map.with(|data| {
+        map_string_entry_order(data)
+            .into_iter()
+            .map(|position| {
+                data.entries[position]
+                    .as_ref()
+                    .expect("scriptc: ordered map entry points at a tombstone")
+                    .clone()
+            })
+            .collect()
+    })
+}
+
 pub type JsSet<T> = JsMap<T, bool>;
 
 pub fn set_new<T: Clone + 'static>() -> JsSet<T> {
