@@ -1,6 +1,6 @@
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
-import { mangleGlobal, mangleLocal, mangleRecordStruct } from "../mangle.js";
+import { mangleFunction, mangleGlobal, mangleLocal, mangleRecordStruct } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustValueContext {
@@ -35,6 +35,31 @@ export interface RustValueContext {
 
 export class RustValueEmitter {
   constructor(private readonly context: RustValueContext) {}
+
+  emitOrDefault(expr: Extract<IrExpr, { kind: "orDefault" }>): string {
+    if (expr.left.type.kind !== "union") {
+      this.context.unsupported("orDefault over a non-union", expr.loc);
+    }
+    const union = this.context.union(expr.left.type.unionId, expr.loc);
+    const left = "sc_or_default";
+    const truthy = this.truthiness(left, expr.left.type, expr.loc);
+    let present: string;
+    if (expr.retag !== undefined) {
+      present = `${mangleFunction(expr.retag)}(${left})`;
+    } else {
+      const nonUnitArms = union.arms.filter((arm) => !this.isUnit(arm));
+      if (nonUnitArms.length !== 1) {
+        this.context.unsupported("orDefault union without one value arm", expr.loc);
+      }
+      const name = this.context.unionName(union.id);
+      const arms = union.arms.map((arm, tag) => {
+        const variant = `${name}::${this.context.unionVariant(tag)}`;
+        return this.isUnit(arm) ? `${variant} => unreachable!()` : `${variant}(value) => value`;
+      }).join(", ");
+      present = `match ${left} { ${arms} }`;
+    }
+    return `{ let ${left} = ${this.context.emitExpr(expr.left)}; if ${truthy} { ${present} } else { drop(${left}); ${this.context.emitExpr(expr.right)} } }`;
+  }
 
   displayExpr(expr: IrExpr): string {
     return this.displayValue(this.context.emitExpr(expr), expr.type, expr.loc);

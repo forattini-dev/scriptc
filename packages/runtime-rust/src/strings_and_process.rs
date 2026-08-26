@@ -680,8 +680,42 @@ pub fn process_arch() -> JsString {
     })
 }
 
+thread_local! {
+    static PROCESS_ENV_WRITES: RefCell<HashMap<String, Option<JsString>>> = RefCell::new(HashMap::new());
+}
+
 pub fn process_env_get(name: &JsString) -> Option<JsString> {
+    if let Some(value) =
+        PROCESS_ENV_WRITES.with(|writes| writes.borrow().get(name.as_ref()).cloned())
+    {
+        return value;
+    }
     std::env::var_os(name.as_ref()).map(|value| Rc::from(value.to_string_lossy().as_ref()))
+}
+
+pub fn process_env_set(name: &JsString, value: &JsString) {
+    PROCESS_ENV_WRITES.with(|writes| {
+        writes
+            .borrow_mut()
+            .insert(name.to_string(), Some(value.clone()));
+    });
+}
+
+pub fn process_env_unset(name: &JsString) {
+    PROCESS_ENV_WRITES.with(|writes| {
+        writes.borrow_mut().insert(name.to_string(), None);
+    });
+}
+
+pub fn process_env_apply(command: &mut std::process::Command) {
+    PROCESS_ENV_WRITES.with(|writes| {
+        for (name, value) in writes.borrow().iter() {
+            match value {
+                Some(value) => command.env(name, value.as_ref()),
+                None => command.env_remove(name),
+            };
+        }
+    });
 }
 
 pub fn process_versions_node() -> JsString {

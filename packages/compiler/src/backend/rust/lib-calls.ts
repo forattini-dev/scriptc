@@ -94,6 +94,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "dyn.cloneTransferFail" && expr.args.length === 0) {
     return "runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\")";
   }
+  if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::string(&runtime::display_number(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const depth = expr.args[1];
     const colors = expr.args[2];
@@ -209,6 +212,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     if (stringTag < 0 || undefinedTag < 0) context.unsupported("process.envGet result union shape", expr.loc);
     const name = context.unionName(union.id);
     return `match runtime::process_env_get(&(${context.emitExpr(arg)})) { Some(value) => ${name}::${context.unionVariant(stringTag)}(value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
+  if (expr.fn === "process.envSet" && expr.args.length === 2 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "string") {
+    return `runtime::process_env_set(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
+  if (expr.fn === "process.envUnset" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::process_env_unset(&(${context.emitExpr(arg)}))`;
   }
   if (expr.fn === "num.parseInt" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::number_parse_int(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])})`;

@@ -43,6 +43,7 @@ export interface RustExpressionContext {
   emitFileHandleTransferPromise(expr: Extract<IrExpr, { kind: "libCall" }>): string;
   emitFsRenameCallback(expr: Extract<IrExpr, { kind: "libCall" }>): string;
   emitMapIntrinsic(expr: Extract<IrExpr, { kind: "mapIntrinsic" }>): string;
+  emitOrDefault(expr: Extract<IrExpr, { kind: "orDefault" }>): string;
   emitPromiseFromSync(args: readonly IrExpr[], operation: (value: (index: number) => string) => string): string;
   emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
@@ -123,6 +124,8 @@ export class RustExpressionEmitter {
         const takeRight = expr.op === "&&" ? truthy : `!(${truthy})`;
         return `{ let ${temp} = ${left}; if ${takeRight} { ${this.emitExpr(expr.right)} } else { ${temp} } }`;
       }
+      case "orDefault":
+        return this.context.emitOrDefault(expr);
       case "nullish": {
         if (expr.left.type.kind !== "union") this.context.unsupported("nullish over a non-union", expr.loc);
         const union = this.context.union(expr.left.type.unionId, expr.loc);

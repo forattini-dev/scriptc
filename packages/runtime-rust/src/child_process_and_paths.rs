@@ -102,6 +102,8 @@ pub fn child_exec_sync(
                 child_command.env(pair[0].as_ref(), pair[1].as_ref());
             }
         });
+    } else {
+        process_env_apply(&mut child_command);
     }
 
     let stdout_mode = to_int32(stdout_mode);
@@ -241,6 +243,7 @@ pub fn child_spawn_sync(
     use std::process::{Command, Stdio};
 
     let mut child_command = Command::new(command.as_ref());
+    process_env_apply(&mut child_command);
     arguments.with(|arguments| {
         child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
     });

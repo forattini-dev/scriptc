@@ -709,6 +709,33 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
   }
 }, 240_000);
 
+test.each([
+  "1477-in-expressions.ts",
+  "1483-array-slice.ts",
+  "1527-logical-mixed-operands.ts",
+  "2643-or-default-retag.ts",
+])("Rust environment writes and mixed logical values match Node: %s", async (fixture) => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.replace(/\.ts$/, "")),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
+  const [node, rust] = await Promise.all([
+    runToExit(process.execPath, [entryPath], env),
+    runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
+  ]);
+  expect(rust, fixture).toEqual(node);
+}, 240_000);
+
 test("Rust record clones preserve evaluation across async suspension", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-record-clone-async-"));
   const entryPath = join(dir, "record-clone-async.ts");

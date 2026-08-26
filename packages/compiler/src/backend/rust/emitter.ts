@@ -280,6 +280,7 @@ class RustEmitter {
     emitFileHandleTransferPromise: (expr) => this.emitFileHandleTransferPromise(expr),
     emitFsRenameCallback: (expr) => this.emitFsRenameCallback(expr),
     emitMapIntrinsic: (expr) => this.emitMapIntrinsic(expr),
+    emitOrDefault: (expr) => this.valueEmitter.emitOrDefault(expr),
     emitPromiseFromSync: (args, operation) => this.emitPromiseFromSync(args, operation),
     emitPromiseRaceValue: (from, to, value, loc) => this.emitPromiseRaceValue(from, to, value, loc),
     emitRead: (id, type, loc) => this.emitRead(id, type, loc),

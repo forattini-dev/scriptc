@@ -879,6 +879,28 @@
     }
 
     #[test]
+    fn process_environment_overlay_updates_reads_and_inherited_children() {
+        let name = string("SCRIPTC_RUNTIME_ENV_OVERLAY_TEST");
+        let value = string("written");
+        process_env_unset(&name);
+        assert_eq!(process_env_get(&name), None);
+        process_env_set(&name, &value);
+        assert_eq!(process_env_get(&name).as_deref(), Some("written"));
+
+        #[cfg(unix)]
+        {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", "printf %s \"$SCRIPTC_RUNTIME_ENV_OVERLAY_TEST\""]);
+            process_env_apply(&mut command);
+            let output = command.output().expect("the environment child must run");
+            assert_eq!(output.stdout, b"written");
+        }
+
+        process_env_unset(&name);
+        assert_eq!(process_env_get(&name), None);
+    }
+
+    #[test]
     fn rename_workers_progress_and_checkpoint_each_callback() {
         init();
         let suffix = std::time::SystemTime::now()
