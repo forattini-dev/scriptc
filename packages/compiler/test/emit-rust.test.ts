@@ -796,6 +796,7 @@ test.each([
   "1687-stream-readable-flow-control.ts",
   "1696-stream-read-inside-read.ts",
   "1697-stream-tick-vs-timer.ts",
+  "1698-stream-uncaught-error.ts",
   "1713-js-dyn-fields.js",
   "1726-promise-with-resolvers.ts",
   "1730-countdown-symbol-keys/main.js",

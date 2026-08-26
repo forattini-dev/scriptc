@@ -155,6 +155,7 @@ export class RustEventEmitterEmitter {
       case "readable.isPaused": return this.emitReadableIsPaused(expr);
       case "readable.flowing": return this.emitReadableFlowing(expr);
       case "stream.prop": return this.emitReadableProp(expr);
+      case "stream.destroyErr": return this.emitReadableDestroyError(expr);
       default: return null;
     }
   }
@@ -541,6 +542,18 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("Readable isPaused shape", expr.loc);
     }
     return `runtime::readable_is_paused(&(${this.context.emitExpr(receiver)}))`;
+  }
+
+  private emitReadableDestroyError(expr: RustLibCallExpr): string {
+    const [receiver, error] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      error?.type.kind !== "object" || expr.args.length !== 2 || expr.type.kind !== "object" ||
+      expr.type.className !== "%Readable") {
+      this.context.unsupported("Readable destroy(error) shape", expr.loc);
+    }
+    const receiverValue = this.context.nextTemporary();
+    const errorValue = this.context.nextTemporary();
+    return `{ let ${receiverValue} = ${this.context.emitExpr(receiver)}; let ${errorValue} = ${this.context.emitExpr(error)}; runtime::process_next_tick(Box::new(move || runtime::throw_value(${errorValue}))); ${receiverValue} }`;
   }
 
   private emitReadableFlowing(expr: RustLibCallExpr): string {
