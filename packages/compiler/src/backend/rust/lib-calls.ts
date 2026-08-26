@@ -59,6 +59,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  const thirdArg = expr.args[2];
   if (expr.fn === "string.raw" && expr.args.length === 2 &&
     arg?.type.kind === "array" && arg.type.elem.kind === "string" &&
     secondArg?.type.kind === "array" && secondArg.type.elem.kind === "string") {
@@ -68,6 +69,13 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "global.undefRead" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::throw_undefined_global::<${context.rustType(expr.type, expr.loc)}>(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "error.nodeThrow" && expr.args.length === 3 &&
+    arg?.type.kind === "f64" && secondArg?.type.kind === "string" && thirdArg?.type.kind === "string") {
+    const kind = context.nextTemporary();
+    const code = context.nextTemporary();
+    const message = context.nextTemporary();
+    return `{ let ${kind} = ${context.emitExpr(arg)}; let ${code} = ${context.emitExpr(secondArg)}; let ${message} = ${context.emitExpr(thirdArg)}; runtime::throw_node_coded(${kind}, &${code}, &${message}) }`;
   }
   if (expr.fn === "insp.f64" && expr.args.length === 1 && arg?.type.kind === "f64") {
     return `runtime::inspect_number(${context.emitExpr(arg)})`;

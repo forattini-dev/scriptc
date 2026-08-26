@@ -201,6 +201,18 @@ pub fn throw_range_error_code(message: String, code: &str) -> ! {
     })
 }
 
+pub fn throw_node_coded(kind: f64, code: &JsString, message: &JsString) -> ! {
+    match (kind as i32, code.is_empty()) {
+        (0, true) => throw_error(message.to_string()),
+        (0, false) => throw_error_code(message.to_string(), code),
+        (1, true) => throw_type_error(message.to_string()),
+        (1, false) => throw_type_error_code(message.to_string(), code),
+        (2, true) => throw_range_error(message.to_string()),
+        (2, false) => throw_range_error_code(message.to_string(), code),
+        _ => unreachable!("scriptc invariant: invalid Node error kind"),
+    }
+}
+
 pub fn throw_uri_error(message: String) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),
