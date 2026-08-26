@@ -750,6 +750,7 @@ test.each([
   "1562-optional-chain-tails.ts",
   "1574-dyn-optional-method-number-keys.ts",
   "1581-declare-const-read.ts",
+  "1614-js-fence-dodges.cjs",
   "1630-inspect-scalars.ts",
   "1631-inspect-arrays.ts",
   "1632-inspect-records.ts",
@@ -823,6 +824,7 @@ test.each([
   "1990-labels-basics.ts",
   "1991-for-in-loops.ts",
   "1992-small-syntax.ts",
+  "2042-any-flow-loops.ts",
   "2250-tagged-templates.ts",
   "2253-union-coercions.ts",
   "2402-labeled-break-kill.ts",
@@ -834,6 +836,7 @@ test.each([
   "2441-console-process-argv.ts",
   "2485-inspect-circular-refs.ts",
   "2591-ambient-generic-traps.ts",
+  "2613-for-init-uninitialized-let.ts",
   "2643-or-default-retag.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
