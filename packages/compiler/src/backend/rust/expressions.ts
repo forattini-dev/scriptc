@@ -794,7 +794,9 @@ export class RustExpressionEmitter {
         const arm = union.arms[expr.tag];
         if (arm === undefined) this.context.unsupported(`unknown union tag '${expr.unionId}:${expr.tag}'`, expr.loc);
         const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(expr.tag)}`;
-        if (this.context.isUnit(arm)) return variant;
+        if (this.context.isUnit(arm)) {
+          return expr.value.type.kind === "void" ? `{ ${this.emitExpr(expr.value)}; ${variant} }` : variant;
+        }
         return `${variant}(${this.emitExpr(expr.value)})`;
       }
       case "unionNarrow": {

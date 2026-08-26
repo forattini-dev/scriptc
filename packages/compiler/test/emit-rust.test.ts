@@ -734,6 +734,8 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "518-promise-void-union-callbacks.ts",
+  "1429-promise-catch-finally.ts",
   "1460-console-error-warn.ts",
   "1464-env-writes.ts",
   "1465-env-value.ts",
@@ -822,6 +824,7 @@ test.each([
   "1991-for-in-loops.ts",
   "1992-small-syntax.ts",
   "2250-tagged-templates.ts",
+  "2253-union-coercions.ts",
   "2402-labeled-break-kill.ts",
   "2412-dowhile-guard-trailing-test.ts",
   "2413-dowhile-kill-renarrow.ts",
