@@ -767,6 +767,7 @@ test.each([
   "408-params-ctors-inheritance.ts",
   "409-params-async-generics.ts",
   "410-params-rc-stress.ts",
+  "420-dead-strip-modules/main.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
@@ -1060,6 +1061,15 @@ test.each([
     result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
   ).toBe(true);
   if (!result.ok) return;
+  if (fixture === "420-dead-strip-modules/main.ts" && result.backend === "rust") {
+    const source = await readFile(result.sourcePath, "utf8");
+    for (const reached of ["used", "double", "evenSteps", "oddSteps", "usedMethod", "tag"]) {
+      expect(source, `expected reached '${reached}' in the emitted Rust`).toContain(reached);
+    }
+    for (const gone of ["unusedForIn", "unusedAsync", "unusedComptime", "unusedGeneric", "unusedMethod"]) {
+      expect(source, `unreached '${gone}' must leave no trace in the emitted Rust`).not.toContain(gone);
+    }
+  }
   if (fixture === "2470-mockable-module-shape.js" && result.backend === "rust") {
     expect(await readFile(result.sourcePath, "utf8")).toContain(
       "Cannot add property '{}' to a fixed-shape object",
