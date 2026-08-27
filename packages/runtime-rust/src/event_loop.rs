@@ -5,6 +5,7 @@
 /// traced array/record object was released.
 pub fn finish() {
     process_signals_finish();
+    readline_finish();
     stdin_finish();
     fs_renames_finish();
     children_finish();

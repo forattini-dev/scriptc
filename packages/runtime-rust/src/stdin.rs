@@ -48,6 +48,17 @@ fn stdin_start() {
         });
 }
 
+fn stdin_readline_start() -> bool {
+    let live = STDIN_STATE.with(|state| {
+        let state = state.borrow();
+        !state.eof && !state.destroyed
+    });
+    if live && STDIN_STATE.with(|state| state.borrow().receiver.is_none()) {
+        stdin_start();
+    }
+    live
+}
+
 /// Return the next stdin chunk, using empty bytes as the EOF sentinel.
 /// Repeated requests made before delivery share the pending promise.
 pub fn stdin_next_chunk() -> JsPromise<JsBytes<u8>> {
@@ -73,7 +84,7 @@ pub fn stdin_next_chunk() -> JsPromise<JsBytes<u8>> {
 fn stdin_poll() -> Option<StdinEvent> {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        if state.waiter.is_none() {
+        if state.waiter.is_none() && !readline_stdin_pending() {
             return None;
         }
         let receiver = state.receiver.as_ref()?;
@@ -94,12 +105,20 @@ fn stdin_dispatch(event: StdinEvent) {
         }
         state.waiter.take()
     });
-    let Some(waiter) = waiter else { return };
-    let chunk = match event {
-        StdinEvent::Data(bytes) => bytes_from_vec(bytes),
-        StdinEvent::End => bytes_empty(),
-    };
-    let _ = promise_fulfill(&waiter, chunk);
+    match event {
+        StdinEvent::Data(bytes) => {
+            readline_stdin_data(&bytes);
+            if let Some(waiter) = waiter {
+                let _ = promise_fulfill(&waiter, bytes_from_vec(bytes));
+            }
+        }
+        StdinEvent::End => {
+            readline_stdin_end();
+            if let Some(waiter) = waiter {
+                let _ = promise_fulfill(&waiter, bytes_empty());
+            }
+        }
+    }
 }
 
 fn stdin_dispatch_one() -> bool {
@@ -111,7 +130,7 @@ fn stdin_dispatch_one() -> bool {
 fn stdin_pending() -> bool {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        state.waiter.is_some() && !state.eof && !state.destroyed
+        (state.waiter.is_some() || readline_stdin_pending()) && !state.eof && !state.destroyed
     })
 }
 
@@ -149,6 +168,7 @@ fn stdin_destroy() {
     if let Some(waiter) = waiter {
         let _ = promise_fulfill(&waiter, bytes_empty());
     }
+    readline_stdin_end();
 }
 
 fn stdin_finish() {

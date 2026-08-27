@@ -11,6 +11,7 @@ import { emitRustTlsCall } from "./tls.js";
 import { emitRustCheckedBufferCall } from "./buffer-checked.js";
 import { emitRustCheckedFsCall } from "./fs-checked.js";
 import { emitRustDgramCall } from "./dgram.js";
+import { emitRustReadlineCall } from "./readline.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -88,6 +89,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (checkedBufferCall !== null) return checkedBufferCall;
   const checkedFsCall = emitRustCheckedFsCall(expr, context);
   if (checkedFsCall !== null) return checkedFsCall;
+  const readlineCall = emitRustReadlineCall(expr, context);
+  if (readlineCall !== null) return readlineCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];
