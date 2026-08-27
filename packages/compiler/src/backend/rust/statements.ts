@@ -35,7 +35,6 @@ export interface RustStatementContext {
   localIsBoxed(local: IrFunction["locals"][number]): boolean;
   forceBoxedLocal(id: string, forced: boolean): void;
   rustType(type: IrType, loc?: SrcLoc): string;
-  defaultValue(type: IrType, loc: SrcLoc): string;
   record(shapeId: string): IrRecordShape | undefined;
   classDef(name: string, loc?: SrcLoc): IrClassDef;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
@@ -81,10 +80,12 @@ class RustStatementEmitter {
           return;
         }
         const mutable = local.mutable ? "mut " : "";
-        const init = stmt.init === null
-          ? this.context.defaultValue(local.type, stmt.loc)
-          : this.context.emitExpr(stmt.init);
-        this.context.line(`let ${mutable}${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = ${init};`);
+        const type = this.context.rustType(local.type, stmt.loc);
+        if (stmt.init === null) {
+          this.context.line(`let ${mutable}${mangleLocal(local.id)}: ${type};`);
+          return;
+        }
+        this.context.line(`let ${mutable}${mangleLocal(local.id)}: ${type} = ${this.context.emitExpr(stmt.init)};`);
         return;
       }
       case "assign":

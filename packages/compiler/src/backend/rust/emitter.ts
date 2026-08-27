@@ -954,7 +954,6 @@ class RustEmitter {
         else this.forcedBoxedLocals.delete(id);
       },
       rustType: (type, loc) => this.rustType(type, loc),
-      defaultValue: (type, loc) => this.defaultValue(type, loc),
       record: (shapeId) => this.records.get(shapeId),
       classDef: (name, loc) => this.classDef(name, loc),
       classFieldName: (className, fieldName, loc) => this.classFieldName(className, fieldName, loc),
