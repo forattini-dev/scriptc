@@ -507,6 +507,14 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "crypto.randomBytesToString" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::crypto_random_string(${context.emitExpr(arg)}, &(${context.emitExpr(expr.args[1])}))`;
   }
+  if (expr.fn === "zlib.deflateSync" && expr.args.length === 1 &&
+    arg?.type.kind === "bytes" && arg.type.elem === "u8") {
+    return `runtime::zlib_deflate_sync(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "zlib.inflateSync" && expr.args.length === 1 &&
+    arg?.type.kind === "bytes" && arg.type.elem === "u8") {
+    return `runtime::zlib_inflate_sync(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "fs.mkdtempSync" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_mkdtemp(&(${context.emitExpr(arg)}))`;
   }

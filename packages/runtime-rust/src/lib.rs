@@ -37,6 +37,7 @@ include!("assert_shapes.rs");
 include!("arrays.rs");
 include!("bytes.rs");
 include!("bytes_encoding.rs");
+include!("zlib.rs");
 include!("text_decoder.rs");
 include!("crypto.rs");
 include!("collections.rs");
@@ -77,4 +78,5 @@ mod tests {
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");
+    include!("tests/zlib.rs");
 }

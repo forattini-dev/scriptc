@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
+flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backend"] }
 getrandom = "=0.4.3"
 regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
