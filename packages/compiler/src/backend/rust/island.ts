@@ -1,6 +1,7 @@
 import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType } from "./model.js";
 import { emitRustIslandDestructuringFunction } from "./island-destructuring-function.js";
+import { emitRustIslandBuiltin } from "./island-builtins.js";
 
 type IslandExpr = Extract<IrExpr, { kind: "jsMarshal" | "jsOp" | "jsExit" | "jsBridgePromise" }>;
 
@@ -90,6 +91,8 @@ function emitOperation(
     const value = context.nextName("sc_island_value");
     return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${value} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${receiver}, sc_dyn_to_string(&${key}), ${value}); }`;
   }
+  const builtin = emitRustIslandBuiltin(expr, context, emitExpr);
+  if (builtin !== null) return builtin;
   const destructuring = emitRustIslandDestructuringFunction(expr, context, emitExpr);
   if (destructuring !== null) return destructuring;
   if (expr.op === "callFn" && expr.args.length > 0) {

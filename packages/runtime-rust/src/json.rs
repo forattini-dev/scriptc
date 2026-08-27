@@ -353,6 +353,33 @@ pub enum JsonNode {
     Object(Vec<(String, JsonNode)>),
 }
 
+impl JsonValue for JsonNode {
+    fn write_json(&self, writer: &mut JsonWriter) {
+        match self {
+            Self::Null => writer.write_null(),
+            Self::Bool(value) => value.write_json(writer),
+            Self::Number(value) => value.write_json(writer),
+            Self::String(value) => value.write_json(writer),
+            Self::Array(values) => {
+                writer.begin_array();
+                let mut first = true;
+                for (index, value) in values.iter().enumerate() {
+                    writer.element(&mut first, index, value);
+                }
+                writer.end_array();
+            }
+            Self::Object(fields) => {
+                writer.begin_object();
+                let mut first = true;
+                for (key, value) in fields {
+                    writer.property(&mut first, key, value);
+                }
+                writer.end_object();
+            }
+        }
+    }
+}
+
 impl JsonNode {
     fn kind(&self) -> &'static str {
         match self {
