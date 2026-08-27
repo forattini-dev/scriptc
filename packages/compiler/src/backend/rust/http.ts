@@ -149,6 +149,22 @@ function emitClientCloseListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_client_on_close(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitResponseFinishListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr] = expr.args;
+  if (receiver?.type.kind !== "httpRes" || callbackExpr === undefined ||
+      callbackType.params.length !== 0) {
+    context.unsupported("http.resOnFinish shape", expr.loc);
+  }
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_response_on_finish(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+}
+
 export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -202,6 +218,22 @@ export function emitRustHttpCall(
       expr.args[2]?.type.kind === "string") {
     return `runtime::http_response_set_header(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}), &(${context.emitExpr(expr.args[2])}))`;
   }
+  if (expr.fn === "http.resGetHeader" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "string") {
+    if (expr.type.kind !== "union") context.unsupported("http.resGetHeader result", expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (stringTag < 0 || undefinedTag < 0) context.unsupported("http.resGetHeader result union", expr.loc);
+    const name = context.unionName(union.id);
+    return `match runtime::http_response_get_header(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])})) { Some(sc_value) => ${name}::${context.unionVariant(stringTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
+  if ((expr.fn === "http.resHasHeader" || expr.fn === "http.resRemoveHeader") &&
+      expr.args.length === 2 && expr.args[0]?.type.kind === "httpRes" &&
+      expr.args[1]?.type.kind === "string") {
+    const fn = expr.fn === "http.resHasHeader" ? "http_response_has_header" : "http_response_remove_header";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
   if (expr.fn === "http.resWriteHead" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "f64") {
     return `runtime::http_response_write_head(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;
@@ -236,6 +268,15 @@ export function emitRustHttpCall(
     if (callbackType?.kind !== "func") context.unsupported("http.reqOnEnd callback", expr.loc);
     return emitIncomingEndListener(expr, callbackType, context);
   }
+  if (expr.fn === "http.resOnFinish" && expr.args.length === 2) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported("http.resOnFinish callback", expr.loc);
+    return emitResponseFinishListener(expr, callbackType, context);
+  }
+  if (expr.fn === "http.reqPipeRes" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "httpReq" && expr.args[1]?.type.kind === "httpRes") {
+    return `runtime::http_request_pipe_response(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
   if (expr.fn === "http.reqStatusCode" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "httpReq") {
     if (expr.type.kind !== "union") context.unsupported("http.reqStatusCode result", expr.loc);
@@ -245,6 +286,16 @@ export function emitRustHttpCall(
     if (numberTag < 0 || undefinedTag < 0) context.unsupported("http.reqStatusCode result union", expr.loc);
     const name = context.unionName(union.id);
     return `match runtime::http_request_status_code(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(numberTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+  }
+  if (expr.fn === "http.reqStatusMessage" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpReq") {
+    if (expr.type.kind !== "union") context.unsupported("http.reqStatusMessage result", expr.loc);
+    const union = context.union(expr.type.unionId, expr.loc);
+    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (stringTag < 0 || undefinedTag < 0) context.unsupported("http.reqStatusMessage result union", expr.loc);
+    const name = context.unionName(union.id);
+    return `match runtime::http_request_status_message(&(${context.emitExpr(expr.args[0])})) { Some(sc_value) => ${name}::${context.unionVariant(stringTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
   }
   if ((expr.fn === "http.requestUrl" || expr.fn === "http.requestUrlCb" ||
       expr.fn === "https.requestUrl" || expr.fn === "https.requestUrlCb") &&
@@ -339,6 +390,16 @@ export function emitRustHttpCall(
       expr.args[1]?.type.kind === "bytes" && expr.args[1].type.elem === "u8") {
     const fn = expr.fn === "http.clientWriteBytes" ? "http_client_write_bytes" : "http_client_end_bytes";
     return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  }
+  if ((expr.fn === "http.clientWriteDyn" || expr.fn === "http.clientEndDyn") &&
+      expr.args.length === 2 && expr.args[0]?.type.kind === "httpClientReq" &&
+      expr.args[1]?.type.kind === "dyn") {
+    const receiver = context.nextTemporary();
+    const value = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    const stringFn = expr.fn === "http.clientWriteDyn" ? "http_client_write_str" : "http_client_end_str";
+    const bytesFn = expr.fn === "http.clientWriteDyn" ? "http_client_write_bytes" : "http_client_end_bytes";
+    return `{ let ${receiver} = ${context.emitExpr(expr.args[0])}; let ${value} = ${context.emitExpr(expr.args[1])}; match &${value} { ${dyn}::String(sc_chunk) => runtime::${stringFn}(&${receiver}, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::${bytesFn}(&${receiver}, sc_chunk), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), } }`;
   }
   if ((expr.fn === "http.clientEnd" || expr.fn === "http.clientDestroy" ||
       expr.fn === "http.clientDestroyed") && expr.args.length === 1 &&

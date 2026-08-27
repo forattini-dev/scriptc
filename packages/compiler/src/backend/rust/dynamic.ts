@@ -589,6 +589,7 @@ export class RustDynamicEmitter {
     this.context.line("if !stored { sc_dyn_key_set_error(value, &key); }");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::HttpResponse(response) => { if !sc_dyn_http_response_set(response, &key, &field) { sc_dyn_key_set_error(value, &key); } },`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_set_by(properties, key, field, |left, right| left.as_ref() == right.as_ref()),`);
     }
@@ -757,8 +758,8 @@ export class RustDynamicEmitter {
     this.context.line("}");
     if (this.context.usesDynamicInvoke()) {
       emitRustDynamicInvoke(this.context, boxedShapes);
-      emitRustDynamicHttp(this.context);
     }
+    emitRustDynamicHttp(this.context);
     this.emitDynamicStringCoercion(boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);

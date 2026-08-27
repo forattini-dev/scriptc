@@ -3,6 +3,7 @@ export interface RustDynamicHttpContext {
   pushIndent(): void;
   popIndent(): void;
   dynTypeName(): string;
+  usesDynamicInvoke(): boolean;
 }
 
 /** Emit checked-dynamic dispatch for node:http request and response handles. */
@@ -52,10 +53,21 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
   close("}");
 
+  open(`fn sc_dyn_http_response_set(response: &runtime::JsHttpResponse, key: &runtime::JsString, value: &${dyn}) -> bool {`);
+  open("match key.as_ref() {");
+  line(`"statusCode" => { let ${dyn}::Number(value) = value else { sc_dyn_arg_type_fail("statusCode", "of type number", value); }; runtime::http_response_status_set(response, *value); true },`);
+  line(`"statusMessage" => { let ${dyn}::String(value) = value else { sc_dyn_arg_type_fail("statusMessage", "of type string", value); }; runtime::http_response_status_message_set(response, value); true },`);
+  line("_ => false,");
+  close("}");
+  close("}");
+
+  if (!context.usesDynamicInvoke()) return;
+
   open(`fn sc_dyn_http_request_invoke(request: &runtime::JsHttpRequest, recv: &${dyn}, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
   open("match method {");
   line(`"pause" => { runtime::http_request_pause(request); recv.clone() },`);
   line(`"resume" => { runtime::http_request_resume(request); recv.clone() },`);
+  line(`"pipe" => { let destination = match args.first() { Some(${dyn}::HttpResponse(response)) => response, value => sc_dyn_arg_type_fail("destination", "an instance of ServerResponse", value.unwrap_or(&${dyn}::Undefined)), }; runtime::http_request_pipe_response(request, destination); args[0].clone() },`);
   line('"on" | "once" | "addListener" => {');
   context.pushIndent();
   line(`let event = match args.first() { Some(${dyn}::String(value)) => value.as_ref(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);

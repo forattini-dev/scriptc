@@ -604,6 +604,30 @@ pub fn http_request_on_end(
     });
 }
 
+pub fn http_request_pipe_response(request: &JsHttpRequest, response: &JsHttpResponse) {
+    let write_response = response.clone();
+    let write_trace = response.clone();
+    let end_response = response.clone();
+    let end_trace = response.clone();
+    request.with_mut(|request| {
+        if request.ended {
+            return;
+        }
+        request.flowing = true;
+        request.data_listeners.push(HttpDataListener {
+            invoke: Rc::new(move |chunk| http_response_write_bytes(&write_response, &chunk)),
+            trace: Rc::new(move |tracer| tracer.edge(&write_trace)),
+            once: false,
+        });
+        request.end_listeners.push(HttpVoidListener {
+            invoke: Rc::new(move || http_response_end(&end_response)),
+            trace: Rc::new(move |tracer| tracer.edge(&end_trace)),
+        });
+    });
+    http_dispatch_data(request);
+    http_request_maybe_finish(request);
+}
+
 fn http_header_index(headers: &[(JsString, JsString)], name: &str) -> Option<usize> {
     headers.iter().position(|(stored, _)| stored.eq_ignore_ascii_case(name))
 }
@@ -651,6 +675,25 @@ pub fn http_response_set_header(response: &JsHttpResponse, name: &JsString, valu
             response.headers[index] = (name.clone(), value.clone());
         } else {
             response.headers.push((name.clone(), value.clone()));
+        }
+    });
+}
+
+pub fn http_response_get_header(response: &JsHttpResponse, name: &JsString) -> Option<JsString> {
+    response.with(|response| {
+        http_header_index(&response.headers, name)
+            .map(|index| response.headers[index].1.clone())
+    })
+}
+
+pub fn http_response_has_header(response: &JsHttpResponse, name: &JsString) -> bool {
+    response.with(|response| http_header_index(&response.headers, name).is_some())
+}
+
+pub fn http_response_remove_header(response: &JsHttpResponse, name: &JsString) {
+    response.with_mut(|response| {
+        if !response.headers_sent {
+            response.headers.retain(|(stored, _)| !stored.eq_ignore_ascii_case(name));
         }
     });
 }
