@@ -47,6 +47,7 @@ function emitMarshal(
     case "func":
     case "array":
     case "bytes":
+    case "url":
     case "record":
     case "union":
       return context.emitDynFromValue(expr.value.type, emitExpr(expr.value), expr.loc);

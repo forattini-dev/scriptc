@@ -4,6 +4,7 @@ import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicHttp } from "./dynamic-http.js";
 import { emitRustDynamicAgent } from "./dynamic-agent.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
+import { emitRustDynamicInspect } from "./dynamic-inspect.js";
 import { emitRustDynamicScalarChecks } from "./dynamic-scalars.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
@@ -70,8 +71,11 @@ export class RustDynamicEmitter {
     this.context.line("Boolean(bool),");
     this.context.line("String(runtime::JsString),");
     this.context.line("Regex(runtime::JsRegex),");
+    this.context.line("Url(runtime::JsUrl),");
     this.context.line("Bytes(runtime::JsBytes<u8>),");
+    this.context.line("TypedBytes(runtime::JsTypedBytes),");
     this.context.line("Buffer(runtime::JsBytes<u8>),");
+    this.context.line("NativeConstructor(&'static str),");
     this.context.line("Promise(runtime::JsPromiseHandle),");
     this.context.line("NetServer(runtime::JsNetServer),");
     this.context.line("NetSocket(runtime::JsNetSocket),");
@@ -99,6 +103,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
+    this.context.line("Self::TypedBytes(value) => runtime::typed_bytes_trace(value, tracer),");
     this.context.line("Self::Buffer(value) => tracer.edge(value),");
     this.context.line("Self::Promise(value) => runtime::promise_handle_trace(value, tracer),");
     this.context.line("Self::NetServer(value) => tracer.edge(value),");
@@ -135,6 +140,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Regex(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::Url(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::Bytes(value) => {`);
     this.context.pushIndent();
     this.context.line("writer.begin_object();");
@@ -144,6 +150,7 @@ export class RustDynamicEmitter {
     this.context.line("writer.end_object();");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::TypedBytes(value) => { writer.begin_object(); let mut first = true; let mut index = 0.0; while index < runtime::typed_bytes_len(value) { writer.property(&mut first, &(index as usize).to_string(), &runtime::typed_bytes_get(value, index)); index += 1.0; } writer.end_object(); },`);
     this.context.line(`${name}::Buffer(value) => runtime::JsonValue::write_json(&${name}::Bytes(value.clone()), writer),`);
     this.context.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
@@ -154,6 +161,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
     }
+    this.context.line(`${name}::NativeConstructor(..) => writer.write_null(),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -162,6 +170,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     const undefinedPatterns = [
       `${name}::Undefined`,
+      `${name}::NativeConstructor(..)`,
       ...boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`),
     ];
     this.context.line(`matches!(self, ${undefinedPatterns.join(" | ")})`);
@@ -247,6 +256,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(..) => "[ ... ]".to_owned(),`);
     this.context.line(`${name}::Object(..) => "{ ... }".to_owned(),`);
     this.context.line(`${name}::Bytes(..) => "<Buffer ...>".to_owned(),`);
+    this.context.line(`${name}::TypedBytes(value) => format!("<{} ...>", runtime::typed_bytes_name(value)),`);
     this.context.line(`${name}::Buffer(..) => "<Buffer ...>".to_owned(),`);
     this.context.line("_ => \"[object]\".to_owned(),");
     this.context.popIndent();
@@ -264,7 +274,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(value.clone()),`);
+    this.context.line(`${name}::Url(value) => ${name}::Url(value.clone()),`);
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
+    this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::Promise(value) => ${name}::Promise(value.clone()),`);
     this.context.line(`${name}::NetServer(value) => ${name}::NetServer(value.clone()),`);
@@ -309,6 +321,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(value, function_name, properties) => ${name}::${this.context.dynFunctionVariant(shape)}(value.clone(), function_name.clone(), properties.clone()),`);
     }
+    this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -322,7 +335,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
     this.context.line(`${name}::Regex(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::Url(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Bytes(..) => Err(format!("bytes at {path} is not JSON data")),`);
+    this.context.line(`${name}::TypedBytes(..) => Err(format!("typed array at {path} is not JSON data")),`);
     this.context.line(`${name}::Buffer(..) => Err(format!("buffer at {path} is not JSON data")),`);
     this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetServer(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
@@ -366,6 +381,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => Err(format!("function at {path} is not JSON data")),`);
     }
+    this.context.line(`${name}::NativeConstructor(..) => Err(format!("function at {path} is not JSON data")),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -381,7 +397,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(..) => "boolean",`);
     this.context.line(`${name}::String(..) => "string",`);
     this.context.line(`${name}::Regex(..) => "object",`);
+    this.context.line(`${name}::Url(..) => "object",`);
     this.context.line(`${name}::Bytes(..) => "bytes",`);
+    this.context.line(`${name}::TypedBytes(..) => "bytes",`);
     this.context.line(`${name}::Buffer(..) => "bytes",`);
     this.context.line(`${name}::Array(..) => "array",`);
     this.context.line(`${name}::Object(..) => "object",`);
@@ -392,6 +410,7 @@ export class RustDynamicEmitter {
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
+    this.context.line(`${name}::NativeConstructor(..) => "function",`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -417,6 +436,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(array) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::array_len(array) { runtime::array_get(array, index) } else { ${name}::Undefined }); },`);
     this.context.line(`${name}::String(text) => { let mut chars = text.chars(); for _ in 0..count { runtime::array_push(&output, chars.next().map_or(${name}::Undefined, |character| ${name}::String(runtime::string(&character.to_string())))); } },`);
     this.context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::bytes_len(bytes) { ${name}::Number(runtime::bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
+    this.context.line(`${name}::TypedBytes(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::typed_bytes_len(bytes) { ${name}::Number(runtime::typed_bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
     this.context.line("other => {");
     this.context.pushIndent();
     this.context.line("let description = match other {");
@@ -448,12 +468,14 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(..) => "boolean",`);
     this.context.line(`${name}::String(..) => "string",`);
     this.context.line(`${name}::Bytes(..) => "object",`);
+    this.context.line(`${name}::TypedBytes(..) => "object",`);
     this.context.line(`${name}::Buffer(..) => "object",`);
     this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
+    this.context.line(`${name}::NativeConstructor(..) => "function",`);
     this.context.line("_ => \"object\",");
     this.context.popIndent();
     this.context.line("};");
@@ -509,6 +531,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::Object(object) => runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined),`);
     this.context.line(`${name}::Regex(regex) => match key.as_ref() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
+    this.context.line(`${name}::Url(url) => match key.as_ref() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
     this.context.line(`if key.as_ref() == "length" { ${name}::Number(runtime::array_len(array)) }`);
@@ -526,10 +549,13 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => {`);
     this.context.pushIndent();
     this.context.line(`if key.as_ref() == "length" { ${name}::Number(runtime::bytes_len(bytes)) }`);
+    this.context.line(`else if key.as_ref() == "constructor" { ${name}::NativeConstructor(if matches!(value, ${name}::Buffer(..)) { "Buffer" } else { "Uint8Array" }) }`);
     this.context.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::bytes_len(bytes) as usize { ${name}::Number(runtime::bytes_get(bytes, index as f64)) } else { ${name}::Undefined } }`);
     this.context.line(`else { ${name}::Undefined }`);
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::TypedBytes(bytes) => { if key.as_ref() == "length" { ${name}::Number(runtime::typed_bytes_len(bytes)) } else if key.as_ref() == "constructor" { ${name}::NativeConstructor(runtime::typed_bytes_name(bytes)) } else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::typed_bytes_len(bytes) as usize { ${name}::Number(runtime::typed_bytes_get(bytes, index as f64)) } else { ${name}::Undefined } } else { ${name}::Undefined } },`);
+    this.context.line(`${name}::NativeConstructor(name) => if key.as_ref() == "name" { ${name}::String(runtime::string(name)) } else { ${name}::Undefined },`);
     this.context.line(`${name}::NetSocket(socket) => match key.as_ref() {`);
     this.context.pushIndent();
     this.context.line(`"destroyed" => ${name}::Boolean(runtime::net_socket_destroyed(socket)),`);
@@ -630,8 +656,11 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
+    this.context.line(`${name}::Url(value) => runtime::url_href(value),`);
     this.context.line(`${name}::Bytes(value) => runtime::bytes_join(value, &runtime::string(",")),`);
+    this.context.line(`${name}::TypedBytes(value) => runtime::typed_bytes_join(value, &runtime::string(",")),`);
     this.context.line(`${name}::Buffer(value) => runtime::bytes_to_string(value, &runtime::string("utf8")),`);
+    this.context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("function {name}() {{ [native code] }}")),`);
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
@@ -670,7 +699,7 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
-    this.emitDynamicInspectDefinition(boxedShapes);
+    emitRustDynamicInspect(this.context, boxedShapes);
     this.context.line(`fn sc_dyn_specific_type(value: &${name}) -> String {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -681,8 +710,11 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => format!("type boolean ({value})"),`);
     this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
     this.context.line(`${name}::Regex(..) => "an instance of RegExp".to_owned(),`);
+    this.context.line(`${name}::Url(..) => "an instance of URL".to_owned(),`);
     this.context.line(`${name}::Bytes(..) => "an instance of Uint8Array".to_owned(),`);
+    this.context.line(`${name}::TypedBytes(value) => format!("an instance of {}", runtime::typed_bytes_name(value)),`);
     this.context.line(`${name}::Buffer(..) => "an instance of Buffer".to_owned(),`);
+    this.context.line(`${name}::NativeConstructor(name) => format!("function {name}"),`);
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
     this.context.line(`${name}::Promise(..) => "an instance of Promise".to_owned(),`);
@@ -822,106 +854,6 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_strict_equal(left: &${name}, right: &${name}) -> bool { match (left, right) { (${name}::Number(left), ${name}::Number(right)) => left == right, (${name}::Promise(left), ${name}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right), _ => sc_dyn_equal(left, right, false), } }`);
   }
 
-  emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {
-    const name = this.context.dynTypeName();
-    this.context.line(`fn sc_dyn_inspect(value: &${name}, recurse: f64, depth: f64) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line("match value {");
-    this.context.pushIndent();
-    this.context.line(`${name}::Undefined => runtime::string("undefined"),`);
-    this.context.line(`${name}::Null => runtime::string("null"),`);
-    this.context.line(`${name}::Number(value) => runtime::inspect_number(*value),`);
-    this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
-    this.context.line(`${name}::String(value) => runtime::inspect_string(value),`);
-    this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
-    this.context.line(`${name}::Bytes(value) => {`);
-    this.context.pushIndent();
-    this.context.line("let length = runtime::bytes_len(value);");
-    this.context.line("if length == 0.0 { return runtime::string(\"Uint8Array(0) []\"); }");
-    this.context.line("if recurse > depth { return runtime::string(\"[Uint8Array]\"); }");
-    this.context.line("runtime::inspect_begin(recurse + 1.0);");
-    this.context.line("let shown = length.min(100.0);");
-    this.context.line("let mut index = 0.0;");
-    this.context.line("while index < shown {");
-    this.context.pushIndent();
-    this.context.line("runtime::inspect_entry(&runtime::inspect_number(runtime::bytes_get(value, index)), true);");
-    this.context.line("index += 1.0;");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("let more = length > 100.0;");
-    this.context.line("if more { runtime::inspect_entry(&runtime::inspect_more_items(length - 100.0), true); }");
-    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(&format!(\"Uint8Array({}) [\", length as usize)), &runtime::string(\"]\"), recurse + 1.0, true, more)");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value),`);
-    this.context.line(`${name}::Promise(..) => runtime::string("Promise { <pending> }"),`);
-    this.context.line(`${name}::Array(array) => {`);
-    this.context.pushIndent();
-    this.context.line("let length = runtime::array_len(array);");
-    this.context.line("if length == 0.0 { return runtime::string(\"[]\"); }");
-    this.context.line("if recurse > depth { return runtime::string(\"[Array]\"); }");
-    this.context.line("runtime::inspect_begin(recurse + 1.0);");
-    this.context.line("let shown = length.min(100.0);");
-    this.context.line("let mut index = 0.0;");
-    this.context.line("while index < shown {");
-    this.context.pushIndent();
-    this.context.line("let element = runtime::array_get(array, index);");
-    this.context.line(`let is_number = matches!(&element, ${name}::Number(_));`);
-    this.context.line("runtime::inspect_entry(&sc_dyn_inspect(&element, recurse + 1.0, depth), is_number);");
-    this.context.line("index += 1.0;");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("let more = length > 100.0;");
-    this.context.line("if more {");
-    this.context.pushIndent();
-    this.context.line("let next = runtime::array_get(array, 100.0);");
-    this.context.line(`runtime::inspect_entry(&runtime::inspect_more_items(length - 100.0), matches!(&next, ${name}::Number(_)));`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(\"[\"), &runtime::string(\"]\"), recurse + 1.0, true, more)");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`${name}::Object(object) => {`);
-    this.context.pushIndent();
-    this.context.line("let null_proto = sc_dyn_is_null_proto(object);");
-    this.context.line("let keys = runtime::map_string_keys_js_order(object);");
-    this.context.line("let length = runtime::array_len(&keys);");
-    this.context.line("if length == 0.0 { return runtime::string(if null_proto { \"[Object: null prototype] {}\" } else { \"{}\" }); }");
-    this.context.line("if recurse > depth { return runtime::string(if null_proto { \"[Object: null prototype]\" } else { \"[Object]\" }); }");
-    this.context.line("runtime::inspect_begin(recurse + 1.0);");
-    this.context.line("let mut index = 0.0;");
-    this.context.line("while index < length {");
-    this.context.pushIndent();
-    this.context.line("let key = runtime::array_get(&keys, index);");
-    this.context.line("let field = runtime::map_get_by(object, &key, |left, right| left.as_ref() == right.as_ref()).expect(\"scriptc: missing dynamic object field\");");
-    this.context.line("let rendered = sc_dyn_inspect(&field, recurse + 1.0, depth);");
-    this.context.line("let entry = runtime::string(&format!(\"{}: {}\", runtime::inspect_key(&key), rendered));");
-    this.context.line("runtime::inspect_entry(&entry, false);");
-    this.context.line("index += 1.0;");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("let base = if null_proto { runtime::string(\"[Object: null prototype]\") } else { runtime::empty_string() }; runtime::inspect_end(&base, &runtime::string(\"{\"), &runtime::string(\"}\"), recurse + 1.0, false, false)");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`${name}::NetSocket(..) => runtime::string("Socket {}"),`);
-    this.context.line(`${name}::NetServer(..) => runtime::string("Server {}"),`);
-    this.context.line(`${name}::HttpRequest(..) => runtime::string("IncomingMessage {}"),`);
-    this.context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
-    this.context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
-    for (const shape of boxedShapes) {
-      this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
-    }
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_inspect_s(value: &${name}, depth: f64) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line(`match value { ${name}::String(text) => text.clone(), _ => sc_dyn_inspect(value, 0.0, depth), }`);
-    this.context.popIndent();
-    this.context.line("}");
-  }
-
   emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
     const name = this.context.dynTypeName();
     const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
@@ -1008,8 +940,11 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(runtime::regex_new(&runtime::regex_source(value), &runtime::regex_flags(value))),`);
+    this.context.line(`${name}::Url(value) => ${name}::Url(value.clone()),`);
     this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
+    this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
+    this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
     this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
     this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
     this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
@@ -1069,6 +1004,7 @@ export class RustDynamicEmitter {
     this.context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
     this.context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
     this.context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);
+    this.context.line(`(${name}::Url(left), ${name}::Url(right)) => std::rc::Rc::ptr_eq(left, right),`);
     this.context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::HttpRequest(left), ${name}::HttpRequest(right)) => left.ptr_eq(right),`);
@@ -1083,7 +1019,9 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`(${name}::TypedBytes(left), ${name}::TypedBytes(right)) => runtime::typed_bytes_ptr_eq(left, right) || (deep && runtime::typed_bytes_deep_equals(left, right)),`);
     this.context.line(`(${name}::Buffer(left), ${name}::Buffer(right)) => left.ptr_eq(right) || (deep && runtime::bytes_deep_equals(left, right)),`);
+    this.context.line(`(${name}::NativeConstructor(left), ${name}::NativeConstructor(right)) => left == right,`);
     this.context.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
     this.context.pushIndent();
     this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");

@@ -30,6 +30,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::Boolean(value) => value.to_string(),`);
   context.line(`${name}::String(value) => runtime::assert_inspect_string(value),`);
   context.line(`${name}::Regex(value) => format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value)),`);
+  context.line(`${name}::Url(value) => runtime::url_href(value).to_string(),`);
   context.line(`${name}::Promise(..) => "Promise { <pending> }".to_owned(),`);
   context.line(`${name}::NetServer(..) => "Server {}".to_owned(),`);
   context.line(`${name}::NetSocket(..) => "Socket {}".to_owned(),`);
@@ -45,7 +46,9 @@ export function emitRustDynamicAssertions(
   context.line("output.push('\\n'); output.push_str(&\" \".repeat(indent)); output.push(']'); output");
   context.popIndent();
   context.line("},");
+  context.line(`${name}::TypedBytes(value) => { let length = runtime::typed_bytes_len(value) as usize; let type_name = runtime::typed_bytes_name(value); if length == 0 { return format!("{type_name}(0) []"); } let mut output = format!("{type_name}({length}) ["); for index in 0..length { output.push('\\n'); output.push_str(&" ".repeat(indent + 2)); output.push_str(&runtime::display_number(runtime::typed_bytes_get(value, index as f64))); if index + 1 < length { output.push(','); } } output.push('\\n'); output.push_str(&" ".repeat(indent)); output.push(']'); output },`);
   context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value).to_string(),`);
+  context.line(`${name}::NativeConstructor(name) => format!("[Function: {name}]"),`);
   context.line(`${name}::Array(value) => {`);
   context.pushIndent();
   context.line("let length = runtime::array_len(value) as usize;");
@@ -74,11 +77,11 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
-    context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { let _ = value; false }`);
+    context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..)) }`);
   } else {
-    context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${functionPatterns}) }`);
+    context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..) | ${functionPatterns}) }`);
   }
   context.line(`fn sc_dyn_assert_message(actual: &${name}, expected: &${name}, negated: bool, deep: bool, message: &runtime::JsString, has_message: bool) {`);
   context.pushIndent();

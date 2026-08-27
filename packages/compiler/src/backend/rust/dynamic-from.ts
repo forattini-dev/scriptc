@@ -60,9 +60,13 @@ export class RustDynamicFromEmitter {
       case "f64": return `${name}::Number(${value})`;
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;
+      case "url": return `${name}::Url(${value})`;
       case "bytes": {
-        if (type.elem !== "u8") this.context.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
-        return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
+        if (type.elem === "u8") {
+          return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
+        }
+        const copy = `runtime::typed_bytes_${type.elem}_copy`;
+        return liveRef ? `{ let source = ${value}; let mirror = ${copy}(&source); runtime::live_dyn_ref_store(runtime::typed_bytes_identity(&mirror), source); ${name}::TypedBytes(mirror) }` : `${name}::TypedBytes(${copy}(&(${value})))`;
       }
       case "promise": {
         const promise = this.context.nextTemporary();

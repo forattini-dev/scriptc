@@ -72,6 +72,113 @@ impl<T: ByteElement> ClearEdges for BytesData<T> {
 
 pub type JsBytes<T> = Gc<BytesData<T>>;
 
+/// A type-erased non-byte typed array kept inside checked-dynamic values.
+///
+/// Uint8Array stays on the established `JsBytes<u8>` path because Buffer and
+/// the Node byte APIs consume that exact representation. The remaining typed
+/// arrays retain their element kind here instead of being flattened into a JS
+/// Array (which would make Array.isArray and constructor identity incorrect).
+#[derive(Clone)]
+pub enum JsTypedBytes {
+    U32(JsBytes<u32>),
+    I32(JsBytes<i32>),
+    F32(JsBytes<f32>),
+}
+
+pub fn typed_bytes_u32_copy(value: &JsBytes<u32>) -> JsTypedBytes {
+    JsTypedBytes::U32(bytes_copy(value))
+}
+
+pub fn typed_bytes_i32_copy(value: &JsBytes<i32>) -> JsTypedBytes {
+    JsTypedBytes::I32(bytes_copy(value))
+}
+
+pub fn typed_bytes_f32_copy(value: &JsBytes<f32>) -> JsTypedBytes {
+    JsTypedBytes::F32(bytes_copy(value))
+}
+
+pub fn typed_bytes_trace(value: &JsTypedBytes, tracer: &mut Tracer<'_>) {
+    match value {
+        JsTypedBytes::U32(value) => tracer.edge(value),
+        JsTypedBytes::I32(value) => tracer.edge(value),
+        JsTypedBytes::F32(value) => tracer.edge(value),
+    }
+}
+
+pub fn typed_bytes_len(value: &JsTypedBytes) -> f64 {
+    match value {
+        JsTypedBytes::U32(value) => bytes_len(value),
+        JsTypedBytes::I32(value) => bytes_len(value),
+        JsTypedBytes::F32(value) => bytes_len(value),
+    }
+}
+
+pub fn typed_bytes_get(value: &JsTypedBytes, index: f64) -> f64 {
+    match value {
+        JsTypedBytes::U32(value) => bytes_get(value, index),
+        JsTypedBytes::I32(value) => bytes_get(value, index),
+        JsTypedBytes::F32(value) => bytes_get(value, index),
+    }
+}
+
+pub fn typed_bytes_name(value: &JsTypedBytes) -> &'static str {
+    match value {
+        JsTypedBytes::U32(_) => "Uint32Array",
+        JsTypedBytes::I32(_) => "Int32Array",
+        JsTypedBytes::F32(_) => "Float32Array",
+    }
+}
+
+pub fn typed_bytes_identity(value: &JsTypedBytes) -> usize {
+    match value {
+        JsTypedBytes::U32(value) => value.identity(),
+        JsTypedBytes::I32(value) => value.identity(),
+        JsTypedBytes::F32(value) => value.identity(),
+    }
+}
+
+pub fn typed_bytes_copy(value: &JsTypedBytes) -> JsTypedBytes {
+    match value {
+        JsTypedBytes::U32(value) => typed_bytes_u32_copy(value),
+        JsTypedBytes::I32(value) => typed_bytes_i32_copy(value),
+        JsTypedBytes::F32(value) => typed_bytes_f32_copy(value),
+    }
+}
+
+pub fn typed_bytes_slice(value: &JsTypedBytes, start: f64, end: f64) -> JsTypedBytes {
+    match value {
+        JsTypedBytes::U32(value) => JsTypedBytes::U32(bytes_slice(value, start, end, false)),
+        JsTypedBytes::I32(value) => JsTypedBytes::I32(bytes_slice(value, start, end, false)),
+        JsTypedBytes::F32(value) => JsTypedBytes::F32(bytes_slice(value, start, end, false)),
+    }
+}
+
+pub fn typed_bytes_ptr_eq(left: &JsTypedBytes, right: &JsTypedBytes) -> bool {
+    match (left, right) {
+        (JsTypedBytes::U32(left), JsTypedBytes::U32(right)) => left.ptr_eq(right),
+        (JsTypedBytes::I32(left), JsTypedBytes::I32(right)) => left.ptr_eq(right),
+        (JsTypedBytes::F32(left), JsTypedBytes::F32(right)) => left.ptr_eq(right),
+        _ => false,
+    }
+}
+
+pub fn typed_bytes_deep_equals(left: &JsTypedBytes, right: &JsTypedBytes) -> bool {
+    match (left, right) {
+        (JsTypedBytes::U32(left), JsTypedBytes::U32(right)) => bytes_deep_equals(left, right),
+        (JsTypedBytes::I32(left), JsTypedBytes::I32(right)) => bytes_deep_equals(left, right),
+        (JsTypedBytes::F32(left), JsTypedBytes::F32(right)) => bytes_deep_equals(left, right),
+        _ => false,
+    }
+}
+
+pub fn typed_bytes_join(value: &JsTypedBytes, separator: &JsString) -> JsString {
+    match value {
+        JsTypedBytes::U32(value) => bytes_join(value, separator),
+        JsTypedBytes::I32(value) => bytes_join(value, separator),
+        JsTypedBytes::F32(value) => bytes_join(value, separator),
+    }
+}
+
 fn bytes_from_elements<T: ByteElement>(elements: Vec<T>) -> JsBytes<T> {
     Gc::new(BytesData {
         length: elements.len(),

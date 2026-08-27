@@ -337,13 +337,13 @@ export class RustExpressionEmitter {
           case "undefined": test = `matches!(&${value}, ${name}::Undefined)`; break;
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
-          case "function": test = functions.length === 0 ? "false" : `matches!(&${value}, ${functions.join(" | ")})`; break;
-          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..))`; break;
+          case "function": test = `matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`})`; break;
+          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
-          case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::Buffer(..))`; break;
+          case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;
           case "truthy":
-            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => true${functions.length === 0 ? "" : `, ${functions.join(" | ")} => true`} }`;
+            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), _ => true }`;
             break;
         }
         if (expr.negated) test = `!(${test})`;

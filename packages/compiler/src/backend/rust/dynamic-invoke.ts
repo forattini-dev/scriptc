@@ -294,6 +294,7 @@ class RustDynamicInvokeEmitter {
     this.emitRegexArm();
     this.emitArrayArm();
     this.emitBytesArm();
+    this.emitTypedBytesArm();
     this.emitBufferArm();
     this.emitPromiseArm();
     this.emitNetSocketArm();
@@ -425,6 +426,17 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"slice" | "subarray" => ${this.dyn}::Buffer(runtime::bytes_slice(bytes, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, length, callee_name), false)),`);
     this.context.line(`"toString" => { let encoding = match args.first() { None | Some(${this.dyn}::Undefined) => runtime::string("utf8"), Some(${this.dyn}::String(value)) => value.clone(), value => sc_dyn_arg_type_fail("encoding", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; ${this.dyn}::String(runtime::bytes_to_string(bytes, &encoding)) },`);
     this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    this.close("}");
+    this.close("},");
+  }
+
+  private emitTypedBytesArm(): void {
+    this.open(`${this.dyn}::TypedBytes(bytes) => {`);
+    this.context.line("let length = runtime::typed_bytes_len(bytes);");
+    this.open("match method {");
+    this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { length + index } else { index }; if actual < 0.0 || actual >= length { ${this.dyn}::Undefined } else { ${this.dyn}::Number(runtime::typed_bytes_get(bytes, actual)) } },`);
+    this.context.line(`"slice" | "subarray" => ${this.dyn}::TypedBytes(runtime::typed_bytes_slice(bytes, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, length, callee_name))),`);
+    this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");
   }

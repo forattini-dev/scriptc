@@ -43,6 +43,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line("}");
   context.popIndent();
   context.line("},");
+  context.line(`${name}::TypedBytes(bytes) => { let mut index = 0usize; while index < runtime::typed_bytes_len(bytes) as usize { sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), ${name}::Number(runtime::typed_bytes_get(bytes, index as f64))); index += 1; } },`);
   context.line(`${name}::String(text) => for (index, character) in text.chars().enumerate() {`);
   context.pushIndent();
   context.line(`sc_dyn_obj_walk_push(&output, mode, runtime::string(&index.to_string()), ${name}::String(runtime::string(&character.to_string())));`);
@@ -75,6 +76,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line("},");
   context.line(`${name}::Array(source) => { let mut index = 0.0; while index < runtime::array_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), runtime::array_get(source, index), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
   context.line(`${name}::Bytes(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
+  context.line(`${name}::TypedBytes(source) => { let mut index = 0.0; while index < runtime::typed_bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::typed_bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
   context.line(`${name}::Buffer(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
   context.line(`${name}::String(source) => for (index, character) in source.chars().enumerate() { runtime::map_set_by(target, runtime::string(&index.to_string()), ${name}::String(runtime::string(&character.to_string())), |left, right| left.as_ref() == right.as_ref()); },`);
   context.line("_ => {},");
@@ -101,6 +103,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.pushIndent();
   context.line(`${name}::Array(source) => { let ${name}::Array(pack) = pack else { unreachable!() }; runtime::array_extend(pack, source); return; },`);
   context.line(`${name}::Bytes(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::bytes_get(source, index))); index += 1.0; } return; },`);
+  context.line(`${name}::TypedBytes(source) => { let mut index = 0.0; while index < runtime::typed_bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::typed_bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::Buffer(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::String(source) => { for character in source.chars() { sc_dyn_pack_push(pack, ${name}::String(runtime::string(&character.to_string()))); } return; },`);
   context.line("_ => {},");

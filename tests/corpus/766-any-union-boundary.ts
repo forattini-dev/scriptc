@@ -35,9 +35,15 @@ console.log(`${hb.length}`, `${hb[0]}`, `${hb[2]}`, `${hb.constructor.name}`);
 const words = new Uint32Array([7, 900000001]);
 const hw: any = words;
 console.log(`${hw.length}`, `${hw[1]}`, `${hw.constructor.name}`);
+const hwTail: any = hw.slice(1);
+console.log(`${hwTail.length}`, `${hwTail[0]}`, `${hwTail.constructor.name}`);
+const signed = new Int32Array([-7, 2147483647]);
+const hs: any = signed;
+console.log(`${hs.length}`, `${hs[0]}`, `${hs[1]}`, `${hs.constructor.name}`);
 const floats = new Float32Array([1.5, -0.25]);
 const hf: any = floats;
 console.log(`${hf.length}`, `${hf[1]}`, `${hf.constructor.name}`);
+console.log(`${hb.constructor === hb.constructor}`, `${hw.constructor === hw.constructor}`);
 
 // A bytes-armed union, both arms.
 function payload(flag: boolean): Uint8Array | string {
