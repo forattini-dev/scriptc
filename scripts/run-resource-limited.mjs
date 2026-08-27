@@ -20,7 +20,7 @@ const properties = [
   "IOWeight=1",
   "IOSchedulingClass=idle",
   "Nice=19",
-  "TasksMax=64",
+  `TasksMax=${process.env.SCRIPTC_LIMIT_TASKS ?? "256"}`,
 ];
 const cacheRoot = process.env.SCRIPTC_CACHE_DIR ?? join(homedir(), ".cache", "scriptc");
 const temporaryRoot = process.env.TMPDIR ?? join(homedir(), ".cache", "scriptc-test-tmp");
