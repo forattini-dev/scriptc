@@ -21,8 +21,8 @@ export function emitRustOptionalChain(
     context.chainValues.delete(expr.id);
   }
 
-  if (expr.receiver.type.kind === "dyn") {
-    if (expr.type.kind !== "dyn" && expr.type.kind !== "void") {
+  if (expr.receiver.type.kind === "dyn" || expr.receiver.type.kind === "jsval") {
+    if (expr.type.kind !== expr.receiver.type.kind && expr.type.kind !== "void") {
       context.unsupported("dynamic optional chain result", expr.loc);
     }
     const dyn = context.dynTypeName();
