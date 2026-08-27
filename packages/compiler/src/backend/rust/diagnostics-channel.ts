@@ -4,6 +4,73 @@ function callbackIdentity(value: string): string {
   return `sc_dyn_function_identity(&${value}).unwrap_or_else(|| sc_dyn_arg_type_fail("subscription", "of type function", &${value}))`;
 }
 
+const TRACE_EVENTS = ["start", "end", "asyncStart", "asyncEnd", "error"] as const;
+
+function traceEventChannel(handle: string, index: number, dyn: string): string {
+  return `runtime::diagnostics_tracing_event_channel::<${dyn}>(${handle}, ${index}.0)`;
+}
+
+function emitPublish(
+  handle: string,
+  message: string,
+  dyn: string,
+  context: RustLibCallContext,
+): string {
+  const name = context.nextTemporary();
+  const subscribers = context.nextTemporary();
+  const callback = context.nextTemporary();
+  return `{ let (${name}, ${subscribers}) = runtime::diagnostics_snapshot::<${dyn}>(${handle}); for ${callback} in ${subscribers} { let _ = sc_dyn_call(&${callback}, &[${message}.clone(), ${dyn}::String(${name}.clone())], "subscription"); } }`;
+}
+
+function emitTracingSubscription(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+  subscribe: boolean,
+): string | null {
+  const [handleExpr, handlersExpr] = expr.args;
+  if (handleExpr?.type.kind !== "f64" || handlersExpr?.type.kind !== "dyn") return null;
+  const dyn = context.dynTypeName();
+  const handle = context.nextTemporary();
+  const handlers = context.nextTemporary();
+  const done = context.nextTemporary();
+  const actions = TRACE_EVENTS.map((event, index) => {
+    const callback = context.nextTemporary();
+    const channel = traceEventChannel(handle, index, dyn);
+    const action = subscribe
+      ? `runtime::diagnostics_chan_subscribe(${channel}, ${callbackIdentity(callback)}, ${callback});`
+      : `if !runtime::diagnostics_chan_unsubscribe::<${dyn}>(${channel}, ${callbackIdentity(callback)}) { ${done} = false; }`;
+    return `let ${callback} = sc_dyn_key_get(&${handlers}, &runtime::string("${event}"), false); if sc_dyn_is_truthy(&${callback}) { ${action} }`;
+  }).join(" ");
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${handlers} = ${context.emitExpr(handlersExpr)}; let mut ${done} = true; ${actions} ${subscribe ? "()" : done} }`;
+}
+
+function emitTraceSync(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
+  const [handleExpr, fnExpr, contextExpr, thisExpr, argsExpr] = expr.args;
+  if (handleExpr?.type.kind !== "f64" || fnExpr?.type.kind !== "dyn" ||
+      contextExpr?.type.kind !== "dyn" || thisExpr?.type.kind !== "dyn" || argsExpr?.type.kind !== "dyn") return null;
+  const dyn = context.dynTypeName();
+  const handle = context.nextTemporary();
+  const fn = context.nextTemporary();
+  const traceContext = context.nextTemporary();
+  const thisArg = context.nextTemporary();
+  const args = context.nextTemporary();
+  const callArgs = context.nextTemporary();
+  const index = context.nextTemporary();
+  const outcome = context.nextTemporary();
+  const result = context.nextTemporary();
+  const payload = context.nextTemporary();
+  const caught = context.nextTemporary();
+  const error = context.nextTemporary();
+  const collectArgs = `let mut ${callArgs} = Vec::new(); if let ${dyn}::Array(sc_values) = &${args} { let mut ${index} = 0.0; while ${index} < runtime::array_len(sc_values) { ${callArgs}.push(runtime::array_get(sc_values, ${index})); ${index} += 1.0; } }`;
+  const invoke = `{ let _sc_this_guard = sc_dyn_this_push(${thisArg}.clone()); sc_dyn_call(&${fn}, &${callArgs}, "traceSync") }`;
+  const setResult = `if let ${dyn}::Object(sc_object) = &${traceContext} { runtime::map_set_by(sc_object, runtime::string("result"), ${result}.clone(), |left, right| left.as_ref() == right.as_ref()); }`;
+  const setError = `if let ${dyn}::Object(sc_object) = &${traceContext} { runtime::map_set_by(sc_object, runtime::string("error"), ${error}, |left, right| left.as_ref() == right.as_ref()); }`;
+  const publishStart = emitPublish(traceEventChannel(handle, 0, dyn), traceContext, dyn, context);
+  const publishEnd = emitPublish(traceEventChannel(handle, 1, dyn), traceContext, dyn, context);
+  const publishError = emitPublish(traceEventChannel(handle, 4, dyn), traceContext, dyn, context);
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${invoke} } else { ${publishStart}; let ${outcome} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${invoke})); match ${outcome} { Ok(${result}) => { ${setResult} ${publishEnd}; ${result} }, Err(${payload}) => { let ${caught} = runtime::caught_from_panic(${payload}); let ${error} = sc_dyn_from_caught(${caught}.clone()); ${setError} ${publishError}; ${publishEnd}; runtime::rethrow_caught(${caught}) }, } } }`;
+}
+
 export function emitRustDiagnosticsChannelCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -15,6 +82,13 @@ export function emitRustDiagnosticsChannelCall(
 
   if (expr.fn === "dc.channel" && expr.args.length === 1 && first?.type.kind === "string") {
     return `runtime::diagnostics_channel::<${dyn}>(&(${context.emitExpr(first)}))`;
+  }
+  if (expr.fn === "dc.tracingChannel" && expr.args.length === 1 && first?.type.kind === "string") {
+    return `runtime::diagnostics_tracing_channel::<${dyn}>(&(${context.emitExpr(first)}))`;
+  }
+  if (expr.fn === "dc.tracingChannelOf" && expr.args.length === 5 &&
+      expr.args.every((arg) => arg.type.kind === "f64")) {
+    return `runtime::diagnostics_tracing_channel_of::<${dyn}>([${expr.args.map((arg) => context.emitExpr(arg)).join(", ")}])`;
   }
   if (expr.fn === "dc.hasSubscribers" && expr.args.length === 1 && first?.type.kind === "string") {
     return `runtime::diagnostics_has_subscribers::<${dyn}>(&(${context.emitExpr(first)}))`;
@@ -33,6 +107,19 @@ export function emitRustDiagnosticsChannelCall(
   }
   if (expr.fn === "dc.chanHasSubscribers" && expr.args.length === 1 && first?.type.kind === "f64") {
     return `runtime::diagnostics_chan_has_subscribers::<${dyn}>(${context.emitExpr(first)})`;
+  }
+  if (expr.fn === "dc.tcChannel" && expr.args.length === 2 &&
+      first?.type.kind === "f64" && second?.type.kind === "f64") {
+    return `runtime::diagnostics_tracing_event_channel::<${dyn}>(${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+  }
+  if (expr.fn === "dc.tcHasSubscribers" && expr.args.length === 1 && first?.type.kind === "f64") {
+    return `runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${context.emitExpr(first)})`;
+  }
+  if ((expr.fn === "dc.tcSubscribe" || expr.fn === "dc.tcUnsubscribe") && expr.args.length === 2) {
+    return emitTracingSubscription(expr, context, expr.fn === "dc.tcSubscribe");
+  }
+  if (expr.fn === "dc.tcTraceSync" && expr.args.length === 5) {
+    return emitTraceSync(expr, context);
   }
   if ((expr.fn === "dc.chanSubscribe" || expr.fn === "dc.chanUnsubscribe") && expr.args.length === 2 &&
       first?.type.kind === "f64" && second?.type.kind === "dyn") {

@@ -651,7 +651,7 @@ class RustEmitter {
         this.usesProcessRejectionEvents = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && node.op === "callMethod") ||
-        (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {
+        (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync"))) {
         this.usesDynamicInvoke = true;
       }
       if (node.kind === "dynFrom" || node.kind === "jsMarshal") {

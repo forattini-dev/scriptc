@@ -13,6 +13,7 @@ struct DiagnosticsChannel<D> {
 struct DiagnosticsRegistry<D> {
     channels: Vec<DiagnosticsChannel<D>>,
     by_name: HashMap<JsString, usize>,
+    tracings: Vec<[usize; 5]>,
 }
 
 impl<D> Default for DiagnosticsRegistry<D> {
@@ -20,9 +21,13 @@ impl<D> Default for DiagnosticsRegistry<D> {
         Self {
             channels: Vec::new(),
             by_name: HashMap::new(),
+            tracings: Vec::new(),
         }
     }
 }
+
+const DIAGNOSTICS_TRACE_EVENTS: [&str; 5] =
+    ["start", "end", "asyncStart", "asyncEnd", "error"];
 
 thread_local! {
     static DIAGNOSTICS_REGISTRIES: RefCell<HashMap<TypeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
@@ -66,8 +71,60 @@ fn diagnostics_index<D>(registry: &DiagnosticsRegistry<D>, handle: f64) -> usize
     index
 }
 
+fn diagnostics_tracing_index<D>(registry: &DiagnosticsRegistry<D>, handle: f64) -> usize {
+    if !handle.is_finite() || handle.fract() != 0.0 || handle < 1.0 {
+        panic!("scriptc: invalid diagnostics_channel tracing handle");
+    }
+    let index = handle as usize - 1;
+    if index >= registry.tracings.len() {
+        panic!("scriptc: invalid diagnostics_channel tracing handle");
+    }
+    index
+}
+
 pub fn diagnostics_channel<D: 'static>(name: &JsString) -> f64 {
     with_diagnostics_registry(|registry| (diagnostics_intern::<D>(registry, name) + 1) as f64)
+}
+
+pub fn diagnostics_tracing_channel<D: 'static>(name: &JsString) -> f64 {
+    with_diagnostics_registry(|registry| {
+        let channels = std::array::from_fn(|index| {
+            let channel_name = string(&format!(
+                "tracing:{name}:{}",
+                DIAGNOSTICS_TRACE_EVENTS[index]
+            ));
+            diagnostics_intern::<D>(registry, &channel_name)
+        });
+        registry.tracings.push(channels);
+        registry.tracings.len() as f64
+    })
+}
+
+pub fn diagnostics_tracing_channel_of<D: 'static>(handles: [f64; 5]) -> f64 {
+    with_diagnostics_registry(|registry: &mut DiagnosticsRegistry<D>| {
+        let channels = handles.map(|handle| diagnostics_index(registry, handle));
+        registry.tracings.push(channels);
+        registry.tracings.len() as f64
+    })
+}
+
+pub fn diagnostics_tracing_event_channel<D: 'static>(handle: f64, event: f64) -> f64 {
+    with_diagnostics_registry(|registry: &mut DiagnosticsRegistry<D>| {
+        let tracing = diagnostics_tracing_index(registry, handle);
+        if !event.is_finite() || event.fract() != 0.0 || !(0.0..5.0).contains(&event) {
+            panic!("scriptc: invalid diagnostics_channel tracing event");
+        }
+        (registry.tracings[tracing][event as usize] + 1) as f64
+    })
+}
+
+pub fn diagnostics_tracing_has_subscribers<D: 'static>(handle: f64) -> bool {
+    with_diagnostics_registry(|registry: &mut DiagnosticsRegistry<D>| {
+        let tracing = diagnostics_tracing_index(registry, handle);
+        registry.tracings[tracing]
+            .iter()
+            .any(|channel| !registry.channels[*channel].subscribers.is_empty())
+    })
 }
 
 pub fn diagnostics_subscribe<D: Clone + 'static>(name: &JsString, identity: usize, callback: D) {
@@ -181,6 +238,31 @@ mod diagnostics_channel_tests {
         assert_eq!(snapshot, vec![70, 80]);
         assert_eq!(diagnostics_snapshot::<usize>(handle).1, vec![80]);
         assert!(!diagnostics_unsubscribe::<usize>(&string("missing"), 8));
+        diagnostics_finish();
+    }
+
+    #[test]
+    fn tracing_channels_share_named_channels_and_track_activity() {
+        diagnostics_finish();
+        let tracing = diagnostics_tracing_channel::<usize>(&string("work"));
+        let start = diagnostics_tracing_event_channel::<usize>(tracing, 0.0);
+        let error = diagnostics_tracing_event_channel::<usize>(tracing, 4.0);
+        assert_eq!(diagnostics_chan_name::<usize>(start).as_ref(), "tracing:work:start");
+        assert_eq!(diagnostics_chan_name::<usize>(error).as_ref(), "tracing:work:error");
+        assert!(!diagnostics_tracing_has_subscribers::<usize>(tracing));
+
+        diagnostics_chan_subscribe(start, 1, 10_usize);
+        assert!(diagnostics_tracing_has_subscribers::<usize>(tracing));
+
+        let collection = diagnostics_tracing_channel_of::<usize>([
+            start,
+            diagnostics_channel::<usize>(&string("custom:end")),
+            diagnostics_channel::<usize>(&string("custom:asyncStart")),
+            diagnostics_channel::<usize>(&string("custom:asyncEnd")),
+            error,
+        ]);
+        assert_eq!(diagnostics_tracing_event_channel::<usize>(collection, 0.0), start);
+        assert_eq!(diagnostics_tracing_event_channel::<usize>(collection, 4.0), error);
         diagnostics_finish();
     }
 }
