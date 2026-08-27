@@ -71,6 +71,44 @@ function emitTraceSync(expr: RustLibCallExpr, context: RustLibCallContext): stri
   return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${invoke} } else { ${publishStart}; let ${outcome} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${invoke})); match ${outcome} { Ok(${result}) => { ${setResult} ${publishEnd}; ${result} }, Err(${payload}) => { let ${caught} = runtime::caught_from_panic(${payload}); let ${error} = sc_dyn_from_caught(${caught}.clone()); ${setError} ${publishError}; ${publishEnd}; runtime::rethrow_caught(${caught}) }, } } }`;
 }
 
+function emitTraceCallback(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
+  const [handleExpr, fnExpr, positionExpr, contextExpr, thisExpr, argsExpr] = expr.args;
+  if (handleExpr?.type.kind !== "f64" || fnExpr?.type.kind !== "dyn" || positionExpr?.type.kind !== "f64" ||
+      contextExpr?.type.kind !== "dyn" || thisExpr?.type.kind !== "dyn" || argsExpr?.type.kind !== "dyn") return null;
+  const dyn = context.dynTypeName();
+  const handle = context.nextTemporary();
+  const traceContext = context.nextTemporary();
+  const args = context.nextTemporary();
+  const callArgs = context.nextTemporary();
+  const index = context.nextTemporary();
+  const callback = context.nextTemporary();
+  const tail = context.nextTemporary();
+  const asyncContext = context.nextTemporary();
+  const asyncCallback = context.nextTemporary();
+  const error = context.nextTemporary();
+  const result = context.nextTemporary();
+  const outcome = context.nextTemporary();
+  const payload = context.nextTemporary();
+  const caught = context.nextTemporary();
+  const collectArgs = `let mut ${callArgs} = Vec::new(); if let ${dyn}::Array(sc_values) = &${args} { let mut ${index} = 0.0; while ${index} < runtime::array_len(sc_values) { ${callArgs}.push(runtime::array_get(sc_values, ${index})); ${index} += 1.0; } }`;
+  const validate = `let ${callback} = ${callArgs}.first().cloned().unwrap_or(${dyn}::Undefined); if sc_dyn_function_identity(&${callback}).is_none() { sc_dyn_arg_type_fail("callback", "of type function", &${callback}); }`;
+  const directSchedule = `let ${tail}: Vec<${dyn}> = ${callArgs}.iter().skip(1).cloned().collect(); runtime::timer_set_immediate(Box::new(move || { let _sc_this_guard = sc_dyn_this_push(${dyn}::Undefined); let _ = sc_dyn_call(&${callback}, &${tail}, "immediate callback"); })); ${dyn}::Undefined`;
+  if (fnExpr.kind !== "libCall" || fnExpr.fn !== "timers.setImmediateFnValue" ||
+      positionExpr.kind !== "numLit" || positionExpr.value !== 0) {
+    const fn = context.nextTemporary();
+    return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let _sc_this_arg = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} ${validate} let _ = (${handle}, ${fn}, ${traceContext}); runtime::throw_error_code("Rust traceCallback currently supports setImmediate as the traced function".to_owned(), "SC2020") }`;
+  }
+  const publishStart = emitPublish(traceEventChannel(handle, 0, dyn), traceContext, dyn, context);
+  const publishEnd = emitPublish(traceEventChannel(handle, 1, dyn), traceContext, dyn, context);
+  const publishError = emitPublish(traceEventChannel(handle, 4, dyn), asyncContext, dyn, context);
+  const publishAsyncStart = emitPublish(traceEventChannel(handle, 2, dyn), asyncContext, dyn, context);
+  const publishAsyncEnd = emitPublish(traceEventChannel(handle, 3, dyn), asyncContext, dyn, context);
+  const setError = `if let ${dyn}::Object(sc_object) = &${asyncContext} { runtime::map_set_by(sc_object, runtime::string("error"), ${error}.clone(), |left, right| left.as_ref() == right.as_ref()); }`;
+  const setResult = `if let ${dyn}::Object(sc_object) = &${asyncContext} { runtime::map_set_by(sc_object, runtime::string("result"), ${result}.clone(), |left, right| left.as_ref() == right.as_ref()); }`;
+  const scheduleWrapped = `let ${tail}: Vec<${dyn}> = ${callArgs}.iter().skip(1).cloned().collect(); let ${asyncContext} = ${traceContext}.clone(); let ${asyncCallback} = ${callback}.clone(); runtime::timer_set_immediate(Box::new(move || { let ${error} = ${tail}.first().cloned().unwrap_or(${dyn}::Undefined); let ${result} = ${tail}.get(1).cloned().unwrap_or(${dyn}::Undefined); if sc_dyn_is_truthy(&${error}) { ${setError} ${publishError}; } else { ${setResult} } ${publishAsyncStart}; let ${outcome} = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _sc_this_guard = sc_dyn_this_push(${dyn}::Undefined); sc_dyn_call(&${asyncCallback}, &${tail}, "callback") })) { Ok(value) => Ok(value), Err(${payload}) => Err(runtime::caught_from_panic(${payload})), }; ${publishAsyncEnd}; if let Err(${caught}) = ${outcome} { runtime::rethrow_caught(${caught}); } }));`;
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let _sc_this_arg = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} ${validate} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${directSchedule} } else { ${publishStart}; ${scheduleWrapped} ${publishEnd}; ${dyn}::Undefined } }`;
+}
+
 export function emitRustDiagnosticsChannelCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -120,6 +158,9 @@ export function emitRustDiagnosticsChannelCall(
   }
   if (expr.fn === "dc.tcTraceSync" && expr.args.length === 5) {
     return emitTraceSync(expr, context);
+  }
+  if (expr.fn === "dc.tcTraceCallback" && expr.args.length === 6) {
+    return emitTraceCallback(expr, context);
   }
   if ((expr.fn === "dc.chanSubscribe" || expr.fn === "dc.chanUnsubscribe") && expr.args.length === 2 &&
       first?.type.kind === "f64" && second?.type.kind === "dyn") {
