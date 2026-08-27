@@ -120,6 +120,7 @@ class RustEmitter {
     dynTypeName: () => this.dynTypeName(),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     errorClassRoots: () => this.errorClassRoots(),
+    errorValueName: () => this.errorValueName(),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),

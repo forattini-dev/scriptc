@@ -29,6 +29,7 @@ export interface RustDynamicContext {
   dynTypeName(): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   errorClassRoots(): RustClassMeta[];
+  errorValueName(): string;
   isEdgeValue(type: IrType): boolean;
   isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;
   isUnit(type: IrType): boolean;
@@ -51,6 +52,8 @@ export class RustDynamicEmitter {
   emitDynamicDefinition(): void {
     if (!this.context.usesDyn()) return;
     const name = this.context.dynTypeName();
+    const caughtErrorTest = this.context.errorClassRoots().length === 0 ? "runtime::caught_is_error(&caught)" : "sc_caught_is_error_class(&caught, \"Error\")";
+    const caughtErrorValue = this.context.errorClassRoots().length === 0 ? "runtime::caught_error_value(&caught)" : "sc_caught_error_value(&caught)";
     const boxedShapes = [...this.context.dynBoxedFunctionShapes].map((key) => {
       const shape = this.context.closureShapes.get(key);
       if (shape === undefined) this.context.unsupported(`dynamic function signature '${key}'`);
@@ -457,7 +460,7 @@ export class RustDynamicEmitter {
     this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
-    this.context.line("else if runtime::caught_is_error(&caught) { sc_dyn_error_box(&runtime::caught_error_value(&caught)) }");
+    this.context.line(`else if ${caughtErrorTest} { sc_dyn_error_box(&${caughtErrorValue}) }`);
     this.context.line(`else { ${name}::Object(runtime::map_new()) }`);
     this.context.popIndent();
     this.context.line("}");
@@ -913,15 +916,17 @@ export class RustDynamicEmitter {
   emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
     const name = this.context.dynTypeName();
     const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
+    const errorType = this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
+    const errorHelper = (helper: string): string => this.context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
 
     this.context.line("std::thread_local! {");
     this.context.pushIndent();
-    this.context.line(`static SC_DYN_ERROR_CACHE: std::cell::RefCell<Vec<(usize, runtime::JsError, ${mapType})>> = const { std::cell::RefCell::new(Vec::new()) };`);
+    this.context.line(`static SC_DYN_ERROR_CACHE: std::cell::RefCell<Vec<(usize, ${errorType}, ${mapType})>> = const { std::cell::RefCell::new(Vec::new()) };`);
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_error_box(error: &runtime::JsError) -> ${name} {`);
+    this.context.line(`fn sc_dyn_error_box(error: &${errorType}) -> ${name} {`);
     this.context.pushIndent();
-    this.context.line("let identity = runtime::error_identity(error);");
+    this.context.line(`let identity = ${errorHelper("identity")}(error);`);
     this.context.line("if let Some(object) = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(cached, _, _)| *cached == identity).map(|(_, _, object)| object.clone())) {");
     this.context.pushIndent();
     this.context.line(`return ${name}::Object(object);`);
@@ -930,14 +935,14 @@ export class RustDynamicEmitter {
     this.context.line(`let object: ${mapType} = runtime::map_new();`);
     this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().push((identity, error.clone(), object.clone())));");
     this.context.line(`runtime::map_set_by(&object, runtime::string("%error"), ${name}::Boolean(true), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`runtime::map_set_by(&object, runtime::string("name"), ${name}::String(runtime::error_name(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`runtime::map_set_by(&object, runtime::string("message"), ${name}::String(runtime::error_message(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line("if runtime::error_is_class(error, \"DOMException\") {");
+    this.context.line(`runtime::map_set_by(&object, runtime::string("name"), ${name}::String(${errorHelper("name")}(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.context.line(`runtime::map_set_by(&object, runtime::string("message"), ${name}::String(${errorHelper("message")}(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.context.line(`if ${errorHelper("is_class")}(error, "DOMException") {`);
     this.context.pushIndent();
-    this.context.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::Number(runtime::error_dom_code(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`if let Some(cause) = runtime::error_dom_cause::<${name}>(error) { runtime::map_set_by(&object, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); }`);
+    this.context.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::Number(${errorHelper("dom_code")}(error)), |left, right| left.as_ref() == right.as_ref());`);
+    this.context.line(`if let Some(cause) = ${errorHelper("dom_cause")}::<${name}>(error) { runtime::map_set_by(&object, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); }`);
     this.context.popIndent();
-    this.context.line("} else if let Some(code) = runtime::error_code(error) {");
+    this.context.line(`} else if let Some(code) = ${errorHelper("code")}(error) {`);
     this.context.pushIndent();
     this.context.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::String(code), |left, right| left.as_ref() == right.as_ref());`);
     this.context.popIndent();
@@ -950,10 +955,10 @@ export class RustDynamicEmitter {
     this.context.line("let target = match kind as i32 { 0 => \"Error\", 1 => \"TypeError\", 2 => \"RangeError\", 3 => \"SyntaxError\", 4 => \"DOMException\", _ => return false };");
     this.context.line(`let ${name}::Object(object) = value else { return false; };`);
     this.context.line("let identity = object.identity();");
-    this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| runtime::error_is_class(error, target)))");
+    this.context.line(`SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| ${errorHelper("is_class")}(error, target)))`);
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> runtime::JsError {`);
+    this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> ${errorType} {`);
     this.context.pushIndent();
     this.context.line(`let ${name}::Object(object) = &value else { return sc_dyn_check_fail("Error", &value); };`);
     this.context.line("let identity = object.identity();");
@@ -1148,7 +1153,7 @@ export class RustDynamicEmitter {
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
       case "object": {
-        if (!RUNTIME_ERROR_CLASSES.has(type.className) || this.context.errorClassRoots().length > 0) {
+        if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
           this.context.unsupported(`dynamic checked cast to object '${type.className}'`, loc);
         }
         return `sc_dyn_error_unbox(${value})`;

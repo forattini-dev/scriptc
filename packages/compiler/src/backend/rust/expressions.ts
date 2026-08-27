@@ -695,7 +695,9 @@ export class RustExpressionEmitter {
         const caught = this.context.nextName("sc_rt");
         const error = this.context.nextName("sc_rt");
         const dyn = this.context.dynTypeName();
-        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if runtime::caught_is_error(&${caught}) { let ${error} = runtime::caught_error_value(&${caught}); sc_dyn_error_box(&${error}) } else { ${dyn}::Object(runtime::map_new()) } }`;
+        const errorTest = this.context.errorClassRoots().length === 0 ? `runtime::caught_is_error(&${caught})` : `sc_caught_is_error_class(&${caught}, "Error")`;
+        const errorValue = this.context.errorClassRoots().length === 0 ? `runtime::caught_error_value(&${caught})` : `sc_caught_error_value(&${caught})`;
+        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if ${errorTest} { let ${error} = ${errorValue}; sc_dyn_error_box(&${error}) } else { ${dyn}::Object(runtime::map_new()) } }`;
       }
       case "caughtTest":
         if (expr.test !== "instanceof") {

@@ -105,9 +105,6 @@ export class RustDynamicFromEmitter {
         if (!RUNTIME_ERROR_CLASSES.has(type.className)) {
           this.context.unsupported(`dynamic boxing from object '${type.className}'`, loc);
         }
-        if (this.context.errorClassRoots().length > 0) {
-          this.context.unsupported("dynamic Error boxing alongside user Error subclasses", loc);
-        }
         const error = this.context.nextTemporary();
         return `{ let ${error} = ${value}; sc_dyn_error_box(&${error}) }`;
       }
