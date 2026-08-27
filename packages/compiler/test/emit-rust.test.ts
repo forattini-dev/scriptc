@@ -960,6 +960,8 @@ test.each([
   "2567-rest-spread-forward.js",
   "2568-rest-spread-forward-dynamic.js",
   "2569-upcast-identity.ts",
+  "2572-readable-emitted-readable-flag.cjs",
+  "2574-emitter-max-listeners-ladders.cjs",
   "2575-string-destructuring-decl.ts",
   "2576-string-destructuring-assign.ts",
   "2577-builtin-global-destructuring.js",

@@ -32,6 +32,7 @@ where
     resume_pending: bool,
     resume_after_data: bool,
     readable_scheduled: bool,
+    emitted_readable: bool,
     pipes: Vec<ReadablePipe>,
     destroyed: bool,
     closed: bool,
@@ -124,6 +125,7 @@ where
         resume_pending: false,
         resume_after_data: false,
         readable_scheduled: false,
+        emitted_readable: false,
         pipes: Vec::new(),
         destroyed: false,
         closed: false,
@@ -217,7 +219,14 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    let (available, eof) = readable.with(|data| (data.buffered_length, data.eof));
+    let (available, eof) = readable.with_mut(|data| {
+        // Node clears emittedReadable for every read except read(0).
+        // The absent read() form arrives as -1 and therefore clears too.
+        if size != 0.0 {
+            data.emitted_readable = false;
+        }
+        (data.buffered_length, data.eof)
+    });
     if available == 0 {
         return None;
     }
@@ -264,6 +273,7 @@ where
             return false;
         }
         data.readable_scheduled = true;
+        data.emitted_readable = true;
         true
     })
 }
@@ -274,6 +284,14 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| data.readable_scheduled = false);
+}
+
+pub fn readable_end_notification<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.emitted_readable = false);
 }
 
 pub fn readable_start_flowing<L, R>(readable: &JsReadable<L, R>)
@@ -599,6 +617,7 @@ where
         "destroyed" => data.destroyed,
         "closed" => data.closed,
         "readableObjectMode" => false,
+        "rs:emittedReadable" => data.emitted_readable,
         _ => false,
     })
 }

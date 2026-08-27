@@ -174,7 +174,7 @@ export class RustReadableEmitter {
     this.context.line("let sc_emitter = runtime::readable_emitter(sc_readable);");
     this.context.line("if runtime::emitter_listener_count(&sc_emitter, &runtime::string(\"readable\")) == 0.0 || !runtime::readable_schedule_notification(sc_readable) { return; }");
     this.context.line("let sc_readable = sc_readable.clone();");
-    this.context.line("runtime::process_next_tick(Box::new(move || { runtime::readable_begin_notification(&sc_readable); sc_readable_emit_void(&sc_readable, \"readable\"); if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); } }));");
+    this.context.line("runtime::process_next_tick(Box::new(move || { runtime::readable_begin_notification(&sc_readable); sc_readable_emit_void(&sc_readable, \"readable\"); runtime::readable_end_notification(&sc_readable); if runtime::readable_take_end(&sc_readable) { let sc_readable = sc_readable.clone(); runtime::process_next_tick(Box::new(move || { sc_readable_emit_void(&sc_readable, \"end\"); sc_readable_emit_void(&sc_readable, \"close\"); })); } }));");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("");
