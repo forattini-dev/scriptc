@@ -1,16 +1,24 @@
-import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrFuncType, RustClosureShape } from "./model.js";
 import type { RustStreamModel } from "./stream-model.js";
 
 type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustStreamPromiseContext {
   readonly streams: RustStreamModel;
+  closureName(shape: RustClosureShape): string;
+  closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   dynTypeName(): string;
+  emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   emitExpr(expr: IrExpr): string;
   line(value: string): void;
   nextTemporary(): string;
   popIndent(): void;
   pushIndent(): void;
+  rustType(type: IrType, loc?: SrcLoc): string;
+  union(id: string, loc?: SrcLoc): IrUnionDef;
+  unionName(id: string): string;
+  unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -43,6 +51,45 @@ export class RustStreamPromiseEmitter {
     return `sc_stream_promise_finished(${this.streamValue(stream.type, this.context.emitExpr(stream), expr.loc)})`;
   }
 
+  emitCallbackFinished(expr: RustLibCallExpr): string {
+    const [stream, callback] = expr.args;
+    const dynamic = expr.fn === "stream.finishedDyn";
+    if (stream === undefined || callback === undefined || expr.args.length !== 2 ||
+      expr.type.kind !== "func" || expr.type.params.length !== 0 || expr.type.ret.kind !== "void" ||
+      (dynamic ? callback.type.kind !== "dyn" : callback.type.kind !== "func")) {
+      this.context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const streamValue = this.context.nextTemporary();
+    const callbackValue = this.context.nextTemporary();
+    const callbackState = this.context.nextTemporary();
+    const cleanupShape = this.context.closureShapeForType(expr.type, expr.loc);
+    const watched = this.streamValue(stream.type, `${streamValue}.clone()`, expr.loc);
+    let invoke: string;
+    let traceCallback: string;
+    if (callback.type.kind === "dyn") {
+      const dyn = this.context.dynTypeName();
+      invoke = `let sc_args = match sc_status { Some(sc_error) => vec![sc_dyn_error_box(&sc_error)], None => Vec::<${dyn}>::new(), }; let _ = sc_dyn_call(&${callbackState}.0, &sc_args, "callback");`;
+      traceCallback = `runtime::Trace::trace(&${callbackState}.0, tracer);`;
+    } else {
+      if (callback.type.kind !== "func") this.context.unsupported("stream.finished callback type", expr.loc);
+      const callbackType = callback.type;
+      if (callbackType.ret.kind !== "void" || callbackType.rest === true ||
+        callbackType.params.length < 1 || callbackType.params.length > 2) {
+        this.context.unsupported("stream.finished callback signature", expr.loc);
+      }
+      const first = callbackType.params[0];
+      if (first?.kind !== "object" || stream.type.kind !== "object" || first.className !== stream.type.className) {
+        this.context.unsupported("stream.finished callback receiver", expr.loc);
+      }
+      const args = ["sc_target.clone()"];
+      const statusType = callbackType.params[1];
+      if (statusType !== undefined) args.push(this.finishedStatus(statusType, "sc_status", expr.loc));
+      invoke = `let _ = ${this.context.emitClosureDispatch(`${callbackState}.0`, callbackType, args, expr.loc)};`;
+      traceCallback = `tracer.edge(&${callbackState}.0);`;
+    }
+    return `{ let ${streamValue} = ${this.context.emitExpr(stream)}; let ${callbackValue} = ${this.context.emitExpr(callback)}; let ${callbackState} = std::rc::Rc::new((${callbackValue}, ${streamValue}.downgrade())); let (sc_cleanup, sc_cleanup_trace) = sc_stream_finished(${watched}, std::rc::Rc::new({ let ${callbackState} = ${callbackState}.clone(); move |_, sc_status| { let sc_target = ${callbackState}.1.upgrade().expect("scriptc: finished callback lost its live stream"); ${invoke} } }), std::rc::Rc::new(move |tracer| { ${traceCallback} })); runtime::Gc::new(${this.context.closureName(cleanupShape)}::RuntimeCallback { callback: Some(sc_cleanup), trace: Some(sc_cleanup_trace) }) }`;
+  }
+
   emitConsumer(expr: RustLibCallExpr): string {
     const stream = expr.args[0];
     if (stream === undefined || expr.args.length !== 1 || expr.type.kind !== "promise") {
@@ -71,6 +118,11 @@ export class RustStreamPromiseEmitter {
     this.context.line("fn sc_stream_identity(stream: &ScStream) -> usize { match stream {");
     this.context.pushIndent();
     for (const variant of this.variants()) this.context.line(`ScStream::${variant}(value) => value.identity(),`);
+    this.context.popIndent();
+    this.context.line("} }");
+    this.context.line("fn sc_stream_weak(stream: &ScStream) -> std::rc::Rc<dyn Fn() -> Option<ScStream>> { match stream {");
+    this.context.pushIndent();
+    for (const variant of this.variants()) this.context.line(`ScStream::${variant}(value) => { let weak = value.downgrade(); std::rc::Rc::new(move || weak.upgrade().map(ScStream::${variant})) },`);
     this.context.popIndent();
     this.context.line("} }");
     this.context.line("fn sc_stream_trace(stream: &ScStream, tracer: &mut runtime::Tracer<'_>) { match stream {");
@@ -106,16 +158,23 @@ export class RustStreamPromiseEmitter {
   }
 
   private emitFinishedHelper(): void {
-    this.context.line("fn sc_stream_finished(stream: ScStream, callback: std::rc::Rc<dyn Fn(ScStream, Option<runtime::JsError>)>, trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>) {");
+    this.context.line("fn sc_stream_finished(stream: ScStream, callback: std::rc::Rc<dyn Fn(ScStream, Option<runtime::JsError>)>, trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>) -> (std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>) {");
     this.context.pushIndent();
     this.context.line("let emitter = sc_stream_emitter(&stream);");
-    this.context.line("let error = std::rc::Rc::new(std::cell::RefCell::new(Option::<runtime::JsError>::None));");
-    this.context.line("let error_identity = std::rc::Rc::as_ptr(&error) as usize;");
-    this.context.line("runtime::emitter_on(&emitter, runtime::string(\"error\"), ScEmitterListener::RuntimeError(std::rc::Rc::new({ let error = error.clone(); move |value| { if error.borrow().is_none() { *error.borrow_mut() = Some(value); } } }), std::rc::Rc::new(|_| {})), error_identity, true, false);");
-    this.context.line("runtime::emitter_on(&emitter, runtime::string(\"close\"), ScEmitterListener::RuntimeVoid(std::rc::Rc::new({ let emitter = emitter.clone(); let stream = stream.clone(); let error = error.clone(); move || { let _ = runtime::emitter_off(&emitter, &runtime::string(\"error\"), error_identity); let status = error.borrow().clone().or_else(|| sc_stream_finish_status(&stream)); callback(stream.clone(), status); } }), std::rc::Rc::new({ let stream = stream.clone(); move |tracer| { sc_stream_trace(&stream, tracer); trace(tracer); } })), error_identity, true, false);");
+    this.context.line("let active = std::rc::Rc::new(std::cell::Cell::new(true));");
+    this.context.line("let stream_weak = sc_stream_weak(&stream);");
+    this.context.line("let emitter_weak: std::rc::Rc<dyn Fn() -> Option<ScEmitterRegistry>> = { let weak = emitter.downgrade(); std::rc::Rc::new(move || weak.upgrade()) };");
+    this.context.line("let state = std::rc::Rc::new((stream_weak, emitter_weak, std::cell::RefCell::new(Option::<runtime::JsError>::None), active.clone(), callback, trace));");
+    this.context.line("let identity = std::rc::Rc::as_ptr(&state) as usize;");
+    this.context.line("runtime::emitter_on(&emitter, runtime::string(\"error\"), ScEmitterListener::RuntimeError(std::rc::Rc::new({ let state = state.clone(); move |value| { if state.2.borrow().is_none() { *state.2.borrow_mut() = Some(value); } } }), std::rc::Rc::new({ let state = state.clone(); move |tracer| { if let Some(value) = state.2.borrow().as_ref() { runtime::Trace::trace(value, tracer); } (state.5)(tracer); } })), identity, true, false);");
+    this.context.line("runtime::emitter_on(&emitter, runtime::string(\"close\"), ScEmitterListener::RuntimeVoid(std::rc::Rc::new({ let state = state.clone(); move || { if !state.3.replace(false) { return; } if let Some(emitter) = (state.1)() { let _ = runtime::emitter_off(&emitter, &runtime::string(\"error\"), identity); } let Some(stream) = (state.0)() else { return; }; let status = state.2.borrow().clone().or_else(|| sc_stream_finish_status(&stream)); (state.4)(stream, status); } }), std::rc::Rc::new({ let state = state.clone(); move |tracer| { if let Some(value) = state.2.borrow().as_ref() { runtime::Trace::trace(value, tracer); } (state.5)(tracer); } })), identity, true, false);");
+    this.context.line("let retained = std::rc::Rc::new((stream, active));");
+    this.context.line("let cleanup: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({ let retained = retained.clone(); move || { if !retained.1.replace(false) { return; } let emitter = sc_stream_emitter(&retained.0); let _ = runtime::emitter_off(&emitter, &runtime::string(\"error\"), identity); let _ = runtime::emitter_off(&emitter, &runtime::string(\"close\"), identity); } });");
+    this.context.line("let cleanup_trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new(move |tracer| sc_stream_trace(&retained.0, tracer));");
+    this.context.line("(cleanup, cleanup_trace)");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("fn sc_stream_promise_finished(stream: ScStream) -> runtime::JsPromise<()> { let promise = runtime::promise_new::<()>(); let target = promise.clone(); let traced = promise.clone(); sc_stream_finished(stream, std::rc::Rc::new(move |_, error| { if let Some(error) = error { let _ = runtime::promise_reject(&target, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&target, ()); } }), std::rc::Rc::new(move |tracer| tracer.edge(&traced))); promise }");
+    this.context.line("fn sc_stream_promise_finished(stream: ScStream) -> runtime::JsPromise<()> { let promise = runtime::promise_new::<()>(); let target = promise.clone(); let traced = promise.clone(); let _ = sc_stream_finished(stream, std::rc::Rc::new(move |_, error| { if let Some(error) = error { let _ = runtime::promise_reject(&target, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&target, ()); } }), std::rc::Rc::new(move |tracer| tracer.edge(&traced))); promise }");
   }
 
   private emitPipelineHelper(): void {
@@ -125,7 +184,7 @@ export class RustStreamPromiseEmitter {
     this.context.line("let promise = runtime::promise_new::<()>();");
     this.context.line("let pipeline = std::rc::Rc::new(std::cell::RefCell::new(ScStreamPipeline { streams, closed: 0, error: None, promise: promise.clone() }));");
     this.context.line("let watched = pipeline.borrow().streams.clone();");
-    this.context.line("for stream in watched { let pipeline_callback = pipeline.clone(); let pipeline_trace = pipeline.clone(); sc_stream_finished(stream, std::rc::Rc::new(move |closed_stream, status| { let mut state = pipeline_callback.borrow_mut(); state.closed += 1; let destroy = if state.error.is_none() { status.map(|error| { state.error = Some(error.clone()); (error, state.streams.clone()) }) } else { None }; let settle = (state.closed == state.streams.len()).then(|| (state.promise.clone(), state.error.clone())); drop(state); if let Some((error, streams)) = destroy { let closed_identity = sc_stream_identity(&closed_stream); for stream in streams { if sc_stream_identity(&stream) != closed_identity { sc_stream_destroy(&stream, error.clone()); } } } if let Some((promise, error)) = settle { if let Some(error) = error { let _ = runtime::promise_reject(&promise, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&promise, ()); } } }), std::rc::Rc::new(move |tracer| { let state = pipeline_trace.borrow(); tracer.edge(&state.promise); for stream in &state.streams { sc_stream_trace(stream, tracer); } })); }");
+    this.context.line("for stream in watched { let pipeline_callback = pipeline.clone(); let pipeline_trace = pipeline.clone(); let _ = sc_stream_finished(stream, std::rc::Rc::new(move |closed_stream, status| { let mut state = pipeline_callback.borrow_mut(); state.closed += 1; let destroy = if state.error.is_none() { status.map(|error| { state.error = Some(error.clone()); (error, state.streams.clone()) }) } else { None }; let settle = (state.closed == state.streams.len()).then(|| (state.promise.clone(), state.error.clone())); drop(state); if let Some((error, streams)) = destroy { let closed_identity = sc_stream_identity(&closed_stream); for stream in streams { if sc_stream_identity(&stream) != closed_identity { sc_stream_destroy(&stream, error.clone()); } } } if let Some((promise, error)) = settle { if let Some(error) = error { let _ = runtime::promise_reject(&promise, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&promise, ()); } } }), std::rc::Rc::new(move |tracer| { let state = pipeline_trace.borrow(); tracer.edge(&state.promise); for stream in &state.streams { sc_stream_trace(stream, tracer); } })); }");
     this.context.line("promise");
     this.context.popIndent();
     this.context.line("}");
@@ -170,5 +229,23 @@ export class RustStreamPromiseEmitter {
       this.context.streams.usesDuplex ? "Duplex" : null,
       this.context.streams.usesTransform ? "Transform" : null,
     ].filter((value): value is string => value !== null);
+  }
+
+  private finishedStatus(type: IrType, value: string, loc: SrcLoc): string {
+    if (type.kind === "dyn") {
+      const dyn = this.context.dynTypeName();
+      return `match ${value} { Some(sc_error) => sc_dyn_error_box(&sc_error), None => ${dyn}::Undefined }`;
+    }
+    if (type.kind !== "union") this.context.unsupported("stream.finished error parameter", loc);
+    const union = this.context.union(type.unionId, loc);
+    const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+    const cleanTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    const fallbackCleanTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    const successTag = cleanTag >= 0 ? cleanTag : fallbackCleanTag;
+    if (errorTag < 0 || successTag < 0) this.context.unsupported("stream.finished error union", loc);
+    const name = this.context.unionName(union.id);
+    const errorType = this.context.rustType({ kind: "object", className: "%Error" }, loc);
+    const error = errorType === "runtime::JsError" ? "sc_error" : `${errorType}::Builtin(sc_error)`;
+    return `match ${value} { Some(sc_error) => ${name}::${this.context.unionVariant(errorTag)}(${error}), None => ${name}::${this.context.unionVariant(successTag)}, }`;
   }
 }

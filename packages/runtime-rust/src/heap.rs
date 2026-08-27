@@ -98,8 +98,43 @@ where
         self.rc().id
     }
 
+    /// Creates a non-owning handle suitable for callbacks stored by this object.
+    pub fn downgrade(&self) -> GcWeak<T> {
+        GcWeak {
+            inner: Rc::downgrade(self.rc()),
+        }
+    }
+
     fn rc(&self) -> &Rc<Node<T>> {
         self.inner.as_ref().expect("scriptc: moved heap handle")
+    }
+}
+
+/// Non-owning counterpart to [`Gc`], used to avoid runtime-created cycles.
+pub struct GcWeak<T>
+where
+    T: Trace + ClearEdges + 'static,
+{
+    inner: Weak<Node<T>>,
+}
+
+impl<T> GcWeak<T>
+where
+    T: Trace + ClearEdges + 'static,
+{
+    pub fn upgrade(&self) -> Option<Gc<T>> {
+        self.inner.upgrade().map(|inner| Gc { inner: Some(inner) })
+    }
+}
+
+impl<T> Clone for GcWeak<T>
+where
+    T: Trace + ClearEdges + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 

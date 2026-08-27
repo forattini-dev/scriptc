@@ -178,6 +178,8 @@ export class RustEventEmitterEmitter {
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
       case "readable.pipe": return this.emitPipe(expr);
       case "readable.unpipe": return this.emitUnpipe(expr);
+      case "stream.finished":
+      case "stream.finishedDyn": return this.streamPromises.emitCallbackFinished(expr);
       case "sp.finished": return this.streamPromises.emitFinished(expr);
       case "sp.pipeline": return this.emitPromisePipeline(expr);
       case "sc.text":

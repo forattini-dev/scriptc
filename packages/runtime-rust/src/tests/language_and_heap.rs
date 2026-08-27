@@ -645,6 +645,21 @@
     }
 
     #[test]
+    fn weak_heap_handles_upgrade_without_retaining_the_object() {
+        let baseline = live_heap_objects();
+        let node = Gc::new(Link { next: None });
+        let weak = node.downgrade();
+
+        let upgraded = weak.upgrade().expect("live heap object");
+        assert!(upgraded.ptr_eq(&node));
+        drop(upgraded);
+        drop(node);
+
+        assert!(weak.upgrade().is_none());
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promises_queue_reactions_and_settle_only_once() {
         let baseline = live_heap_objects();
         let promise = promise_new::<f64>();

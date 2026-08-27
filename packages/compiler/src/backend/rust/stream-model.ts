@@ -37,7 +37,18 @@ export class RustStreamModel {
     if (node.kind !== "libCall") return false;
     if (node.fn === "sp.finished" || node.fn === "stream.finished" || node.fn === "stream.finishedDyn") {
       this.usesStreamFinished = true;
-      this.markStreamType((node.args as StreamArgument[] | undefined)?.[0]?.type, false);
+      const args = node.args as StreamArgument[] | undefined;
+      this.markStreamType(args?.[0]?.type, false);
+      if (node.fn === "stream.finished") {
+        const callback = args?.[1]?.type;
+        if (callback?.kind !== "func") unsupported("malformed stream.finished callback IR");
+        ensureClosureShape(callback);
+      }
+      if (node.fn !== "sp.finished") {
+        const cleanup = node.type as IrType | undefined;
+        if (cleanup?.kind !== "func") unsupported("malformed stream.finished cleanup IR");
+        ensureClosureShape(cleanup).runtimeCallback = true;
+      }
       return true;
     }
     if (node.fn === "sp.pipeline" || node.fn === "stream.pipeline" || node.fn === "stream.pipelineDyn") {
