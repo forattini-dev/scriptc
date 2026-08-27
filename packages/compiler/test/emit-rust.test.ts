@@ -53,9 +53,12 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   }
   const transform = source.split("\n", 2).some((line) => /^\/\/ @transform-types\s*$/u.test(line)) ||
     sources.some((input) => /\benum\s+[A-Za-z_$]/u.test(input));
-  return transform
-    ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning", entryPath]
-    : [entryPath];
+  const noDeprecation = source.split("\n", 2).some((line) => /^\/\/ @no-deprecation\s*$/u.test(line));
+  return [
+    ...(transform ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"] : []),
+    ...(noDeprecation ? ["--no-deprecation"] : []),
+    entryPath,
+  ];
 }
 
 test("Rust emitter compiles recursive scalar IR without unsafe or C", async () => {
@@ -960,6 +963,7 @@ test.each([
   "2567-rest-spread-forward.js",
   "2568-rest-spread-forward-dynamic.js",
   "2569-upcast-identity.ts",
+  "2570-buffer-arg-validation.cjs",
   "2572-readable-emitted-readable-flag.cjs",
   "2574-emitter-max-listeners-ladders.cjs",
   "2575-string-destructuring-decl.ts",

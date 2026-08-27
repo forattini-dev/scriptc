@@ -242,7 +242,7 @@ fn bytes_received_number(value: f64) -> String {
     received
 }
 
-fn bytes_validate_offset(name: &str, value: f64, max: f64) {
+pub fn bytes_validate_offset(name: &str, value: f64, max: f64) {
     if value.is_finite() && value.fract() == 0.0 && value >= 0.0 && (max < 0.0 || value <= max) {
         return;
     }
