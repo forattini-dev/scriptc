@@ -4,6 +4,7 @@ import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustDataViewIntrinsic } from "./data-view.js";
+import { emitRustDynamicCall } from "./dynamic-call.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
@@ -314,13 +315,13 @@ export class RustExpressionEmitter {
       }
       case "dynFrom":
         return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
-      case "dynCall": {
-        if ((expr.spreads?.length ?? 0) > 0) this.context.unsupported("dynamic call spreads", expr.loc);
-        const callee = this.context.nextName("sc_rt");
-        const args = this.context.nextName("sc_rt");
-        const values = expr.args.map((arg) => this.emitExpr(arg)).join(", ");
-        return `{ let ${callee} = ${this.emitExpr(expr.callee)}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "${this.context.rustString(expr.calleeName)}") }`;
-      }
+      case "dynCall":
+        return emitRustDynamicCall(expr, {
+          dynTypeName: () => this.context.dynTypeName(),
+          emitExpr: (value) => this.emitExpr(value),
+          nextName: (prefix) => this.context.nextName(prefix),
+          rustString: (value) => this.context.rustString(value),
+        });
       case "dynInvoke": {
         const receiver = this.context.nextName("sc_rt");
         const args = this.context.nextName("sc_rt");
@@ -1107,8 +1108,8 @@ export class RustExpressionEmitter {
             this.context.unsupported("Promise.reject shape", expr.loc);
           }
           const reason = expr.args[0];
-          if (reason === undefined || reason.type.kind !== "object") {
-            this.context.unsupported("Promise.reject reason outside typed Error objects", expr.loc);
+          if (reason === undefined || (reason.type.kind !== "object" && reason.type.kind !== "dyn")) {
+            this.context.unsupported("Promise.reject reason outside Error or dynamic values", expr.loc);
           }
           return `runtime::promise_rejected::<${this.context.rustType(expr.type.inner, expr.loc)}>(runtime::caught_value(${this.emitExpr(reason)}))`;
         }
