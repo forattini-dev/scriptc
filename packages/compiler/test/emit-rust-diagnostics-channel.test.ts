@@ -42,6 +42,11 @@ test("Rust diagnostics_channel tracing callbacks match Node", async () => {
   await expectRustMatchesNode(fixture, "scriptc-rust-diagnostics-trace-callback-");
 });
 
+test("Rust diagnostics_channel traced promises match Node", async () => {
+  const fixture = resolve("tests/corpus/2211-dc-trace-promise.cjs");
+  await expectRustMatchesNode(fixture, "scriptc-rust-diagnostics-trace-promise-");
+});
+
 test("Rust diagnostics_channel tracingChannel traceSync matches Node", async () => {
   const sourceDir = await mkdtemp(join(tmpdir(), "scriptc-rust-diagnostics-tracing-source-"));
   const fixture = join(sourceDir, "tracing-sync.cjs");

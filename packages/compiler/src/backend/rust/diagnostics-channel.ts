@@ -109,6 +109,46 @@ function emitTraceCallback(expr: RustLibCallExpr, context: RustLibCallContext): 
   return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let _sc_this_arg = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} ${validate} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${directSchedule} } else { ${publishStart}; ${scheduleWrapped} ${publishEnd}; ${dyn}::Undefined } }`;
 }
 
+function emitTracePromise(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
+  const [handleExpr, fnExpr, contextExpr, thisExpr, argsExpr] = expr.args;
+  if (handleExpr?.type.kind !== "f64" || fnExpr?.type.kind !== "dyn" ||
+      contextExpr?.type.kind !== "dyn" || thisExpr?.type.kind !== "dyn" || argsExpr?.type.kind !== "dyn") return null;
+  const dyn = context.dynTypeName();
+  const handle = context.nextTemporary();
+  const fn = context.nextTemporary();
+  const traceContext = context.nextTemporary();
+  const thisArg = context.nextTemporary();
+  const args = context.nextTemporary();
+  const callArgs = context.nextTemporary();
+  const index = context.nextTemporary();
+  const invocation = context.nextTemporary();
+  const result = context.nextTemporary();
+  const payload = context.nextTemporary();
+  const caught = context.nextTemporary();
+  const error = context.nextTemporary();
+  const source = context.nextTemporary();
+  const target = context.nextTemporary();
+  const reactionTarget = context.nextTemporary();
+  const reactionContext = context.nextTemporary();
+  const outcome = context.nextTemporary();
+  const publishResult = context.nextTemporary();
+  const publishPayload = context.nextTemporary();
+  const publishCaught = context.nextTemporary();
+  const collectArgs = `let mut ${callArgs} = Vec::new(); if let ${dyn}::Array(sc_values) = &${args} { let mut ${index} = 0.0; while ${index} < runtime::array_len(sc_values) { ${callArgs}.push(runtime::array_get(sc_values, ${index})); ${index} += 1.0; } }`;
+  const invoke = `{ let _sc_this_guard = sc_dyn_this_push(${thisArg}.clone()); sc_dyn_call(&${fn}, &${callArgs}, "tracePromise") }`;
+  const adopt = `match ${result} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), sc_value => runtime::promise_resolved(sc_value), }`;
+  const setSyncError = `if let ${dyn}::Object(sc_object) = &${traceContext} { runtime::map_set_by(sc_object, runtime::string("error"), ${error}, |left, right| left.as_ref() == right.as_ref()); }`;
+  const publishStart = emitPublish(traceEventChannel(handle, 0, dyn), traceContext, dyn, context);
+  const publishEnd = emitPublish(traceEventChannel(handle, 1, dyn), traceContext, dyn, context);
+  const publishSyncError = emitPublish(traceEventChannel(handle, 4, dyn), traceContext, dyn, context);
+  const publishError = emitPublish(traceEventChannel(handle, 4, dyn), reactionContext, dyn, context);
+  const publishAsyncStart = emitPublish(traceEventChannel(handle, 2, dyn), reactionContext, dyn, context);
+  const publishAsyncEnd = emitPublish(traceEventChannel(handle, 3, dyn), reactionContext, dyn, context);
+  const settleReaction = `match ${outcome} { Ok(sc_value) => { if let ${dyn}::Object(sc_object) = &${reactionContext} { runtime::map_set_by(sc_object, runtime::string("result"), sc_value.clone(), |left, right| left.as_ref() == right.as_ref()); } let ${publishResult} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { ${publishAsyncStart}; ${publishAsyncEnd}; })); match ${publishResult} { Ok(()) => { let _ = runtime::promise_fulfill(&${reactionTarget}, sc_value); }, Err(${publishPayload}) => { let _ = runtime::promise_reject(&${reactionTarget}, runtime::caught_from_panic(${publishPayload})); }, } }, Err(sc_reason) => { if let ${dyn}::Object(sc_object) = &${reactionContext} { runtime::map_set_by(sc_object, runtime::string("error"), sc_dyn_from_caught(sc_reason.clone()), |left, right| left.as_ref() == right.as_ref()); } let ${publishResult} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { ${publishError}; ${publishAsyncStart}; ${publishAsyncEnd}; })); match ${publishResult} { Ok(()) => { let _ = runtime::promise_reject(&${reactionTarget}, sc_reason); }, Err(${publishPayload}) => { let ${publishCaught} = runtime::caught_from_panic(${publishPayload}); let _ = runtime::promise_reject(&${reactionTarget}, ${publishCaught}); }, } } }`;
+  const traced = `{ let ${invocation} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${invoke})); let ${result} = match ${invocation} { Ok(value) => value, Err(${payload}) => { let ${caught} = runtime::caught_from_panic(${payload}); let ${error} = sc_dyn_from_caught(${caught}.clone()); ${setSyncError} ${publishSyncError}; ${publishEnd}; runtime::rethrow_caught(${caught}) }, }; let ${source}: runtime::JsPromise<${dyn}> = ${adopt}; let ${target}: runtime::JsPromise<${dyn}> = runtime::promise_new(); let ${reactionTarget} = ${target}.clone(); let ${reactionContext} = ${traceContext}.clone(); runtime::promise_then(&${source}, Box::new(move |${outcome}| { ${settleReaction} })); ${publishEnd}; ${target} }`;
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { let ${result} = ${invoke}; ${adopt} } else { ${publishStart}; ${traced} } }`;
+}
+
 export function emitRustDiagnosticsChannelCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -161,6 +201,9 @@ export function emitRustDiagnosticsChannelCall(
   }
   if (expr.fn === "dc.tcTraceCallback" && expr.args.length === 6) {
     return emitTraceCallback(expr, context);
+  }
+  if (expr.fn === "dc.tcTracePromise" && expr.args.length === 5) {
+    return emitTracePromise(expr, context);
   }
   if ((expr.fn === "dc.chanSubscribe" || expr.fn === "dc.chanUnsubscribe") && expr.args.length === 2 &&
       first?.type.kind === "f64" && second?.type.kind === "dyn") {

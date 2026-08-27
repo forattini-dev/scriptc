@@ -790,6 +790,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "tp.setImmediate" && expr.args.length === 0) {
     return "runtime::promise_immediate()";
   }
+  if (expr.fn === "timers.immediatePromise" && expr.args.length === 0) {
+    return `runtime::promise_map(&runtime::promise_immediate(), |_| ${context.dynTypeName()}::Undefined)`;
+  }
   if (expr.fn === "atomics.wait" && expr.args.length === 4 && arg !== undefined) {
     const [index, expected, timeout] = expr.args.slice(1);
     if (index === undefined || expected === undefined || timeout === undefined) {

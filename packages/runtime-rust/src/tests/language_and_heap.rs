@@ -801,6 +801,46 @@
     }
 
     #[test]
+    fn erased_promise_handles_adopt_fulfillments_and_rejections() {
+        init();
+        let baseline = live_heap_objects();
+        let fulfilled = promise_resolved(string("value"));
+        let fulfilled_handle = promise_to_handle(&fulfilled);
+        let adopted = promise_from_handle::<JsString>(&fulfilled_handle);
+        let mapped_handle = promise_to_mapped_handle(&fulfilled, |value| value.len() as f64);
+        assert_eq!(promise_handle_identity(&mapped_handle), fulfilled.identity());
+        let adopted_mapped = promise_from_handle::<f64>(&mapped_handle);
+
+        let rejected = promise_rejected::<JsString>(caught_value(string("reason")));
+        let rejected_handle = promise_to_handle(&rejected);
+        let adopted_rejection = promise_from_handle::<JsString>(&rejected_handle);
+        run_event_loop();
+
+        let value = match promise_poll(&adopted) {
+            Some(Ok(value)) => value,
+            _ => panic!("adopted fulfillment did not fulfill"),
+        };
+        assert_eq!(value.as_ref(), "value");
+        assert!(matches!(promise_poll(&adopted_mapped), Some(Ok(5.0))));
+        let reason = promise_poll(&adopted_rejection)
+            .expect("adopted rejection settled")
+            .expect_err("adopted rejection fulfilled");
+        assert_eq!(caught_to_string(&reason).as_ref(), "reason");
+
+        drop(reason);
+        drop(adopted_mapped);
+        drop(mapped_handle);
+        drop(adopted_rejection);
+        drop(rejected_handle);
+        drop(rejected);
+        drop(adopted);
+        drop(fulfilled_handle);
+        drop(fulfilled);
+        finish();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promise_map_transforms_fulfillments_and_forwards_rejections() {
         let baseline = live_heap_objects();
         {

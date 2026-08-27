@@ -64,11 +64,16 @@ export class RustDynamicFromEmitter {
         if (type.elem !== "u8") this.context.unsupported(`dynamic boxing from bytes<${type.elem}>`, loc);
         return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
       }
-      case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
+      case "promise": {
+        const promise = this.context.nextTemporary();
+        const dynamic = this.emit(type.inner, "sc_value", loc);
+        return `{ let ${promise} = ${value}; ${name}::Promise(runtime::promise_to_mapped_handle(&${promise}, move |sc_value| ${dynamic})) }`;
+      }
       case "netServer": return `${name}::NetServer(${value})`;
       case "netSocket": return `${name}::NetSocket(${value})`;
       case "httpReq": return `${name}::HttpRequest(${value})`;
       case "httpRes": return `${name}::HttpResponse(${value})`;
+      case "void": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
       case "func": {

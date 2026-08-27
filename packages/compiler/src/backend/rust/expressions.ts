@@ -1097,6 +1097,7 @@ export class RustExpressionEmitter {
         const dispatch = this.context.emitClosureDispatch(executor, expr.executor.type, [resolver, rejector], expr.loc);
         return `{ let ${promise} = runtime::promise_new(); let ${executor} = ${this.emitExpr(expr.executor)}; let ${resolver} = runtime::Gc::new(${this.context.closureName(shape)}::PromiseResolver { promise: Some(${promise}.clone()) }); let ${rejector} = runtime::Gc::new(${this.context.closureName(rejectorShape)}::${rejectorVariant} { promise: Some(${promise}.clone()) }); runtime::promise_run_segment(&${promise}, || { ${dispatch}; }); ${promise} }`;
       }
+      case "promiseVoidWiden": return `runtime::promise_map(&(${this.emitExpr(expr.value)}), |_| ())`;
       case "intrinsic":
         if (expr.name === "promise.reject") {
           if (expr.type.kind !== "promise" || expr.args.length !== 1) {
@@ -1196,5 +1197,4 @@ export class RustExpressionEmitter {
         this.context.unsupported(`expression '${expr.kind}'`, expr.loc);
     }
   }
-
 }

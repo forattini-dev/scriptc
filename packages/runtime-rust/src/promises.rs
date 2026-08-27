@@ -69,6 +69,7 @@ pub type JsPromise<T> = Gc<PromiseData<T>>;
 pub struct JsPromiseHandle {
     identity: usize,
     catch: Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>,
+    observe: Rc<dyn Fn(Box<dyn FnOnce(Result<Box<dyn Any>, Caught>)>)>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
@@ -100,9 +101,20 @@ pub fn promise_set_rejection_handled_handler(
 }
 
 pub fn promise_to_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandle {
+    promise_to_mapped_handle(promise, |value| value)
+}
+
+pub fn promise_to_mapped_handle<T, U, F>(promise: &JsPromise<T>, map: F) -> JsPromiseHandle
+where
+    T: HeapValue,
+    U: HeapValue,
+    F: Fn(T) -> U + 'static,
+{
     let identity = promise.identity();
     let source = promise.clone();
+    let observed_source = promise.clone();
     let traced_source = promise.clone();
+    let map = Rc::new(map);
     JsPromiseHandle {
         identity,
         catch: Rc::new(move |callback| {
@@ -125,8 +137,34 @@ pub fn promise_to_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandl
             );
             promise_to_handle(&result)
         }),
+        observe: Rc::new(move |callback| {
+            let map = map.clone();
+            promise_then(
+                &observed_source,
+                Box::new(move |outcome| {
+                    callback(outcome.map(|value| Box::new(map(value)) as Box<dyn Any>));
+                }),
+            );
+        }),
         trace: Rc::new(move |tracer| tracer.edge(&traced_source)),
     }
+}
+
+pub fn promise_from_handle<T: HeapValue>(handle: &JsPromiseHandle) -> JsPromise<T> {
+    let result = promise_new();
+    let target = result.clone();
+    (handle.observe)(Box::new(move |outcome| match outcome {
+        Ok(value) => {
+            let value = *value
+                .downcast::<T>()
+                .expect("scriptc: dynamic promise handle payload type mismatch");
+            let _ = promise_fulfill(&target, value);
+        }
+        Err(reason) => {
+            let _ = promise_reject(&target, reason);
+        }
+    }));
+    result
 }
 
 pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
