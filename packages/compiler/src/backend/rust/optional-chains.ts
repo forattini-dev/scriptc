@@ -41,6 +41,8 @@ export function emitRustOptionalChain(
   let absent: string;
   if (expr.type.kind === "void") {
     absent = "()";
+  } else if (expr.type.kind === "dyn" || expr.type.kind === "jsval") {
+    absent = `${context.dynTypeName()}::Undefined`;
   } else {
     if (expr.type.kind !== "union") context.unsupported("optional chain result without undefined union", expr.loc);
     const result = context.union(expr.type.unionId, expr.loc);

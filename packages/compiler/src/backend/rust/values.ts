@@ -416,6 +416,7 @@ export class RustValueEmitter {
       case "string":
       case "undefinedT":
       case "nullT":
+      case "dyn":
         return true;
       case "array":
         return this.isRustJsonCompatible(type.elem, visiting);

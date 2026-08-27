@@ -652,7 +652,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line(`${name}::Undefined => runtime::string("undefined"),`);
     this.context.line(`${name}::Null => runtime::string("null"),`);
-    this.context.line(`${name}::Number(value) => runtime::string(&runtime::display_number(*value)),`);
+    this.context.line(`${name}::Number(value) => runtime::number_to_string(*value),`);
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
