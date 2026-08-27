@@ -198,6 +198,16 @@ where
     writable.with(|data| data.write_callback.clone())
 }
 
+pub fn writable_set_write_callback<L, W, F, C>(writable: &JsWritable<L, W, F, C>, callback: W)
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| data.write_callback = Some(callback));
+}
+
 pub fn writable_final_callback<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> Option<F>
 where
     L: Clone + Trace + 'static,
@@ -206,6 +216,16 @@ where
     C: Clone + Trace + 'static,
 {
     writable.with(|data| data.final_callback.clone())
+}
+
+pub fn writable_set_final_callback<L, W, F, C>(writable: &JsWritable<L, W, F, C>, callback: F)
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| data.final_callback = Some(callback));
 }
 
 pub fn writable_enqueue<L, W, F, C>(

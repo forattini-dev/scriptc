@@ -78,6 +78,30 @@ export class RustStreamModel {
         return true;
       }
     }
+    if (node.fn === "stream.setRead" || node.fn === "stream.setWrite" || node.fn === "stream.setFinal") {
+      const args = node.args as StreamArgument[] | undefined;
+      const receiver = args?.[0]?.type;
+      const callback = args?.[1]?.type;
+      if (receiver?.kind !== "object" || callback?.kind !== "func") {
+        unsupported(`malformed ${String(node.fn)} callback IR`);
+      }
+      if (node.fn === "stream.setRead" && receiver.className === "%Readable") {
+        this.usesReadable = true;
+        this.readableReadShapes.set(typeKey(callback), ensureClosureShape(callback));
+        return true;
+      }
+      if ((node.fn === "stream.setWrite" || node.fn === "stream.setFinal") &&
+          receiver.className === "%Writable") {
+        this.usesWritable = true;
+        const completion = callback.params.at(-1);
+        if (completion?.kind !== "func") return true;
+        const shape = ensureClosureShape(callback);
+        (node.fn === "stream.setWrite" ? this.writableWriteShapes : this.writableFinalShapes)
+          .set(typeKey(callback), shape);
+        this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
+        return true;
+      }
+    }
     if (node.fn === "readable.new") {
       this.usesReadable = true;
       const args = node.args as StreamArgument[] | undefined;

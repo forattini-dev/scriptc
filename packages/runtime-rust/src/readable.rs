@@ -552,6 +552,14 @@ where
     readable.with(|data| data.read_callback.clone())
 }
 
+pub fn readable_set_read_callback<L, R>(readable: &JsReadable<L, R>, callback: R)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.read_callback = Some(callback));
+}
+
 pub fn readable_destroy_callback<L, R>(readable: &JsReadable<L, R>) -> Option<R>
 where
     L: Clone + Trace + 'static,

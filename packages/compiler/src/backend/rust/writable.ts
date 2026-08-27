@@ -101,6 +101,8 @@ export class RustWritableEmitter {
       case "writable.end": return this.emitEnd(expr);
       case "writable.cork": return this.emitCork(expr);
       case "writable.uncork": return this.emitUncork(expr);
+      case "stream.setWrite": return this.isWritable(expr.args[0]?.type) ? this.emitSetCallback(expr, true) : null;
+      case "stream.setFinal": return this.isWritable(expr.args[0]?.type) ? this.emitSetCallback(expr, false) : null;
       case "stream.prop": return this.isWritable(expr.args[0]?.type) ? this.emitProp(expr) : null;
       case "stream.destroy": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, false) : null;
       case "stream.destroyErr": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, true) : null;
@@ -239,6 +241,23 @@ export class RustWritableEmitter {
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Writable constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let _ = ${values[3]}; runtime::writable_new::<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>(${values[0]}, ${values[1]}, ${values[2]}, ${write}, ${final}) }`;
+  }
+
+  private emitSetCallback(expr: RustLibCallExpr, write: boolean): string {
+    const [receiver, callback] = expr.args;
+    if (!this.isWritable(receiver?.type) || callback?.type.kind !== "func" ||
+      expr.args.length !== 2 || expr.type.kind !== "void") {
+      this.context.unsupported(`Writable assigned ${write ? "write" : "final"} callback shape`, expr.loc);
+    }
+    const shapes = write ? this.context.streams.writableWriteShapes : this.context.streams.writableFinalShapes;
+    const shape = shapes.get(typeKey(callback.type));
+    if (shape === undefined) {
+      this.context.unsupported(`unregistered assigned Writable ${write ? "write" : "final"} callback`, expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const runtime = write ? "writable_set_write_callback" : "writable_set_final_callback";
+    const variant = write ? "ScWritableWrite" : "ScWritableFinal";
+    return `{ ${this.bind(expr.args, values)} runtime::${runtime}(&${values[0]}, ${variant}::${this.variant(shape)}(${values[1]})); }`;
   }
 
   private emitWrite(expr: RustLibCallExpr, stringChunk: boolean): string {

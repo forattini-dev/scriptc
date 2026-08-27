@@ -232,6 +232,7 @@ export class RustReadableEmitter {
       case "readable.resume": return this.emitResume(expr);
       case "readable.isPaused": return this.emitIsPaused(expr);
       case "readable.flowing": return this.emitFlowing(expr);
+      case "stream.setRead": return this.isReadable(expr.args[0]) ? this.emitSetRead(expr) : null;
       case "stream.prop": return expr.args[0]?.type.kind === "object" &&
         expr.args[0].type.className === "%Readable" ? this.emitProp(expr) : null;
       case "stream.destroy": return this.isReadable(expr.args[0]) ? this.emitDestroy(expr, false) : null;
@@ -276,6 +277,18 @@ export class RustReadableEmitter {
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Readable constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let _ = (${values[1]}, ${values[3]}); runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[0]}, ${values[2]}, ${read}, ${destroy}) }`;
+  }
+
+  private emitSetRead(expr: RustLibCallExpr): string {
+    const [receiver, callback] = expr.args;
+    if (!this.isReadable(receiver) || callback?.type.kind !== "func" ||
+      expr.args.length !== 2 || expr.type.kind !== "void") {
+      this.context.unsupported("Readable assigned read callback shape", expr.loc);
+    }
+    const shape = this.context.streams.readableReadShapes.get(typeKey(callback.type));
+    if (shape === undefined) this.context.unsupported("unregistered assigned Readable read callback", expr.loc);
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} runtime::readable_set_read_callback(&${values[0]}, ScReadableRead::${this.listenerVariant(shape)}(${values[1]})); }`;
   }
 
   private emitPush(expr: RustLibCallExpr, stringChunk: boolean): string {
