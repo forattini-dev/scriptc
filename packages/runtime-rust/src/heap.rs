@@ -46,7 +46,11 @@ where
 
 impl<T> Drop for Node<T> {
     fn drop(&mut self) {
-        LIVE_NODES.with(|count| count.set(count.get() - 1));
+        // Native process exit runs TLS destructors in an unspecified order.
+        // A program-owned TLS may release its final Gc after the runtime's
+        // counters have already gone away; there is nothing left to audit in
+        // that phase, so teardown must not turn a requested exit into a panic.
+        let _ = LIVE_NODES.try_with(|count| count.set(count.get() - 1));
     }
 }
 
@@ -162,7 +166,8 @@ where
         drop(erased);
         drop(node);
         if candidate.strong_count() > 0 {
-            CYCLE_CANDIDATES.with(|candidates| candidates.borrow_mut().push(candidate));
+            let _ = CYCLE_CANDIDATES
+                .try_with(|candidates| candidates.borrow_mut().push(candidate));
         }
     }
 }

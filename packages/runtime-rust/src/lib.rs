@@ -81,4 +81,5 @@ mod tests {
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");
     include!("tests/zlib.rs");
+    include!("tests/inspect.rs");
 }

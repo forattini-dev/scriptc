@@ -264,6 +264,48 @@ pub fn inspect_buffer(bytes: &JsBytes<u8>) -> JsString {
     string(&output)
 }
 
+pub fn inspect_error(error: &JsError, recurse: f64, depth: f64) -> JsString {
+    let name = error_name(error);
+    let message = error_message(error);
+    let code = error_code(error);
+    inspect_error_parts(&name, &message, code.as_ref(), recurse, depth)
+}
+
+pub fn inspect_error_parts(
+    name: &JsString,
+    message: &JsString,
+    code: Option<&JsString>,
+    recurse: f64,
+    depth: f64,
+) -> JsString {
+    if code.is_some() && recurse > depth {
+        return string(&format!("[{name}]"));
+    }
+    let indentation = INSPECT_FRAMES.with(|frames| frames.borrow().len() * 2);
+    let mut base = format!("[{name}");
+    if !message.is_empty() {
+        base.push_str(": ");
+        for character in message.chars() {
+            base.push(character);
+            if character == '\n' {
+                base.push_str(&" ".repeat(indentation));
+            }
+        }
+    }
+    base.push(']');
+    let Some(code) = code else { return string(&base) };
+    inspect_begin(recurse + 1.0);
+    inspect_entry(&string(&format!("code: {}", inspect_quote(code))), false);
+    inspect_end(
+        &string(&base),
+        &string("{"),
+        &string("}"),
+        recurse + 1.0,
+        false,
+        false,
+    )
+}
+
 pub fn inspect_begin(recurse: f64) {
     if recurse == 1.0 {
         INSPECT_SEEN.with(|seen| seen.borrow_mut().clear());
