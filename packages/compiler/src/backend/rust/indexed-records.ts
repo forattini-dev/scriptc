@@ -88,6 +88,9 @@ export function emitRustRecordKeyGetValues(
   if (expr.type.kind === "union") {
     const union = context.union(expr.type.unionId, expr.loc);
     const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (undefinedTag < 0 && typeKey(indexValue) === typeKey(expr.type)) {
+      return `{ ${bindings} ${lookup}.expect("scriptc: missing statically-known indexed record key") }`;
+    }
     if (undefinedTag < 0) context.unsupported(`indexed record optional read result '${expr.shapeId}'`, expr.loc);
     const name = context.unionName(union.id);
     let present: string;
