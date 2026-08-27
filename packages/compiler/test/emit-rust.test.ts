@@ -774,6 +774,7 @@ test.each([
   "754-cycle-external-ref.ts",
   "756-cycle-inheritance.ts",
   "757-cycle-cross-generation.ts",
+  "760-any-arithmetic.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
@@ -1056,10 +1057,13 @@ test.each([
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
+  const dynamic = (await readFile(entryPath, "utf8")).split("\n", 4)
+    .some((line) => /^\/\/ @dynamic\s*$/u.test(line));
   const result = await compile(entryPath, {
     outDir: dir,
     outPath: join(dir, fixture.replace(/\.ts$/, "")),
     backend: "rust",
+    dynamic,
     optimization: "dev",
   });
   expect(

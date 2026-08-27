@@ -127,6 +127,15 @@ function emitOperation(
       : `sc_dyn_to_number(&${left}) ${numericOperator(expr.op)} sc_dyn_to_number(&${right})`;
     return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${context.dynTypeName()}::Number(${operation}) }`;
   }
+  if ((expr.op === "lt" || expr.op === "le" || expr.op === "gt" || expr.op === "ge") && expr.args.length === 2) {
+    const left = context.nextName("sc_island_left");
+    const right = context.nextName("sc_island_right");
+    const order = context.nextName("sc_island_order");
+    const dyn = context.dynTypeName();
+    const numericOrder = `{ let sc_left = sc_dyn_to_number(&${left}); let sc_right = sc_dyn_to_number(&${right}); if sc_left.is_nan() || sc_right.is_nan() { None } else { Some(if sc_left < sc_right { -1 } else if sc_left > sc_right { 1 } else { 0 }) } }`;
+    const compare = relationalOperator(expr.op);
+    return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; let ${order} = match (&${left}, &${right}) { (${dyn}::String(sc_left), ${dyn}::String(sc_right)) => Some(runtime::string_compare_utf16(sc_left, sc_right)), _ => ${numericOrder}, }; ${order}.is_some_and(|sc_order| sc_order ${compare} 0) }`;
+  }
   if ((expr.op === "neg" || expr.op === "plus") && expr.args.length === 1) {
     const value = context.nextName("sc_island_value");
     const number = `sc_dyn_to_number(&${value})`;
@@ -153,6 +162,10 @@ function emitOperation(
 
 function numericOperator(op: "sub" | "mul" | "div" | "mod"): string {
   return { sub: "-", mul: "*", div: "/", mod: "%" }[op];
+}
+
+function relationalOperator(op: "lt" | "le" | "gt" | "ge"): string {
+  return { lt: "<", le: "<=", gt: ">", ge: ">=" }[op];
 }
 
 function emitObjectLiteral(
