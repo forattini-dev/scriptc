@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { compile } from "../src/index.js";
@@ -57,6 +58,10 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   return [
     ...(transform ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"] : []),
     ...(noDeprecation ? ["--no-deprecation"] : []),
+    "--import",
+    pathToFileURL(resolve("tests/harness/comptime-shim.mjs")).href,
+    "--import",
+    pathToFileURL(resolve("tests/harness/island-shim.mjs")).href,
     entryPath,
   ];
 }
@@ -828,6 +833,22 @@ test.each([
   "995-fs-uncaught.ts",
   "996-fs-rc-stress.ts",
   "997-fs-modules/main.ts",
+  "1010-json-stringify-space.ts",
+  "1020-async-basics.ts",
+  "1021-async-ordering.ts",
+  "1022-async-exceptions.ts",
+  "1023-async-rc-stress.ts",
+  "1024-async-pending-exit.ts",
+  "1025-async-promise-capture.ts",
+  "1026-throw-promise.ts",
+  "1027-async-return-promise.ts",
+  "1028-async-return-record-literals.ts",
+  "1029-async-eager-chains.ts",
+  "1050-comptime-tables.ts",
+  "1051-comptime-strings.ts",
+  "1052-comptime-records.ts",
+  "1053-comptime-json.ts",
+  "1054-comptime-modules/main.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
