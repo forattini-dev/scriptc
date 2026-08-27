@@ -99,9 +99,22 @@ export class RustReadableEmitter {
       }
     }
     for (const shape of this.context.streams.readableReadShapes.values()) {
-      if (shape.type.rest === true || shape.type.params.length !== 1 ||
-        shape.type.params[0]?.kind !== "object" || shape.type.params[0].className !== "%Readable") continue;
-      const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_readable.clone()"], loc);
+      if (shape.type.rest === true) continue;
+      const [first, second] = shape.type.params;
+      const readSize = "runtime::readable_prop(sc_readable, &runtime::string(\"readableHighWaterMark\"))";
+      let args: string[] | null = null;
+      if (shape.type.params.length === 1 && first?.kind === "object" && first.className === "%Readable") {
+        args = ["sc_readable.clone()"];
+      } else if (shape.type.params.length === 1 && first?.kind === "dyn") {
+        args = [`${this.context.dynTypeName()}::Number(${readSize})`];
+      } else if (shape.type.params.length === 2 && first?.kind === "object" &&
+        first.className === "%Readable" && (second?.kind === "f64" || second?.kind === "dyn")) {
+        args = ["sc_readable.clone()", second.kind === "dyn"
+          ? `${this.context.dynTypeName()}::Number(${readSize})`
+          : readSize];
+      }
+      if (args === null) continue;
+      const dispatch = this.context.emitClosureDispatch("callback", shape.type, args, loc);
       readArms.push(`ScReadableRead::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
     }
     if (this.context.streams.usesStreamFinished) {

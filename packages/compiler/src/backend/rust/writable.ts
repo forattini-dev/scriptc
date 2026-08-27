@@ -13,6 +13,8 @@ export interface RustWritableContext {
   popIndent(): void;
   nextTemporary(): string;
   emitExpr(expr: IrExpr): string;
+  dynFunctionVariant(shape: RustClosureShape): string;
+  dynTypeName(): string;
   closureName(shape: RustClosureShape): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
@@ -142,6 +144,10 @@ export class RustWritableEmitter {
   private emitWriteDispatch(loc: SrcLoc): void {
     const arms: string[] = [];
     for (const shape of this.context.streams.writableWriteShapes.values()) {
+      if (shape.type.params.at(-1)?.kind === "dyn") {
+        arms.push(this.emitDynamicWriteArm(shape, loc));
+        continue;
+      }
       const completionType = this.completionType(shape.type, "%Writable write", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
       const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
@@ -192,6 +198,10 @@ export class RustWritableEmitter {
   private emitFinalDispatch(loc: SrcLoc): void {
     const arms: string[] = [];
     for (const shape of this.context.streams.writableFinalShapes.values()) {
+      if (shape.type.params.at(-1)?.kind === "dyn") {
+        arms.push(this.emitDynamicFinalArm(shape, loc));
+        continue;
+      }
       const completionType = this.completionType(shape.type, "%Writable final", loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
       const completionParams = completionType.params.map((_, index) => `sc_arg_${index}`);
@@ -208,6 +218,36 @@ export class RustWritableEmitter {
     this.context.line(`match sc_callback { ${arms.join(" ")} }`);
     this.context.popIndent();
     this.context.line("}");
+  }
+
+  private emitDynamicWriteArm(shape: RustClosureShape, loc: SrcLoc): string {
+    const completionShape = this.dynamicCompletionShape(loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move || { if sc_called.replace(true) { return; } runtime::writable_complete_write(&sc_writable, sc_length); sc_writable_after_write(&sc_writable, sc_done.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_writable = sc_writable.clone(); let sc_done = sc_done.clone(); move |tracer| { tracer.edge(&sc_writable); runtime::Trace::trace(&sc_done, tracer); } })) })`;
+    const dynamic = this.dynamicCompletion(completionShape, completion);
+    const dyn = this.context.dynTypeName();
+    const dispatch = this.context.emitClosureDispatch("callback", shape.type, [
+      `${dyn}::Buffer(sc_chunk.clone())`, `${dyn}::String(runtime::string("buffer"))`, dynamic,
+    ], loc);
+    return `ScWritableWrite::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`;
+  }
+
+  private emitDynamicFinalArm(shape: RustClosureShape, loc: SrcLoc): string {
+    const completionShape = this.dynamicCompletionShape(loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_finish = sc_finish.clone(); move || sc_finish() })), trace: Some(sc_finish_trace.clone()) })`;
+    const dispatch = this.context.emitClosureDispatch(
+      "callback", shape.type, [this.dynamicCompletion(completionShape, completion)], loc,
+    );
+    return `ScWritableFinal::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`;
+  }
+
+  private dynamicCompletion(shape: RustClosureShape, completion: string): string {
+    return `${this.context.dynTypeName()}::${this.context.dynFunctionVariant(shape)}(${completion}, runtime::empty_string(), runtime::map_new())`;
+  }
+
+  private dynamicCompletionShape(loc: SrcLoc): RustClosureShape {
+    const shape = this.context.streams.writableDynamicCompletionShape;
+    if (shape === null) this.context.unsupported("unregistered dynamic Writable completion callback", loc);
+    return shape;
   }
 
   private emitNew(expr: RustLibCallExpr): string {

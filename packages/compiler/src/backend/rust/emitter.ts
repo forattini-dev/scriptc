@@ -144,6 +144,7 @@ class RustEmitter {
     usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
     streams: this.streams,
     dynTypeName: () => this.dynTypeName(),
+    dynFunctionVariant: (shape) => this.dynFunctionVariant(shape),
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
     popIndent: () => { this.indent -= 1; },
@@ -626,7 +627,8 @@ class RustEmitter {
           this.emitterSnapshotShapes.set(typeKey(result.elem), shape);
         }
       }
-      if (this.streams.discover(node, (type) => this.ensureClosureShape(type), (kind) => this.unsupported(kind))) {
+      if (this.streams.discover(node, (type) => this.ensureClosureShape(type), (kind) => this.unsupported(kind),
+        (type) => this.registerDynBoxedFunction(type))) {
         this.usesEventEmitter = true;
       }
       if (node.kind === "libCall" && node.fn === "net.serverCloseBind") {
@@ -1130,7 +1132,6 @@ class RustEmitter {
   }
 
   private ensureUnionArm(type: IrType): void { this.valueEmitter.ensureUnionArm(type); }
-
   private closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape {
     return this.metadata.closureShapeForType(type, loc);
   }
@@ -1172,11 +1173,10 @@ class RustEmitter {
     return this.metadata.virtualImplementation(meta, slot);
   }
 
-  private closureName(shape: RustClosureShape): string { return this.metadata.closureName(shape); }
   private dynTypeName(): string { return this.metadata.dynTypeName(); }
+  private closureName(shape: RustClosureShape): string { return this.metadata.closureName(shape); }
   private dynFunctionVariant(shape: RustClosureShape): string { return this.metadata.dynFunctionVariant(shape); }
   private dynFunctionCheckName(shape: RustClosureShape): string { return this.metadata.dynFunctionCheckName(shape); }
-
   private promiseRejectorVariant(type: IrFuncType, promiseType: IrType, loc?: SrcLoc): string {
     return this.metadata.promiseRejectorVariant(type, promiseType, loc);
   }

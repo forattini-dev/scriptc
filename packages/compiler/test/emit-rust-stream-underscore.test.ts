@@ -8,8 +8,11 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust streams replace typed underscore callbacks after construction", async () => {
-  const fixture = resolve("tests/corpus/2312-stream-underscore-assign.ts");
+test.each([
+  "2312-stream-underscore-assign.ts",
+  "2313-stream-underscore-assign-js.cjs",
+])("Rust streams replace underscore callbacks after construction: %s", async (fixtureName) => {
+  const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-stream-underscore-"));
   const result = await compile(fixture, {
     outDir: dir,

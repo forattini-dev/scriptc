@@ -1,5 +1,5 @@
 import type { IrType } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import { typeKey, VOID } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 
 type StreamNode = Record<string, unknown>;
@@ -21,6 +21,7 @@ export class RustStreamModel {
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
   readonly writableFinalShapes = new Map<string, RustClosureShape>();
   readonly writableDoneShapes = new Map<string, RustClosureShape>();
+  writableDynamicCompletionShape: RustClosureShape | null = null;
   readonly duplexReadShapes = new Map<string, RustClosureShape>();
   readonly duplexWriteShapes = new Map<string, RustClosureShape>();
   readonly duplexFinalShapes = new Map<string, RustClosureShape>();
@@ -33,6 +34,7 @@ export class RustStreamModel {
     node: StreamNode,
     ensureClosureShape: (type: IrFuncType) => RustClosureShape,
     unsupported: (kind: string) => never,
+    registerDynBoxedFunction: (type: IrFuncType) => void,
   ): boolean {
     if (node.kind !== "libCall") return false;
     if (node.fn === "sp.finished" || node.fn === "stream.finished" || node.fn === "stream.finishedDyn") {
@@ -94,11 +96,18 @@ export class RustStreamModel {
           receiver.className === "%Writable") {
         this.usesWritable = true;
         const completion = callback.params.at(-1);
-        if (completion?.kind !== "func") return true;
         const shape = ensureClosureShape(callback);
         (node.fn === "stream.setWrite" ? this.writableWriteShapes : this.writableFinalShapes)
           .set(typeKey(callback), shape);
-        this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
+        if (completion?.kind === "func") {
+          this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
+        } else if (completion?.kind === "dyn" && callback.params.every((param) => param.kind === "dyn")) {
+          const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+          registerDynBoxedFunction(completionType);
+          const completionShape = ensureClosureShape(completionType);
+          completionShape.runtimeCallback = true;
+          this.writableDynamicCompletionShape = completionShape;
+        }
         return true;
       }
     }
