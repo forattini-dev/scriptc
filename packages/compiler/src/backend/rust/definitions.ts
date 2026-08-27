@@ -823,7 +823,9 @@ export class RustDefinitionEmitter {
       const bodyResult = this.context.nextName("sc_async_result");
       const guard = this.context.nextName("sc_async_guard");
       this.context.line(`let ${result} = runtime::promise_new();`);
-      if (fn.asyncCacheGlobal !== undefined) {
+      // SCC members publish after the eager segment: recursive static evaluation
+      // must first run the loaded guard and return its settled temporary promise.
+      if (fn.asyncCacheGlobal !== undefined && fn.asyncCycleCacheGlobal === undefined) {
         const cache = mangleGlobal(fn.asyncCacheGlobal);
         this.context.line(`${cache}.with(|slot| *slot.borrow_mut() = Some(${result}.clone()));`);
       }
@@ -842,6 +844,10 @@ export class RustDefinitionEmitter {
       this.context.setCurrentAsyncLocals(null);
       this.context.popIndent();
       this.context.line("});");
+      if (fn.asyncCacheGlobal !== undefined && fn.asyncCycleCacheGlobal !== undefined) {
+        const cache = mangleGlobal(fn.asyncCacheGlobal);
+        this.context.line(`${cache}.with(|slot| *slot.borrow_mut() = Some(${result}.clone()));`);
+      }
       if (fn.asyncCycleCacheGlobal !== undefined) {
         const cycleCache = mangleGlobal(fn.asyncCycleCacheGlobal);
         this.context.line(`${cycleCache}.with(|slot| *slot.borrow_mut() = Some(${result}.clone()));`);

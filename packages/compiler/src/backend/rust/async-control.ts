@@ -87,9 +87,10 @@ export class RustAsyncControlEmitter {
   containsAsyncSuspension(value: unknown): boolean {
     if (value === null || typeof value !== "object") return false;
     if (Array.isArray(value)) return value.some((item) => this.containsAsyncSuspension(item));
-    const node = value as { kind?: unknown; fn?: unknown };
+    const node = value as { kind?: unknown; fn?: unknown; name?: unknown };
     if (node.kind === "awaitExpr" || node.kind === "awaitUnionExpr") return true;
     if (node.kind === "libCall" && node.fn === "async.hop") return true;
+    if (node.kind === "intrinsic" && node.name === "module.await") return true;
     return Object.values(value).some((item) => this.containsAsyncSuspension(item));
   }
 
@@ -209,6 +210,29 @@ export class RustAsyncControlEmitter {
         : stmt.kind === "exprStmt" ? stmt.expr
         : stmt.kind === "return" ? stmt.value
         : null;
+      if (stmt.kind === "exprStmt" && stmt.expr.kind === "intrinsic" &&
+        stmt.expr.name === "module.await") {
+        const argument = stmt.expr.args[0];
+        if (argument === undefined) this.context.unsupported("module.await without a dependency", stmt.loc);
+        const dependency = this.context.nextName("sc_module_dependency");
+        const outcome = this.context.nextName("sc_module_outcome");
+        this.context.line(`let ${dependency} = ${this.context.emitExpr(argument)};`);
+        this.context.line(`if let Some(${outcome}) = runtime::promise_poll(&${dependency}) {`);
+        this.context.pushIndent();
+        this.context.line(`let _ = runtime::promise_unwrap(${outcome});`);
+        this.context.popIndent();
+        this.context.line("} else {");
+        this.context.pushIndent();
+        this.context.emitAsyncContinuation(
+          dependency,
+          (value) => this.context.line(`let _ = ${value};`),
+          statements.slice(index + 1),
+          onComplete,
+        );
+        this.context.popIndent();
+        this.context.line("}");
+        continue;
+      }
       const hop = this.asyncHopSequence(nested);
       if (hop !== null) {
         for (const prelude of hop.prelude) {

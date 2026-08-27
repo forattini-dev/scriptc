@@ -435,6 +435,32 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
     }
 }
 
+pub fn promise_poll<T: HeapValue>(promise: &JsPromise<T>) -> Option<Result<T, Caught>> {
+    let (settled, rejection_handled) = promise.with_mut(|data| {
+        let rejection_handled = data.reported;
+        data.reported = false;
+        data.handled = true;
+        let settled = match &data.state {
+            PromiseState::Pending(_) => None,
+            PromiseState::Fulfilled(value) => Some(Ok(value
+                .as_ref()
+                .expect("scriptc: cleared fulfilled promise")
+                .clone())),
+            PromiseState::Rejected(reason) => Some(Err(reason
+                .as_ref()
+                .expect("scriptc: cleared rejected promise")
+                .clone())),
+        };
+        (settled, rejection_handled)
+    });
+    if rejection_handled {
+        let handle = promise_to_handle(promise);
+        let handler = REJECTION_HANDLED_HANDLER.with(|handler| handler.borrow().clone());
+        if let Some(handler) = handler { handler(handle); }
+    }
+    settled
+}
+
 pub fn promise_map<T, U, F>(promise: &JsPromise<T>, map: F) -> JsPromise<U>
 where
     T: HeapValue,

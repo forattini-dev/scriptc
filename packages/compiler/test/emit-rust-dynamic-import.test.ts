@@ -59,5 +59,7 @@ test.for([
 test.for([
   "tests/corpus/2650-top-level-await-self-import.ts",
   "tests/corpus/2652-top-level-await-dynamic/main.ts",
+  "tests/corpus/2657-top-level-await-cycle-dynamic/main.ts",
   "tests/corpus/2659-top-level-await-dynamic-cycle/main.ts",
+  "tests/corpus/2660-top-level-await-cycle-rejection/main.ts",
 ])("Rust async own-module import matches Node: %s", expectDifferential);

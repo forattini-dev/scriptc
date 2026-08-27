@@ -707,6 +707,30 @@
     }
 
     #[test]
+    fn promise_poll_observes_without_queuing_a_reaction() {
+        init();
+        let baseline = live_heap_objects();
+        let pending = promise_new::<f64>();
+        assert!(promise_poll(&pending).is_none());
+        assert!(promise_fulfill(&pending, 7.0));
+        assert!(matches!(promise_poll(&pending), Some(Ok(7.0))));
+
+        let rejected = promise_rejected::<f64>(caught_value(string("module failed")));
+        let reason = promise_poll(&rejected)
+            .expect("settled promise")
+            .expect_err("rejected promise");
+        assert_eq!(caught_to_string(&reason).as_ref(), "module failed");
+        run_event_loop();
+        assert!(!had_unhandled_rejection());
+
+        drop(reason);
+        drop(rejected);
+        drop(pending);
+        finish();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promise_rejections_wait_for_handlers_until_the_microtask_checkpoint() {
         init();
         let baseline = live_heap_objects();
