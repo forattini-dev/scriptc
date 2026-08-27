@@ -62,6 +62,9 @@ pub struct HttpRequestData {
     headers: Vec<(JsString, JsString, JsString)>,
     body: Vec<u8>,
     ended: bool,
+    finish_pending: bool,
+    paused: bool,
+    flowing: bool,
     data_listeners: Vec<HttpDataListener>,
     end_listeners: Vec<HttpVoidListener>,
 }
@@ -86,6 +89,9 @@ impl ClearEdges for HttpRequestData {
         self.headers.clear();
         self.body.clear();
         self.ended = true;
+        self.finish_pending = false;
+        self.paused = false;
+        self.flowing = false;
         self.data_listeners.clear();
         self.end_listeners.clear();
     }
@@ -95,12 +101,19 @@ pub type JsHttpRequest = Gc<HttpRequestData>;
 
 pub struct HttpResponseData {
     socket: Option<JsNetSocket>,
+    request: Option<JsHttpRequest>,
     status_code: f64,
     status_message: JsString,
     headers: Vec<(JsString, JsString)>,
     headers_sent: bool,
     chunked: bool,
     ended: bool,
+    corked: usize,
+    cork_buffer: Vec<u8>,
+    cork_callbacks: Vec<HttpVoidListener>,
+    finish_listeners: Vec<HttpVoidListener>,
+    close_listeners: Vec<HttpVoidListener>,
+    destroyed: bool,
 }
 
 impl Trace for HttpResponseData {
@@ -108,15 +121,32 @@ impl Trace for HttpResponseData {
         if let Some(socket) = &self.socket {
             tracer.edge(socket);
         }
+        if let Some(request) = &self.request {
+            tracer.edge(request);
+        }
+        for listener in self
+            .cork_callbacks
+            .iter()
+            .chain(self.finish_listeners.iter())
+            .chain(self.close_listeners.iter())
+        {
+            (listener.trace)(tracer);
+        }
     }
 }
 
 impl ClearEdges for HttpResponseData {
     fn clear_edges(&mut self) {
         self.socket = None;
+        self.request = None;
         self.headers.clear();
         self.headers_sent = true;
         self.ended = true;
+        self.cork_buffer.clear();
+        self.cork_callbacks.clear();
+        self.finish_listeners.clear();
+        self.close_listeners.clear();
+        self.destroyed = true;
     }
 }
 
@@ -146,6 +176,9 @@ impl Trace for HttpClientRequestData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         if let Some(socket) = &self.socket {
             tracer.edge(socket);
+        }
+        if let Some(connection) = &self.connection {
+            connection.borrow().trace(tracer);
         }
         for listener in &self.response_listeners {
             (listener.trace)(tracer);
@@ -312,7 +345,13 @@ fn http_parse_request_head(bytes: &[u8]) -> Option<ParsedHttpHead> {
 
 fn http_dispatch_data(request: &JsHttpRequest) {
     let (listeners, body) = request.with_mut(|request| {
-        if request.body.is_empty() || request.data_listeners.is_empty() {
+        if request.paused || request.body.is_empty() ||
+            (!request.flowing && request.data_listeners.is_empty())
+        {
+            return (Vec::new(), Vec::new());
+        }
+        if request.data_listeners.is_empty() {
+            request.body.clear();
             return (Vec::new(), Vec::new());
         }
         let listeners = request.data_listeners.clone();
@@ -334,17 +373,25 @@ fn http_request_push(request: &JsHttpRequest, bytes: &[u8]) {
 }
 
 fn http_request_finish(request: &JsHttpRequest) {
+    request.with_mut(|request| request.finish_pending = true);
     http_dispatch_data(request);
+    http_request_maybe_finish(request);
+}
+
+fn http_request_maybe_finish(request: &JsHttpRequest) {
     let listeners = request.with_mut(|request| {
-        if request.ended {
-            return Vec::new();
+        if request.ended || !request.finish_pending || request.paused || !request.body.is_empty() {
+            return None;
         }
         request.ended = true;
-        std::mem::take(&mut request.end_listeners)
+        request.finish_pending = false;
+        Some(std::mem::take(&mut request.end_listeners))
     });
+    let Some(listeners) = listeners else { return; };
     for listener in listeners {
         (listener.invoke)();
     }
+    request.with_mut(|request| request.data_listeners.clear());
 }
 
 fn http_server_feed(connection: &Rc<RefCell<HttpServerConnection>>, bytes: &[u8]) {
@@ -380,17 +427,27 @@ fn http_server_feed(connection: &Rc<RefCell<HttpServerConnection>>, bytes: &[u8]
                 headers,
                 body: Vec::new(),
                 ended: false,
+                finish_pending: false,
+                paused: false,
+                flowing: false,
                 data_listeners: Vec::new(),
                 end_listeners: Vec::new(),
             });
             let response = Gc::new(HttpResponseData {
                 socket: Some(connection.socket.clone()),
+                request: Some(request.clone()),
                 status_code: 200.0,
                 status_message: empty_string(),
                 headers: Vec::new(),
                 headers_sent: false,
                 chunked: false,
                 ended: false,
+                corked: 0,
+                cork_buffer: Vec::new(),
+                cork_callbacks: Vec::new(),
+                finish_listeners: Vec::new(),
+                close_listeners: Vec::new(),
+                destroyed: false,
             });
             let available = connection.buffer.len() - head_len;
             let take = available.min(content_length);
@@ -462,6 +519,18 @@ pub fn http_request_header(request: &JsHttpRequest, name: &JsString) -> Option<J
     })
 }
 
+pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)> {
+    request.with(|request| {
+        let mut output = Vec::new();
+        for (_, lower, value) in &request.headers {
+            if output.iter().all(|(name, _): &(JsString, JsString)| name.as_ref() != lower.as_ref()) {
+                output.push((lower.clone(), value.clone()));
+            }
+        }
+        output
+    })
+}
+
 pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {
     request.with(|request| request.status_code)
 }
@@ -478,10 +547,48 @@ pub fn http_request_on_data(
 ) {
     request.with_mut(|request| {
         if !request.ended {
+            request.flowing = true;
             request.data_listeners.push(HttpDataListener { invoke: callback, trace, once });
         }
     });
     http_dispatch_data(request);
+    http_request_maybe_finish(request);
+}
+
+pub fn http_request_pause(request: &JsHttpRequest) {
+    let socket = request.with_mut(|request| {
+        request.paused = true;
+        request.socket.clone()
+    });
+    if let Some(socket) = socket {
+        net_socket_pause(&socket);
+    }
+}
+
+pub fn http_request_resume(request: &JsHttpRequest) {
+    let socket = request.with_mut(|request| {
+        request.paused = false;
+        request.flowing = true;
+        request.socket.clone()
+    });
+    if let Some(socket) = socket {
+        net_socket_resume(&socket);
+    }
+    let request = request.clone();
+    process_next_tick(Box::new(move || {
+        http_dispatch_data(&request);
+        http_request_maybe_finish(&request);
+    }));
+}
+
+pub fn http_request_readable(request: &JsHttpRequest) -> bool {
+    request.with(|request| {
+        !request.ended && request.socket.as_ref().is_some_and(net_socket_readable)
+    })
+}
+
+pub fn http_request_destroyed(request: &JsHttpRequest) -> bool {
+    request.with(|request| request.socket.as_ref().is_none_or(net_socket_destroyed))
 }
 
 pub fn http_request_on_end(
@@ -546,6 +653,20 @@ pub fn http_response_set_header(response: &JsHttpResponse, name: &JsString, valu
             response.headers.push((name.clone(), value.clone()));
         }
     });
+}
+
+pub fn http_response_get_headers(response: &JsHttpResponse) -> Vec<(JsString, JsString)> {
+    response.with(|response| {
+        response
+            .headers
+            .iter()
+            .map(|(name, value)| (string(&name.to_ascii_lowercase()), value.clone()))
+            .collect()
+    })
+}
+
+pub fn http_response_request(response: &JsHttpResponse) -> Option<JsHttpRequest> {
+    response.with(|response| response.request.clone())
 }
 
 pub fn http_response_write_head(response: &JsHttpResponse, status: f64) {
@@ -638,6 +759,16 @@ fn http_chunk(bytes: &[u8]) -> Vec<u8> {
 }
 
 fn http_response_write_raw(response: &JsHttpResponse, bytes: &[u8]) {
+    if response.with_mut(|response| {
+        if response.corked == 0 {
+            false
+        } else {
+            response.cork_buffer.extend_from_slice(bytes);
+            true
+        }
+    }) {
+        return;
+    }
     if let Some((socket, head)) = http_response_head(response, None) {
         net_socket_queue(&socket, head);
     }
@@ -656,6 +787,7 @@ fn http_response_write_raw(response: &JsHttpResponse, bytes: &[u8]) {
 }
 
 fn http_response_end_raw(response: &JsHttpResponse, tail: &[u8]) {
+    http_response_flush_cork(response);
     let fresh = http_response_head(response, Some(tail.len()));
     let target = response.with_mut(|response| {
         if response.ended {
@@ -677,6 +809,27 @@ fn http_response_end_raw(response: &JsHttpResponse, tail: &[u8]) {
     } else {
         net_socket_queue(&socket, tail.to_vec());
     }
+    let finish_listeners = response.with_mut(|response| std::mem::take(&mut response.finish_listeners));
+    for listener in finish_listeners {
+        net_socket_on_finish(&socket, listener.invoke, listener.trace);
+    }
+    let invoke_response = response.clone();
+    let trace_response = response.clone();
+    net_socket_on_finish(
+        &socket,
+        Rc::new(move || {
+            let listeners = invoke_response.with_mut(|response| {
+                response.destroyed = true;
+                response.socket = None;
+                std::mem::take(&mut response.close_listeners)
+            });
+            for listener in listeners {
+                (listener.invoke)();
+            }
+            invoke_response.with_mut(|response| response.request = None);
+        }),
+        Rc::new(move |tracer| tracer.edge(&trace_response)),
+    );
     net_socket_end(&socket);
 }
 
@@ -694,6 +847,112 @@ pub fn http_response_end_bytes(response: &JsHttpResponse, value: &JsBytes<u8>) {
 
 pub fn http_response_headers_sent(response: &JsHttpResponse) -> bool {
     response.with(|response| response.headers_sent)
+}
+
+pub fn http_response_flush_headers(response: &JsHttpResponse) {
+    http_response_write_head(response, http_response_status_get(response));
+}
+
+pub fn http_response_cork(response: &JsHttpResponse) {
+    response.with_mut(|response| response.corked = response.corked.saturating_add(1));
+}
+
+pub fn http_response_uncork(response: &JsHttpResponse) {
+    let flush = response.with_mut(|response| {
+        response.corked = response.corked.saturating_sub(1);
+        response.corked == 0
+    });
+    if flush {
+        http_response_flush_cork(response);
+    }
+}
+
+fn http_response_flush_cork(response: &JsHttpResponse) {
+    let (bytes, callbacks) = response.with_mut(|response| {
+        response.corked = 0;
+        (
+            std::mem::take(&mut response.cork_buffer),
+            std::mem::take(&mut response.cork_callbacks),
+        )
+    });
+    if !bytes.is_empty() {
+        http_response_write_raw(response, &bytes);
+    }
+    if callbacks.is_empty() {
+        return;
+    }
+    let socket = response.with(|response| response.socket.clone());
+    if let Some(socket) = socket {
+        let traced = callbacks.clone();
+        net_socket_after_write(
+            &socket,
+            Rc::new(move || {
+                for listener in &callbacks {
+                    (listener.invoke)();
+                }
+            }),
+            Rc::new(move |tracer| {
+                for listener in &traced {
+                    (listener.trace)(tracer);
+                }
+            }),
+        );
+    }
+}
+
+pub fn http_response_after_write(
+    response: &JsHttpResponse,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+) {
+    let listener = HttpVoidListener { invoke: callback, trace };
+    let socket = response.with_mut(|response| {
+        if response.corked > 0 {
+            response.cork_callbacks.push(listener.clone());
+            None
+        } else {
+            response.socket.clone()
+        }
+    });
+    if let Some(socket) = socket {
+        net_socket_after_write(&socket, listener.invoke, listener.trace);
+    }
+}
+
+pub fn http_response_on_finish(
+    response: &JsHttpResponse,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+) {
+    response.with_mut(|response| {
+        response.finish_listeners.push(HttpVoidListener { invoke: callback, trace });
+    });
+}
+
+pub fn http_response_on_close(
+    response: &JsHttpResponse,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+) {
+    response.with_mut(|response| {
+        if !response.destroyed {
+            response.close_listeners.push(HttpVoidListener { invoke: callback, trace });
+        }
+    });
+}
+
+pub fn http_response_writable_corked(response: &JsHttpResponse) -> f64 {
+    response.with(|response| response.corked as f64)
+}
+
+pub fn http_response_writable_finished(response: &JsHttpResponse) -> bool {
+    response.with(|response| response.ended)
+}
+
+pub fn http_response_destroyed(response: &JsHttpResponse) -> bool {
+    response.with(|response| {
+        response.destroyed || response.socket.as_ref().is_none_or(net_socket_destroyed)
+    })
 }
 
 pub fn http_server_join_duplicate_headers(server: &JsNetServer) {

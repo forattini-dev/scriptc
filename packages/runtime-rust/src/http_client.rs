@@ -200,6 +200,9 @@ fn http_client_feed(
                 headers,
                 body: Vec::new(),
                 ended: false,
+                finish_pending: false,
+                paused: false,
+                flowing: false,
                 data_listeners: Vec::new(),
                 end_listeners: Vec::new(),
             });

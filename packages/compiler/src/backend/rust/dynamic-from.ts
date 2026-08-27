@@ -67,6 +67,8 @@ export class RustDynamicFromEmitter {
       case "promise": return `${name}::Promise(runtime::promise_to_handle(&(${value})))`;
       case "netServer": return `${name}::NetServer(${value})`;
       case "netSocket": return `${name}::NetSocket(${value})`;
+      case "httpReq": return `${name}::HttpRequest(${value})`;
+      case "httpRes": return `${name}::HttpResponse(${value})`;
       case "undefinedT": return `{ let _ = ${value}; ${name}::Undefined }`;
       case "nullT": return `{ let _ = ${value}; ${name}::Null }`;
       case "func": {

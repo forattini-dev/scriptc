@@ -77,6 +77,8 @@ class RustDynamicInvokeEmitter {
     this.context.line(`(${this.dyn}::Promise(left), ${this.dyn}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
     this.context.line(`(${this.dyn}::NetServer(left), ${this.dyn}::NetServer(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::NetSocket(left), ${this.dyn}::NetSocket(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${this.dyn}::HttpRequest(left), ${this.dyn}::HttpRequest(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${this.dyn}::HttpResponse(left), ${this.dyn}::HttpResponse(right)) => left.ptr_eq(right),`);
     for (const pattern of this.functionVariants()) {
       this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);
     }
@@ -232,6 +234,8 @@ class RustDynamicInvokeEmitter {
     this.emitBufferArm();
     this.emitPromiseArm();
     this.emitNetSocketArm();
+    this.emitHttpRequestArm();
+    this.emitHttpResponseArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("}");
@@ -364,6 +368,14 @@ class RustDynamicInvokeEmitter {
     this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("}");
     this.close("},");
+  }
+
+  private emitHttpRequestArm(): void {
+    this.context.line(`${this.dyn}::HttpRequest(request) => sc_dyn_http_request_invoke(request, recv, method, args, callee_name),`);
+  }
+
+  private emitHttpResponseArm(): void {
+    this.context.line(`${this.dyn}::HttpResponse(response) => sc_dyn_http_response_invoke(response, recv, method, args, callee_name),`);
   }
 
   private functionVariants(): string[] {
