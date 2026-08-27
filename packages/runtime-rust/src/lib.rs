@@ -26,6 +26,7 @@ include!("regex.rs");
 include!("clock_and_date.rs");
 include!("heap.rs");
 include!("live_refs.rs");
+include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");
 include!("stdin.rs");

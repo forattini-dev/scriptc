@@ -4,6 +4,7 @@
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    process_signals_finish();
     stdin_finish();
     fs_renames_finish();
     children_finish();
@@ -415,6 +416,9 @@ pub fn run_event_loop() {
         }
 
         if fs_renames_dispatch_one() {
+            continue;
+        }
+        if process_signals_dispatch_one() {
             continue;
         }
         if stdin_dispatch_one() {

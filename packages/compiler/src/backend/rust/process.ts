@@ -17,6 +17,25 @@ export function emitRustProcessCall(
       arg?.type.kind === "f64" && secondArg?.type.kind === "f64") {
     return `runtime::process_kill_num(${context.emitExpr(arg)}, ${context.emitExpr(secondArg)})`;
   }
+  if (expr.fn === "process.onSignal" && expr.args.length === 3 &&
+      arg?.type.kind === "f64" && secondArg?.type.kind === "func" &&
+      secondArg.type.params.length === 0 && secondArg.type.ret.kind === "void" &&
+      expr.args[2]?.type.kind === "bool") {
+    const signal = context.nextTemporary();
+    const callback = context.nextTemporary();
+    const once = context.nextTemporary();
+    const identity = context.functionIdentity(callback, secondArg.type, expr.loc);
+    const dispatch = context.emitClosureDispatch(callback, secondArg.type, [], expr.loc);
+    return `{ let ${signal} = ${context.emitExpr(arg)}; let ${callback} = ${context.emitExpr(secondArg)}; let ${once} = ${context.emitExpr(expr.args[2])}; let sc_signal_identity = ${identity}; runtime::process_signal_on(${signal}, sc_signal_identity, std::rc::Rc::new(move || { let _ = ${dispatch}; }), ${once}); }`;
+  }
+  if (expr.fn === "process.offSignal" && expr.args.length === 2 &&
+      arg?.type.kind === "f64" && secondArg?.type.kind === "func" &&
+      secondArg.type.params.length === 0 && secondArg.type.ret.kind === "void") {
+    const signal = context.nextTemporary();
+    const callback = context.nextTemporary();
+    const identity = context.functionIdentity(callback, secondArg.type, expr.loc);
+    return `{ let ${signal} = ${context.emitExpr(arg)}; let ${callback} = ${context.emitExpr(secondArg)}; runtime::process_signal_off(${signal}, ${identity}); }`;
+  }
   if (expr.fn === "process.isTTY" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_is_tty(${context.emitExpr(arg)})`;
   }
