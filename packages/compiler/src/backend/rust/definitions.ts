@@ -676,6 +676,8 @@ export class RustDefinitionEmitter {
     this.context.line("}");
     this.emitErrorValueStringHelper("name");
     this.emitErrorValueStringHelper("message");
+    this.emitErrorValueStringSetter("name");
+    this.emitErrorValueStringSetter("message");
     this.context.line(`fn sc_error_to_string(value: &${name}) -> runtime::JsString {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -733,6 +735,24 @@ export class RustDefinitionEmitter {
     for (const root of roots) {
       const fieldName = this.context.classFieldName(root.def.name, field);
       this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => value.with(|object| object.${fieldName}.clone()),`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
+  }
+
+  emitErrorValueStringSetter(field: "name" | "message"): void {
+    const roots = this.context.errorClassRoots();
+    const name = this.context.errorValueName();
+    this.context.line(`fn sc_error_set_${field}(target: &${name}, value: runtime::JsString) {`);
+    this.context.pushIndent();
+    this.context.line("match target {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Builtin(error) => runtime::error_set_${field}(error, value),`);
+    for (const root of roots) {
+      const fieldName = this.context.classFieldName(root.def.name, field);
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(target) => target.with_mut(|object| object.${fieldName} = value),`);
     }
     this.context.popIndent();
     this.context.line("}");

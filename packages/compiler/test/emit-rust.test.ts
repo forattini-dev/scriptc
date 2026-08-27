@@ -758,6 +758,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
   "1423-text-codec.ts",
@@ -894,6 +895,7 @@ test.each([
   "2100-stream-default-hwm.ts",
   "2106-comma-expressions.ts",
   "2212-unhandled-rejection-listener.cjs",
+  "2215-process-emit-warning-exit.cjs",
   "2250-tagged-templates.ts",
   "2253-union-coercions.ts",
   "2260-http2-constants.cjs",

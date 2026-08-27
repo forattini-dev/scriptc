@@ -10,6 +10,7 @@ export interface RustProgramEntryOptions {
   readonly usesDynamicInvoke: boolean;
   readonly usesProcessExitListeners: boolean;
   readonly usesProcessRejectionEvents: boolean;
+  readonly usesProcessWarningEvents: boolean;
 }
 
 /** Emit the process boundary separately from IR expression/statement emission. */
@@ -61,6 +62,7 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
   if (options.usesDyn) lines.push("    sc_dyn_error_cache_clear();");
   if (options.usesDynamicInvoke) lines.push("    sc_dyn_function_cache_clear();");
   if (options.usesProcessRejectionEvents) lines.push("    sc_process_rejection_clear();");
+  if (options.usesProcessWarningEvents) lines.push("    sc_process_warning_clear();");
   lines.push(
     "    runtime::finish();",
     "    if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }",

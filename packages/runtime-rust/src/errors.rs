@@ -7,6 +7,65 @@ pub struct JsError {
     dom: Option<DomExceptionData>,
 }
 
+#[derive(Default)]
+struct JsErrorProperties {
+    name: Option<String>,
+    message: Option<String>,
+}
+
+thread_local! {
+    static ERROR_PROPERTIES: RefCell<Vec<(Weak<()>, JsErrorProperties)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn error_property(error: &JsError, name: bool) -> Option<JsString> {
+    ERROR_PROPERTIES.with(|properties| {
+        properties
+            .borrow()
+            .iter()
+            .find(|(identity, _)| identity.as_ptr() == Rc::as_ptr(&error.identity))
+            .and_then(|(_, properties)| {
+                (if name {
+                    &properties.name
+                } else {
+                    &properties.message
+                })
+                .as_ref()
+            })
+            .map(|value| Rc::from(value.as_str()))
+    })
+}
+
+fn error_set_property(error: &JsError, value: JsString, name: bool) {
+    ERROR_PROPERTIES.with(|properties| {
+        let mut properties = properties.borrow_mut();
+        properties.retain(|(identity, _)| identity.strong_count() != 0);
+        let index = properties
+            .iter()
+            .position(|(identity, _)| identity.as_ptr() == Rc::as_ptr(&error.identity));
+        let index = match index {
+            Some(index) => index,
+            None => {
+                properties.push((Rc::downgrade(&error.identity), JsErrorProperties::default()));
+                properties.len() - 1
+            }
+        };
+        let properties = &mut properties[index].1;
+        if name {
+            properties.name = Some(value.to_string());
+        } else {
+            properties.message = Some(value.to_string());
+        }
+    });
+}
+
+pub fn error_set_name(error: &JsError, value: JsString) {
+    error_set_property(error, value, true);
+}
+
+pub fn error_set_message(error: &JsError, value: JsString) {
+    error_set_property(error, value, false);
+}
+
 #[derive(Clone)]
 struct DomExceptionData {
     code: f64,
@@ -299,7 +358,7 @@ pub fn caught_error_name(caught: &Caught) -> JsString {
         .value
         .downcast_ref::<JsError>()
         .expect("scriptc: narrowed non-Error caught value");
-    Rc::<str>::from(error.name.as_str())
+    error_name(error)
 }
 
 pub fn caught_error_message(caught: &Caught) -> JsString {
@@ -307,7 +366,7 @@ pub fn caught_error_message(caught: &Caught) -> JsString {
         .value
         .downcast_ref::<JsError>()
         .expect("scriptc: narrowed non-Error caught value");
-    Rc::<str>::from(error.message.as_str())
+    error_message(error)
 }
 
 pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
@@ -347,12 +406,14 @@ pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
 }
 
 pub fn error_to_string(error: &JsError) -> JsString {
-    if error.name == "AssertionError" {
+    let name = error_name(error);
+    let message = error_message(error);
+    if name.as_ref() == "AssertionError" {
         if let Some(code) = &error.code {
-            return error_to_string_parts(&format!("{} [{code}]", error.name), &error.message);
+            return error_to_string_parts(&format!("{name} [{code}]"), &message);
         }
     }
-    error_to_string_parts(&error.name, &error.message)
+    error_to_string_parts(&name, &message)
 }
 
 pub fn error_is_class(error: &JsError, name: &str) -> bool {
@@ -365,11 +426,15 @@ pub fn error_is_class(error: &JsError, name: &str) -> bool {
 }
 
 pub fn error_name(error: &JsError) -> JsString {
-    Rc::from(error.name.as_str())
+    error_property(error, true).unwrap_or_else(|| Rc::from(error.name.as_str()))
 }
 
 pub fn error_message(error: &JsError) -> JsString {
-    Rc::from(error.message.as_str())
+    error_property(error, false).unwrap_or_else(|| Rc::from(error.message.as_str()))
+}
+
+fn errors_finish() {
+    ERROR_PROPERTIES.with(|properties| properties.borrow_mut().clear());
 }
 
 pub fn error_code(error: &JsError) -> Option<JsString> {

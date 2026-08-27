@@ -693,6 +693,31 @@ pub fn process_pid() -> f64 {
     f64::from(std::process::id())
 }
 
+thread_local! {
+    static PROCESS_WARNING_HINTED: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn process_warning_report(
+    name: &JsString,
+    message: &JsString,
+    code: Option<&JsString>,
+    detail: Option<&JsString>,
+) {
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    eprint!("(node:{}) ", std::process::id());
+    if let Some(code) = code {
+        eprint!("[{code}] ");
+    }
+    eprint!("{name}: {message}");
+    if let Some(detail) = detail {
+        eprint!("\n{detail}");
+    }
+    eprintln!();
+    if !PROCESS_WARNING_HINTED.with(|hinted| hinted.replace(true)) {
+        eprintln!("(Use `node --trace-warnings ...` to show where the warning was created)");
+    }
+}
+
 pub fn process_exit(code: f64) -> ! {
     use std::io::Write;
     let _ = std::io::stdout().flush();

@@ -27,7 +27,6 @@ import { RustStreamModel } from "./stream-model.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
-
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
 export class RustUnsupportedError extends Error {
   constructor(
@@ -43,7 +42,6 @@ export class RustUnsupportedError extends Error {
 export function emitRustModule(mod: IrModule): string {
   return new RustEmitter(mod).emit();
 }
-
 class RustEmitter {
   private readonly lines: string[] = [];
   private readonly functions = new Map<string, IrFunction>();
@@ -85,6 +83,7 @@ class RustEmitter {
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
   private usesProcessRejectionEvents = false;
+  private usesProcessWarningEvents = false;
   private readonly streams = new RustStreamModel();
   private readonly containerExpressions = new RustContainerExpressionEmitter({
     nextTemporary: () => `sc_rt_${this.temporary++}`,
@@ -143,6 +142,9 @@ class RustEmitter {
     isUsed: () => this.usesEventEmitter,
     usesProcessExitListeners: () => this.usesProcessExitListeners,
     usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
+    usesProcessWarningEvents: () => this.usesProcessWarningEvents,
+    hasErrorClassRoots: () => this.errorClassRoots().length !== 0,
+    errorValueName: () => this.errorValueName(),
     streams: this.streams,
     dynTypeName: () => this.dynTypeName(),
     dynFunctionVariant: (shape) => this.dynFunctionVariant(shape),
@@ -530,6 +532,7 @@ class RustEmitter {
       usesDynamicInvoke: this.usesDynamicInvoke,
       usesProcessExitListeners: this.usesProcessExitListeners,
       usesProcessRejectionEvents: this.usesProcessRejectionEvents,
+      usesProcessWarningEvents: this.usesProcessWarningEvents,
     }));
     return `${this.lines.join("\n")}\n`;
   }
@@ -646,9 +649,10 @@ class RustEmitter {
         this.emitterListenerShapes.set(typeKey(callback.type), shape);
       }
       if (node.kind === "libCall" && typeof node.fn === "string" &&
-        ["process.onUnhandledRejection", "process.offUnhandledRejection", "process.onRejectionHandled", "process.offRejectionHandled"].includes(node.fn)) {
+        ["process.onUnhandledRejection", "process.offUnhandledRejection", "process.onRejectionHandled", "process.offRejectionHandled", "process.onWarning", "process.offWarning", "process.emitWarning"].includes(node.fn)) {
         this.usesEventEmitter = true;
-        this.usesProcessRejectionEvents = true;
+        if (node.fn.endsWith("Warning")) this.usesProcessWarningEvents = true;
+        else this.usesProcessRejectionEvents = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && node.op === "callMethod") ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
@@ -825,24 +829,19 @@ class RustEmitter {
   }
 
   private emitClosureDefinitions(): void { this.definitionEmitter.emitClosureDefinitions(); }
-
   private emitDynamicDefinition(): void { this.definitionEmitter.emitDynamicDefinition(); }
-
   private emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     return this.definitionEmitter.emitDynFromValue(type, value, loc, functionName, liveRef);
   }
-
   private emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
     return this.definitionEmitter.emitDynCheckValue(type, value, loc);
   }
-
   private emitUnionDefinitions(): void { this.definitionEmitter.emitUnionDefinitions(); }
   private emitRecordDefinitions(): void { this.definitionEmitter.emitRecordDefinitions(); }
   private emitClassDefinitions(): void { this.definitionEmitter.emitClassDefinitions(); }
   private emitErrorValueDefinition(): void { this.definitionEmitter.emitErrorValueDefinition(); }
   private emitGlobals(): void { this.definitionEmitter.emitGlobals(); }
   private emitFunction(fn: IrFunction): void { this.definitionEmitter.emitFunction(fn); }
-
   private containsAsyncSuspension(value: unknown): boolean {
     return this.asyncControlEmitter.containsAsyncSuspension(value);
   }
@@ -960,6 +959,7 @@ class RustEmitter {
       record: (shapeId) => this.records.get(shapeId),
       classDef: (name, loc) => this.classDef(name, loc),
       classFieldName: (className, fieldName, loc) => this.classFieldName(className, fieldName, loc),
+      hasErrorClassRoots: () => this.errorClassRoots().length !== 0,
       isEdgeValue: (type) => this.isEdgeValue(type),
       rustString: (value) => this.rustString(value),
       unsupported: (kind, loc) => this.unsupported(kind, loc),

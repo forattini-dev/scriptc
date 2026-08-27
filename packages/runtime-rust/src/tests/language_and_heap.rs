@@ -242,6 +242,20 @@
     }
 
     #[test]
+    fn error_name_and_message_writes_follow_reference_identity() {
+        let error = error_new("Error", string("before"));
+        let alias = error.clone();
+        error_set_name(&alias, string("CustomWarning"));
+        error_set_message(&alias, string("after"));
+        assert_eq!(error_name(&error).as_ref(), "CustomWarning");
+        assert_eq!(error_message(&error).as_ref(), "after");
+        assert_eq!(error_to_string(&error).as_ref(), "CustomWarning: after");
+        errors_finish();
+        assert_eq!(error_name(&error).as_ref(), "Error");
+        assert_eq!(error_message(&error).as_ref(), "before");
+    }
+
+    #[test]
     fn dom_exception_and_base64_follow_web_platform_rules() {
         let cause = string("cause");
         let error = dom_exception_new(

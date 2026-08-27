@@ -17,6 +17,9 @@ export interface RustEventEmitterContext extends RustReadableContext, RustWritab
   isUsed(): boolean;
   usesProcessExitListeners(): boolean;
   usesProcessRejectionEvents(): boolean;
+  usesProcessWarningEvents(): boolean;
+  hasErrorClassRoots(): boolean;
+  errorValueName(): string;
   dynTypeName(): string;
   classStructName(name: string, loc?: SrcLoc): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
@@ -92,6 +95,7 @@ export class RustEventEmitterEmitter {
     this.emitSnapshotDispatchHelpers();
     this.emitProcessExitDefinitions();
     this.emitProcessRejectionDefinitions();
+    this.emitProcessWarningDefinitions();
     this.readable.emitDefinitions();
     this.writable.emitDefinitions();
     this.duplex.emitDefinitions();
@@ -176,6 +180,9 @@ export class RustEventEmitterEmitter {
       case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
       case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
+      case "process.onWarning": return this.emitProcessWarningOn(expr);
+      case "process.offWarning": return this.emitProcessWarningOff(expr);
+      case "process.emitWarning": return this.emitProcessWarning(expr);
       case "readable.pipe": return this.emitPipe(expr);
       case "readable.unpipe": return this.emitUnpipe(expr);
       case "stream.finished":
@@ -698,6 +705,99 @@ export class RustEventEmitterEmitter {
     this.context.line("sc_process_rejection_sync_hooks();");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("");
+  }
+
+  private emitProcessWarningOn(expr: RustLibCallExpr): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process warning listener registration shape", expr.loc);
+    }
+    return `sc_process_warning_on(${this.context.emitExpr(callback)})`;
+  }
+
+  private emitProcessWarningOff(expr: RustLibCallExpr): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process warning listener removal shape", expr.loc);
+    }
+    return `sc_process_warning_off(${this.context.emitExpr(callback)})`;
+  }
+
+  private emitProcessWarning(expr: RustLibCallExpr): string {
+    const [args] = expr.args;
+    if (args?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process emitWarning argument vector shape", expr.loc);
+    }
+    return `sc_process_warning_emit(${this.context.emitExpr(args)})`;
+  }
+
+  private emitProcessWarningDefinitions(): void {
+    if (!this.context.usesProcessWarningEvents()) return;
+    const dyn = this.context.dynTypeName();
+    const errorValue = this.context.hasErrorClassRoots()
+      ? `${this.context.errorValueName()}::Builtin(sc_error)`
+      : "sc_error";
+    this.context.line("thread_local! {");
+    this.context.pushIndent();
+    this.context.line(`static SC_PROCESS_WARNING_LISTENERS: std::cell::RefCell<Vec<(${dyn}, usize)>> = const { std::cell::RefCell::new(Vec::new()) };`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_is_error(value: &${dyn}) -> bool {`);
+    this.context.pushIndent();
+    this.context.line(`matches!(value, ${dyn}::Object(object) if runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()))`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_property(value: &${dyn}, key: &str) -> ${dyn} {`);
+    this.context.pushIndent();
+    this.context.line(`match value { ${dyn}::Object(object) => runtime::map_get_by(object, &runtime::string(key), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${dyn}::Undefined), _ => ${dyn}::Undefined, }`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_on(callback: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("SC_PROCESS_WARNING_LISTENERS.with(|listeners| listeners.borrow_mut().push((callback, identity)));");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_off(callback: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("SC_PROCESS_WARNING_LISTENERS.with(|listeners| { let mut listeners = listeners.borrow_mut(); if let Some(index) = listeners.iter().rposition(|(_, candidate)| *candidate == identity) { listeners.remove(index); } });");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_dispatch(warning: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line("let listeners = SC_PROCESS_WARNING_LISTENERS.with(|listeners| listeners.borrow().clone());");
+    this.context.line("for (listener, _) in listeners { let _ = sc_dyn_call(&listener, &[warning.clone()], \"listener\"); }");
+    this.context.line(`let name = match sc_process_warning_property(&warning, "name") { ${dyn}::String(value) => value, _ => runtime::string("Warning"), };`);
+    this.context.line(`let message = match sc_process_warning_property(&warning, "message") { ${dyn}::String(value) => value, _ => runtime::empty_string(), };`);
+    this.context.line(`let code = match sc_process_warning_property(&warning, "code") { ${dyn}::String(value) => Some(value), _ => None, };`);
+    this.context.line(`let detail = match sc_process_warning_property(&warning, "detail") { ${dyn}::String(value) => Some(value), _ => None, };`);
+    this.context.line("runtime::process_warning_report(&name, &message, code.as_ref(), detail.as_ref());");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_warning_emit(args: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line(`let ${dyn}::Array(values) = args else { sc_dyn_arg_type_fail("warning", "of type string or an instance of Error", &args); };`);
+    this.context.line(`let argc = runtime::array_len(&values); let warning = if argc > 0.0 { runtime::array_get(&values, 0.0) } else { ${dyn}::Undefined };`);
+    this.context.line("if sc_process_warning_is_error(&warning) { sc_process_warning_dispatch(warning); return; }");
+    this.context.line(`let message = match warning { ${dyn}::String(value) => value, value => sc_dyn_arg_type_fail("warning", "of type string or an instance of Error", &value), };`);
+    this.context.line("let mut name = runtime::string(\"Warning\"); let mut code = None; let mut detail = None; let mut index = 1.0;");
+    this.context.line("if index < argc {");
+    this.context.pushIndent();
+    this.context.line("let value = runtime::array_get(&values, index);");
+    this.context.line(`match value { ${dyn}::Undefined => index += 1.0, ${dyn}::String(value) => { name = value; index += 1.0; }, value if sc_dyn_function_identity(&value).is_some() => index = argc, ${dyn}::Object(object) if !runtime::map_has_by(&object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()) => { let type_value = runtime::map_get_by(&object, &runtime::string("type"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${dyn}::Undefined); match type_value { ${dyn}::Undefined => {}, ${dyn}::String(value) => name = value, value => sc_dyn_prop_type_fail("options.type", "of type string", &value), } if let Some(${dyn}::String(value)) = runtime::map_get_by(&object, &runtime::string("code"), |left, right| left.as_ref() == right.as_ref()) { code = Some(value); } if let Some(${dyn}::String(value)) = runtime::map_get_by(&object, &runtime::string("detail"), |left, right| left.as_ref() == right.as_ref()) { detail = Some(value); } index = argc; }, value => sc_dyn_arg_type_fail("type", "of type string", &value), }`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("if index < argc { let value = runtime::array_get(&values, index); match value { " +
+      `${dyn}::Undefined => {}, ${dyn}::String(value) => code = Some(value), value if sc_dyn_function_identity(&value).is_some() => {}, value => sc_dyn_arg_type_fail("code", "of type string", &value), } }`);
+    this.context.line("let sc_error = if let Some(value) = &code { runtime::error_new_code(name.as_ref(), message.clone(), value.as_ref()) } else { runtime::error_new(name.as_ref(), message.clone()) };");
+    this.context.line(`let warning = sc_dyn_error_box(&${errorValue});`);
+    this.context.line(`if let (Some(value), ${dyn}::Object(object)) = (detail, &warning) { runtime::map_set_by(object, runtime::string("detail"), ${dyn}::String(value), |left, right| left.as_ref() == right.as_ref()); }`);
+    this.context.line("sc_process_warning_dispatch(warning);");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_warning_clear() { SC_PROCESS_WARNING_LISTENERS.with(|listeners| listeners.borrow_mut().clear()); }");
     this.context.line("");
   }
 

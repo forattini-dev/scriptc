@@ -1,5 +1,5 @@
 import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleLocal } from "../mangle.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
@@ -38,6 +38,7 @@ export interface RustStatementContext {
   record(shapeId: string): IrRecordShape | undefined;
   classDef(name: string, loc?: SrcLoc): IrClassDef;
   classFieldName(className: string, fieldName: string, loc?: SrcLoc): string;
+  hasErrorClassRoots(): boolean;
   isEdgeValue(type: IrType): boolean;
   rustString(value: string): string;
   unsupported(kind: string, loc?: SrcLoc): never;
@@ -433,6 +434,13 @@ class RustStatementEmitter {
   }
 
   private emitFieldSet(stmt: Extract<IrStmt, { kind: "fieldSet" }>): void {
+    if (RUNTIME_ERROR_CLASSES.has(stmt.className) && (stmt.field === "name" || stmt.field === "message")) {
+      const object = this.context.nextTemporary();
+      const value = this.context.nextTemporary();
+      const helper = this.context.hasErrorClassRoots() ? `sc_error_set_${stmt.field}` : `runtime::error_set_${stmt.field}`;
+      this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${value} = ${this.context.emitExpr(stmt.value)}; ${helper}(&${object}, ${value}); }`);
+      return;
+    }
     const cls = this.context.classDef(stmt.className, stmt.loc);
     const field = cls.fields.find((candidate) => candidate.name === stmt.field);
     if (field === undefined) {
