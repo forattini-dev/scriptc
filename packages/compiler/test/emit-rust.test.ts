@@ -966,6 +966,7 @@ test.each([
   "2570-buffer-arg-validation.cjs",
   "2571-searchparams-arg-validation.cjs",
   "2572-readable-emitted-readable-flag.cjs",
+  "2573-fs-url-arg-ladders.cjs",
   "2574-emitter-max-listeners-ladders.cjs",
   "2575-string-destructuring-decl.ts",
   "2576-string-destructuring-assign.ts",

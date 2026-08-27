@@ -87,6 +87,13 @@ export function emitRustDynamicLibCall(
     arg?.type.kind === "dyn" && expr.type.kind === "string") {
     return `sc_dyn_string_coerce_js(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "fs.toUnixTimestamp" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "f64") {
+    const value = context.nextTemporary();
+    const number = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${context.emitExpr(arg)}; match &${value} { ${dyn}::String(sc_text) => { let ${number} = runtime::number_from_string(sc_text); if ${number}.is_nan() { sc_dyn_arg_type_fail("time", "an instance of Date or an Time in seconds", &${value}); } ${number} }, ${dyn}::Number(sc_number) if sc_number.is_finite() => if *sc_number < 0.0 { runtime::date_now() / 1000.0 } else { *sc_number }, sc_value => sc_dyn_arg_type_fail("time", "an instance of Date or an Time in seconds", sc_value), } }`;
+  }
   if (expr.fn === "dyn.toString" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
       secondArg?.type.kind === "string" && expr.args[2]?.type.kind === "string") {
     const value = context.nextTemporary();
