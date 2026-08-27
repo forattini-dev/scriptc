@@ -22,6 +22,20 @@ function emitPublish(
   return `{ let (${name}, ${subscribers}) = runtime::diagnostics_snapshot::<${dyn}>(${handle}); for ${callback} in ${subscribers} { let _ = sc_dyn_call(&${callback}, &[${message}.clone(), ${dyn}::String(${name}.clone())], "subscription"); } }`;
 }
 
+function emitEnterBindings(
+  handle: string,
+  message: string,
+  dyn: string,
+  context: RustLibCallContext,
+): string {
+  const entries = context.nextTemporary();
+  const store = context.nextTemporary();
+  const transform = context.nextTemporary();
+  const value = context.nextTemporary();
+  const guard = context.nextTemporary();
+  return `let mut ${entries} = Vec::new(); for (${store}, ${transform}) in runtime::diagnostics_bindings::<${dyn}>(${handle}) { let ${value} = match ${transform} { Some(sc_transform) => sc_dyn_call(&sc_transform, &[${message}.clone()], "transform"), None => ${message}.clone(), }; ${entries}.push((${store}, ${value})); } let ${guard} = runtime::async_local_run_many::<${dyn}>(${entries});`;
+}
+
 function emitTracingSubscription(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -42,6 +56,38 @@ function emitTracingSubscription(
     return `let ${callback} = sc_dyn_key_get(&${handlers}, &runtime::string("${event}"), false); if sc_dyn_is_truthy(&${callback}) { ${action} }`;
   }).join(" ");
   return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${handlers} = ${context.emitExpr(handlersExpr)}; let mut ${done} = true; ${actions} ${subscribe ? "()" : done} }`;
+}
+
+function emitChannelStores(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
+  const [handleExpr, dataExpr, fnExpr, thisExpr, argsExpr] = expr.args;
+  if (handleExpr?.type.kind !== "f64") return null;
+  const dyn = context.dynTypeName();
+  if ((expr.fn === "dc.chanBindStore" || expr.fn === "dc.chanUnbindStore") &&
+      dataExpr?.type.kind === "f64") {
+    const handle = context.nextTemporary();
+    const store = context.nextTemporary();
+    if (expr.fn === "dc.chanUnbindStore" && expr.args.length === 2) {
+      return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${store} = ${context.emitExpr(dataExpr)}; runtime::diagnostics_unbind_store::<${dyn}>(${handle}, ${store}) }`;
+    }
+    const transformExpr = expr.args[2];
+    if (expr.fn !== "dc.chanBindStore" || transformExpr?.type.kind !== "dyn") return null;
+    const transform = context.nextTemporary();
+    const stored = context.nextTemporary();
+    return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${store} = ${context.emitExpr(dataExpr)}; let ${transform} = ${context.emitExpr(transformExpr)}; let ${stored} = if matches!(&${transform}, ${dyn}::Undefined) { None } else { let _ = sc_dyn_function_identity(&${transform}).unwrap_or_else(|| sc_dyn_arg_type_fail("transform", "of type function", &${transform})); Some(${transform}) }; runtime::diagnostics_bind_store(${handle}, ${store}, ${stored}); () }`;
+  }
+  if (expr.fn !== "dc.chanRunStores" || dataExpr?.type.kind !== "dyn" || fnExpr?.type.kind !== "dyn" ||
+      thisExpr?.type.kind !== "dyn" || argsExpr?.type.kind !== "dyn") return null;
+  const handle = context.nextTemporary();
+  const data = context.nextTemporary();
+  const fn = context.nextTemporary();
+  const thisArg = context.nextTemporary();
+  const argsValue = context.nextTemporary();
+  const args = context.nextTemporary();
+  const index = context.nextTemporary();
+  const collectArgs = `let mut ${args} = Vec::new(); if let ${dyn}::Array(sc_values) = &${argsValue} { let mut ${index} = 0.0; while ${index} < runtime::array_len(sc_values) { ${args}.push(runtime::array_get(sc_values, ${index})); ${index} += 1.0; } }`;
+  const enterBindings = emitEnterBindings(handle, data, dyn, context);
+  const publish = emitPublish(handle, data, dyn, context);
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${data} = ${context.emitExpr(dataExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${argsValue} = ${context.emitExpr(argsExpr)}; ${collectArgs} ${enterBindings} ${publish}; let _sc_this_guard = sc_dyn_this_push(${thisArg}); sc_dyn_call(&${fn}, &${args}, "runStores") }`;
 }
 
 function emitTraceSync(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
@@ -68,7 +114,8 @@ function emitTraceSync(expr: RustLibCallExpr, context: RustLibCallContext): stri
   const publishStart = emitPublish(traceEventChannel(handle, 0, dyn), traceContext, dyn, context);
   const publishEnd = emitPublish(traceEventChannel(handle, 1, dyn), traceContext, dyn, context);
   const publishError = emitPublish(traceEventChannel(handle, 4, dyn), traceContext, dyn, context);
-  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${invoke} } else { ${publishStart}; let ${outcome} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${invoke})); match ${outcome} { Ok(${result}) => { ${setResult} ${publishEnd}; ${result} }, Err(${payload}) => { let ${caught} = runtime::caught_from_panic(${payload}); let ${error} = sc_dyn_from_caught(${caught}.clone()); ${setError} ${publishError}; ${publishEnd}; runtime::rethrow_caught(${caught}) }, } } }`;
+  const enterBindings = emitEnterBindings(traceEventChannel(handle, 0, dyn), traceContext, dyn, context);
+  return `{ let ${handle} = ${context.emitExpr(handleExpr)}; let ${fn} = ${context.emitExpr(fnExpr)}; let ${traceContext} = ${context.emitExpr(contextExpr)}; let ${thisArg} = ${context.emitExpr(thisExpr)}; let ${args} = ${context.emitExpr(argsExpr)}; ${collectArgs} if !runtime::diagnostics_tracing_has_subscribers::<${dyn}>(${handle}) { ${invoke} } else { ${enterBindings} ${publishStart}; let ${outcome} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${invoke})); match ${outcome} { Ok(${result}) => { ${setResult} ${publishEnd}; ${result} }, Err(${payload}) => { let ${caught} = runtime::caught_from_panic(${payload}); let ${error} = sc_dyn_from_caught(${caught}.clone()); ${setError} ${publishError}; ${publishEnd}; runtime::rethrow_caught(${caught}) }, } } }`;
 }
 
 function emitTraceCallback(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
@@ -204,6 +251,10 @@ export function emitRustDiagnosticsChannelCall(
   }
   if (expr.fn === "dc.tcTracePromise" && expr.args.length === 5) {
     return emitTracePromise(expr, context);
+  }
+  if ((expr.fn === "dc.chanBindStore" || expr.fn === "dc.chanUnbindStore" ||
+      expr.fn === "dc.chanRunStores")) {
+    return emitChannelStores(expr, context);
   }
   if ((expr.fn === "dc.chanSubscribe" || expr.fn === "dc.chanUnsubscribe") && expr.args.length === 2 &&
       first?.type.kind === "f64" && second?.type.kind === "dyn") {

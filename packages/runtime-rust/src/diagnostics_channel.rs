@@ -5,9 +5,15 @@ struct DiagnosticsSubscriber<D> {
     callback: D,
 }
 
+struct DiagnosticsBinding<D> {
+    store: f64,
+    transform: Option<D>,
+}
+
 struct DiagnosticsChannel<D> {
     name: JsString,
     subscribers: Vec<DiagnosticsSubscriber<D>>,
+    bindings: Vec<DiagnosticsBinding<D>>,
 }
 
 struct DiagnosticsRegistry<D> {
@@ -55,6 +61,7 @@ fn diagnostics_intern<D: 'static>(registry: &mut DiagnosticsRegistry<D>, name: &
     registry.channels.push(DiagnosticsChannel {
         name: name.clone(),
         subscribers: Vec::new(),
+        bindings: Vec::new(),
     });
     registry.by_name.insert(name.clone(), index);
     index
@@ -80,6 +87,10 @@ fn diagnostics_tracing_index<D>(registry: &DiagnosticsRegistry<D>, handle: f64) 
         panic!("scriptc: invalid diagnostics_channel tracing handle");
     }
     index
+}
+
+fn diagnostics_active<D>(channel: &DiagnosticsChannel<D>) -> bool {
+    !channel.subscribers.is_empty() || !channel.bindings.is_empty()
 }
 
 pub fn diagnostics_channel<D: 'static>(name: &JsString) -> f64 {
@@ -123,7 +134,7 @@ pub fn diagnostics_tracing_has_subscribers<D: 'static>(handle: f64) -> bool {
         let tracing = diagnostics_tracing_index(registry, handle);
         registry.tracings[tracing]
             .iter()
-            .any(|channel| !registry.channels[*channel].subscribers.is_empty())
+            .any(|channel| diagnostics_active(&registry.channels[*channel]))
     })
 }
 
@@ -178,14 +189,14 @@ pub fn diagnostics_has_subscribers<D: 'static>(name: &JsString) -> bool {
         registry
             .by_name
             .get(name)
-            .is_some_and(|index| !registry.channels[*index].subscribers.is_empty())
+            .is_some_and(|index| diagnostics_active(&registry.channels[*index]))
     })
 }
 
 pub fn diagnostics_chan_has_subscribers<D: 'static>(handle: f64) -> bool {
     with_diagnostics_registry(|registry: &mut DiagnosticsRegistry<D>| {
         let index = diagnostics_index(registry, handle);
-        !registry.channels[index].subscribers.is_empty()
+        diagnostics_active(&registry.channels[index])
     })
 }
 
@@ -209,6 +220,41 @@ pub fn diagnostics_snapshot<D: Clone + 'static>(handle: f64) -> (JsString, Vec<D
                 .map(|subscriber| subscriber.callback.clone())
                 .collect(),
         )
+    })
+}
+
+pub fn diagnostics_bind_store<D: Clone + 'static>(handle: f64, store: f64, transform: Option<D>) {
+    with_diagnostics_registry(|registry| {
+        let index = diagnostics_index(registry, handle);
+        let channel = &mut registry.channels[index];
+        if let Some(binding) = channel.bindings.iter_mut().find(|binding| binding.store == store) {
+            binding.transform = transform;
+        } else {
+            channel.bindings.push(DiagnosticsBinding { store, transform });
+        }
+    });
+}
+
+pub fn diagnostics_unbind_store<D: 'static>(handle: f64, store: f64) -> bool {
+    with_diagnostics_registry(|registry: &mut DiagnosticsRegistry<D>| {
+        let index = diagnostics_index(registry, handle);
+        let channel = &mut registry.channels[index];
+        let Some(binding) = channel.bindings.iter().position(|binding| binding.store == store) else {
+            return false;
+        };
+        channel.bindings.remove(binding);
+        true
+    })
+}
+
+pub fn diagnostics_bindings<D: Clone + 'static>(handle: f64) -> Vec<(f64, Option<D>)> {
+    with_diagnostics_registry(|registry| {
+        let index = diagnostics_index(registry, handle);
+        registry.channels[index]
+            .bindings
+            .iter()
+            .map(|binding| (binding.store, binding.transform.clone()))
+            .collect()
     })
 }
 
@@ -238,6 +284,16 @@ mod diagnostics_channel_tests {
         assert_eq!(snapshot, vec![70, 80]);
         assert_eq!(diagnostics_snapshot::<usize>(handle).1, vec![80]);
         assert!(!diagnostics_unsubscribe::<usize>(&string("missing"), 8));
+        assert!(!diagnostics_chan_has_subscribers::<usize>(diagnostics_channel::<usize>(&string("bound"))));
+        let bound = diagnostics_channel::<usize>(&string("bound"));
+        diagnostics_bind_store(bound, 3.0, Some(30_usize));
+        assert!(diagnostics_chan_has_subscribers::<usize>(bound));
+        assert_eq!(diagnostics_bindings::<usize>(bound), vec![(3.0, Some(30))]);
+        diagnostics_bind_store(bound, 3.0, Some(31_usize));
+        assert_eq!(diagnostics_bindings::<usize>(bound), vec![(3.0, Some(31))]);
+        assert!(diagnostics_unbind_store::<usize>(bound, 3.0));
+        assert!(!diagnostics_unbind_store::<usize>(bound, 3.0));
+        assert!(!diagnostics_chan_has_subscribers::<usize>(bound));
         diagnostics_finish();
     }
 

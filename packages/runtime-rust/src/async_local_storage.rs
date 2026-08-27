@@ -86,6 +86,15 @@ pub fn async_local_run<D: 'static>(handle: f64, value: D) -> JsAsyncContextGuard
     async_context_install(next)
 }
 
+pub fn async_local_run_many<D: 'static>(entries: Vec<(f64, D)>) -> JsAsyncContextGuard {
+    let mut next = async_context_capture();
+    for (handle, value) in entries {
+        let id = async_local_id::<D>(handle);
+        next.values.insert(id, Rc::new(value));
+    }
+    async_context_install(next)
+}
+
 pub fn async_local_exit<D: 'static>(handle: f64) -> JsAsyncContextGuard {
     let id = async_local_id::<D>(handle);
     let mut next = async_context_capture();

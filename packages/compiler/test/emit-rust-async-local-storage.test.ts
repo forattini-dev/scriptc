@@ -8,9 +8,12 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust AsyncLocalStorage matches Node", async () => {
-  const fixture = resolve("tests/corpus/2213-async-local-storage.cjs");
-  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-local-storage-"));
+test.each([
+  "2213-async-local-storage.cjs",
+  "2214-dc-bind-store.cjs",
+])("Rust async context matches Node: %s", async (fixtureName) => {
+  const fixture = resolve("tests/corpus", fixtureName);
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-context-"));
   const result = await compile(fixture, {
     outDir: dir,
     outPath: join(dir, "program"),
