@@ -11,6 +11,12 @@ struct ReadablePipe {
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
+#[derive(Clone)]
+pub enum ReadableChunk {
+    Bytes(JsBytes<u8>),
+    String(JsString),
+}
+
 pub struct ReadableData<L, R>
 where
     L: Clone + Trace + 'static,
@@ -20,7 +26,9 @@ where
     read_callback: Option<R>,
     destroy_callback: Option<R>,
     errored: Option<JsError>,
-    chunks: VecDeque<JsBytes<u8>>,
+    chunks: VecDeque<ReadableChunk>,
+    encoding: Option<JsString>,
+    decoder_pending: f64,
     push_encoding: Option<JsString>,
     buffered_length: usize,
     high_water_mark: usize,
@@ -59,7 +67,9 @@ where
             error.trace(tracer);
         }
         for chunk in &self.chunks {
-            tracer.edge(chunk);
+            if let ReadableChunk::Bytes(bytes) = chunk {
+                tracer.edge(bytes);
+            }
         }
         for pipe in &self.pipes {
             (pipe.trace)(tracer);
@@ -79,6 +89,8 @@ where
         self.destroy_callback = None;
         self.errored = None;
         self.chunks.clear();
+        self.encoding = None;
+        self.decoder_pending = 0.0;
         self.push_encoding = None;
         self.buffered_length = 0;
         self.pipes.clear();
@@ -116,6 +128,8 @@ where
         destroy_callback,
         errored: None,
         chunks: VecDeque::new(),
+        encoding: None,
+        decoder_pending: 0.0,
         push_encoding: None,
         buffered_length: 0,
         high_water_mark,
@@ -183,8 +197,18 @@ where
             data.push_after_eof = true;
             return false;
         }
-        data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
-        data.chunks.push_back(chunk);
+        if let Some(encoding) = &data.encoding {
+            let text = string_decoder_write(encoding, data.decoder_pending, &chunk);
+            data.decoder_pending = string_decoder_next(encoding, data.decoder_pending, &chunk);
+            let length = text.encode_utf16().count();
+            if length > 0 {
+                data.buffered_length = data.buffered_length.saturating_add(length);
+                data.chunks.push_back(ReadableChunk::String(text));
+            }
+        } else {
+            data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
+            data.chunks.push_back(ReadableChunk::Bytes(chunk));
+        }
         data.buffered_length < data.high_water_mark
     })
 }
@@ -221,12 +245,69 @@ pub fn readable_set_push_encoding<L, R>(
     readable.with_mut(|data| data.push_encoding = Some(encoding.clone()));
 }
 
+pub fn readable_set_encoding<L, R>(readable: &JsReadable<L, R>, encoding: &JsString)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        let previous_encoding = data.encoding.clone();
+        let mut content = None;
+        let old_chunks = std::mem::take(&mut data.chunks);
+        let mut pending = 0.0;
+        for chunk in old_chunks {
+            let piece = match chunk {
+                ReadableChunk::Bytes(bytes) => {
+                    let piece = string_decoder_write(encoding, pending, &bytes);
+                    pending = string_decoder_next(encoding, pending, &bytes);
+                    piece
+                }
+                ReadableChunk::String(text) => text,
+            };
+            if piece.is_empty() {
+                continue;
+            }
+            content = Some(match content {
+                Some(previous) => string_concat(&previous, &piece),
+                None => piece,
+            });
+        }
+        if let Some(previous) = previous_encoding {
+            let tail = string_decoder_end(&previous, data.decoder_pending);
+            if !tail.is_empty() {
+                content = Some(match content {
+                    Some(previous) => string_concat(&previous, &tail),
+                    None => tail,
+                });
+            }
+        }
+        data.encoding = Some(encoding.clone());
+        data.decoder_pending = pending;
+        data.buffered_length = 0;
+        if let Some(content) = content {
+            data.buffered_length = content.encode_utf16().count();
+            data.chunks.push_back(ReadableChunk::String(content));
+        }
+    });
+}
+
 pub fn readable_push_null<L, R>(readable: &JsReadable<L, R>) -> bool
 where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    readable.with_mut(|data| data.eof = true);
+    readable.with_mut(|data| {
+        if let Some(encoding) = &data.encoding {
+            let tail = string_decoder_end(encoding, data.decoder_pending);
+            data.decoder_pending = 0.0;
+            let length = tail.encode_utf16().count();
+            if length > 0 {
+                data.buffered_length = data.buffered_length.saturating_add(length);
+                data.chunks.push_back(ReadableChunk::String(tail));
+            }
+        }
+        data.eof = true;
+    });
     false
 }
 
@@ -236,8 +317,21 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| {
-        data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
-        data.chunks.push_front(chunk);
+        if let Some(encoding) = &data.encoding {
+            let mut text = string_decoder_write(encoding, 0.0, &chunk);
+            let tail = string_decoder_end(encoding, string_decoder_next(encoding, 0.0, &chunk));
+            if !tail.is_empty() {
+                text = string_concat(&text, &tail);
+            }
+            let length = text.encode_utf16().count();
+            if length > 0 {
+                data.buffered_length = data.buffered_length.saturating_add(length);
+                data.chunks.push_front(ReadableChunk::String(text));
+            }
+        } else {
+            data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
+            data.chunks.push_front(ReadableChunk::Bytes(chunk));
+        }
     });
 }
 
@@ -246,14 +340,17 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    let (available, eof) = readable.with_mut(|data| {
+    let (available, eof, encoded) = readable.with_mut(|data| {
         // Node clears emittedReadable for every read except read(0).
         // The absent read() form arrives as -1 and therefore clears too.
         if size != 0.0 {
             data.emitted_readable = false;
         }
-        (data.buffered_length, data.eof)
+        (data.buffered_length, data.eof, data.encoding.is_some())
     });
+    if encoded {
+        throw_error("read() on a stream with an encoding set is not supported yet (consume 'data' events, which deliver strings)".to_owned());
+    }
     if available == 0 {
         return None;
     }
@@ -270,14 +367,16 @@ where
     let mut pieces = Vec::new();
     readable.with_mut(|data| {
         while remaining > 0 {
-            let chunk = data.chunks.pop_front().expect("scriptc: Readable length without chunks");
+            let ReadableChunk::Bytes(chunk) = data.chunks.pop_front().expect("scriptc: Readable length without chunks") else {
+                unreachable!("scriptc: encoded Readable reached byte read");
+            };
             let length = bytes_len(&chunk) as usize;
             if length <= remaining {
                 remaining -= length;
                 pieces.push(chunk);
             } else {
                 pieces.push(bytes_slice(&chunk, 0.0, remaining as f64, false));
-                data.chunks.push_front(bytes_slice(&chunk, remaining as f64, length as f64, false));
+                data.chunks.push_front(ReadableChunk::Bytes(bytes_slice(&chunk, remaining as f64, length as f64, false)));
                 remaining = 0;
             }
         }
@@ -427,14 +526,18 @@ where
     readable.with_mut(|data| data.draining = false);
 }
 
-pub fn readable_pop<L, R>(readable: &JsReadable<L, R>) -> Option<JsBytes<u8>>
+pub fn readable_pop<L, R>(readable: &JsReadable<L, R>) -> Option<ReadableChunk>
 where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| {
         let chunk = data.chunks.pop_front()?;
-        data.buffered_length = data.buffered_length.saturating_sub(bytes_len(&chunk) as usize);
+        let length = match &chunk {
+            ReadableChunk::Bytes(bytes) => bytes_len(bytes) as usize,
+            ReadableChunk::String(text) => text.encode_utf16().count(),
+        };
+        data.buffered_length = data.buffered_length.saturating_sub(length);
         Some(chunk)
     })
 }

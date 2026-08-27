@@ -51,6 +51,9 @@ export class RustEventEmitterEmitter {
       this.context.line("RuntimeVoid(std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>),");
       this.context.line("RuntimeError(std::rc::Rc<dyn Fn(runtime::JsError)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>),");
     }
+    if (this.context.streams.usesStreamConsumers) {
+      this.context.line("RuntimeData(std::rc::Rc<dyn Fn(Option<runtime::JsBytes<u8>>, Option<runtime::JsString>)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>),");
+    }
     for (const shape of this.context.listenerShapes.values()) {
       this.context.line(`${this.listenerVariant(shape)}(runtime::Gc<${this.context.closureName(shape)}>),`);
     }
@@ -65,6 +68,9 @@ export class RustEventEmitterEmitter {
     this.context.line("Self::Never => {},");
     if (this.context.streams.usesStreamFinished) {
       this.context.line("Self::RuntimeVoid(_, trace) | Self::RuntimeError(_, trace) => trace(tracer),");
+    }
+    if (this.context.streams.usesStreamConsumers) {
+      this.context.line("Self::RuntimeData(_, trace) => trace(tracer),");
     }
     for (const shape of this.context.listenerShapes.values()) {
       this.context.line(`Self::${this.listenerVariant(shape)}(callback) => tracer.edge(callback),`);
@@ -174,6 +180,9 @@ export class RustEventEmitterEmitter {
       case "readable.unpipe": return this.emitUnpipe(expr);
       case "sp.finished": return this.streamPromises.emitFinished(expr);
       case "sp.pipeline": return this.emitPromisePipeline(expr);
+      case "sc.text":
+      case "sc.json":
+      case "sc.buffer": return this.streamPromises.emitConsumer(expr);
       default: return this.transform.emitLibCall(expr) ?? this.duplex.emitLibCall(expr) ??
         this.readable.emitLibCall(expr) ?? this.writable.emitLibCall(expr);
     }

@@ -59,6 +59,7 @@ export class RustTransformEmitter {
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
       case "readable.pushNull": return this.emitPushNull(expr);
+      case "readable.setEncoding": return this.emitSetEncoding(expr);
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
       case "writable.end": return this.emitEnd(expr);
@@ -93,6 +94,7 @@ export class RustTransformEmitter {
 
   private emitEventHelpers(loc: SrcLoc): void {
     const byteArms: string[] = [];
+    const stringArms: string[] = [];
     const voidArms: string[] = [];
     const errorArms: string[] = [];
     for (const shape of this.context.listenerShapes.values()) {
@@ -105,10 +107,18 @@ export class RustTransformEmitter {
         const chunk = `${this.context.dynTypeName()}::Buffer(sc_chunk.clone())`;
         const call = this.context.emitClosureDispatch("callback", shape.type, [chunk], loc);
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
+        const text = `${this.context.dynTypeName()}::String(sc_chunk.clone())`;
+        const stringCall = this.context.emitClosureDispatch("callback", shape.type, [text], loc);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${stringCall}; },`);
+      }
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "string") {
+        const call = this.context.emitClosureDispatch("callback", shape.type, ["sc_chunk.clone()"], loc);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
       }
       if (shape.type.params.length === 0) {
         const call = this.context.emitClosureDispatch("callback", shape.type, [], loc);
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
       }
       if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "object" &&
@@ -121,13 +131,24 @@ export class RustTransformEmitter {
       voidArms.push("ScEmitterListener::RuntimeVoid(callback, _) => callback(),");
       errorArms.push("ScEmitterListener::RuntimeError(callback, _) => callback(sc_error.clone()),");
     }
+    if (this.context.streams.usesStreamConsumers) {
+      byteArms.push("ScEmitterListener::RuntimeData(callback, _) => callback(Some(sc_chunk.clone()), None),");
+      stringArms.push("ScEmitterListener::RuntimeData(callback, _) => callback(None, Some(sc_chunk.clone())),");
+    }
     byteArms.push("_ => unreachable!(\"scriptc invariant: Transform data listener signature\"),");
+    stringArms.push("_ => unreachable!(\"scriptc invariant: Transform string data listener signature\"),");
     voidArms.push("_ => unreachable!(\"scriptc invariant: Transform lifecycle listener signature\"),");
     errorArms.push("_ => unreachable!(\"scriptc invariant: Transform error listener signature\"),");
     this.context.line("fn sc_transform_emit_data(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>) {");
     this.context.pushIndent();
     this.emitEventLoop("data", byteArms);
     this.context.line("runtime::readable_write_pipes(&runtime::transform_readable(sc_transform), sc_chunk);");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_transform_emit_string(sc_transform: &ScTransform, sc_chunk: runtime::JsString) {");
+    this.context.pushIndent();
+    this.emitEventLoop("data", stringArms);
+    this.context.line("runtime::readable_write_pipes(&runtime::transform_readable(sc_transform), runtime::buffer_from_string(&sc_chunk, &runtime::string(\"utf8\")));");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_transform_emit_void(sc_transform: &ScTransform, sc_event: &str) {");
@@ -149,7 +170,7 @@ export class RustTransformEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_transform_destroy_pipeline(sc_transform: &ScTransform, sc_error: runtime::JsError) { let sc_readable = runtime::transform_readable(sc_transform); let sc_writable = runtime::transform_writable(sc_transform); let sc_readable_changed = runtime::readable_destroy(&sc_readable, Some(sc_error.clone())); let sc_writable_changed = runtime::writable_destroy(&sc_writable, Some(sc_error.clone())); if sc_readable_changed || sc_writable_changed { let sc_transform = sc_transform.clone(); runtime::process_next_tick(Box::new(move || { sc_transform_emit_error(&sc_transform, sc_error); sc_transform_emit_void(&sc_transform, \"close\"); })); } }");
-    this.context.line("fn sc_transform_emit_output(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>) { let sc_readable = runtime::transform_readable(sc_transform); let _ = runtime::readable_push(&sc_readable, sc_chunk); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_transform_emit_data(sc_transform, sc_chunk); } } }");
+    this.context.line("fn sc_transform_emit_output(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>) { let sc_readable = runtime::transform_readable(sc_transform); let _ = runtime::readable_push(&sc_readable, sc_chunk); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_transform_emit_data(sc_transform, value), runtime::ReadableChunk::String(value) => sc_transform_emit_string(sc_transform, value), } } } }");
   }
 
   private emitEventLoop(event: string, arms: readonly string[], dynamic = false): void {
@@ -164,7 +185,7 @@ export class RustTransformEmitter {
   }
 
   private emitReadableHelpers(): void {
-    this.context.line("fn sc_transform_read_drain(sc_transform: ScTransform) { let sc_readable = runtime::transform_readable(&sc_transform); runtime::readable_begin_drain(&sc_readable); if runtime::readable_take_resume(&sc_readable, false) { sc_transform_emit_void(&sc_transform, \"resume\"); } if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_transform_emit_data(&sc_transform, sc_chunk); runtime::readable_end_drain(&sc_readable); sc_transform_read_schedule(&sc_transform); return; } if runtime::readable_take_end(&sc_readable) { sc_transform_emit_void(&sc_transform, \"end\"); runtime::readable_end_pipes(&sc_readable); let sc_duplex = runtime::transform_duplex(&sc_transform); if runtime::duplex_take_close(&sc_duplex) { sc_transform_emit_void(&sc_transform, \"close\"); } runtime::readable_end_drain(&sc_readable); return; } runtime::readable_end_drain(&sc_readable); }");
+    this.context.line("fn sc_transform_read_drain(sc_transform: ScTransform) { let sc_readable = runtime::transform_readable(&sc_transform); runtime::readable_begin_drain(&sc_readable); if runtime::readable_take_resume(&sc_readable, false) { sc_transform_emit_void(&sc_transform, \"resume\"); } if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_transform_emit_data(&sc_transform, value), runtime::ReadableChunk::String(value) => sc_transform_emit_string(&sc_transform, value), } runtime::readable_end_drain(&sc_readable); sc_transform_read_schedule(&sc_transform); return; } if runtime::readable_take_end(&sc_readable) { sc_transform_emit_void(&sc_transform, \"end\"); runtime::readable_end_pipes(&sc_readable); let sc_duplex = runtime::transform_duplex(&sc_transform); if runtime::duplex_take_close(&sc_duplex) { sc_transform_emit_void(&sc_transform, \"close\"); } runtime::readable_end_drain(&sc_readable); return; } runtime::readable_end_drain(&sc_readable); }");
     this.context.line("fn sc_transform_read_schedule(sc_transform: &ScTransform) { let sc_readable = runtime::transform_readable(sc_transform); if runtime::readable_schedule(&sc_readable) { let sc_transform = sc_transform.clone(); runtime::process_next_tick(Box::new(move || sc_transform_read_drain(sc_transform))); } }");
     this.context.line("fn sc_transform_start_flowing(sc_transform: &ScTransform) { let sc_readable = runtime::transform_readable(sc_transform); runtime::readable_start_flowing(&sc_readable); sc_transform_read_schedule(sc_transform); }");
   }
@@ -319,7 +340,18 @@ export class RustTransformEmitter {
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     const converted = stringChunk ? `runtime::buffer_from_string(&${values[1]}, &runtime::string("utf8"))` : values[1];
-    return `{ ${this.bind(expr.args, values)} let sc_readable = runtime::transform_readable(&${values[0]}); let sc_result = runtime::readable_push(&sc_readable, ${converted}); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_transform_emit_data(&${values[0]}, sc_chunk); } } sc_result }`;
+    return `{ ${this.bind(expr.args, values)} let sc_readable = runtime::transform_readable(&${values[0]}); let sc_result = runtime::readable_push(&sc_readable, ${converted}); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_transform_emit_data(&${values[0]}, value), runtime::ReadableChunk::String(value) => sc_transform_emit_string(&${values[0]}, value), } } } sc_result }`;
+  }
+
+  private emitSetEncoding(expr: RustLibCallExpr): string {
+    const [receiver, encoding] = expr.args;
+    if (!this.isTransform(receiver) || encoding?.type.kind !== "string" || expr.args.length !== 2 ||
+      expr.type.kind !== "object" ||
+      (expr.type.className !== "%Transform" && expr.type.className !== "%PassThrough")) {
+      this.context.unsupported("Transform setEncoding shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} runtime::readable_set_encoding(&runtime::transform_readable(&${values[0]}), &${values[1]}); ${values[0]} }`;
   }
 
   private emitPushNull(expr: RustLibCallExpr): string {

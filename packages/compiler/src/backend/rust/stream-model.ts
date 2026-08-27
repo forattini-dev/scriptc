@@ -15,6 +15,7 @@ export class RustStreamModel {
   usesWritableDestroy = false;
   usesStreamFinished = false;
   usesStreamPipeline = false;
+  usesStreamConsumers = false;
   readonly readableReadShapes = new Map<string, RustClosureShape>();
   readonly readableDestroyShapes = new Map<string, RustClosureShape>();
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
@@ -45,6 +46,12 @@ export class RustStreamModel {
       for (const arg of (node.args as StreamArgument[] | undefined)?.slice(1) ?? []) {
         this.markStreamType(arg.type, true);
       }
+      return true;
+    }
+    if (node.fn === "sc.text" || node.fn === "sc.json" || node.fn === "sc.buffer") {
+      this.usesStreamFinished = true;
+      this.usesStreamConsumers = true;
+      this.markStreamType((node.args as StreamArgument[] | undefined)?.[0]?.type, false);
       return true;
     }
     if (node.fn === "stream.destroy" || node.fn === "stream.destroyErr") {

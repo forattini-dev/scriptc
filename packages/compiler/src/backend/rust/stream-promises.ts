@@ -5,6 +5,7 @@ type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 
 export interface RustStreamPromiseContext {
   readonly streams: RustStreamModel;
+  dynTypeName(): string;
   emitExpr(expr: IrExpr): string;
   line(value: string): void;
   nextTemporary(): string;
@@ -30,6 +31,7 @@ export class RustStreamPromiseEmitter {
     this.emitStreamHelpers();
     this.emitFinishedHelper();
     if (this.context.streams.usesStreamPipeline) this.emitPipelineHelper();
+    if (this.context.streams.usesStreamConsumers) this.emitConsumerHelpers();
   }
 
   emitFinished(expr: RustLibCallExpr): string {
@@ -39,6 +41,18 @@ export class RustStreamPromiseEmitter {
       this.context.unsupported("stream/promises finished shape", expr.loc);
     }
     return `sc_stream_promise_finished(${this.streamValue(stream.type, this.context.emitExpr(stream), expr.loc)})`;
+  }
+
+  emitConsumer(expr: RustLibCallExpr): string {
+    const stream = expr.args[0];
+    if (stream === undefined || expr.args.length !== 1 || expr.type.kind !== "promise") {
+      this.context.unsupported("stream consumer shape", expr.loc);
+    }
+    const expected = expr.fn === "sc.text" ? "string" : expr.fn === "sc.json" ? "dyn" : "bytes";
+    if (expr.type.inner.kind !== expected) this.context.unsupported("stream consumer result", expr.loc);
+    const value = this.streamValue(stream.type, this.context.emitExpr(stream), expr.loc);
+    const helper = expr.fn === "sc.text" ? "text" : expr.fn === "sc.json" ? "json" : "buffer";
+    return `sc_stream_consume_${helper}(${value})`;
   }
 
   streamValue(type: IrType, value: string, loc: SrcLoc): string {
@@ -115,6 +129,38 @@ export class RustStreamPromiseEmitter {
     this.context.line("promise");
     this.context.popIndent();
     this.context.line("}");
+  }
+
+  private emitConsumerHelpers(): void {
+    this.context.line("fn sc_stream_resume_consumer(stream: &ScStream) { match stream {");
+    this.context.pushIndent();
+    if (this.context.streams.usesReadable) this.context.line("ScStream::Readable(value) => { runtime::readable_resume(value); sc_readable_schedule(value); },");
+    if (this.context.streams.usesWritable) this.context.line("ScStream::Writable(_) => runtime::throw_type_error(\"stream is not async iterable\".to_owned()),");
+    if (this.context.streams.usesDuplex) this.context.line("ScStream::Duplex(value) => { let readable = runtime::duplex_readable(value); runtime::readable_resume(&readable); sc_duplex_read_schedule(value); },");
+    if (this.context.streams.usesTransform) this.context.line("ScStream::Transform(value) => { let readable = runtime::transform_readable(value); runtime::readable_resume(&readable); sc_transform_read_schedule(value); },");
+    this.context.popIndent();
+    this.context.line("} }");
+    this.context.line("fn sc_stream_consume<T: runtime::HeapValue>(stream: ScStream, convert: std::rc::Rc<dyn Fn(Vec<runtime::JsBytes<u8>>) -> T>) -> runtime::JsPromise<T> {");
+    this.context.pushIndent();
+    this.context.line("let promise = runtime::promise_new::<T>();");
+    this.context.line("let chunks = std::rc::Rc::new(std::cell::RefCell::new(Vec::<runtime::JsBytes<u8>>::new()));");
+    this.context.line("let identity = std::rc::Rc::as_ptr(&chunks) as usize;");
+    this.context.line("let emitter = sc_stream_emitter(&stream);");
+    this.context.line("let target = promise.clone();");
+    this.context.line("let target_trace = promise.clone();");
+    this.context.line("let finish_chunks = chunks.clone();");
+    this.context.line("let finish_chunks_trace = chunks.clone();");
+    this.context.line("let finish_emitter = emitter.clone();");
+    this.context.line("sc_stream_finished(stream.clone(), std::rc::Rc::new(move |_, error| { let _ = runtime::emitter_off(&finish_emitter, &runtime::string(\"data\"), identity); if let Some(error) = error { let _ = runtime::promise_reject(&target, runtime::caught_value(error)); return; } let values = std::mem::take(&mut *finish_chunks.borrow_mut()); let guard = target.clone(); runtime::promise_run_segment(&guard, || { let value = convert(values); let _ = runtime::promise_fulfill(&target, value); }); }), std::rc::Rc::new(move |tracer| { tracer.edge(&target_trace); for chunk in finish_chunks_trace.borrow().iter() { tracer.edge(chunk); } }));");
+    this.context.line("runtime::emitter_on(&emitter, runtime::string(\"data\"), ScEmitterListener::RuntimeData(std::rc::Rc::new({ let chunks = chunks.clone(); move |bytes, text| { if let Some(bytes) = bytes { chunks.borrow_mut().push(bytes); } else if let Some(text) = text { chunks.borrow_mut().push(runtime::buffer_from_string(&text, &runtime::string(\"utf8\"))); } } }), std::rc::Rc::new(move |tracer| { for chunk in chunks.borrow().iter() { tracer.edge(chunk); } })), identity, false, false);");
+    this.context.line("sc_stream_resume_consumer(&stream);");
+    this.context.line("promise");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_stream_consume_bytes(chunks: Vec<runtime::JsBytes<u8>>) -> runtime::JsBytes<u8> { runtime::buffer_concat(&runtime::array_new(chunks)) }");
+    this.context.line("fn sc_stream_consume_text(stream: ScStream) -> runtime::JsPromise<runtime::JsString> { sc_stream_consume(stream, std::rc::Rc::new(|chunks| runtime::bytes_to_string(&sc_stream_consume_bytes(chunks), &runtime::string(\"utf8\")))) }");
+    this.context.line(`fn sc_stream_consume_json(stream: ScStream) -> runtime::JsPromise<${this.context.dynTypeName()}> { sc_stream_consume(stream, std::rc::Rc::new(|chunks| runtime::json_parse_typed::<${this.context.dynTypeName()}>(&runtime::bytes_to_string(&sc_stream_consume_bytes(chunks), &runtime::string("utf8"))))) }`);
+    this.context.line("fn sc_stream_consume_buffer(stream: ScStream) -> runtime::JsPromise<runtime::JsBytes<u8>> { sc_stream_consume(stream, std::rc::Rc::new(sc_stream_consume_bytes)) }");
   }
 
   private variants(): string[] {

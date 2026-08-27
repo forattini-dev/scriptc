@@ -55,6 +55,7 @@ export class RustDuplexEmitter {
       case "duplex.new": return this.emitNew(expr);
       case "readable.pushStr": return duplexReceiver ? this.emitPushString(expr) : null;
       case "readable.pushNull": return duplexReceiver ? this.emitPushNull(expr) : null;
+      case "readable.setEncoding": return duplexReceiver ? this.emitSetEncoding(expr) : null;
       case "writable.writeStr": return duplexReceiver ? this.emitWriteString(expr) : null;
       case "writable.end": return duplexReceiver ? this.emitEnd(expr) : null;
       case "stream.prop": return duplexReceiver ? this.emitProp(expr) : null;
@@ -92,6 +93,7 @@ export class RustDuplexEmitter {
 
   private emitEventHelpers(loc: SrcLoc): void {
     const byteArms: string[] = [];
+    const stringArms: string[] = [];
     const voidArms: string[] = [];
     const errorArms: string[] = [];
     for (const shape of this.context.listenerShapes.values()) {
@@ -104,10 +106,18 @@ export class RustDuplexEmitter {
         const chunk = `${this.context.dynTypeName()}::Buffer(sc_chunk.clone())`;
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, [chunk], loc);
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
+        const text = `${this.context.dynTypeName()}::String(sc_chunk.clone())`;
+        const stringDispatch = this.context.emitClosureDispatch("callback", shape.type, [text], loc);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${stringDispatch}; },`);
+      }
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "string") {
+        const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_chunk.clone()"], loc);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
       if (shape.type.params.length === 0) {
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, [], loc);
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
+        stringArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
       if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "object" &&
@@ -120,13 +130,24 @@ export class RustDuplexEmitter {
       voidArms.push("ScEmitterListener::RuntimeVoid(callback, _) => callback(),");
       errorArms.push("ScEmitterListener::RuntimeError(callback, _) => callback(sc_error.clone()),");
     }
+    if (this.context.streams.usesStreamConsumers) {
+      byteArms.push("ScEmitterListener::RuntimeData(callback, _) => callback(Some(sc_chunk.clone()), None),");
+      stringArms.push("ScEmitterListener::RuntimeData(callback, _) => callback(None, Some(sc_chunk.clone())),");
+    }
     byteArms.push("_ => unreachable!(\"scriptc invariant: Duplex data listener signature\"),");
+    stringArms.push("_ => unreachable!(\"scriptc invariant: Duplex string data listener signature\"),");
     voidArms.push("_ => unreachable!(\"scriptc invariant: Duplex lifecycle listener signature\"),");
     errorArms.push("_ => unreachable!(\"scriptc invariant: Duplex error listener signature\"),");
     this.context.line("fn sc_duplex_emit_data(sc_duplex: &ScDuplex, sc_chunk: runtime::JsBytes<u8>) {");
     this.context.pushIndent();
     this.emitEventLoop("sc_duplex", "data", byteArms);
     this.context.line("runtime::readable_write_pipes(&runtime::duplex_readable(sc_duplex), sc_chunk);");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_duplex_emit_string(sc_duplex: &ScDuplex, sc_chunk: runtime::JsString) {");
+    this.context.pushIndent();
+    this.emitEventLoop("sc_duplex", "data", stringArms);
+    this.context.line("runtime::readable_write_pipes(&runtime::duplex_readable(sc_duplex), runtime::buffer_from_string(&sc_chunk, &runtime::string(\"utf8\")));");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_duplex_emit_void(sc_duplex: &ScDuplex, sc_event: &str) {");
@@ -182,7 +203,7 @@ export class RustDuplexEmitter {
     this.context.line("let sc_readable = runtime::duplex_readable(&sc_duplex);");
     this.context.line("runtime::readable_begin_drain(&sc_readable);");
     this.context.line("if runtime::readable_take_resume(&sc_readable, false) { sc_duplex_emit_void(&sc_duplex, \"resume\"); }");
-    this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_duplex_emit_data(&sc_duplex, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_duplex_emit_void(&sc_duplex, \"resume\"); } runtime::readable_end_drain(&sc_readable); sc_duplex_read_schedule(&sc_duplex); return; }");
+    this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_duplex_emit_data(&sc_duplex, value), runtime::ReadableChunk::String(value) => sc_duplex_emit_string(&sc_duplex, value), } if runtime::readable_take_resume(&sc_readable, true) { sc_duplex_emit_void(&sc_duplex, \"resume\"); } runtime::readable_end_drain(&sc_readable); sc_duplex_read_schedule(&sc_duplex); return; }");
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
     this.context.line("if runtime::readable_take_end(&sc_readable) { sc_duplex_emit_void(&sc_duplex, \"end\"); runtime::readable_end_pipes(&sc_readable); if runtime::duplex_take_close(&sc_duplex) { sc_duplex_emit_void(&sc_duplex, \"close\"); } runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("sc_duplex_call_read(&sc_duplex, &sc_readable);");
@@ -262,6 +283,16 @@ export class RustDuplexEmitter {
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     return `{ ${this.bind(expr.args, values)} let sc_readable = runtime::duplex_readable(&${values[0]}); let sc_result = runtime::readable_push_string(&sc_readable, &${values[1]}); sc_duplex_read_schedule(&${values[0]}); sc_result }`;
+  }
+
+  private emitSetEncoding(expr: RustLibCallExpr): string {
+    const [receiver, encoding] = expr.args;
+    if (!this.isDuplex(receiver) || encoding?.type.kind !== "string" || expr.args.length !== 2 ||
+      expr.type.kind !== "object" || expr.type.className !== "%Duplex") {
+      this.context.unsupported("Duplex setEncoding shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} runtime::readable_set_encoding(&runtime::duplex_readable(&${values[0]}), &${values[1]}); ${values[0]} }`;
   }
 
   private emitPushNull(expr: RustLibCallExpr): string {

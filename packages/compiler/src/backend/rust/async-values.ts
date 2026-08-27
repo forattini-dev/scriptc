@@ -51,6 +51,10 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return expr.args;
     case "arrayLit":
       return expr.elems;
+    case "bytesIntrinsic":
+      return [expr.receiver, ...expr.args];
+    case "dynCheck":
+      return [expr.value];
     case "jsonStringify":
       return [expr.value];
     default:
