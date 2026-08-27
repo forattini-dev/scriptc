@@ -260,6 +260,8 @@ class RustDynamicInvokeEmitter {
   private emitStringArm(): void {
     this.open(`${this.dyn}::String(text) => {`);
     this.open("match method {");
+    this.context.line(`"toLowerCase" => ${this.dyn}::String(runtime::string_to_lower_case(text)),`);
+    this.context.line(`"toUpperCase" => ${this.dyn}::String(runtime::string_to_upper_case(text)),`);
     this.context.line(`"slice" => ${this.dyn}::String(runtime::string_slice(text, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, runtime::string_len(text), callee_name))),`);
     this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { runtime::string_len(text) + index } else { index }; if actual < 0.0 || actual >= runtime::string_len(text) { ${this.dyn}::Undefined } else { ${this.dyn}::String(runtime::string_at(text, index)) } },`);
     this.context.line(`"concat" => { let mut output = text.to_string(); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);

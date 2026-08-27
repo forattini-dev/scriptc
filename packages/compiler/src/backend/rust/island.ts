@@ -102,6 +102,14 @@ function emitOperation(
     const truthy = `sc_dyn_is_truthy(&(${emitExpr(argOf(expr, 0, context))}))`;
     return expr.op === "not" ? `!(${truthy})` : truthy;
   }
+  if (expr.op === "add" && expr.args.length === 2) {
+    const left = context.nextName("sc_island_left");
+    const right = context.nextName("sc_island_right");
+    const dyn = context.dynTypeName();
+    const numeric = (value: string): string =>
+      `matches!(&${value}, ${dyn}::Undefined | ${dyn}::Null | ${dyn}::Number(..) | ${dyn}::Boolean(..))`;
+    return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; if ${numeric(left)} && ${numeric(right)} { ${dyn}::Number(sc_dyn_to_number(&${left}) + sc_dyn_to_number(&${right})) } else { ${dyn}::String(runtime::string_concat(&sc_dyn_to_string(&${left}), &sc_dyn_to_string(&${right}))) } }`;
+  }
   if ((expr.op === "eq" || expr.op === "neq") && expr.args.length === 2) {
     const left = context.nextName("sc_island_left");
     const right = context.nextName("sc_island_right");
