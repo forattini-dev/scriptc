@@ -13,6 +13,7 @@ export interface RustTransformContext {
   popIndent(): void;
   nextTemporary(): string;
   emitExpr(expr: IrExpr): string;
+  dynTypeName(): string;
   closureName(shape: RustClosureShape): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
@@ -98,6 +99,11 @@ export class RustTransformEmitter {
       if (shape.type.rest === true) continue;
       if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "bytes") {
         const call = this.context.emitClosureDispatch("callback", shape.type, ["sc_chunk.clone()"], loc);
+        byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
+      }
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "dyn") {
+        const chunk = `${this.context.dynTypeName()}::Buffer(sc_chunk.clone())`;
+        const call = this.context.emitClosureDispatch("callback", shape.type, [chunk], loc);
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
       }
       if (shape.type.params.length === 0) {

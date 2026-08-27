@@ -990,6 +990,7 @@ test.each([
   "2602-dyn-array-destructure.js",
   "2603-island-keyed-write-dyn.js",
   "2613-for-init-uninitialized-let.ts",
+  "2628-stream-push-encodings.cjs",
   "2643-or-default-retag.ts",
   "2654-top-level-await-unrelated-rejection.ts",
   "2664-top-level-await-same-checkpoint-rejection.ts",

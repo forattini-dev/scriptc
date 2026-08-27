@@ -611,8 +611,8 @@ class RustEmitter {
       const node = value as Record<string, unknown>;
       if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("emitter.")) {
         this.usesEventEmitter = true;
-        if (node.fn === "emitter.on" || node.fn === "emitter.onData" || node.fn === "emitter.onDyn") {
-          const callback = (node.args as { type?: IrType }[] | undefined)?.[node.fn === "emitter.onDyn" ? 3 : 2];
+        if (node.fn === "emitter.on" || node.fn === "emitter.onData" || node.fn === "emitter.onDyn" || node.fn === "emitter.onDataDyn") {
+          const callback = (node.args as { type?: IrType }[] | undefined)?.[node.fn === "emitter.onDyn" || node.fn === "emitter.onDataDyn" ? 3 : 2];
           if (callback?.type?.kind !== "func") this.unsupported("malformed EventEmitter listener IR");
           const shape = this.ensureClosureShape(callback.type);
           this.emitterListenerShapes.set(typeKey(callback.type), shape);

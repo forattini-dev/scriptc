@@ -146,6 +146,7 @@ export class RustEventEmitterEmitter {
       case "emitter.off": return this.emitOff(expr);
       case "emitter.checkListener": return this.emitCheckListener(expr);
       case "emitter.onDyn": return this.emitOnDynamic(expr);
+      case "emitter.onDataDyn": return this.emitOnDynamic(expr, true);
       case "emitter.offDyn": return this.emitOffDynamic(expr);
       case "emitter.removeAll": return this.emitRemoveAll(expr);
       case "emitter.emit": return this.emitEvent(expr);
@@ -341,12 +342,7 @@ export class RustEventEmitterEmitter {
     const shape = this.listenerShape(callback.type, expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
     const startFlow = startsReadableFlow
-      ? receiver.type.kind === "object" && receiver.type.className === "%Duplex"
-        ? `sc_duplex_start_flowing(&${values[0]});`
-        : receiver.type.kind === "object" &&
-            (receiver.type.className === "%Transform" || receiver.type.className === "%PassThrough")
-          ? `sc_transform_start_flowing(&${values[0]});`
-          : `runtime::readable_start_flowing(&${values[0]}); sc_readable_schedule(&${values[0]});`
+      ? this.startReadableFlow(receiver.type, this.requiredValue(values, 0, expr.loc), expr.loc)
       : "";
     const scheduleReadable = receiver.type.kind === "object" && receiver.type.className === "%Readable" &&
       name.kind === "strLit" && name.value === "readable" ? `sc_readable_schedule_notification(&${values[0]});` : "";
@@ -381,7 +377,7 @@ export class RustEventEmitterEmitter {
     return `{ let ${value} = ${this.context.emitExpr(callback)}; if sc_dyn_function_identity(&${value}).is_none() { sc_dyn_arg_type_fail("listener", "of type function", &${value}); } () }`;
   }
 
-  private emitOnDynamic(expr: RustLibCallExpr): string {
+  private emitOnDynamic(expr: RustLibCallExpr, startsReadableFlow = false): string {
     const [receiver, name, callback, adapter, once, prepend] = expr.args;
     if (receiver === undefined || name?.type.kind !== "string" || callback?.type.kind !== "dyn" ||
       adapter?.type.kind !== "func" || once?.type.kind !== "bool" || prepend?.type.kind !== "bool" ||
@@ -390,7 +386,22 @@ export class RustEventEmitterEmitter {
     }
     const shape = this.listenerShape(adapter.type, expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[3]}), sc_identity, ${values[4]}, ${values[5]}); ${values[0]} }`;
+    const startFlow = startsReadableFlow
+      ? this.startReadableFlow(receiver.type, this.requiredValue(values, 0, expr.loc), expr.loc)
+      : "";
+    return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = sc_dyn_function_identity(&${values[2]}).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &${values[2]})); let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[3]}), sc_identity, ${values[4]}, ${values[5]}); ${startFlow} ${values[0]} }`;
+  }
+
+  private startReadableFlow(type: IrType, value: string, loc: SrcLoc): string {
+    if (type.kind !== "object") this.context.unsupported("stream data listener receiver", loc);
+    if (type.className === "%Readable") {
+      return `runtime::readable_start_flowing(&${value}); sc_readable_schedule(&${value});`;
+    }
+    if (type.className === "%Duplex") return `sc_duplex_start_flowing(&${value});`;
+    if (type.className === "%Transform" || type.className === "%PassThrough") {
+      return `sc_transform_start_flowing(&${value});`;
+    }
+    this.context.unsupported(`stream data listener receiver '${type.className}'`, loc);
   }
 
   private emitOffDynamic(expr: RustLibCallExpr): string {

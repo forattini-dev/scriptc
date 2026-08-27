@@ -21,6 +21,7 @@ where
     destroy_callback: Option<R>,
     errored: Option<JsError>,
     chunks: VecDeque<JsBytes<u8>>,
+    push_encoding: Option<JsString>,
     buffered_length: usize,
     high_water_mark: usize,
     flowing: Option<bool>,
@@ -78,6 +79,7 @@ where
         self.destroy_callback = None;
         self.errored = None;
         self.chunks.clear();
+        self.push_encoding = None;
         self.buffered_length = 0;
         self.pipes.clear();
     }
@@ -114,6 +116,7 @@ where
         destroy_callback,
         errored: None,
         chunks: VecDeque::new(),
+        push_encoding: None,
         buffered_length: 0,
         high_water_mark,
         flowing: None,
@@ -191,7 +194,31 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    readable_push(readable, buffer_from_string(chunk, &string("utf8")))
+    let encoding = readable.with(|data| data.push_encoding.clone());
+    let bytes = buffer_from_string(chunk, encoding.as_ref().unwrap_or(&string("utf8")));
+    readable_push(readable, bytes)
+}
+
+pub fn readable_push_string_encoding<L, R>(
+    readable: &JsReadable<L, R>,
+    chunk: &JsString,
+    encoding: &JsString,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable_push(readable, buffer_from_string(chunk, encoding))
+}
+
+pub fn readable_set_push_encoding<L, R>(
+    readable: &JsReadable<L, R>,
+    encoding: &JsString,
+) where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.push_encoding = Some(encoding.clone()));
 }
 
 pub fn readable_push_null<L, R>(readable: &JsReadable<L, R>) -> bool

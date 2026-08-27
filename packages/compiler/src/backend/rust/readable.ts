@@ -13,6 +13,7 @@ export interface RustReadableContext {
   popIndent(): void;
   nextTemporary(): string;
   emitExpr(expr: IrExpr): string;
+  dynTypeName(): string;
   closureName(shape: RustClosureShape): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
@@ -69,6 +70,11 @@ export class RustReadableEmitter {
       if (shape.type.rest === true) continue;
       if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "bytes") {
         const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_chunk.clone()"], loc);
+        byteArms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
+      }
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "dyn") {
+        const chunk = `${this.context.dynTypeName()}::Buffer(sc_chunk.clone())`;
+        const dispatch = this.context.emitClosureDispatch("callback", shape.type, [chunk], loc);
         byteArms.push(`ScEmitterListener::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
       if (shape.type.params.length === 0) {
@@ -156,7 +162,8 @@ export class RustReadableEmitter {
     this.context.pushIndent();
     this.context.line("runtime::readable_begin_drain(&sc_readable);");
     this.context.line("if runtime::readable_take_resume(&sc_readable, false) { sc_readable_emit_void(&sc_readable, \"resume\"); }");
-    this.context.line("if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { sc_readable_emit_data(&sc_readable, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_readable_emit_void(&sc_readable, \"resume\"); } runtime::readable_end_drain(&sc_readable); if runtime::readable_is_flowing(&sc_readable) { sc_readable_schedule(&sc_readable); } return; }");
+    this.context.line("while runtime::readable_is_flowing(&sc_readable) { let Some(sc_chunk) = runtime::readable_pop(&sc_readable) else { break; }; sc_readable_emit_data(&sc_readable, sc_chunk); if runtime::readable_take_resume(&sc_readable, true) { sc_readable_emit_void(&sc_readable, \"resume\"); } }");
+    this.context.line("if !runtime::readable_is_flowing(&sc_readable) { runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("if runtime::readable_take_push_after_eof(&sc_readable) { runtime::throw_error_code(\"stream.push() after EOF\".to_owned(), \"ERR_STREAM_PUSH_AFTER_EOF\"); }");
     this.context.line("if runtime::readable_take_end(&sc_readable) { sc_readable_emit_void(&sc_readable, \"end\"); runtime::readable_end_pipes(&sc_readable); sc_readable_emit_void(&sc_readable, \"close\"); runtime::readable_end_drain(&sc_readable); return; }");
     this.context.line("sc_readable_call_read(&sc_readable);");
@@ -185,6 +192,8 @@ export class RustReadableEmitter {
       case "readable.new": return this.emitNew(expr);
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
+      case "readable.pushStrEnc": return this.emitPushStringEncoding(expr);
+      case "readable.pushEncoding": return this.emitPushEncoding(expr);
       case "readable.pushU": return this.emitPushUnion(expr);
       case "readable.pushNull": return this.emitPushNull(expr);
       case "readable.read": return this.emitRead(expr);
@@ -251,6 +260,28 @@ export class RustReadableEmitter {
       ? `runtime::readable_push_string(&${values[0]}, &${values[1]})`
       : `runtime::readable_push(&${values[0]}, ${values[1]})`;
     return `{ ${this.bind(expr.args, values)} let sc_result = ${pushed}; sc_readable_schedule(&${values[0]}); sc_readable_schedule_notification(&${values[0]}); sc_result }`;
+  }
+
+  private emitPushStringEncoding(expr: RustLibCallExpr): string {
+    const [receiver, chunk, encoding] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      chunk?.type.kind !== "string" || encoding?.type.kind !== "string" ||
+      expr.args.length !== 3 || expr.type.kind !== "bool") {
+      this.context.unsupported("Readable encoded string push shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} let sc_result = runtime::readable_push_string_encoding(&${values[0]}, &${values[1]}, &${values[2]}); sc_readable_schedule(&${values[0]}); sc_readable_schedule_notification(&${values[0]}); sc_result }`;
+  }
+
+  private emitPushEncoding(expr: RustLibCallExpr): string {
+    const [receiver, encoding] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
+      encoding?.type.kind !== "string" || expr.args.length !== 2 ||
+      expr.type.kind !== "object" || expr.type.className !== "%Readable") {
+      this.context.unsupported("Readable default push encoding shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    return `{ ${this.bind(expr.args, values)} runtime::readable_set_push_encoding(&${values[0]}, &${values[1]}); ${values[0]} }`;
   }
 
   private emitPushNull(expr: RustLibCallExpr): string {
