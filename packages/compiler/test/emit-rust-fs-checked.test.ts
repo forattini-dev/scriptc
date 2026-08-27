@@ -8,8 +8,8 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust filesystem argument ladders match Node byte-for-byte", async () => {
-  const fixture = resolve("tests/corpus/2595-fs-arg-ladders.cjs");
+async function expectFsDifferential(relativePath: string): Promise<void> {
+  const fixture = resolve(relativePath);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-fs-checked-"));
   const result = await compile(fixture, {
     outDir: dir,
@@ -31,4 +31,10 @@ test("Rust filesystem argument ladders match Node byte-for-byte", async () => {
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
-});
+}
+
+test("Rust filesystem argument ladders match Node byte-for-byte", async () =>
+  expectFsDifferential("tests/corpus/2595-fs-arg-ladders.cjs"));
+
+test("Rust fs.rename checkJs callback receives Error or null", async () =>
+  expectFsDifferential("tests/corpus/2683-fs-rename-js.cjs"));

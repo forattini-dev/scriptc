@@ -286,16 +286,21 @@ export class RustFunctionValueEmitter {
     if (parameter === undefined) {
       invoke = `let _ = sc_error; ${this.emitClosureDispatch(callback, callbackType, [], expr.loc)};`;
     } else {
-      if (parameter.kind !== "union") this.context.unsupported("fs.rename callback error parameter", expr.loc);
-      const union = this.context.union(parameter.unionId, expr.loc);
-      const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
-      const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
-      if (errorTag < 0 || nullTag < 0) this.context.unsupported("fs.rename callback Error | null union", expr.loc);
-      const name = this.context.unionName(union.id);
-      const errorPayload = this.context.errorClassRoots().length === 0
-        ? "error"
-        : `${this.context.errorValueName()}::Builtin(error)`;
-      const argument = `match sc_error { Some(error) => ${name}::${this.context.unionVariant(errorTag)}(${errorPayload}), None => ${name}::${this.context.unionVariant(nullTag)}, }`;
+      let argument: string;
+      if (parameter.kind === "dyn") {
+        argument = `match sc_error { Some(error) => sc_dyn_error_box(&error), None => ${this.context.emitDynFromValue({ kind: "nullT" }, "()", expr.loc)}, }`;
+      } else {
+        if (parameter.kind !== "union") this.context.unsupported("fs.rename callback error parameter", expr.loc);
+        const union = this.context.union(parameter.unionId, expr.loc);
+        const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+        const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+        if (errorTag < 0 || nullTag < 0) this.context.unsupported("fs.rename callback Error | null union", expr.loc);
+        const name = this.context.unionName(union.id);
+        const errorPayload = this.context.errorClassRoots().length === 0
+          ? "error"
+          : `${this.context.errorValueName()}::Builtin(error)`;
+        argument = `match sc_error { Some(error) => ${name}::${this.context.unionVariant(errorTag)}(${errorPayload}), None => ${name}::${this.context.unionVariant(nullTag)}, }`;
+      }
       invoke = `let sc_argument = ${argument}; ${this.emitClosureDispatch(callback, callbackType, ["sc_argument"], expr.loc)};`;
     }
     return `{ let ${from} = ${this.context.emitExpr(fromExpr)}; let ${to} = ${this.context.emitExpr(toExpr)}; let ${callback} = ${this.context.emitExpr(callbackExpr)}; runtime::fs_rename_async(&${from}, &${to}, Box::new(move |sc_error| { ${invoke} })); }`;
