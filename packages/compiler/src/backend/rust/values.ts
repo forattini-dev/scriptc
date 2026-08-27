@@ -448,6 +448,7 @@ export class RustValueEmitter {
       case "string":
       case "array":
       case "bytes":
+      case "set":
       case "record":
       case "object":
       case "classval":
