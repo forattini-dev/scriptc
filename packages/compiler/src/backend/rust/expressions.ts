@@ -299,6 +299,8 @@ export class RustExpressionEmitter {
       }
       case "dynFrom":
         return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
+      case "dynFromJsval":
+        return this.emitExpr(expr.value);
       case "dynCall":
         return emitRustDynamicCall(expr, {
           dynTypeName: () => this.context.dynTypeName(),
