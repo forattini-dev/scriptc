@@ -66,6 +66,16 @@ pub fn error_new(name: &str, message: JsString) -> JsError {
     }
 }
 
+pub fn error_new_code(name: &str, message: JsString, code: &str) -> JsError {
+    JsError {
+        identity: Rc::new(()),
+        name: name.to_owned(),
+        message: message.to_string(),
+        code: Some(code.to_owned()),
+        dom: None,
+    }
+}
+
 #[derive(Clone)]
 pub struct Caught {
     value: Rc<dyn Any>,

@@ -1,4 +1,4 @@
-import type { IrExpr, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 import type { RustStreamModel } from "./stream-model.js";
@@ -17,6 +17,9 @@ export interface RustDuplexContext {
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   sourceLoc(): SrcLoc;
+  union(id: string, loc?: SrcLoc): IrUnionDef;
+  unionName(id: string): string;
+  unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -89,6 +92,7 @@ export class RustDuplexEmitter {
   private emitEventHelpers(loc: SrcLoc): void {
     const byteArms: string[] = [];
     const voidArms: string[] = [];
+    const errorArms: string[] = [];
     for (const shape of this.context.listenerShapes.values()) {
       if (shape.type.rest === true) continue;
       if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "bytes") {
@@ -100,9 +104,19 @@ export class RustDuplexEmitter {
         byteArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
         voidArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
+      if (shape.type.params.length === 1 && shape.type.params[0]?.kind === "object" &&
+        shape.type.params[0].className === "%Error") {
+        const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_error.clone()"], loc);
+        errorArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
+      }
+    }
+    if (this.context.streams.usesStreamFinished) {
+      voidArms.push("ScEmitterListener::RuntimeVoid(callback, _) => callback(),");
+      errorArms.push("ScEmitterListener::RuntimeError(callback, _) => callback(sc_error.clone()),");
     }
     byteArms.push("_ => unreachable!(\"scriptc invariant: Duplex data listener signature\"),");
     voidArms.push("_ => unreachable!(\"scriptc invariant: Duplex lifecycle listener signature\"),");
+    errorArms.push("_ => unreachable!(\"scriptc invariant: Duplex error listener signature\"),");
     this.context.line("fn sc_duplex_emit_data(sc_duplex: &ScDuplex, sc_chunk: runtime::JsBytes<u8>) {");
     this.context.pushIndent();
     this.emitEventLoop("sc_duplex", "data", byteArms);
@@ -114,6 +128,20 @@ export class RustDuplexEmitter {
     this.emitEventLoop("sc_duplex", "sc_event", voidArms, true);
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("fn sc_duplex_emit_error(sc_duplex: &ScDuplex, sc_error: runtime::JsError) {");
+    this.context.pushIndent();
+    this.context.line("let sc_emitter = runtime::duplex_emitter(sc_duplex);");
+    this.context.line("let sc_name = runtime::string(\"error\");");
+    this.context.line("let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &sc_name);");
+    this.context.line("if sc_snapshot.is_empty() { runtime::throw_value(sc_error); }");
+    this.context.line("for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &sc_name, sc_registration.registration); } match sc_registration.callback {");
+    this.context.pushIndent();
+    for (const arm of errorArms) this.context.line(arm);
+    this.context.popIndent();
+    this.context.line("} }");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_duplex_destroy_pipeline(sc_duplex: &ScDuplex, sc_error: runtime::JsError) { let sc_readable = runtime::duplex_readable(sc_duplex); let sc_writable = runtime::duplex_writable(sc_duplex); let sc_readable_changed = runtime::readable_destroy(&sc_readable, Some(sc_error.clone())); let sc_writable_changed = runtime::writable_destroy(&sc_writable, Some(sc_error.clone())); if sc_readable_changed || sc_writable_changed { let sc_duplex = sc_duplex.clone(); runtime::process_next_tick(Box::new(move || { sc_duplex_emit_error(&sc_duplex, sc_error); sc_duplex_emit_void(&sc_duplex, \"close\"); })); } }");
   }
 
   private emitEventLoop(receiver: string, event: string, arms: readonly string[], dynamic = false): void {
@@ -166,8 +194,12 @@ export class RustDuplexEmitter {
       const completionType = this.completionType(shape.type, loc);
       const completionShape = this.context.closureShapeForType(completionType, loc);
       const params = completionType.params.map((_, index) => `sc_arg_${index}`);
-      const ignored = params.length === 0 ? "" : `let _ = (${params.join(", ")});`;
-      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_duplex = sc_duplex.clone(); let sc_done = sc_done.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |${params.join(", ")}| { ${ignored} if sc_called.replace(true) { return; } let sc_writable = runtime::duplex_writable(&sc_duplex); runtime::writable_complete_write(&sc_writable, sc_length); sc_duplex_after_write(&sc_duplex, sc_done.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_duplex = sc_duplex.clone(); let sc_done = sc_done.clone(); move |tracer| { tracer.edge(&sc_duplex); runtime::Trace::trace(&sc_done, tracer); } })) })`;
+      const errorType = completionType.params[0];
+      const errorParam = params[0];
+      if (errorType === undefined || errorParam === undefined) this.context.unsupported("Duplex completion error", loc);
+      const completedError = this.errorOption(errorParam, errorType, loc);
+      const ignored = params.length <= 1 ? "" : `let _ = (${params.slice(1).join(", ")});`;
+      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_duplex = sc_duplex.clone(); let sc_done = sc_done.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |${params.join(", ")}| { ${ignored} if sc_called.replace(true) { return; } if let Some(sc_error) = ${completedError} { sc_duplex_destroy_pipeline(&sc_duplex, sc_error); return; } let sc_writable = runtime::duplex_writable(&sc_duplex); runtime::writable_complete_write(&sc_writable, sc_length); sc_duplex_after_write(&sc_duplex, sc_done.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_duplex = sc_duplex.clone(); let sc_done = sc_done.clone(); move |tracer| { tracer.edge(&sc_duplex); runtime::Trace::trace(&sc_done, tracer); } })) })`;
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, [
         "sc_duplex.clone()", "sc_chunk.clone()", "runtime::string(\"buffer\")", completion,
       ], loc);
@@ -269,6 +301,19 @@ export class RustDuplexEmitter {
     const completion = type.params.at(-1);
     if (completion?.kind !== "func") this.context.unsupported("Duplex completion callback shape", loc);
     return completion;
+  }
+
+  private errorOption(value: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind !== "union") this.context.unsupported("Duplex completion error union", loc);
+    const union = this.context.union(type.unionId, loc);
+    const name = this.context.unionName(union.id);
+    const arms = union.arms.map((arm, tag) => {
+      const variant = `${name}::${this.context.unionVariant(tag)}`;
+      if (arm.kind === "object" && arm.className === "%Error") return `${variant}(sc_error) => Some(sc_error)`;
+      if (arm.kind === "nullT" || arm.kind === "undefinedT") return `${variant} => None`;
+      this.context.unsupported(`Duplex completion error arm '${arm.kind}'`, loc);
+    });
+    return `match ${value} { ${arms.join(", ")} }`;
   }
 
   private bind(args: readonly IrExpr[], values: readonly string[]): string {

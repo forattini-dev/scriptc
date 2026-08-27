@@ -13,6 +13,8 @@ export class RustStreamModel {
   usesTransform = false;
   usesReadableDestroy = false;
   usesWritableDestroy = false;
+  usesStreamFinished = false;
+  usesStreamPipeline = false;
   readonly readableReadShapes = new Map<string, RustClosureShape>();
   readonly readableDestroyShapes = new Map<string, RustClosureShape>();
   readonly writableWriteShapes = new Map<string, RustClosureShape>();
@@ -32,6 +34,19 @@ export class RustStreamModel {
     unsupported: (kind: string) => never,
   ): boolean {
     if (node.kind !== "libCall") return false;
+    if (node.fn === "sp.finished" || node.fn === "stream.finished" || node.fn === "stream.finishedDyn") {
+      this.usesStreamFinished = true;
+      this.markStreamType((node.args as StreamArgument[] | undefined)?.[0]?.type, false);
+      return true;
+    }
+    if (node.fn === "sp.pipeline" || node.fn === "stream.pipeline" || node.fn === "stream.pipelineDyn") {
+      this.usesStreamFinished = true;
+      this.usesStreamPipeline = true;
+      for (const arg of (node.args as StreamArgument[] | undefined)?.slice(1) ?? []) {
+        this.markStreamType(arg.type, true);
+      }
+      return true;
+    }
     if (node.fn === "stream.destroy" || node.fn === "stream.destroyErr") {
       const receiver = (node.args as StreamArgument[] | undefined)?.[0]?.type;
       if (receiver?.kind === "object" && receiver.className === "%Readable") {
@@ -140,6 +155,21 @@ export class RustStreamModel {
       if (bit <= 1) this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
     }
     return true;
+  }
+
+  private markStreamType(type: IrType | undefined, pipeline: boolean): void {
+    if (type?.kind !== "object") return;
+    if (type.className === "%Readable") {
+      this.usesReadable = true;
+      if (pipeline) this.usesReadableDestroy = true;
+    } else if (type.className === "%Writable") {
+      this.usesWritable = true;
+      if (pipeline) this.usesWritableDestroy = true;
+    } else if (type.className === "%Duplex") {
+      this.usesDuplex = true;
+    } else if (type.className === "%Transform" || type.className === "%PassThrough") {
+      this.usesTransform = true;
+    }
   }
 
   private markRuntimeCompletion(

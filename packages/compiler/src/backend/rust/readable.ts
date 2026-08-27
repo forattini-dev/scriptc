@@ -89,6 +89,10 @@ export class RustReadableEmitter {
       const dispatch = this.context.emitClosureDispatch("callback", shape.type, ["sc_readable.clone()"], loc);
       readArms.push(`ScReadableRead::${this.listenerVariant(shape)}(callback) => { let _ = ${dispatch}; },`);
     }
+    if (this.context.streams.usesStreamFinished) {
+      voidArms.push("ScEmitterListener::RuntimeVoid(callback, _) => callback(),");
+      errorArms.push("ScEmitterListener::RuntimeError(callback, _) => callback(sc_error.clone()),");
+    }
     byteArms.push("_ => unreachable!(\"scriptc invariant: Readable data listener signature\"),");
     voidArms.push("_ => unreachable!(\"scriptc invariant: Readable lifecycle listener signature\"),");
     errorArms.push("_ => unreachable!(\"scriptc invariant: Readable error listener signature\"),");

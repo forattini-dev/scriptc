@@ -53,6 +53,10 @@ export class RustWritableEmitter {
         errorArms.push(`ScEmitterListener::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
       }
     }
+    if (this.context.streams.usesStreamFinished) {
+      voidArms.push("ScEmitterListener::RuntimeVoid(callback, _) => callback(),");
+      errorArms.push("ScEmitterListener::RuntimeError(callback, _) => callback(sc_error.clone()),");
+    }
     voidArms.push("_ => unreachable!(\"scriptc invariant: Writable lifecycle listener signature\"),");
     errorArms.push("_ => unreachable!(\"scriptc invariant: Writable error listener signature\"),");
     this.context.line("fn sc_writable_emit_void(sc_writable: &ScWritable, sc_event: &str) {");
