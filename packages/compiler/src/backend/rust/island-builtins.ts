@@ -9,6 +9,8 @@ export function emitRustIslandBuiltin(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string | null {
+  const regexp = emitRegExpConstructor(expr, context, emitExpr);
+  if (regexp !== null) return regexp;
   if (expr.op !== "callMethod" || expr.name !== "stringify" ||
       !isGlobal(expr.args[0], "JSON") || expr.args.length < 2 || expr.args.length > 4) return null;
   const valueExpr = expr.args[1];
@@ -26,6 +28,23 @@ export function emitRustIslandBuiltin(
     ? `runtime::json_stringify(&${node})`
     : `runtime::json_stringify_indented(&${node}, "${context.rustString(space.slice(0, 10))}")`;
   return `{ let ${value} = ${emitExpr(valueExpr)}; let ${hook} = match &${value} { ${dyn}::Object(sc_object) => runtime::map_get_by(sc_object, &runtime::string("toJSON"), |left, right| left.as_ref() == right.as_ref()), _ => None, }; let ${value} = if ${hook}.as_ref().is_some_and(|sc_hook| sc_dyn_function_identity(sc_hook).is_some()) { let sc_hook = ${hook}.expect("scriptc invariant: checked JSON hook disappeared"); let _sc_this = sc_dyn_this_push(${value}.clone()); sc_dyn_call(&sc_hook, &[${dyn}::String(runtime::empty_string())], "toJSON") } else { ${value} }; let sc_text = if matches!(&${value}, ${dyn}::Undefined) || sc_dyn_function_identity(&${value}).is_some() { runtime::string("undefined") } else { let ${node} = sc_dyn_to_json(&${value}, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); ${stringify} }; ${dyn}::String(sc_text) }`;
+}
+
+function emitRegExpConstructor(
+  expr: JsOperation,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  if (expr.op !== "construct" || !isGlobal(expr.args[0], "RegExp") ||
+      expr.args.length < 2 || expr.args.length > 3) return null;
+  const patternExpr = expr.args[1];
+  if (patternExpr === undefined) return null;
+  const dyn = context.dynTypeName();
+  const pattern = context.nextName("sc_island_regex_pattern");
+  const flags = context.nextName("sc_island_regex_flags");
+  const flagsExpr = expr.args[2];
+  const emittedFlags = flagsExpr === undefined ? `${dyn}::Undefined` : emitExpr(flagsExpr);
+  return `{ let ${pattern} = ${emitExpr(patternExpr)}; let ${flags} = ${emittedFlags}; let ${pattern} = match ${pattern} { ${dyn}::String(value) => value, value => sc_dyn_arg_type_fail("pattern", "of type string", &value), }; let ${flags} = match ${flags} { ${dyn}::Undefined => runtime::empty_string(), ${dyn}::String(value) => value, value => sc_dyn_arg_type_fail("flags", "of type string", &value), }; ${dyn}::Regex(runtime::regex_new(&${pattern}, &${flags})) }`;
 }
 
 function isGlobal(expr: IrExpr | undefined, name: string): boolean {

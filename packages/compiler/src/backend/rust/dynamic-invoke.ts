@@ -207,6 +207,7 @@ class RustDynamicInvokeEmitter {
     this.emitObjectArm();
     this.emitFunctionArm();
     this.emitStringArm();
+    this.emitRegexArm();
     this.emitArrayArm();
     this.emitBytesArm();
     this.emitBufferArm();
@@ -269,6 +270,16 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"lastIndexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_last_index_of(text, search)), _ => runtime::throw_error("'String.prototype.lastIndexOf' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line(`"includes" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Boolean(runtime::string_includes(text, search, 0.0)), _ => runtime::throw_error("'String.prototype.includes' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
+    this.close("}");
+    this.close("},");
+  }
+
+  private emitRegexArm(): void {
+    this.open(`${this.dyn}::Regex(regex) => {`);
+    this.open("match method {");
+    this.context.line(`"test" => { let value = args.first().cloned().unwrap_or(${this.dyn}::Undefined); ${this.dyn}::Boolean(runtime::regex_test(regex, &sc_dyn_to_string(&value))) },`);
+    this.context.line(`"toString" => ${this.dyn}::String(runtime::string(&format!("/{}/{}", runtime::regex_source(regex), runtime::regex_flags(regex)))),`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("}");
     this.close("},");
   }

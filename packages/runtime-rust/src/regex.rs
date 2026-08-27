@@ -376,6 +376,19 @@ pub fn regex_flags(regex: &JsRegex) -> JsString {
     regex.flags.clone()
 }
 
+pub fn regex_last_index(regex: &JsRegex) -> f64 {
+    regex.last_index.get() as f64
+}
+
+pub fn regex_set_last_index(regex: &JsRegex, value: f64) {
+    let index = if value.is_finite() && value > 0.0 {
+        value.trunc().min(usize::MAX as f64) as usize
+    } else {
+        0
+    };
+    regex.last_index.set(index);
+}
+
 pub fn regexp_escape(value: &JsString) -> JsString {
     use std::fmt::Write as _;
 

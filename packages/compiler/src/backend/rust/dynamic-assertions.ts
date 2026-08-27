@@ -29,6 +29,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::Number(value) => runtime::display_number(*value),`);
   context.line(`${name}::Boolean(value) => value.to_string(),`);
   context.line(`${name}::String(value) => runtime::assert_inspect_string(value),`);
+  context.line(`${name}::Regex(value) => format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value)),`);
   context.line(`${name}::Promise(..) => "Promise { <pending> }".to_owned(),`);
   context.line(`${name}::NetServer(..) => "Server {}".to_owned(),`);
   context.line(`${name}::NetSocket(..) => "Socket {}".to_owned(),`);
@@ -73,7 +74,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { let _ = value; false }`);
   } else {

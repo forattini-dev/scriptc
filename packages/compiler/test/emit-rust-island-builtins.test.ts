@@ -8,8 +8,11 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust island JSON.stringify matches Node", async () => {
-  const fixture = resolve("tests/corpus/2171-island-json-stringify.ts");
+test.each([
+  "2171-island-json-stringify.ts",
+  "2172-island-regexp-boundary.ts",
+])("Rust island built-ins match Node: %s", async (fixtureName) => {
+  const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-island-builtins-"));
   const result = await compile(fixture, {
     outDir: dir,
