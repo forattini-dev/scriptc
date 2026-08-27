@@ -14,6 +14,7 @@ import { emitRustDgramCall } from "./dgram.js";
 import { emitRustReadlineCall } from "./readline.js";
 import { emitRustInspectCall } from "./inspect.js";
 import { emitRustCryptoCall } from "./crypto.js";
+import { emitRustTimerCall } from "./timers.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -97,6 +98,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (inspectCall !== null) return inspectCall;
   const cryptoCall = emitRustCryptoCall(expr, context);
   if (cryptoCall !== null) return cryptoCall;
+  const timerCall = emitRustTimerCall(expr, context);
+  if (timerCall !== null) return timerCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];
