@@ -9,6 +9,7 @@ import { emitRustProcessCall } from "./process.js";
 import { emitRustQuerystringCall } from "./querystring.js";
 import { emitRustTlsCall } from "./tls.js";
 import { emitRustCheckedBufferCall } from "./buffer-checked.js";
+import { emitRustCheckedFsCall } from "./fs-checked.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -82,6 +83,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (querystringCall !== null) return querystringCall;
   const checkedBufferCall = emitRustCheckedBufferCall(expr, context);
   if (checkedBufferCall !== null) return checkedBufferCall;
+  const checkedFsCall = emitRustCheckedFsCall(expr, context);
+  if (checkedFsCall !== null) return checkedFsCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];

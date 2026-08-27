@@ -286,6 +286,22 @@ pub fn fs_mkdtemp(prefix: &JsString) -> JsString {
     )
 }
 
+pub fn fs_lchmod(path: &JsString, mode: f64) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(mode as u32);
+        if let Err(error) = std::fs::set_permissions(path.as_ref(), permissions) {
+            throw_fs_error("lchmod", path, error);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, mode);
+        unreachable!("scriptc: lchmod reached on a platform where Node does not expose it");
+    }
+}
+
 pub fn fs_mkdir_recursive(path: &JsString) {
     if let Err(error) = std::fs::create_dir_all(path.as_ref()) {
         throw_fs_error("mkdir", path, error);
