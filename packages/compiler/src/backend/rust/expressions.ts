@@ -311,6 +311,10 @@ export class RustExpressionEmitter {
         const values = expr.args.map((arg) => this.emitExpr(arg)).join(", ");
         return `{ let ${receiver} = ${this.emitExpr(expr.recv)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${this.context.rustString(expr.method)}", &${args}, "${this.context.rustString(expr.calleeName)}") }`;
       }
+      case "dynIterN": {
+        if (expr.value.type.kind !== "dyn") this.context.unsupported("dynamic iteration over an island value", expr.loc);
+        return `sc_dyn_iter_n(&(${this.emitExpr(expr.value)}), ${expr.count})`;
+      }
       case "dynTest": {
         const value = this.context.nextName("sc_rt");
         const name = this.context.dynTypeName();
