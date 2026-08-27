@@ -1,5 +1,6 @@
 import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType } from "./model.js";
+import { emitRustIslandDestructuringFunction } from "./island-destructuring-function.js";
 
 type IslandExpr = Extract<IrExpr, { kind: "jsMarshal" | "jsOp" | "jsExit" | "jsBridgePromise" }>;
 
@@ -59,6 +60,11 @@ function emitOperation(
   emitExpr: (expr: IrExpr) => string,
 ): string {
   if (expr.op === "objLit") return emitObjectLiteral(expr, context, emitExpr);
+  if (expr.op === "arrLit") {
+    const array = context.nextName("sc_island_array");
+    const elements = expr.args.map((arg) => `runtime::array_push(&${array}, ${emitExpr(arg)});`).join(" ");
+    return `{ let ${array}: runtime::JsArray<${context.dynTypeName()}> = runtime::array_new(Vec::new()); ${elements} ${context.dynTypeName()}::Array(${array}) }`;
+  }
   if (expr.op === "undefLit" && expr.args.length === 0) return `${context.dynTypeName()}::Undefined`;
   if (expr.op === "nullLit" && expr.args.length === 0) return `${context.dynTypeName()}::Null`;
   if (expr.op === "getProp" && expr.name !== undefined && expr.args.length === 1) {
@@ -73,6 +79,19 @@ function emitOperation(
     }
     return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(keyExpr)}; sc_dyn_key_get(&${receiver}, &sc_dyn_to_string(&${key}), false) }`;
   }
+  if (expr.op === "setProp" && expr.name !== undefined && expr.args.length === 2) {
+    const receiver = context.nextName("sc_island_receiver");
+    const value = context.nextName("sc_island_value");
+    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${value} = ${emitExpr(argOf(expr, 1, context))}; sc_dyn_key_set(&${receiver}, runtime::string("${context.rustString(expr.name)}"), ${value}); }`;
+  }
+  if (expr.op === "setIdx" && expr.args.length === 3) {
+    const receiver = context.nextName("sc_island_receiver");
+    const key = context.nextName("sc_island_key");
+    const value = context.nextName("sc_island_value");
+    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${value} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${receiver}, sc_dyn_to_string(&${key}), ${value}); }`;
+  }
+  const destructuring = emitRustIslandDestructuringFunction(expr, context, emitExpr);
+  if (destructuring !== null) return destructuring;
   if (expr.op === "callFn" && expr.args.length > 0) {
     const callee = context.nextName("sc_island_callee");
     const args = context.nextName("sc_island_args");

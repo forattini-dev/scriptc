@@ -5,6 +5,7 @@ import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustDataViewIntrinsic } from "./data-view.js";
 import { emitRustDynamicCall } from "./dynamic-call.js";
+import { emitRustDynamicDestructureCheck } from "./dynamic-destructuring.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
@@ -315,9 +316,11 @@ export class RustExpressionEmitter {
         return `{ let ${receiver} = ${this.emitExpr(expr.recv)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${this.context.rustString(expr.method)}", &${args}, "${this.context.rustString(expr.calleeName)}") }`;
       }
       case "dynIterN": {
-        if (expr.value.type.kind !== "dyn") this.context.unsupported("dynamic iteration over an island value", expr.loc);
+        if (expr.value.type.kind !== "dyn" && expr.value.type.kind !== "jsval") this.context.unsupported("dynamic iteration value", expr.loc);
         return `sc_dyn_iter_n(&(${this.emitExpr(expr.value)}), ${expr.count})`;
       }
+      case "dynDestrCheck":
+        return emitRustDynamicDestructureCheck(expr, this.context, (value) => this.emitExpr(value));
       case "dynTest": {
         const value = this.context.nextName("sc_rt");
         const name = this.context.dynTypeName();
