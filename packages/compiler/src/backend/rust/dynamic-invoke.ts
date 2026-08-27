@@ -107,6 +107,7 @@ class RustDynamicInvokeEmitter {
     this.context.line("let result = sc_dyn_array_callback(&callback, item.clone(), index, array);");
     this.open("match method {");
     this.context.line(`"map" => { runtime::array_push(&output, result); },`);
+    this.context.line(`"flatMap" => { match result { ${this.dyn}::Array(items) => { runtime::array_extend(&output, &items); }, value => { runtime::array_push(&output, value); }, } },`);
     this.context.line(`"filter" if sc_dyn_truthy(&result) => { runtime::array_push(&output, item.clone()); },`);
     this.context.line(`"some" if sc_dyn_truthy(&result) => return ${this.dyn}::Boolean(true),`);
     this.context.line(`"every" if !sc_dyn_truthy(&result) => return ${this.dyn}::Boolean(false),`);
@@ -117,7 +118,7 @@ class RustDynamicInvokeEmitter {
     this.context.line("index += 1.0;");
     this.close("}");
     this.open("match method {");
-    this.context.line(`"map" | "filter" => ${this.dyn}::Array(output),`);
+    this.context.line(`"map" | "flatMap" | "filter" => ${this.dyn}::Array(output),`);
     this.context.line(`"some" => ${this.dyn}::Boolean(false),`);
     this.context.line(`"every" => ${this.dyn}::Boolean(true),`);
     this.context.line(`"find" | "forEach" => ${this.dyn}::Undefined,`);
@@ -304,7 +305,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"concat" => { let output = runtime::array_slice(array, 0.0, length); for arg in args { match arg { ${this.dyn}::Array(items) => { runtime::array_extend(&output, items); }, value => { runtime::array_push(&output, value.clone()); }, } } ${this.dyn}::Array(output) },`);
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
     this.context.line('"sort" => sc_dyn_array_sort(array, args),');
-    this.context.line("\"forEach\" | \"map\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
+    this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
     this.context.line("\"splice\" | \"reduce\" | \"reduceRight\" | \"flat\" | \"fill\" | \"copyWithin\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");

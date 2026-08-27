@@ -971,6 +971,7 @@ test.each([
   "2575-string-destructuring-decl.ts",
   "2576-string-destructuring-assign.ts",
   "2577-builtin-global-destructuring.js",
+  "2583-dyn-nullish-coalesce.js",
   "2587-array-entries-forof.ts",
   "2588-array-entries-chains.ts",
   "2591-ambient-generic-traps.ts",

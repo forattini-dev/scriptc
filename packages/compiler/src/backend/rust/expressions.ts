@@ -8,6 +8,7 @@ import { emitRustDynamicCall } from "./dynamic-call.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
+import { emitRustNullish } from "./nullish.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 
@@ -137,25 +138,7 @@ export class RustExpressionEmitter {
       }
       case "orDefault":
         return this.context.emitOrDefault(expr);
-      case "nullish": {
-        if (expr.left.type.kind !== "union") this.context.unsupported("nullish over a non-union", expr.loc);
-        const union = this.context.union(expr.left.type.unionId, expr.loc);
-        const left = this.context.nextName("sc_rt");
-        const unitPatterns = union.arms.flatMap((arm, tag) =>
-          this.context.isUnit(arm) ? [`${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`] : []
-        );
-        if (unitPatterns.length === 0) this.context.unsupported("nullish union without a unit arm", expr.loc);
-        if (expr.type.kind === "union" && expr.type.unionId === union.id) {
-          return `{ let ${left} = ${this.emitExpr(expr.left)}; if matches!(&${left}, ${unitPatterns.join(" | ")}) { ${this.emitExpr(expr.right)} } else { ${left} } }`;
-        }
-        const arms = union.arms.map((arm, tag) => {
-          const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}`;
-          return this.context.isUnit(arm)
-            ? `${variant} => ${this.emitExpr(expr.right)}`
-            : `${variant}(payload) => payload`;
-        }).join(", ");
-        return `{ let ${left} = ${this.emitExpr(expr.left)}; match ${left} { ${arms} } }`;
-      }
+      case "nullish": return emitRustNullish(expr, this.context, (value) => this.emitExpr(value));
       case "optChain":
         return emitRustOptionalChain(expr, this.context, (value) => this.emitExpr(value));
       case "chainRecv": {
