@@ -20,6 +20,30 @@ fn tls_server_config(cert: &JsString, key: &JsString) -> Arc<rustls::ServerConfi
     Arc::new(config)
 }
 
+pub struct TlsSecureContext {
+    config: Arc<rustls::ServerConfig>,
+}
+
+impl Trace for TlsSecureContext {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+impl ClearEdges for TlsSecureContext {
+    fn clear_edges(&mut self) {}
+}
+
+pub type JsSecureContext = Gc<TlsSecureContext>;
+
+pub fn tls_secure_context_new(cert: &JsString, key: &JsString) -> JsSecureContext {
+    Gc::new(TlsSecureContext {
+        config: tls_server_config(cert, key),
+    })
+}
+
+pub fn tls_secure_context_config(context: &JsSecureContext) -> Arc<rustls::ServerConfig> {
+    context.with(|context| context.config.clone())
+}
+
 fn tls_server_attach(server: &JsNetServer, cert: &JsString, key: &JsString) {
     let config = tls_server_config(cert, key);
     server.with_mut(|server| server.tls_config = Some(config));

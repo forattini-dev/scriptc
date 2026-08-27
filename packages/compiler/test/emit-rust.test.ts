@@ -998,6 +998,7 @@ test.each([
   "2589-object-create-null.cjs",
   "2591-ambient-generic-traps.ts",
   "2596-net-arg-ladders.cjs",
+  "2598-tls-arg-ladders.cjs",
   "2600-dyn-keyed-write-harness.js",
   "2601-dyn-keyed-write-ops.js",
   "2602-dyn-array-destructure.js",

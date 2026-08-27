@@ -95,6 +95,7 @@ export class RustValueEmitter {
       case "httpReq": return "true";
       case "httpRes": return "true";
       case "httpClientReq": return "true";
+      case "secureCtx": return "true";
       case "record": return "true";
       case "object": return "true";
       case "func": return "true";
@@ -202,6 +203,7 @@ export class RustValueEmitter {
       case "httpReq": return "runtime::JsHttpRequest";
       case "httpRes": return "runtime::JsHttpResponse";
       case "httpClientReq": return "runtime::JsHttpClientRequest";
+      case "secureCtx": return "runtime::JsSecureContext";
       case "map": return `runtime::JsMap<${this.rustType(type.key, loc)}, ${this.rustType(type.value, loc)}>`;
       case "set": return `runtime::JsSet<${this.rustType(type.elem, loc)}>`;
       case "record": {
@@ -386,7 +388,7 @@ export class RustValueEmitter {
   }
 
   isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -455,6 +457,7 @@ export class RustValueEmitter {
       case "httpReq":
       case "httpRes":
       case "httpClientReq":
+      case "secureCtx":
       case "regex":
       case "symbol":
       case "url":

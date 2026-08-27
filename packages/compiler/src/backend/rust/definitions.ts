@@ -372,6 +372,7 @@ export class RustDefinitionEmitter {
         case "httpReq":
         case "httpRes":
         case "httpClientReq":
+        case "secureCtx":
         case "record":
         case "func":
         case "promise":
@@ -745,6 +746,7 @@ export class RustDefinitionEmitter {
         case "httpReq":
         case "httpRes":
         case "httpClientReq":
+        case "secureCtx":
         case "map":
         case "set":
         case "record":
