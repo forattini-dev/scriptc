@@ -83,6 +83,25 @@ function emitOperation(
     const truthy = `sc_dyn_is_truthy(&(${emitExpr(argOf(expr, 0, context))}))`;
     return expr.op === "not" ? `!(${truthy})` : truthy;
   }
+  if ((expr.op === "eq" || expr.op === "neq") && expr.args.length === 2) {
+    const left = context.nextName("sc_island_left");
+    const right = context.nextName("sc_island_right");
+    const equal = `sc_dyn_strict_equal(&${left}, &${right})`;
+    return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${expr.op === "neq" ? `!(${equal})` : equal} }`;
+  }
+  if ((expr.op === "sub" || expr.op === "mul" || expr.op === "div" || expr.op === "mod" || expr.op === "pow") && expr.args.length === 2) {
+    const left = context.nextName("sc_island_left");
+    const right = context.nextName("sc_island_right");
+    const operation = expr.op === "pow"
+      ? `runtime::math_pow(sc_dyn_to_number(&${left}), sc_dyn_to_number(&${right}))`
+      : `sc_dyn_to_number(&${left}) ${numericOperator(expr.op)} sc_dyn_to_number(&${right})`;
+    return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${context.dynTypeName()}::Number(${operation}) }`;
+  }
+  if ((expr.op === "neg" || expr.op === "plus") && expr.args.length === 1) {
+    const value = context.nextName("sc_island_value");
+    const number = `sc_dyn_to_number(&${value})`;
+    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; ${context.dynTypeName()}::Number(${expr.op === "neg" ? `-(${number})` : number}) }`;
+  }
   if (expr.op === "toStr" && expr.args.length === 1) {
     return `sc_dyn_to_string(&(${emitExpr(argOf(expr, 0, context))}))`;
   }
@@ -100,6 +119,10 @@ function emitOperation(
     return `{ let ${receiver} = ${emitExpr(receiverExpr)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${context.rustString(expr.name)}", &${args}, "${context.rustString(expr.name)}") }`;
   }
   context.unsupported(`island operation '${expr.op}'`, expr.loc);
+}
+
+function numericOperator(op: "sub" | "mul" | "div" | "mod"): string {
+  return { sub: "-", mul: "*", div: "/", mod: "%" }[op];
 }
 
 function emitObjectLiteral(

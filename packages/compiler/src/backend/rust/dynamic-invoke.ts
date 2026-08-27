@@ -64,29 +64,6 @@ class RustDynamicInvokeEmitter {
     this.close("}");
     this.close("}");
 
-    this.open(`fn sc_dyn_strict_equal(left: &${this.dyn}, right: &${this.dyn}) -> bool {`);
-    this.open("match (left, right) {");
-    this.context.line(`(${this.dyn}::Undefined, ${this.dyn}::Undefined) | (${this.dyn}::Null, ${this.dyn}::Null) => true,`);
-    this.context.line(`(${this.dyn}::Number(left), ${this.dyn}::Number(right)) => left == right,`);
-    this.context.line(`(${this.dyn}::Boolean(left), ${this.dyn}::Boolean(right)) => left == right,`);
-    this.context.line(`(${this.dyn}::String(left), ${this.dyn}::String(right)) => left.as_ref() == right.as_ref(),`);
-    this.context.line(`(${this.dyn}::Bytes(left), ${this.dyn}::Bytes(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::Buffer(left), ${this.dyn}::Buffer(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::Array(left), ${this.dyn}::Array(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::Object(left), ${this.dyn}::Object(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::Promise(left), ${this.dyn}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right),`);
-    this.context.line(`(${this.dyn}::NetServer(left), ${this.dyn}::NetServer(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::NetSocket(left), ${this.dyn}::NetSocket(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::HttpRequest(left), ${this.dyn}::HttpRequest(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::HttpResponse(left), ${this.dyn}::HttpResponse(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${this.dyn}::HttpAgent(left), ${this.dyn}::HttpAgent(right)) => left.ptr_eq(right),`);
-    for (const pattern of this.functionVariants()) {
-      this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);
-    }
-    this.context.line("_ => false,");
-    this.close("}");
-    this.close("}");
-
     this.context.line(`fn sc_dyn_same_value_zero(left: &${this.dyn}, right: &${this.dyn}) -> bool {`);
     this.context.pushIndent();
     this.context.line(`matches!((left, right), (${this.dyn}::Number(a), ${this.dyn}::Number(b)) if a.is_nan() && b.is_nan()) || sc_dyn_strict_equal(left, right)`);

@@ -604,6 +604,11 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_to_number(value: &${name}) -> f64 {`);
+    this.context.pushIndent();
+    this.context.line(`match value { ${name}::Undefined => f64::NAN, ${name}::Null => 0.0, ${name}::Number(value) => *value, ${name}::Boolean(value) => if *value { 1.0 } else { 0.0 }, ${name}::String(value) => runtime::number_from_string(value), _ => runtime::number_from_string(&sc_dyn_to_string(value)), }`);
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_to_string(value: &${name}) -> runtime::JsString {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -803,6 +808,7 @@ export class RustDynamicEmitter {
     this.context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_strict_equal(left: &${name}, right: &${name}) -> bool { match (left, right) { (${name}::Number(left), ${name}::Number(right)) => left == right, (${name}::Promise(left), ${name}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right), _ => sc_dyn_equal(left, right, false), } }`);
   }
 
   emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {

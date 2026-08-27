@@ -68,3 +68,6 @@ test.for([
 
 test("Rust top-level for-await matches Node", async () =>
   expectDifferential("tests/corpus/2674-top-level-for-await-implicit-module.ts", false, "alpha\nbeta\n"));
+
+test("Rust any-array copying sort matches Node", async () =>
+  expectDifferential("tests/corpus/2667-array-to-sorted-any.ts"));
