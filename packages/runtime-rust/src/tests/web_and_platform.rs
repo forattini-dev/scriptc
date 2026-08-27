@@ -631,6 +631,18 @@
     }
 
     #[test]
+    fn crypto_hash_digests_match_node_encodings() {
+        assert_eq!(
+            crypto_hash_digest_string(&string("sha256"), &string("abc"), &string("hex")).as_ref(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        );
+        assert_eq!(
+            crypto_hash_digest_bytes(&string("sha1"), &bytes_from_vec(b"abc".to_vec()), &string("base64")).as_ref(),
+            "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=",
+        );
+    }
+
+    #[test]
     fn operating_system_identity_values_are_available() {
         assert!(!os_type().is_empty());
         assert!(!os_release().is_empty());

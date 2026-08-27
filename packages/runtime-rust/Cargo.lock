@@ -393,6 +393,7 @@ dependencies = [
  "getifaddrs",
  "getrandom 0.4.3",
  "regress",
+ "ring",
  "rustix",
  "rustls",
  "rustls-pemfile",

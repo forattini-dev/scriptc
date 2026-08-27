@@ -45,3 +45,36 @@ pub fn crypto_random_uuid() -> JsString {
     }
     string(&output)
 }
+
+fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
+    let algorithm = match algorithm.as_ref() {
+        "sha1" => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
+        "sha256" => &ring::digest::SHA256,
+        _ => unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"),
+    };
+    let digest = ring::digest::digest(algorithm, data);
+    decode_bytes(digest.as_ref(), encoding.as_ref())
+}
+
+pub fn crypto_hash_digest_string(
+    algorithm: &JsString,
+    data: &JsString,
+    encoding: &JsString,
+) -> JsString {
+    crypto_hash_digest(algorithm, data.as_bytes(), encoding)
+}
+
+pub fn crypto_hash_digest_bytes(
+    algorithm: &JsString,
+    data: &JsBytes<u8>,
+    encoding: &JsString,
+) -> JsString {
+    data.with(|bytes| {
+        let storage = bytes.storage.borrow();
+        crypto_hash_digest(
+            algorithm,
+            &storage[bytes.offset..bytes.offset + bytes.length],
+            encoding,
+        )
+    })
+}
