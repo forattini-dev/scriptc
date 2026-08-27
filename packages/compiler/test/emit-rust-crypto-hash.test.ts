@@ -8,8 +8,11 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust fused crypto hashes match the differential corpus", async () => {
-  const fixture = resolve("tests/corpus/2280-builtin-namespace-destructure.cjs");
+test.each([
+  "1534-crypto-hash-chain.ts",
+  "2280-builtin-namespace-destructure.cjs",
+])("Rust fused crypto hashes match the differential corpus: %s", async (fixtureName) => {
+  const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-crypto-hash-"));
   const result = await compile(fixture, {
     outDir: dir,
