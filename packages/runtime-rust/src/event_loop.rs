@@ -13,6 +13,7 @@ pub fn finish() {
     net_finish();
     dgram_finish();
     tls_ca_finish();
+    diagnostics_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();

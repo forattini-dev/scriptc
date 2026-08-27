@@ -16,6 +16,7 @@ import { emitRustInspectCall } from "./inspect.js";
 import { emitRustCryptoCall } from "./crypto.js";
 import { emitRustTimerCall } from "./timers.js";
 import { emitRustFilesystemCall } from "./filesystem.js";
+import { emitRustDiagnosticsChannelCall } from "./diagnostics-channel.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -103,6 +104,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (timerCall !== null) return timerCall;
   const filesystemCall = emitRustFilesystemCall(expr, context);
   if (filesystemCall !== null) return filesystemCall;
+  const diagnosticsChannelCall = emitRustDiagnosticsChannelCall(expr, context);
+  if (diagnosticsChannelCall !== null) return diagnosticsChannelCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];
