@@ -54,6 +54,121 @@ pub fn bytes_slice<T: ByteElement>(
     })
 }
 
+pub fn bytes_byte_offset(bytes: &JsBytes<u8>) -> f64 {
+    bytes.with(|data| data.offset as f64)
+}
+
+fn data_view_index(value: f64) -> Option<usize> {
+    let value = if value.is_nan() { 0.0 } else { value.trunc() };
+    (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64).then_some(value as usize)
+}
+
+pub fn data_view_new(
+    bytes: &JsBytes<u8>,
+    byte_offset: f64,
+    has_length: bool,
+    byte_length: f64,
+) -> JsBytes<u8> {
+    let total = bytes.with(|data| data.length);
+    let Some(start) = data_view_index(byte_offset) else {
+        throw_range_error(format!(
+            "Start offset {} is outside the bounds of the buffer",
+            format_number(byte_offset)
+        ));
+    };
+    if start > total {
+        throw_range_error(format!(
+            "Start offset {} is outside the bounds of the buffer",
+            format_number(byte_offset)
+        ));
+    }
+    let length = if has_length {
+        let Some(length) = data_view_index(byte_length) else {
+            throw_range_error(format!(
+                "Invalid DataView length {}",
+                format_number(byte_length)
+            ));
+        };
+        if length > total - start {
+            throw_range_error(format!(
+                "Invalid DataView length {}",
+                format_number(byte_length)
+            ));
+        }
+        length
+    } else {
+        total - start
+    };
+    bytes.with(|data| {
+        Gc::new(BytesData {
+            storage: data.storage.clone(),
+            offset: data.offset + start,
+            length,
+        })
+    })
+}
+
+fn data_view_width(kind: &str) -> usize {
+    match kind {
+        "u8" | "i8" => 1,
+        "u16" | "i16" => 2,
+        "u32" | "i32" | "f32" => 4,
+        "u64" | "i64" | "f64" => 8,
+        _ => panic!("scriptc: invalid DataView numeric kind"),
+    }
+}
+
+fn data_view_offset(bytes: &JsBytes<u8>, value: f64, width: usize) -> usize {
+    let length = bytes.with(|data| data.length);
+    let offset = data_view_index(value);
+    if offset.is_none_or(|offset| offset > length || width > length - offset) {
+        throw_range_error("Offset is outside the bounds of the DataView".to_owned());
+    }
+    offset.expect("validated DataView offset")
+}
+
+pub fn data_view_get(
+    bytes: &JsBytes<u8>,
+    kind: &str,
+    byte_offset: f64,
+    little_endian: bool,
+) -> f64 {
+    let width = data_view_width(kind);
+    let offset = data_view_offset(bytes, byte_offset, width);
+    if kind == "u64" || kind == "i64" {
+        let value = bytes_read_unsigned(bytes, offset, width, little_endian);
+        return if kind == "i64" {
+            (value as i64) as f64
+        } else {
+            value as f64
+        };
+    }
+    let endian = if little_endian { "le" } else { "be" };
+    let token = match kind {
+        "u8" | "i8" => kind.to_owned(),
+        _ => format!("{kind}{endian}"),
+    };
+    bytes_read_num(bytes, &token, offset as f64)
+}
+
+pub fn data_view_set(
+    bytes: &JsBytes<u8>,
+    kind: &str,
+    byte_offset: f64,
+    value: f64,
+    little_endian: bool,
+) {
+    let width = data_view_width(kind);
+    let offset = data_view_offset(bytes, byte_offset, width);
+    let bits = match kind {
+        "u8" | "i8" | "u16" | "i16" | "u32" | "i32" => u64::from(to_uint32(value)),
+        "f32" => u64::from((value as f32).to_bits()),
+        "f64" => value.to_bits(),
+        _ => panic!("scriptc: invalid DataView setter kind"),
+    };
+    bytes_write_unsigned(bytes, offset, width, little_endian, bits);
+}
+
 pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, offset: f64) {
     let offset = if offset.is_nan() { 0.0 } else { offset.trunc() };
     let target_length = target.with(|data| data.length);

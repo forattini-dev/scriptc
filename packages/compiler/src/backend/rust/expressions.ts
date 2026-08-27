@@ -3,6 +3,7 @@ import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
+import { emitRustDataViewIntrinsic } from "./data-view.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 import { emitRustOptionalChain } from "./optional-chains.js";
@@ -435,6 +436,8 @@ export class RustExpressionEmitter {
       }
       case "bytesIntrinsic": {
         if (expr.receiver.type.kind !== "bytes") this.context.unsupported("bytes intrinsic receiver", expr.loc);
+        const dataView = emitRustDataViewIntrinsic(expr, { emitExpr: (value) => this.emitExpr(value) });
+        if (dataView !== null) return dataView;
         if ([
           "equals", "compareBuf", "indexOf", "lastIndexOf", "includes",
           "indexOfNum", "lastIndexOfNum", "includesNum",

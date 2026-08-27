@@ -70,6 +70,9 @@ class RustStatementEmitter {
           }
           return;
         }
+        if (stmt.init === null && local.type.kind === "func") {
+          this.context.forceBoxedLocal(local.id, true);
+        }
         if (this.context.localIsBoxed(local)) {
           const init = stmt.init === null
             ? "runtime::cell_empty()"
