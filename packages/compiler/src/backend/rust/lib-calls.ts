@@ -91,6 +91,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];
+  if (expr.fn === "stdin.nextChunk" && expr.args.length === 0 &&
+    expr.type.kind === "promise" && expr.type.inner.kind === "bytes" && expr.type.inner.elem === "u8") {
+    return "runtime::stdin_next_chunk()";
+  }
   if (expr.fn === "string.raw" && expr.args.length === 2 &&
     arg?.type.kind === "array" && arg.type.elem.kind === "string" &&
     secondArg?.type.kind === "array" && secondArg.type.elem.kind === "string") {

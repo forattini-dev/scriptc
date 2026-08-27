@@ -4,6 +4,7 @@
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    stdin_finish();
     fs_renames_finish();
     children_finish();
     child_streams_finish();
@@ -416,6 +417,9 @@ pub fn run_event_loop() {
         if fs_renames_dispatch_one() {
             continue;
         }
+        if stdin_dispatch_one() {
+            continue;
+        }
         if net_dispatch_one() {
             continue;
         }
@@ -429,6 +433,7 @@ pub fn run_event_loop() {
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || fs_renames_pending()
+            || stdin_pending()
             || children_referenced_pending()
             || children_failed_pending()
             || child_streams_pending()
@@ -509,6 +514,12 @@ pub fn run_event_loop() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             fs_renames_wait(wait);
+            continue;
+        }
+        if stdin_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            stdin_wait(wait);
             continue;
         }
         if net_pending() {

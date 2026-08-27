@@ -7,9 +7,9 @@ import { compile } from "../src/index.js";
 
 interface RunOutcome { stdout: string; stderr: string; exitCode: number }
 
-function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<RunOutcome> {
+function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv, input?: string): Promise<RunOutcome> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(file, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(file, args, { env, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
@@ -21,17 +21,18 @@ function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv): Pr
       if (signal !== null) return rejectRun(new Error(`${file} terminated by ${signal}`));
       resolveRun({ stdout, stderr, exitCode: code ?? 1 });
     });
+    if (input !== undefined) child.stdin?.end(input);
   });
 }
 
-async function expectDifferential(relativePath: string): Promise<void> {
+async function expectDifferential(relativePath: string, dynamic = true, input?: string): Promise<void> {
   const fixture = resolve(relativePath);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dynamic-import-"));
   const result = await compile(fixture, {
     outDir: dir,
     outPath: join(dir, "program"),
     backend: "rust",
-    dynamic: true,
+    dynamic,
     optimization: "dev",
   });
   expect(
@@ -41,8 +42,8 @@ async function expectDifferential(relativePath: string): Promise<void> {
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    run(process.execPath, ["--no-warnings", fixture]),
-    run(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
+    run(process.execPath, ["--no-warnings", fixture], undefined, input),
+    run(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }, input),
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
@@ -64,3 +65,6 @@ test.for([
   "tests/corpus/2660-top-level-await-cycle-rejection/main.ts",
   "tests/corpus/2661-top-level-await-dynamic-runtime-root/main.ts",
 ])("Rust async own-module import matches Node: %s", expectDifferential);
+
+test("Rust top-level for-await matches Node", async () =>
+  expectDifferential("tests/corpus/2674-top-level-for-await-implicit-module.ts", false, "alpha\nbeta\n"));

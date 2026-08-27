@@ -15,6 +15,11 @@ type RustAsyncCompletion =
   | { readonly kind: "return"; readonly value: string }
   | { readonly kind: "throw"; readonly reason: string };
 
+interface RustAsyncLoopControl {
+  breakLoop(): void;
+  continueLoop(): void;
+}
+
 export interface RustAsyncControlContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
   line(value: string): void;
@@ -82,6 +87,8 @@ export interface RustAsyncControlContext {
 }
 
 export class RustAsyncControlEmitter {
+  private loopControl: RustAsyncLoopControl | null = null;
+
   constructor(private readonly context: RustAsyncControlContext) {}
 
   containsAsyncSuspension(value: unknown): boolean {
@@ -172,6 +179,14 @@ export class RustAsyncControlEmitter {
     for (let index = 0; index < statements.length; index += 1) {
       const stmt = statements[index];
       if (stmt === undefined) break;
+      if (stmt.kind === "break" || stmt.kind === "continue") {
+        if (stmt.label !== undefined || this.loopControl === null) {
+          this.context.unsupported(`${stmt.kind} outside a supported suspended async loop`, stmt.loc);
+        }
+        if (stmt.kind === "break") this.loopControl.breakLoop();
+        else this.loopControl.continueLoop();
+        return;
+      }
       if (stmt.kind === "while" && this.containsAsyncSuspension(stmt.body)) {
         this.emitAsyncWhile(stmt, statements.slice(index + 1), onComplete);
         return;
@@ -184,7 +199,8 @@ export class RustAsyncControlEmitter {
         this.emitAsyncFor(stmt, statements.slice(index + 1), onComplete);
         return;
       }
-      if (stmt.kind === "block" && this.containsAsyncSuspension(stmt.body)) {
+      if (stmt.kind === "block" && (this.containsAsyncSuspension(stmt.body) ||
+        (this.loopControl !== null && this.containsLoopControl(stmt.body)))) {
         const outerLocals = new Set(this.context.currentAsyncLocals() ?? []);
         const resume = this.emitAsyncResumeHelper(
           statements.slice(index + 1),
@@ -196,7 +212,8 @@ export class RustAsyncControlEmitter {
         this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.body, resume));
         return;
       }
-      if (stmt.kind === "if" && this.containsAsyncSuspension(stmt)) {
+      if (stmt.kind === "if" && (this.containsAsyncSuspension(stmt) ||
+        (this.loopControl !== null && this.containsLoopControl(stmt)))) {
         this.emitAsyncIf(stmt, statements.slice(index + 1), onComplete);
         return;
       }
@@ -448,10 +465,7 @@ export class RustAsyncControlEmitter {
     if (result === null || fn?.async !== true) this.context.unsupported("async while outside an async function", stmt.loc);
     if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled async while", stmt.loc);
     if (this.containsAsyncSuspension(stmt.cond)) this.context.unsupported("async suspension in a while condition", stmt.loc);
-    if (this.containsLoopControl(stmt.body)) {
-      this.context.unsupported("break or continue in a suspended async while", stmt.loc);
-    }
-
+    const outerLoopControl = this.loopControl;
     const loopLocals = new Set(this.context.currentAsyncLocals() ?? []);
     const locals = [...loopLocals].map((localId) => this.context.local(localId, stmt.loc));
     const helper = this.context.nextName("sc_async_while");
@@ -471,14 +485,19 @@ export class RustAsyncControlEmitter {
     this.withAsyncLocals(new Set(loopLocals), () => {
       this.context.line(`if ${this.context.emitExpr(stmt.cond)} {`);
       this.context.pushIndent();
-      this.emitAsyncStatements(stmt.body, () => this.withAsyncLocals(new Set(loopLocals), () => {
+      const continueLoop = () => this.withAsyncLocals(new Set(loopLocals), () => {
         this.context.line(call);
         this.context.line("return;");
-      }));
+      });
+      this.withLoopControl({
+        breakLoop: () => this.withAsyncLocals(new Set(loopLocals), () =>
+          this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete))),
+        continueLoop,
+      }, () => this.emitAsyncStatements(stmt.body, continueLoop));
       this.context.popIndent();
       this.context.line("} else {");
       this.context.pushIndent();
-      this.emitAsyncStatements(remaining, onComplete);
+      this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete));
       this.context.popIndent();
       this.context.line("}");
     });
@@ -560,6 +579,19 @@ export class RustAsyncControlEmitter {
     const node = value as { kind?: unknown };
     if (node.kind === "break" || node.kind === "continue") return true;
     return Object.values(value).some((item) => this.containsLoopControl(item));
+  }
+
+  withLoopControl<T>(
+    control: RustAsyncLoopControl | null,
+    emit: () => T,
+  ): T {
+    const previous = this.loopControl;
+    this.loopControl = control;
+    try {
+      return emit();
+    } finally {
+      this.loopControl = previous;
+    }
   }
 
   emitAsyncProtectedSequence(

@@ -28,6 +28,7 @@ include!("heap.rs");
 include!("live_refs.rs");
 include!("event_loop.rs");
 include!("promises.rs");
+include!("stdin.rs");
 include!("generators.rs");
 include!("errors.rs");
 include!("inspect.rs");

@@ -710,7 +710,9 @@ pub fn process_is_tty(fd: f64) -> bool {
     }
 }
 
-pub fn process_stdin_destroy() {}
+pub fn process_stdin_destroy() {
+    stdin_destroy();
+}
 
 fn process_status_id(prefix: &str, id_flag: &str) -> f64 {
     std::fs::read_to_string("/proc/self/status")
