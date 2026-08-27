@@ -10,19 +10,57 @@ pub struct RegexData {
 
 pub type JsRegex = Rc<RegexData>;
 
+fn validate_regex_flags(flags: &str) -> String {
+    let mut seen = 0u8;
+    for flag in flags.chars() {
+        let bit = match flag {
+            'd' => 1 << 0,
+            'g' => 1 << 1,
+            'i' => 1 << 2,
+            'm' => 1 << 3,
+            's' => 1 << 4,
+            'u' => 1 << 5,
+            'v' => 1 << 6,
+            'y' => 1 << 7,
+            _ => throw_syntax_error(format!(
+                "Invalid flags supplied to RegExp constructor '{flags}'"
+            )),
+        };
+        if seen & bit != 0 {
+            throw_syntax_error(format!(
+                "Invalid flags supplied to RegExp constructor '{flags}'"
+            ));
+        }
+        seen |= bit;
+    }
+    if seen & (1 << 5) != 0 && seen & (1 << 6) != 0 {
+        throw_syntax_error(format!(
+            "Invalid flags supplied to RegExp constructor '{flags}'"
+        ));
+    }
+
+    "dgimsuvy"
+        .chars()
+        .enumerate()
+        .filter_map(|(index, flag)| (seen & (1 << index) != 0).then_some(flag))
+        .collect()
+}
+
 pub fn regex_new(pattern: &str, flags: &str) -> JsRegex {
-    let parsed_flags = regress::Flags::from(flags);
+    let flags = validate_regex_flags(flags);
+    let source = if pattern.is_empty() { "(?:)" } else { pattern };
+    let parsed_flags = regress::Flags::from(flags.as_str());
     let unicode = flags.contains('u') || flags.contains('v');
     let compiled = if unicode {
-        regress::Regex::from_unicode(pattern.chars().map(u32::from), parsed_flags)
+        regress::Regex::from_unicode(source.chars().map(u32::from), parsed_flags)
     } else {
-        regress::Regex::from_unicode(pattern.encode_utf16().map(u32::from), parsed_flags)
+        regress::Regex::from_unicode(source.encode_utf16().map(u32::from), parsed_flags)
     }
     .unwrap_or_else(|error| throw_syntax_error(error.to_string()));
     Rc::new(RegexData {
         compiled,
-        source: string(pattern),
-        flags: string(flags),
+        source: string(source),
+        flags: string(&flags),
         unicode,
         global: flags.contains('g'),
         sticky: flags.contains('y'),

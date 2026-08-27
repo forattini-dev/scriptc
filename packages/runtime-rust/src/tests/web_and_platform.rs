@@ -404,6 +404,36 @@
     }
 
     #[test]
+    fn regex_constructor_validates_and_canonicalizes_flags() {
+        assert_eq!(regex_flags(&regex_new("a", "mig")).as_ref(), "gim");
+        assert_eq!(regex_flags(&regex_new("a", "d")).as_ref(), "d");
+        assert_eq!(regex_flags(&regex_new("a", "v")).as_ref(), "v");
+        assert_eq!(regex_source(&regex_new("", "")).as_ref(), "(?:)");
+
+        for flags in ["x", "gg", "uv"] {
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                regex_new("a", flags)
+            }))
+            .err()
+            .expect("invalid RegExp flags must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "SyntaxError");
+            assert_eq!(
+                caught_error_message(&caught).as_ref(),
+                format!("Invalid flags supplied to RegExp constructor '{flags}'")
+            );
+        }
+
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            regex_new("(", "")
+        }))
+        .err()
+        .expect("an invalid RegExp pattern must throw");
+        let caught = caught_from_panic(payload);
+        assert_eq!(caught_error_name(&caught).as_ref(), "SyntaxError");
+    }
+
+    #[test]
     fn regex_replacement_and_split_use_utf16_ranges() {
         let astral_subject = string("😀z");
         let suffix = regex_new("z", "");

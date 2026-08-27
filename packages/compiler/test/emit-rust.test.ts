@@ -903,6 +903,7 @@ test.each([
   "2250-tagged-templates.ts",
   "2253-union-coercions.ts",
   "2260-http2-constants.cjs",
+  "2284-regexp-constructor.cjs",
   "2320-await-unit.ts",
   "2330-tls-server-runtime-options.cjs",
   "2331-tls-server-options-typed.ts",
