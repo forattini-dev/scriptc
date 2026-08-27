@@ -849,6 +849,12 @@ test.each([
   "1052-comptime-records.ts",
   "1053-comptime-json.ts",
   "1054-comptime-modules/main.ts",
+  "1123-any-conditional-spread.ts",
+  "1354-builtin-bare-specifiers.ts",
+  "1359-json-module/main.ts",
+  "1406-dataview-mp4.ts",
+  "1407-dataview-bounds.ts",
+  "1409-typedarray-integer-loops.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
@@ -1128,6 +1134,7 @@ test.each([
   "2696-http-server-net-roundtrip.ts",
   "2697-process-chdir.ts",
   "2698-process-umask.ts",
+  "2625-bytes-views.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);

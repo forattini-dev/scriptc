@@ -4,6 +4,8 @@ import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
 import { emitRustDataViewIntrinsic } from "./data-view.js";
+import { emitRustBytesFillIntrinsic } from "./bytes-fill.js";
+import { emitRustBytesBasicIntrinsic } from "./bytes-basic.js";
 import { emitRustDynamicCall } from "./dynamic-call.js";
 import { emitRustDynamicDestructureCheck } from "./dynamic-destructuring.js";
 import { emitRustRecordKeyGet } from "./indexed-records.js";
@@ -432,6 +434,11 @@ export class RustExpressionEmitter {
         if (expr.receiver.type.kind !== "bytes") this.context.unsupported("bytes intrinsic receiver", expr.loc);
         const dataView = emitRustDataViewIntrinsic(expr, { emitExpr: (value) => this.emitExpr(value) });
         if (dataView !== null) return dataView;
+        const elementFill = emitRustBytesFillIntrinsic(expr, {
+          emitExpr: (value) => this.emitExpr(value),
+          nextName: (prefix) => this.context.nextName(prefix),
+        });
+        if (elementFill !== null) return elementFill;
         if ([
           "equals", "compareBuf", "indexOf", "lastIndexOf", "includes",
           "indexOfNum", "lastIndexOfNum", "includesNum",
@@ -522,43 +529,11 @@ export class RustExpressionEmitter {
           const width = this.context.nextName("sc_rt");
           return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${value} = ${this.emitExpr(valueExpr)}; let ${offset} = ${this.emitExpr(offsetExpr)}; let ${width} = ${this.emitExpr(widthExpr)}; runtime::bytes_write_num_var(&${receiver}, "${this.context.rustString(kind.value)}", ${value}, ${offset}, ${width}) }`;
         }
-        if (expr.method === "length" && expr.args.length === 0) {
-          return `runtime::bytes_len(&(${this.emitExpr(expr.receiver)}))`;
-        }
-        if (expr.method === "byteLength" && expr.args.length === 0) {
-          return `runtime::bytes_byte_len(&(${this.emitExpr(expr.receiver)}))`;
-        }
-        if (expr.method === "get" && expr.args.length === 1 && expr.args[0] !== undefined) {
-          return `runtime::bytes_get(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
-        }
-        if (expr.method === "slice" || expr.method === "subarray") {
-          const start = expr.args[0] === undefined ? "0.0" : this.emitExpr(expr.args[0]);
-          const end = expr.args[1] === undefined ? "f64::INFINITY" : this.emitExpr(expr.args[1]);
-          return `runtime::bytes_slice(&(${this.emitExpr(expr.receiver)}), ${start}, ${end}, ${expr.method === "subarray"})`;
-        }
-        if (expr.method === "setFrom" && expr.args[0] !== undefined) {
-          const offset = expr.args[1] === undefined ? "0.0" : this.emitExpr(expr.args[1]);
-          return `runtime::bytes_set_from(&(${this.emitExpr(expr.receiver)}), &(${this.emitExpr(expr.args[0])}), ${offset})`;
-        }
-        if (expr.method === "join" && expr.args.length === 1 && expr.args[0] !== undefined) {
-          const receiver = this.context.nextName("sc_rt");
-          const separator = this.context.nextName("sc_rt");
-          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${separator} = ${this.emitExpr(expr.args[0])}; runtime::bytes_join(&${receiver}, &${separator}) }`;
-        }
-        if (expr.method === "toReversed" && expr.args.length === 0) {
-          const receiver = this.context.nextName("sc_rt");
-          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; runtime::bytes_to_reversed(&${receiver}) }`;
-        }
-        if (expr.method === "with" && expr.args.length === 2 && expr.args[0] !== undefined && expr.args[1] !== undefined) {
-          const receiver = this.context.nextName("sc_rt");
-          const index = this.context.nextName("sc_rt");
-          const value = this.context.nextName("sc_rt");
-          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${index} = ${this.emitExpr(expr.args[0])}; let ${value} = ${this.emitExpr(expr.args[1])}; runtime::bytes_with(&${receiver}, ${index}, ${value}) }`;
-        }
-        if (expr.method === "toArray" && expr.args.length === 0) {
-          const receiver = this.context.nextName("sc_rt");
-          return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; runtime::bytes_to_array(&${receiver}) }`;
-        }
+        const basic = emitRustBytesBasicIntrinsic(expr, {
+          emitExpr: (value) => this.emitExpr(value),
+          nextName: (prefix) => this.context.nextName(prefix),
+        });
+        if (basic !== null) return basic;
         if (expr.method === "toStringVar" && expr.args.length >= 1 && expr.args.length <= 3 && expr.args[0] !== undefined) {
           const receiver = this.context.nextName("sc_rt");
           const encoding = this.context.nextName("sc_rt");

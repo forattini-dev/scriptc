@@ -532,6 +532,28 @@
     }
 
     #[test]
+    fn data_views_share_typed_storage_and_recover_the_full_buffer() {
+        let floats = bytes_alloc::<f32>(2.0);
+        bytes_set(&floats, 0.0, 1.5);
+        let float_view = data_view_new(&floats, 0.0, false, 0.0);
+        assert_eq!(data_view_get(&float_view, "f32", 0.0, true), 1.5);
+        data_view_set(&float_view, "f32", 4.0, 3.5, true);
+        assert_eq!(bytes_get(&floats, 1.0), 3.5);
+
+        let words = bytes_alloc::<u32>(2.0);
+        bytes_set(&words, 0.0, f64::from(0x0102_0304_u32));
+        let word_view = data_view_new(&words, 0.0, false, 0.0);
+        assert_eq!(data_view_get(&word_view, "u32", 0.0, true), 0x0102_0304 as f64);
+
+        let owner = bytes_alloc::<u8>(8.0);
+        bytes_set(&owner, 6.0, 7.0);
+        let window = data_view_new(&owner, 2.0, true, 3.0);
+        let rebased = data_view_new(&window, 6.0, true, 2.0);
+        assert_eq!(bytes_byte_offset(&rebased), 6.0);
+        assert_eq!(data_view_get(&rebased, "u8", 0.0, false), 7.0);
+    }
+
+    #[test]
     fn buffer_comparison_and_search_match_node_ranges_and_offsets() {
         let baseline = live_heap_objects();
         {

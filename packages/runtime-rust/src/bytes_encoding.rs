@@ -40,14 +40,22 @@ pub fn bytes_slice<T: ByteElement>(
         if view {
             Gc::new(BytesData {
                 storage: data.storage.clone(),
+                backing: data.backing.clone(),
                 offset: data.offset + start,
                 length: end - start,
             })
         } else {
-            let copied = data.storage.borrow()[data.offset + start..data.offset + end].to_vec();
+            let copied = if let Some(backing) = &data.backing {
+                (data.offset + start..data.offset + end)
+                    .map(|index| T::from_number(f64::from(backing.get(index))))
+                    .collect()
+            } else {
+                data.storage.borrow()[data.offset + start..data.offset + end].to_vec()
+            };
             Gc::new(BytesData {
                 length: copied.len(),
                 storage: Rc::new(RefCell::new(copied)),
+                backing: None,
                 offset: 0,
             })
         }
@@ -63,13 +71,18 @@ fn data_view_index(value: f64) -> Option<usize> {
     (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64).then_some(value as usize)
 }
 
-pub fn data_view_new(
-    bytes: &JsBytes<u8>,
+pub fn data_view_new<T: ByteElement>(
+    bytes: &JsBytes<T>,
     byte_offset: f64,
     has_length: bool,
     byte_length: f64,
 ) -> JsBytes<u8> {
-    let total = bytes.with(|data| data.length);
+    let backing = bytes.with(|data| {
+        data.backing
+            .clone()
+            .unwrap_or_else(|| T::byte_backing(&data.storage))
+    });
+    let total = backing.byte_len();
     let Some(start) = data_view_index(byte_offset) else {
         throw_range_error(format!(
             "Start offset {} is outside the bounds of the buffer",
@@ -99,12 +112,11 @@ pub fn data_view_new(
     } else {
         total - start
     };
-    bytes.with(|data| {
-        Gc::new(BytesData {
-            storage: data.storage.clone(),
-            offset: data.offset + start,
-            length,
-        })
+    Gc::new(BytesData {
+        storage: Rc::new(RefCell::new(Vec::new())),
+        backing: Some(backing),
+        offset: start,
+        length,
     })
 }
 
@@ -294,14 +306,9 @@ pub fn bytes_to_string_range(
     start: f64,
     end: f64,
 ) -> JsString {
-    bytes.with(|data| {
-        let (start, end) = bytes_decode_bounds(data.length, start, end);
-        let storage = data.storage.borrow();
-        decode_bytes(
-            &storage[data.offset + start..data.offset + end],
-            encoding.as_ref(),
-        )
-    })
+    let values = bytes_u8_values(bytes);
+    let (start, end) = bytes_decode_bounds(values.len(), start, end);
+    decode_bytes(&values[start..end], encoding.as_ref())
 }
 
 pub fn bytes_to_string_checked(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
@@ -471,6 +478,7 @@ fn bytes_from_vec(values: Vec<u8>) -> JsBytes<u8> {
     Gc::new(BytesData {
         length: values.len(),
         storage: Rc::new(RefCell::new(values)),
+        backing: None,
         offset: 0,
     })
 }
@@ -730,21 +738,12 @@ fn bytes_read_unsigned(
     width: usize,
     little_endian: bool,
 ) -> u64 {
-    bytes.with(|data| {
-        let storage = data.storage.borrow();
-        let input = &storage[data.offset + offset..data.offset + offset + width];
-        let mut value = 0_u64;
-        for index in 0..width {
-            value |= u64::from(
-                input[if little_endian {
-                    index
-                } else {
-                    width - 1 - index
-                }],
-            ) << (8 * index);
-        }
-        value
-    })
+    let mut value = 0_u64;
+    for index in 0..width {
+        let source = if little_endian { index } else { width - 1 - index };
+        value |= u64::from(bytes_u8_at(bytes, offset + source)) << (8 * index);
+    }
+    value
 }
 
 fn bytes_write_unsigned(
@@ -754,43 +753,33 @@ fn bytes_write_unsigned(
     little_endian: bool,
     value: u64,
 ) {
-    bytes.with(|data| {
-        let mut storage = data.storage.borrow_mut();
-        let output = &mut storage[data.offset + offset..data.offset + offset + width];
-        for index in 0..width {
-            output[if little_endian {
-                index
-            } else {
-                width - 1 - index
-            }] = (value >> (8 * index)) as u8;
-        }
-    });
+    for index in 0..width {
+        let target = if little_endian { index } else { width - 1 - index };
+        bytes_u8_set_at(bytes, offset + target, (value >> (8 * index)) as u8);
+    }
 }
 
 pub fn bytes_read_num(bytes: &JsBytes<u8>, kind: &str, offset: f64) -> f64 {
     let width = bytes_num_width(kind);
     let offset = bytes_num_offset(bytes, offset, width);
-    bytes.with(|data| {
-        let storage = data.storage.borrow();
-        let input = &storage[data.offset + offset..data.offset + offset + width];
-        match kind {
-            "u8" => f64::from(input[0]),
-            "i8" => f64::from(input[0] as i8),
-            "u16be" => f64::from(u16::from_be_bytes([input[0], input[1]])),
-            "u16le" => f64::from(u16::from_le_bytes([input[0], input[1]])),
-            "i16be" => f64::from(i16::from_be_bytes([input[0], input[1]])),
-            "i16le" => f64::from(i16::from_le_bytes([input[0], input[1]])),
-            "u32be" => f64::from(u32::from_be_bytes(input.try_into().expect("four bytes"))),
-            "u32le" => f64::from(u32::from_le_bytes(input.try_into().expect("four bytes"))),
-            "i32be" => f64::from(i32::from_be_bytes(input.try_into().expect("four bytes"))),
-            "i32le" => f64::from(i32::from_le_bytes(input.try_into().expect("four bytes"))),
-            "f32be" => f64::from(f32::from_be_bytes(input.try_into().expect("four bytes"))),
-            "f32le" => f64::from(f32::from_le_bytes(input.try_into().expect("four bytes"))),
-            "f64be" => f64::from_be_bytes(input.try_into().expect("eight bytes")),
-            "f64le" => f64::from_le_bytes(input.try_into().expect("eight bytes")),
-            _ => unreachable!(),
-        }
-    })
+    let input: Vec<u8> = (0..width).map(|index| bytes_u8_at(bytes, offset + index)).collect();
+    match kind {
+        "u8" => f64::from(input[0]),
+        "i8" => f64::from(input[0] as i8),
+        "u16be" => f64::from(u16::from_be_bytes([input[0], input[1]])),
+        "u16le" => f64::from(u16::from_le_bytes([input[0], input[1]])),
+        "i16be" => f64::from(i16::from_be_bytes([input[0], input[1]])),
+        "i16le" => f64::from(i16::from_le_bytes([input[0], input[1]])),
+        "u32be" => f64::from(u32::from_be_bytes(input.try_into().expect("four bytes"))),
+        "u32le" => f64::from(u32::from_le_bytes(input.try_into().expect("four bytes"))),
+        "i32be" => f64::from(i32::from_be_bytes(input.try_into().expect("four bytes"))),
+        "i32le" => f64::from(i32::from_le_bytes(input.try_into().expect("four bytes"))),
+        "f32be" => f64::from(f32::from_be_bytes(input.try_into().expect("four bytes"))),
+        "f32le" => f64::from(f32::from_le_bytes(input.try_into().expect("four bytes"))),
+        "f64be" => f64::from_be_bytes(input.try_into().expect("eight bytes")),
+        "f64le" => f64::from_le_bytes(input.try_into().expect("eight bytes")),
+        _ => unreachable!(),
+    }
 }
 
 pub fn bytes_write_num(bytes: &JsBytes<u8>, kind: &str, value: f64, offset: f64) -> f64 {
@@ -815,17 +804,15 @@ pub fn bytes_write_num(bytes: &JsBytes<u8>, kind: &str, value: f64, offset: f64)
         _ => unreachable!(),
     };
     let source = &bits[8 - width..];
-    bytes.with(|data| {
-        let mut storage = data.storage.borrow_mut();
-        let output = &mut storage[data.offset + offset..data.offset + offset + width];
-        if kind.ends_with("le") {
-            for (target, source) in output.iter_mut().zip(source.iter().rev()) {
-                *target = *source;
-            }
-        } else {
-            output.copy_from_slice(source);
+    if kind.ends_with("le") {
+        for (index, source) in source.iter().rev().enumerate() {
+            bytes_u8_set_at(bytes, offset + index, *source);
         }
-    });
+    } else {
+        for (index, source) in source.iter().enumerate() {
+            bytes_u8_set_at(bytes, offset + index, *source);
+        }
+    }
     (offset + width) as f64
 }
 

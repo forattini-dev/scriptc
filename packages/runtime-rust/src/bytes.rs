@@ -2,6 +2,63 @@ pub trait ByteElement: Copy + Default + 'static {
     fn from_number(value: f64) -> Self;
     fn to_number(self) -> f64;
     fn same_bits(self, other: Self) -> bool;
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking;
+}
+
+#[derive(Clone)]
+pub enum ByteBacking {
+    U8(Rc<RefCell<Vec<u8>>>),
+    U32(Rc<RefCell<Vec<u32>>>),
+    I32(Rc<RefCell<Vec<i32>>>),
+    F32(Rc<RefCell<Vec<f32>>>),
+}
+
+impl ByteBacking {
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::U8(storage) => storage.borrow().len(),
+            Self::U32(storage) => storage.borrow().len() * 4,
+            Self::I32(storage) => storage.borrow().len() * 4,
+            Self::F32(storage) => storage.borrow().len() * 4,
+        }
+    }
+
+    fn get(&self, index: usize) -> u8 {
+        let element = index / 4;
+        let byte = index % 4;
+        match self {
+            Self::U8(storage) => storage.borrow()[index],
+            Self::U32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
+            Self::I32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
+            Self::F32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
+        }
+    }
+
+    fn set(&self, index: usize, value: u8) {
+        let element = index / 4;
+        let byte = index % 4;
+        match self {
+            Self::U8(storage) => storage.borrow_mut()[index] = value,
+            Self::U32(storage) => {
+                let mut storage = storage.borrow_mut();
+                let mut bytes = storage[element].to_ne_bytes();
+                bytes[byte] = value;
+                storage[element] = u32::from_ne_bytes(bytes);
+            }
+            Self::I32(storage) => {
+                let mut storage = storage.borrow_mut();
+                let mut bytes = storage[element].to_ne_bytes();
+                bytes[byte] = value;
+                storage[element] = i32::from_ne_bytes(bytes);
+            }
+            Self::F32(storage) => {
+                let mut storage = storage.borrow_mut();
+                let mut bytes = storage[element].to_ne_bytes();
+                bytes[byte] = value;
+                storage[element] = f32::from_ne_bytes(bytes);
+            }
+        }
+    }
 }
 
 impl ByteElement for u8 {
@@ -13,6 +70,9 @@ impl ByteElement for u8 {
     }
     fn same_bits(self, other: Self) -> bool {
         self == other
+    }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::U8(storage.clone())
     }
 }
 
@@ -26,6 +86,9 @@ impl ByteElement for u32 {
     fn same_bits(self, other: Self) -> bool {
         self == other
     }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::U32(storage.clone())
+    }
 }
 
 impl ByteElement for i32 {
@@ -37,6 +100,9 @@ impl ByteElement for i32 {
     }
     fn same_bits(self, other: Self) -> bool {
         self == other
+    }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::I32(storage.clone())
     }
 }
 
@@ -50,10 +116,14 @@ impl ByteElement for f32 {
     fn same_bits(self, other: Self) -> bool {
         self.to_bits() == other.to_bits()
     }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::F32(storage.clone())
+    }
 }
 
 pub struct BytesData<T: ByteElement> {
     storage: Rc<RefCell<Vec<T>>>,
+    backing: Option<ByteBacking>,
     offset: usize,
     length: usize,
 }
@@ -65,6 +135,7 @@ impl<T: ByteElement> Trace for BytesData<T> {
 impl<T: ByteElement> ClearEdges for BytesData<T> {
     fn clear_edges(&mut self) {
         self.storage = Rc::new(RefCell::new(Vec::new()));
+        self.backing = None;
         self.offset = 0;
         self.length = 0;
     }
@@ -183,6 +254,7 @@ fn bytes_from_elements<T: ByteElement>(elements: Vec<T>) -> JsBytes<T> {
     Gc::new(BytesData {
         length: elements.len(),
         storage: Rc::new(RefCell::new(elements)),
+        backing: None,
         offset: 0,
     })
 }
@@ -199,6 +271,7 @@ pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
     let length = length as usize;
     Gc::new(BytesData {
         storage: Rc::new(RefCell::new(vec![T::default(); length])),
+        backing: None,
         offset: 0,
         length,
     })
@@ -267,12 +340,37 @@ fn bytes_index<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> usize {
 
 pub fn bytes_get<T: ByteElement>(bytes: &JsBytes<T>, index: f64) -> f64 {
     let index = bytes_index(bytes, index);
-    bytes.with(|data| data.storage.borrow()[data.offset + index].to_number())
+    bytes.with(|data| match &data.backing {
+        Some(backing) => f64::from(backing.get(data.offset + index)),
+        None => data.storage.borrow()[data.offset + index].to_number(),
+    })
 }
 
 pub fn bytes_set<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) {
     let index = bytes_index(bytes, index);
-    bytes.with(|data| data.storage.borrow_mut()[data.offset + index] = T::from_number(value));
+    bytes.with(|data| match &data.backing {
+        Some(backing) => backing.set(
+            data.offset + index,
+            T::from_number(value).to_number() as u8,
+        ),
+        None => data.storage.borrow_mut()[data.offset + index] = T::from_number(value),
+    });
+}
+
+pub fn bytes_fill_elem<T: ByteElement>(
+    bytes: &JsBytes<T>,
+    value: f64,
+    start: f64,
+    end: f64,
+) -> JsBytes<T> {
+    let length = bytes.with(|data| data.length);
+    let start = bytes_relative_index(start, length, 0);
+    let end = bytes_relative_index(end, length, length).max(start);
+    bytes.with(|data| {
+        data.storage.borrow_mut()[data.offset + start..data.offset + end]
+            .fill(T::from_number(value));
+    });
+    bytes.clone()
 }
 
 pub fn bytes_join<T: ByteElement>(bytes: &JsBytes<T>, separator: &JsString) -> JsString {
@@ -327,7 +425,28 @@ pub fn bytes_to_array<T: ByteElement>(bytes: &JsBytes<T>) -> JsArray<f64> {
 }
 
 fn bytes_u8_values(bytes: &JsBytes<u8>) -> Vec<u8> {
-    bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec())
+    bytes.with(|data| {
+        if let Some(backing) = &data.backing {
+            return (data.offset..data.offset + data.length)
+                .map(|index| backing.get(index))
+                .collect();
+        }
+        data.storage.borrow()[data.offset..data.offset + data.length].to_vec()
+    })
+}
+
+fn bytes_u8_at(bytes: &JsBytes<u8>, index: usize) -> u8 {
+    bytes.with(|data| match &data.backing {
+        Some(backing) => backing.get(data.offset + index),
+        None => data.storage.borrow()[data.offset + index],
+    })
+}
+
+fn bytes_u8_set_at(bytes: &JsBytes<u8>, index: usize, value: u8) {
+    bytes.with(|data| match &data.backing {
+        Some(backing) => backing.set(data.offset + index, value),
+        None => data.storage.borrow_mut()[data.offset + index] = value,
+    });
 }
 
 fn bytes_received_number(value: f64) -> String {
@@ -639,13 +758,15 @@ pub fn bytes_swap(bytes: &JsBytes<u8>, width: usize) -> JsBytes<u8> {
             dom: None,
         });
     }
-    bytes.with(|data| {
-        for group in data.storage.borrow_mut()[data.offset..data.offset + data.length]
-            .chunks_exact_mut(width)
-        {
-            group.reverse();
+    for start in (0..length).step_by(width) {
+        for index in 0..width / 2 {
+            let opposite = width - 1 - index;
+            let left = bytes_u8_at(bytes, start + index);
+            let right = bytes_u8_at(bytes, start + opposite);
+            bytes_u8_set_at(bytes, start + index, right);
+            bytes_u8_set_at(bytes, start + opposite, left);
         }
-    });
+    }
     bytes.clone()
 }
 
