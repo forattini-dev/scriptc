@@ -34,6 +34,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::NetSocket(..) => "Socket {}".to_owned(),`);
   context.line(`${name}::HttpRequest(..) => "IncomingMessage {}".to_owned(),`);
   context.line(`${name}::HttpResponse(..) => "ServerResponse {}".to_owned(),`);
+  context.line(`${name}::HttpAgent(..) => "Agent {}".to_owned(),`);
   context.line(`${name}::Bytes(value) => {`);
   context.pushIndent();
   context.line("let length = runtime::bytes_len(value) as usize;");
@@ -72,7 +73,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { let _ = value; false }`);
   } else {

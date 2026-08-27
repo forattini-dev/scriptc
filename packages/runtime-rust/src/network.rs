@@ -69,6 +69,7 @@ struct NetWrite {
 
 pub struct NetSocketData {
     stream: Option<std::net::TcpStream>,
+    pending_connect: Option<(String, u16)>,
     connect_rx: Option<std::sync::mpsc::Receiver<Result<std::net::TcpStream, String>>>,
     tls: Option<TlsSocketState>,
     server: Option<JsNetServer>,
@@ -124,6 +125,7 @@ impl Trace for NetSocketData {
 impl ClearEdges for NetSocketData {
     fn clear_edges(&mut self) {
         self.stream = None;
+        self.pending_connect = None;
         self.connect_rx = None;
         self.tls = None;
         self.server = None;
@@ -229,6 +231,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
         .unwrap_or_else(|error| throw_error(format!("connect {}", fs_error_code(&error))));
     let socket = Gc::new(NetSocketData {
         stream: Some(stream),
+        pending_connect: None,
         connect_rx: None,
         tls: None,
         server,
@@ -429,18 +432,13 @@ pub fn net_server_close(server: &JsNetServer) {
     }
 }
 
-pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
+pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
     let port = net_port(port);
     let host = host.to_string();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let result = std::net::TcpStream::connect((host.as_str(), port))
-            .map_err(|error| format!("connect {} {host}:{port}", fs_error_code(&error)));
-        let _ = sender.send(result);
-    });
     let socket = Gc::new(NetSocketData {
         stream: None,
-        connect_rx: Some(receiver),
+        pending_connect: Some((host, port)),
+        connect_rx: None,
         tls: None,
         server: None,
         destroyed: false,
@@ -461,6 +459,32 @@ pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
         error_listeners: Vec::new(),
     });
     NET_SOCKETS.with(|sockets| sockets.borrow_mut().push(socket.clone()));
+    socket
+}
+
+pub fn net_socket_start_connect(socket: &JsNetSocket) {
+    let endpoint = socket.with_mut(|socket| {
+        if socket.destroyed || socket.connect_rx.is_some() || socket.stream.is_some() {
+            None
+        } else {
+            socket.pending_connect.take()
+        }
+    });
+    let Some((host, port)) = endpoint else {
+        return;
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::net::TcpStream::connect((host.as_str(), port))
+            .map_err(|error| format!("connect {} {host}:{port}", fs_error_code(&error)));
+        let _ = sender.send(result);
+    });
+    socket.with_mut(|socket| socket.connect_rx = Some(receiver));
+}
+
+pub fn net_socket_connect(port: f64, host: &JsString) -> JsNetSocket {
+    let socket = net_socket_connect_deferred(port, host);
+    net_socket_start_connect(&socket);
     socket
 }
 
@@ -701,6 +725,7 @@ pub fn net_socket_destroy(socket: &JsNetSocket) {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         socket.connect_rx = None;
+        socket.pending_connect = None;
         socket.tls = None;
         socket.destroyed = true;
         socket.writable = false;
@@ -923,7 +948,7 @@ fn net_socket_flush_one() -> bool {
                 if socket.destroyed || !socket.writable {
                     return Flush::Idle;
                 }
-                if socket.connect_rx.is_some() {
+                if socket.pending_connect.is_some() || socket.connect_rx.is_some() {
                     return Flush::Idle;
                 }
                 if socket.tls.is_some() {
@@ -1015,7 +1040,7 @@ fn net_socket_read_one() -> bool {
                 if socket.destroyed || socket.read_ended {
                     return None;
                 }
-                if socket.connect_rx.is_some() {
+                if socket.pending_connect.is_some() || socket.connect_rx.is_some() {
                     return None;
                 }
                 if socket.tls.is_some() {

@@ -78,10 +78,16 @@ fn http_client_dispatch_error(request: &JsHttpClientRequest, error: JsError) {
 }
 
 fn http_client_dispatch_close(request: &JsHttpClientRequest) {
-    let listeners = request.with_mut(|request| {
+    let (listeners, agent) = request.with_mut(|request| {
         request.destroyed = true;
-        std::mem::take(&mut request.close_listeners)
+        (
+            std::mem::take(&mut request.close_listeners),
+            request.agent.take(),
+        )
     });
+    if let Some(agent) = agent {
+        http_agent_client_done(&agent, request);
+    }
     for listener in listeners {
         (listener.invoke)();
     }
@@ -236,7 +242,7 @@ fn http_client_headers(values: &JsArray<JsString>) -> Vec<(JsString, JsString)> 
     headers
 }
 
-fn http_client_new(
+fn http_client_new_with_socket(
     host: &JsString,
     port: f64,
     path: &JsString,
@@ -247,13 +253,14 @@ fn http_client_new(
     auto_end: bool,
     reject_unauthorized: bool,
     ca: &JsString,
+    socket: Option<JsNetSocket>,
     callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
 ) -> JsHttpClientRequest {
     let port_number = net_port(port);
-    let socket = (!secure).then(|| net_socket_connect(port, host));
     let request = Gc::new(HttpClientRequestData {
         socket: socket.clone(),
         connection: None,
+        agent: None,
         host: host.clone(),
         port: port_number,
         path: path.clone(),
@@ -324,6 +331,26 @@ fn http_client_new(
         http_client_end(&request);
     }
     request
+}
+
+fn http_client_new(
+    host: &JsString,
+    port: f64,
+    path: &JsString,
+    method: &JsString,
+    secure: bool,
+    timeout: f64,
+    headers: &JsArray<JsString>,
+    auto_end: bool,
+    reject_unauthorized: bool,
+    ca: &JsString,
+    callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
+) -> JsHttpClientRequest {
+    let socket = (!secure).then(|| net_socket_connect(port, host));
+    http_client_new_with_socket(
+        host, port, path, method, secure, timeout, headers, auto_end, reject_unauthorized, ca,
+        socket, callback,
+    )
 }
 
 pub fn http_client_request(

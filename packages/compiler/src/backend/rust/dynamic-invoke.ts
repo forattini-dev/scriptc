@@ -79,6 +79,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`(${this.dyn}::NetSocket(left), ${this.dyn}::NetSocket(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::HttpRequest(left), ${this.dyn}::HttpRequest(right)) => left.ptr_eq(right),`);
     this.context.line(`(${this.dyn}::HttpResponse(left), ${this.dyn}::HttpResponse(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${this.dyn}::HttpAgent(left), ${this.dyn}::HttpAgent(right)) => left.ptr_eq(right),`);
     for (const pattern of this.functionVariants()) {
       this.context.line(`(${this.dyn}::${pattern}(left, _, _), ${this.dyn}::${pattern}(right, _, _)) => left.identity() == right.identity(),`);
     }
@@ -236,6 +237,7 @@ class RustDynamicInvokeEmitter {
     this.emitNetSocketArm();
     this.emitHttpRequestArm();
     this.emitHttpResponseArm();
+    this.emitHttpAgentArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("}");
@@ -376,6 +378,10 @@ class RustDynamicInvokeEmitter {
 
   private emitHttpResponseArm(): void {
     this.context.line(`${this.dyn}::HttpResponse(response) => sc_dyn_http_response_invoke(response, recv, method, args, callee_name),`);
+  }
+
+  private emitHttpAgentArm(): void {
+    this.context.line(`${this.dyn}::HttpAgent(agent) => sc_dyn_http_agent_invoke(agent, method, args, callee_name),`);
   }
 
   private functionVariants(): string[] {

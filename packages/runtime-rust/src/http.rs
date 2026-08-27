@@ -155,6 +155,7 @@ pub type JsHttpResponse = Gc<HttpResponseData>;
 pub struct HttpClientRequestData {
     socket: Option<JsNetSocket>,
     connection: Option<Rc<RefCell<HttpClientConnection>>>,
+    agent: Option<JsHttpAgent>,
     host: JsString,
     port: u16,
     path: JsString,
@@ -180,6 +181,9 @@ impl Trace for HttpClientRequestData {
         if let Some(connection) = &self.connection {
             connection.borrow().trace(tracer);
         }
+        if let Some(agent) = &self.agent {
+            tracer.edge(agent);
+        }
         for listener in &self.response_listeners {
             (listener.trace)(tracer);
         }
@@ -196,6 +200,7 @@ impl ClearEdges for HttpClientRequestData {
     fn clear_edges(&mut self) {
         self.socket = None;
         self.connection = None;
+        self.agent = None;
         self.headers.clear();
         self.body.clear();
         self.sent = true;

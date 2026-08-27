@@ -2,6 +2,7 @@ import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicHttp } from "./dynamic-http.js";
+import { emitRustDynamicAgent } from "./dynamic-agent.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
@@ -71,6 +72,7 @@ export class RustDynamicEmitter {
     this.context.line("NetSocket(runtime::JsNetSocket),");
     this.context.line("HttpRequest(runtime::JsHttpRequest),");
     this.context.line("HttpResponse(runtime::JsHttpResponse),");
+    this.context.line("HttpAgent(runtime::JsHttpAgent),");
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     for (const shape of boxedShapes) {
@@ -98,6 +100,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::NetSocket(value) => tracer.edge(value),");
     this.context.line("Self::HttpRequest(value) => tracer.edge(value),");
     this.context.line("Self::HttpResponse(value) => tracer.edge(value),");
+    this.context.line("Self::HttpAgent(value) => tracer.edge(value),");
     this.context.line("_ => {},");
     this.context.popIndent();
     this.context.line("}");
@@ -141,7 +144,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
-    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => { writer.begin_object(); writer.end_object(); },`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
     }
@@ -261,6 +264,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NetSocket(value) => ${name}::NetSocket(value.clone()),`);
     this.context.line(`${name}::HttpRequest(value) => ${name}::HttpRequest(value.clone()),`);
     this.context.line(`${name}::HttpResponse(value) => ${name}::HttpResponse(value.clone()),`);
+    this.context.line(`${name}::HttpAgent(value) => ${name}::HttpAgent(value.clone()),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
@@ -315,7 +319,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetServer(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetSocket(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
-    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let mut elements = Vec::new();");
@@ -375,7 +379,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => "promise",`);
     this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
-    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) => "object",`);
+    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
@@ -537,6 +541,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::HttpRequest(request) => sc_dyn_http_request_get(request, key),`);
     this.context.line(`${name}::HttpResponse(response) => sc_dyn_http_response_get(response, key),`);
+    this.context.line(`${name}::HttpAgent(agent) => sc_dyn_http_agent_get(agent, key),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, properties) => {`);
       this.context.pushIndent();
@@ -590,6 +595,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::HttpResponse(response) => { if !sc_dyn_http_response_set(response, &key, &field) { sc_dyn_key_set_error(value, &key); } },`);
+    this.context.line(`${name}::HttpAgent(agent) => { if !sc_dyn_http_agent_set(agent, &key, &field) { sc_dyn_key_set_error(value, &key); } },`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, _, properties) => runtime::map_set_by(properties, key, field, |left, right| left.as_ref() == right.as_ref()),`);
     }
@@ -612,7 +618,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
-    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) => runtime::string("[object Object]"),`);
+    this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let mut output = String::new();");
@@ -666,6 +672,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NetSocket(..) => "an instance of Socket".to_owned(),`);
     this.context.line(`${name}::HttpRequest(..) => "an instance of IncomingMessage".to_owned(),`);
     this.context.line(`${name}::HttpResponse(..) => "an instance of ServerResponse".to_owned(),`);
+    this.context.line(`${name}::HttpAgent(..) => "an instance of Agent".to_owned(),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => format!("function {function_name}"),`);
     }
@@ -760,6 +767,7 @@ export class RustDynamicEmitter {
       emitRustDynamicInvoke(this.context, boxedShapes);
     }
     emitRustDynamicHttp(this.context);
+    emitRustDynamicAgent(this.context);
     this.emitDynamicStringCoercion(boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
@@ -881,6 +889,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NetServer(..) => runtime::string("Server {}"),`);
     this.context.line(`${name}::HttpRequest(..) => runtime::string("IncomingMessage {}"),`);
     this.context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
+    this.context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
     }
@@ -985,6 +994,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
     this.context.line(`${name}::HttpRequest(..) => runtime::throw_dom_exception("DataCloneError", "#<IncomingMessage> could not be cloned."),`);
     this.context.line(`${name}::HttpResponse(..) => runtime::throw_dom_exception("DataCloneError", "#<ServerResponse> could not be cloned."),`);
+    this.context.line(`${name}::HttpAgent(..) => runtime::throw_dom_exception("DataCloneError", "#<Agent> could not be cloned."),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let identity = value.identity();");
@@ -1041,6 +1051,7 @@ export class RustDynamicEmitter {
     this.context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::HttpRequest(left), ${name}::HttpRequest(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::HttpResponse(left), ${name}::HttpResponse(right)) => left.ptr_eq(right),`);
+    this.context.line(`(${name}::HttpAgent(left), ${name}::HttpAgent(right)) => left.ptr_eq(right),`);
     this.context.line(`(${name}::Bytes(left), ${name}::Bytes(right)) => {`);
     this.context.pushIndent();
     this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::bytes_len(left) != runtime::bytes_len(right) { false } else {");

@@ -169,6 +169,12 @@ export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "http.agentNew" && expr.args.length === 7 &&
+      expr.args[0]?.type.kind === "bool" && expr.args[1]?.type.kind === "bool" &&
+      expr.args.slice(2).every((arg) => arg.type.kind === "f64")) {
+    const args = expr.args.map((arg) => context.emitExpr(arg)).join(", ");
+    return `${context.dynTypeName()}::HttpAgent(runtime::http_agent_new(${args}))`;
+  }
   if (expr.fn === "http.createServer" && expr.args.length === 1) {
     const callbackType = expr.args[0]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.createServer shape", expr.loc);
@@ -268,6 +274,10 @@ export function emitRustHttpCall(
     if (callbackType?.kind !== "func") context.unsupported("http.reqOnEnd callback", expr.loc);
     return emitIncomingEndListener(expr, callbackType, context);
   }
+  if (expr.fn === "http.reqResume" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpReq") {
+    return `runtime::http_request_resume(&(${context.emitExpr(expr.args[0])}))`;
+  }
   if (expr.fn === "http.resOnFinish" && expr.args.length === 2) {
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.resOnFinish callback", expr.loc);
@@ -335,6 +345,27 @@ export function emitRustHttpCall(
     }
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::http_client_request_callback(${args}, ${invoke}, ${trace})`);
+  }
+  if ((expr.fn === "http.requestAgent" || expr.fn === "http.requestAgentCb") &&
+      (expr.args.length === 8 || expr.args.length === 9)) {
+    const [host, port, path, method, timeout, headers, autoEnd, agentValue, callbackExpr] = expr.args;
+    if (host?.type.kind !== "string" || port?.type.kind !== "f64" || path?.type.kind !== "string" ||
+        method?.type.kind !== "string" || timeout?.type.kind !== "f64" || headers?.type.kind !== "array" ||
+        headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool" || agentValue?.type.kind !== "dyn") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const dyn = context.dynTypeName();
+    const checkedAgent = `{ let sc_value = ${context.emitExpr(agentValue)}; match sc_value { ${dyn}::HttpAgent(sc_agent) => sc_agent, sc_value => sc_dyn_arg_type_fail("options.agent", "an instance of http.Agent, false, null, or undefined", &sc_value), } }`;
+    const args = `&(${checkedAgent}), &(${context.emitExpr(host)}), ${context.emitExpr(port)}, &(${context.emitExpr(path)}), &(${context.emitExpr(method)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(headers)}), ${context.emitExpr(autoEnd)}`;
+    if (expr.fn === "http.requestAgent") {
+      return `runtime::http_agent_client_request(${args})`;
+    }
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("http.requestAgentCb callback", expr.loc);
+    }
+    return emitResponseCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::http_agent_client_request_callback(${args}, ${invoke}, ${trace})`);
   }
   if ((expr.fn === "https.request" || expr.fn === "https.requestCb") &&
       (expr.args.length === 9 || expr.args.length === 10)) {

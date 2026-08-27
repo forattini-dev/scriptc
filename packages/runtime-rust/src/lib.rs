@@ -58,6 +58,7 @@ include!("numeric_ops.rs");
 include!("network.rs");
 include!("http.rs");
 include!("http_client.rs");
+include!("http_agent.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
 include!("tls_socket.rs");

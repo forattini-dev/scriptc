@@ -1002,6 +1002,8 @@ test.each([
   "2630-stream-consumers-errors.ts",
   "2638-http-dyn-res-compat.cjs",
   "2639-http-dyn-req-pause.cjs",
+  "2641-http-agent-surface.cjs",
+  "2642-http-agent-maxsockets.cjs",
   "2643-or-default-retag.ts",
   "2654-top-level-await-unrelated-rejection.ts",
   "2664-top-level-await-same-checkpoint-rejection.ts",
