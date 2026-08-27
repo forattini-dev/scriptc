@@ -650,6 +650,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "1451-instanceof-uint8array-unknown.ts",
     "1467-string-match.ts",
     "1476-assign-expression.ts",
+    "1480-os-network-interfaces.ts",
     "1481-string-case-static.ts",
     "1520-string-split-static.ts",
     "1521-string-trim-pad-static.ts",
@@ -1398,22 +1399,29 @@ test("Rust Buffer and StringDecoder byte surfaces match Node byte-for-byte", asy
   }
 }, 240_000);
 
-test("unsupported Rust IR refuses instead of falling back to C or LLVM", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-refusal-"));
-  const sourcePath = join(dir, "unsupported.ts");
-  await writeFile(
-    sourcePath,
-    'import { networkInterfaces } from "node:os";\nconsole.log(networkInterfaces());\n',
-  );
-  const result = await compile(sourcePath, {
+test("Rust os.networkInterfaces matches Node byte-for-byte", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-network-interfaces-"));
+  const entryPath = resolve("tests/corpus/1480-os-network-interfaces.ts");
+  const result = await compile(entryPath, {
     outDir: dir,
-    outPath: join(dir, "unsupported"),
+    outPath: join(dir, "network-interfaces"),
     backend: "rust",
+    optimization: "dev",
   });
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
-  expect(result.diagnostics[0]?.code).toBe("SC3001");
-  expect(result.diagnostics[0]?.message).toContain("rust backend does not support");
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; "),
+  ).toBe(true);
+  if (!result.ok || result.backend !== "rust") return;
+  expect(await readFile(result.sourcePath, "utf8")).not.toMatch(/\bunsafe\s*\{/);
+  const [node, rust] = await Promise.all([
+    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(result.binaryPath, [], {
+      env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    }),
+  ]);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
 }, 120_000);
 
 test("Rust class inheritance, dispatch, instanceof, accessors, and cycles match Node", async () => {

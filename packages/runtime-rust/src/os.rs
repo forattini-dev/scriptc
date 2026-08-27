@@ -168,3 +168,139 @@ pub fn os_totalmem() -> f64 {
     };
     output.and_then(|value| value.parse().ok()).unwrap_or(0.0)
 }
+
+#[derive(Clone)]
+pub struct OsNetworkInterfaceRow {
+    pub name: JsString,
+    pub address: JsString,
+    pub netmask: JsString,
+    pub family: JsString,
+    pub mac: JsString,
+    pub internal: bool,
+    pub cidr: Option<JsString>,
+    pub ipv6: bool,
+    pub scopeid: f64,
+}
+
+fn os_netmask_prefix(bytes: &[u8]) -> Option<usize> {
+    let mut ones = 0;
+    let mut zero_seen = false;
+    for byte in bytes {
+        for bit in (0..8).rev() {
+            if byte & (1 << bit) != 0 {
+                if zero_seen {
+                    return None;
+                }
+                ones += 1;
+            } else {
+                zero_seen = true;
+            }
+        }
+    }
+    Some(ones)
+}
+
+#[cfg(windows)]
+fn os_interface_name(interface: &getifaddrs::Interface) -> &str {
+    &interface.description
+}
+
+#[cfg(all(
+    not(windows),
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )
+))]
+fn os_interface_name(interface: &getifaddrs::Interface) -> &str {
+    &interface.name
+}
+
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    target_os = "android",
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub fn os_network_interfaces() -> Vec<OsNetworkInterfaceRow> {
+    use getifaddrs::{Address, InterfaceFlags};
+
+    let interfaces: Vec<_> = match getifaddrs::getifaddrs() {
+        Ok(interfaces) => interfaces.collect(),
+        Err(_) => return Vec::new(),
+    };
+    let active = |flags: InterfaceFlags| {
+        flags.contains(InterfaceFlags::UP) && flags.contains(InterfaceFlags::RUNNING)
+    };
+    let mut macs = HashMap::<String, [u8; 6]>::new();
+    for interface in &interfaces {
+        if active(interface.flags) {
+            if let Address::Mac(mac) = &interface.address {
+                macs.insert(os_interface_name(interface).to_owned(), *mac);
+            }
+        }
+    }
+    let zero_mac = [0_u8; 6];
+    interfaces
+        .into_iter()
+        .filter_map(|interface| {
+            if !active(interface.flags) {
+                return None;
+            }
+            let name = os_interface_name(&interface).to_owned();
+            let internal = interface.flags.contains(InterfaceFlags::LOOPBACK);
+            let mac = macs.get(&name).unwrap_or(&zero_mac);
+            let mac = string(&format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+            ));
+            let (address, netmask, ipv6, scopeid, prefix) = match interface.address {
+                Address::V4(value) => {
+                    let netmask = value.netmask.unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
+                    let prefix = os_netmask_prefix(&netmask.octets());
+                    (value.address.to_string(), netmask.to_string(), false, 0.0, prefix)
+                }
+                Address::V6(value) => {
+                    let netmask = value.netmask.unwrap_or(std::net::Ipv6Addr::UNSPECIFIED);
+                    let prefix = os_netmask_prefix(&netmask.octets());
+                    let scoped = value.address.is_unicast_link_local() || value.address.is_multicast();
+                    let scopeid = if scoped { interface.index.unwrap_or(0) as f64 } else { 0.0 };
+                    (value.address.to_string(), netmask.to_string(), true, scopeid, prefix)
+                }
+                Address::Mac(_) => return None,
+            };
+            let cidr = prefix.map(|prefix| string(&format!("{address}/{prefix}")));
+            Some(OsNetworkInterfaceRow {
+                name: string(&name),
+                address: string(&address),
+                netmask: string(&netmask),
+                family: string(if ipv6 { "IPv6" } else { "IPv4" }),
+                mac,
+                internal,
+                cidr,
+                ipv6,
+                scopeid,
+            })
+        })
+        .collect()
+}
+
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    target_os = "android",
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
+pub fn os_network_interfaces() -> Vec<OsNetworkInterfaceRow> {
+    Vec::new()
+}

@@ -4,6 +4,7 @@ import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
 import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
+import { emitRustOsCall } from "./os.js";
 import { emitRustProcessCall } from "./process.js";
 import { emitRustQuerystringCall } from "./querystring.js";
 import { emitRustTlsCall } from "./tls.js";
@@ -73,6 +74,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (httpCall !== null) return httpCall;
   const netCall = emitRustNetCall(expr, context);
   if (netCall !== null) return netCall;
+  const osCall = emitRustOsCall(expr, context);
+  if (osCall !== null) return osCall;
   const processCall = emitRustProcessCall(expr, context);
   if (processCall !== null) return processCall;
   const querystringCall = emitRustQuerystringCall(expr, context);
