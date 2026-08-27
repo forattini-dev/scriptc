@@ -83,6 +83,10 @@ export function emitRustDynamicLibCall(
   if (expr.fn === "dyn.typeof" && expr.args.length === 1 && arg?.type.kind === "dyn") {
     return `sc_dyn_typeof(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "dyn.toStringCoerce" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "string") {
+    return `sc_dyn_string_coerce_js(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "dyn.toString" && expr.args.length === 3 && arg?.type.kind === "dyn" &&
       secondArg?.type.kind === "string" && expr.args[2]?.type.kind === "string") {
     const value = context.nextTemporary();

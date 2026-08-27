@@ -707,9 +707,42 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     if (this.context.usesDynamicInvoke()) emitRustDynamicInvoke(this.context, boxedShapes);
+    this.emitDynamicStringCoercion(boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
+  }
+
+  private emitDynamicStringCoercion(boxedShapes: readonly RustClosureShape[]): void {
+    const name = this.context.dynTypeName();
+    const callable = boxedShapes
+      .map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`)
+      .join(" | ");
+    this.context.line(`fn sc_dyn_string_coerce_hook(receiver: &${name}, method: &${name}, method_name: &str) -> Option<runtime::JsString> {`);
+    this.context.pushIndent();
+    this.context.line("let result = match method {");
+    this.context.pushIndent();
+    if (callable.length > 0) {
+      const thisBinding = this.context.usesDynamicInvoke()
+        ? "let _this_guard = sc_dyn_this_push(receiver.clone());"
+        : "let _ = receiver;";
+      this.context.line(`${callable} => { ${thisBinding} sc_dyn_call(method, &[], method_name) },`);
+    }
+    this.context.line("_ => return None,");
+    this.context.popIndent();
+    this.context.line("};");
+    this.context.line(`match &result { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::Boolean(..) | ${name}::String(..) => Some(sc_dyn_to_string(&result)), _ => None, }`);
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_dyn_string_coerce_js(value: &${name}) -> runtime::JsString {`);
+    this.context.pushIndent();
+    this.context.line(`let ${name}::Object(object) = value else { return sc_dyn_to_string(value); };`);
+    this.context.line(`let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) else { return runtime::string("[object Object]"); };`);
+    this.context.line("if let Some(result) = sc_dyn_string_coerce_hook(value, &to_string, \"toString\") { return result; }");
+    this.context.line("if let Some(value_of) = runtime::map_get_by(object, &runtime::string(\"valueOf\"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_string_coerce_hook(value, &value_of, \"valueOf\") { return result; } }");
+    this.context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");
+    this.context.popIndent();
+    this.context.line("}");
   }
 
   emitDynamicInspectDefinition(boxedShapes: readonly RustClosureShape[]): void {
