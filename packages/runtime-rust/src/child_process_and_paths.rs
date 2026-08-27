@@ -188,6 +188,75 @@ pub fn child_exec_sync(
     Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())
 }
 
+pub fn child_exec_capture(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    cwd: &JsString,
+    has_env: bool,
+    env_pairs: &JsArray<JsString>,
+    timeout_ms: f64,
+) -> JsSpawnResult {
+    use std::process::{Command, Stdio};
+
+    let mut child_command = Command::new(command.as_ref());
+    arguments.with(|arguments| {
+        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+    });
+    if !cwd.is_empty() {
+        child_command.current_dir(cwd.as_ref());
+    }
+    if has_env {
+        child_command.env_clear();
+        env_pairs.with(|pairs| {
+            for pair in pairs.elements.chunks_exact(2) {
+                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            }
+        });
+    } else {
+        process_env_apply(&mut child_command);
+    }
+    child_command.stdin(Stdio::null());
+    child_command.stdout(Stdio::piped());
+    child_command.stderr(Stdio::piped());
+
+    let output = run_sync_child(child_command, None, timeout_ms).unwrap_or_else(|error| {
+        let code = fs_error_code(&error);
+        throw_value(JsError {
+            identity: Rc::new(()),
+            name: "Error".to_owned(),
+            message: format!("spawn {command} {code}"),
+            code: Some(code.to_owned()),
+            dom: None,
+        })
+    });
+    if output.timed_out || !output.status.success() {
+        let mut display = command.to_string();
+        arguments.with(|arguments| {
+            for argument in &arguments.elements {
+                display.push(' ');
+                display.push_str(argument);
+            }
+        });
+        throw_value(JsError {
+            identity: Rc::new(()),
+            name: "Error".to_owned(),
+            message: format!(
+                "Command failed: {display}\n{}",
+                String::from_utf8_lossy(&output.stderr),
+            ),
+            code: None,
+            dom: None,
+        });
+    }
+    Gc::new(SpawnResultData {
+        status: Some(0.0),
+        signal: None,
+        stdout: Rc::from(String::from_utf8_lossy(&output.stdout).as_ref()),
+        stderr: Rc::from(String::from_utf8_lossy(&output.stderr).as_ref()),
+        error: None,
+    })
+}
+
 pub struct SpawnResultData {
     status: Option<f64>,
     signal: Option<JsString>,

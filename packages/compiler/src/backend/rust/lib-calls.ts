@@ -591,6 +591,12 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
         stdoutMode === undefined || stderrMode === undefined) context.unsupported("cp.execSync arguments", expr.loc);
     return `runtime::child_exec_sync(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), ${context.emitExpr(shell)}, &(${context.emitExpr(input)}), ${context.emitExpr(hasInput)}, &(${context.emitExpr(cwd)}), ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), ${context.emitExpr(timeout)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)})`;
   }
+  if (expr.fn === "cp.execCapture" && expr.args.length === 6 && arg !== undefined) {
+    const [argv, cwd, hasEnv, envPairs, timeout] = expr.args.slice(1);
+    if (argv === undefined || cwd === undefined || hasEnv === undefined ||
+        envPairs === undefined || timeout === undefined) context.unsupported("cp.execCapture arguments", expr.loc);
+    return `runtime::child_exec_capture(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), &(${context.emitExpr(cwd)}), ${context.emitExpr(hasEnv)}, &(${context.emitExpr(envPairs)}), ${context.emitExpr(timeout)})`;
+  }
   if ((expr.fn === "timers.setTimeout" || expr.fn === "timers.setTimeoutHandle" || expr.fn === "timers.setInterval") &&
       expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     if (arg.type.kind !== "func" || arg.type.params.length !== 0 || arg.type.ret.kind !== "void") {

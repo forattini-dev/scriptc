@@ -25,6 +25,7 @@ test.each([
   "1466-child-containers.ts",
   "1470-child-lifecycle.ts",
   "1471-child-unref.ts",
+  "1473-promisify-execfile.ts",
   "1523-spawn-options.ts",
   "1525-child-exit-signal.ts",
   "1562-spawn-conditional-spread.ts",
