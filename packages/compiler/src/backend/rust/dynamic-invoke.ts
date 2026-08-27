@@ -45,12 +45,11 @@ class RustDynamicInvokeEmitter {
 
   private emitIndexHelpers(): void {
     this.open(`fn sc_dyn_index_arg(args: &[${this.dyn}], index: usize, default: f64, callee_name: &str) -> f64 {`);
-    this.open("match args.get(index) {");
-    this.context.line(`None | Some(${this.dyn}::Undefined) => default,`);
-    this.context.line(`Some(${this.dyn}::Number(value)) if value.is_nan() => 0.0,`);
-    this.context.line(`Some(${this.dyn}::Number(value)) => value.trunc(),`);
-    this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name}: non-number index arguments on a dynamic receiver are not supported yet\")),");
-    this.close("}");
+    this.context.line("let _ = callee_name;");
+    this.context.line(`let Some(value) = args.get(index) else { return default; };`);
+    this.context.line(`if matches!(value, ${this.dyn}::Undefined) { return default; }`);
+    this.context.line("let number = sc_dyn_to_number(value);");
+    this.context.line("if number.is_nan() { 0.0 } else { number.trunc() }");
     this.close("}");
   }
 
@@ -70,6 +69,12 @@ class RustDynamicInvokeEmitter {
     this.context.line(`matches!((left, right), (${this.dyn}::Number(a), ${this.dyn}::Number(b)) if a.is_nan() && b.is_nan()) || sc_dyn_strict_equal(left, right)`);
     this.context.popIndent();
     this.context.line("}");
+    this.open(`fn sc_dyn_string_array(values: runtime::JsArray<runtime::JsString>) -> ${this.dyn} {`);
+    this.context.line(`let output: runtime::JsArray<${this.dyn}> = runtime::array_new(Vec::new());`);
+    this.context.line("let mut index = 0.0;");
+    this.context.line(`while index < runtime::array_len(&values) { runtime::array_push(&output, ${this.dyn}::String(runtime::array_get(&values, index))); index += 1.0; }`);
+    this.context.line(`${this.dyn}::Array(output)`);
+    this.close("}");
   }
 
   private emitArrayCallbacks(): void {
@@ -284,6 +289,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`${this.dyn}::Undefined | ${this.dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading '{method}')", sc_dyn_kind(recv))),`);
     this.emitObjectArm();
     this.emitFunctionArm();
+    this.emitNumberArm();
     this.emitStringArm();
     this.emitRegexArm();
     this.emitArrayArm();
@@ -345,11 +351,23 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"toUpperCase" => ${this.dyn}::String(runtime::string_to_upper_case(text)),`);
     this.context.line(`"slice" => ${this.dyn}::String(runtime::string_slice(text, sc_dyn_index_arg(args, 0, 0.0, callee_name), sc_dyn_index_arg(args, 1, runtime::string_len(text), callee_name))),`);
     this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { runtime::string_len(text) + index } else { index }; if actual < 0.0 || actual >= runtime::string_len(text) { ${this.dyn}::Undefined } else { ${this.dyn}::String(runtime::string_at(text, index)) } },`);
+    this.context.line(`"charAt" => ${this.dyn}::String(runtime::string_char_at(text, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
+    this.context.line(`"split" => { let limit = match args.get(1) { None | Some(${this.dyn}::Undefined) => u32::MAX as f64, Some(value) => runtime::to_uint32(sc_dyn_to_number(value)) as f64, }; let pieces = match args.first() { None | Some(${this.dyn}::Undefined) => if limit == 0.0 { runtime::array_new(Vec::new()) } else { runtime::array_new(vec![text.clone()]) }, Some(${this.dyn}::Regex(separator)) => runtime::regex_split(text, separator, limit), Some(separator) => runtime::string_split(text, &sc_dyn_to_string(separator), limit), }; sc_dyn_string_array(pieces) },`);
     this.context.line(`"concat" => { let mut output = text.to_string(); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);
     this.context.line(`"indexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_index_of(text, search, 0.0)), _ => runtime::throw_error("'String.prototype.indexOf' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line(`"lastIndexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_last_index_of(text, search)), _ => runtime::throw_error("'String.prototype.lastIndexOf' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line(`"includes" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Boolean(runtime::string_includes(text, search, 0.0)), _ => runtime::throw_error("'String.prototype.includes' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
+    this.close("}");
+    this.close("},");
+  }
+
+  private emitNumberArm(): void {
+    this.open(`${this.dyn}::Number(number) => {`);
+    this.open("match method {");
+    this.context.line(`"toFixed" => ${this.dyn}::String(runtime::number_to_fixed(*number, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
+    this.context.line(`"valueOf" => ${this.dyn}::Number(*number),`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("}");
     this.close("},");
   }

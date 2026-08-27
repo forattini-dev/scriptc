@@ -775,6 +775,7 @@ test.each([
   "756-cycle-inheritance.ts",
   "757-cycle-cross-generation.ts",
   "760-any-arithmetic.ts",
+  "761-any-objects.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
