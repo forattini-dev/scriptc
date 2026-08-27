@@ -65,6 +65,39 @@ export function emitRustProcessCall(
     const target = expr.fn === "process.stdoutWriteBytes" ? "stdout" : "stderr";
     return `runtime::process_${target}_write_bytes(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
   }
+  if ((expr.fn === "process.stdoutWriteBytesCb" || expr.fn === "process.stderrWriteBytesCb") &&
+      expr.args.length === 3 && arg?.type.kind === "bytes" && arg.type.elem === "u8" &&
+      secondArg?.type.kind === "string") {
+    const callbackExpr = expr.args[2];
+    if (callbackExpr?.type.kind !== "func" || callbackExpr.type.params.length > 1 || callbackExpr.type.ret.kind !== "void") {
+      context.unsupported("process write callback shape", expr.loc);
+    }
+    const callbackType = callbackExpr.type;
+    const bytes = context.nextTemporary();
+    const encoding = context.nextTemporary();
+    const callback = context.nextTemporary();
+    const result = context.nextTemporary();
+    const parameter = callbackType.params[0];
+    let dispatch: string;
+    if (parameter === undefined) {
+      dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+    } else if (parameter.kind === "dyn") {
+      dispatch = context.emitClosureDispatch(callback, callbackType, [`${context.dynTypeName()}::Null`], expr.loc);
+    } else {
+      if (parameter.kind !== "union") context.unsupported("process write callback error parameter", expr.loc);
+      const union = context.union(parameter.unionId, expr.loc);
+      const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+      if (nullTag < 0) context.unsupported("process write callback Error | null union", expr.loc);
+      dispatch = context.emitClosureDispatch(
+        callback,
+        callbackType,
+        [`${context.unionName(union.id)}::${context.unionVariant(nullTag)}`],
+        expr.loc,
+      );
+    }
+    const target = expr.fn === "process.stdoutWriteBytesCb" ? "stdout" : "stderr";
+    return `{ let ${bytes} = ${context.emitExpr(arg)}; let ${encoding} = ${context.emitExpr(secondArg)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${result} = runtime::process_${target}_write_bytes(&${bytes}, &${encoding}); runtime::process_next_tick(Box::new(move || { let _ = ${dispatch}; })); ${result} }`;
+  }
   if ((expr.fn === "process.stdoutWrite" || expr.fn === "process.stderrWrite") &&
       expr.args.length === 1 && arg?.type.kind === "string") {
     const target = expr.fn === "process.stdoutWrite" ? "stdout" : "stderr";
