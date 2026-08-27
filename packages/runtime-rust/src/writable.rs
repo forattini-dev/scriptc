@@ -108,7 +108,13 @@ where
         stream_default_byte_high_water_mark()
     };
     Gc::new(WritableData {
-        emitter: Some(emitter_new()),
+        emitter: Some(emitter_new_shaped(&[
+            "close",
+            "error",
+            "prefinish",
+            "finish",
+            "drain",
+        ])),
         write_callback,
         final_callback,
         queue: VecDeque::new(),

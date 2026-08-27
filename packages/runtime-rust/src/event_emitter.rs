@@ -21,6 +21,7 @@ impl<L: Clone> Clone for EventListener<L> {
 struct EventBucket<L> {
     name: JsString,
     listeners: Vec<EventListener<L>>,
+    preserve_when_empty: bool,
 }
 
 pub struct EventEmitter<L> {
@@ -55,8 +56,22 @@ pub fn emitter_new<L>() -> JsEventEmitter<L>
 where
     L: Clone + Trace + 'static,
 {
+    emitter_new_shaped(&[])
+}
+
+pub fn emitter_new_shaped<L>(names: &[&str]) -> JsEventEmitter<L>
+where
+    L: Clone + Trace + 'static,
+{
     Gc::new(EventEmitter {
-        events: Vec::new(),
+        events: names
+            .iter()
+            .map(|name| EventBucket {
+                name: string(name),
+                listeners: Vec::new(),
+                preserve_when_empty: true,
+            })
+            .collect(),
         next_registration: 0,
         max_listeners: None,
     })
@@ -99,6 +114,7 @@ pub fn emitter_on<L>(
             emitter.events.push(EventBucket {
                 name,
                 listeners: vec![listener],
+                preserve_when_empty: false,
             });
         }
     })
@@ -151,7 +167,7 @@ where
         } else {
             false
         };
-        if event.listeners.is_empty() {
+        if event.listeners.is_empty() && !event.preserve_when_empty {
             emitter.events.remove(event_index);
         }
         removed
@@ -181,7 +197,7 @@ where
         } else {
             false
         };
-        if event.listeners.is_empty() {
+        if event.listeners.is_empty() && !event.preserve_when_empty {
             emitter.events.remove(event_index);
         }
         removed
@@ -201,7 +217,9 @@ where
             return false;
         };
         let removed = emitter.events[event_index].listeners.pop().is_some();
-        if emitter.events[event_index].listeners.is_empty() {
+        if emitter.events[event_index].listeners.is_empty()
+            && !emitter.events[event_index].preserve_when_empty
+        {
             emitter.events.remove(event_index);
         }
         removed
@@ -272,6 +290,7 @@ where
         emitter
             .events
             .iter()
+            .filter(|event| !event.listeners.is_empty())
             .map(|event| event.name.clone())
             .collect()
     }))
@@ -285,6 +304,7 @@ where
         emitter
             .events
             .iter()
+            .filter(|event| !event.listeners.is_empty())
             .map(|event| event.name.clone())
             .collect()
     })

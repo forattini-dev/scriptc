@@ -990,6 +990,7 @@ test.each([
   "2602-dyn-array-destructure.js",
   "2603-island-keyed-write-dyn.js",
   "2613-for-init-uninitialized-let.ts",
+  "2626-stream-event-names.ts",
   "2627-stream-ticks-are-nextticks.ts",
   "2628-stream-push-encodings.cjs",
   "2629-stream-consumers.ts",

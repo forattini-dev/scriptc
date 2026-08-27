@@ -123,7 +123,9 @@ where
         stream_default_byte_high_water_mark()
     };
     Gc::new(ReadableData {
-        emitter: Some(emitter_new()),
+        emitter: Some(emitter_new_shaped(&[
+            "close", "error", "data", "end", "readable",
+        ])),
         read_callback,
         destroy_callback,
         errored: None,
