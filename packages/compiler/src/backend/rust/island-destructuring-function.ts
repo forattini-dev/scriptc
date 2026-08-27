@@ -13,13 +13,27 @@ export function emitRustIslandDestructuringFunction(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string | null {
-  if (expr.op !== "callFn" || expr.args.length !== 2) return null;
-  const [callee, sourceExpr] = expr.args;
-  if (sourceExpr === undefined || callee?.kind !== "jsOp" || callee.op !== "construct" ||
-      callee.args.length !== 3 || !isFunctionGlobal(callee.args[0])) return null;
-  const parameter = compilerString(callee.args[1]);
-  const body = compilerString(callee.args[2]);
-  if (parameter !== "v" || body === null) return null;
+  if (expr.op !== "callFn" || expr.args.length < 2) return null;
+  const [callee] = expr.args;
+  if (callee?.kind !== "jsOp" || callee.op !== "construct" ||
+      callee.args.length < 3 || !isFunctionGlobal(callee.args[0])) return null;
+  const constructorArgs = callee.args.slice(1);
+  const parameters = constructorArgs.slice(0, -1).map(compilerString);
+  const body = compilerString(constructorArgs.at(-1));
+  if (parameters.some((parameter) => parameter === null) || parameters[0] !== "v" || body === null ||
+      expr.args.length !== parameters.length + 1) return null;
+  const argumentsByName = new Map<string, IrExpr>();
+  for (const [index, parameter] of parameters.entries()) {
+    const argument = expr.args[index + 1];
+    if (parameter === null || argument === undefined) return null;
+    argumentsByName.set(parameter, argument);
+  }
+  const sourceExpr = argumentsByName.get("v");
+  if (sourceExpr === undefined) return null;
+
+  const nestedDefault = emitNestedDefaultPattern(body, sourceExpr, argumentsByName, context, emitExpr);
+  if (nestedDefault !== null) return nestedDefault;
+  if (parameters.length !== 1) return null;
 
   const array = parseArrayPattern(body);
   if (array !== null) {
@@ -34,6 +48,42 @@ export function emitRustIslandDestructuringFunction(
     `runtime::array_push(&${output}, sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false));`
   ).join(" ");
   return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure 'v' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure 'v' as it is null.".to_owned()), _ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
+}
+
+function emitNestedDefaultPattern(
+  body: string,
+  sourceExpr: IrExpr,
+  argumentsByName: ReadonlyMap<string, IrExpr>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const empty = /^"use strict";\(\{\[("(?:\\.|[^"\\])*")\]:\{\}=(__d\d+)\} = v\);return \[\];$/u.exec(body);
+  const value = /^"use strict";var (__\d+);\(\{\[("(?:\\.|[^"\\])*")\]:\{\[("(?:\\.|[^"\\])*")\]:(__\d+)\}=(__d\d+)\} = v\);return \[(__\d+)\];$/u.exec(body);
+  if (empty === null && value === null) return null;
+  const outerKey = parseString(empty?.[1] ?? value?.[2]);
+  const defaultName = empty?.[2] ?? value?.[5];
+  const defaultExpr = defaultName === undefined ? undefined : argumentsByName.get(defaultName);
+  if (outerKey === null || defaultExpr === undefined) return null;
+  if (value !== null && !(value[1] === value[4] && value[4] === value[6])) return null;
+  const innerKey = value === null ? null : parseString(value[3]);
+  if (value !== null && innerKey === null) return null;
+
+  const dyn = context.dynTypeName();
+  const source = context.nextName("sc_island_source");
+  const fallback = context.nextName("sc_island_default");
+  const nested = context.nextName("sc_island_nested");
+  const output = context.nextName("sc_island_output");
+  const requireObject = (name: string) =>
+    `match &${name} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure an undefined value".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure a null value".to_owned()), _ => {}, }`;
+  const push = innerKey === null ? "" :
+    `runtime::array_push(&${output}, sc_dyn_key_get(&${nested}, &runtime::string("${context.rustString(innerKey)}"), false));`;
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${fallback} = ${emitExpr(defaultExpr)}; ${requireObject(source)} let ${nested} = sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(outerKey)}"), false); let ${nested} = if matches!(&${nested}, ${dyn}::Undefined) { ${fallback} } else { ${nested} }; ${requireObject(nested)} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${push} ${dyn}::Array(${output}) }`;
+}
+
+function parseString(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const parsed: unknown = JSON.parse(value);
+  return typeof parsed === "string" ? parsed : null;
 }
 
 function isFunctionGlobal(expr: IrExpr | undefined): boolean {
