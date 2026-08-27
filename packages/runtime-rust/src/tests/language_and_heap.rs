@@ -841,6 +841,42 @@
     }
 
     #[test]
+    fn async_local_storage_restores_nested_scopes_and_crosses_reactions() {
+        init();
+        let baseline = live_heap_objects();
+        let store = async_local_new::<f64>();
+        assert_eq!(async_local_get::<f64>(store), None);
+        let observed = Rc::new(Cell::new(0.0));
+        let promise = promise_resolved(());
+
+        {
+            let _outer = async_local_run(store, 1.0);
+            assert_eq!(async_local_get::<f64>(store), Some(1.0));
+            {
+                let _inner = async_local_run(store, 2.0);
+                assert_eq!(async_local_get::<f64>(store), Some(2.0));
+            }
+            assert_eq!(async_local_get::<f64>(store), Some(1.0));
+            let reaction_observed = observed.clone();
+            promise_then(
+                &promise,
+                Box::new(move |_| {
+                    reaction_observed.set(async_local_get::<f64>(store).unwrap_or(-1.0));
+                }),
+            );
+        }
+
+        assert_eq!(async_local_get::<f64>(store), None);
+        run_event_loop();
+        assert_eq!(observed.get(), 1.0);
+        assert_eq!(async_local_get::<f64>(store), None);
+
+        drop(promise);
+        finish();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promise_map_transforms_fulfillments_and_forwards_rejections() {
         let baseline = live_heap_objects();
         {

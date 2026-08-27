@@ -27,6 +27,7 @@ include!("clock_and_date.rs");
 include!("heap.rs");
 include!("live_refs.rs");
 include!("diagnostics_channel.rs");
+include!("async_local_storage.rs");
 include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");

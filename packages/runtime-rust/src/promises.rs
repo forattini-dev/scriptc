@@ -439,6 +439,11 @@ fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<
 }
 
 pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
+    let registered_context = async_context_capture();
+    let reaction: PromiseReaction<T> = Box::new(move |outcome| {
+        let _context_guard = async_context_install(registered_context);
+        reaction(outcome);
+    });
     let mut reaction = Some(reaction);
     let (settled, rejection_handled) = promise.with_mut(|data| {
         let rejection_handled = data.reported;

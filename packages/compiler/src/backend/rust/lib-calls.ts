@@ -17,6 +17,7 @@ import { emitRustCryptoCall } from "./crypto.js";
 import { emitRustTimerCall } from "./timers.js";
 import { emitRustFilesystemCall } from "./filesystem.js";
 import { emitRustDiagnosticsChannelCall } from "./diagnostics-channel.js";
+import { emitRustAsyncLocalStorageCall } from "./async-local-storage.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -106,6 +107,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (filesystemCall !== null) return filesystemCall;
   const diagnosticsChannelCall = emitRustDiagnosticsChannelCall(expr, context);
   if (diagnosticsChannelCall !== null) return diagnosticsChannelCall;
+  const asyncLocalStorageCall = emitRustAsyncLocalStorageCall(expr, context);
+  if (asyncLocalStorageCall !== null) return asyncLocalStorageCall;
   const arg = expr.args[0];
   const secondArg = expr.args[1];
   const thirdArg = expr.args[2];

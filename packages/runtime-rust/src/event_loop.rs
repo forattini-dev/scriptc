@@ -14,6 +14,7 @@ pub fn finish() {
     dgram_finish();
     tls_ca_finish();
     diagnostics_finish();
+    async_local_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();
@@ -64,6 +65,12 @@ fn timer_delay(delay_ms: f64) -> std::time::Duration {
 }
 
 fn timer_schedule(callback: Box<dyn FnMut()>, delay_ms: f64, repeat: bool) -> f64 {
+    let registered_context = async_context_capture();
+    let mut callback = callback;
+    let callback: Box<dyn FnMut()> = Box::new(move || {
+        let _context_guard = async_context_install(registered_context.clone());
+        callback();
+    });
     let delay = timer_delay(delay_ms);
     let id = NEXT_TIMER_ID.with(|next| {
         let id = next.get();
@@ -175,6 +182,11 @@ pub fn timer_refresh(id: f64) -> f64 {
 }
 
 pub fn timer_set_immediate(callback: Box<dyn FnOnce()>) -> f64 {
+    let registered_context = async_context_capture();
+    let callback: Box<dyn FnOnce()> = Box::new(move || {
+        let _context_guard = async_context_install(registered_context);
+        callback();
+    });
     let id = NEXT_IMMEDIATE_ID.with(|next| {
         let id = next.get();
         next.set(id.checked_add(1).expect("scriptc: exhausted immediate ids"));
@@ -227,11 +239,23 @@ pub fn timer_immediate_has_ref(id: f64) -> bool {
 }
 
 pub fn timer_queue_microtask(callback: Box<dyn FnOnce()>) {
-    MICROTASKS.with(|tasks| tasks.borrow_mut().push_back(callback));
+    let registered_context = async_context_capture();
+    MICROTASKS.with(|tasks| {
+        tasks.borrow_mut().push_back(Box::new(move || {
+            let _context_guard = async_context_install(registered_context);
+            callback();
+        }));
+    });
 }
 
 pub fn process_next_tick(callback: Box<dyn FnOnce()>) {
-    NEXT_TICKS.with(|tasks| tasks.borrow_mut().push_back(callback));
+    let registered_context = async_context_capture();
+    NEXT_TICKS.with(|tasks| {
+        tasks.borrow_mut().push_back(Box::new(move || {
+            let _context_guard = async_context_install(registered_context);
+            callback();
+        }));
+    });
 }
 
 pub fn process_active_resources() -> JsArray<JsString> {
