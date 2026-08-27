@@ -39,6 +39,7 @@ class RustDynamicInvokeEmitter {
     this.emitDefinePropertiesHelper();
     this.emitArrayCallbacks();
     this.emitArraySortHelpers();
+    this.emitPromiseHelpers();
     this.emitDispatcher();
   }
 
@@ -132,6 +133,83 @@ class RustDynamicInvokeEmitter {
     this.context.line(`if !matches!(&comparator, ${callable}) { runtime::throw_type_error(format!("The comparison function must be either a function or undefined: {}", sc_dyn_to_string(&comparator))); }`);
     this.context.line(`let comparator = if matches!(&comparator, ${this.dyn}::Undefined) { None } else { Some(&comparator) };`);
     this.context.line(`${this.dyn}::Array(runtime::array_sort_by_snapshot(array, |left, right| sc_dyn_sort_compare(left, right, comparator)))`);
+    this.close("}");
+  }
+
+  private emitPromiseHelpers(): void {
+    this.open(`fn sc_dyn_promise_settle(target: &runtime::JsPromise<${this.dyn}>, outcome: Result<${this.dyn}, runtime::Caught>) {`);
+    this.open("match outcome {");
+    this.context.line("Ok(value) => { let _ = runtime::promise_fulfill(target, value); },");
+    this.context.line("Err(reason) => { let _ = runtime::promise_reject(target, reason); },");
+    this.close("}");
+    this.close("}");
+
+    this.open(`fn sc_dyn_promise_adopt(target: &runtime::JsPromise<${this.dyn}>, value: ${this.dyn}) {`);
+    this.open("match value {");
+    this.context.line(`${this.dyn}::Promise(handle) => {`);
+    this.context.pushIndent();
+    this.context.line("if runtime::promise_handle_identity(&handle) == target.identity() { let reason = runtime::caught_value(runtime::error_new(\"TypeError\", runtime::string(\"Chaining cycle detected for promise #<Promise>\"))); let _ = runtime::promise_reject(target, reason); return; }");
+    this.context.line(`let inner = runtime::promise_from_handle::<${this.dyn}>(&handle);`);
+    this.context.line("let forwarded = target.clone();");
+    this.context.line("runtime::promise_then(&inner, Box::new(move |outcome| sc_dyn_promise_settle(&forwarded, outcome)));");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line("value => { let _ = runtime::promise_fulfill(target, value); },");
+    this.close("}");
+    this.close("}");
+
+    this.open(`fn sc_dyn_promise_react(target: runtime::JsPromise<${this.dyn}>, callback: ${this.dyn}, argument: ${this.dyn}) {`);
+    this.context.line("let guard = target.clone();");
+    this.open("runtime::promise_run_segment(&guard, move || {");
+    this.context.line("let value = sc_dyn_call(&callback, &[argument], \"handler\");");
+    this.context.line("sc_dyn_promise_adopt(&target, value);");
+    this.close("});");
+    this.close("}");
+
+    this.open(`fn sc_dyn_promise_chain(handle: &runtime::JsPromiseHandle, on_fulfilled: ${this.dyn}, on_rejected: ${this.dyn}) -> ${this.dyn} {`);
+    this.context.line(`let source = runtime::promise_from_handle::<${this.dyn}>(handle);`);
+    this.context.line(`let result = runtime::promise_new::<${this.dyn}>();`);
+    this.context.line("let target = result.clone();");
+    this.open("runtime::promise_then(&source, Box::new(move |outcome| match outcome {");
+    this.context.line("Ok(value) => { if sc_dyn_function_identity(&on_fulfilled).is_some() { sc_dyn_promise_react(target, on_fulfilled, value); } else { let _ = runtime::promise_fulfill(&target, value); } },");
+    this.context.line("Err(reason) => { if sc_dyn_function_identity(&on_rejected).is_some() { sc_dyn_promise_react(target, on_rejected, sc_dyn_from_caught(reason)); } else { let _ = runtime::promise_reject(&target, reason); } },");
+    this.close("}));");
+    this.context.line(`${this.dyn}::Promise(runtime::promise_to_handle(&result))`);
+    this.close("}");
+
+    this.open(`fn sc_dyn_promise_finish_after(target: &runtime::JsPromise<${this.dyn}>, outcome: Result<${this.dyn}, runtime::Caught>, cleanup: ${this.dyn}) {`);
+    this.open("match cleanup {");
+    this.context.line(`${this.dyn}::Promise(handle) => {`);
+    this.context.pushIndent();
+    this.context.line("if runtime::promise_handle_identity(&handle) == target.identity() { let reason = runtime::caught_value(runtime::error_new(\"TypeError\", runtime::string(\"Chaining cycle detected for promise #<Promise>\"))); let _ = runtime::promise_reject(target, reason); return; }");
+    this.context.line(`let inner = runtime::promise_from_handle::<${this.dyn}>(&handle);`);
+    this.context.line("let forwarded = target.clone();");
+    this.open("runtime::promise_then(&inner, Box::new(move |cleanup_outcome| match cleanup_outcome {");
+    this.context.line("Ok(_) => sc_dyn_promise_settle(&forwarded, outcome),");
+    this.context.line("Err(reason) => { let _ = runtime::promise_reject(&forwarded, reason); },");
+    this.close("}));");
+    this.context.popIndent();
+    this.context.line("},");
+    this.context.line("_ => sc_dyn_promise_settle(target, outcome),");
+    this.close("}");
+    this.close("}");
+
+    this.open(`fn sc_dyn_promise_finally(handle: &runtime::JsPromiseHandle, callback: ${this.dyn}) -> ${this.dyn} {`);
+    this.context.line(`let source = runtime::promise_from_handle::<${this.dyn}>(handle);`);
+    this.context.line(`let result = runtime::promise_new::<${this.dyn}>();`);
+    this.context.line("let target = result.clone();");
+    this.open("runtime::promise_then(&source, Box::new(move |outcome| {");
+    this.open("if sc_dyn_function_identity(&callback).is_none() {");
+    this.context.line("sc_dyn_promise_settle(&target, outcome);");
+    this.context.line("return;");
+    this.close("}");
+    this.context.line("let guard = target.clone();");
+    this.open("runtime::promise_run_segment(&guard, move || {");
+    this.context.line("let cleanup = sc_dyn_call(&callback, &[], \"onFinally\");");
+    this.context.line("sc_dyn_promise_finish_after(&target, outcome, cleanup);");
+    this.close("});");
+    this.close("}));");
+    this.context.line(`${this.dyn}::Promise(runtime::promise_to_handle(&result))`);
     this.close("}");
   }
 
@@ -232,7 +310,9 @@ class RustDynamicInvokeEmitter {
   private emitPromiseArm(): void {
     this.open(`${this.dyn}::Promise(promise) => {`);
     this.open("match method {");
-    this.context.line(`"catch" => { let callback = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let next = runtime::promise_handle_catch(promise, Box::new(move |reason| { let reason = sc_dyn_from_caught(reason); let _ = sc_dyn_call(&callback, &[reason], "handler"); })); ${this.dyn}::Promise(next) },`);
+    this.context.line(`"then" => sc_dyn_promise_chain(promise, args.first().cloned().unwrap_or(${this.dyn}::Undefined), args.get(1).cloned().unwrap_or(${this.dyn}::Undefined)),`);
+    this.context.line(`"catch" => sc_dyn_promise_chain(promise, ${this.dyn}::Undefined, args.first().cloned().unwrap_or(${this.dyn}::Undefined)),`);
+    this.context.line(`"finally" => sc_dyn_promise_finally(promise, args.first().cloned().unwrap_or(${this.dyn}::Undefined)),`);
     this.context.line(`_ => runtime::throw_type_error(format!("recv.{method} is not a function")),`);
     this.close("}");
     this.close("},");

@@ -894,6 +894,7 @@ test.each([
   "2060-empty-tuple.ts",
   "2100-stream-default-hwm.ts",
   "2106-comma-expressions.ts",
+  "2210-dyn-promise-crossing.cjs",
   "2212-unhandled-rejection-listener.cjs",
   "2215-process-emit-warning-exit.cjs",
   "2250-tagged-templates.ts",

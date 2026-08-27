@@ -38,4 +38,27 @@ id(fails())
   .finally(() => { console.log('finally ran'); })
   .then((v) => { console.log('after finally', v); });
 
+// The second then handler handles a rejection; a handler throw rejects the
+// chained promise and remains catchable.
+id(fails())
+  .then(undefined, (e) => { console.log('then rejected', e.message); return 'handled'; })
+  .then((v) => { console.log('then recovered', v); });
+id(seven())
+  .then(() => { throw new Error('handler boom'); })
+  .catch((e) => { console.log('handler caught', e.message); });
+
+// A promise returned by finally is awaited. Fulfillment preserves the source
+// outcome, while cleanup rejection replaces it.
+async function cleanup() { return 'clean'; }
+async function cleanupFails() { throw new Error('cleanup boom'); }
+id(seven())
+  .finally(() => cleanup())
+  .then((v) => { console.log('finally kept', v); });
+id(fails())
+  .finally(() => cleanup())
+  .catch((e) => { console.log('finally kept rejection', e.message); });
+id(seven())
+  .finally(() => cleanupFails())
+  .catch((e) => { console.log('finally replaced', e.message); });
+
 console.log('sync tail');
