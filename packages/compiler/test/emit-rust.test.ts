@@ -758,6 +758,11 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
 }, 240_000);
 
 test.each([
+  "212-string-aliasing-append.ts",
+  "240-stdout-write.ts",
+  "404-rc-stress.ts",
+  "405-params-optional.ts",
+  "406-params-defaults.ts",
   "1300-errors-basics.ts",
   "913-records-index-iteration.ts",
   "991-process-exit.ts",
