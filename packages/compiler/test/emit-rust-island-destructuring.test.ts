@@ -27,6 +27,7 @@ test.each([
   ["2054-destructuring-island-source.ts", 0],
   ["2074-island-destructuring.ts", 1],
   ["2101-dyn-param-defaults.ts", 0],
+  ["2104-computed-key-destructuring.ts", 0],
 ] as const)("Rust island destructuring matches Node: %s", async (fixtureName, expectedExit) => {
   const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-island-destructure-"));
