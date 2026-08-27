@@ -983,6 +983,7 @@ test.each([
   "2585-unknown-array.ts",
   "2587-array-entries-forof.ts",
   "2588-array-entries-chains.ts",
+  "2589-object-create-null.cjs",
   "2591-ambient-generic-traps.ts",
   "2613-for-init-uninitialized-let.ts",
   "2643-or-default-retag.ts",

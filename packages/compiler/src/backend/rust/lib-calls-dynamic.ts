@@ -69,6 +69,11 @@ export function emitRustDynamicLibCall(
     const sources = context.nextTemporary();
     return `{ let ${target} = ${context.emitExpr(arg)}; let ${sources} = ${context.emitExpr(secondArg)}; sc_dyn_assign_all(&${target}, &${sources}) }`;
   }
+  if (expr.fn === "dyn.objCreateNullProto" && expr.args.length === 0 && expr.type.kind === "dyn") {
+    const object = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); sc_dyn_mark_null_proto(&${object}); ${dyn}::Object(${object}) }`;
+  }
   if (expr.fn === "dyn.keySet" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const keyExpr = expr.args[1];
     const valueExpr = expr.args[2];
@@ -100,7 +105,7 @@ export function emitRustDynamicLibCall(
     const encoding = context.nextTemporary();
     const spelling = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${value} = ${context.emitExpr(arg)}; let ${encoding} = ${context.emitExpr(secondArg)}; let ${spelling} = ${context.emitExpr(expr.args[2])}; match &${value} { ${dyn}::Undefined | ${dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading 'toString')", sc_dyn_kind(&${value}))), ${dyn}::Bytes(bytes) | ${dyn}::Buffer(bytes) => runtime::bytes_to_string(bytes, &${encoding}), _ => { let _ = ${spelling}; sc_dyn_to_string(&${value}) }, } }`;
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${encoding} = ${context.emitExpr(secondArg)}; let ${spelling} = ${context.emitExpr(expr.args[2])}; match &${value} { ${dyn}::Undefined | ${dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading 'toString')", sc_dyn_kind(&${value}))), ${dyn}::Bytes(bytes) | ${dyn}::Buffer(bytes) => runtime::bytes_to_string(bytes, &${encoding}), ${dyn}::Object(object) if sc_dyn_is_null_proto(object) => runtime::throw_type_error(format!("{} is not a function", ${spelling})), _ => sc_dyn_to_string(&${value}), } }`;
   }
   if ((expr.fn === "dyn.objKeys" || expr.fn === "dyn.objValues" || expr.fn === "dyn.objEntries") &&
     expr.args.length === 1 && arg?.type.kind === "dyn" && expr.type.kind === "dyn") {

@@ -53,10 +53,11 @@ export function emitRustDynamicAssertions(
   context.line("},");
   context.line(`${name}::Object(value) => {`);
   context.pushIndent();
-  context.line("if runtime::map_size(value) == 0.0 { return \"{}\".to_owned(); }");
+  context.line("let null_proto = sc_dyn_is_null_proto(value);");
+  context.line("if runtime::map_size(value) == 0.0 { return if null_proto { \"[Object: null prototype] {}\".to_owned() } else { \"{}\".to_owned() }; }");
   context.line("let mut entries = Vec::new(); let mut index = 0.0;");
   context.line("while index < runtime::map_iter_count(value) { if runtime::map_iter_live(value, index) { let key = runtime::map_iter_key(value, index); let field = runtime::map_iter_value(value, index); entries.push(format!(\"{}: {}\", sc_dyn_assert_key(&key), sc_dyn_assert_inspect(&field, indent + 2))); } index += 1.0; }");
-  context.line("entries.sort(); let mut output = \"{\".to_owned(); let length = entries.len();");
+  context.line("entries.sort(); let mut output = if null_proto { \"[Object: null prototype] {\".to_owned() } else { \"{\".to_owned() }; let length = entries.len();");
   context.line("for (index, entry) in entries.into_iter().enumerate() { output.push('\\n'); output.push_str(&\" \".repeat(indent + 2)); output.push_str(&entry); if index + 1 < length { output.push(','); } }");
   context.line("output.push('\\n'); output.push_str(&\" \".repeat(indent)); output.push('}'); output");
   context.popIndent();

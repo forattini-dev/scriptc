@@ -79,6 +79,7 @@ export class RustValueEmitter {
       case "bool": return value;
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
+      case "dyn": return `sc_dyn_is_truthy(&${value})`;
       case "array": return "true";
       case "date": return "true";
       case "bytes": return "true";

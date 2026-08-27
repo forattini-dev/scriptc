@@ -2,6 +2,8 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
     entries: Vec<Option<(K, V)>>,
     live: usize,
     iteration_depth: usize,
+    // Dynamic objects reuse JsMap; this bit preserves Object.create(null).
+    null_prototype: bool,
 }
 
 impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
@@ -27,7 +29,16 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
         entries: Vec::new(),
         live: 0,
         iteration_depth: 0,
+        null_prototype: false,
     })
+}
+
+pub fn map_mark_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    map.with_mut(|data| data.null_prototype = true);
+}
+
+pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    map.with(|data| data.null_prototype)
 }
 
 pub fn map_set_by<K, V, F>(map: &JsMap<K, V>, key: K, value: V, equal: F)

@@ -75,6 +75,8 @@ export class RustDynamicEmitter {
     }
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_mark_null_proto(object: &runtime::JsMap<runtime::JsString, ${name}>) { runtime::map_mark_null_prototype(object); }`);
+    this.context.line(`fn sc_dyn_is_null_proto(object: &runtime::JsMap<runtime::JsString, ${name}>) -> bool { runtime::map_has_null_prototype(object) }`);
     this.context.line(`impl runtime::Trace for ${name} {`);
     this.context.pushIndent();
     this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
@@ -281,6 +283,7 @@ export class RustDynamicEmitter {
     this.context.line("index += 1.0;");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line("if sc_dyn_is_null_proto(value) { sc_dyn_mark_null_proto(&output); }");
     this.context.line(`${name}::Object(output)`);
     this.context.popIndent();
     this.context.line("},");
@@ -583,6 +586,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::Object(object) => {`);
     this.context.pushIndent();
+    this.context.line("if sc_dyn_is_null_proto(object) { runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned()); }");
     this.context.line("if runtime::map_has_by(object, &runtime::string(\"%error\"), |left, right| left.as_ref() == right.as_ref()) {");
     this.context.pushIndent();
     this.context.line(`let error_name = match runtime::map_get_by(object, &runtime::string("name"), |left, right| left.as_ref() == right.as_ref()) { Some(${name}::String(value)) => value, _ => runtime::empty_string(), };`);
@@ -737,8 +741,7 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_string_coerce_js(value: &${name}) -> runtime::JsString {`);
     this.context.pushIndent();
     this.context.line(`let ${name}::Object(object) = value else { return sc_dyn_to_string(value); };`);
-    this.context.line(`let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) else { return runtime::string("[object Object]"); };`);
-    this.context.line("if let Some(result) = sc_dyn_string_coerce_hook(value, &to_string, \"toString\") { return result; }");
+    this.context.line(`if let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_string_coerce_hook(value, &to_string, "toString") { return result; } } else if !sc_dyn_is_null_proto(object) { return runtime::string("[object Object]"); }`);
     this.context.line("if let Some(value_of) = runtime::map_get_by(object, &runtime::string(\"valueOf\"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_string_coerce_hook(value, &value_of, \"valueOf\") { return result; } }");
     this.context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");
     this.context.popIndent();
@@ -805,10 +808,11 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::Object(object) => {`);
     this.context.pushIndent();
+    this.context.line("let null_proto = sc_dyn_is_null_proto(object);");
     this.context.line("let keys = runtime::map_string_keys_js_order(object);");
     this.context.line("let length = runtime::array_len(&keys);");
-    this.context.line("if length == 0.0 { return runtime::string(\"{}\"); }");
-    this.context.line("if recurse > depth { return runtime::string(\"[Object]\"); }");
+    this.context.line("if length == 0.0 { return runtime::string(if null_proto { \"[Object: null prototype] {}\" } else { \"{}\" }); }");
+    this.context.line("if recurse > depth { return runtime::string(if null_proto { \"[Object: null prototype]\" } else { \"[Object]\" }); }");
     this.context.line("runtime::inspect_begin(recurse + 1.0);");
     this.context.line("let mut index = 0.0;");
     this.context.line("while index < length {");
@@ -821,7 +825,7 @@ export class RustDynamicEmitter {
     this.context.line("index += 1.0;");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line("runtime::inspect_end(&runtime::empty_string(), &runtime::string(\"{\"), &runtime::string(\"}\"), recurse + 1.0, false, false)");
+    this.context.line("let base = if null_proto { runtime::string(\"[Object: null prototype]\") } else { runtime::empty_string() }; runtime::inspect_end(&base, &runtime::string(\"{\"), &runtime::string(\"}\"), recurse + 1.0, false, false)");
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::NetSocket(..) => runtime::string("Socket {}"),`);
@@ -1003,7 +1007,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`(${name}::Object(left), ${name}::Object(right)) => {`);
     this.context.pushIndent();
-    this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
+    this.context.line("if sc_dyn_is_null_proto(left) != sc_dyn_is_null_proto(right) { false } else if left.ptr_eq(right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
     this.context.pushIndent();
     this.context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::map_iter_count(left) { if runtime::map_iter_live(left, index) { let key = runtime::map_iter_key(left, index); let field = runtime::map_iter_value(left, index); equal = runtime::map_get_by(right, &key, |a, b| a.as_ref() == b.as_ref()).is_some_and(|other| sc_dyn_equal(&field, &other, true)); } index += 1.0; } equal");
     this.context.popIndent();
