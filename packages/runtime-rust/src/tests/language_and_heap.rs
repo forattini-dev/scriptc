@@ -808,6 +808,27 @@
     }
 
     #[test]
+    fn finish_releases_pending_promise_reaction_cycles() {
+        init();
+        let baseline = live_heap_objects();
+        let first = promise_new::<()>();
+        let second = promise_new::<()>();
+        let first_target = first.clone();
+        promise_then(&second, Box::new(move |_| {
+            let _ = promise_fulfill(&first_target, ());
+        }));
+        let second_target = second.clone();
+        promise_then(&first, Box::new(move |_| {
+            let _ = promise_fulfill(&second_target, ());
+        }));
+        drop(first);
+        drop(second);
+        assert_eq!(live_heap_objects(), baseline + 2);
+        finish();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn promise_from_sync_fulfills_values_and_converts_throws_to_rejections() {
         let baseline = live_heap_objects();
         {

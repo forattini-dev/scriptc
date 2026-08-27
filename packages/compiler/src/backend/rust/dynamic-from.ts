@@ -56,7 +56,7 @@ export class RustDynamicFromEmitter {
   private emitInline(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     const name = this.context.dynTypeName();
     switch (type.kind) {
-      case "dyn": return value;
+      case "dyn": case "jsval": return value;
       case "f64": return `${name}::Number(${value})`;
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;

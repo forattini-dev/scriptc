@@ -11,6 +11,7 @@ import { emitRustOptionalChain } from "./optional-chains.js";
 import { emitRustNullish } from "./nullish.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
+import { emitRustIslandExpr } from "./island.js";
 
 export interface RustExpressionContext {
   readonly chainValues: Map<string, string>;
@@ -1179,6 +1180,11 @@ export class RustExpressionEmitter {
         }
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with_mut(|object| { let ${old} = object.${name}; let ${next} = ${old} ${operation} 1.0; object.${name} = ${next}; ${result} }) }`;
       }
+      case "jsMarshal":
+      case "jsExit":
+      case "jsOp":
+      case "jsBridgePromise":
+        return emitRustIslandExpr(expr, this.context, (value) => this.emitExpr(value));
       default:
         this.context.unsupported(`expression '${expr.kind}'`, expr.loc);
     }

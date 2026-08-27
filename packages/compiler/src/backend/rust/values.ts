@@ -79,7 +79,7 @@ export class RustValueEmitter {
       case "bool": return value;
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
-      case "dyn": return `sc_dyn_is_truthy(&${value})`;
+      case "dyn": case "jsval": return `sc_dyn_is_truthy(&${value})`;
       case "array": return "true";
       case "date": return "true";
       case "bytes": return "true";
@@ -251,7 +251,7 @@ export class RustValueEmitter {
       case "url": return "runtime::JsUrl";
       case "searchParams": return "runtime::JsSearchParams";
       case "caught": return "runtime::Caught";
-      case "dyn": return this.context.dynTypeName();
+      case "dyn": case "jsval": return this.context.dynTypeName();
       default: this.context.unsupported(`type '${type.kind}'`, loc);
     }
   }
@@ -263,6 +263,7 @@ export class RustValueEmitter {
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "symbol": return "runtime::symbol_new_anonymous()";
+      case "jsval": return `${this.context.dynTypeName()}::Undefined`;
       case "array": return "runtime::array_new(Vec::new())";
       case "bytes": return `runtime::bytes_empty::<${this.rustBytesElement(type.elem)}>()`;
       case "map": return "runtime::map_new()";
@@ -333,7 +334,7 @@ export class RustValueEmitter {
   }
 
   needsClone(type: IrType): boolean {
-    return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" ||
+    return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
 
@@ -396,7 +397,7 @@ export class RustValueEmitter {
   }
 
   isEdgeValue(type: IrType): boolean {
-    return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn" ||
+    return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && type.className === RUNTIME_EMITTER_CLASS);
   }
 

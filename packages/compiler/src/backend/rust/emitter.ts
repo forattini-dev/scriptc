@@ -481,7 +481,7 @@ class RustEmitter {
     for (const global of mod.globals ?? []) this.globals.set(global.id, global);
     for (const record of mod.records ?? []) this.records.set(record.id, record);
     for (const union of mod.unions ?? []) this.unions.set(union.id, union);
-    this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn");
+    this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn" || global.type.kind === "jsval");
     this.buildClassGraph();
     this.discoverClosures();
   }
@@ -647,11 +647,11 @@ class RustEmitter {
         this.usesEventEmitter = true;
         this.usesProcessRejectionEvents = true;
       }
-      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" ||
+      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && node.op === "callMethod") ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps"))) {
         this.usesDynamicInvoke = true;
       }
-      if (node.kind === "dynFrom") {
+      if (node.kind === "dynFrom" || node.kind === "jsMarshal") {
         this.usesDyn = true;
         const operand = node.value as { type?: IrType } | undefined;
         if (operand?.type?.kind === "func") {
@@ -670,7 +670,7 @@ class RustEmitter {
         }
       }
       const nodeType = node.type as IrType | undefined;
-      if (nodeType?.kind === "dyn" || node.kind === "dynTest" || node.kind === "dynCall") this.usesDyn = true;
+      if (nodeType?.kind === "dyn" || nodeType?.kind === "jsval" || node.kind === "dynTest" || node.kind === "dynCall") this.usesDyn = true;
       if (node.kind === "closure") {
         const type = node.type as IrType | undefined;
         const fnName = node.fnName;

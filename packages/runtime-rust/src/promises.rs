@@ -30,6 +30,11 @@ where
 }
 
 type PromiseReaction<T> = Box<dyn FnOnce(Result<T, Caught>)>;
+type PromiseFinalizer = Box<dyn Fn(bool) -> bool>;
+
+thread_local! {
+    static PROMISE_FINALIZERS: RefCell<(usize, Vec<PromiseFinalizer>)> = RefCell::new((0, Vec::new()));
+}
 
 enum PromiseState<T: HeapValue> {
     Pending(Vec<PromiseReaction<T>>),
@@ -125,11 +130,37 @@ pub fn promise_to_handle<T: HeapValue>(promise: &JsPromise<T>) -> JsPromiseHandl
 }
 
 pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
-    Gc::new(PromiseData {
+    let promise = Gc::new(PromiseData {
         state: PromiseState::Pending(Vec::new()),
         handled: false,
         reported: false,
-    })
+    });
+    let weak = promise.downgrade();
+    PROMISE_FINALIZERS.with(|finalizers| {
+        let mut finalizers = finalizers.borrow_mut();
+        finalizers.0 += 1;
+        if finalizers.0 >= 1024 {
+            finalizers.1.retain(|finalize| finalize(false));
+            finalizers.0 = 0;
+        }
+        finalizers.1.push(Box::new(move |clear| {
+            let Some(promise) = weak.upgrade() else { return false; };
+            if clear { promise.with_mut(ClearEdges::clear_edges); }
+            true
+        }));
+    });
+    promise
+}
+
+pub fn promises_finish() {
+    let finalizers = PROMISE_FINALIZERS.with(|finalizers| {
+        let mut finalizers = finalizers.borrow_mut();
+        finalizers.0 = 0;
+        std::mem::take(&mut finalizers.1)
+    });
+    for finalize in finalizers {
+        let _ = finalize(true);
+    }
 }
 
 pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
@@ -425,6 +456,34 @@ where
             Err(reason) => {
                 let _ = promise_reject(&target, reason);
             }
+        }),
+    );
+    result
+}
+
+pub fn promise_flat_map<T, U, F>(promise: &JsPromise<T>, map: F) -> JsPromise<U>
+where
+    T: HeapValue,
+    U: HeapValue,
+    F: FnOnce(T) -> JsPromise<U> + 'static,
+{
+    let result = promise_new();
+    let target = result.clone();
+    promise_then(
+        promise,
+        Box::new(move |outcome| match outcome {
+            Ok(value) => {
+                let guard = target.clone();
+                promise_run_segment(&guard, move || {
+                    let inner = map(value);
+                    let forwarded = target.clone();
+                    promise_then(&inner, Box::new(move |outcome| match outcome {
+                        Ok(value) => { let _ = promise_fulfill(&forwarded, value); }
+                        Err(reason) => { let _ = promise_reject(&forwarded, reason); }
+                    }));
+                });
+            }
+            Err(reason) => { let _ = promise_reject(&target, reason); }
         }),
     );
     result

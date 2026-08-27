@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,10 +75,13 @@ async function probe(entryPath) {
   ]);
   let load;
   try {
+    const directiveHead = (await readFile(entryPath, "utf8")).split(/\r?\n/u, 2).join("\n");
+    const dynamic = /^\s*\/\/\s*@dynamic\s*$/mu.test(directiveHead);
     load = program.loadProgram(entryPath);
     const preflight = program.checkPreflight(load);
     if (preflight.length > 0) return { key: `preflight:${preflight[0].code}` };
     const lowered = lowerer.lowerToIr(load.program, load.entry, load.moduleOrder, {
+      dynamic,
       startupCrash: load.startupCrash ?? null,
       externalTypes: load.externalTypes,
       externalTypeSpecifiersByFile: load.externalTypeSpecifiersByFile,

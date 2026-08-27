@@ -762,6 +762,7 @@ export class RustDefinitionEmitter {
         case "url":
         case "searchParams":
         case "dyn":
+        case "jsval":
           this.context.line(`static ${name}: RefCell<Option<${this.context.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
         default:
@@ -807,6 +808,10 @@ export class RustDefinitionEmitter {
     this.context.line(`fn ${mangleFunction(fn.name)}(${params.join(", ")})${emittedReturnType === "()" ? "" : ` -> ${emittedReturnType}`} {`);
     this.context.pushIndent();
     this.context.setCurrentFunction(fn);
+    if (fn.asyncCacheGlobal !== undefined) {
+      const cache = mangleGlobal(fn.asyncCacheGlobal);
+      this.context.line(`if let Some(sc_cached) = ${cache}.with(|slot| slot.borrow().clone()) { return sc_cached; }`);
+    }
     for (const param of fn.params) {
       const local = fn.locals.find((candidate) => candidate.id === param.localId);
       if (local !== undefined && (local.boxed || fn.async === true || fn.generator !== undefined)) {
@@ -818,6 +823,10 @@ export class RustDefinitionEmitter {
       const bodyResult = this.context.nextName("sc_async_result");
       const guard = this.context.nextName("sc_async_guard");
       this.context.line(`let ${result} = runtime::promise_new();`);
+      if (fn.asyncCacheGlobal !== undefined) {
+        const cache = mangleGlobal(fn.asyncCacheGlobal);
+        this.context.line(`${cache}.with(|slot| *slot.borrow_mut() = Some(${result}.clone()));`);
+      }
       this.context.line(`let ${bodyResult} = ${result}.clone();`);
       this.context.line(`let ${guard} = ${result}.clone();`);
       this.context.line(`runtime::promise_run_segment(&${guard}, move || {`);
@@ -833,6 +842,10 @@ export class RustDefinitionEmitter {
       this.context.setCurrentAsyncLocals(null);
       this.context.popIndent();
       this.context.line("});");
+      if (fn.asyncCycleCacheGlobal !== undefined) {
+        const cycleCache = mangleGlobal(fn.asyncCycleCacheGlobal);
+        this.context.line(`${cycleCache}.with(|slot| *slot.borrow_mut() = Some(${result}.clone()));`);
+      }
       this.context.line(result);
     } else if (fn.generator !== undefined) {
       emitRustGeneratorBody(fn, this.context);

@@ -1115,7 +1115,7 @@ export class RustDynamicEmitter {
 
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
     switch (type.kind) {
-      case "dyn": return value;
+      case "dyn": case "jsval": return value;
       case "f64": return `sc_dyn_check_number(${value})`;
       case "bool": return `sc_dyn_check_boolean(${value})`;
       case "string": return `sc_dyn_check_string(${value})`;
