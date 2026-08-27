@@ -8,6 +8,7 @@ pub fn finish() {
     children_finish();
     child_streams_finish();
     net_finish();
+    dgram_finish();
     tls_ca_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
@@ -417,6 +418,9 @@ pub fn run_event_loop() {
         if net_dispatch_one() {
             continue;
         }
+        if dgram_dispatch_one() {
+            continue;
+        }
         if child_streams_dispatch_one() {
             continue;
         }
@@ -427,7 +431,8 @@ pub fn run_event_loop() {
             || children_referenced_pending()
             || children_failed_pending()
             || child_streams_pending()
-            || net_pending();
+            || net_pending()
+            || dgram_pending();
         if !has_referenced_work {
             break;
         }
@@ -509,6 +514,12 @@ pub fn run_event_loop() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             net_wait(wait);
+            continue;
+        }
+        if dgram_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            dgram_wait(wait);
             continue;
         }
         if children_referenced_pending() || child_streams_pending() {

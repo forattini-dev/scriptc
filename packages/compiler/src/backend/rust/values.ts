@@ -92,6 +92,7 @@ export class RustValueEmitter {
       case "childStream": return "true";
       case "netServer": return "true";
       case "netSocket": return "true";
+      case "dgramSocket": return "true";
       case "httpReq": return "true";
       case "httpRes": return "true";
       case "httpClientReq": return "true";
@@ -200,6 +201,7 @@ export class RustValueEmitter {
       case "childStream": return "runtime::JsChildStream";
       case "netServer": return "runtime::JsNetServer";
       case "netSocket": return "runtime::JsNetSocket";
+      case "dgramSocket": return "runtime::JsDgramSocket";
       case "httpReq": return "runtime::JsHttpRequest";
       case "httpRes": return "runtime::JsHttpResponse";
       case "httpClientReq": return "runtime::JsHttpClientRequest";
@@ -371,7 +373,7 @@ export class RustValueEmitter {
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
-    if (type.kind === "netServer" || type.kind === "netSocket" || type.kind === "httpReq" ||
+    if (type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" ||
         type.kind === "httpRes" || type.kind === "httpClientReq") {
       return `${left}.ptr_eq(${right})`;
     }
@@ -388,7 +390,7 @@ export class RustValueEmitter {
   }
 
   isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -454,6 +456,7 @@ export class RustValueEmitter {
       case "childStream":
       case "netServer":
       case "netSocket":
+      case "dgramSocket":
       case "httpReq":
       case "httpRes":
       case "httpClientReq":

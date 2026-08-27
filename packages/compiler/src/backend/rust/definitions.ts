@@ -369,6 +369,7 @@ export class RustDefinitionEmitter {
         case "childStream":
         case "netServer":
         case "netSocket":
+        case "dgramSocket":
         case "httpReq":
         case "httpRes":
         case "httpClientReq":
@@ -743,6 +744,7 @@ export class RustDefinitionEmitter {
         case "childStream":
         case "netServer":
         case "netSocket":
+        case "dgramSocket":
         case "httpReq":
         case "httpRes":
         case "httpClientReq":

@@ -10,6 +10,7 @@ import { emitRustQuerystringCall } from "./querystring.js";
 import { emitRustTlsCall } from "./tls.js";
 import { emitRustCheckedBufferCall } from "./buffer-checked.js";
 import { emitRustCheckedFsCall } from "./fs-checked.js";
+import { emitRustDgramCall } from "./dgram.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -69,6 +70,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
+  const dgramCall = emitRustDgramCall(expr, context);
+  if (dgramCall !== null) return dgramCall;
   const tlsCall = emitRustTlsCall(expr, context);
   if (tlsCall !== null) return tlsCall;
   const httpCall = emitRustHttpCall(expr, context);
