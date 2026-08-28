@@ -12,7 +12,9 @@ export class RustStreamModel {
   usesWritable = false;
   usesWritableSubclass = false;
   usesDuplex = false;
+  usesDuplexSubclass = false;
   usesTransform = false;
+  usesTransformSubclass = false;
   usesReadableDestroy = false;
   usesWritableDestroy = false;
   usesStreamFinished = false;
@@ -172,6 +174,33 @@ export class RustStreamModel {
         ensureClosureShape(callback.type);
         this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
         if (bit === 2) this.usesWritableDestroy = true;
+      }
+      return true;
+    }
+    if (node.fn === "duplex.init" || node.fn === "transform.init") {
+      const transform = node.fn === "transform.init";
+      if (transform) {
+        this.usesTransform = true;
+        this.usesTransformSubclass = true;
+      } else {
+        this.usesDuplex = true;
+        this.usesDuplexSubclass = true;
+      }
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[8];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported(`malformed ${transform ? "Transform" : "Duplex"} subclass callback flags IR`);
+      }
+      let callbackIndex = 9;
+      const callbackBits = transform ? 2 : 4;
+      for (let bit = 0; bit < callbackBits; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed stream subclass callback IR");
+        ensureClosureShape(callback.type);
+        if ((transform && bit <= 1) || (!transform && (bit === 1 || bit === 2))) {
+          this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        }
       }
       return true;
     }

@@ -558,6 +558,8 @@ export class RustDefinitionEmitter {
       const emitterRooted = this.context.isEmitterClass(cls.name);
       const readableRooted = this.context.runtimeStreamBase(cls.name) === "%Readable";
       const writableRooted = this.context.runtimeStreamBase(cls.name) === "%Writable";
+      const duplexRooted = this.context.runtimeStreamBase(cls.name) === "%Duplex";
+      const transformRooted = this.context.runtimeStreamBase(cls.name) === "%Transform";
       this.context.line(`struct ${struct} {`);
       this.context.pushIndent();
       if (meta.hierarchy || emitterRooted) this.context.line("sc_class_pre: usize,");
@@ -567,6 +569,8 @@ export class RustDefinitionEmitter {
         this.context.line("sc_writable: Option<ScWritable>,");
         this.context.line("sc_writable_destroy: Option<ScWritableDestroy>,");
       }
+      if (duplexRooted) this.context.line("sc_duplex: Option<ScDuplex>,");
+      if (transformRooted) this.context.line("sc_transform: Option<ScTransform>,");
       for (const { owner, field } of fields) {
         const fieldType = this.context.isEdgeValue(field.type)
           ? `Option<${this.context.rustType(field.type, cls.loc)}>`
@@ -585,6 +589,8 @@ export class RustDefinitionEmitter {
         this.context.line("if let Some(edge) = &self.sc_writable { runtime::writable_trace(edge, tracer); }");
         this.context.line("if let Some(edge) = &self.sc_writable_destroy { runtime::Trace::trace(edge, tracer); }");
       }
+      if (duplexRooted) this.context.line("if let Some(edge) = &self.sc_duplex { runtime::duplex_trace(edge, tracer); }");
+      if (transformRooted) this.context.line("if let Some(edge) = &self.sc_transform { runtime::transform_trace(edge, tracer); }");
       for (const { owner, field } of fields) {
         if (!this.context.isEdgeValue(field.type)) continue;
         const name = this.context.classFieldStorageName(owner, field.name);
@@ -606,6 +612,8 @@ export class RustDefinitionEmitter {
         this.context.line("self.sc_writable = None;");
         this.context.line("self.sc_writable_destroy = None;");
       }
+      if (duplexRooted) this.context.line("self.sc_duplex = None;");
+      if (transformRooted) this.context.line("self.sc_transform = None;");
       for (const { owner, field } of fields) {
         if (this.context.isEdgeValue(field.type)) this.context.line(`self.${this.context.classFieldStorageName(owner, field.name)} = None;`);
       }

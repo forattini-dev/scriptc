@@ -154,8 +154,10 @@ export class RustMetadata {
     const streamBase = this.runtimeStreamBase(meta.def.name);
     const readable = streamBase === "%Readable" ? "sc_readable: None, " : "";
     const writable = streamBase === "%Writable" ? "sc_writable: None, sc_writable_destroy: None, " : "";
+    const duplex = streamBase === "%Duplex" ? "sc_duplex: None, " : "";
+    const transform = streamBase === "%Transform" ? "sc_transform: None, " : "";
     const classTag = meta.hierarchy || this.isEmitterClass(meta.def.name) ? `sc_class_pre: ${meta.pre}, ` : "";
-    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${readable}${writable}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${readable}${writable}${duplex}${transform}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
   }
 
   private classFieldInitialValue(type: IrType, loc: SrcLoc): string {

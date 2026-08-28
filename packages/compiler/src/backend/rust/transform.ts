@@ -22,6 +22,7 @@ export interface RustTransformContext {
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
   unionVariant(tag: number): string;
+  runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -31,12 +32,19 @@ export class RustTransformEmitter {
 
   emitTypeDefinition(): void {
     if (!this.context.streams.usesTransform) return;
-    this.emitCallbackType("ScTransformRead", new Map(), ["Never"]);
-    this.emitCallbackType("ScTransformWrite", new Map(), ["Transform"]);
-    this.emitCallbackType("ScTransformFinal", new Map(), ["Flush"]);
-    this.emitCallbackType("ScTransformDone", this.context.streams.transformDoneShapes, ["Never"]);
-    this.emitCallbackType("ScTransformCallback", this.context.streams.transformCallbackShapes, ["Never"]);
-    this.emitCallbackType("ScTransformFlush", this.context.streams.transformFlushShapes, ["Never"]);
+    const subclass = this.context.streams.usesTransformSubclass;
+    this.emitCallbackType("ScTransformRead", new Map(), ["Never"], null);
+    this.emitCallbackType("ScTransformWrite", new Map(), ["Transform"], null);
+    this.emitCallbackType("ScTransformFinal", new Map(), ["Flush"], null);
+    this.emitCallbackType("ScTransformDone", this.context.streams.transformDoneShapes, ["Never"], null);
+    this.emitCallbackType("ScTransformCallback", this.context.streams.transformCallbackShapes, ["Never"], subclass ? {
+      variant: "RuntimeTransform",
+      fields: "std::rc::Rc<dyn Fn(ScTransform, runtime::JsBytes<u8>, usize, ScTransformDone)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>",
+    } : null);
+    this.emitCallbackType("ScTransformFlush", this.context.streams.transformFlushShapes, ["Never"], subclass ? {
+      variant: "RuntimeFlush",
+      fields: "std::rc::Rc<dyn Fn(ScTransform, std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>",
+    } : null);
     this.context.line("type ScTransformDuplex = runtime::JsDuplex<ScEmitterListener, ScTransformRead, ScTransformWrite, ScTransformFinal, ScTransformDone>;");
     this.context.line("type ScTransform = runtime::JsTransform<ScEmitterListener, ScTransformRead, ScTransformWrite, ScTransformFinal, ScTransformDone, ScTransformCallback, ScTransformFlush>;");
   }
@@ -53,6 +61,7 @@ export class RustTransformEmitter {
 
   emitLibCall(expr: RustLibCallExpr): string | null {
     if (expr.fn === "transform.new" || expr.fn === "passthrough.new") return this.emitNew(expr);
+    if (expr.fn === "transform.init") return this.emitInit(expr);
     const receiver = expr.args[0];
     if (!this.isTransform(receiver)) return null;
     switch (expr.fn) {
@@ -74,11 +83,13 @@ export class RustTransformEmitter {
     name: string,
     shapes: ReadonlyMap<string, RustClosureShape>,
     markers: readonly string[],
+    runtime: { variant: string; fields: string } | null,
   ): void {
     this.context.line("#[derive(Clone)]");
     this.context.line(`enum ${name} {`);
     this.context.pushIndent();
     for (const marker of markers) this.context.line(`${marker},`);
+    if (runtime !== null) this.context.line(`${runtime.variant}(${runtime.fields}),`);
     for (const shape of shapes.values()) {
       this.context.line(`${this.variant(shape)}(runtime::Gc<${this.context.closureName(shape)}>),`);
     }
@@ -87,6 +98,7 @@ export class RustTransformEmitter {
     this.context.line(`impl runtime::Trace for ${name} { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { match self {`);
     this.context.pushIndent();
     for (const marker of markers) this.context.line(`Self::${marker} => {},`);
+    if (runtime !== null) this.context.line(`Self::${runtime.variant}(_, trace) => trace(tracer),`);
     for (const shape of shapes.values()) this.context.line(`Self::${this.variant(shape)}(callback) => tracer.edge(callback),`);
     this.context.popIndent();
     this.context.line("} } }");
@@ -214,6 +226,9 @@ export class RustTransformEmitter {
       ], loc);
       arms.push(`ScTransformCallback::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
     }
+    if (this.context.streams.usesTransformSubclass) {
+      arms.push("ScTransformCallback::RuntimeTransform(callback, _) => callback(sc_transform.clone(), sc_chunk, sc_length, sc_done),");
+    }
     arms.push("ScTransformCallback::Never => { if runtime::transform_is_passthrough(sc_transform) { sc_transform_emit_output(sc_transform, sc_chunk); let sc_writable = runtime::transform_writable(sc_transform); runtime::writable_complete_write(&sc_writable, sc_length); sc_transform_after_write(sc_transform, sc_done); } else { runtime::throw_error_code(\"The _transform() method is not implemented\".to_owned(), \"ERR_METHOD_NOT_IMPLEMENTED\"); } },");
     arms.push("_ => unreachable!(\"scriptc invariant: Transform callback signature\"),");
     this.context.line("fn sc_transform_call_write(sc_transform: &ScTransform, sc_chunk: runtime::JsBytes<u8>, sc_length: usize, sc_done: ScTransformDone) {");
@@ -247,6 +262,9 @@ export class RustTransformEmitter {
       const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_transform = sc_transform.clone(); let sc_finish = sc_finish.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |${params.join(", ")}| { ${ignore} if sc_called.replace(true) { return; } ${output} sc_finish(); } })), trace: Some(std::rc::Rc::new({ let sc_transform = sc_transform.clone(); let sc_finish_trace = sc_finish_trace.clone(); move |tracer| { tracer.edge(&sc_transform); sc_finish_trace(tracer); } })) })`;
       const call = this.context.emitClosureDispatch("callback", shape.type, ["sc_transform.clone()", done], loc);
       arms.push(`ScTransformFlush::${this.variant(shape)}(callback) => { let _ = ${call}; },`);
+    }
+    if (this.context.streams.usesTransformSubclass) {
+      arms.push("ScTransformFlush::RuntimeFlush(callback, _) => callback(sc_transform.clone(), sc_finish, sc_finish_trace),");
     }
     arms.push("ScTransformFlush::Never => sc_finish(),");
     arms.push("_ => unreachable!(\"scriptc invariant: Transform flush callback signature\"),");
@@ -289,6 +307,69 @@ export class RustTransformEmitter {
     }
     if (index !== expr.args.length) this.context.unsupported("Transform constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let _ = (${values[5]}, ${values[6]}, ${values[7]}); let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[0]}, ${values[2]}, ${values[3]}, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[1]}, ${values[2]}, ${values[3]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[4]}); runtime::transform_new(sc_duplex, ${transform}, ${flush}, ${passthrough}) }`;
+  }
+
+  private emitInit(expr: RustLibCallExpr): string {
+    const [receiver, hwmRead, hwmWrite, autoDestroy, emitClose, allowHalfOpen, readableSide, writableSide, flags] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className === "%Transform" ||
+      this.context.runtimeStreamBase(receiver.type.className) !== "%Transform" || hwmRead?.type.kind !== "f64" ||
+      hwmWrite?.type.kind !== "f64" || autoDestroy?.type.kind !== "bool" || emitClose?.type.kind !== "bool" ||
+      allowHalfOpen?.type.kind !== "bool" || readableSide?.type.kind !== "bool" || writableSide?.type.kind !== "bool" ||
+      flags?.kind !== "numLit" || (flags.value & ~3) !== 0 || expr.type.kind !== "void") {
+      this.context.unsupported("Transform subclass constructor shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const owner = this.requiredValue(values, 0, expr.loc);
+    let index = 9;
+    let transform = "Option::<ScTransformCallback>::None";
+    let flush = "Option::<ScTransformFlush>::None";
+    if ((flags.value & 1) !== 0) {
+      const callback = expr.args[index];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      const completion = params[3];
+      const errorType = completion?.kind === "func" ? completion.params[0] : undefined;
+      const outputType = completion?.kind === "func" ? completion.params[1] : undefined;
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || params.length !== 4 ||
+        params[0]?.kind !== "object" || params[0].className !== receiver.type.className ||
+        params[1]?.kind !== "bytes" || params[1].elem !== "u8" || params[2]?.kind !== "string" ||
+        completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 2 ||
+        errorType === undefined || outputType === undefined) {
+        this.context.unsupported("Transform subclass transform callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const completionShape = this.context.closureShapeForType(completion, expr.loc);
+      const completedError = this.errorOption("sc_error", errorType, expr.loc);
+      const output = this.emitOutput("sc_output", outputType, "sc_transform", expr.loc);
+      const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if let Some(sc_error) = ${completedError} { sc_transform_destroy_pipeline(&sc_transform, sc_error); return; } ${output} let sc_writable = runtime::transform_writable(&sc_transform); runtime::writable_complete_write(&sc_writable, sc_length); sc_transform_after_write(&sc_transform, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, [
+        "sc_owner", "sc_chunk", "runtime::string(\"buffer\")", done,
+      ], expr.loc);
+      transform = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScTransformCallback::RuntimeTransform(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_chunk, sc_length, sc_done| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_transform, sc_done, std::cell::Cell::new(false))); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if ((flags.value & 2) !== 0) {
+      const callback = expr.args[index];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      const completion = params[1];
+      const errorType = completion?.kind === "func" ? completion.params[0] : undefined;
+      const outputType = completion?.kind === "func" ? completion.params[1] : undefined;
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || params.length !== 2 ||
+        params[0]?.kind !== "object" || params[0].className !== receiver.type.className ||
+        completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 2 ||
+        errorType === undefined || outputType === undefined) {
+        this.context.unsupported("Transform subclass flush callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const completionShape = this.context.closureShapeForType(completion, expr.loc);
+      const completedError = this.errorOption("sc_error", errorType, expr.loc);
+      const output = this.emitOutput("sc_output", outputType, "sc_transform", expr.loc);
+      const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if let Some(sc_error) = ${completedError} { sc_transform_destroy_pipeline(&sc_transform, sc_error); return; } ${output} (sc_completion.1)(); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); (sc_completion.3)(tracer); } })) })`;
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, ["sc_owner", done], expr.loc);
+      flush = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScTransformFlush::RuntimeFlush(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_finish, sc_finish_trace| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_transform, sc_finish, std::cell::Cell::new(false), sc_finish_trace)); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if (index !== expr.args.length) this.context.unsupported("Transform subclass constructor arity", expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[1]}, ${values[3]}, ${values[4]}, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[2]}, ${values[3]}, ${values[4]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[5]}); let sc_transform = runtime::transform_new(sc_duplex, ${transform}, ${flush}, false); let _ = (${values[6]}, ${values[7]}, ${values[8]}); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
   }
 
   private emitWrite(expr: RustLibCallExpr, stringChunk: boolean): string {
@@ -429,9 +510,25 @@ export class RustTransformEmitter {
     return args.map((arg, index) => `let ${values[index]} = ${this.context.emitExpr(arg)};`).join(" ");
   }
 
+  private requiredValue(values: readonly string[], index: number, loc: SrcLoc): string {
+    const value = values[index];
+    if (value === undefined) this.context.unsupported("Transform argument arity", loc);
+    return value;
+  }
+
   private isTransform(expr: IrExpr | undefined): boolean {
     return expr?.type.kind === "object" &&
-      (expr.type.className === "%Transform" || expr.type.className === "%PassThrough");
+      (expr.type.className === "%Transform" || expr.type.className === "%PassThrough" ||
+        this.context.runtimeStreamBase(expr.type.className) === "%Transform");
+  }
+
+  private transformHandle(value: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind !== "object") this.context.unsupported("Transform receiver type", loc);
+    if (type.className === "%Transform" || type.className === "%PassThrough") return `${value}.clone()`;
+    if (this.context.runtimeStreamBase(type.className) === "%Transform") {
+      return `${value}.with(|object| object.sc_transform.as_ref().expect("scriptc: uninitialized Transform subclass").clone())`;
+    }
+    this.context.unsupported(`non-Transform receiver '${type.className}'`, loc);
   }
 
   private variant(shape: RustClosureShape): string {

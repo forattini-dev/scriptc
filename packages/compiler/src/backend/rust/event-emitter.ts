@@ -288,6 +288,10 @@ export class RustEventEmitterEmitter {
     if (className === "%Transform" || className === "%PassThrough") {
       return `runtime::transform_readable(&${value})`;
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Readable") return `${value}.with(|object| object.sc_readable.as_ref().expect("scriptc: uninitialized Readable subclass").clone())`;
+    if (base === "%Duplex") return `runtime::duplex_readable(&${this.duplexHandle(value, className, loc)})`;
+    if (base === "%Transform") return `runtime::transform_readable(&${this.transformHandle(value, className, loc)})`;
     this.context.unsupported(`pipe source '${className}'`, loc);
   }
 
@@ -302,6 +306,10 @@ export class RustEventEmitterEmitter {
     if (className === "%Duplex") {
       return "let sc_writable = runtime::duplex_writable(&sc_destination); let sc_result = runtime::writable_enqueue(&sc_writable, sc_chunk, ScDuplexDone::Never); sc_duplex_write_drain(&sc_destination); sc_result";
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Writable") return "let sc_writable = sc_destination.with(|object| object.sc_writable.as_ref().expect(\"scriptc: uninitialized Writable subclass\").clone()); let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable)";
+    if (base === "%Duplex") return "let sc_duplex = sc_destination.with(|object| object.sc_duplex.as_ref().expect(\"scriptc: uninitialized Duplex subclass\").clone()); let sc_writable = runtime::duplex_writable(&sc_duplex); let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScDuplexDone::Never); sc_duplex_write_drain(&sc_duplex); runtime::writable_write_result(&sc_writable)";
+    if (base === "%Transform") return "let sc_transform = sc_destination.with(|object| object.sc_transform.as_ref().expect(\"scriptc: uninitialized Transform subclass\").clone()); let sc_writable = runtime::transform_writable(&sc_transform); let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScTransformDone::Never); sc_transform_drain_write(&sc_transform); runtime::writable_write_result(&sc_writable)";
     this.context.unsupported(`pipe destination '${className}'`, loc);
   }
 
@@ -311,6 +319,9 @@ export class RustEventEmitterEmitter {
     if (className === "%Transform" || className === "%PassThrough") {
       return "sc_transform_end_from_pipe(&sc_destination);";
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Writable") return "let sc_writable = sc_destination.with(|object| object.sc_writable.as_ref().expect(\"scriptc: uninitialized Writable subclass\").clone()); sc_writable_end_from_pipe(&sc_writable);";
+    if (base === "%Transform") return "let sc_transform = sc_destination.with(|object| object.sc_transform.as_ref().expect(\"scriptc: uninitialized Transform subclass\").clone()); sc_transform_end_from_pipe(&sc_transform);";
     this.context.unsupported(`pipe end destination '${className}'`, loc);
   }
 
@@ -321,6 +332,10 @@ export class RustEventEmitterEmitter {
       return `sc_transform_emit_void(${receiver}, "${event}");`;
     }
     if (className === "%Duplex") return `sc_duplex_emit_void(${receiver}, "${event}");`;
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Writable") return `{ let sc_writable = ${this.writableHandle(value, { kind: "object", className }, loc)}; sc_writable_emit_void(&sc_writable, "${event}"); }`;
+    if (base === "%Duplex") return `{ let sc_duplex = ${this.duplexHandle(value, className, loc)}; sc_duplex_emit_void(&sc_duplex, "${event}"); }`;
+    if (base === "%Transform") return `{ let sc_transform = ${this.transformHandle(value, className, loc)}; sc_transform_emit_void(&sc_transform, "${event}"); }`;
     this.context.unsupported(`pipe event destination '${className}'`, loc);
   }
 
@@ -332,6 +347,10 @@ export class RustEventEmitterEmitter {
     if (className === "%Transform" || className === "%PassThrough") {
       return `sc_transform_start_flowing(&${value});`;
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Readable") return `{ let sc_readable = ${value}.with(|object| object.sc_readable.as_ref().expect("scriptc: uninitialized Readable subclass").clone()); runtime::readable_start_flowing(&sc_readable); sc_readable_schedule(&sc_readable); }`;
+    if (base === "%Duplex") return `{ let sc_duplex = ${this.duplexHandle(value, className, loc)}; sc_duplex_start_flowing(&sc_duplex); }`;
+    if (base === "%Transform") return `{ let sc_transform = ${this.transformHandle(value, className, loc)}; sc_transform_start_flowing(&sc_transform); }`;
     this.context.unsupported(`pipe flow source '${className}'`, loc);
   }
 
@@ -343,6 +362,10 @@ export class RustEventEmitterEmitter {
     if (className === "%Transform" || className === "%PassThrough") {
       return "sc_transform_start_flowing(&sc_source);";
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Readable") return "let sc_readable = sc_source.with(|object| object.sc_readable.as_ref().expect(\"scriptc: uninitialized Readable subclass\").clone()); runtime::readable_resume(&sc_readable); sc_readable_schedule(&sc_readable);";
+    if (base === "%Duplex") return "let sc_duplex = sc_source.with(|object| object.sc_duplex.as_ref().expect(\"scriptc: uninitialized Duplex subclass\").clone()); sc_duplex_start_flowing(&sc_duplex);";
+    if (base === "%Transform") return "let sc_transform = sc_source.with(|object| object.sc_transform.as_ref().expect(\"scriptc: uninitialized Transform subclass\").clone()); sc_transform_start_flowing(&sc_transform);";
     this.context.unsupported(`pipe resume source '${className}'`, loc);
   }
 
@@ -356,6 +379,10 @@ export class RustEventEmitterEmitter {
     if (className === "%Duplex") {
       return "runtime::writable_add_drain_resume(&runtime::duplex_writable(&sc_destination), sc_resume, sc_resume_trace);";
     }
+    const base = this.context.runtimeStreamBase(className);
+    if (base === "%Writable") return "let sc_writable = sc_destination.with(|object| object.sc_writable.as_ref().expect(\"scriptc: uninitialized Writable subclass\").clone()); runtime::writable_add_drain_resume(&sc_writable, sc_resume, sc_resume_trace);";
+    if (base === "%Duplex") return "let sc_duplex = sc_destination.with(|object| object.sc_duplex.as_ref().expect(\"scriptc: uninitialized Duplex subclass\").clone()); runtime::writable_add_drain_resume(&runtime::duplex_writable(&sc_duplex), sc_resume, sc_resume_trace);";
+    if (base === "%Transform") return "let sc_transform = sc_destination.with(|object| object.sc_transform.as_ref().expect(\"scriptc: uninitialized Transform subclass\").clone()); runtime::writable_add_drain_resume(&runtime::transform_writable(&sc_transform), sc_resume, sc_resume_trace);";
     this.context.unsupported(`pipe backpressure destination '${className}'`, loc);
   }
 
@@ -435,6 +462,9 @@ export class RustEventEmitterEmitter {
     if (type.className === "%Transform" || type.className === "%PassThrough") {
       return `sc_transform_start_flowing(&${value});`;
     }
+    const base = this.context.runtimeStreamBase(type.className);
+    if (base === "%Duplex") return `{ let sc_duplex = ${this.duplexHandle(value, type.className, loc)}; sc_duplex_start_flowing(&sc_duplex); }`;
+    if (base === "%Transform") return `{ let sc_transform = ${this.transformHandle(value, type.className, loc)}; sc_transform_start_flowing(&sc_transform); }`;
     this.context.unsupported(`stream data listener receiver '${type.className}'`, loc);
   }
 
@@ -1067,6 +1097,12 @@ export class RustEventEmitterEmitter {
     if (this.context.runtimeStreamBase(type.className) === "%Writable") {
       return `runtime::writable_emitter(&${this.writableHandle(value, type, loc)})`;
     }
+    if (this.context.runtimeStreamBase(type.className) === "%Duplex") {
+      return `runtime::duplex_emitter(&${this.duplexHandle(value, type.className, loc)})`;
+    }
+    if (this.context.runtimeStreamBase(type.className) === "%Transform") {
+      return `runtime::transform_emitter(&${this.transformHandle(value, type.className, loc)})`;
+    }
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }
@@ -1089,6 +1125,16 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("Writable subclass receiver", loc);
     }
     return `${value}.with(|object| object.sc_writable.as_ref().expect("scriptc: uninitialized Writable subclass").clone())`;
+  }
+
+  private duplexHandle(value: string, className: string, loc: SrcLoc): string {
+    if (this.context.runtimeStreamBase(className) !== "%Duplex") this.context.unsupported("Duplex subclass receiver", loc);
+    return `${value}.with(|object| object.sc_duplex.as_ref().expect("scriptc: uninitialized Duplex subclass").clone())`;
+  }
+
+  private transformHandle(value: string, className: string, loc: SrcLoc): string {
+    if (this.context.runtimeStreamBase(className) !== "%Transform") this.context.unsupported("Transform subclass receiver", loc);
+    return `${value}.with(|object| object.sc_transform.as_ref().expect("scriptc: uninitialized Transform subclass").clone())`;
   }
 
   private isBareEmitter(type: IrType): boolean {
