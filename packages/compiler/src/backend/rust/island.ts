@@ -50,6 +50,7 @@ function emitMarshal(
     case "url":
     case "record":
     case "union":
+    case "dyn":
       return context.emitDynFromValue(expr.value.type, emitExpr(expr.value), expr.loc);
     default:
       context.unsupported(`island marshal from '${expr.value.type.kind}'`, expr.loc);
