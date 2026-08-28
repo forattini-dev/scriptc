@@ -18,6 +18,23 @@ console.log(__island_eval("JSON.stringify({ a: 1, b: [true, 'two'] })"));
 console.log(__island_eval("var acc = 100; acc"));
 console.log(__island_eval("acc = acc + 1; acc"));
 
+// Engine errors cross the static catch boundary with their builtin identity.
+try {
+  __island_eval("throw new TypeError('island boom')");
+} catch (error) {
+  if (error instanceof TypeError) console.log(error.name, error.message);
+}
+try {
+  __island_eval("class Weird extends Error { constructor(m) { super(m); this.name = 'Weird'; } } throw new Weird('custom')");
+} catch (error) {
+  if (error instanceof Error) console.log(error.name, error.message, error.toString());
+}
+try {
+  __island_eval("throw 'plain reason'");
+} catch (error) {
+  console.log(typeof error, error instanceof Error, String(error));
+}
+
 // Island results are ordinary static strings: concat, methods, log args.
 const answer = __island_eval("6 * 7");
 const banner = "answer=" + answer + "!";

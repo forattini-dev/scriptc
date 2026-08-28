@@ -6,6 +6,9 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "island.eval" && expr.args.length === 1 && arg?.type.kind === "string") {
+    return `runtime::island_eval(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "util.parseArgs" && expr.args.length === 1 &&
     arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     return `runtime::util_parse_args(${context.emitExpr(arg)})`;

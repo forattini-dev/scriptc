@@ -17,10 +17,9 @@ export interface RustIslandContext {
 
 /** Emit the backend-neutral island subset used by compiled program imports.
  *
- * Rust intentionally has no embedded JavaScript engine. Own-module imports
- * nevertheless need only a native promise microtask, a compiled namespace
- * builder, and the existing checked-dynamic value model. Every other island
- * operation keeps its explicit SC3001 refusal instead of approximating JS.
+ * Most operations map directly to the native checked-dynamic value model.
+ * The explicit island.eval hook instead uses the runtime's persistent
+ * ECMAScript realm. Unsupported operations keep their explicit SC3001 refusal.
  */
 export function emitRustIslandExpr(
   expr: IslandExpr,

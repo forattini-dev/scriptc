@@ -36,6 +36,8 @@ include!("terminal.rs");
 include!("readline.rs");
 include!("generators.rs");
 include!("errors.rs");
+#[cfg(feature = "island-eval")]
+include!("island_eval.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");

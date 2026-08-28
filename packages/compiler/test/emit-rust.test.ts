@@ -865,6 +865,7 @@ test.each([
   "1052-comptime-records.ts",
   "1053-comptime-json.ts",
   "1054-comptime-modules/main.ts",
+  "1100-island-eval-basics.ts",
   "1123-any-conditional-spread.ts",
   "1354-builtin-bare-specifiers.ts",
   "1359-json-module/main.ts",

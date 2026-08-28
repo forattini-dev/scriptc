@@ -18,6 +18,8 @@ pub fn finish() {
     diagnostics_finish();
     async_local_finish();
     errors_finish();
+    #[cfg(feature = "island-eval")]
+    island_eval_finish();
     live_dyn_refs_clear();
     PROCESS_ARGV.with(|slot| *slot.borrow_mut() = None);
     template_strings_clear();

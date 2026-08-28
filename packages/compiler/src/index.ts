@@ -6,6 +6,7 @@ import { emitModule } from "./backend/emission/emitter.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { compileRust, RustCompileError } from "./backend/rust/compile.js";
 import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
+import { rustRuntimeFeatures } from "./backend/rust/runtime-features.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
 import { rebaseLibrarySourceComments, replaceLibraryIdentity, stripLibraryIdentity, stripLibrarySourceComments } from "./backend/library-identity.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -1241,6 +1242,7 @@ async function compileTracked(
         sourcePath,
         outPath: opts.outPath,
         optimization: opts.optimization ?? "release",
+        runtimeFeatures: rustRuntimeFeatures(lowered.module!),
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;
