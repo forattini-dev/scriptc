@@ -885,6 +885,7 @@ test.each([
   "1429-promise-catch-finally.ts",
   "1460-console-error-warn.ts",
   "1462-exec-sync.ts",
+  "1463-timeout-unref.ts",
   "1464-env-writes.ts",
   "1465-env-value.ts",
   "1468-exec-path.ts",
