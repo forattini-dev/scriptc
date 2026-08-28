@@ -507,9 +507,10 @@ where
     C: Clone + Trace + 'static,
 {
     writable.with(|data| match name.as_ref() {
-        "writableLength" => data.writable_length as f64,
+        "writableLength" | "ws:length" => data.writable_length as f64,
         "writableHighWaterMark" => data.high_water_mark as f64,
-        "writableCorked" => data.corked as f64,
+        "writableCorked" | "ws:corked" => data.corked as f64,
+        "ws:bufferedRequestCount" => data.queue.len() as f64,
         _ => 0.0,
     })
 }
@@ -529,6 +530,9 @@ where
         "writableEnded" => data.ended,
         "writableFinished" => data.finished,
         "writableNeedDrain" => data.need_drain,
+        "ws:ended" => data.ended,
+        "ws:finished" => data.finished,
+        "ws:needDrain" => data.need_drain,
         "destroyed" => data.destroyed,
         "closed" => data.closed,
         _ => false,

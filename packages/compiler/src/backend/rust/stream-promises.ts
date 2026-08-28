@@ -114,6 +114,10 @@ export class RustStreamPromiseEmitter {
     }
   }
 
+  callbackStatus(type: IrType, value: string, loc: SrcLoc): string {
+    return this.finishedStatus(type, value, loc);
+  }
+
   private emitStreamHelpers(): void {
     this.context.line("fn sc_stream_identity(stream: &ScStream) -> usize { match stream {");
     this.context.pushIndent();
@@ -178,13 +182,20 @@ export class RustStreamPromiseEmitter {
   }
 
   private emitPipelineHelper(): void {
-    this.context.line("struct ScStreamPipeline { streams: Vec<ScStream>, closed: usize, error: Option<runtime::JsError>, promise: runtime::JsPromise<()> }");
+    this.context.line("struct ScStreamPipeline { streams: Vec<ScStream>, closed: usize, error: Option<runtime::JsError>, callback: std::rc::Rc<dyn Fn(Option<runtime::JsError>)>, trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> }");
+    this.context.line("fn sc_stream_callback_pipeline(streams: Vec<ScStream>, callback: std::rc::Rc<dyn Fn(Option<runtime::JsError>)>, trace: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>) {");
+    this.context.pushIndent();
+    this.context.line("let pipeline = std::rc::Rc::new(std::cell::RefCell::new(ScStreamPipeline { streams, closed: 0, error: None, callback, trace }));");
+    this.context.line("let watched = pipeline.borrow().streams.clone();");
+    this.context.line("for stream in watched { let pipeline_callback = pipeline.clone(); let pipeline_trace = pipeline.clone(); let _ = sc_stream_finished(stream, std::rc::Rc::new(move |closed_stream, status| { let mut state = pipeline_callback.borrow_mut(); state.closed += 1; let destroy = if state.error.is_none() { status.map(|error| { state.error = Some(error.clone()); (error, state.streams.clone()) }) } else { None }; let settle = (state.closed == state.streams.len()).then(|| (state.callback.clone(), state.error.clone())); drop(state); if let Some((error, streams)) = destroy { let closed_identity = sc_stream_identity(&closed_stream); for stream in streams { if sc_stream_identity(&stream) != closed_identity { sc_stream_destroy(&stream, error.clone()); } } } if let Some((callback, error)) = settle { callback(error); } }), std::rc::Rc::new(move |tracer| { let state = pipeline_trace.borrow(); (state.trace)(tracer); for stream in &state.streams { sc_stream_trace(stream, tracer); } })); }");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line("fn sc_stream_promise_pipeline(streams: Vec<ScStream>) -> runtime::JsPromise<()> {");
     this.context.pushIndent();
     this.context.line("let promise = runtime::promise_new::<()>();");
-    this.context.line("let pipeline = std::rc::Rc::new(std::cell::RefCell::new(ScStreamPipeline { streams, closed: 0, error: None, promise: promise.clone() }));");
-    this.context.line("let watched = pipeline.borrow().streams.clone();");
-    this.context.line("for stream in watched { let pipeline_callback = pipeline.clone(); let pipeline_trace = pipeline.clone(); let _ = sc_stream_finished(stream, std::rc::Rc::new(move |closed_stream, status| { let mut state = pipeline_callback.borrow_mut(); state.closed += 1; let destroy = if state.error.is_none() { status.map(|error| { state.error = Some(error.clone()); (error, state.streams.clone()) }) } else { None }; let settle = (state.closed == state.streams.len()).then(|| (state.promise.clone(), state.error.clone())); drop(state); if let Some((error, streams)) = destroy { let closed_identity = sc_stream_identity(&closed_stream); for stream in streams { if sc_stream_identity(&stream) != closed_identity { sc_stream_destroy(&stream, error.clone()); } } } if let Some((promise, error)) = settle { if let Some(error) = error { let _ = runtime::promise_reject(&promise, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&promise, ()); } } }), std::rc::Rc::new(move |tracer| { let state = pipeline_trace.borrow(); tracer.edge(&state.promise); for stream in &state.streams { sc_stream_trace(stream, tracer); } })); }");
+    this.context.line("let target = promise.clone();");
+    this.context.line("let traced = promise.clone();");
+    this.context.line("sc_stream_callback_pipeline(streams, std::rc::Rc::new(move |error| { if let Some(error) = error { let _ = runtime::promise_reject(&target, runtime::caught_value(error)); } else { let _ = runtime::promise_fulfill(&target, ()); } }), std::rc::Rc::new(move |tracer| tracer.edge(&traced)));");
     this.context.line("promise");
     this.context.popIndent();
     this.context.line("}");

@@ -915,8 +915,10 @@ where
     R: Clone + Trace + 'static,
 {
     match name.as_ref() {
-        "readableLength" => readable_length(readable),
-        "readableHighWaterMark" => readable.with(|data| data.high_water_mark as f64),
+        "readableLength" | "rs:length" => readable_length(readable),
+        "readableHighWaterMark" | "rs:highWaterMark" => {
+            readable.with(|data| data.high_water_mark as f64)
+        }
         "readableEnded" => {
             if readable.with(|data| data.ended) {
                 1.0
@@ -943,6 +945,8 @@ where
     readable.with(|data| match name.as_ref() {
         "readable" => !data.ended && !data.destroyed && data.errored.is_none(),
         "readableEnded" => data.ended,
+        "rs:ended" => data.eof,
+        "rs:endEmitted" => data.ended,
         "destroyed" => data.destroyed,
         "closed" => data.closed,
         "readableObjectMode" => data.object_mode,

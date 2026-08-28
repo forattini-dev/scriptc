@@ -257,6 +257,7 @@ export class RustReadableEmitter {
     switch (expr.fn) {
       case "readable.new": return this.emitNew(expr);
       case "readable.init": return this.emitInit(expr);
+      case "readable.initDyn": return this.emitInitDynamic(expr);
       case "readable.fromArr": return this.emitFromArray(expr);
       case "readable.nextChunkDyn": return this.emitNextChunkDynamic(expr);
       case "readable.push": return this.emitPush(expr, false);
@@ -351,6 +352,56 @@ export class RustReadableEmitter {
       this.context.unsupported("Readable subclass constructor arity", expr.loc);
     }
     return `{ ${this.bind(expr.args, values)} let sc_readable = runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[1]}, ${values[2]}, ${values[3]}, ${read}, Option::<ScReadableRead>::None); ${values[0]}.with_mut(|object| object.sc_readable = Some(sc_readable)); }`;
+  }
+
+  private emitInitDynamic(expr: RustLibCallExpr): string {
+    const [receiver, options, flagsExpr] = expr.args;
+    if (receiver === undefined || receiver.type.kind !== "object" || !this.isReadable(receiver) ||
+      receiver.type.className === "%Readable" || options?.type.kind !== "dyn" ||
+      flagsExpr?.kind !== "numLit" || expr.type.kind !== "void" ||
+      (flagsExpr.value & ~1) !== 0) {
+      this.context.unsupported("dynamic Readable subclass constructor shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    let callbackIndex = 3;
+    let fallback = "Option::<ScReadableRead>::None";
+    if ((flagsExpr.value & 1) !== 0) {
+      const callback = expr.args[callbackIndex];
+      const first = callback?.type.kind === "func" ? callback.type.params[0] : undefined;
+      const second = callback?.type.kind === "func" ? callback.type.params[1] : undefined;
+      if (callback?.type.kind !== "func" ||
+        (callback.type.ret.kind !== "void" && callback.type.ret.kind !== "dyn") ||
+        first?.kind !== "object" || first.className !== receiver.type.className ||
+        (callback.type.params.length !== 1 &&
+          (callback.type.params.length !== 2 ||
+            (second?.kind !== "f64" && second?.kind !== "dyn")))) {
+        this.context.unsupported("dynamic Readable fallback callback shape", expr.loc);
+      }
+      const callbackValue = values[callbackIndex];
+      if (callbackValue === undefined) {
+        this.context.unsupported("dynamic Readable fallback callback arity", expr.loc);
+      }
+      const size = second?.kind === "dyn" ? `${this.context.dynTypeName()}::Number(sc_size)` : "sc_size";
+      const args = ["sc_owner.clone()", ...(callback.type.params.length === 2 ? [size] : [])];
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, args, expr.loc);
+      fallback = `Some({ let sc_context = std::rc::Rc::new((${values[0]}.clone(), ${callbackValue}.clone())); ScReadableRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_size| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      callbackIndex += 1;
+    }
+    if (callbackIndex !== expr.args.length) {
+      this.context.unsupported("dynamic Readable subclass constructor arity", expr.loc);
+    }
+    const dyn = this.context.dynTypeName();
+    const optionsValue = this.requiredValue(values, 1, expr.loc);
+    const option = (key: string): string =>
+      `match &${optionsValue} { ${dyn}::Object(..) => sc_dyn_key_get(&${optionsValue}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const readOption = option("read");
+    const hwmOption = option("highWaterMark");
+    const autoDestroyOption = option("autoDestroy");
+    const emitCloseOption = option("emitClose");
+    const encodingOption = option("encoding");
+    const read = `let sc_read_option = ${readOption}; let sc_read = if sc_dyn_function_identity(&sc_read_option).is_some() { let sc_context = std::rc::Rc::new(sc_read_option); Some(ScReadableRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_size| { let _ = sc_dyn_call(&sc_context, &[${dyn}::Number(sc_size)], "read"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${fallback} };`;
+    const optionsInit = `let sc_hwm = match ${hwmOption} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 }; let sc_auto_destroy = !matches!(${autoDestroyOption}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${emitCloseOption}, ${dyn}::Boolean(false)); let sc_encoding = ${encodingOption};`;
+    return `{ ${this.bind(expr.args, values)} ${read} ${optionsInit} let sc_readable = runtime::readable_new::<ScEmitterListener, ScReadableRead>(sc_hwm, sc_auto_destroy, sc_emit_close, sc_read, Option::<ScReadableRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } ${values[0]}.with_mut(|object| object.sc_readable = Some(sc_readable)); }`;
   }
 
   private emitFromArray(expr: RustLibCallExpr): string {
@@ -529,12 +580,13 @@ export class RustReadableEmitter {
 
   private emitResume(expr: RustLibCallExpr): string {
     const [receiver] = expr.args;
-    if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
-      expr.args.length !== 1 || expr.type.kind !== "object" || expr.type.className !== "%Readable") {
+    if (!this.isReadable(receiver) || expr.args.length !== 1 ||
+      typeKey(expr.type) !== typeKey(receiver.type)) {
       this.context.unsupported("Readable resume shape", expr.loc);
     }
     const value = this.context.nextTemporary();
-    return `{ let ${value} = ${this.context.emitExpr(receiver)}; runtime::readable_resume(&${value}); sc_readable_schedule(&${value}); ${value} }`;
+    const readable = this.readableHandle(value, receiver.type, expr.loc);
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_readable = (${readable}).clone(); runtime::readable_resume(&sc_readable); sc_readable_schedule(&sc_readable); ${value} }`;
   }
 
   private emitIsPaused(expr: RustLibCallExpr): string {

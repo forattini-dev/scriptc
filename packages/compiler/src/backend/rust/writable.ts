@@ -109,6 +109,7 @@ export class RustWritableEmitter {
     switch (expr.fn) {
       case "writable.new": return this.emitNew(expr);
       case "writable.init": return this.emitInit(expr);
+      case "writable.initDyn": return this.emitInitDynamic(expr);
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
       case "writable.end": return this.emitEnd(expr);
@@ -398,6 +399,58 @@ export class RustWritableEmitter {
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Writable subclass constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let sc_writable = runtime::writable_new::<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>(${values[1]}, ${values[2]}, ${values[3]}, ${write}, ${final}); ${owner}.with_mut(|object| { object.sc_writable = Some(sc_writable); object.sc_writable_destroy = ${destroy}; }); }`;
+  }
+
+  private emitInitDynamic(expr: RustLibCallExpr): string {
+    const [receiver, options, flagsExpr] = expr.args;
+    if (receiver === undefined || receiver.type.kind !== "object" ||
+      this.context.runtimeStreamBase(receiver.type.className) !== "%Writable" ||
+      options?.type.kind !== "dyn" || flagsExpr?.kind !== "numLit" ||
+      expr.type.kind !== "void" || (flagsExpr.value & ~1) !== 0) {
+      this.context.unsupported("dynamic Writable subclass constructor shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const owner = this.requiredValue(values, 0, expr.loc);
+    let callbackIndex = 3;
+    let fallback = "Option::<ScWritableWrite>::None";
+    if ((flagsExpr.value & 1) !== 0) {
+      const callback = expr.args[callbackIndex];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      if (callback?.type.kind !== "func" ||
+        (callback.type.ret.kind !== "void" && callback.type.ret.kind !== "dyn") ||
+        params.length !== 4 || params[0]?.kind !== "object" ||
+        params[0].className !== receiver.type.className ||
+        !params.slice(1).every((param) => param.kind === "dyn")) {
+        this.context.unsupported("dynamic Writable fallback callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, callbackIndex, expr.loc);
+      const completionShape = this.dynamicCompletionShape(expr.loc);
+      const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } runtime::writable_complete_write(&sc_completion.0, sc_length); sc_writable_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+      const dynamic = this.dynamicCompletion(completionShape, completion);
+      const dyn = this.context.dynTypeName();
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, [
+        "sc_owner", `${dyn}::Buffer(sc_chunk)`, `${dyn}::String(runtime::string(\"buffer\"))`, dynamic,
+      ], expr.loc);
+      fallback = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScWritableWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_writable, sc_chunk, sc_length, sc_done| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_writable, sc_done, std::cell::Cell::new(false))); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      callbackIndex += 1;
+    }
+    if (callbackIndex !== expr.args.length) {
+      this.context.unsupported("dynamic Writable subclass constructor arity", expr.loc);
+    }
+    const dyn = this.context.dynTypeName();
+    const optionsValue = this.requiredValue(values, 1, expr.loc);
+    const option = (key: string): string =>
+      `match &${optionsValue} { ${dyn}::Object(..) => sc_dyn_key_get(&${optionsValue}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const writeOption = option("write");
+    const completionShape = this.dynamicCompletionShape(expr.loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } runtime::writable_complete_write(&sc_completion.0, sc_length); sc_writable_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+    const dynamicCompletion = this.dynamicCompletion(completionShape, completion);
+    const dynamicWrite = `let sc_write_option = ${writeOption}; let sc_write = if sc_dyn_function_identity(&sc_write_option).is_some() { let sc_context = std::rc::Rc::new(sc_write_option); Some(ScWritableWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_writable, sc_chunk, sc_length, sc_done| { let sc_completion = std::rc::Rc::new((sc_writable, sc_done, std::cell::Cell::new(false))); let _ = sc_dyn_call(&sc_context, &[${dyn}::Buffer(sc_chunk), ${dyn}::String(runtime::string("buffer")), ${dynamicCompletion}], "write"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${fallback} };`;
+    const hwm = option("highWaterMark");
+    const autoDestroy = option("autoDestroy");
+    const emitClose = option("emitClose");
+    const optionsInit = `let sc_hwm = match ${hwm} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 }; let sc_auto_destroy = !matches!(${autoDestroy}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${emitClose}, ${dyn}::Boolean(false));`;
+    return `{ ${this.bind(expr.args, values)} ${dynamicWrite} ${optionsInit} let sc_writable = runtime::writable_new::<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>(sc_hwm, sc_auto_destroy, sc_emit_close, sc_write, Option::<ScWritableFinal>::None); ${owner}.with_mut(|object| { object.sc_writable = Some(sc_writable); object.sc_writable_destroy = Option::<ScWritableDestroy>::None; }); }`;
   }
 
   private emitSetCallback(expr: RustLibCallExpr, write: boolean): string {

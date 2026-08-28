@@ -61,8 +61,16 @@ export class RustStreamModel {
     if (node.fn === "sp.pipeline" || node.fn === "stream.pipeline" || node.fn === "stream.pipelineDyn") {
       this.usesStreamFinished = true;
       this.usesStreamPipeline = true;
-      for (const arg of (node.args as StreamArgument[] | undefined)?.slice(1) ?? []) {
+      const args = node.args as StreamArgument[] | undefined;
+      const pipelineArgs = args?.slice(1) ?? [];
+      const streams = node.fn === "sp.pipeline" ? pipelineArgs : pipelineArgs.slice(0, -1);
+      for (const arg of streams) {
         this.markStreamType(arg.type, true);
+      }
+      if (node.fn === "stream.pipeline") {
+        const callback = pipelineArgs.at(-1)?.type;
+        if (callback?.kind !== "func") unsupported("malformed stream.pipeline callback IR");
+        ensureClosureShape(callback);
       }
       return true;
     }
@@ -137,15 +145,16 @@ export class RustStreamModel {
       }
       return true;
     }
-    if (node.fn === "readable.init") {
+    if (node.fn === "readable.init" || node.fn === "readable.initDyn") {
       this.usesReadable = true;
       this.usesReadableSubclass = true;
       const args = node.args as StreamArgument[] | undefined;
-      const flags = args?.[4];
+      const dynamic = node.fn === "readable.initDyn";
+      const flags = args?.[dynamic ? 2 : 4];
       if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
         unsupported("malformed Readable subclass callback flags IR");
       }
-      let callbackIndex = 5;
+      let callbackIndex = dynamic ? 3 : 5;
       for (let bit = 0; bit < 2; bit += 1) {
         if ((flags.value & (1 << bit)) === 0) continue;
         const callback = args?.[callbackIndex++];
@@ -159,21 +168,31 @@ export class RustStreamModel {
       }
       return true;
     }
-    if (node.fn === "writable.init") {
+    if (node.fn === "writable.init" || node.fn === "writable.initDyn") {
       this.usesWritable = true;
       this.usesWritableSubclass = true;
       const args = node.args as StreamArgument[] | undefined;
-      const flags = args?.[4];
+      const dynamic = node.fn === "writable.initDyn";
+      const flags = args?.[dynamic ? 2 : 4];
       if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
         unsupported("malformed Writable subclass callback flags IR");
       }
-      let callbackIndex = 5;
+      let callbackIndex = dynamic ? 3 : 5;
       for (let bit = 0; bit < 3; bit += 1) {
         if ((flags.value & (1 << bit)) === 0) continue;
         const callback = args?.[callbackIndex++];
         if (callback?.type?.kind !== "func") unsupported("malformed Writable subclass callback IR");
         ensureClosureShape(callback.type);
-        this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        const completion = callback.type.params.at(-1);
+        if (dynamic && bit === 0 && completion?.kind === "dyn") {
+          const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+          registerDynBoxedFunction(completionType);
+          const completionShape = ensureClosureShape(completionType);
+          completionShape.runtimeCallback = true;
+          this.writableDynamicCompletionShape = completionShape;
+        } else {
+          this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        }
         if (bit === 2) this.usesWritableDestroy = true;
       }
       return true;
@@ -287,7 +306,17 @@ export class RustStreamModel {
       const shape = ensureClosureShape(callback.type);
       if (bit === 0) this.writableWriteShapes.set(typeKey(callback.type), shape);
       if (bit === 1) this.writableFinalShapes.set(typeKey(callback.type), shape);
-      if (bit <= 1) this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+      const completion = callback.type.params.at(-1);
+      if (bit === 0 && completion?.kind === "dyn" &&
+          callback.type.params.every((param) => param.kind === "dyn")) {
+        const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+        registerDynBoxedFunction(completionType);
+        const completionShape = ensureClosureShape(completionType);
+        completionShape.runtimeCallback = true;
+        this.writableDynamicCompletionShape = completionShape;
+      } else if (bit <= 1) {
+        this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+      }
     }
     return true;
   }
