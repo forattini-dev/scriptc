@@ -290,6 +290,16 @@ pub fn writable_complete_write<L, W, F, C>(
     });
 }
 
+pub fn writable_write_result<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with(|data| !data.destroyed && data.writable_length < data.high_water_mark)
+}
+
 pub fn writable_take_drain<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
 where
     L: Clone + Trace + 'static,

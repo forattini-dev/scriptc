@@ -151,9 +151,11 @@ export class RustMetadata {
       return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
     }).join(", ");
     const emitter = this.isEmitterClass(meta.def.name) ? "sc_emitter: Some(runtime::emitter_new::<ScEmitterListener>()), " : "";
-    const readable = this.runtimeStreamBase(meta.def.name) === "%Readable" ? "sc_readable: None, " : "";
+    const streamBase = this.runtimeStreamBase(meta.def.name);
+    const readable = streamBase === "%Readable" ? "sc_readable: None, " : "";
+    const writable = streamBase === "%Writable" ? "sc_writable: None, sc_writable_destroy: None, " : "";
     const classTag = meta.hierarchy || this.isEmitterClass(meta.def.name) ? `sc_class_pre: ${meta.pre}, ` : "";
-    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${readable}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${readable}${writable}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
   }
 
   private classFieldInitialValue(type: IrType, loc: SrcLoc): string {

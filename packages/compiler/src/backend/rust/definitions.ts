@@ -557,11 +557,16 @@ export class RustDefinitionEmitter {
       const fields = meta.hierarchy ? this.context.hierarchyFields(meta) : cls.fields.map((field) => ({ owner: meta, field }));
       const emitterRooted = this.context.isEmitterClass(cls.name);
       const readableRooted = this.context.runtimeStreamBase(cls.name) === "%Readable";
+      const writableRooted = this.context.runtimeStreamBase(cls.name) === "%Writable";
       this.context.line(`struct ${struct} {`);
       this.context.pushIndent();
       if (meta.hierarchy || emitterRooted) this.context.line("sc_class_pre: usize,");
       if (emitterRooted) this.context.line("sc_emitter: Option<ScEmitterRegistry>,");
       if (readableRooted) this.context.line("sc_readable: Option<ScReadable>,");
+      if (writableRooted) {
+        this.context.line("sc_writable: Option<ScWritable>,");
+        this.context.line("sc_writable_destroy: Option<ScWritableDestroy>,");
+      }
       for (const { owner, field } of fields) {
         const fieldType = this.context.isEdgeValue(field.type)
           ? `Option<${this.context.rustType(field.type, cls.loc)}>`
@@ -576,6 +581,10 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       if (emitterRooted) this.context.line("if let Some(edge) = &self.sc_emitter { tracer.edge(edge); }");
       if (readableRooted) this.context.line("if let Some(edge) = &self.sc_readable { runtime::readable_trace(edge, tracer); }");
+      if (writableRooted) {
+        this.context.line("if let Some(edge) = &self.sc_writable { runtime::writable_trace(edge, tracer); }");
+        this.context.line("if let Some(edge) = &self.sc_writable_destroy { runtime::Trace::trace(edge, tracer); }");
+      }
       for (const { owner, field } of fields) {
         if (!this.context.isEdgeValue(field.type)) continue;
         const name = this.context.classFieldStorageName(owner, field.name);
@@ -593,6 +602,10 @@ export class RustDefinitionEmitter {
       this.context.pushIndent();
       if (emitterRooted) this.context.line("self.sc_emitter = None;");
       if (readableRooted) this.context.line("self.sc_readable = None;");
+      if (writableRooted) {
+        this.context.line("self.sc_writable = None;");
+        this.context.line("self.sc_writable_destroy = None;");
+      }
       for (const { owner, field } of fields) {
         if (this.context.isEdgeValue(field.type)) this.context.line(`self.${this.context.classFieldStorageName(owner, field.name)} = None;`);
       }

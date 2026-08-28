@@ -10,6 +10,7 @@ export class RustStreamModel {
   usesReadable = false;
   usesReadableSubclass = false;
   usesWritable = false;
+  usesWritableSubclass = false;
   usesDuplex = false;
   usesTransform = false;
   usesReadableDestroy = false;
@@ -152,6 +153,25 @@ export class RustStreamModel {
           this.readableDestroyShapes.set(typeKey(callback.type), shape);
           this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
         }
+      }
+      return true;
+    }
+    if (node.fn === "writable.init") {
+      this.usesWritable = true;
+      this.usesWritableSubclass = true;
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[4];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported("malformed Writable subclass callback flags IR");
+      }
+      let callbackIndex = 5;
+      for (let bit = 0; bit < 3; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed Writable subclass callback IR");
+        ensureClosureShape(callback.type);
+        this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        if (bit === 2) this.usesWritableDestroy = true;
       }
       return true;
     }

@@ -965,6 +965,7 @@ test.each([
   "1731-symbol-field-shapes.cjs",
   "1732-symbol-field-cross-module/main.js",
   "1740-stream-extends-readable.ts",
+  "1741-stream-extends-writable.ts",
   "1744-stream-set-encoding.ts",
   "1745-stream-encoding-js.cjs",
   "1746-stream-for-await.ts",

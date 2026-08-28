@@ -1064,6 +1064,9 @@ export class RustEventEmitterEmitter {
     if (this.context.runtimeStreamBase(type.className) === "%Readable") {
       return `runtime::readable_emitter(&${this.readableHandle(value, type, loc)})`;
     }
+    if (this.context.runtimeStreamBase(type.className) === "%Writable") {
+      return `runtime::writable_emitter(&${this.writableHandle(value, type, loc)})`;
+    }
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }
@@ -1077,6 +1080,15 @@ export class RustEventEmitterEmitter {
       this.context.unsupported("Readable subclass receiver", loc);
     }
     return `${value}.with(|object| object.sc_readable.as_ref().expect("scriptc: uninitialized Readable subclass").clone())`;
+  }
+
+  private writableHandle(value: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind !== "object") this.context.unsupported("Writable receiver type", loc);
+    if (type.className === "%Writable") return value;
+    if (this.context.runtimeStreamBase(type.className) !== "%Writable") {
+      this.context.unsupported("Writable subclass receiver", loc);
+    }
+    return `${value}.with(|object| object.sc_writable.as_ref().expect("scriptc: uninitialized Writable subclass").clone())`;
   }
 
   private isBareEmitter(type: IrType): boolean {
