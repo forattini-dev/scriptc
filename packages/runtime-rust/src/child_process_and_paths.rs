@@ -189,10 +189,15 @@ pub fn child_exec_sync(
             Rc::from(display)
         };
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = if stderr.is_empty() {
+            format!("Command failed: {display}")
+        } else {
+            format!("Command failed: {display}\n{stderr}")
+        };
         throw_value(JsError {
             identity: Rc::new(()),
             name: "Error".to_owned(),
-            message: format!("Command failed: {display}\n{stderr}"),
+            message,
             code: None,
             dom: None,
         });
