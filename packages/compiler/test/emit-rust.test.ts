@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import ts5 from "typescript5";
 import { expect, test } from "vitest";
 import { compile } from "../src/index.js";
 import { compileRust } from "../src/backend/rust/compile.js";
@@ -55,6 +57,20 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   const transform = source.split("\n", 2).some((line) => /^\/\/ @transform-types\s*$/u.test(line)) ||
     sources.some((input) => /\benum\s+[A-Za-z_$]/u.test(input));
   const noDeprecation = source.split("\n", 2).some((line) => /^\/\/ @no-deprecation\s*$/u.test(line));
+  let oraclePath = entryPath;
+  if (source.split("\n", 2).some((line) => /^\/\/ @tsc-decorators\s*$/u.test(line))) {
+    const output = ts5.transpileModule(source, {
+      compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
+      fileName: entryPath,
+    }).outputText;
+    const key = createHash("sha256").update(ts5.version).update("\0").update(source).digest("hex").slice(0, 16);
+    const cacheDir = resolve("node_modules/.cache/scriptc-tests");
+    oraclePath = join(cacheDir, `dec-oracle-${key}.mjs`);
+    await mkdir(cacheDir, { recursive: true });
+    const temporaryPath = `${oraclePath}.${process.pid}.tmp`;
+    await writeFile(temporaryPath, output);
+    await rename(temporaryPath, oraclePath);
+  }
   return [
     ...(transform ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"] : []),
     ...(noDeprecation ? ["--no-deprecation"] : []),
@@ -62,7 +78,7 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
     pathToFileURL(resolve("tests/harness/comptime-shim.mjs")).href,
     "--import",
     pathToFileURL(resolve("tests/harness/island-shim.mjs")).href,
-    entryPath,
+    oraclePath,
   ];
 }
 
@@ -1000,16 +1016,20 @@ test.each([
   "1822-static-block-js.js",
   "1823-static-instance-method-names.ts",
   "1824-for-of-destructuring-defaults.ts",
+  "1826-settimeout-arguments-callback.js",
   "1831-enum-string-const-reverse.ts",
+  "1832-enum-modules/main.ts",
   "1836-var-loop-capture.ts",
   "1837-var-undefined-hoisting.ts",
   "1838-var-modules/main.ts",
   "1839-var-js/main.cjs",
+  "1840-jsdoc-import-type-only/main.js",
   "1850-overload-basics.ts",
   "1851-overload-return-narrowing.ts",
   "1852-overload-class-members.ts",
   "1853-overload-modules/main.ts",
   "1854-ambient-declare-fn.ts",
+  "1855-ambient-declare-fn-uncaught.ts",
   "1870-unit-type-values.ts",
   "1871-empty-array-never.ts",
   "1872-template-tostring-composite.ts",
@@ -1030,7 +1050,12 @@ test.each([
   "1964-namespace-type-only.ts",
   "1965-namespace-ambient.ts",
   "1966-namespace-modules/main.ts",
+  "1967-namespace-alias-typeonly.ts",
   "1968-namespace-import-eq-snapshot.ts",
+  "1970-decorators-basics.ts",
+  "1971-decorators-rebinding.ts",
+  "1972-decorators-throwing.ts",
+  "1973-decorators-ambient.ts",
   "1982-freeze-resolve-passthrough.ts",
   "1983-array-tuple-surfaces.ts",
   "1990-labels-basics.ts",
