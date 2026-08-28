@@ -1,5 +1,5 @@
 import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 import { RustReadableEmitter, type RustReadableContext } from "./readable.js";
 import { RustWritableEmitter, type RustWritableContext } from "./writable.js";
@@ -14,6 +14,7 @@ export interface RustEventEmitterContext extends RustReadableContext, RustWritab
   emitterRoots(): RustClassMeta[];
   classMeta(name: string, loc?: SrcLoc): RustClassMeta;
   isEmitterClass(name: string): boolean;
+  runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null;
   isUsed(): boolean;
   usesProcessExitListeners(): boolean;
   usesProcessRejectionEvents(): boolean;
@@ -132,6 +133,14 @@ export class RustEventEmitterEmitter {
     if (source.kind !== "object") return null;
     if (target === RUNTIME_EMITTER_CLASS) {
       return `{ let sc_value = ${value}; let _ = sc_value; ${this.isEmitterObject(source) ? "true" : "false"} }`;
+    }
+    if (RUNTIME_STREAM_CLASSES.has(target)) {
+      const runtimeBase = RUNTIME_STREAM_CLASSES.has(source.className)
+        ? source.className
+        : this.context.runtimeStreamBase(source.className);
+      if (runtimeBase !== null) {
+        return `{ let sc_value = ${value}; let _ = sc_value; ${this.runtimeStreamIsA(runtimeBase, target)} }`;
+      }
     }
     if (source.className !== RUNTIME_EMITTER_CLASS) return null;
     if (!this.context.isEmitterClass(target)) {
@@ -362,8 +371,11 @@ export class RustEventEmitterEmitter {
     const startFlow = startsReadableFlow
       ? this.startReadableFlow(receiver.type, this.requiredValue(values, 0, expr.loc), expr.loc)
       : "";
-    const scheduleReadable = receiver.type.kind === "object" && receiver.type.className === "%Readable" &&
-      name.kind === "strLit" && name.value === "readable" ? `sc_readable_schedule_notification(&${values[0]});` : "";
+    const scheduleReadable = receiver.type.kind === "object" &&
+      (receiver.type.className === "%Readable" || this.context.runtimeStreamBase(receiver.type.className) === "%Readable") &&
+      name.kind === "strLit" && name.value === "readable"
+      ? `sc_readable_schedule_notification(&${this.readableHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc)});`
+      : "";
     return `{ ${this.bindWithRegistry(expr, values)} let sc_identity = ${this.functionIdentity(this.requiredValue(values, 2, expr.loc), callback.type, expr.loc)}; let _ = sc_emitter_emit_meta(&sc_emitter, "newListener", ${values[1]}.clone()); runtime::emitter_on(&sc_emitter, ${values[1]}, ScEmitterListener::${this.listenerVariant(shape)}(${values[2]}), sc_identity, ${values[3]}, ${values[4]}); ${startFlow} ${scheduleReadable} ${values[0]} }`;
   }
 
@@ -414,6 +426,10 @@ export class RustEventEmitterEmitter {
     if (type.kind !== "object") this.context.unsupported("stream data listener receiver", loc);
     if (type.className === "%Readable") {
       return `runtime::readable_start_flowing(&${value}); sc_readable_schedule(&${value});`;
+    }
+    if (this.context.runtimeStreamBase(type.className) === "%Readable") {
+      const readable = this.readableHandle(value, type, loc);
+      return `{ let sc_readable = ${readable}; runtime::readable_start_flowing(&sc_readable); sc_readable_schedule(&sc_readable); }`;
     }
     if (type.className === "%Duplex") return `sc_duplex_start_flowing(&${value});`;
     if (type.className === "%Transform" || type.className === "%PassThrough") {
@@ -1020,10 +1036,21 @@ export class RustEventEmitterEmitter {
     return this.classMeta(name, loc).pre;
   }
 
+  private runtimeStreamIsA(source: string, target: string): boolean {
+    const seen = new Set<string>();
+    let current: string | undefined = source;
+    while (current !== undefined && !seen.has(current)) {
+      if (current === target) return true;
+      seen.add(current);
+      current = RUNTIME_STREAM_CLASSES.get(current)?.base;
+    }
+    return false;
+  }
+
   private isEmitterObject(type: IrType): boolean {
     return type.kind === "object" &&
       (type.className === RUNTIME_EMITTER_CLASS || type.className === "%Readable" || type.className === "%Writable" || type.className === "%Duplex" || type.className === "%Transform" || type.className === "%PassThrough" ||
-        this.context.isEmitterClass(type.className));
+        this.context.isEmitterClass(type.className) || this.context.runtimeStreamBase(type.className) !== null);
   }
 
   private registry(value: string, type: IrType, loc: SrcLoc): string {
@@ -1034,10 +1061,22 @@ export class RustEventEmitterEmitter {
     if (type.className === "%Duplex") return `runtime::duplex_emitter(&${value})`;
     if (type.className === "%Transform") return `runtime::transform_emitter(&${value})`;
     if (type.className === "%PassThrough") return `runtime::transform_emitter(&${value})`;
+    if (this.context.runtimeStreamBase(type.className) === "%Readable") {
+      return `runtime::readable_emitter(&${this.readableHandle(value, type, loc)})`;
+    }
     if (this.context.isEmitterClass(type.className)) {
       return `${value}.with(|object| object.sc_emitter.as_ref().expect("scriptc: cleared live EventEmitter registry").clone())`;
     }
     this.context.unsupported(`non-EventEmitter receiver '${type.className}'`, loc);
+  }
+
+  private readableHandle(value: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind !== "object") this.context.unsupported("Readable receiver type", loc);
+    if (type.className === "%Readable") return value;
+    if (this.context.runtimeStreamBase(type.className) !== "%Readable") {
+      this.context.unsupported("Readable subclass receiver", loc);
+    }
+    return `${value}.with(|object| object.sc_readable.as_ref().expect("scriptc: uninitialized Readable subclass").clone())`;
   }
 
   private isBareEmitter(type: IrType): boolean {

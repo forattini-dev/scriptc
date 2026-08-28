@@ -887,6 +887,20 @@ where
     })
 }
 
+pub fn readable_take_close<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| {
+        if data.closed || !data.auto_destroy || !data.emit_close {
+            return false;
+        }
+        data.closed = true;
+        true
+    })
+}
+
 pub fn readable_length<L, R>(readable: &JsReadable<L, R>) -> f64
 where
     L: Clone + Trace + 'static,

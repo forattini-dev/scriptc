@@ -55,6 +55,7 @@ export interface RustDefinitionContext {
   hierarchyFields(root: RustClassMeta): { owner: RustClassMeta; field: RustClassMeta["def"]["fields"][number] }[];
   isEdgeValue(type: IrType): boolean;
   isEmitterClass(name: string): boolean;
+  runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null;
   isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;
   isTracedHandle(type: IrType): boolean;
   isUnit(type: IrType): boolean;
@@ -555,10 +556,12 @@ export class RustDefinitionEmitter {
       const struct = mangleClassStruct(cls.name);
       const fields = meta.hierarchy ? this.context.hierarchyFields(meta) : cls.fields.map((field) => ({ owner: meta, field }));
       const emitterRooted = this.context.isEmitterClass(cls.name);
+      const readableRooted = this.context.runtimeStreamBase(cls.name) === "%Readable";
       this.context.line(`struct ${struct} {`);
       this.context.pushIndent();
       if (meta.hierarchy || emitterRooted) this.context.line("sc_class_pre: usize,");
       if (emitterRooted) this.context.line("sc_emitter: Option<ScEmitterRegistry>,");
+      if (readableRooted) this.context.line("sc_readable: Option<ScReadable>,");
       for (const { owner, field } of fields) {
         const fieldType = this.context.isEdgeValue(field.type)
           ? `Option<${this.context.rustType(field.type, cls.loc)}>`
@@ -572,6 +575,7 @@ export class RustDefinitionEmitter {
       this.context.line("fn trace(&self, tracer: &mut runtime::Tracer<'_>) {");
       this.context.pushIndent();
       if (emitterRooted) this.context.line("if let Some(edge) = &self.sc_emitter { tracer.edge(edge); }");
+      if (readableRooted) this.context.line("if let Some(edge) = &self.sc_readable { runtime::readable_trace(edge, tracer); }");
       for (const { owner, field } of fields) {
         if (!this.context.isEdgeValue(field.type)) continue;
         const name = this.context.classFieldStorageName(owner, field.name);
@@ -588,6 +592,7 @@ export class RustDefinitionEmitter {
       this.context.line("fn clear_edges(&mut self) {");
       this.context.pushIndent();
       if (emitterRooted) this.context.line("self.sc_emitter = None;");
+      if (readableRooted) this.context.line("self.sc_readable = None;");
       for (const { owner, field } of fields) {
         if (this.context.isEdgeValue(field.type)) this.context.line(`self.${this.context.classFieldStorageName(owner, field.name)} = None;`);
       }

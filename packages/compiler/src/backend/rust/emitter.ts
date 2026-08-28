@@ -139,6 +139,7 @@ class RustEmitter {
     ),
     classMeta: (name, loc) => this.classMetaOf(name, loc),
     isEmitterClass: (name) => this.isEmitterClass(name),
+    runtimeStreamBase: (name) => this.metadata.runtimeStreamBase(name),
     isUsed: () => this.usesEventEmitter,
     usesProcessExitListeners: () => this.usesProcessExitListeners,
     usesProcessRejectionEvents: () => this.usesProcessRejectionEvents,
@@ -440,6 +441,7 @@ class RustEmitter {
     hierarchyFields: (root) => this.hierarchyFields(root),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isEmitterClass: (name) => this.isEmitterClass(name),
+    runtimeStreamBase: (name) => this.metadata.runtimeStreamBase(name),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isTracedHandle: (type) => this.isTracedHandle(type),
     isUnit: (type) => this.isUnit(type),
@@ -540,6 +542,7 @@ class RustEmitter {
     for (const cls of this.classes.values()) {
       if (cls.base !== undefined && !this.classes.has(cls.base) &&
         cls.base !== RUNTIME_EMITTER_CLASS &&
+        cls.base !== "%Readable" &&
         (cls.base === "%DOMException" || !RUNTIME_ERROR_CLASSES.has(cls.base))) {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
@@ -1158,18 +1161,15 @@ class RustEmitter {
 
   private classSubtree(meta: RustClassMeta): RustClassMeta[] { return this.metadata.classSubtree(meta); }
   private isEmitterClass(name: string): boolean { return this.metadata.isEmitterClass(name); }
-
   private classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string {
     return this.metadata.classAllocation(meta, args, loc);
   }
   private classFieldName(className: string, fieldName: string, loc?: SrcLoc): string {
     return this.metadata.classFieldName(className, fieldName, loc);
   }
-
   private classFieldStorageName(owner: RustClassMeta, fieldName: string): string {
     return this.metadata.classFieldStorageName(owner, fieldName);
   }
-
   private virtualImplementation(meta: RustClassMeta, slot: RustVtSlot): IrFunction {
     return this.metadata.virtualImplementation(meta, slot);
   }

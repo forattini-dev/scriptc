@@ -8,6 +8,7 @@ type StreamArgument = { kind?: string; type?: IrType; value?: unknown };
 /** Closure-shape discovery and usage state shared by the Rust stream emitters. */
 export class RustStreamModel {
   usesReadable = false;
+  usesReadableSubclass = false;
   usesWritable = false;
   usesDuplex = false;
   usesTransform = false;
@@ -123,6 +124,28 @@ export class RustStreamModel {
         if ((flags.value & (1 << bit)) === 0) continue;
         const callback = args?.[callbackIndex++];
         if (callback?.type?.kind !== "func") unsupported("malformed Readable callback IR");
+        const shape = ensureClosureShape(callback.type);
+        if (bit === 0) this.readableReadShapes.set(typeKey(callback.type), shape);
+        if (bit === 1) {
+          this.readableDestroyShapes.set(typeKey(callback.type), shape);
+          this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+        }
+      }
+      return true;
+    }
+    if (node.fn === "readable.init") {
+      this.usesReadable = true;
+      this.usesReadableSubclass = true;
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[4];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported("malformed Readable subclass callback flags IR");
+      }
+      let callbackIndex = 5;
+      for (let bit = 0; bit < 2; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed Readable subclass callback IR");
         const shape = ensureClosureShape(callback.type);
         if (bit === 0) this.readableReadShapes.set(typeKey(callback.type), shape);
         if (bit === 1) {

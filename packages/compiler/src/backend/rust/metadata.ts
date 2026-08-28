@@ -60,6 +60,20 @@ export class RustMetadata {
     return false;
   }
 
+  runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null {
+    const runtimeBases = new Set(["%Readable", "%Writable", "%Duplex", "%Transform"]);
+    const seen = new Set<string>();
+    let cls = this.context.classes.get(name);
+    while (cls?.base !== undefined && !seen.has(cls.name)) {
+      seen.add(cls.name);
+      if (runtimeBases.has(cls.base)) {
+        return cls.base as "%Readable" | "%Writable" | "%Duplex" | "%Transform";
+      }
+      cls = this.context.classes.get(cls.base);
+    }
+    return null;
+  }
+
   errorClassRoots(): RustClassMeta[] {
     return [...this.context.classMeta.values()].filter((meta) =>
       meta === meta.root && this.runtimeErrorAncestor(meta.def.name) !== null
@@ -137,8 +151,9 @@ export class RustMetadata {
       return `${this.classFieldStorageName(owner, field.name)}: ${value}`;
     }).join(", ");
     const emitter = this.isEmitterClass(meta.def.name) ? "sc_emitter: Some(runtime::emitter_new::<ScEmitterListener>()), " : "";
+    const readable = this.runtimeStreamBase(meta.def.name) === "%Readable" ? "sc_readable: None, " : "";
     const classTag = meta.hierarchy || this.isEmitterClass(meta.def.name) ? `sc_class_pre: ${meta.pre}, ` : "";
-    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
+    return `{ let ${object} = runtime::Gc::new(${this.classStructName(meta.def.name, loc)} { ${classTag}${emitter}${readable}${fields} }); ${mangleFunction(constructor.name)}(${[`${object}.clone()`, ...args].join(", ")}); ${object} }`;
   }
 
   private classFieldInitialValue(type: IrType, loc: SrcLoc): string {
