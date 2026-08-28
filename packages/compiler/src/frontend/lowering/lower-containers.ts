@@ -3698,6 +3698,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       if (termIds.length === 2) {
         preLoop.push({ kind: "varDecl", localId: accId, init: varRef(termIds[1]!, resultT, loc), loc });
       } else {
+        preLoop.push({ kind: "varDecl", localId: accId, init: null, loc });
         hasAccId = addLocal("hasAcc", BOOL, true);
         preLoop.push({ kind: "varDecl", localId: hasAccId, init: boolLit(false, loc), loc });
         postLoop.push({

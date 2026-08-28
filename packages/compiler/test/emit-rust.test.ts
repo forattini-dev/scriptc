@@ -1106,6 +1106,7 @@ test.each([
   "2331-tls-server-options-typed.ts",
   "2352-void-coercions.ts",
   "2363-nullish-retag.ts",
+  "2371-iterator-helpers.ts",
   "2386-string-to-chars.ts",
   "2387-tonumber-argv.ts",
   "2388-tonumber-grammar-zoo.ts",
