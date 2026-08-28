@@ -454,13 +454,16 @@ export class RustTransformEmitter {
   }
 
   private emitPush(expr: RustLibCallExpr, stringChunk: boolean): string {
+    const receiver = expr.args[0];
     const chunk = expr.args[1];
-    if (expr.args.length !== 2 || chunk?.type.kind !== (stringChunk ? "string" : "bytes") || expr.type.kind !== "bool") {
+    if (!this.isTransform(receiver) || expr.args.length !== 2 ||
+      chunk?.type.kind !== (stringChunk ? "string" : "bytes") || expr.type.kind !== "bool") {
       this.context.unsupported("Transform push shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     const converted = stringChunk ? `runtime::buffer_from_string(&${values[1]}, &runtime::string("utf8"))` : values[1];
-    return `{ ${this.bind(expr.args, values)} let sc_readable = runtime::transform_readable(&${values[0]}); let sc_result = runtime::readable_push(&sc_readable, ${converted}); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_transform_emit_data(&${values[0]}, value), runtime::ReadableChunk::String(value) => sc_transform_emit_string(&${values[0]}, value), } } } sc_result }`;
+    const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; let sc_readable = runtime::transform_readable(&sc_transform); let sc_result = runtime::readable_push(&sc_readable, ${converted}); if runtime::readable_is_flowing(&sc_readable) { if let Some(sc_chunk) = runtime::readable_pop(&sc_readable) { match sc_chunk { runtime::ReadableChunk::Bytes(value) => sc_transform_emit_data(&sc_transform, value), runtime::ReadableChunk::String(value) => sc_transform_emit_string(&sc_transform, value), } } } sc_result }`;
   }
 
   private emitSetEncoding(expr: RustLibCallExpr): string {

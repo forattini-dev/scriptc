@@ -45,4 +45,8 @@ const t = new Upper();
 t.on("data", (c: Buffer) => out.push(c.toString()));
 t.on("end", () => console.log("piped:", out.join("")));
 new Words().pipe(t);
+
+const direct = new Upper();
+direct.on("data", (c: Buffer) => console.log("direct:", c.toString()));
+console.log("direct push:", direct.push("manual"));
 console.log("sync end");
