@@ -49,6 +49,8 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
     case "call":
     case "intrinsic":
       return expr.args;
+    case "jsOp":
+      return expr.args;
     case "arrayLit":
       return expr.elems;
     case "bytesIntrinsic":

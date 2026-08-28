@@ -1277,6 +1277,8 @@ test.each([
   "2628-stream-push-encodings.cjs",
   "2629-stream-consumers.ts",
   "2630-stream-consumers-errors.ts",
+  "2632-dyn-jsval-iterate.js",
+  "2633-island-promise-crossing.js",
   "2638-http-dyn-res-compat.cjs",
   "2639-http-dyn-req-pause.cjs",
   "2640-net-dyn-socket-compat.cjs",

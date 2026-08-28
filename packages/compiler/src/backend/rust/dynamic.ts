@@ -1111,11 +1111,26 @@ export class RustDynamicEmitter {
         return `sc_dyn_error_unbox(${value})`;
       }
       case "union": {
+        const union = this.context.union(type.unionId, loc);
+        const dyn = this.context.dynTypeName();
+        const jsvalArrayTag = union.arms.findIndex((arm) =>
+          arm.kind === "array" && arm.elem.kind === "jsval"
+        );
+        const jsvalArrayExit = jsvalArrayTag >= 0 &&
+          union.arms.some((arm) => arm.kind === "undefinedT") &&
+          union.arms.every((arm, tag) => tag === jsvalArrayTag || this.context.isUnit(arm));
+        if (jsvalArrayExit) {
+          const name = this.context.unionName(union.id);
+          const units = union.arms.flatMap((arm, tag) => {
+            const source = arm.kind === "undefinedT" ? "Undefined" : arm.kind === "nullT" ? "Null" : null;
+            return source === null ? [] : [`${dyn}::${source} => ${name}::${this.context.unionVariant(tag)}`];
+          });
+          const array = `${dyn}::Array(sc_array) => ${name}::${this.context.unionVariant(jsvalArrayTag)}(sc_array)`;
+          return `{ let value = ${value}; match value { ${units.join(", ")}, ${array}, value => sc_dyn_check_fail("array or undefined", &value), } }`;
+        }
         if (!this.context.isRustJsonCompatible(type)) {
           this.context.unsupported("dynamic checked cast to union", loc);
         }
-        const union = this.context.union(type.unionId, loc);
-        const dyn = this.context.dynTypeName();
         const name = this.context.unionName(union.id);
         const rustType = this.context.rustType(type, loc);
         const units = union.arms.flatMap((arm, tag) => {

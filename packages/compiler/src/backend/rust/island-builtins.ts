@@ -9,6 +9,8 @@ export function emitRustIslandBuiltin(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string | null {
+  const promiseAll = emitPromiseAll(expr, context, emitExpr);
+  if (promiseAll !== null) return promiseAll;
   const objectCreate = emitObjectCreate(expr, context, emitExpr);
   if (objectCreate !== null) return objectCreate;
   const regexp = emitRegExpConstructor(expr, context, emitExpr);
@@ -32,6 +34,23 @@ export function emitRustIslandBuiltin(
     ? `runtime::json_stringify(&${node})`
     : `runtime::json_stringify_indented(&${node}, "${context.rustString(space.slice(0, 10))}")`;
   return `{ let ${value} = ${emitExpr(valueExpr)}; let ${hook} = match &${value} { ${dyn}::Object(sc_object) => runtime::map_get_by(sc_object, &runtime::string("toJSON"), |left, right| left.as_ref() == right.as_ref()), _ => None, }; let ${value} = if ${hook}.as_ref().is_some_and(|sc_hook| sc_dyn_function_identity(sc_hook).is_some()) { let sc_hook = ${hook}.expect("scriptc invariant: checked JSON hook disappeared"); let _sc_this = sc_dyn_this_push(${value}.clone()); sc_dyn_call(&sc_hook, &[${dyn}::String(runtime::empty_string())], "toJSON") } else { ${value} }; let sc_text = if matches!(&${value}, ${dyn}::Undefined) || sc_dyn_function_identity(&${value}).is_some() { runtime::string("undefined") } else { let ${node} = sc_dyn_to_json(&${value}, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); ${stringify} }; ${dyn}::String(sc_text) }`;
+}
+
+function emitPromiseAll(
+  expr: JsOperation,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  if (expr.op !== "callMethod" || expr.name !== "all" ||
+      !isGlobal(expr.args[0], "Promise") || expr.args.length !== 2) return null;
+  const entriesExpr = expr.args[1];
+  if (entriesExpr === undefined) return null;
+  const dyn = context.dynTypeName();
+  const entries = context.nextName("sc_island_promise_entries");
+  const promises = context.nextName("sc_island_promises");
+  const index = context.nextName("sc_island_promise_index");
+  const result = context.nextName("sc_island_promise_all");
+  return `{ let ${entries} = match ${emitExpr(entriesExpr)} { ${dyn}::Array(sc_array) => sc_array, sc_value => sc_dyn_arg_type_fail("iterable", "an array", &sc_value), }; let ${promises}: runtime::JsArray<runtime::JsPromise<${dyn}>> = runtime::array_new(Vec::new()); let mut ${index} = 0.0; while ${index} < runtime::array_len(&${entries}) { let sc_value = runtime::array_get(&${entries}, ${index}); runtime::array_push(&${promises}, match sc_value { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), sc_value => runtime::promise_resolved(sc_value), }); ${index} += 1.0; } let ${result} = runtime::promise_all(&${promises}); ${dyn}::Promise(runtime::promise_to_mapped_handle(&${result}, |sc_values| ${dyn}::Array(sc_values))) }`;
 }
 
 function emitObjectCreate(

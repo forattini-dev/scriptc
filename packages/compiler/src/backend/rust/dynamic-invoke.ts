@@ -78,6 +78,14 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitArrayCallbacks(): void {
+    this.open(`fn sc_dyn_array_flat_once(array: &runtime::JsArray<${this.dyn}>) -> ${this.dyn} {`);
+    this.context.line(`let output: runtime::JsArray<${this.dyn}> = runtime::array_new(Vec::new());`);
+    this.open("for item in runtime::array_values(array) {");
+    this.context.line(`match item { ${this.dyn}::Array(items) => { runtime::array_extend(&output, &items); }, value => { runtime::array_push(&output, value); }, }`);
+    this.close("}");
+    this.context.line(`${this.dyn}::Array(output)`);
+    this.close("}");
+
     this.open(`fn sc_dyn_array_callback(callback: &${this.dyn}, item: ${this.dyn}, index: f64, array: &runtime::JsArray<${this.dyn}>) -> ${this.dyn} {`);
     this.context.line(`let args = [item, ${this.dyn}::Number(index), ${this.dyn}::Array(array.clone())];`);
     this.context.line("let callback_name = sc_dyn_to_string(callback);");
@@ -400,6 +408,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"includes" => { let needle = args.first().cloned().unwrap_or(${this.dyn}::Undefined); ${this.dyn}::Boolean(runtime::array_includes_by(array, &needle, sc_dyn_same_value_zero)) },`);
     this.context.line(`"join" => { let separator = match args.first() { None | Some(${this.dyn}::Undefined) => runtime::string(","), Some(value) => sc_dyn_to_string(value), }; ${this.dyn}::String(runtime::array_join_by(array, &separator, |element, output| { if !matches!(element, ${this.dyn}::Undefined | ${this.dyn}::Null) { output.push_str(sc_dyn_to_string(element).as_ref()); } })) },`);
     this.context.line(`"concat" => { let output = runtime::array_slice(array, 0.0, length); for arg in args { match arg { ${this.dyn}::Array(items) => { runtime::array_extend(&output, items); }, value => { runtime::array_push(&output, value.clone()); }, } } ${this.dyn}::Array(output) },`);
+    this.context.line('"flat" if args.is_empty() => sc_dyn_array_flat_once(array),');
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
     this.context.line('"sort" => sc_dyn_array_sort(array, args),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");

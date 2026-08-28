@@ -31,7 +31,7 @@ export function emitRustIslandExpr(
     case "jsMarshal": return emitMarshal(expr, context, emitExpr);
     case "jsExit": return context.emitDynCheckValue(expr.type, emitExpr(expr.value), expr.loc);
     case "jsOp": return emitOperation(expr, context, emitExpr);
-    case "jsBridgePromise": return emitProgramImportBridge(expr, context, emitExpr);
+    case "jsBridgePromise": return emitPromiseBridge(expr, context, emitExpr);
   }
 }
 
@@ -48,6 +48,7 @@ function emitMarshal(
     case "array":
     case "bytes":
     case "url":
+    case "promise":
     case "record":
     case "union":
     case "dyn":
@@ -207,7 +208,7 @@ function emitObjectLiteral(
   return `{ let ${object}: runtime::JsMap<runtime::JsString, ${context.dynTypeName()}> = runtime::map_new(); ${fields.join(" ")} ${context.dynTypeName()}::Object(${object}) }`;
 }
 
-function emitProgramImportBridge(
+function emitPromiseBridge(
   expr: Extract<IrExpr, { kind: "jsBridgePromise" }>,
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
@@ -232,7 +233,7 @@ function emitProgramImportBridge(
     promiseGlobal?.kind !== "jsOp" || promiseGlobal.op !== "globalGet" || promiseGlobal.name !== "Promise" ||
     callback?.type.kind !== "func" || callback.type.params.length !== 0
   ) {
-    context.unsupported("island promise bridge outside a compiled program import", expr.loc);
+    return emitGenericPromiseBridge(expr, context, emitExpr);
   }
   const closure = context.nextName("sc_import_builder");
   const source = context.nextName("sc_import_source");
@@ -243,6 +244,28 @@ function emitProgramImportBridge(
       ? "promise_flat_map"
       : context.unsupported("compiled program import builder result", expr.loc);
   return `{ let ${closure} = ${emitExpr(callback)}; let ${source} = runtime::promise_resolved(()); runtime::${combinator}(&${source}, move |_| ${dispatch}) }`;
+}
+
+function emitGenericPromiseBridge(
+  expr: Extract<IrExpr, { kind: "jsBridgePromise" }>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string {
+  if (expr.type.kind !== "promise") context.unsupported("island promise bridge result", expr.loc);
+  const dyn = context.dynTypeName();
+  const value = context.nextName("sc_island_promise_value");
+  const source = context.nextName("sc_island_promise_source");
+  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), sc_value => runtime::promise_resolved(sc_value), }`;
+  if (expr.type.inner.kind === "jsval") {
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; ${source} }`;
+  }
+  if (expr.type.inner.kind === "void") {
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::promise_map(&${source}, |_| ()) }`;
+  }
+  if (expr.type.inner.kind === "array" && expr.type.inner.elem.kind === "jsval") {
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::promise_map(&${source}, |sc_value| match sc_value { ${dyn}::Array(sc_array) => sc_array, sc_value => sc_dyn_check_fail("array", &sc_value), }) }`;
+  }
+  context.unsupported("island promise bridge payload", expr.loc);
 }
 
 function argOf(

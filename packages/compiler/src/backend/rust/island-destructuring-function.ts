@@ -33,6 +33,8 @@ export function emitRustIslandDestructuringFunction(
 
   const computed = emitComputedPropertyPattern(body, sourceExpr, argumentsByName, context, emitExpr);
   if (computed !== null) return computed;
+  const objectArrayDefault = emitObjectArrayDefaultPattern(body, sourceExpr, context, emitExpr);
+  if (objectArrayDefault !== null) return objectArrayDefault;
   const arrayDefault = emitComputedArrayDefaultPattern(body, sourceExpr, argumentsByName, context, emitExpr);
   if (arrayDefault !== null) return arrayDefault;
   const nestedRest = emitComputedNestedRestPattern(body, sourceExpr, argumentsByName, context, emitExpr);
@@ -56,6 +58,23 @@ export function emitRustIslandDestructuringFunction(
     `runtime::array_push(&${output}, sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false));`
   ).join(" ");
   return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure 'v' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure 'v' as it is null.".to_owned()), _ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
+}
+
+function emitObjectArrayDefaultPattern(
+  body: string,
+  sourceExpr: IrExpr,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const match = /^"use strict";var (__\d+);\(\{\[("(?:\\.|[^"\\])*")\]:(__\d+)=\[\]\} = v\);return \[(__\d+)\];$/u.exec(body);
+  if (match === null || !(match[1] === match[3] && match[3] === match[4])) return null;
+  const key = parseString(match[2]);
+  if (key === null) return null;
+  const dyn = context.dynTypeName();
+  const source = context.nextName("sc_island_source");
+  const value = context.nextName("sc_island_value");
+  const output = context.nextName("sc_island_output");
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${value} = sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::Array(runtime::array_new(Vec::new())) } else { ${value} }; let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${dyn}::Array(${output}) }`;
 }
 
 function emitComputedPropertyPattern(
