@@ -1132,6 +1132,8 @@ test.each([
   "2404-kill-throw-catch.ts",
   "2405-sibling-arm-narrow.ts",
   "2407-infinite-loop-seal.ts",
+  "2408-loop-terminality-reopen.ts",
+  "2409-loop-body-return-not-terminal.ts",
   "2412-dowhile-guard-trailing-test.ts",
   "2413-dowhile-kill-renarrow.ts",
   "2414-dowhile-continue-kill.ts",
