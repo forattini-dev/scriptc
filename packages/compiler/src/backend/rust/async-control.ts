@@ -665,6 +665,15 @@ export class RustAsyncControlEmitter {
           terminal = "await";
           break;
         }
+        if (current.kind === "arraySet" && this.containsAsyncSuspension(current)) {
+          this.context.emitAsyncProtectedValues([current.arr, current.index, current.value], exitLocals, handlers, (values) => {
+            this.context.line(`runtime::array_set(&(${values[0]}), ${values[1]}, ${values[2]});`);
+            this.emitAsyncProtectedSequence(statements.slice(index + 1), exitLocals, handlers, loc);
+          });
+          this.context.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
         const nested =
           current.kind === "assign" ? current.value
           : current.kind === "varDecl" ? current.init

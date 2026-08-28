@@ -53,6 +53,8 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return expr.args;
     case "arrayLit":
       return expr.elems;
+    case "recordLit":
+      return expr.fields.map((field) => field.value);
     case "bytesIntrinsic":
       return [expr.receiver, ...expr.args];
     case "dynCheck":

@@ -15,6 +15,7 @@ import { emitRustNullish } from "./nullish.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 import { emitRustIslandExpr } from "./island.js";
+import { emitRustArrayNewLen } from "./array-new-len.js";
 
 export interface RustExpressionContext {
   readonly chainValues: Map<string, string>;
@@ -421,6 +422,9 @@ export class RustExpressionEmitter {
           ? `runtime::array_extend(&${array}, &(${this.emitExpr(element)}));`
           : `runtime::array_push(&${array}, ${this.emitExpr(element)});`).join(" ");
         return `{ let ${array}: ${this.context.rustType(expr.type, expr.loc)} = runtime::array_new(Vec::new()); ${operations} ${array} }`;
+      }
+      case "arrayNewLen": {
+        return emitRustArrayNewLen(expr, this.context, (value) => this.emitExpr(value));
       }
       case "arrayGet":
         if (expr.arr.type.kind !== "array") this.context.unsupported("arrayGet on a non-array", expr.loc);
