@@ -33,6 +33,7 @@ function generatorStepType(fn: IrFunction, context: RustGeneratorBodyContext): s
 }
 
 interface GeneratorFlow {
+  readonly captures: readonly { parameter: string; argument: string }[];
   emitReturn(value: string): void;
   emitThrow(reason: string): void;
   emitBreak(): void;
@@ -135,10 +136,12 @@ function emitGeneratorWhile(
     ...active.map((local) =>
       `${mangleLocal(local.id)}: runtime::JsCell<${context.rustType(local.type, statement.loc)}>`
     ),
+    ...flow.captures.map((capture) => capture.parameter),
   ];
   const call = `${helper}(${[
     "sc_generator",
     ...active.map((local) => `${mangleLocal(local.id)}.clone()`),
+    ...flow.captures.map((capture) => capture.argument),
   ].join(", ")})`;
   const bodyFlow: GeneratorFlow = {
     ...flow,
@@ -211,6 +214,83 @@ function emitGeneratorFor(
     body: statement.update === null ? statement.body : [...statement.body, statement.update],
     loc: statement.loc,
   }, remaining, context, locals, flow, onComplete);
+}
+
+function emitGeneratorForOf(
+  fn: IrFunction,
+  statement: Extract<IrStmt, { kind: "forOf" }>,
+  remaining: readonly IrStmt[],
+  context: RustGeneratorBodyContext,
+  locals: ReadonlySet<string>,
+  flow: GeneratorFlow,
+  onComplete: (() => void) | null,
+): void {
+  if ((statement.labels?.length ?? 0) > 0 || containsYield(statement.iterable)) {
+    context.unsupported("labeled generator for-of or suspension in its iterable", statement.loc);
+  }
+  if (statement.iterable.type.kind !== "array") {
+    context.unsupported("suspended generator for-of over a non-array", statement.loc);
+  }
+  const local = fn.locals.find((candidate) => candidate.id === statement.localId);
+  if (local === undefined) context.unsupported(`unknown generator local '${statement.localId}'`, statement.loc);
+  const active = [...locals].map((id) => {
+    const candidate = fn.locals.find((entry) => entry.id === id);
+    if (candidate === undefined) context.unsupported(`unknown generator local '${id}'`, statement.loc);
+    return candidate;
+  });
+  const helper = context.nextName("sc_generator_for_of");
+  const array = context.nextName("sc_generator_array");
+  const index = context.nextName("sc_generator_index");
+  const generatorType: IrType = {
+    kind: "generator",
+    yieldT: fn.generator?.yieldT ?? context.unsupported("generator for-of outside generator", statement.loc),
+    retT: fn.returnType,
+    nextT: fn.generator?.nextT ?? context.unsupported("generator for-of outside generator", statement.loc),
+  };
+  const params = [
+    `sc_generator: ${context.rustType(generatorType, statement.loc)}`,
+    `${array}: ${context.rustType(statement.iterable.type, statement.loc)}`,
+    `${index}: f64`,
+    ...active.map((candidate) =>
+      `${mangleLocal(candidate.id)}: runtime::JsCell<${context.rustType(candidate.type, statement.loc)}>`
+    ),
+    ...flow.captures.map((capture) => capture.parameter),
+  ];
+  const call = (nextIndex: string): string => `${helper}(${[
+    "sc_generator",
+    `${array}.clone()`,
+    nextIndex,
+    ...active.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
+    ...flow.captures.map((capture) => capture.argument),
+  ].join(", ")})`;
+  const bodyFlow: GeneratorFlow = {
+    ...flow,
+    captures: [
+      ...flow.captures,
+      { parameter: `${array}: ${context.rustType(statement.iterable.type, statement.loc)}`, argument: `${array}.clone()` },
+      { parameter: `${index}: f64`, argument: index },
+    ],
+    emitBreak: () => emitGeneratorSequence(fn, remaining, context, new Set(locals), flow, onComplete),
+    emitContinue: () => context.line(`return ${call(`${index} + 1.0`)};`),
+  };
+  context.line(`fn ${helper}(${params.join(", ")}) -> ${generatorStepType(fn, context)} {`);
+  context.pushIndent();
+  context.line(`if ${index} < runtime::array_len(&${array}) {`);
+  context.pushIndent();
+  context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${context.rustType(local.type, statement.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
+  emitGeneratorSequence(fn, statement.body, context, new Set([...locals, local.id]), bodyFlow, () => {
+    context.line(`return ${call(`${index} + 1.0`)};`);
+  });
+  context.popIndent();
+  context.line("} else {");
+  context.pushIndent();
+  emitGeneratorSequence(fn, remaining, context, new Set(locals), flow, onComplete);
+  context.popIndent();
+  context.line("}");
+  context.popIndent();
+  context.line("}");
+  context.line(`let ${array} = ${context.emitExpr(statement.iterable)};`);
+  context.line(`return ${call("0.0")};`);
 }
 
 function generatorSwitchBranch(
@@ -398,6 +478,10 @@ function emitGeneratorSequence(
       emitGeneratorFor(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
     }
+    if (statement.kind === "forOf" && containsYield(statement.body)) {
+      emitGeneratorForOf(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
+      return;
+    }
     if (statement.kind === "switch" && containsYield(statement.cases)) {
       emitGeneratorSwitch(fn, statement, statements.slice(index + 1), context, locals, flow, onComplete);
       return;
@@ -455,6 +539,7 @@ export function emitRustGeneratorBody(fn: IrFunction, context: RustGeneratorBody
   context.pushIndent();
   context.line("let _ = sc_command;");
   const flow: GeneratorFlow = {
+    captures: [],
     emitReturn: (value) => context.line(`return runtime::GeneratorStep::Returned(${value});`),
     emitThrow: (reason) => context.line(`runtime::rethrow_caught(${reason})`),
     emitBreak: () => context.unsupported("generator break outside a loop", fn.loc),
