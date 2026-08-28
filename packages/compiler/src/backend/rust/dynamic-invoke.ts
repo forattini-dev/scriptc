@@ -309,7 +309,8 @@ class RustDynamicInvokeEmitter {
 
   private emitObjectArm(): void {
     this.open(`${this.dyn}::Object(object) => {`);
-    this.context.line(`let member = runtime::map_get_by(object, &runtime::string(method), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dyn}::Undefined);`);
+    this.context.line("let _ = object;");
+    this.context.line("let member = sc_dyn_key_get(recv, &runtime::string(method), false);");
     this.context.line("let _this_guard = sc_dyn_this_push(recv.clone());");
     this.context.line("sc_dyn_call(&member, args, callee_name)");
     this.close("},");

@@ -11,6 +11,8 @@ export function emitRustIslandBuiltin(
 ): string | null {
   const regexp = emitRegExpConstructor(expr, context, emitExpr);
   if (regexp !== null) return regexp;
+  const numberPredicate = emitNumberPredicate(expr, context, emitExpr);
+  if (numberPredicate !== null) return numberPredicate;
   if (expr.op !== "callMethod" || expr.name !== "stringify" ||
       !isGlobal(expr.args[0], "JSON") || expr.args.length < 2 || expr.args.length > 4) return null;
   const valueExpr = expr.args[1];
@@ -28,6 +30,21 @@ export function emitRustIslandBuiltin(
     ? `runtime::json_stringify(&${node})`
     : `runtime::json_stringify_indented(&${node}, "${context.rustString(space.slice(0, 10))}")`;
   return `{ let ${value} = ${emitExpr(valueExpr)}; let ${hook} = match &${value} { ${dyn}::Object(sc_object) => runtime::map_get_by(sc_object, &runtime::string("toJSON"), |left, right| left.as_ref() == right.as_ref()), _ => None, }; let ${value} = if ${hook}.as_ref().is_some_and(|sc_hook| sc_dyn_function_identity(sc_hook).is_some()) { let sc_hook = ${hook}.expect("scriptc invariant: checked JSON hook disappeared"); let _sc_this = sc_dyn_this_push(${value}.clone()); sc_dyn_call(&sc_hook, &[${dyn}::String(runtime::empty_string())], "toJSON") } else { ${value} }; let sc_text = if matches!(&${value}, ${dyn}::Undefined) || sc_dyn_function_identity(&${value}).is_some() { runtime::string("undefined") } else { let ${node} = sc_dyn_to_json(&${value}, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); ${stringify} }; ${dyn}::String(sc_text) }`;
+}
+
+function emitNumberPredicate(
+  expr: JsOperation,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  if (expr.op !== "callMethod" || !isGlobal(expr.args[0], "Number") || expr.args.length !== 2 ||
+      (expr.name !== "isInteger" && expr.name !== "isSafeInteger")) return null;
+  const argument = expr.args[1];
+  if (argument === undefined) return null;
+  const dyn = context.dynTypeName();
+  const value = context.nextName("sc_island_number");
+  const predicate = expr.name === "isInteger" ? "number_is_integer" : "number_is_safe_integer";
+  return `{ let ${value} = ${emitExpr(argument)}; ${dyn}::Boolean(matches!(${value}, ${dyn}::Number(sc_number) if runtime::${predicate}(sc_number))) }`;
 }
 
 function emitRegExpConstructor(

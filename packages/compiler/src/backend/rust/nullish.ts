@@ -19,8 +19,8 @@ export function emitRustNullish(
   emitExpr: (expr: IrExpr) => string,
 ): string {
   const left = context.nextName("sc_rt");
-  if (expr.left.type.kind === "dyn") {
-    if (expr.type.kind !== "dyn") context.unsupported("dynamic nullish with non-dynamic result", expr.loc);
+  if (expr.left.type.kind === "dyn" || expr.left.type.kind === "jsval") {
+    if (expr.type.kind !== expr.left.type.kind) context.unsupported("dynamic nullish with mismatched result", expr.loc);
     const dyn = context.dynTypeName();
     return `{ let ${left} = ${emitExpr(expr.left)}; if matches!(&${left}, ${dyn}::Undefined | ${dyn}::Null) { ${emitExpr(expr.right)} } else { ${left} } }`;
   }

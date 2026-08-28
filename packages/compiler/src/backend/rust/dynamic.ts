@@ -84,6 +84,7 @@ export class RustDynamicEmitter {
     this.context.line("HttpAgent(runtime::JsHttpAgent),");
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
+    this.context.line(`Getter(Box<${name}>),`);
     for (const shape of boxedShapes) {
       this.context.line(`${this.context.dynFunctionVariant(shape)}(runtime::Gc<${this.context.closureName(shape)}>, runtime::JsString, runtime::JsMap<runtime::JsString, ${name}>),`);
     }
@@ -102,6 +103,7 @@ export class RustDynamicEmitter {
     }
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
+    this.context.line("Self::Getter(value) => runtime::Trace::trace(value.as_ref(), tracer),");
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
     this.context.line("Self::TypedBytes(value) => runtime::typed_bytes_trace(value, tracer),");
     this.context.line("Self::Buffer(value) => tracer.edge(value),");
@@ -154,6 +156,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Buffer(value) => runtime::JsonValue::write_json(&${name}::Bytes(value.clone()), writer),`);
     this.context.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::Getter(..) => writer.write_null(),`);
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
@@ -318,6 +321,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(output)`);
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::Getter(value) => ${name}::Getter(Box::new(sc_dyn_deep_copy(value.as_ref()))),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(value, function_name, properties) => ${name}::${this.context.dynFunctionVariant(shape)}(value.clone(), function_name.clone(), properties.clone()),`);
     }
@@ -378,6 +382,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Undefined => Err(format!("undefined at {path} is not JSON data")),`);
+    this.context.line(`${name}::Getter(..) => Err(format!("accessor at {path} is not JSON data")),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => Err(format!("function at {path} is not JSON data")),`);
     }
@@ -403,6 +408,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Buffer(..) => "bytes",`);
     this.context.line(`${name}::Array(..) => "array",`);
     this.context.line(`${name}::Object(..) => "object",`);
+    this.context.line(`${name}::Getter(..) => "function",`);
     this.context.line(`${name}::Promise(..) => "promise",`);
     this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
@@ -529,7 +535,10 @@ export class RustDynamicEmitter {
     this.context.line(`runtime::throw_type_error(format!("Cannot read properties of {} (reading '{}')", sc_dyn_kind(value), key))`);
     this.context.popIndent();
     this.context.line("},");
-    this.context.line(`${name}::Object(object) => runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined),`);
+    const getterRead = this.context.usesDynamicInvoke()
+      ? `{ let _this_guard = sc_dyn_this_push(value.clone()); sc_dyn_call(getter.as_ref(), &[], key.as_ref()) }`
+      : "sc_dyn_call(getter.as_ref(), &[], key.as_ref())";
+    this.context.line(`${name}::Object(object) => match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined) { ${name}::Getter(getter) => ${getterRead}, field => field },`);
     this.context.line(`${name}::Regex(regex) => match key.as_ref() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Url(url) => match key.as_ref() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);
@@ -692,6 +701,7 @@ export class RustDynamicEmitter {
     this.context.line("} else { runtime::string(\"[object Object]\") }");
     this.context.popIndent();
     this.context.line("},");
+    this.context.line(`${name}::Getter(value) => sc_dyn_to_string(value.as_ref()),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("function () { [native code] }") } else { runtime::string(&format!("function {}() {{ [native code] }}", function_name)) },`);
     }
@@ -717,6 +727,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NativeConstructor(name) => format!("function {name}"),`);
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
+    this.context.line(`${name}::Getter(..) => "function getter".to_owned(),`);
     this.context.line(`${name}::Promise(..) => "an instance of Promise".to_owned(),`);
     this.context.line(`${name}::NetServer(..) => "an instance of Server".to_owned(),`);
     this.context.line(`${name}::NetSocket(..) => "an instance of Socket".to_owned(),`);
@@ -945,6 +956,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
+    this.context.line(`${name}::Getter(..) => runtime::throw_dom_exception("DataCloneError", "getter could not be cloned."),`);
     this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
     this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
     this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);

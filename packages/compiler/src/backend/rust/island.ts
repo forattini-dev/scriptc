@@ -92,6 +92,19 @@ function emitOperation(
     const value = context.nextName("sc_island_value");
     return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${value} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${receiver}, sc_dyn_to_string(&${key}), ${value}); }`;
   }
+  if (expr.op === "objSpread" && expr.args.length === 2) {
+    const target = context.nextName("sc_island_target");
+    const source = context.nextName("sc_island_source");
+    const dyn = context.dynTypeName();
+    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
+  }
+  if (expr.op === "defineGetter" && expr.args.length === 3) {
+    const target = context.nextName("sc_island_target");
+    const key = context.nextName("sc_island_key");
+    const getter = context.nextName("sc_island_getter");
+    const dyn = context.dynTypeName();
+    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${getter} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${target}, sc_dyn_to_string(&${key}), ${dyn}::Getter(Box::new(${getter}))); ${target} }`;
+  }
   const builtin = emitRustIslandBuiltin(expr, context, emitExpr);
   if (builtin !== null) return builtin;
   const destructuring = emitRustIslandDestructuringFunction(expr, context, emitExpr);

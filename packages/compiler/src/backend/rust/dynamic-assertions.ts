@@ -49,6 +49,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::TypedBytes(value) => { let length = runtime::typed_bytes_len(value) as usize; let type_name = runtime::typed_bytes_name(value); if length == 0 { return format!("{type_name}(0) []"); } let mut output = format!("{type_name}({length}) ["); for index in 0..length { output.push('\\n'); output.push_str(&" ".repeat(indent + 2)); output.push_str(&runtime::display_number(runtime::typed_bytes_get(value, index as f64))); if index + 1 < length { output.push(','); } } output.push('\\n'); output.push_str(&" ".repeat(indent)); output.push(']'); output },`);
   context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value).to_string(),`);
   context.line(`${name}::NativeConstructor(name) => format!("[Function: {name}]"),`);
+  context.line(`${name}::Getter(value) => sc_dyn_assert_inspect(value.as_ref(), indent),`);
   context.line(`${name}::Array(value) => {`);
   context.pushIndent();
   context.line("let length = runtime::array_len(value) as usize;");
