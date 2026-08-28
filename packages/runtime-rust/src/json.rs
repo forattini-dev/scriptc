@@ -280,6 +280,9 @@ pub fn json_write_map_properties<V>(
 }
 
 pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
+    if value.is_json_undefined() {
+        return string("undefined");
+    }
     let mut writer = JsonWriter::new();
     value.write_json(&mut writer);
     Rc::from(writer.output)

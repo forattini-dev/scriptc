@@ -349,6 +349,8 @@ export class RustValueEmitter {
         return `${left} == ${right}`;
       case "string":
         return `${left}.as_ref() == ${right}.as_ref()`;
+      case "regex":
+        return `std::rc::Rc::ptr_eq(${left}, ${right})`;
       case "symbol":
         return `runtime::symbol_ptr_eq(${left}, ${right})`;
       case "func":
