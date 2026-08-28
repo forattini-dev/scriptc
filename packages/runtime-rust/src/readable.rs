@@ -12,6 +12,12 @@ struct ReadablePipe {
 }
 
 #[derive(Clone)]
+struct ReadableWaiter {
+    settle: Rc<dyn Fn(Result<Option<ReadableChunk>, Caught>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+}
+
+#[derive(Clone)]
 pub enum ReadableChunk {
     Bytes(JsBytes<u8>),
     String(JsString),
@@ -42,6 +48,10 @@ where
     resume_after_data: bool,
     readable_scheduled: bool,
     emitted_readable: bool,
+    object_mode: bool,
+    auto_destroy: bool,
+    async_iterator: bool,
+    next_waiter: Option<ReadableWaiter>,
     pipes: Vec<ReadablePipe>,
     destroyed: bool,
     closed: bool,
@@ -75,6 +85,9 @@ where
             (pipe.trace)(tracer);
             (pipe.resume_trace)(tracer);
         }
+        if let Some(waiter) = &self.next_waiter {
+            (waiter.trace)(tracer);
+        }
     }
 }
 
@@ -93,6 +106,7 @@ where
         self.decoder_pending = 0.0;
         self.push_encoding = None;
         self.buffered_length = 0;
+        self.next_waiter = None;
         self.pipes.clear();
     }
 }
@@ -109,6 +123,7 @@ fn stream_default_byte_high_water_mark() -> usize {
 
 pub fn readable_new<L, R>(
     high_water_mark: f64,
+    auto_destroy: bool,
     emit_close: bool,
     read_callback: Option<R>,
     destroy_callback: Option<R>,
@@ -145,6 +160,10 @@ where
         resume_after_data: false,
         readable_scheduled: false,
         emitted_readable: false,
+        object_mode: false,
+        auto_destroy,
+        async_iterator: false,
+        next_waiter: None,
         pipes: Vec::new(),
         destroyed: false,
         closed: false,
@@ -189,12 +208,132 @@ where
     left.ptr_eq(right)
 }
 
-pub fn readable_push<L, R>(readable: &JsReadable<L, R>, chunk: JsBytes<u8>) -> bool
+fn readable_take_next<L, R>(data: &mut ReadableData<L, R>) -> Option<ReadableChunk>
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let chunk = data.chunks.pop_front()?;
+    let length = if data.object_mode {
+        1
+    } else {
+        match &chunk {
+            ReadableChunk::Bytes(bytes) => bytes_len(bytes) as usize,
+            ReadableChunk::String(text) => text.encode_utf16().count(),
+        }
+    };
+    data.buffered_length = data.buffered_length.saturating_sub(length);
+    Some(chunk)
+}
+
+fn readable_settle_next<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let ready = readable.with_mut(|data| {
+        if data.next_waiter.is_none() {
+            return None;
+        }
+        let outcome = if let Some(error) = &data.errored {
+            Some(Err(caught_value(error.clone())))
+        } else if !data.chunks.is_empty() {
+            Some(Ok(readable_take_next(data)))
+        } else if data.eof || data.destroyed {
+            data.ended = data.eof;
+            if data.auto_destroy && data.eof {
+                data.destroyed = true;
+                data.closed = data.emit_close;
+            }
+            Some(Ok(None))
+        } else {
+            None
+        };
+        outcome.map(|outcome| {
+            let waiter = data
+                .next_waiter
+                .take()
+                .expect("scriptc: checked Readable waiter");
+            (waiter, outcome)
+        })
+    });
+    if let Some((waiter, outcome)) = ready {
+        (waiter.settle)(outcome);
+    }
+}
+
+pub fn readable_set_next_waiter<L, R>(
+    readable: &JsReadable<L, R>,
+    settle: Rc<dyn Fn(Result<Option<ReadableChunk>, Caught>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let registered = readable.with_mut(|data| {
+        if data.next_waiter.is_some() {
+            return false;
+        }
+        data.async_iterator = true;
+        data.next_waiter = Some(ReadableWaiter { settle, trace });
+        true
+    });
+    if registered {
+        readable_settle_next(readable);
+    }
+    registered
+}
+
+pub fn readable_has_async_iterator<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.async_iterator)
+}
+
+pub fn readable_reject_next<L, R>(readable: &JsReadable<L, R>, reason: Caught)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let waiter = readable.with_mut(|data| data.next_waiter.take());
+    if let Some(waiter) = waiter {
+        (waiter.settle)(Err(reason));
+    }
+}
+
+pub fn readable_set_object_mode<L, R>(readable: &JsReadable<L, R>)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.object_mode = true);
+}
+
+pub fn readable_push_object_string<L, R>(readable: &JsReadable<L, R>, chunk: JsString)
 where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| {
+        if data.eof {
+            data.push_after_eof = true;
+            return;
+        }
+        data.buffered_length = data.buffered_length.saturating_add(1);
+        data.chunks.push_back(ReadableChunk::String(chunk));
+    });
+    readable_settle_next(readable);
+}
+
+pub fn readable_push<L, R>(readable: &JsReadable<L, R>, chunk: JsBytes<u8>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    let below_high_water_mark = readable.with_mut(|data| {
         if data.eof {
             data.push_after_eof = true;
             return false;
@@ -208,11 +347,18 @@ where
                 data.chunks.push_back(ReadableChunk::String(text));
             }
         } else {
-            data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
+            let length = if data.object_mode {
+                1
+            } else {
+                bytes_len(&chunk) as usize
+            };
+            data.buffered_length = data.buffered_length.saturating_add(length);
             data.chunks.push_back(ReadableChunk::Bytes(chunk));
         }
         data.buffered_length < data.high_water_mark
-    })
+    });
+    readable_settle_next(readable);
+    below_high_water_mark
 }
 
 pub fn readable_push_string<L, R>(readable: &JsReadable<L, R>, chunk: &JsString) -> bool
@@ -237,10 +383,8 @@ where
     readable_push(readable, buffer_from_string(chunk, encoding))
 }
 
-pub fn readable_set_push_encoding<L, R>(
-    readable: &JsReadable<L, R>,
-    encoding: &JsString,
-) where
+pub fn readable_set_push_encoding<L, R>(readable: &JsReadable<L, R>, encoding: &JsString)
+where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
@@ -310,6 +454,7 @@ where
         }
         data.eof = true;
     });
+    readable_settle_next(readable);
     false
 }
 
@@ -331,7 +476,9 @@ where
                 data.chunks.push_front(ReadableChunk::String(text));
             }
         } else {
-            data.buffered_length = data.buffered_length.saturating_add(bytes_len(&chunk) as usize);
+            data.buffered_length = data
+                .buffered_length
+                .saturating_add(bytes_len(&chunk) as usize);
             data.chunks.push_front(ReadableChunk::Bytes(chunk));
         }
     });
@@ -369,7 +516,11 @@ where
     let mut pieces = Vec::new();
     readable.with_mut(|data| {
         while remaining > 0 {
-            let ReadableChunk::Bytes(chunk) = data.chunks.pop_front().expect("scriptc: Readable length without chunks") else {
+            let ReadableChunk::Bytes(chunk) = data
+                .chunks
+                .pop_front()
+                .expect("scriptc: Readable length without chunks")
+            else {
                 unreachable!("scriptc: encoded Readable reached byte read");
             };
             let length = bytes_len(&chunk) as usize;
@@ -378,7 +529,12 @@ where
                 pieces.push(chunk);
             } else {
                 pieces.push(bytes_slice(&chunk, 0.0, remaining as f64, false));
-                data.chunks.push_front(ReadableChunk::Bytes(bytes_slice(&chunk, remaining as f64, length as f64, false)));
+                data.chunks.push_front(ReadableChunk::Bytes(bytes_slice(
+                    &chunk,
+                    remaining as f64,
+                    length as f64,
+                    false,
+                )));
                 remaining = 0;
             }
         }
@@ -501,7 +657,12 @@ where
     R: Clone + Trace + 'static,
 {
     readable.with_mut(|data| {
-        if data.flowing != Some(true) || data.scheduled || data.draining || data.ended || data.destroyed {
+        if data.flowing != Some(true)
+            || data.scheduled
+            || data.draining
+            || data.ended
+            || data.destroyed
+        {
             return false;
         }
         data.scheduled = true;
@@ -573,7 +734,7 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    readable.with_mut(|data| {
+    let changed = readable.with_mut(|data| {
         if data.destroyed {
             return false;
         }
@@ -582,7 +743,9 @@ where
             data.errored = error;
         }
         true
-    })
+    });
+    readable_settle_next(readable);
+    changed
 }
 
 pub fn readable_error<L, R>(readable: &JsReadable<L, R>) -> Option<JsError>
@@ -740,8 +903,20 @@ where
     match name.as_ref() {
         "readableLength" => readable_length(readable),
         "readableHighWaterMark" => readable.with(|data| data.high_water_mark as f64),
-        "readableEnded" => if readable.with(|data| data.ended) { 1.0 } else { 0.0 },
-        "destroyed" => if readable.with(|data| data.destroyed) { 1.0 } else { 0.0 },
+        "readableEnded" => {
+            if readable.with(|data| data.ended) {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        "destroyed" => {
+            if readable.with(|data| data.destroyed) {
+                1.0
+            } else {
+                0.0
+            }
+        }
         _ => 0.0,
     }
 }
@@ -756,7 +931,7 @@ where
         "readableEnded" => data.ended,
         "destroyed" => data.destroyed,
         "closed" => data.closed,
-        "readableObjectMode" => false,
+        "readableObjectMode" => data.object_mode,
         "rs:emittedReadable" => data.emitted_readable,
         _ => false,
     })

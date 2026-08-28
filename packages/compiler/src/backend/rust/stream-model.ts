@@ -132,6 +132,11 @@ export class RustStreamModel {
       }
       return true;
     }
+    if (node.fn === "readable.fromArr" || node.fn === "readable.nextChunk" ||
+        node.fn === "readable.nextChunkDyn") {
+      this.usesReadable = true;
+      return true;
+    }
     if (node.fn === "writable.write" || node.fn === "writable.writeStr") {
       const args = node.args as StreamArgument[] | undefined;
       const receiver = args?.[0]?.type;

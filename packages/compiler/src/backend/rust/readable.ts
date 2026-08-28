@@ -163,7 +163,7 @@ export class RustReadableEmitter {
       this.context.line("let sc_emitter = runtime::readable_emitter(sc_readable);");
       this.context.line("let sc_name = runtime::string(\"error\");");
       this.context.line("let sc_snapshot = runtime::emitter_snapshot(&sc_emitter, &sc_name);");
-      this.context.line("if sc_snapshot.is_empty() { runtime::throw_value(sc_error); }");
+      this.context.line("if sc_snapshot.is_empty() && !runtime::readable_has_async_iterator(sc_readable) { runtime::throw_value(sc_error); }");
       this.context.line("for sc_registration in sc_snapshot { if !runtime::emitter_listener_should_invoke(&sc_registration) { continue; } if sc_registration.once { let _ = runtime::emitter_remove_registration(&sc_emitter, &sc_name, sc_registration.registration); } match sc_registration.callback {");
       this.context.pushIndent();
       for (const arm of errorArms) this.context.line(arm);
@@ -232,6 +232,8 @@ export class RustReadableEmitter {
   emitLibCall(expr: RustLibCallExpr): string | null {
     switch (expr.fn) {
       case "readable.new": return this.emitNew(expr);
+      case "readable.fromArr": return this.emitFromArray(expr);
+      case "readable.nextChunkDyn": return this.emitNextChunkDynamic(expr);
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
       case "readable.pushStrEnc": return this.emitPushStringEncoding(expr);
@@ -289,7 +291,42 @@ export class RustReadableEmitter {
       callbackIndex += 1;
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Readable constructor arity", expr.loc);
-    return `{ ${this.bind(expr.args, values)} let _ = (${values[1]}, ${values[3]}); runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[0]}, ${values[2]}, ${read}, ${destroy}) }`;
+    return `{ ${this.bind(expr.args, values)} let _ = ${values[3]}; runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[0]}, ${values[1]}, ${values[2]}, ${read}, ${destroy}) }`;
+  }
+
+  private emitFromArray(expr: RustLibCallExpr): string {
+    const [source, strings] = expr.args;
+    if (source?.type.kind !== "array" || strings?.kind !== "boolLit" ||
+      expr.args.length !== 2 || expr.type.kind !== "object" ||
+      expr.type.className !== "%Readable") {
+      this.context.unsupported("Readable.from array shape", expr.loc);
+    }
+    const stringElements = source.type.elem.kind === "string";
+    const byteElements = source.type.elem.kind === "bytes" && source.type.elem.elem === "u8";
+    if ((!stringElements && !byteElements) || strings.value !== stringElements) {
+      this.context.unsupported("Readable.from array element shape", expr.loc);
+    }
+    const sourceValue = this.context.nextTemporary();
+    const readableValue = this.context.nextTemporary();
+    const push = stringElements
+      ? `runtime::readable_push_object_string(&${readableValue}, runtime::array_get(&${sourceValue}, sc_index))`
+      : `let _ = runtime::readable_push(&${readableValue}, runtime::array_get(&${sourceValue}, sc_index))`;
+    return `{ let ${sourceValue} = ${this.context.emitExpr(source)}; let ${readableValue} = runtime::readable_new::<ScEmitterListener, ScReadableRead>(1.0, true, true, Option::<ScReadableRead>::None, Option::<ScReadableRead>::None); runtime::readable_set_object_mode(&${readableValue}); let mut sc_index = 0.0; while sc_index < runtime::array_len(&${sourceValue}) { ${push}; sc_index += 1.0; } let _ = runtime::readable_push_null(&${readableValue}); ${readableValue} }`;
+  }
+
+  private emitNextChunkDynamic(expr: RustLibCallExpr): string {
+    const [receiver] = expr.args;
+    if (!this.isReadable(receiver) || expr.args.length !== 1 ||
+      expr.type.kind !== "promise" || expr.type.inner.kind !== "dyn") {
+      this.context.unsupported("Readable async iterator shape", expr.loc);
+    }
+    const dyn = this.context.dynTypeName();
+    const readableValue = this.context.nextTemporary();
+    const result = this.context.nextTemporary();
+    const target = this.context.nextTemporary();
+    const traced = this.context.nextTemporary();
+    const outcome = this.context.nextTemporary();
+    return `{ let ${readableValue} = ${this.context.emitExpr(receiver)}; let ${result}: runtime::JsPromise<${dyn}> = runtime::promise_new(); let ${target} = ${result}.clone(); let ${traced} = ${result}.clone(); let sc_registered = runtime::readable_set_next_waiter(&${readableValue}, std::rc::Rc::new(move |${outcome}| match ${outcome} { Ok(Some(runtime::ReadableChunk::Bytes(value))) => { let _ = runtime::promise_fulfill(&${target}, ${dyn}::Buffer(value)); }, Ok(Some(runtime::ReadableChunk::String(value))) => { let _ = runtime::promise_fulfill(&${target}, ${dyn}::String(value)); }, Ok(None) => { let _ = runtime::promise_fulfill(&${target}, ${dyn}::Undefined); }, Err(reason) => { let _ = runtime::promise_reject(&${target}, reason); }, }), std::rc::Rc::new(move |tracer| tracer.edge(&${traced}))); if sc_registered { let sc_read_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sc_readable_call_read(&${readableValue}))); if let Err(sc_payload) = sc_read_result { runtime::readable_reject_next(&${readableValue}, runtime::caught_from_panic(sc_payload)); } } else { let sc_reason = runtime::caught_value(runtime::error_new("Error", runtime::string("Readable already has a pending async iterator read"))); let _ = runtime::promise_reject(&${result}, sc_reason); } ${result} }`;
   }
 
   private emitSetRead(expr: RustLibCallExpr): string {

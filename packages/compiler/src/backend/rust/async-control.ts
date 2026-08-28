@@ -3,6 +3,7 @@ import { typeKey } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
 import type { IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
+import { emitAsyncProtectedWhile } from "./async-protected-loop.js";
 
 export interface RustAsyncHandlers {
   readonly fallthrough: () => void;
@@ -600,6 +601,18 @@ export class RustAsyncControlEmitter {
     handlers: RustAsyncHandlers,
     loc: SrcLoc,
   ): void {
+    const blockIndex = statements.findIndex((statement) =>
+      statement.kind === "block" && this.containsAsyncSuspension(statement.body)
+    );
+    const block = statements[blockIndex];
+    if (blockIndex >= 0 && block?.kind === "block") {
+      this.emitAsyncProtectedSequence([
+        ...statements.slice(0, blockIndex),
+        ...block.body,
+        ...statements.slice(blockIndex + 1),
+      ], exitLocals, handlers, loc);
+      return;
+    }
     const result = this.context.currentAsyncResult();
     const fn = this.context.currentFunction();
     if (result === null || fn?.async !== true) this.context.unsupported("async protected segment without a result promise", loc);
@@ -611,6 +624,21 @@ export class RustAsyncControlEmitter {
       for (let index = 0; index < statements.length; index += 1) {
         const current = statements[index];
         if (current === undefined) break;
+        if (current.kind === "while" && this.containsAsyncSuspension(current.body)) {
+          emitAsyncProtectedWhile(
+            this.context,
+            (...args) => this.emitAsyncProtectedSequence(...args),
+            (locals, emit) => this.withAsyncLocals(locals, emit),
+            current,
+            statements.slice(index + 1),
+            exitLocals,
+            handlers,
+            loc,
+          );
+          this.context.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
         if (current.kind === "forOf" && this.containsAsyncSuspension(current.body)) {
           this.emitAsyncProtectedForOf(
             current,
