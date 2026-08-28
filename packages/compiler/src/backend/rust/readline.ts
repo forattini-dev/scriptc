@@ -4,6 +4,8 @@ export function emitRustReadlineCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  const stdinCall = emitRustStdinCall(expr, context);
+  if (stdinCall !== null) return stdinCall;
   const [handle, query, callbackExpr] = expr.args;
   if (expr.fn === "rl.create" && expr.args.length === 0 && expr.type.kind === "f64") {
     return "runtime::readline_create()";
@@ -40,4 +42,50 @@ export function emitRustReadlineCall(
     return `{ let ${handleValue} = ${context.emitExpr(handle)}; let ${queryValue} = ${context.emitExpr(query)}; let ${callback} = ${context.emitExpr(callbackExpr)}; runtime::readline_question(${handleValue}, &${queryValue}, Box::new(move |${answer}| { let _ = ${dispatch}; })); }`;
   }
   return null;
+}
+
+function emitRustStdinCall(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+): string | null {
+  if (expr.fn !== "stdin.onData" && expr.fn !== "stdin.onEnd" && expr.fn !== "stdin.onError") {
+    return null;
+  }
+  const [callbackExpr, onceExpr] = expr.args;
+  if (callbackExpr?.type.kind !== "func" || callbackExpr.type.ret.kind !== "void" ||
+      onceExpr?.type.kind !== "bool" || expr.type.kind !== "void") {
+    context.unsupported(`${expr.fn} argument shape`, expr.loc);
+  }
+  const callbackType = callbackExpr.type;
+  const callback = context.nextTemporary();
+  const once = context.nextTemporary();
+  if (expr.fn === "stdin.onEnd") {
+    if (callbackType.params.length !== 0) context.unsupported("stdin end listener shape", expr.loc);
+    const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+    return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${once} = ${context.emitExpr(onceExpr)}; runtime::stdin_on_end(std::rc::Rc::new(move || { let _ = ${dispatch}; }), ${once}); }`;
+  }
+  if (callbackType.params.length > 1) context.unsupported(`${expr.fn} listener arity`, expr.loc);
+  const parameter = callbackType.params[0];
+  if (expr.fn === "stdin.onData") {
+    if (parameter !== undefined && (parameter.kind !== "bytes" || parameter.elem !== "u8")) {
+      context.unsupported("stdin data listener shape", expr.loc);
+    }
+    const chunk = parameter === undefined ? "_sc_chunk" : "sc_chunk";
+    const dispatch = context.emitClosureDispatch(callback, callbackType, parameter === undefined ? [] : [chunk], expr.loc);
+    return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${once} = ${context.emitExpr(onceExpr)}; runtime::stdin_on_data(std::rc::Rc::new(move |${chunk}| { let _ = ${dispatch}; }), ${once}); }`;
+  }
+  if (parameter !== undefined && (parameter.kind !== "object" || parameter.className !== "%Error")) {
+    context.unsupported("stdin error listener shape", expr.loc);
+  }
+  const error = parameter === undefined ? "_sc_error" : "sc_error";
+  const argument = context.hasErrorClassRoots()
+    ? `${context.errorValueName()}::Builtin(sc_error)`
+    : "sc_error";
+  const dispatch = context.emitClosureDispatch(
+    callback,
+    callbackType,
+    parameter === undefined ? [] : [argument],
+    expr.loc,
+  );
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${once} = ${context.emitExpr(onceExpr)}; runtime::stdin_on_error(std::rc::Rc::new(move |${error}| { let _ = ${dispatch}; }), ${once}); }`;
 }

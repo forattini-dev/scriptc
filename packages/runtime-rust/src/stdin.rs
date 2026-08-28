@@ -1,12 +1,32 @@
 enum StdinEvent {
     Data(Vec<u8>),
     End,
+    Error(String),
+}
+
+#[derive(Clone)]
+struct StdinDataListener {
+    callback: Rc<dyn Fn(JsBytes<u8>)>,
+    once: bool,
+}
+
+#[derive(Clone)]
+struct StdinEndListener {
+    callback: Rc<dyn Fn()>,
+}
+
+#[derive(Clone)]
+struct StdinErrorListener {
+    callback: Rc<dyn Fn(JsError)>,
 }
 
 #[derive(Default)]
 struct StdinState {
     receiver: Option<std::sync::mpsc::Receiver<StdinEvent>>,
     waiter: Option<JsPromise<JsBytes<u8>>>,
+    data_listeners: Vec<StdinDataListener>,
+    end_listeners: Vec<StdinEndListener>,
+    error_listeners: Vec<StdinErrorListener>,
     eof: bool,
     destroyed: bool,
 }
@@ -39,13 +59,48 @@ fn stdin_start() {
                         }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => {
-                        let _ = sender.send(StdinEvent::End);
+                    Err(error) => {
+                        let message = error
+                            .raw_os_error()
+                            .map_or_else(|| format!("read {error}"), |code| format!("read E{code}"));
+                        let _ = sender.send(StdinEvent::Error(message));
                         break;
                     }
                 }
             }
         });
+}
+
+pub fn stdin_on_data(callback: Rc<dyn Fn(JsBytes<u8>)>, once: bool) {
+    let should_start = STDIN_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if state.eof || state.destroyed {
+            return false;
+        }
+        state.data_listeners.push(StdinDataListener { callback, once });
+        state.receiver.is_none()
+    });
+    if should_start {
+        stdin_start();
+    }
+}
+
+pub fn stdin_on_end(callback: Rc<dyn Fn()>, _once: bool) {
+    STDIN_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.eof && !state.destroyed {
+            state.end_listeners.push(StdinEndListener { callback });
+        }
+    });
+}
+
+pub fn stdin_on_error(callback: Rc<dyn Fn(JsError)>, _once: bool) {
+    STDIN_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.eof && !state.destroyed {
+            state.error_listeners.push(StdinErrorListener { callback });
+        }
+    });
 }
 
 fn stdin_readline_start() -> bool {
@@ -84,7 +139,7 @@ pub fn stdin_next_chunk() -> JsPromise<JsBytes<u8>> {
 fn stdin_poll() -> Option<StdinEvent> {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        if state.waiter.is_none() && !readline_stdin_pending() {
+        if state.waiter.is_none() && state.data_listeners.is_empty() && !readline_stdin_pending() {
             return None;
         }
         let receiver = state.receiver.as_ref()?;
@@ -97,23 +152,63 @@ fn stdin_poll() -> Option<StdinEvent> {
 }
 
 fn stdin_dispatch(event: StdinEvent) {
-    let waiter = STDIN_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if matches!(&event, StdinEvent::End) {
-            state.eof = true;
-            state.receiver = None;
-        }
-        state.waiter.take()
-    });
     match event {
         StdinEvent::Data(bytes) => {
             readline_stdin_data(&bytes);
-            if let Some(waiter) = waiter {
-                let _ = promise_fulfill(&waiter, bytes_from_vec(bytes));
+            let (listeners, waiter) = STDIN_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let listeners = state.data_listeners.clone();
+                state.data_listeners.retain(|listener| !listener.once);
+                let waiter = listeners.is_empty().then(|| state.waiter.take()).flatten();
+                (listeners, waiter)
+            });
+            if listeners.is_empty() {
+                if let Some(waiter) = waiter {
+                    let _ = promise_fulfill(&waiter, bytes_from_vec(bytes));
+                }
+            } else {
+                let chunk = bytes_from_vec(bytes);
+                for listener in listeners {
+                    (listener.callback)(chunk.clone());
+                }
             }
         }
         StdinEvent::End => {
+            let (listeners, waiter) = STDIN_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.eof = true;
+                state.receiver = None;
+                state.data_listeners.clear();
+                state.error_listeners.clear();
+                (std::mem::take(&mut state.end_listeners), state.waiter.take())
+            });
             readline_stdin_end();
+            for listener in listeners {
+                (listener.callback)();
+            }
+            if let Some(waiter) = waiter {
+                let _ = promise_fulfill(&waiter, bytes_empty());
+            }
+        }
+        StdinEvent::Error(message) => {
+            let has_error_listeners =
+                STDIN_STATE.with(|state| !state.borrow().error_listeners.is_empty());
+            if !has_error_listeners {
+                stdin_dispatch(StdinEvent::End);
+                return;
+            }
+            let (listeners, waiter) = STDIN_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.eof = true;
+                state.receiver = None;
+                state.data_listeners.clear();
+                state.end_listeners.clear();
+                (std::mem::take(&mut state.error_listeners), state.waiter.take())
+            });
+            let error = error_new("Error", string(&message));
+            for listener in listeners {
+                (listener.callback)(error.clone());
+            }
             if let Some(waiter) = waiter {
                 let _ = promise_fulfill(&waiter, bytes_empty());
             }
@@ -130,14 +225,15 @@ fn stdin_dispatch_one() -> bool {
 fn stdin_pending() -> bool {
     STDIN_STATE.with(|state| {
         let state = state.borrow();
-        (state.waiter.is_some() || readline_stdin_pending()) && !state.eof && !state.destroyed
+        (state.waiter.is_some() || !state.data_listeners.is_empty() || readline_stdin_pending()) &&
+            !state.eof && !state.destroyed
     })
 }
 
 fn stdin_wait(timeout: Option<std::time::Duration>) {
     let event = STDIN_STATE.with(|state| {
         let state = state.borrow();
-        if state.waiter.is_none() {
+        if state.waiter.is_none() && state.data_listeners.is_empty() && !readline_stdin_pending() {
             return None;
         }
         let receiver = state.receiver.as_ref()?;
@@ -163,6 +259,9 @@ fn stdin_destroy() {
         let mut state = state.borrow_mut();
         state.destroyed = true;
         state.receiver = None;
+        state.data_listeners.clear();
+        state.end_listeners.clear();
+        state.error_listeners.clear();
         state.waiter.take()
     });
     if let Some(waiter) = waiter {
