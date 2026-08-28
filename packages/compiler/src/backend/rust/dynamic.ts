@@ -803,13 +803,13 @@ export class RustDynamicEmitter {
     this.context.line("match callee {");
     this.context.pushIndent();
     for (const shape of boxedShapes) {
-      const typedArgs = shape.type.params.map((param, index) => {
+      const fixedParams = shape.type.restAbi === "jsval" ? shape.type.params.slice(0, -1) : shape.type.params;
+      const typedArgs = fixedParams.map((param, index) => {
         const value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
         return this.emitDynCheckValue(param, value);
       });
       if (shape.type.rest === true) {
-        if (shape.type.restAbi === "jsval") this.context.unsupported("dynamic jsval rest call");
-        typedArgs.push(`${name}::Array(runtime::array_new(args.iter().skip(${shape.type.params.length}).cloned().collect()))`);
+        typedArgs.push(`${name}::Array(runtime::array_new(args.iter().skip(${fixedParams.length}).cloned().collect()))`);
       }
       const loc = this.context.module().functions[0]?.loc;
       if (loc === undefined) this.context.unsupported("dynamic call without a source location");

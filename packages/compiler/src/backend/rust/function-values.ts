@@ -82,7 +82,7 @@ export class RustFunctionValueEmitter {
 
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string {
     const shape = this.context.closureShapeForType(type, loc);
-    const abiArity = shape.type.params.length + (shape.type.rest === true ? 1 : 0);
+    const abiArity = shape.type.params.length + (shape.type.rest === true && shape.type.restAbi !== "jsval" ? 1 : 0);
     if (args.length !== abiArity) this.context.unsupported("closure dispatch argument arity", loc);
     const arms = shape.targets.map((target) => {
       const captures = target.captures ?? [];

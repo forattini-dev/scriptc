@@ -1144,6 +1144,7 @@ test.each([
   "2472-string-regexp-union.ts",
   "2473-option-table-widths.js",
   "2474-island-literal-forms.ts",
+  "2475-variadic-wrapper-island.js",
   "2476-map-regex-values.ts",
   "2480-recursive-record-tree.ts",
   "2481-mutual-recursive-records.ts",
