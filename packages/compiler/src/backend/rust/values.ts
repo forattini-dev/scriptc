@@ -90,6 +90,7 @@ export class RustValueEmitter {
       case "spawnRes": return "true";
       case "child": return "true";
       case "childStream": return "true";
+      case "fsWatcher": return "true";
       case "netServer": return "true";
       case "netSocket": return "true";
       case "dgramSocket": return "true";
@@ -199,6 +200,7 @@ export class RustValueEmitter {
       case "spawnRes": return "runtime::JsSpawnResult";
       case "child": return "runtime::JsChild";
       case "childStream": return "runtime::JsChildStream";
+      case "fsWatcher": return "runtime::JsFsWatcher";
       case "netServer": return "runtime::JsNetServer";
       case "netSocket": return "runtime::JsNetSocket";
       case "dgramSocket": return "runtime::JsDgramSocket";
@@ -393,7 +395,7 @@ export class RustValueEmitter {
   }
 
   isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "child" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -459,6 +461,7 @@ export class RustValueEmitter {
       case "promise":
       case "child":
       case "childStream":
+      case "fsWatcher":
       case "netServer":
       case "netSocket":
       case "dgramSocket":

@@ -916,6 +916,7 @@ test.each([
   "1562-optional-chain-tails.ts",
   "1563-string-raw-fold.ts",
   "1564-string-raw.ts",
+  "1564-fs-watch.ts",
   "1565-spawn-pipe-streams.ts",
   "1569-fsp-mkdir-unlink-chmod.ts",
   "1573-promisify-execfile-env-spread.ts",

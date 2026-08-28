@@ -368,6 +368,7 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "childStream":
+        case "fsWatcher":
         case "netServer":
         case "netSocket":
         case "dgramSocket":
@@ -819,6 +820,7 @@ export class RustDefinitionEmitter {
         case "spawnRes":
         case "child":
         case "childStream":
+        case "fsWatcher":
         case "netServer":
         case "netSocket":
         case "dgramSocket":

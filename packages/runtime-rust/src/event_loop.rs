@@ -8,6 +8,7 @@ pub fn finish() {
     readline_finish();
     stdin_finish();
     fs_renames_finish();
+    fs_watchers_finish();
     children_finish();
     child_streams_finish();
     net_finish();
@@ -445,6 +446,9 @@ pub fn run_event_loop() {
         if fs_renames_dispatch_one() {
             continue;
         }
+        if fs_watchers_dispatch_one() {
+            continue;
+        }
         if process_signals_dispatch_one() {
             continue;
         }
@@ -464,6 +468,7 @@ pub fn run_event_loop() {
             .with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || IMMEDIATE_TASKS.with(|tasks| tasks.borrow().iter().any(|task| task.referenced))
             || fs_renames_pending()
+            || fs_watchers_pending()
             || stdin_pending()
             || children_referenced_pending()
             || children_failed_pending()
@@ -545,6 +550,12 @@ pub fn run_event_loop() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
             fs_renames_wait(wait);
+            continue;
+        }
+        if fs_watchers_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            fs_watchers_wait(wait);
             continue;
         }
         if stdin_pending() {

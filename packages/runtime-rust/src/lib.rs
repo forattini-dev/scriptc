@@ -55,6 +55,7 @@ include!("querystring.rs");
 include!("os.rs");
 include!("filesystem.rs");
 include!("filesystem_dirent.rs");
+include!("fs_watch.rs");
 include!("child_process_and_paths.rs");
 include!("child_stream.rs");
 include!("child_process_async.rs");
