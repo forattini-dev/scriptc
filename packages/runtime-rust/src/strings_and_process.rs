@@ -731,6 +731,7 @@ pub fn process_warning_report(
 
 pub fn process_exit(code: f64) -> ! {
     use std::io::Write;
+    terminal_finish();
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     std::process::exit(code as i32)

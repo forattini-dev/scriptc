@@ -42,6 +42,10 @@ export function emitRustProcessCall(
   if (expr.fn === "process.stdinDestroy" && expr.args.length === 0) {
     return "runtime::process_stdin_destroy()";
   }
+  if (expr.fn === "process.stdinSetRawMode" && expr.args.length === 1 &&
+      arg?.type.kind === "bool" && expr.type.kind === "void") {
+    return `runtime::process_stdin_set_raw_mode(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "process.argv" && expr.args.length === 0) return "runtime::process_argv()";
   if (expr.fn === "process.platform" && expr.args.length === 0) return "runtime::process_platform()";
   if (expr.fn === "process.cwd" && expr.args.length === 0) return "runtime::process_cwd()";

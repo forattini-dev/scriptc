@@ -4,6 +4,7 @@
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    terminal_finish();
     process_signals_finish();
     readline_finish();
     stdin_finish();

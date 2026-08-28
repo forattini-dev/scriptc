@@ -32,6 +32,7 @@ include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");
 include!("stdin.rs");
+include!("terminal.rs");
 include!("readline.rs");
 include!("generators.rs");
 include!("errors.rs");
