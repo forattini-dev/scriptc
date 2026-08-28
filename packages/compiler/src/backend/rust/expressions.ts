@@ -904,7 +904,10 @@ export class RustExpressionEmitter {
         }
         const target = this.context.classMetaOf(expr.className, expr.loc);
         const value = this.context.nextName("sc_rt");
-        return `{ let ${value} = ${this.emitExpr(expr.value)}; ${value}.with(|object| ${target.pre} <= object.sc_class_pre && object.sc_class_pre <= ${target.post}) }`;
+        const test = target.hierarchy
+          ? `${value}.with(|object| ${target.pre} <= object.sc_class_pre && object.sc_class_pre <= ${target.post})`
+          : "true";
+        return `{ let ${value} = ${this.emitExpr(expr.value)}; let _ = ${value}; ${test} }`;
       }
       case "instanceOfValue": {
         if (expr.value.type.kind !== "object" || expr.classValue.type.kind !== "classval") {

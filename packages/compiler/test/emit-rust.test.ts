@@ -1134,6 +1134,8 @@ test.each([
   "2441-console-process-argv.ts",
   "2448-entries-null-arms-regex-arrays.ts",
   "2449-js-dyn-worlds/main.js",
+  "2450-private-instance-methods.ts",
+  "2451-private-fields.ts",
   "2454-private-generator-methods.ts",
   "2456-private-async-methods.ts",
   "2460-qs-parse-grammar.ts",
