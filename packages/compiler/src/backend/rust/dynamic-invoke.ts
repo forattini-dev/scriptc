@@ -80,7 +80,8 @@ class RustDynamicInvokeEmitter {
   private emitArrayCallbacks(): void {
     this.open(`fn sc_dyn_array_callback(callback: &${this.dyn}, item: ${this.dyn}, index: f64, array: &runtime::JsArray<${this.dyn}>) -> ${this.dyn} {`);
     this.context.line(`let args = [item, ${this.dyn}::Number(index), ${this.dyn}::Array(array.clone())];`);
-    this.context.line("sc_dyn_call(callback, &args, \"callback\")");
+    this.context.line("let callback_name = sc_dyn_to_string(callback);");
+    this.context.line("sc_dyn_call(callback, &args, callback_name.as_ref())");
     this.close("}");
 
     this.open(`fn sc_dyn_array_iterate(array: &runtime::JsArray<${this.dyn}>, method: &str, args: &[${this.dyn}]) -> ${this.dyn} {`);
