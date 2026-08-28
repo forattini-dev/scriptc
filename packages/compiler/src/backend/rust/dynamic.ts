@@ -525,6 +525,14 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
+    const getterRead = this.context.usesDynamicInvoke()
+      ? `{ let _this_guard = sc_dyn_this_push(receiver.clone()); sc_dyn_call(getter.as_ref(), &[], key.as_ref()) }`
+      : "sc_dyn_call(getter.as_ref(), &[], key.as_ref())";
+    this.context.line(`fn sc_dyn_object_key_get(object: &runtime::JsMap<runtime::JsString, ${name}>, key: &runtime::JsString, receiver: &${name}) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(${name}::Object(prototype)) => sc_dyn_object_key_get(&prototype, key, receiver), _ => ${name}::Undefined, }, }`);
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);
     this.context.pushIndent();
     this.context.line("match value {");
@@ -535,10 +543,7 @@ export class RustDynamicEmitter {
     this.context.line(`runtime::throw_type_error(format!("Cannot read properties of {} (reading '{}')", sc_dyn_kind(value), key))`);
     this.context.popIndent();
     this.context.line("},");
-    const getterRead = this.context.usesDynamicInvoke()
-      ? `{ let _this_guard = sc_dyn_this_push(value.clone()); sc_dyn_call(getter.as_ref(), &[], key.as_ref()) }`
-      : "sc_dyn_call(getter.as_ref(), &[], key.as_ref())";
-    this.context.line(`${name}::Object(object) => match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined) { ${name}::Getter(getter) => ${getterRead}, field => field },`);
+    this.context.line(`${name}::Object(object) => sc_dyn_object_key_get(object, key, value),`);
     this.context.line(`${name}::Regex(regex) => match key.as_ref() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Url(url) => match key.as_ref() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);

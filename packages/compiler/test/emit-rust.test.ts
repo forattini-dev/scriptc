@@ -1257,6 +1257,7 @@ test.each([
   "2587-array-entries-forof.ts",
   "2588-array-entries-chains.ts",
   "2589-object-create-null.cjs",
+  "2590-object-create-dynamic.js",
   "2591-ambient-generic-traps.ts",
   "2596-net-arg-ladders.cjs",
   "2598-tls-arg-ladders.cjs",

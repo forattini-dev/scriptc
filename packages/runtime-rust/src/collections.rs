@@ -4,6 +4,7 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
     iteration_depth: usize,
     // Dynamic objects reuse JsMap; this bit preserves Object.create(null).
     null_prototype: bool,
+    prototype: Option<V>,
 }
 
 impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
@@ -13,12 +14,16 @@ impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
                 value.trace_value(tracer);
             }
         }
+        if let Some(prototype) = &self.prototype {
+            prototype.trace_value(tracer);
+        }
     }
 }
 
 impl<K: Clone + 'static, V: HeapValue> ClearEdges for MapData<K, V> {
     fn clear_edges(&mut self) {
         self.entries.clear();
+        self.prototype = None;
     }
 }
 
@@ -30,6 +35,7 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
         live: 0,
         iteration_depth: 0,
         null_prototype: false,
+        prototype: None,
     })
 }
 
@@ -39,6 +45,14 @@ pub fn map_mark_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, 
 
 pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     map.with(|data| data.null_prototype)
+}
+
+pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, prototype: V) {
+    map.with_mut(|data| data.prototype = Some(prototype));
+}
+
+pub fn map_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> Option<V> {
+    map.with(|data| data.prototype.clone())
 }
 
 pub fn map_set_by<K, V, F>(map: &JsMap<K, V>, key: K, value: V, equal: F)

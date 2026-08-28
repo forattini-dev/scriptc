@@ -522,6 +522,7 @@ where
             entries,
             iteration_depth: 0,
             null_prototype: false,
+            prototype: None,
         })
     }
 }
