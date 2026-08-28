@@ -971,6 +971,7 @@ test.each([
   "1744-stream-set-encoding.ts",
   "1745-stream-encoding-js.cjs",
   "1746-stream-for-await.ts",
+  "1747-stream-for-await-js.cjs",
   "1750-http-agent-options.ts",
   "1760-surplus-args-drop.cjs",
   "1780-http-res-surface.ts",

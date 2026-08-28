@@ -1,5 +1,5 @@
 import type { IrType } from "../../ir/nodes.js";
-import { typeKey, VOID } from "../../ir/nodes.js";
+import { DYN, typeKey, VOID } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 
 type StreamNode = Record<string, unknown>;
@@ -33,6 +33,7 @@ export class RustStreamModel {
   readonly transformCallbackShapes = new Map<string, RustClosureShape>();
   readonly transformFlushShapes = new Map<string, RustClosureShape>();
   readonly transformDoneShapes = new Map<string, RustClosureShape>();
+  transformDynamicCompletionShape: RustClosureShape | null = null;
 
   discover(
     node: StreamNode,
@@ -198,7 +199,13 @@ export class RustStreamModel {
         const callback = args?.[callbackIndex++];
         if (callback?.type?.kind !== "func") unsupported("malformed stream subclass callback IR");
         ensureClosureShape(callback.type);
-        if ((transform && bit <= 1) || (!transform && (bit === 1 || bit === 2))) {
+        if (transform && bit === 0 && callback.type.params.at(-1)?.kind === "dyn") {
+          const completionType: IrFuncType = { kind: "func", params: [DYN, DYN], ret: VOID };
+          registerDynBoxedFunction(completionType);
+          const completionShape = ensureClosureShape(completionType);
+          completionShape.runtimeCallback = true;
+          this.transformDynamicCompletionShape = completionShape;
+        } else if ((transform && bit <= 1) || (!transform && (bit === 1 || bit === 2))) {
           this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
         }
       }
