@@ -70,7 +70,13 @@ class RustStatementEmitter {
           }
           return;
         }
-        if (stmt.init === null && local.type.kind === "func") {
+        // A declaration without an initializer can be assigned from inside
+        // a generated catch_unwind closure (for example a destructuring
+        // binding in Map iteration). Rust cannot prove that such a closure
+        // initialized a plain local before a later read. JsCell represents
+        // the JavaScript state directly: empty until the first assignment,
+        // with the existing TDZ/read checks still guarding early access.
+        if (stmt.init === null) {
           this.context.forceBoxedLocal(local.id, true);
         }
         if (this.context.localIsBoxed(local)) {
