@@ -1308,6 +1308,8 @@ test.each([
   "2670-uint8array-copy-iterate.ts",
   "2671-array-copying-js.cjs",
   "2672-http-request-response-callback.ts",
+  "2675-process-self-reexec.ts",
+  "2676-indexed-read-strict-equality.ts",
   "2678-util-parseargs.ts",
   "2679-util-parseargs-cjs.cjs",
   "2682-fs-rename.ts",

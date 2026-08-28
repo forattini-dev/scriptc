@@ -72,6 +72,18 @@ fn run_sync_child(
     })
 }
 
+fn is_self_reexec(command: &JsString, arguments: &JsArray<JsString>) -> bool {
+    let Some(first) = arguments.with(|arguments| arguments.elements.first().cloned()) else {
+        return false;
+    };
+    let Ok(executable) = std::env::current_exe() else {
+        return false;
+    };
+    let resolve = |path: &str| std::fs::canonicalize(path).unwrap_or_else(|_| path.into());
+    let executable = resolve(executable.to_string_lossy().as_ref());
+    resolve(command.as_ref()) == executable && resolve(first.as_ref()) == executable
+}
+
 pub fn child_exec_sync(
     command: &JsString,
     arguments: &JsArray<JsString>,
@@ -313,6 +325,9 @@ pub fn child_spawn_sync(
 
     let mut child_command = Command::new(command.as_ref());
     process_env_apply(&mut child_command);
+    if is_self_reexec(command, arguments) {
+        child_command.arg(SELF_REEXEC_MARKER);
+    }
     arguments.with(|arguments| {
         child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
     });

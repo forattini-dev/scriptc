@@ -620,6 +620,8 @@ pub fn string_split(value: &JsString, separator: &JsString, limit: f64) -> JsArr
     array_new(parts)
 }
 
+const SELF_REEXEC_MARKER: &str = "\u{1f}scriptc-self-reexec";
+
 pub fn process_argv() -> JsArray<JsString> {
     PROCESS_ARGV.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -628,7 +630,16 @@ pub fn process_argv() -> JsArray<JsString> {
         }
         let mut native = std::env::args();
         let executable = native.next().unwrap_or_else(|| "scriptc".to_owned());
-        let mut values = vec![Rc::from(executable.as_str()), Rc::from(executable.as_str())];
+        let first = native.next();
+        let script = if first.as_deref() == Some(SELF_REEXEC_MARKER) {
+            native.next().unwrap_or_else(|| executable.clone())
+        } else {
+            executable.clone()
+        };
+        let mut values = vec![Rc::from(executable.as_str()), Rc::from(script.as_str())];
+        if let Some(first) = first.filter(|value| value != SELF_REEXEC_MARKER) {
+            values.push(Rc::from(first));
+        }
         values.extend(native.map(Rc::<str>::from));
         let argv = array_new(values);
         *slot = Some(argv.clone());
