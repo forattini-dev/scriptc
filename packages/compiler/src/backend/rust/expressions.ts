@@ -747,7 +747,8 @@ export class RustExpressionEmitter {
         if (expr.type.kind !== "object") this.context.unsupported("caught check outside an object", expr.loc);
         const error = RUNTIME_ERROR_CLASSES.get(expr.className);
         if (error === undefined) this.context.unsupported(`caught check '${expr.className}'`, expr.loc);
-        return `runtime::caught_check_error(&(${this.emitExpr(expr.value)}), "${this.context.rustString(error.lib)}")`;
+        const helper = this.context.errorClassRoots().length === 0 ? "runtime::caught_check_error" : "sc_caught_check_error";
+        return `${helper}(&(${this.emitExpr(expr.value)}), "${this.context.rustString(error.lib)}")`;
       }
       case "fieldGet":
         if (RUNTIME_ERROR_CLASSES.has(expr.className) && (expr.field === "name" || expr.field === "message")) {

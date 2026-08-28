@@ -1147,6 +1147,8 @@ test.each([
   "2423-param-null-reassign.ts",
   "2424-ternary-miss-first-narrowing.ts",
   "2425-elseif-head-exit-narrow.ts",
+  "2426-default-snapshot-mutable/main.ts",
+  "2428-field-redeclare-inherited.ts",
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2448-entries-null-arms-regex-arrays.ts",

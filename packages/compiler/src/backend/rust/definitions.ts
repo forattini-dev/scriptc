@@ -741,6 +741,12 @@ export class RustDefinitionEmitter {
     this.context.line("false");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_caught_check_error(caught: &runtime::Caught, target: &str) -> ${name} {`);
+    this.context.pushIndent();
+    this.context.line("if !sc_caught_is_error_class(caught, target) { runtime::throw_type_error(format!(\"caught value is not a {target}\")); }");
+    this.context.line("sc_caught_error_value(caught)");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line("fn sc_caught_to_string(caught: &runtime::Caught) -> runtime::JsString {");
     this.context.pushIndent();
     this.context.line("if sc_caught_is_error_class(caught, \"Error\") { return sc_error_to_string(&sc_caught_error_value(caught)); }");
