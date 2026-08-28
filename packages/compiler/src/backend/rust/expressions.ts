@@ -1,5 +1,5 @@
 import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
 import { emitRustGeneratorResume } from "./generators.js";
@@ -936,15 +936,25 @@ export class RustExpressionEmitter {
       case "newValue": {
         if (expr.callee.type.kind !== "classval") this.context.unsupported("newValue with non-class callee", expr.loc);
         const staticMeta = this.context.classMetaOf(expr.callee.type.className, expr.loc);
+        const staticConstructor = this.context.functions.get(`%${staticMeta.def.name}.constructor`);
+        if (staticConstructor === undefined) {
+          this.context.unsupported(`missing constructor for '${staticMeta.def.name}'`, expr.loc);
+        }
         const callee = this.context.nextName("sc_rt");
         const args = expr.args.map(() => this.context.nextName("sc_rt"));
         const bindings = [
           `let ${callee} = ${this.emitExpr(expr.callee)};`,
           ...expr.args.map((arg, index) => `let ${args[index]} = ${this.emitExpr(arg)};`),
         ].join(" ");
-        const arms = this.context.classSubtree(staticMeta).filter((dynamic) => !dynamic.def.abstract).map((dynamic) =>
-          `${dynamic.pre} => ${this.context.classAllocation(dynamic, args, expr.loc)},`
-        ).join(" ");
+        const arms = this.context.classSubtree(staticMeta).filter((dynamic) => {
+          if (dynamic.def.abstract) return false;
+          const constructor = this.context.functions.get(`%${dynamic.def.name}.constructor`);
+          return constructor !== undefined && constructor.params.length === staticConstructor.params.length &&
+            constructor.params.every((param, index) => {
+              const staticParam = staticConstructor.params[index];
+              return index === 0 || staticParam !== undefined && typeEquals(param.type, staticParam.type);
+            });
+        }).map((dynamic) => `${dynamic.pre} => ${this.context.classAllocation(dynamic, args, expr.loc)},`).join(" ");
         return `{ ${bindings} match ${callee} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
       }
       case "upcast":
