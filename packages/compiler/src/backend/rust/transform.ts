@@ -469,50 +469,56 @@ export class RustTransformEmitter {
   private emitSetEncoding(expr: RustLibCallExpr): string {
     const [receiver, encoding] = expr.args;
     if (!this.isTransform(receiver) || encoding?.type.kind !== "string" || expr.args.length !== 2 ||
-      expr.type.kind !== "object" ||
-      (expr.type.className !== "%Transform" && expr.type.className !== "%PassThrough")) {
+      typeKey(expr.type) !== typeKey(receiver.type)) {
       this.context.unsupported("Transform setEncoding shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
-    return `{ ${this.bind(expr.args, values)} runtime::readable_set_encoding(&runtime::transform_readable(&${values[0]}), &${values[1]}); ${values[0]} }`;
+    const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; runtime::readable_set_encoding(&runtime::transform_readable(&sc_transform), &${values[1]}); ${values[0]} }`;
   }
 
   private emitPushNull(expr: RustLibCallExpr): string {
     const receiver = expr.args[0];
-    if (receiver === undefined || expr.args.length !== 1 || expr.type.kind !== "bool") {
+    if (!this.isTransform(receiver) || expr.args.length !== 1 || expr.type.kind !== "bool") {
       this.context.unsupported("Transform null push shape", expr.loc);
     }
     const value = this.context.nextTemporary();
-    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_result = runtime::readable_push_null(&runtime::transform_readable(&${value})); sc_transform_read_schedule(&${value}); sc_result }`;
+    const handle = this.transformHandle(value, receiver.type, expr.loc);
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_transform = ${handle}; let sc_result = runtime::readable_push_null(&runtime::transform_readable(&sc_transform)); sc_transform_read_schedule(&sc_transform); sc_result }`;
   }
 
   private emitProp(expr: RustLibCallExpr): string {
-    const name = expr.args[1];
-    if (expr.args.length !== 2 || name?.type.kind !== "string" || (expr.type.kind !== "f64" && expr.type.kind !== "bool")) {
+    const [receiver, name] = expr.args;
+    if (!this.isTransform(receiver) || expr.args.length !== 2 || name?.type.kind !== "string" ||
+      (expr.type.kind !== "f64" && expr.type.kind !== "bool")) {
       this.context.unsupported("Transform property shape", expr.loc);
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     const result = expr.type.kind === "f64"
-      ? `match ${values[1]}.as_ref() { "readableHighWaterMark" | "readableLength" => runtime::readable_prop(&runtime::transform_readable(&${values[0]}), &${values[1]}), _ => runtime::writable_number_prop(&runtime::transform_writable(&${values[0]}), &${values[1]}), }`
-      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&${values[0]})), "readable" | "readableEnded" | "readableObjectMode" => runtime::readable_bool_prop(&runtime::transform_readable(&${values[0]}), &${values[1]}), _ => runtime::writable_bool_prop(&runtime::transform_writable(&${values[0]}), &${values[1]}), }`;
-    return `{ ${this.bind(expr.args, values)} ${result} }`;
+      ? `match ${values[1]}.as_ref() { "readableHighWaterMark" | "readableLength" => runtime::readable_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_number_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`
+      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&sc_transform)), "readable" | "readableEnded" | "readableObjectMode" => runtime::readable_bool_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_bool_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`;
+    const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; ${result} }`;
   }
 
   private emitCork(expr: RustLibCallExpr): string {
     const receiver = expr.args[0];
-    if (receiver === undefined || expr.args.length !== 1 || expr.type.kind !== "void") {
+    if (!this.isTransform(receiver) || expr.args.length !== 1 || expr.type.kind !== "void") {
       this.context.unsupported("Transform cork shape", expr.loc);
     }
-    return `runtime::writable_cork(&runtime::transform_writable(&(${this.context.emitExpr(receiver)})))`;
+    const value = this.context.nextTemporary();
+    const handle = this.transformHandle(value, receiver.type, expr.loc);
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_transform = ${handle}; runtime::writable_cork(&runtime::transform_writable(&sc_transform)); }`;
   }
 
   private emitUncork(expr: RustLibCallExpr): string {
     const receiver = expr.args[0];
-    if (receiver === undefined || expr.args.length !== 1 || expr.type.kind !== "void") {
+    if (!this.isTransform(receiver) || expr.args.length !== 1 || expr.type.kind !== "void") {
       this.context.unsupported("Transform uncork shape", expr.loc);
     }
     const value = this.context.nextTemporary();
-    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_writable = runtime::transform_writable(&${value}); if runtime::writable_uncork(&sc_writable) { sc_transform_drain_write(&${value}); } }`;
+    const handle = this.transformHandle(value, receiver.type, expr.loc);
+    return `{ let ${value} = ${this.context.emitExpr(receiver)}; let sc_transform = ${handle}; let sc_writable = runtime::transform_writable(&sc_transform); if runtime::writable_uncork(&sc_writable) { sc_transform_drain_write(&sc_transform); } }`;
   }
 
   private emitOutput(value: string, type: IrType, receiver: string, loc: SrcLoc): string {

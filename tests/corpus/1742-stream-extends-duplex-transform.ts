@@ -47,6 +47,18 @@ t.on("end", () => console.log("piped:", out.join("")));
 new Words().pipe(t);
 
 const direct = new Upper();
-direct.on("data", (c: Buffer) => console.log("direct:", c.toString()));
+direct.setEncoding("utf8");
+direct.on("data", (c: string) => console.log("direct:", c, typeof c));
+direct.on("end", () => console.log("direct end"));
 console.log("direct push:", direct.push("manual"));
+console.log("direct state:", direct.readableLength, direct.readableObjectMode);
+direct.push(null);
+
+const corked = new Upper();
+corked.on("data", (c: Buffer) => console.log("corked:", c.toString()));
+corked.cork();
+corked.write("held");
+console.log("before uncork");
+corked.uncork();
+corked.end();
 console.log("sync end");
