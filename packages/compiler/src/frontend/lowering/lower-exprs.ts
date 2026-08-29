@@ -700,6 +700,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      // The POSIX identity methods are linked native capabilities on every
+      // host scriptc supports. Their optional Node declarations exist for
+      // Windows, but the compiled target's direct and optional calls both
+      // already lower to the runtime functions; the matching capability
+      // probe must therefore answer "function" without materializing a
+      // bound method value.
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        const processMember = L.stdlibGlobalMember(expr.expression, "process");
+        if (processMember === "getuid" || processMember === "getgid") {
+          return { kind: "strLit", value: "function", type: STRING, loc };
+        }
+      }
       // `typeof queueMicrotask` / `typeof DOMException` on a STDLIB global
       // whose declared type is callable or constructable: folds to
       // "function" BEFORE the operand lowers — the identity-token story
@@ -8600,6 +8612,13 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       [expr.right, expr.left],
     ] as const) {
       if (!ts.isTypeOfExpression(a)) continue;
+      if (
+        ts.isPropertyAccessExpression(a.expression) &&
+        (L.stdlibGlobalMember(a.expression, "process") === "getuid" ||
+          L.stdlibGlobalMember(a.expression, "process") === "getgid")
+      ) {
+        continue; // the native process-capability fold in bare typeof owns it
+      }
       if (L.mapTypeOf(L.typeOf(a.expression))?.kind !== "union") continue;
       if (!ts.isStringLiteral(b)) continue; // bare-typeof + strEq handles pure operands
       const value = L.lowerExpr(a.expression);
