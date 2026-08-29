@@ -161,7 +161,9 @@ export class RustMetadata {
   }
 
   private classFieldInitialValue(type: IrType, loc: SrcLoc): string {
-    if (type.kind === "jsval") return `Some(${this.dynTypeName()}::Undefined)`;
+    if (type.kind === "dyn" || type.kind === "jsval") {
+      return `Some(${this.dynTypeName()}::Undefined)`;
+    }
     if (!this.context.isEdgeValue(type)) return this.context.defaultValue(type, loc);
     if (type.kind !== "union") return "None";
     const undefinedTag = this.union(type.unionId, loc).arms.findIndex((arm) => arm.kind === "undefinedT");

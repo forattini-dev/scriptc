@@ -1727,6 +1727,9 @@ export class CEmitter {
    * every type that cannot hold undefined (tsc's SPI guards those) and for
    * record shapes' construction paths, which write every field. */
   undefFieldInitLineC(name: string, t: IrType): string[] {
+    if (t.kind === "dyn") {
+      return [`  o->${mangleField(name)} = scr_dyn_undefined(); /* ${name} starts undefined */`];
+    }
     if (t.kind === "jsval") {
       return [`  o->${mangleField(name)} = scr_jsval_undefined(); /* ${name} starts undefined */`];
     }

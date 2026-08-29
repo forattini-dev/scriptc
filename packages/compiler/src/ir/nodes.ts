@@ -253,10 +253,10 @@ export type IrType =
    * be stored in locals/globals, passed as a param/call arg, returned,
    * validated with a checked cast (`dynCheck`), CALLED (`dynCall` — the
    * dyn's function kind, boxed closures with per-call argument checks),
-   * and captured by closures (an untraced obj-box: cycles through dyn are
-   * never collected, SEMANTICS.md); it can NOT ride record/class fields,
-   * array elements, union arms, or the exception cell, and every other
-   * operation on it (property access, arithmetic, truthiness, `===`,
+   * captured by closures, and stored in class fields (both are untraced:
+   * cycles through dyn are never collected, SEMANTICS.md); it can NOT ride
+   * record fields, array elements, union arms, or the exception cell, and
+   * every other operation on it (property access, arithmetic, truthiness, `===`,
    * console.log, ...) is frontend-rejected with a "validate with 'as
    * <type>' first" hint — or, in JavaScript sources, met with per-site
    * checked lowerings (SEMANTICS.md 115-117). */

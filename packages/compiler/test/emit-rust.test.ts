@@ -1562,6 +1562,8 @@ shardedTest.each(shardSelect([
   "2702-os-hostname.ts",
   "2703-satisfies-const-tuple.ts",
   "2704-imported-satisfies-registry/main.ts",
+  "2705-tuple-method-refinement.ts",
+  "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
 ], (fixture) => fixture))("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));

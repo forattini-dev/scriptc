@@ -1210,6 +1210,41 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // part must be a plain object refinement — no call/construct signatures,
   // no class identity of its own.
   if (widened.isIntersectionType()) {
+    // A tuple with a method-signature-only refinement keeps the tuple's
+    // runtime representation. This is the common `as const as Tuple & {
+    // includes(wider): boolean }` idiom: the extra constituent changes
+    // call-site typing but adds no own data slot. Calls to methods the
+    // backend does not model still fence at their use site.
+    let refinedTuple: IrType | null = null;
+    let tupleMethodOnly = true;
+    for (const part of ts.constituentTypes(widened)) {
+      const mapped = mapType(part, ctx);
+      if (mapped?.kind === "record" && ctx.shapes.get(mapped.shapeId)?.tuple) {
+        if (refinedTuple !== null && refinedTuple.shapeId !== mapped.shapeId) {
+          tupleMethodOnly = false;
+          break;
+        }
+        refinedTuple = mapped;
+        continue;
+      }
+      const props = checker.getPropertiesOfType(part);
+      const methodOnly =
+        checker.getCallSignatures(part).length === 0 &&
+        checker.getConstructSignatures(part).length === 0 &&
+        checker.getIndexInfosOfType(part).length === 0 &&
+        props.length > 0 &&
+        props.every((prop) => {
+          const declarations = checker.declarationsOf(prop);
+          return declarations.length > 0 &&
+            declarations.every((declaration) => declaration.kind === ts.SyntaxKind.MethodSignature);
+        });
+      if (!methodOnly) {
+        tupleMethodOnly = false;
+        break;
+      }
+    }
+    if (tupleMethodOnly && refinedTuple !== null) return refinedTuple;
+
     const HANDLE_KINDS = new Set([
       "netServer", "netSocket", "httpReq", "httpRes", "httpClientReq", "dgramSocket",
       // process.stdout's own type IS the refined intersection
