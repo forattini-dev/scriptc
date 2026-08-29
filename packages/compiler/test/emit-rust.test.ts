@@ -867,6 +867,7 @@ test.each([
   "1054-comptime-modules/main.ts",
   "1100-island-eval-basics.ts",
   "1101-island-marshal-unicode.ts",
+  "1102-island-rc-stress.ts",
   "1123-any-conditional-spread.ts",
   "1354-builtin-bare-specifiers.ts",
   "1359-json-module/main.ts",
