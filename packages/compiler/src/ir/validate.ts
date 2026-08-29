@@ -2196,12 +2196,16 @@ function validateFunction(
         if (!def.arms.some(isUnitType)) {
           err("nullish left union has no unit arm (frontend must fence)", e.loc);
         }
-        // Two shapes: pass-through (type === left's union) or narrowed
-        // (type === the union's SINGLE non-unit arm).
+        // Three shapes: pass-through (type === left's union), narrowed
+        // (type === the union's single non-unit arm), or retagged into a
+        // result union containing every non-unit left arm.
         if (!typeEquals(e.type, e.left.type)) {
           const rest = def.arms.filter((a) => !isUnitType(a));
-          if (rest.length !== 1 || !typeEquals(e.type, rest[0]!)) {
-            err("nullish type must be the left union or its single non-unit arm", e.loc);
+          const narrowed = rest.length === 1 && typeEquals(e.type, rest[0]!);
+          const result = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+          const retagged = result !== undefined && rest.every((arm) => result.arms.some((candidate) => typeEquals(candidate, arm)));
+          if (!narrowed && !retagged) {
+            err("nullish type must preserve every non-unit left arm", e.loc);
           }
         }
         break;

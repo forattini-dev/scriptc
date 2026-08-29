@@ -2870,9 +2870,9 @@ export function pureReemittable(e: IrExpr): boolean {
    * string, the single non-unit arm). A left the checker types non-nullish
    * never takes the right side, so the whole expression folds to the left
    * value — dropping only the never-evaluated default, the same
-   * trust-the-checker bet as lowerUnitComparison's static fold. Sub-union
-   * results (several non-unit arms) and defaults that change the result
-   * type are fenced with narrow-first hints. */
+   * trust-the-checker bet as lowerUnitComparison's static fold. A result
+   * union containing every non-unit arm uses the same lazy node and retags
+   * the selected left payload in the backend. */
   export function lowerNullishCoalesce(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     const left = lowerAbsenceProbe(L, expr.left) ?? L.lowerExpr(expr.left);
     if (left.type.kind === "dyn") {
@@ -2906,88 +2906,24 @@ export function pureReemittable(e: IrExpr): boolean {
       const right = L.lowerExprExpecting(expr.right, type);
       return { kind: "nullish", left, right, type, loc };
     }
-    // The RETAGGED shape — the default changes the result union (`s ??
-    // null` over `string | undefined` answers `null | string`): every
-    // non-unit arm of the left has a home in the result, so an interned
-    // helper tests the unit tags and re-wraps the payload per arm. The
-    // helper call evaluates the default EAGERLY where JS is lazy, so only
-    // effect-free defaults (the literal null/0/"" spellings) qualify —
-    // anything effectful keeps the fence.
+    // The RETAGGED shape — either the default changes the result union
+    // (`s ?? null`), or removing the unit arm leaves a multi-arm sub-union
+    // (`number | string | undefined` -> `number | string`). Every non-unit
+    // left arm must have a home in the result. The nullish node keeps the
+    // right side genuinely lazy; backends re-wrap the selected payload.
     if (type.kind === "union") {
       const leftT = left.type;
       const armPairs = rest.map((a) => ({ arm: a, src: L.armTag(leftT.unionId, a), dst: L.armTag(type.unionId, a) }));
       if (armPairs.every((p) => p.src >= 0 && p.dst >= 0)) {
         const right = L.lowerExprExpecting(expr.right, type);
-        if (droppableStatic(right)) {
-          const helper = nullishRetagHelper(L, leftT, type, loc);
-          return { kind: "call", callee: helper, args: [left, right], type, loc };
-        }
+        return { kind: "nullish", left, right, type, loc };
       }
     }
     L.unsupported(
       "SC1090",
       expr,
-      rest.length !== 1
-        ? `'??' on '${L.fmt(left.type)}' (the non-nullish result is a sub-union; check a discriminant field first)`
-        : `'??' where the default changes the result type (left is '${L.fmt(left.type)}' but the whole expression is '${L.fmt(type)}' — give both sides one type)`,
+      `'??' where the result cannot represent every non-nullish arm (left is '${L.fmt(left.type)}' but the whole expression is '${L.fmt(type)}')`,
     );
-  }
-
-/** Interned `%nullish.retag.<n>(l, r)` — the retagged `??` (see
-   * lowerNullishCoalesce): unit-armed left answers the pre-evaluated
-   * default; every other arm narrows out of the left union and wraps into
-   * the result union's matching arm. */
-  function nullishRetagHelper(L: Lowerer, leftT: IrType & { kind: "union" }, resT: IrType & { kind: "union" }, loc: SrcLoc): string {
-    const key = `nullish:${leftT.unionId}:${typeKey(resT)}`;
-    const existing = L.widthHelpers.get(key);
-    if (existing) return existing;
-    const name = `%nullish.retag.${L.widthHelpers.size}`;
-    L.widthHelpers.set(key, name);
-    const def = L.unions.get(leftT.unionId)!;
-
-    const l = varRef("l.0", leftT, loc);
-    const r = varRef("r.0", resT, loc);
-    const body: IrStmt[] = [];
-    def.arms.forEach((arm, tag) => {
-      if (isUnitType(arm)) return;
-      const dst = L.armTag(resT.unionId, arm);
-      body.push({
-        kind: "if",
-        cond: { kind: "unionIsTag", unionId: leftT.unionId, tag, negated: false, value: l, type: BOOL, loc },
-        then: [
-          {
-            kind: "return",
-            value: {
-              kind: "unionWrap",
-              unionId: resT.unionId,
-              tag: dst,
-              value: { kind: "unionNarrow", unionId: leftT.unionId, tag, value: l, type: arm, loc },
-              type: resT,
-              loc,
-            },
-            loc,
-          },
-        ],
-        else_: null,
-        loc,
-      });
-    });
-    body.push({ kind: "return", value: r, loc });
-    L.liftedFns.push({
-      name,
-      params: [
-        { localId: "l.0", name: "l", type: leftT },
-        { localId: "r.0", name: "r", type: resT },
-      ],
-      returnType: resT,
-      locals: [
-        { id: "l.0", name: "l", type: leftT, mutable: true },
-        { id: "r.0", name: "r", type: resT, mutable: true },
-      ],
-      body,
-      loc,
-    });
-    return name;
   }
 
 /** One optional-chain STEP: `a?.b`, `a?.m(...)`, `a?.[i]` (the token on

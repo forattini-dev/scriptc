@@ -1,4 +1,4 @@
-import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import { typeEquals, type IrExpr, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/nodes.js";
 
 type NullishExpr = Extract<IrExpr, { kind: "nullish" }>;
 
@@ -33,11 +33,14 @@ export function emitRustNullish(
   if (expr.type.kind === "union" && expr.type.unionId === union.id) {
     return `{ let ${left} = ${emitExpr(expr.left)}; if matches!(&${left}, ${unitPatterns.join(" | ")}) { ${emitExpr(expr.right)} } else { ${left} } }`;
   }
+  const result = expr.type.kind === "union" ? context.union(expr.type.unionId, expr.loc) : undefined;
   const arms = union.arms.map((arm, tag) => {
     const variant = `${context.unionName(union.id)}::${context.unionVariant(tag)}`;
-    return context.isUnit(arm)
-      ? `${variant} => ${emitExpr(expr.right)}`
-      : `${variant}(payload) => payload`;
+    if (context.isUnit(arm)) return `${variant} => ${emitExpr(expr.right)}`;
+    if (result === undefined) return `${variant}(payload) => payload`;
+    const resultTag = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+    if (resultTag < 0) context.unsupported(`nullish result union lacks '${arm.kind}' arm`, expr.loc);
+    return `${variant}(payload) => ${context.unionName(result.id)}::${context.unionVariant(resultTag)}(payload)`;
   }).join(", ");
   return `{ let ${left} = ${emitExpr(expr.left)}; match ${left} { ${arms} } }`;
 }

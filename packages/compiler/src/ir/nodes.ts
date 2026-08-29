@@ -4387,12 +4387,13 @@ export type IrExpr =
    * ToBoolean (JS-exact: ONLY null/undefined take the right side — 0, "",
    * and false do not). `left` is a unit-armed union; `right` evaluates
    * lazily, only when the tag IS a unit arm, and has the node's type.
-   * Exactly two result shapes exist (frontend-enforced, validated):
+   * Three result shapes exist (frontend-enforced, validated):
    * pass-through — `type` equals `left.type` and the non-unit left value is
    * the result box itself — and narrowed — the union has ONE non-unit arm,
    * `type` equals it, and the payload is extracted unionNarrow-style (+1
-   * for ref kinds) under the checker's proof that the tag matches. Unions
-   * with several non-unit arms narrowing to a sub-union are fenced. */
+   * for ref kinds) under the checker's proof that the tag matches; and
+   * retagged — `type` is another union containing every non-unit left arm,
+   * whose payloads are lazily re-wrapped into that result union. */
   | { kind: "nullish"; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
   /** `u || d` where u is a union and the checker types the RESULT as u's
    * single non-unit arm (`value || null`-style picks resolved to a plain

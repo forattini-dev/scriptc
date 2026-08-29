@@ -1172,6 +1172,34 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.indent++;
         if (typeEquals(e.type, e.left.type)) {
           E.line(`${name} = ${l.name};`);
+        } else if (e.type.kind === "union") {
+          const result = E.unionsById.get(e.type.unionId);
+          if (!result) throw new InternalCompilerError(`emitter bug: nullish of unknown result union ${e.type.unionId}`);
+          E.line(`switch (${l.name}->tag) {`);
+          E.indent++;
+          def.arms.forEach((arm, sourceTag) => {
+            if (isUnitType(arm)) return;
+            const resultTag = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+            if (resultTag < 0) throw new InternalCompilerError(`emitter bug: nullish result union lacks ${arm.kind} arm`);
+            const read = arm.kind === "f64"
+              ? `scr_union_get_f64(${l.name})`
+              : arm.kind === "bool"
+                ? `scr_union_get_bool(${l.name})`
+                : `(${cType(arm).trim()})scr_union_peek(${l.name})`;
+            const wrapped = arm.kind === "f64"
+              ? `scr_union_new_f64(${resultTag}, ${read})`
+              : arm.kind === "bool"
+                ? `scr_union_new_bool(${resultTag}, ${read})`
+                : (() => {
+                    const rc = vAdapters(arm);
+                    return `scr_union_new_ref(${resultTag}, ${retainCallC(arm, read)}, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)})`;
+                  })();
+            E.line(`case ${sourceTag}: ${name} = ${wrapped}; break;`);
+          });
+          E.line(`default: scr_trap("scriptc: internal error: invalid nullish union tag\\n");`);
+          E.indent--;
+          E.line(`}`);
+          E.releaseValue(l.name, e.left.type);
         } else {
           const arm = e.type;
           const read =

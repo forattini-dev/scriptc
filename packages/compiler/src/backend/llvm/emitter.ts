@@ -5663,11 +5663,30 @@ class LlEmitter {
         B.startBlock(lv);
         if (typeEquals(e.type, e.left.type)) {
           B.line(`store ${ty} ${l.name}, ptr ${slot}`);
+          B.br(lj);
+        } else if (e.type.kind === "union") {
+          const result = this.unionsById.get(e.type.unionId);
+          if (!result) throw new InternalCompilerError(`llvm emitter bug: nullish of unknown result union ${e.type.unionId}`);
+          this.unionTagSwitch(l.name, def, (arm) => {
+            if (isUnitType(arm)) {
+              this.needsBadTag = true;
+              B.line(`call void @sc_bad_tag()`);
+              B.terminate(`unreachable`);
+              return;
+            }
+            const resultTag = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+            if (resultTag < 0) throw new InternalCompilerError(`llvm emitter bug: nullish result union lacks ${arm.kind} arm`);
+            const extracted = { name: this.unionExtract(l.name, arm), type: arm };
+            const wrapped = this.unionNewOwned(resultTag, extracted);
+            B.line(`store ${ty} ${wrapped}, ptr ${slot}`);
+            this.releaseValue(l.name, e.left.type);
+            B.br(lj);
+          });
         } else {
           B.line(`store ${ty} ${this.unionExtract(l.name, e.type)}, ptr ${slot}`);
           this.releaseValue(l.name, e.left.type);
+          B.br(lj);
         }
-        B.br(lj);
         B.startBlock(lj);
         const t = B.tmp();
         B.line(`${t} = load ${ty}, ptr ${slot}`);
