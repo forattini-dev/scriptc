@@ -39,6 +39,11 @@ export function emitRustProcessCall(
   if (expr.fn === "process.isTTY" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_is_tty(${context.emitExpr(arg)})`;
   }
+  if ((expr.fn === "process.columns" || expr.fn === "process.rows") &&
+      expr.args.length === 1 && arg?.type.kind === "f64") {
+    const runtimeFn = expr.fn === "process.columns" ? "process_columns" : "process_rows";
+    return emitOptionalUnion(expr, context, "f64", `runtime::${runtimeFn}(${context.emitExpr(arg)})`);
+  }
   if (expr.fn === "process.stdinDestroy" && expr.args.length === 0) {
     return "runtime::process_stdin_destroy()";
   }
@@ -63,13 +68,7 @@ export function emitRustProcessCall(
     return `runtime::process_umask(${context.emitExpr(arg)})`;
   }
   if (expr.fn === "process.envGet" && expr.args.length === 1 && arg !== undefined) {
-    if (expr.type.kind !== "union") context.unsupported("process.envGet without an optional result union", expr.loc);
-    const union = context.union(expr.type.unionId, expr.loc);
-    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
-    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
-    if (stringTag < 0 || undefinedTag < 0) context.unsupported("process.envGet result union shape", expr.loc);
-    const name = context.unionName(union.id);
-    return `match runtime::process_env_get(&(${context.emitExpr(arg)})) { Some(value) => ${name}::${context.unionVariant(stringTag)}(value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
+    return emitOptionalUnion(expr, context, "string", `runtime::process_env_get(&(${context.emitExpr(arg)}))`);
   }
   if (expr.fn === "process.envSet" && expr.args.length === 2 &&
       arg?.type.kind === "string" && secondArg?.type.kind === "string") {
@@ -127,4 +126,19 @@ export function emitRustProcessCall(
     return `runtime::process_${target}_write(&(${context.emitExpr(arg)}))`;
   }
   return null;
+}
+
+function emitOptionalUnion(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+  valueKind: "f64" | "string",
+  option: string,
+): string {
+  if (expr.type.kind !== "union") context.unsupported(`${expr.fn} without an optional result union`, expr.loc);
+  const union = context.union(expr.type.unionId, expr.loc);
+  const valueTag = union.arms.findIndex((arm) => arm.kind === valueKind);
+  const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+  if (valueTag < 0 || undefinedTag < 0) context.unsupported(`${expr.fn} result union shape`, expr.loc);
+  const name = context.unionName(union.id);
+  return `match ${option} { Some(value) => ${name}::${context.unionVariant(valueTag)}(value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
 }

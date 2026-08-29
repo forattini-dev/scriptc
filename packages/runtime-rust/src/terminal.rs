@@ -13,6 +13,32 @@ pub fn process_stdin_set_raw_mode(raw: bool) {
     let _ = raw;
 }
 
+pub fn process_columns(fd: f64) -> Option<f64> {
+    process_terminal_size(fd).map(|(_, columns)| columns)
+}
+
+pub fn process_rows(fd: f64) -> Option<f64> {
+    process_terminal_size(fd).map(|(rows, _)| rows)
+}
+
+#[cfg(not(target_os = "wasi"))]
+fn process_terminal_size(fd: f64) -> Option<(f64, f64)> {
+    use terminal_size::{Height, Width, terminal_size_of};
+    let size = match fd as i32 {
+        0 => terminal_size_of(std::io::stdin()),
+        1 => terminal_size_of(std::io::stdout()),
+        2 => terminal_size_of(std::io::stderr()),
+        _ => return None,
+    }?;
+    let (Width(columns), Height(rows)) = size;
+    Some((f64::from(rows), f64::from(columns)))
+}
+
+#[cfg(target_os = "wasi")]
+fn process_terminal_size(_fd: f64) -> Option<(f64, f64)> {
+    None
+}
+
 #[cfg(not(any(windows, target_os = "wasi")))]
 fn set_stdin_raw_mode(raw: bool) {
     use rustix::termios::{
