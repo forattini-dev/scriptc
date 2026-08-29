@@ -889,6 +889,7 @@ test.each([
   "1442-interval-throw.ts",
   "1445-exit-process-exit.ts",
   "1446-exit-uncaught.ts",
+  "1454-nonnull-narrow-and-fcc-bytes.ts",
   "518-promise-void-union-callbacks.ts",
   "1429-promise-catch-finally.ts",
   "1460-console-error-warn.ts",
