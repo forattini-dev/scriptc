@@ -4942,6 +4942,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     if (L.mapTypeOf(L.typeOf(node))?.kind !== "jsval") return null;
     const source = L.lowerExpr(node);
     if (source.type.kind !== "jsval") return null;
+    const destructuringSourceName = destrSpellingOf(node);
     const loc = locOf(expr);
     const tmp = L.declareHiddenLocal("%dsrc", JSVAL);
     const out: IrStmt[] = [{ kind: "varDecl", localId: tmp.id, init: source, loc }];
@@ -4962,6 +4963,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         kind: "jsOp",
         op: "construct",
         synthetic: "destructuring",
+        ...(destructuringSourceName === null ? {} : { destructuringSourceName }),
         args: [
           { kind: "jsOp", op: "globalGet", name: "Function", args: [], type: JSVAL, loc },
           { kind: "jsMarshal", value: { kind: "strLit", value: "v", type: STRING, loc }, type: JSVAL, loc },

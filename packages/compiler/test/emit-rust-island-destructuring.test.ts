@@ -24,11 +24,19 @@ function runToExit(file: string, args: string[], env: NodeJS.ProcessEnv): Promis
 }
 
 test.each([
-  ["2054-destructuring-island-source.ts", 0],
-  ["2074-island-destructuring.ts", 1],
-  ["2101-dyn-param-defaults.ts", 0],
-  ["2104-computed-key-destructuring.ts", 0],
-] as const)("Rust island destructuring matches Node: %s", async (fixtureName, expectedExit) => {
+  ["2054-destructuring-island-source.ts", 0, null],
+  [
+    "2074-island-destructuring.ts",
+    1,
+    "Uncaught TypeError: Cannot destructure 'a' as it is undefined.",
+  ],
+  ["2101-dyn-param-defaults.ts", 0, null],
+  ["2104-computed-key-destructuring.ts", 0, null],
+] as const)("Rust island destructuring matches Node: %s", async (
+  fixtureName,
+  expectedExit,
+  expectedUncaught,
+) => {
   const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-island-destructure-"));
   const result = await compile(fixture, {
@@ -51,6 +59,7 @@ test.each([
   expect(node.exitCode).toBe(expectedExit);
   expect(rust.exitCode).toBe(expectedExit);
   expect(rust.stdout).toBe(node.stdout);
-  if (expectedExit === 0) expect(rust.stderr).toBe(node.stderr);
-  else expect(rust.stderr).not.toContain("Rust heap object(s) still live");
+  if (expectedUncaught === null) expect(rust.stderr).toBe(node.stderr);
+  else expect(rust.stderr).toBe(`${expectedUncaught}\n`);
+  expect(rust.stderr).not.toContain("Rust heap object(s) still live");
 }, 240_000);

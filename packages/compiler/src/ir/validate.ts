@@ -5057,6 +5057,10 @@ function validateFunction(
         if (e.synthetic !== undefined && (e.synthetic !== "destructuring" || e.op !== "construct")) {
           err(`jsOp ${e.op} has invalid synthetic provenance '${e.synthetic}'`, e.loc);
         }
+        if (e.destructuringSourceName !== undefined &&
+            (e.synthetic !== "destructuring" || e.op !== "construct")) {
+          err(`jsOp ${e.op} has a destructuring source name without destructuring provenance`, e.loc);
+        }
         if (e.type.kind !== jsOpResultKind(e.op)) {
           err(`jsOp ${e.op} must be ${jsOpResultKind(e.op)}, got ${e.type.kind}`, e.loc);
         }

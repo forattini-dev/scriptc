@@ -5239,6 +5239,9 @@ export type IrExpr =
       /** Unforgeable frontend provenance for compiler-created island helpers.
        * Source-level `new Function(...)` never receives this marker. */
       synthetic?: "destructuring";
+      /** Original RHS identifier used only in destructuring diagnostics.
+       * The generated helper keeps its collision-free internal parameter. */
+      destructuringSourceName?: string;
       args: IrExpr[];
       type: IrType;
       loc: SrcLoc;

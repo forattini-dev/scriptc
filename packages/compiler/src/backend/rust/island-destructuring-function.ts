@@ -63,7 +63,8 @@ export function emitRustIslandDestructuringFunction(
   const pushes = object.map((key) =>
     `runtime::array_push(&${output}, sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false));`
   ).join(" ");
-  return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure 'v' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure 'v' as it is null.".to_owned()), _ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
+  const sourceName = context.rustString(callee.destructuringSourceName ?? "v");
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is null.".to_owned()), _ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
 }
 
 function emitObjectArrayDefaultPattern(
