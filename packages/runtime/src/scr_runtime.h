@@ -3309,6 +3309,7 @@ ScrError *scr_errdyn_err_of(const ScrDyn *d); /* +1 or NULL */
 void scr_errdyn_put(ScrError *e, ScrDyn *d);  /* retains both sides */
 /* ToBoolean over the dyn kind (JS-exact); borrowed, never throws. */
 bool scr_dyn_truthy(const ScrDyn *d);
+bool scr_dyn_is_integer(const ScrDyn *d);
 /* JS String() over a dyn value (arrays join, [object Object], the error
  * encoding renders "name: message"); borrowed, result +1, never throws. */
 ScrStr *scr_dyn_display(const ScrDyn *d);

@@ -1355,6 +1355,10 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   }
 }
 
+bool scr_dyn_is_integer(const ScrDyn *d) {
+  return d->kind == SCR_DYN_NUM && scr_num_is_integer(d->v.num);
+}
+
 /* Bare `typeof v` on a dyn value: the dyn kind's JS answer (+1 string).
  * null answers "object" — JS's oldest wart, preserved. */
 ScrStr *scr_dyn_typeof(const ScrDyn *d) {

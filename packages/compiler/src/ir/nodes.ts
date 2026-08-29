@@ -4941,7 +4941,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An

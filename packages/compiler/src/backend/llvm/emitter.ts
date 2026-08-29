@@ -7596,6 +7596,10 @@ class LlEmitter {
           this.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
           test = B.tmp();
           B.line(`${test} = call zeroext i1 @scr_dyn_truthy(ptr ${d.name})`);
+        } else if (e.test === "integer") {
+          this.declare(`declare zeroext i1 @scr_dyn_is_integer(ptr)`);
+          test = B.tmp();
+          B.line(`${test} = call zeroext i1 @scr_dyn_is_integer(ptr ${d.name})`);
         } else if (e.test === "error") {
           // `u instanceof Error`: the checked-dynamic tree's error encoding — an object
           // carrying the reserved "%error" marker key — or a real engine

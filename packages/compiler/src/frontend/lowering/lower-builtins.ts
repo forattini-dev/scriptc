@@ -6689,6 +6689,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         const raw: IrExpr = { kind: "jsOp", op: "callMethod", name: member, args: [numberGlobal, arg], type: JSVAL, loc };
         return { kind: "jsExit", value: raw, type: BOOL, loc };
       }
+      // `unknown` lowers to the checked-dynamic tree. Number.isInteger
+      // observes its runtime kind without coercion: numeric nodes test the
+      // payload and every other kind is simply false.
+      if (arg.type.kind === "dyn" && member === "isInteger") {
+        return { kind: "dynTest", test: "integer", value: arg, type: BOOL, loc };
+      }
       if (arg.type.kind !== "f64") {
         L.noLowering(
           `Number.${member} of '${L.fmt(arg.type)}' values`,

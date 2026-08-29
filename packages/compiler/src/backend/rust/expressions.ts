@@ -336,6 +336,7 @@ export class RustExpressionEmitter {
         let test: string;
         switch (expr.test) {
           case "number": test = `matches!(&${value}, ${name}::Number(..))`; break;
+          case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
           case "boolean": test = `matches!(&${value}, ${name}::Boolean(..))`; break;
           case "string": test = `matches!(&${value}, ${name}::String(..))`; break;
           case "undefined": test = `matches!(&${value}, ${name}::Undefined)`; break;

@@ -2832,6 +2832,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const test =
           e.test === "nullish"
             ? `(${d.name}->kind == SCR_DYN_UNDEF || ${d.name}->kind == SCR_DYN_NULL)`
+            : e.test === "integer"
+              ? `scr_dyn_is_integer(${d.name})`
             : e.test === "object"
               ? // `typeof v === "object"`: objects, arrays, bytes, native
                 // handles, promises, AND null — engine-held objects by the
