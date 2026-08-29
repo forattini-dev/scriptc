@@ -926,6 +926,7 @@ test.each([
   "1551-dyn-receiver-methods.ts",
   "1553-truthy-hof-predicates.ts",
   "1554-caught-into-unknown.ts",
+  "1555-index-spread-into-declared.ts",
   "1558-any-joins-and-dyn-validation.ts",
   "1559-conditional-spread-index-merge.ts",
   "1562-optional-chain-tails.ts",
