@@ -910,6 +910,7 @@ test.each([
   "1528-delete-records-env.ts",
   "1529-class-with-statics.ts",
   "1530-array-push-variadic.ts",
+  "1530-spread-override-completion.ts",
   "1531-delete-optional-fields.ts",
   "1533-bool-equality.ts",
   "1533-path-platform-namespaces.ts",
