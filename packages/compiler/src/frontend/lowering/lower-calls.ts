@@ -5771,9 +5771,37 @@ const inliningPredicates = new Set<ts.Symbol>();
         ctxDecl && !ctxDecl.getSourceFile().isDeclarationFile
           ? L.mapTypeOf(L.checker.getReturnTypeOfSignature(ctxSigs[0]!))
           : null;
+      // An ASYNC callback context may itself be the ordinary JS
+      // sync-or-async shape `T | Promise<T>`. The checker contextually
+      // infers the arrow as `Promise<T | Promise<T>>`, but an async
+      // function always adopts a returned promise and its callable ABI is
+      // just `() => Promise<T>`. Keep that real ABI here; the general
+      // function-value adapter wraps its promise result into the slot's
+      // union when the closure lands in the containing record. Without
+      // this normalization, the async arrow falsely exposes a nested
+      // promise and cannot inhabit the same hook slot as a sync callback.
+      let contextualAsyncPromise = false;
+      if (isAsyncLike && ctxRetRaw?.kind === "union") {
+        const arms = L.unions.get(ctxRetRaw.unionId)?.arms ?? [];
+        const promises = arms.filter((arm): arm is IrType & { kind: "promise" } => arm.kind === "promise");
+        if (
+          promises.length === 1 &&
+          arms.every(
+            (arm) =>
+              arm.kind === "promise" ||
+              (promises[0]!.inner.kind === "void"
+                ? arm.kind === "undefinedT"
+                : L.coercibleValue(arm, promises[0]!.inner)),
+          )
+        ) {
+          ret = promises[0]!;
+          contextualAsyncPromise = true;
+        }
+      }
       const ctxRet =
         isAsyncLike && ctxRetRaw?.kind === "promise" ? ctxRetRaw.inner : ctxRetRaw;
       if (
+        !contextualAsyncPromise &&
         ctxRet?.kind === "union" &&
         (innerRet.kind === "void" ? L.armTag(ctxRet.unionId, UNDEFINED_T) >= 0 : true)
       ) {
@@ -8327,7 +8355,9 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (L.chainBlocked(call)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "record") return null;
     const target = L.fieldTarget(access);
-    let callee = target ? L.fieldGetExpr(target, locOf(access), access) : null;
+    let callee = target
+      ? L.maybeNarrow(L.fieldGetExpr(target, locOf(access), access), access)
+      : null;
     if (!callee) return null;
     // A HYBRID (function-with-properties) field is callable through its
     // reserved %call slot — `colors.blue("x")` where blue also carries

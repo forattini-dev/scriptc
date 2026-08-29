@@ -2461,6 +2461,23 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         return { kind: "unionNarrow", unionId: expr.type.unionId, tag: arrayTags[0]!, value: expr, type: arm, loc: expr.loc };
       }
     }
+    // A null check around an optional sync-or-async callback can leave
+    // the checker's narrowed function type context-sensitive enough that
+    // it does not map on its own (`() => void | Promise<void>`). The IR
+    // union still has exactly one callable arm, and getCallSignatures is
+    // the checker's proof that the use is callable, so extract that arm
+    // just like the Array.isArray fallback above extracts its sole array
+    // arm. Multiple function arms remain tagged and keep the fence.
+    if (L.checker.getCallSignatures(narrowedTs).length === 1) {
+      const def = L.unions.get(expr.type.unionId);
+      const funcTags =
+        def?.arms.flatMap((arm, tag) => (arm.kind === "func" ? [tag] : [])) ?? [];
+      if (funcTags.length === 1) {
+        const tag = funcTags[0]!;
+        const arm = def!.arms[tag]!;
+        return { kind: "unionNarrow", unionId: expr.type.unionId, tag, value: expr, type: arm, loc: expr.loc };
+      }
+    }
     // A checker type narrowed to a UNIT arm (the `=== undefined` branch)
     // also stays union-typed: a unit arm has no payload to extract, and
     // nothing useful reads such a value anyway. (Standalone undefined maps

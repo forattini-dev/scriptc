@@ -1579,6 +1579,7 @@ shardedTest.each(shardSelect([
   "2721-parameter-property-inherited-override.ts",
   "2722-unknown-custom-error-instanceof.ts",
   "2723-error-options-cause.ts",
+  "2724-nested-zero-arg-maybe-async-hook.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

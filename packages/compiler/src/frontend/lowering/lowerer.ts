@@ -4421,7 +4421,8 @@ export class Lowerer {
           (src.kind === "record" && arm.kind === "record") ||
           (src.kind === "array" && arm.kind === "array") ||
           (src.kind === "object" && arm.kind === "record") ||
-          (src.kind === "record" && arm.kind === "object");
+          (src.kind === "record" && arm.kind === "object") ||
+          (src.kind === "func" && arm.kind === "func");
         if (sameFamily && this.widthLiftPlan(src, arm) !== null) candidates.push({ tag: i, arm });
       });
       if (candidates.length !== 1) return null;
