@@ -69,6 +69,7 @@ export interface RustExpressionContext {
   errorValueName(): string;
   errorValueVariant(meta: RustClassMeta): string;
   hierarchyFields(root: RustClassMeta): { owner: RustClassMeta; field: IrClassDef["fields"][number] }[];
+  hasEmbeddedModules(): boolean;
   isEdgeValue(type: IrType): boolean;
   isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;
   isUnit(type: IrType): boolean;

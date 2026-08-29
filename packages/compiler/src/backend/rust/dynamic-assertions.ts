@@ -1,4 +1,4 @@
-import type { RustDynamicContext } from "./dynamic.js";
+import type { RustDynamicContext } from "./dynamic-context.js";
 import type { RustClosureShape } from "./model.js";
 
 /** Emits checked-dynamic inspection and Node-compatible assertion messages. */
@@ -7,6 +7,7 @@ export function emitRustDynamicAssertions(
   boxedShapes: readonly RustClosureShape[],
 ): void {
   const name = context.dynTypeName();
+  const usesEmbeddedModules = context.hasEmbeddedModules();
   const functionPatterns = boxedShapes
     .map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`)
     .join(" | ");
@@ -51,6 +52,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::NativeConstructor(name) => format!("[Function: {name}]"),`);
   context.line(`${name}::NativeMethod(method) => format!("[Function: {}]", method.name()),`);
   context.line(`${name}::Getter(value) => sc_dyn_assert_inspect(value.as_ref(), indent),`);
+  if (usesEmbeddedModules) context.line(`${name}::Island(value) => runtime::island_to_string(value).to_string(),`);
   context.line(`${name}::Array(value) => {`);
   context.pushIndent();
   context.line("let length = runtime::array_len(value) as usize;");

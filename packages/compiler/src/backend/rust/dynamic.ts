@@ -1,4 +1,4 @@
-import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicHttp } from "./dynamic-http.js";
@@ -10,40 +10,8 @@ import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
-import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
-
-export interface RustDynamicContext {
-  usesDyn(): boolean;
-  usesDynamicInvoke(): boolean;
-  readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
-  readonly dynAdapterShapes: ReadonlySet<string>;
-  readonly dynBoxedFunctionShapes: ReadonlySet<string>;
-  readonly records: ReadonlyMap<string, IrRecordShape>;
-  readonly unions: ReadonlyMap<string, IrUnionDef>;
-  module(): IrModule;
-  line(value: string): void;
-  pushIndent(): void;
-  popIndent(): void;
-  nextTemporary(): string;
-  closureName(shape: RustClosureShape): string;
-  closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
-  dynFunctionCheckName(shape: RustClosureShape): string;
-  dynFunctionVariant(shape: RustClosureShape): string;
-  dynTypeName(): string;
-  emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
-  errorClassRoots(): RustClassMeta[];
-  errorValueName(): string;
-  isEdgeValue(type: IrType): boolean;
-  isRustJsonCompatible(type: IrType, visiting?: Set<string>): boolean;
-  isUnit(type: IrType): boolean;
-  needsClone(type: IrType): boolean;
-  rustString(value: string): string;
-  rustType(type: IrType, loc?: SrcLoc): string;
-  union(id: string, loc?: SrcLoc): IrUnionDef;
-  unionName(id: string): string;
-  unionVariant(tag: number): string;
-  unsupported(kind: string, loc?: SrcLoc): never;
-}
+import type { RustDynamicContext } from "./dynamic-context.js";
+import type { RustClosureShape } from "./model.js";
 
 export class RustDynamicEmitter {
   private readonly dynFrom: RustDynamicFromEmitter;
@@ -55,6 +23,7 @@ export class RustDynamicEmitter {
   emitDynamicDefinition(): void {
     if (!this.context.usesDyn()) return;
     const name = this.context.dynTypeName();
+    const usesEmbeddedModules = this.context.hasEmbeddedModules();
     const caughtErrorTest = this.context.errorClassRoots().length === 0 ? "runtime::caught_is_error(&caught)" : "sc_caught_is_error_class(&caught, \"Error\")";
     const caughtErrorValue = this.context.errorClassRoots().length === 0 ? "runtime::caught_error_value(&caught)" : "sc_caught_error_value(&caught)";
     const boxedShapes = [...this.context.dynBoxedFunctionShapes].map((key) => {
@@ -85,6 +54,7 @@ export class RustDynamicEmitter {
     this.context.line("HttpRequest(runtime::JsHttpRequest),");
     this.context.line("HttpResponse(runtime::JsHttpResponse),");
     this.context.line("HttpAgent(runtime::JsHttpAgent),");
+    if (usesEmbeddedModules) this.context.line("Island(runtime::IslandValue),");
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
     this.context.line(`Getter(Box<${name}>),`);
@@ -164,6 +134,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => { writer.begin_object(); writer.end_object(); },`);
+    if (usesEmbeddedModules) {
+      this.context.line(`${name}::Island(value) => runtime::JsonValue::write_json(&runtime::island_json_node(value), writer),`);
+    }
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
     }
@@ -337,6 +310,7 @@ export class RustDynamicEmitter {
     }
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
     this.context.line(`${name}::NativeMethod(method) => ${name}::NativeMethod(*method),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => ${name}::Island(value.clone()),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -398,6 +372,7 @@ export class RustDynamicEmitter {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => Err(format!("function at {path} is not JSON data")),`);
     }
     this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => Err(format!("function at {path} is not JSON data")),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => Ok(runtime::island_json_node(value)),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -428,6 +403,7 @@ export class RustDynamicEmitter {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
     this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => "object",`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -729,6 +705,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Getter(value) => sc_dyn_to_string(value.as_ref()),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => runtime::island_to_string(value),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("function () { [native code] }") } else { runtime::string(&format!("function {}() {{ [native code] }}", function_name)) },`);
     }
@@ -762,6 +739,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::HttpRequest(..) => "an instance of IncomingMessage".to_owned(),`);
     this.context.line(`${name}::HttpResponse(..) => "an instance of ServerResponse".to_owned(),`);
     this.context.line(`${name}::HttpAgent(..) => "an instance of Agent".to_owned(),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => "an embedded JavaScript value".to_owned(),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(_, function_name, _) => format!("function {function_name}"),`);
     }
@@ -899,6 +877,7 @@ export class RustDynamicEmitter {
 
   emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
     const name = this.context.dynTypeName();
+    const usesEmbeddedModules = this.context.hasEmbeddedModules();
     const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
     const errorType = this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
     const errorHelper = (helper: string): string => this.context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
@@ -996,6 +975,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::HttpRequest(..) => runtime::throw_dom_exception("DataCloneError", "#<IncomingMessage> could not be cloned."),`);
     this.context.line(`${name}::HttpResponse(..) => runtime::throw_dom_exception("DataCloneError", "#<ServerResponse> could not be cloned."),`);
     this.context.line(`${name}::HttpAgent(..) => runtime::throw_dom_exception("DataCloneError", "#<Agent> could not be cloned."),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => runtime::throw_dom_exception("DataCloneError", "embedded JavaScript value could not be cloned."),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let identity = value.identity();");

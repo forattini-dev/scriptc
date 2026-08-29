@@ -1,10 +1,11 @@
 import type { IrModule } from "../../ir/nodes.js";
+import { hasRustEmbeddedModules } from "./embedded-modules.js";
 
 export type RustRuntimeFeature = "island-eval";
 
 /** Select heavyweight runtime facilities from the lowered IR, never source text. */
 export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
-  let islandEval = false;
+  let islandEval = hasRustEmbeddedModules(mod);
   const visit = (value: unknown): void => {
     if (islandEval || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {

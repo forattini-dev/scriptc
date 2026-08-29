@@ -9,6 +9,13 @@ export function emitRustDynamicLibCall(
   if (expr.fn === "island.eval" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::island_eval(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "island.import" && expr.args.length === 3 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "string" &&
+    expr.args[2]?.type.kind === "string" && expr.type.kind === "jsval") {
+    const key = context.nextTemporary();
+    const member = context.nextTemporary();
+    return `{ let ${key} = ${context.emitExpr(arg)}; let ${member} = ${context.emitExpr(secondArg)}; ${context.dynTypeName()}::Island(runtime::island_import(&${key}, &${member})) }`;
+  }
   if (expr.fn === "util.parseArgs" && expr.args.length === 1 &&
     arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     return `runtime::util_parse_args(${context.emitExpr(arg)})`;

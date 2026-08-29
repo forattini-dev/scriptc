@@ -11,6 +11,7 @@ export interface RustIslandContext {
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
+  hasEmbeddedModules(): boolean;
   rustString(value: string): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
@@ -28,7 +29,15 @@ export function emitRustIslandExpr(
 ): string {
   switch (expr.kind) {
     case "jsMarshal": return emitMarshal(expr, context, emitExpr);
-    case "jsExit": return context.emitDynCheckValue(expr.type, emitExpr(expr.value), expr.loc);
+    case "jsExit": {
+      if (!context.hasEmbeddedModules()) {
+        return context.emitDynCheckValue(expr.type, emitExpr(expr.value), expr.loc);
+      }
+      const value = context.nextName("sc_island_exit");
+      const dyn = context.dynTypeName();
+      const normalized = `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ${dyn}::Island(sc_value) => runtime::json_parse_typed::<${dyn}>(&runtime::island_json(&sc_value)), sc_value => sc_value, } }`;
+      return context.emitDynCheckValue(expr.type, normalized, expr.loc);
+    }
     case "jsOp": return emitOperation(expr, context, emitExpr);
     case "jsBridgePromise": return emitPromiseBridge(expr, context, emitExpr);
   }
@@ -120,7 +129,13 @@ function emitOperation(
     const callee = context.nextName("sc_island_callee");
     const args = context.nextName("sc_island_args");
     const values = expr.args.slice(1).map((arg) => emitExpr(arg)).join(", ");
-    return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "value") }`;
+    if (!context.hasEmbeddedModules()) {
+      return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "value") }`;
+    }
+    const islandCall = values.length === 0
+      ? `${context.dynTypeName()}::Island(runtime::island_call(&sc_value, &[]))`
+      : "runtime::throw_error_code(\"embedded module calls with arguments are not supported yet\".to_owned(), \"SC3001\")";
+    return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; match ${callee} { ${context.dynTypeName()}::Island(sc_value) => ${islandCall}, sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
   }
   if ((expr.op === "truthy" || expr.op === "not") && expr.args.length === 1) {
     const truthy = `sc_dyn_is_truthy(&(${emitExpr(argOf(expr, 0, context))}))`;

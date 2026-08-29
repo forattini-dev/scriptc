@@ -1356,6 +1356,7 @@ test.each([
   "2440-console-inspect-args.ts",
   "2441-console-process-argv.ts",
   "2446-performance-global.ts",
+  "2447-island-boundary-slots/main.ts",
   "2448-entries-null-arms-regex-arrays.ts",
   "2449-js-dyn-worlds/main.js",
   "2450-private-instance-methods.ts",

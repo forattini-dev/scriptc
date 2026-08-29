@@ -1,4 +1,4 @@
-import type { RustDynamicContext } from "./dynamic.js";
+import type { RustDynamicContext } from "./dynamic-context.js";
 import type { RustClosureShape } from "./model.js";
 
 /** Emit util.inspect-compatible rendering for checked-dynamic values. */
@@ -7,6 +7,7 @@ export function emitRustDynamicInspect(
   boxedShapes: readonly RustClosureShape[],
 ): void {
   const name = context.dynTypeName();
+  const usesEmbeddedModules = context.hasEmbeddedModules();
   context.line(`fn sc_dyn_inspect(value: &${name}, recurse: f64, depth: f64) -> runtime::JsString {`);
   context.pushIndent();
   context.line("match value {");
@@ -78,6 +79,7 @@ export function emitRustDynamicInspect(
   context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("[Function: {name}]")),`);
   context.line(`${name}::NativeMethod(method) => runtime::string(&format!("[Function: {}]", method.name())),`);
   context.line(`${name}::Getter(value) => sc_dyn_inspect(value.as_ref(), recurse, depth),`);
+  if (usesEmbeddedModules) context.line(`${name}::Island(value) => runtime::island_to_string(value),`);
   for (const shape of boxedShapes) {
     context.line(`${name}::${context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);
   }

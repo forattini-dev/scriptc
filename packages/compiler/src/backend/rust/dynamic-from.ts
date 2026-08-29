@@ -1,7 +1,7 @@
 import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
-import type { RustDynamicContext } from "./dynamic.js";
+import type { RustDynamicContext } from "./dynamic-context.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 interface DynFromHelper {

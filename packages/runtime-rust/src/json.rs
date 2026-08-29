@@ -531,10 +531,12 @@ where
 }
 
 pub fn json_parse_typed<T: JsonDecode>(text: &JsString) -> T {
-    let node = JsonParser::new(text)
-        .parse()
-        .unwrap_or_else(|message| throw_syntax_error(message));
+    let node = json_parse_node(text).unwrap_or_else(|message| throw_syntax_error(message));
     T::decode_json(&node, "$").unwrap_or_else(|message| throw_type_error(message))
+}
+
+pub fn json_parse_node(text: &JsString) -> Result<JsonNode, String> {
+    JsonParser::new(text).parse()
 }
 
 struct JsonParser<'a> {

@@ -11,6 +11,7 @@ export interface RustProgramEntryOptions {
   readonly usesProcessExitListeners: boolean;
   readonly usesProcessRejectionEvents: boolean;
   readonly usesProcessWarningEvents: boolean;
+  readonly usesEmbeddedModules: boolean;
 }
 
 /** Emit the process boundary separately from IR expression/statement emission. */
@@ -18,6 +19,9 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
   const lines = [
     "fn main() {",
     "    runtime::init();",
+    ...(options.usesEmbeddedModules
+      ? ["    runtime::island_register_modules(&SC_ISLAND_MODULES);"]
+      : []),
     "    let _sc_execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {",
     options.entryAsync
       ? `        let _sc_main_promise = ${mangleFunction(options.entryName)}(); runtime::promise_track_entry(&_sc_main_promise);`

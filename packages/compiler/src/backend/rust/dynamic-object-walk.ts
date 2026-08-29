@@ -1,4 +1,4 @@
-import type { RustDynamicContext } from "./dynamic.js";
+import type { RustDynamicContext } from "./dynamic-context.js";
 
 export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   const name = context.dynTypeName();

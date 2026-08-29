@@ -25,6 +25,7 @@ import { RustMetadata } from "./metadata.js";
 import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustProgramEntry } from "./program-entry.js";
+import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
@@ -120,6 +121,7 @@ class RustEmitter {
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     errorClassRoots: () => this.errorClassRoots(),
     errorValueName: () => this.errorValueName(),
+    hasEmbeddedModules: () => hasRustEmbeddedModules(this.mod),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),
@@ -309,6 +311,7 @@ class RustEmitter {
     errorValueName: () => this.errorValueName(),
     errorValueVariant: (meta) => this.errorValueVariant(meta),
     hierarchyFields: (root) => this.hierarchyFields(root),
+    hasEmbeddedModules: () => hasRustEmbeddedModules(this.mod),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),
@@ -501,6 +504,7 @@ class RustEmitter {
       this.line("use std::cell::{Cell, RefCell};");
     }
     this.line("");
+    this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value), (kind) => this.unsupported(kind)));
     this.emitClosureDefinitions();
     this.emitDynamicDefinition();
     this.eventEmitter.emitDefinition();
@@ -535,6 +539,7 @@ class RustEmitter {
       usesProcessExitListeners: this.usesProcessExitListeners,
       usesProcessRejectionEvents: this.usesProcessRejectionEvents,
       usesProcessWarningEvents: this.usesProcessWarningEvents,
+      usesEmbeddedModules: hasRustEmbeddedModules(this.mod),
     }));
     return `${this.lines.join("\n")}\n`;
   }
@@ -548,7 +553,6 @@ class RustEmitter {
       }
     }
     if ((this.mod.ffiImports?.length ?? 0) > 0) this.unsupported("native FFI");
-    if (this.mod.embedded !== undefined) this.unsupported("embedded dynamic modules");
     if (this.mod.lib !== undefined) this.unsupported("library mode");
   }
 
@@ -1173,7 +1177,6 @@ class RustEmitter {
   private virtualImplementation(meta: RustClassMeta, slot: RustVtSlot): IrFunction {
     return this.metadata.virtualImplementation(meta, slot);
   }
-
   private dynTypeName(): string { return this.metadata.dynTypeName(); }
   private closureName(shape: RustClosureShape): string { return this.metadata.closureName(shape); }
   private dynFunctionVariant(shape: RustClosureShape): string { return this.metadata.dynFunctionVariant(shape); }
@@ -1181,7 +1184,6 @@ class RustEmitter {
   private promiseRejectorVariant(type: IrFuncType, promiseType: IrType, loc?: SrcLoc): string {
     return this.metadata.promiseRejectorVariant(type, promiseType, loc);
   }
-
   private closureVariant(target: IrFunction): string { return this.metadata.closureVariant(target); }
   private captureField(index: number): string { return this.metadata.captureField(index); }
   private union(id: string, loc?: SrcLoc): IrUnionDef { return this.metadata.union(id, loc); }
@@ -1189,10 +1191,7 @@ class RustEmitter {
   private unionVariant(tag: number): string { return this.metadata.unionVariant(tag); }
   private unionEqName(id: string): string { return this.metadata.unionEqName(id); }
   private rustString(value: string): string { return this.metadata.rustString(value); }
-
-  private line(value: string): void {
-    this.lines.push(`${"    ".repeat(this.indent)}${value}`);
-  }
+  private line(value: string): void { this.lines.push(`${"    ".repeat(this.indent)}${value}`); }
 
   private unsupported(kind: string, loc?: SrcLoc): never {
     throw new RustUnsupportedError(kind, loc);
