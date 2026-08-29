@@ -83,6 +83,32 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
   ];
 }
 
+async function expectRustSourceOutcome(
+  name: string,
+  source: string,
+  expected: ProcessOutcome,
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), `scriptc-rust-${name}-`));
+  const entryPath = join(dir, `${name}.ts`);
+  await writeFile(entryPath, source);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, name),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+  const rust = await runToExit(result.binaryPath, [], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  });
+  expect(rust).toEqual(expected);
+}
+
 test("Rust emitter compiles recursive scalar IR without unsafe or C", async () => {
   expect(validateModule(fibModule)).toEqual([]);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-emit-"));
@@ -303,6 +329,54 @@ test("Rust array higher-order methods preserve callbacks, references, reductions
     expect(rust.stdout, fixture).toBe(node.stdout);
     expect(rust.stderr, fixture).toBe(node.stderr);
   }
+}, 120_000);
+
+test("Rust class-to-record width projections drop extra fields into a fresh copy", async () => {
+  await expectRustSourceOutcome("class-record-width", `
+class Tagged {
+  constructor(public id: number, public tag: string) {}
+}
+const source = new Tagged(7, "extra");
+const projected: { id: number } = source;
+console.log(JSON.stringify(projected));
+source.id = 9;
+console.log(projected.id);
+`, {
+    stdout: '{"id":7}\n7\n',
+    stderr: "",
+    exitCode: 0,
+  });
+}, 120_000);
+
+test("Rust record-to-class width projections construct a fresh runtime instance", async () => {
+  await expectRustSourceOutcome("record-class-width", `
+class Point {
+  constructor(public x: number, public y: number) {}
+}
+const source = { x: 3, y: 4, label: "extra" };
+const projected: Point = source;
+console.log(projected instanceof Point);
+source.x = 9;
+console.log(projected.x);
+`, {
+    stdout: "true\n3\n",
+    stderr: "",
+    exitCode: 0,
+  });
+}, 120_000);
+
+test("Rust asserted record widths materialize a fresh narrowed copy", async () => {
+  await expectRustSourceOutcome("asserted-width", `
+const source = { id: 9, extra: true };
+const narrowed = source as { id: number };
+console.log(JSON.stringify(narrowed));
+source.id = 10;
+console.log(narrowed.id);
+`, {
+    stdout: '{"id":9}\n9\n',
+    stderr: "",
+    exitCode: 0,
+  });
 }, 120_000);
 
 test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
@@ -1200,6 +1274,10 @@ test.each([
   "2213-async-local-storage.cjs",
   "2214-dc-bind-store.cjs",
   "2215-process-emit-warning-exit.cjs",
+  "2240-width-class-into-record.ts",
+  "2241-width-record-into-class.ts",
+  "2242-width-statics-into-record.ts",
+  "2243-width-assert-satisfies-shapes.ts",
   "2250-tagged-templates.ts",
   "2251-tagged-templates-dyn.ts",
   "2252-class-iterators.ts",
