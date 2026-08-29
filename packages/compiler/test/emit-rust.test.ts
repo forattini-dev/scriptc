@@ -1295,6 +1295,8 @@ test.each([
   "2352-void-coercions.ts",
   "2353-decorators-member-ambient.ts",
   "2354-decorators-expression-ambient.ts",
+  "2360-tuple-to-array.ts",
+  "2361-assign-index-record.ts",
   "2363-nullish-retag.ts",
   "2368-set-methods.ts",
   "2369-promise-try.ts",
