@@ -883,6 +883,7 @@ test.each([
   "1424-fs-options.ts",
   "1427-fromcharcode-lastindexof.ts",
   "1433-filter-narrow.ts",
+  "1436-default-undef-param.ts",
   "1440-interval-basics.ts",
   "1441-interval-clear-cross.ts",
   "1442-interval-throw.ts",
