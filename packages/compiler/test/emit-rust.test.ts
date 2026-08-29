@@ -1189,6 +1189,11 @@ test.each([
   "2165-js-throw-dyn.cjs",
   "2166-cjs-getter-this/main.cjs",
   "2170-island-array-exits.ts",
+  "2190-new-object-and-string-wrappers.ts",
+  "2192-object-default-tostring.ts",
+  "2194-ambient-undef-chains.ts",
+  "2195-require-missing-package/main.mjs",
+  "2196-island-computed-key-chain.ts",
   "2210-dyn-promise-crossing.cjs",
   "2211-dc-trace-promise.cjs",
   "2212-unhandled-rejection-listener.cjs",
@@ -1505,6 +1510,7 @@ test.each([
 }, 240_000);
 
 test.each([
+  ["2194-ambient-undef-chains.ts", "pair is not defined"],
   ["2592-ambient-trap-uncaught.ts", "t is not defined"],
   ["2614-trap-binding-later-writes.ts", "numLiteral is not defined"],
 ])("Rust uncaught ambient read preserves exit, stdout, and ReferenceError: %s", async (fixture, message) => {
