@@ -1364,6 +1364,7 @@ test.each([
   "2688-fs-stats-disk-fields.ts",
   "2689-http-server-timeout-properties.ts",
   "2690-https-server-timeout-option.ts",
+  "2691-retained-lowering-record-order.ts",
   "2692-void-ternary-statement.ts",
   "2694-path-win32-full.ts",
   "2695-net-typed-roundtrip.ts",

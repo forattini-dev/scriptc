@@ -844,7 +844,7 @@ class RustEmitter {
   private emitClassDefinitions(): void { this.definitionEmitter.emitClassDefinitions(); }
   private emitErrorValueDefinition(): void { this.definitionEmitter.emitErrorValueDefinition(); }
   private emitGlobals(): void { this.definitionEmitter.emitGlobals(); }
-  private emitFunction(fn: IrFunction): void { this.definitionEmitter.emitFunction(fn); }
+  private emitFunction(fn: IrFunction): void { this.forcedBoxedLocals.clear(); this.definitionEmitter.emitFunction(fn); }
   private containsAsyncSuspension(value: unknown): boolean {
     return this.asyncControlEmitter.containsAsyncSuspension(value);
   }
