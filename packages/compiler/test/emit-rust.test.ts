@@ -1551,6 +1551,7 @@ test.each([
   "2696-http-server-net-roundtrip.ts",
   "2697-process-chdir.ts",
   "2698-process-umask.ts",
+  "2700-wasi-core.ts",
   "2625-bytes-views.ts",
 ])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
