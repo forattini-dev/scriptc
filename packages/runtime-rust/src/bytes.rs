@@ -277,10 +277,19 @@ pub fn bytes_alloc<T: ByteElement>(length: f64) -> JsBytes<T> {
     })
 }
 
+fn bytes_values<T: ByteElement>(bytes: &JsBytes<T>) -> Vec<T> {
+    bytes.with(|data| {
+        if let Some(backing) = &data.backing {
+            return (data.offset..data.offset + data.length)
+                .map(|index| T::from_number(f64::from(backing.get(index))))
+                .collect();
+        }
+        data.storage.borrow()[data.offset..data.offset + data.length].to_vec()
+    })
+}
+
 pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
-    let copied =
-        bytes.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
-    bytes_from_elements(copied)
+    bytes_from_elements(bytes_values(bytes))
 }
 
 pub fn process_stdout_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
@@ -425,14 +434,7 @@ pub fn bytes_to_array<T: ByteElement>(bytes: &JsBytes<T>) -> JsArray<f64> {
 }
 
 fn bytes_u8_values(bytes: &JsBytes<u8>) -> Vec<u8> {
-    bytes.with(|data| {
-        if let Some(backing) = &data.backing {
-            return (data.offset..data.offset + data.length)
-                .map(|index| backing.get(index))
-                .collect();
-        }
-        data.storage.borrow()[data.offset..data.offset + data.length].to_vec()
-    })
+    bytes_values(bytes)
 }
 
 fn bytes_u8_at(bytes: &JsBytes<u8>, index: usize) -> u8 {

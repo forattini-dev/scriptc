@@ -546,8 +546,14 @@
         assert_eq!(data_view_get(&word_view, "u32", 0.0, true), 0x0102_0304 as f64);
 
         let owner = bytes_alloc::<u8>(8.0);
+        bytes_set(&owner, 2.0, 2.0);
+        bytes_set(&owner, 3.0, 3.0);
+        bytes_set(&owner, 4.0, 4.0);
         bytes_set(&owner, 6.0, 7.0);
         let window = data_view_new(&owner, 2.0, true, 3.0);
+        let copied = bytes_copy(&window);
+        assert_eq!(bytes_byte_offset(&copied), 0.0);
+        assert_eq!(bytes_join(&copied, &string(",")).as_ref(), "2,3,4");
         let rebased = data_view_new(&window, 6.0, true, 2.0);
         assert_eq!(bytes_byte_offset(&rebased), 6.0);
         assert_eq!(data_view_get(&rebased, "u8", 0.0, false), 7.0);
