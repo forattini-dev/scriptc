@@ -929,6 +929,7 @@ test.each([
   "1555-index-spread-into-declared.ts",
   "1558-any-joins-and-dyn-validation.ts",
   "1559-conditional-spread-index-merge.ts",
+  "1560-forof-homogeneous-tuples.ts",
   "1562-optional-chain-tails.ts",
   "1563-string-raw-fold.ts",
   "1564-string-raw.ts",
