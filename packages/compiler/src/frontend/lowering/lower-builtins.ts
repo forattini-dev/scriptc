@@ -6778,6 +6778,14 @@ const DATE_METHOD_HINT =
       }
       return { kind: "libCall", fn: "date.now", args: [], type: F64, loc };
     }
+    if (L.stdlibGlobalMember(access, "Date") === "parse") {
+      const argNode = call.arguments[0];
+      if (!argNode || call.arguments.length !== 1 || call.arguments.some(ts.isSpreadElement)) {
+        L.noLowering(`Date.parse with ${call.arguments.length} arguments`, call);
+      }
+      const value = L.lowerExprExpecting(argNode, STRING);
+      return { kind: "libCall", fn: "date.parseGetTime", args: [value], type: F64, loc };
+    }
     // Date.UTC(year[, month[, date[, hours[, minutes[, seconds[, ms]]]]]]):
     // a pure function of its numbers — the runtime's MakeDay/MakeTime/
     // TimeClip. Omitted trailing arguments complete with the spec's

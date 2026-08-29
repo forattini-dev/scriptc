@@ -994,8 +994,15 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     id: "stdlib.date.getTime",
     kind: "stdlib",
     name: "Date.prototype.getTime",
-    fns: ["date.getTime", "date.parseGetTime"],
+    fns: ["date.getTime"],
     note: "the millisecond value of a stored Date",
+  },
+  {
+    id: "stdlib.date.parse",
+    kind: "stdlib",
+    name: "Date.parse",
+    fns: ["date.parseGetTime"],
+    note: "one date-string argument; invalid input returns NaN",
   },
   {
     id: "stdlib.date.valueOf",

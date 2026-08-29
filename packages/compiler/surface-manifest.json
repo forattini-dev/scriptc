@@ -2289,6 +2289,13 @@
       "note": "the live clock"
     },
     {
+      "id": "stdlib.date.parse",
+      "kind": "stdlib",
+      "name": "Date.parse",
+      "status": "static",
+      "note": "one date-string argument; invalid input returns NaN"
+    },
+    {
       "id": "stdlib.date.toISOString",
       "kind": "stdlib",
       "name": "Date.prototype.toISOString",
