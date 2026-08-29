@@ -4940,14 +4940,23 @@ function validateFunction(
           err(`awaitUnion of non-union ${e.value.type.kind}`, e.loc);
         } else if (promiseArm?.kind !== "promise") {
           err(`awaitUnion arm ${e.promiseTag} is not a promise`, e.loc);
-        } else if (!def.arms.every((a, i) => i === e.promiseTag || isUnitType(a))) {
-          err("awaitUnion union has non-unit arms beside the promise", e.loc);
+        } else if (
+          !def.arms.every(
+            (a, i) =>
+              i === e.promiseTag || isUnitType(a) || typeEquals(a, promiseArm.inner),
+          )
+        ) {
+          err("awaitUnion union has an arm that differs from the promise inner", e.loc);
         } else if (e.type.kind === "void") {
           if (promiseArm.inner.kind !== "void") {
             err("awaitUnion void result over a value-carrying promise", e.loc);
           }
+        } else if (typeEquals(e.type, promiseArm.inner)) {
+          if (!def.arms.every((a, i) => i === e.promiseTag || typeEquals(a, e.type))) {
+            err("awaitUnion collapsed result has a non-matching plain arm", e.loc);
+          }
         } else if (e.type.kind !== "union") {
-          err(`awaitUnion result is ${e.type.kind}, not void or a union`, e.loc);
+          err(`awaitUnion result is ${e.type.kind}, not its promise inner or a union`, e.loc);
         } else {
           const res = unions.get(e.type.unionId);
           const covered =

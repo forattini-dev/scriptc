@@ -1580,6 +1580,7 @@ shardedTest.each(shardSelect([
   "2722-unknown-custom-error-instanceof.ts",
   "2723-error-options-cause.ts",
   "2724-nested-zero-arg-maybe-async-hook.ts",
+  "2725-optional-maybe-async-predicate.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

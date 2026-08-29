@@ -1289,23 +1289,33 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.unsupported("SC1090", expr, "top-level await (await outside async functions)");
       }
       const value = L.lowerExpr(expr.expression);
-      // A promise-or-absent union (`Promise<T> | undefined` values, calls
-      // of `(...) => Promise<void> | void` callbacks): the await handles
-      // both arms — the promise arm parks like any await, a unit arm takes
-      // exactly one microtask hop (JS: await of a non-thenable) and yields
-      // itself. The result is void when the inner is void and the only
-      // unit is undefined; otherwise the union of the inner type and the
-      // unit arms — what the checker types the await as.
+      // A promise-or-plain union (`Promise<T> | T`, plus the historical
+      // `Promise<T> | undefined` shape): the promise arm parks like any
+      // await; a non-promise arm takes exactly one microtask hop (JS:
+      // await of a non-thenable). When every plain arm is exactly T the
+      // result collapses to T; unit siblings instead join T in the result.
       if (value.type.kind === "union") {
         const def = L.unions.get(value.type.unionId);
         const promiseTag = def ? def.arms.findIndex((a) => a.kind === "promise") : -1;
-        if (
-          def &&
-          promiseTag >= 0 &&
-          def.arms.every((a, i) => i === promiseTag || isUnitType(a))
-        ) {
+        if (def && promiseTag >= 0) {
           const promiseArm = def.arms[promiseTag]!;
           const inner = promiseArm.kind === "promise" ? promiseArm.inner : VOID;
+          const plainSameInner =
+            inner.kind !== "void" &&
+            inner.kind !== "union" &&
+            inner.kind !== "dyn" &&
+            inner.kind !== "jsval" &&
+            def.arms.every((a, i) => i === promiseTag || typeEquals(a, inner));
+          if (plainSameInner) {
+            return { kind: "awaitUnionExpr", value, promiseTag, type: inner, loc };
+          }
+          if (!def.arms.every((a, i) => i === promiseTag || isUnitType(a))) {
+            L.unsupported(
+              "SC1090",
+              expr,
+              `awaiting '${L.fmt(value.type)}' (plain arms must match the promise's inner type exactly)`,
+            );
+          }
           const units = def.arms.filter(isUnitType);
           if (inner.kind === "union" || inner.kind === "dyn" || inner.kind === "jsval") {
             // A union inner would need an arm-wise re-tag into the result

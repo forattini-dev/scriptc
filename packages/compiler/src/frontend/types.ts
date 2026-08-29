@@ -2750,11 +2750,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // (`StringConstructor | NumberConstructor` — the option-table
             // field) closures compare by pointer identity per tag
             // (unionEq), so `x === String` narrows. No restriction left.
-            // Promise arms follow the func rule (typeof gives no test
-            // against sibling data arms): only the promise-or-absent shape
-            // maps — `Promise<T> | undefined`, and `Promise<T> | void`
-            // return types whose void part became the undefined arm above.
-            (a.kind === "promise" && !arms.every((b) => b === a || isUnitType(b))),
+            // Promise arms map beside unit siblings (the historical
+            // promise-or-absent shape) and beside their own scalar inner
+            // type (`boolean | Promise<boolean>` agent/test seams). The
+            // latter has an exact await dispatch: the promise arm parks,
+            // the scalar arm takes one hop, and both yield the same ABI.
+            // Other data siblings still have no static narrowing story.
+            (a.kind === "promise" &&
+              !arms.every(
+                (b) =>
+                  b === a ||
+                  isUnitType(b) ||
+                  ((a.inner.kind === "f64" || a.inner.kind === "bool" || a.inner.kind === "string") &&
+                    typeEquals(b, a.inner)),
+              )),
         )
       ) {
         return null;

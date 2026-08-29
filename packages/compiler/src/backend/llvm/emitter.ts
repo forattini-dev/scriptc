@@ -6916,6 +6916,50 @@ class LlEmitter {
           this.emitPendingCheck();
           return { name: "", type: e.type };
         }
+        // `Promise<T> | T`: both branches join directly at T. The plain
+        // payload extracts +1 after the required non-thenable await hop.
+        if (typeEquals(e.type, inner)) {
+          const ty = this.llType(inner);
+          const slot = B.slot();
+          B.entryAllocas.push(`${slot} = alloca ${ty}`);
+          const lp = B.newLabel("au.p");
+          const lh = B.newLabel("au.h");
+          const lj = B.newLabel("au.j");
+          B.condBr(isP, lp, lh);
+          B.startBlock(lp);
+          const promise = this.unionPeek(u.name);
+          if (this.wasi) this.emitWasiSuspend(promise);
+          let awaited: string;
+          if (inner.kind === "f64") {
+            this.declare(`declare double @scr_await_f64(ptr)`);
+            awaited = B.tmp();
+            B.line(`${awaited} = call double @scr_await_f64(ptr ${promise})`);
+          } else if (inner.kind === "bool") {
+            this.declare(`declare zeroext i1 @scr_await_bool(ptr)`);
+            awaited = B.tmp();
+            B.line(`${awaited} = call zeroext i1 @scr_await_bool(ptr ${promise})`);
+          } else if (inner.kind === "string") {
+            this.declare(`declare ptr @scr_await_str(ptr)`);
+            awaited = B.tmp();
+            B.line(`${awaited} = call ptr @scr_await_str(ptr ${promise})`);
+          } else {
+            throw new InternalCompilerError(`llvm emitter bug: collapsed awaitUnion inner ${inner.kind}`);
+          }
+          B.line(`store ${ty} ${awaited}, ptr ${slot}`);
+          B.br(lj);
+          B.startBlock(lh);
+          if (this.wasi) this.emitWasiSuspend(null);
+          else B.line(`call void @scr_await_hop()`);
+          const plain = this.unionExtract(u.name, inner);
+          B.line(`store ${ty} ${plain}, ptr ${slot}`);
+          B.br(lj);
+          B.startBlock(lj);
+          const result = B.tmp();
+          B.line(`${result} = load ${ty}, ptr ${slot}`);
+          const out = this.own({ name: result, type: e.type });
+          this.emitPendingCheck();
+          return out;
+        }
         if (e.type.kind !== "union") {
           throw new InternalCompilerError("llvm emitter bug: awaitUnion result is neither void nor a union");
         }

@@ -1,6 +1,6 @@
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
+import { emitAwaitDependency } from "./async-await.js";
 import type { IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncProtectedWhile } from "./async-protected-loop.js";
@@ -138,38 +138,7 @@ export class RustAsyncControlEmitter {
   }
 
   emitAwaitDependency(expr: IrAwaitExpr): string {
-    if (expr.kind === "awaitExpr") return this.context.emitExpr(expr.value);
-    if (expr.value.type.kind !== "union") this.context.unsupported("await union with a non-union operand", expr.loc);
-    const source = this.context.union(expr.value.type.unionId, expr.loc);
-    const promiseArm = source.arms[expr.promiseTag];
-    if (promiseArm?.kind !== "promise") this.context.unsupported("await union without a Promise arm", expr.loc);
-    const sourceName = this.context.unionName(source.id);
-    const value = this.context.nextName("sc_async_await_union");
-    if (expr.type.kind === "void") {
-      const arms = source.arms.map((arm, tag) => {
-        const variant = `${sourceName}::${this.context.unionVariant(tag)}`;
-        if (tag === expr.promiseTag) return `${variant}(promise) => promise`;
-        if (this.context.isUnit(arm)) return `${variant} => runtime::promise_resolved(())`;
-        this.context.unsupported(`await union arm '${arm.kind}'`, expr.loc);
-      });
-      return `{ let ${value} = ${this.context.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
-    }
-    if (expr.type.kind !== "union") this.context.unsupported("await union with a non-union result", expr.loc);
-    const result = this.context.union(expr.type.unionId, expr.loc);
-    const resultName = this.context.unionName(result.id);
-    const resultTag = (arm: IrType): number => {
-      const tag = result.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm));
-      if (tag < 0) this.context.unsupported(`await union result missing arm '${arm.kind}'`, expr.loc);
-      return tag;
-    };
-    const arms = source.arms.map((arm, tag) => {
-      const variant = `${sourceName}::${this.context.unionVariant(tag)}`;
-      const target = `${resultName}::${this.context.unionVariant(resultTag(tag === expr.promiseTag ? promiseArm.inner : arm))}`;
-      if (tag === expr.promiseTag) return `${variant}(promise) => runtime::promise_map(&promise, |value| ${target}(value))`;
-      if (this.context.isUnit(arm)) return `${variant} => runtime::promise_resolved(${target})`;
-      this.context.unsupported(`await union arm '${arm.kind}'`, expr.loc);
-    });
-    return `{ let ${value} = ${this.context.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
+    return emitAwaitDependency(this.context, expr);
   }
 
   emitAsyncStatements(statements: readonly IrStmt[], onComplete: (() => void) | null = null): void {

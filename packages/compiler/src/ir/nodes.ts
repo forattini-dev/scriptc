@@ -4687,14 +4687,11 @@ export type IrExpr =
    * promise re-throws into the awaiter (may-throw seed). Result is the
    * promise's inner value (+1 for refcounted kinds). Only inside async fns. */
   | { kind: "awaitExpr"; value: IrExpr; type: IrType; loc: SrcLoc }
-  /** Await of a promise-or-absent union (`Promise<T> | undefined`, the
-   * mapped `Promise<T> | void`): `value` is a union whose arm `promiseTag`
-   * is a promise and whose other arms are all units. The promise arm awaits
-   * like awaitExpr (parks, re-throws rejections — may-throw seed); a unit
-   * arm takes exactly ONE microtask hop (JS: await of a non-thenable) and
-   * yields itself. `type` is void when the promise's inner is void and the
-   * only unit arm is undefined; otherwise the interned union of the inner
-   * type and the unit arms (+1). Only inside async fns. */
+  /** Await of a promise-or-plain union (`Promise<T> | T`, plus the mapped
+   * `Promise<T> | void` / absent form): the promise arm parks and rethrows
+   * rejections; every non-promise arm takes exactly one microtask hop. When
+   * all plain arms equal T, `type` is T. Unit arms instead produce void or
+   * the interned union of T and those units. Only inside async fns. */
   | { kind: "awaitUnionExpr"; value: IrExpr; promiseTag: number; type: IrType; loc: SrcLoc }
   /** `new Promise<T>((resolve) => ...)`: creates a pending promise and runs
    * the executor synchronously with a resolve closure; an executor throw

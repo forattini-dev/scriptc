@@ -7320,6 +7320,32 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return { name: "", type: e.type };
         }
+        // `Promise<T> | T`: both paths yield the same scalar/reference
+        // ABI. The plain arm still takes await's mandatory one-hop turn;
+        // reference payloads retain out of the borrowed union box.
+        if (typeEquals(e.type, inner)) {
+          const name = `sc_t${E.tempCounter++}`;
+          const ref = isRefCounted(inner);
+          E.line(`${cDecl(inner, name)}${ref ? " = NULL" : ""};${E.srcComment(e.loc)}`);
+          if (ref) E.currentFrame().push({ name, type: inner });
+          let awaited: string;
+          let plain: string;
+          if (inner.kind === "f64") {
+            awaited = `scr_await_f64(${peek})`;
+            plain = `scr_union_get_f64(${u.name})`;
+          } else if (inner.kind === "bool") {
+            awaited = `scr_await_bool(${peek})`;
+            plain = `scr_union_get_bool(${u.name})`;
+          } else if (inner.kind === "string") {
+            awaited = `scr_await_str(${peek})`;
+            plain = retainCallC(inner, `(ScrString *)scr_union_peek(${u.name})`);
+          } else {
+            throw new InternalCompilerError(`emitter bug: collapsed awaitUnion inner ${inner.kind}`);
+          }
+          E.line(`if (${u.name}->tag == ${e.promiseTag}) ${name} = ${awaited}; else { scr_await_hop(); ${name} = ${plain}; }`);
+          E.emitPendingCheck();
+          return { name, type: e.type };
+        }
         if (e.type.kind !== "union") {
           throw new InternalCompilerError("emitter bug: awaitUnion result is neither void nor a union");
         }
