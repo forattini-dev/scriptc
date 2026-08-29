@@ -27,13 +27,14 @@ function runToExit(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProcessOutcome> {
   return new Promise((resolveRun) => {
-    execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
+    const child = execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
       resolveRun({
         stdout,
         stderr,
         exitCode: error && typeof error.code === "number" ? error.code : 0,
       });
     });
+    child.stdin?.end();
   });
 }
 
@@ -1298,9 +1299,11 @@ test.each([
   "2590-object-create-dynamic.js",
   "2591-ambient-generic-traps.ts",
   "2593-generic-inert-bindings.ts",
+  "2595-fs-arg-ladders.cjs",
   "2596-net-arg-ladders.cjs",
   "2597-dgram-send-ladders.cjs",
   "2598-tls-arg-ladders.cjs",
+  "2599-stream-arg-ladders.cjs",
   "2600-dyn-keyed-write-harness.js",
   "2601-dyn-keyed-write-ops.js",
   "2602-dyn-array-destructure.js",
@@ -1317,11 +1320,13 @@ test.each([
   "2628-stream-push-encodings.cjs",
   "2629-stream-consumers.ts",
   "2630-stream-consumers-errors.ts",
+  "2631-create-require/main.ts",
   "2632-dyn-jsval-iterate.js",
   "2633-island-promise-crossing.js",
   "2634-stream-pipeline-arg-ladders.cjs",
   "2635-trap-binding-unmappable-written.ts",
   "2636-trap-binding-ambient-rooted-rewrite.ts",
+  "2637-create-require-bare/main.ts",
   "2638-http-dyn-res-compat.cjs",
   "2639-http-dyn-req-pause.cjs",
   "2640-net-dyn-socket-compat.cjs",
@@ -1336,6 +1341,7 @@ test.each([
   "2649-top-level-await-pending.ts",
   "2650-top-level-await-self-import.ts",
   "2651-top-level-await-pending-unhandled.ts",
+  "2652-top-level-await-dynamic/main.ts",
   "2653-top-level-await-rejection-stops-loop.ts",
   "2654-top-level-await-unrelated-rejection.ts",
   "2655-top-level-await-cycle/main.ts",
@@ -1346,6 +1352,7 @@ test.each([
   "2660-top-level-await-cycle-rejection/main.ts",
   "2661-top-level-await-dynamic-runtime-root/main.ts",
   "2662-top-level-await-cycle-external-wait/main.ts",
+  "2663-top-level-await-dependency-errors/main.ts",
   "2664-top-level-await-same-checkpoint-rejection.ts",
   "2665-top-level-await-unhandled-listener-liveness.ts",
   "2666-array-to-sorted.ts",
@@ -1355,8 +1362,12 @@ test.each([
   "2670-uint8array-copy-iterate.ts",
   "2671-array-copying-js.cjs",
   "2672-http-request-response-callback.ts",
+  "2673-top-level-await-implicit-module.ts",
+  "2674-top-level-for-await-implicit-module.ts",
   "2675-process-self-reexec.ts",
+  "2676-top-level-await-ambiguous/main.ts",
   "2676-indexed-read-strict-equality.ts",
+  "2677-top-level-await-module-scope/main.ts",
   "2678-util-parseargs.ts",
   "2679-util-parseargs-cjs.cjs",
   "2680-util-parseargs-default.ts",
