@@ -1143,6 +1143,7 @@ test.each([
   "2214-dc-bind-store.cjs",
   "2215-process-emit-warning-exit.cjs",
   "2250-tagged-templates.ts",
+  "2251-tagged-templates-dyn.ts",
   "2252-class-iterators.ts",
   "2253-union-coercions.ts",
   "2260-http2-constants.cjs",

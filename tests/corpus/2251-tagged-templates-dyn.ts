@@ -17,6 +17,12 @@ function declare(x: any, ...ys: any[]): string {
 }
 console.log(declare`Hello ${0} world!`);
 
+const inspectTemplateStrings: any = (strings: any): string => {
+  return `${String(strings[0])}|${String(strings.raw[0])}`;
+};
+const templateResult: any = inspectTemplateStrings`\u0061`;
+console.log(`${templateResult}`);
+
 var notATag: any;
 try {
   notATag`boom`;

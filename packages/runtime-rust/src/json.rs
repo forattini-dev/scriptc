@@ -494,7 +494,10 @@ where
         for (index, element) in elements.iter().enumerate() {
             decoded.push(T::decode_json(element, &json_index_path(path, index))?);
         }
-        Ok(Self { elements: decoded })
+        Ok(Self {
+            elements: decoded,
+            raw: None,
+        })
     }
 }
 

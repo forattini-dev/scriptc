@@ -68,6 +68,12 @@ function emitOperation(
     const elements = expr.args.map((arg) => `runtime::array_push(&${array}, ${emitExpr(arg)});`).join(" ");
     return `{ let ${array}: runtime::JsArray<${context.dynTypeName()}> = runtime::array_new(Vec::new()); ${elements} ${context.dynTypeName()}::Array(${array}) }`;
   }
+  if (expr.op === "tplStrings" && expr.args.length % 2 === 0) {
+    const middle = expr.args.length / 2;
+    const cooked = expr.args.slice(0, middle).map((arg) => emitExpr(arg)).join(", ");
+    const raw = expr.args.slice(middle).map((arg) => emitExpr(arg)).join(", ");
+    return `${context.dynTypeName()}::Array(runtime::array_new_with_raw(vec![${cooked}], vec![${raw}]))`;
+  }
   if (expr.op === "undefLit" && expr.args.length === 0) return `${context.dynTypeName()}::Undefined`;
   if (expr.op === "nullLit" && expr.args.length === 0) return `${context.dynTypeName()}::Null`;
   if (expr.op === "getProp" && expr.name !== undefined && expr.args.length === 1) {

@@ -43,6 +43,7 @@ where
 
 pub struct ArrayData<T: ArrayElement> {
     elements: Vec<T>,
+    raw: Option<JsArray<T>>,
 }
 
 impl<T: ArrayElement> Trace for ArrayData<T> {
@@ -50,12 +51,16 @@ impl<T: ArrayElement> Trace for ArrayData<T> {
         for element in &self.elements {
             element.trace_element(tracer);
         }
+        if let Some(raw) = &self.raw {
+            tracer.edge(raw);
+        }
     }
 }
 
 impl<T: ArrayElement> ClearEdges for ArrayData<T> {
     fn clear_edges(&mut self) {
         self.elements.clear();
+        self.raw = None;
     }
 }
 
@@ -80,7 +85,29 @@ pub fn template_strings_clear() {
 }
 
 pub fn array_new<T: ArrayElement>(elements: Vec<T>) -> JsArray<T> {
-    Gc::new(ArrayData { elements })
+    Gc::new(ArrayData {
+        elements,
+        raw: None,
+    })
+}
+
+pub fn array_new_with_raw<T: ArrayElement>(
+    elements: Vec<T>,
+    raw_elements: Vec<T>,
+) -> JsArray<T> {
+    let raw = array_new(raw_elements);
+    Gc::new(ArrayData {
+        elements,
+        raw: Some(raw),
+    })
+}
+
+pub fn array_raw<T: ArrayElement>(array: &JsArray<T>) -> Option<JsArray<T>> {
+    array.with(|data| data.raw.clone())
+}
+
+pub fn array_set_raw<T: ArrayElement>(array: &JsArray<T>, raw: JsArray<T>) {
+    array.with_mut(|data| data.raw = Some(raw));
 }
 
 pub fn array_len<T: ArrayElement>(array: &JsArray<T>) -> f64 {
