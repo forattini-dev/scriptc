@@ -15,7 +15,7 @@ export function emitRustIslandDestructuringFunction(
 ): string | null {
   if (expr.op !== "callFn" || expr.args.length < 2) return null;
   const [callee] = expr.args;
-  if (callee?.kind !== "jsOp" || callee.op !== "construct" ||
+  if (callee?.kind !== "jsOp" || callee.op !== "construct" || callee.synthetic !== "destructuring" ||
       callee.args.length < 3 || !isFunctionGlobal(callee.args[0])) return null;
   const constructorArgs = callee.args.slice(1);
   const parameters = constructorArgs.slice(0, -1).map(compilerString);
@@ -43,6 +43,12 @@ export function emitRustIslandDestructuringFunction(
   if (rest !== null) return rest;
   const nestedDefault = emitNestedDefaultPattern(body, sourceExpr, argumentsByName, context, emitExpr);
   if (nestedDefault !== null) return nestedDefault;
+  const arrayHoleRest = emitArrayHoleRestPattern(body, sourceExpr, context, emitExpr);
+  if (arrayHoleRest !== null) return arrayHoleRest;
+  const objectDefault = emitObjectDefaultPattern(body, sourceExpr, context, emitExpr);
+  if (objectDefault !== null) return objectDefault;
+  const arrayDefaults = emitArrayDefaultsPattern(body, sourceExpr, context, emitExpr);
+  if (arrayDefaults !== null) return arrayDefaults;
   if (parameters.length !== 1) return null;
 
   const array = parseArrayPattern(body);
@@ -75,6 +81,119 @@ function emitObjectArrayDefaultPattern(
   const value = context.nextName("sc_island_value");
   const output = context.nextName("sc_island_output");
   return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${value} = sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::Array(runtime::array_new(Vec::new())) } else { ${value} }; let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${dyn}::Array(${output}) }`;
+}
+
+function emitArrayHoleRestPattern(
+  body: string,
+  sourceExpr: IrExpr,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const match = /^"use strict";var (__\d+),(__\d+),(__\d+);\(\[(__\d+),,(__\d+),\.\.\.(__\d+)\] = v\);return \[(__\d+),(__\d+),(__\d+)\];$/u.exec(body);
+  if (match === null || !(match[1] === match[4] && match[4] === match[7] &&
+      match[2] === match[5] && match[5] === match[8] &&
+      match[3] === match[6] && match[6] === match[9])) return null;
+  const dyn = context.dynTypeName();
+  const source = context.nextName("sc_island_source");
+  const headValue = context.nextName("sc_island_head_value");
+  const head = context.nextName("sc_island_head");
+  const rest = context.nextName("sc_island_rest");
+  const index = context.nextName("sc_island_index");
+  const output = context.nextName("sc_island_output");
+  const emitByteRestLoop = (lengthExpr: string, getExpr: string) =>
+    `{ let mut ${index} = 3.0; while ${index} < ${lengthExpr} { runtime::array_push(&${rest}, ${dyn}::Number(${getExpr})); ${index} += 1.0; } }`;
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${headValue} = sc_dyn_iter_n(&${source}, 3); let ${dyn}::Array(${head}) = ${headValue} else { unreachable!("scriptc invariant: destructuring iterator is not an array") }; let ${rest}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); match &${source} { ${dyn}::Array(sc_array) => for sc_value in runtime::array_values(sc_array).into_iter().skip(3) { runtime::array_push(&${rest}, sc_value); }, ${dyn}::String(sc_text) => for sc_character in sc_text.chars().skip(3) { runtime::array_push(&${rest}, ${dyn}::String(runtime::string(&sc_character.to_string()))); }, ${dyn}::Bytes(sc_bytes) | ${dyn}::Buffer(sc_bytes) => ${emitByteRestLoop("runtime::bytes_len(sc_bytes)", `runtime::bytes_get(sc_bytes, ${index})`)}, ${dyn}::TypedBytes(sc_bytes) => ${emitByteRestLoop("runtime::typed_bytes_len(sc_bytes)", `runtime::typed_bytes_get(sc_bytes, ${index})`)}, _ => unreachable!("scriptc invariant: validated destructuring iterator changed kind"), } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, runtime::array_get(&${head}, 0.0)); runtime::array_push(&${output}, runtime::array_get(&${head}, 2.0)); runtime::array_push(&${output}, ${dyn}::Array(${rest})); ${dyn}::Array(${output}) }`;
+}
+
+function emitObjectDefaultPattern(
+  body: string,
+  sourceExpr: IrExpr,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const pattern = parseObjectDefaultPattern(body);
+  if (pattern === null) return null;
+  const dyn = context.dynTypeName();
+  const fallback = primitiveDynLiteral(pattern.fallback, dyn, context);
+  const key = parseString(pattern.keyLiteral);
+  if (key === null || fallback === null) return null;
+  const source = context.nextName("sc_island_source");
+  const excluded = context.nextName("sc_island_excluded");
+  const value = context.nextName("sc_island_value");
+  const output = context.nextName("sc_island_output");
+  const rest = context.nextName("sc_island_rest");
+  const restSetup = pattern.hasRest
+    ? `let ${rest}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); ${copyObjectRest(source, rest, excluded, dyn)}`
+    : "";
+  const restPush = pattern.hasRest ? `runtime::array_push(&${output}, ${dyn}::Object(${rest}));` : "";
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${excluded} = runtime::string("${context.rustString(key)}"); let ${value} = sc_dyn_key_get(&${source}, &${excluded}, false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${fallback} } else { ${value} }; ${restSetup} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${restPush} ${dyn}::Array(${output}) }`;
+}
+
+function parseObjectDefaultPattern(
+  body: string,
+): { keyLiteral: string; fallback: string; hasRest: boolean } | null {
+  const plain = /^"use strict";var (?<decl>__\d+);\(\{\[(?<key>"(?:\\.|[^"\\])*")\]:(?<target>__\d+)=(?<fallback>[^,}]+)\} = v\);return \[(?<returned>__\d+)\];$/u.exec(body)?.groups;
+  if (plain !== undefined) {
+    return plain.decl === plain.target && plain.target === plain.returned &&
+      plain.key !== undefined && plain.fallback !== undefined
+      ? { keyLiteral: plain.key, fallback: plain.fallback, hasRest: false }
+      : null;
+  }
+  const rest = /^"use strict";var (?<decl>__\d+),(?<restDecl>__\d+);\(\{\[(?<key>"(?:\\.|[^"\\])*")\]:(?<target>__\d+)=(?<fallback>[^,}]+),\.\.\.(?<restTarget>__\d+)\} = v\);return \[(?<returned>__\d+),(?<restReturned>__\d+)\];$/u.exec(body)?.groups;
+  if (rest === undefined || rest.key === undefined || rest.fallback === undefined) return null;
+  return rest.decl === rest.target && rest.target === rest.returned &&
+    rest.restDecl === rest.restTarget && rest.restTarget === rest.restReturned
+    ? { keyLiteral: rest.key, fallback: rest.fallback, hasRest: true }
+    : null;
+}
+
+function emitArrayDefaultsPattern(
+  body: string,
+  sourceExpr: IrExpr,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const match = /^"use strict";var (__\d+(?:,__\d+)*);\(\[([^\]]+)\] = v\);return \[([^\]]+)\];$/u.exec(body);
+  if (match === null) return null;
+  const declared = tempList(match[1] ?? "");
+  const returned = tempList(match[3] ?? "");
+  const entries = (match[2] ?? "").split(",").map((entry) => /^(__\d+)=(.+)$/u.exec(entry));
+  if (!sameStrings(declared, returned) || entries.length !== declared.length || entries.some((entry) => entry === null)) return null;
+  const dyn = context.dynTypeName();
+  const fallbacks = entries.map((entry, index) => {
+    if (entry === null || entry[1] !== declared[index]) return null;
+    return primitiveDynLiteral(entry[2], dyn, context);
+  });
+  if (fallbacks.some((fallback) => fallback === null)) return null;
+  const source = context.nextName("sc_island_source");
+  const valuesValue = context.nextName("sc_island_values_value");
+  const values = context.nextName("sc_island_values");
+  const output = context.nextName("sc_island_output");
+  const pushes = fallbacks.map((fallback, index) => {
+    const value = context.nextName("sc_island_value");
+    return `let ${value} = runtime::array_get(&${values}, ${index}.0); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${fallback} } else { ${value} }; runtime::array_push(&${output}, ${value});`;
+  }).join(" ");
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${valuesValue} = sc_dyn_iter_n(&${source}, ${entries.length}); let ${dyn}::Array(${values}) = ${valuesValue} else { unreachable!("scriptc invariant: destructuring iterator is not an array") }; let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
+}
+
+function primitiveDynLiteral(
+  raw: string | undefined,
+  dyn: string,
+  context: RustIslandContext,
+): string | null {
+  if (raw === undefined) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (value === null) return `${dyn}::Null`;
+  if (typeof value === "boolean") return `${dyn}::Boolean(${value})`;
+  if (typeof value === "string") return `${dyn}::String(runtime::string("${context.rustString(value)}"))`;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const number = Object.is(value, -0) ? "-0.0" : Number.isInteger(value) ? `${value}.0` : String(value);
+  return `${dyn}::Number(${number})`;
 }
 
 function emitComputedPropertyPattern(

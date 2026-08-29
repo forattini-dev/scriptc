@@ -2780,6 +2780,7 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
     const helper: IrExpr = {
       kind: "jsOp",
       op: "construct",
+      synthetic: "destructuring",
       args: [
         { kind: "jsOp", op: "globalGet", name: "Function", args: [], type: JSVAL, loc },
         ...paramNames.map((p): IrExpr => ({ kind: "jsMarshal", value: { kind: "strLit", value: p, type: STRING, loc }, type: JSVAL, loc })),
@@ -4960,6 +4961,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const helper: IrExpr = {
         kind: "jsOp",
         op: "construct",
+        synthetic: "destructuring",
         args: [
           { kind: "jsOp", op: "globalGet", name: "Function", args: [], type: JSVAL, loc },
           { kind: "jsMarshal", value: { kind: "strLit", value: "v", type: STRING, loc }, type: JSVAL, loc },

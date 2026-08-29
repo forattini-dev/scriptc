@@ -1129,6 +1129,7 @@ test.each([
   "2052-dynamic-import-self.ts",
   "2053-typeof-static-fold.ts",
   "2060-empty-tuple.ts",
+  "2083-destructuring-island-decl.ts",
   "2100-stream-default-hwm.ts",
   "2106-comma-expressions.ts",
   "2161-js-object-literal-identity.cjs",
@@ -1608,6 +1609,32 @@ console.log(boxed);
     "cannot convert a circular structure into a checked-dynamic value",
   );
   expect(outcome.stderr).not.toContain("stack overflow");
+}, 120_000);
+
+test("Rust keeps source Function lookalikes outside compiler destructuring", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-source-function-"));
+  const entryPath = join(dir, "source-function.ts");
+  await writeFile(entryPath, `
+// @dynamic
+let calls = 0;
+function sideEffect(): number { calls++; return calls; }
+console.log((new Function(
+  "v",
+  "extra",
+  '"use strict";var __0;({["missing"]:__0=42} = v);return [__0];',
+)({} as any, sideEffect()) as any)[0], calls);
+`);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, "source-function"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.diagnostics.map((diag) => diag.message).join("; ")).toContain(
+    "'new Function' is part of the standard library types but has no scriptc lowering yet",
+  );
 }, 120_000);
 
 test("Rust dynamic objects, arrays, strings, and function properties match Node", async () => {

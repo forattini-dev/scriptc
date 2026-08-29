@@ -5054,6 +5054,9 @@ function validateFunction(
       }
       case "jsOp": {
         for (const a of e.args) checkExpr(a);
+        if (e.synthetic !== undefined && (e.synthetic !== "destructuring" || e.op !== "construct")) {
+          err(`jsOp ${e.op} has invalid synthetic provenance '${e.synthetic}'`, e.loc);
+        }
         if (e.type.kind !== jsOpResultKind(e.op)) {
           err(`jsOp ${e.op} must be ${jsOpResultKind(e.op)}, got ${e.type.kind}`, e.loc);
         }

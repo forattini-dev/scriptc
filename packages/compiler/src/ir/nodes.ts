@@ -5232,7 +5232,17 @@ export type IrExpr =
    * (engine
    * exceptions bridge into the exception cell, catchably) — backends'
    * may-throw analyses must seed on every jsOp like a `throw`. */
-  | { kind: "jsOp"; op: IrJsOp; name?: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  | {
+      kind: "jsOp";
+      op: IrJsOp;
+      name?: string;
+      /** Unforgeable frontend provenance for compiler-created island helpers.
+       * Source-level `new Function(...)` never receives this marker. */
+      synthetic?: "destructuring";
+      args: IrExpr[];
+      type: IrType;
+      loc: SrcLoc;
+    }
   /** Island → static validated exit (--dynamic builds only): `value` is
    * jsval-typed, `type` is the static target. STRICT for primitives (a
    * non-number refuses to exit as number — no coercion); composite
