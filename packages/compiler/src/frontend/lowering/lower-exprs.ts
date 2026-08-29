@@ -4904,6 +4904,47 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // erased IR value keeps a wider shape). Reuse that exact value in the
     // ordinary spread path so lowering still happens once.
     let leadingSpreadLowered: IrExpr | null = null;
+    // A computed spread (`...(clientOptions() ?? {})`) must evaluate once
+    // while the field-by-field desugar needs several reads. A FIRST spread
+    // can bind around the whole literal. A later optional-record spread may
+    // use the same outer binding when everything before it is static: moving
+    // the source over an unobservable prefix preserves source-order effects.
+    let computedLeadingSpread: { local: IrLocal; init: IrExpr } | null = null;
+    let computedInlineSpread: { prop: ts.SpreadAssignment; local: IrLocal; init: IrExpr } | null = null;
+    const stableSpreadSource = (
+      prop: ts.SpreadAssignment,
+      value: IrExpr,
+      allowInline = false,
+    ): IrExpr => {
+      if (pureReemittable(value)) return value;
+      const local = L.declareHiddenLocal("%spread", value.type);
+      if (prop === expr.properties[0] && computedLeadingSpread === null) {
+        computedLeadingSpread = { local, init: value };
+        return varRef(local.id, local.type, locOf(prop));
+      }
+      if (
+        !allowInline ||
+        computedLeadingSpread !== null ||
+        computedInlineSpread !== null ||
+        !fields.every(
+          (field) =>
+            field.drop ||
+            droppableStatic(field.value) ||
+            (field.value.kind === "ternary" &&
+              pureCondExpr(field.value.cond) &&
+              droppableStatic(field.value.then) &&
+              droppableStatic(field.value.else_)),
+        )
+      ) {
+        L.unsupported(
+          "SC1090",
+          prop,
+          "object spread of computed sources after effectful members (bind the source to a const before the object literal)",
+        );
+      }
+      computedInlineSpread = { prop, local, init: value };
+      return varRef(local.id, local.type, locOf(prop));
+    };
 
     // The overwhelmingly common immutable-update form over a record:
     // `{ ...model, changed, other: value }`. The historic lowering expanded
@@ -5151,6 +5192,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     };
 
     const fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[] = [];
+    const hasInlineSpread = (prop: ts.SpreadAssignment): boolean =>
+      computedInlineSpread !== null && computedInlineSpread.prop === prop;
+    const selectedComputedSpread = (): { local: IrLocal; init: IrExpr } | null =>
+      computedLeadingSpread ?? computedInlineSpread;
     // Field names introduced by conditional spreads: their ternary carries
     // the spread's whole evaluation (cond once, value lazily), so a LATER
     // contributor overriding one would silently drop that evaluation —
@@ -5190,13 +5235,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               `conditional spreads onto the required field '${name}' (the empty arm leaves it undefined — declare the field optional)`,
             );
           }
-          if (fields.some((f) => f.name === name)) {
-            L.unsupported(
-              "SC1090",
-              prop,
-              `conditional spread of '${name}' over an earlier '${name}' (the desugar keeps one entry per name — restructure so each name has one contributor)`,
-            );
-          }
+          // A conditional contributor overrides the earlier value only in
+          // its non-empty arm. Move the merged entry to this spread's
+          // position so the condition/value retain source order; the empty
+          // arm preserves the earlier spread-copied value.
+          const earlier = fields.findIndex((f) => f.name === name && !f.drop);
+          const emptyValue = earlier >= 0 ? fields[earlier]!.value : absent;
+          if (earlier >= 0) fields.splice(earlier, 1);
           const cond = L.lowerCondition(cs.cond);
           const valueNode = ts.isPropertyAssignment(csProp) ? csProp.initializer : csProp;
           let v = ts.isPropertyAssignment(csProp)
@@ -5210,8 +5255,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             value: {
               kind: "ternary",
               cond,
-              then: cs.whenTrue ? v : absent,
-              else_: cs.whenTrue ? absent : v,
+              then: cs.whenTrue ? v : emptyValue,
+              else_: cs.whenTrue ? emptyValue : v,
               type: fieldType,
               loc: locOf(prop),
             },
@@ -5272,20 +5317,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               `object spread of '${L.fmt(srcType)}' sources (only known record shapes spread — ${NARROW_FIRST})`,
             );
           }
-          if (srcLowered && !pureReemittable(srcLowered)) {
-            L.unsupported(
-              "SC1090",
-              prop,
-              "object spread of computed sources (the field copies re-read the source — bind it to a const first)",
-            );
-          }
+          const stableSrc = srcLowered ? stableSpreadSource(prop, srcLowered, true) : null;
+          const inlineComputed = hasInlineSpread(prop);
           const recArm = recArms[0]! as IrType & { kind: "record" };
           const recTag = def.arms.indexOf(recArm);
           // A checked-dynamic VALUE under the union-mapped checker type
           // (a JS dyn-holding binding): the present/absent desugar tests
           // union tags a dyn box does not carry — fence honestly instead
           // of the validator's ICE.
-          const probedSrc = srcLowered ?? probeLower(L, srcNode);
+          const probedSrc = stableSrc ?? probeLower(L, srcNode);
           if (probedSrc?.type.kind === "dyn") {
             L.unsupported(
               "SC1090",
@@ -5323,14 +5363,18 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               laterNames.add(propNameText(L, later.name));
             }
           }
-          const srcRef = (): IrExpr => srcLowered ?? L.lowerExpr(srcNode);
+          const srcRef = (): IrExpr => stableSrc ?? L.lowerExpr(srcNode);
           for (const f of srcShape.fields) {
             if (laterNames.has(f.name)) continue;
             const targetType = fieldTypes.get(f.name);
             // No slot on the target shape: the copy DROPS the field
             // (divergence 36's stance, same as the plain-record spread).
             if (!targetType) continue;
-            if (conditionalNames.has(f.name)) {
+            const at = fields.findIndex((x) => x.name === f.name && !x.drop);
+            if (
+              conditionalNames.has(f.name) &&
+              (!inlineComputed || at < 0 || !droppableStatic(fields[at]!.value))
+            ) {
               L.unsupported(
                 "SC1090",
                 prop,
@@ -5393,7 +5437,6 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               }
               thenVal = L.applyWidthLift(lift, fRead(), targetType, locOf(prop));
             }
-            const at = fields.findIndex((x) => x.name === f.name && !x.drop);
             const elseVal = at >= 0 ? fields[at]!.value : L.wrappedUndefined(targetType, locOf(prop));
             if (!elseVal) {
               L.unsupported(
@@ -5402,9 +5445,22 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
                 `object spread of '${L.fmt(srcType)}' sources where '${f.name}' has no earlier contributor (the absent arm leaves the required field unset — spread defaults first: { ...defaults, ...overrides })`,
               );
             }
-            const merged: IrExpr = { kind: "ternary", cond, then: thenVal, else_: elseVal, type: targetType, loc: locOf(prop) };
-            if (at >= 0) fields[at] = { name: f.name, value: merged };
-            else fields.push({ name: f.name, value: merged });
+            const merged: IrExpr = {
+              kind: "ternary",
+              cond,
+              then: thenVal,
+              else_: elseVal,
+              type: targetType,
+              loc: locOf(prop),
+            };
+            if (at >= 0 && inlineComputed) {
+              fields.splice(at, 1);
+              fields.push({ name: f.name, value: merged });
+            } else if (at >= 0) {
+              fields[at] = { name: f.name, value: merged };
+            } else {
+              fields.push({ name: f.name, value: merged });
+            }
           }
           continue;
         }
@@ -5415,13 +5471,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             `object spread of '${srcType ? L.fmt(srcType) : L.checker.typeToString(L.typeOf(srcNode))}' sources (only known record shapes spread — ${NARROW_FIRST})`,
           );
         }
-        if (srcLowered && !pureReemittable(srcLowered)) {
-          L.unsupported(
-            "SC1090",
-            prop,
-            "object spread of computed sources (the field copies re-read the source — bind it to a const first)",
-          );
-        }
+        const stableSrc = srcLowered ? stableSpreadSource(prop, srcLowered, true) : null;
+        const inlineComputed = hasInlineSpread(prop);
         const srcShape = L.shapes.get(srcType.shapeId);
         if (!srcShape) throw new InternalCompilerError(`lowerer bug: spread of unknown shape ${srcType.shapeId}`);
         fenceAccessorSpreadSource(L, prop, srcShape);
@@ -5482,7 +5533,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             L.pushDiag(recordShapeMismatchDiag(L.fmt(type), L.fmt(srcType), locOf(prop), `spread field '${f.name}': '${L.fmt(f.type)}' does not lift into '${L.fmt(targetType)}'`));
             throw new PoisonError();
           }
-          const obj = srcLowered ?? L.lowerExpr(srcNode);
+          const obj = stableSrc ?? L.lowerExpr(srcNode);
           // A record-mapped CHECKER type whose VALUE lives in the checked-dynamic tree (a
           // JS file-scope object-literal global): read each field from
           // the checked-dynamic tree (dynKeyGet) and VALIDATE it into the source shape's
@@ -5527,16 +5578,49 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // re-tag, nested reshape) — the same per-field rule the slot
           // coercion applies.
           if (lift) value = L.applyWidthLift(lift, value, targetType, locOf(prop));
-          if (conditionalNames.has(f.name)) {
+          const at = fields.findIndex((x) => x.name === f.name && !x.drop);
+          if (
+            conditionalNames.has(f.name) &&
+            (!inlineComputed || at < 0 || !droppableStatic(fields[at]!.value))
+          ) {
             L.unsupported(
               "SC1090",
               prop,
               `spread of '${f.name}' over an earlier conditional spread (the desugar keeps one entry per name — restructure so each name has one contributor)`,
             );
           }
-          const at = fields.findIndex((x) => x.name === f.name);
-          if (at >= 0) fields[at] = { name: f.name, value };
-          else fields.push({ name: f.name, value });
+          if (
+            inlineComputed &&
+            at >= 0 &&
+            f.type.kind === "union" &&
+            L.armTag(f.type.unionId, UNDEFINED_T) >= 0 &&
+            typeEquals(f.type, targetType)
+          ) {
+            value = {
+              kind: "ternary",
+              cond: {
+                kind: "unionIsTag",
+                unionId: f.type.unionId,
+                tag: L.armTag(f.type.unionId, UNDEFINED_T),
+                negated: true,
+                value,
+                type: BOOL,
+                loc: locOf(prop),
+              },
+              then: value,
+              else_: fields[at]!.value,
+              type: targetType,
+              loc: locOf(prop),
+            };
+          }
+          if (at >= 0 && inlineComputed) {
+            fields.splice(at, 1);
+            fields.push({ name: f.name, value });
+          } else if (at >= 0) {
+            fields[at] = { name: f.name, value };
+          } else {
+            fields.push({ name: f.name, value });
+          }
         }
         continue;
       }
@@ -5742,7 +5826,21 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         fields.push({ name: f.name, value: absent });
       }
     }
-    return { kind: "recordLit", fields, type, loc };
+    const result: IrExpr = { kind: "recordLit", fields, type, loc };
+    const computedSpread = selectedComputedSpread();
+    if (computedSpread === null) return result;
+    return {
+      kind: "seqExpr",
+      stmts: [{
+        kind: "varDecl",
+        localId: computedSpread.local.id,
+        init: computedSpread.init,
+        loc,
+      }],
+      result,
+      type,
+      loc,
+    };
   }
 
 /** A conditional spread's carrier property: `name: value` or shorthand,
