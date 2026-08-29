@@ -935,6 +935,7 @@ test.each([
   "1563-string-raw-fold.ts",
   "1564-string-raw.ts",
   "1564-fs-watch.ts",
+  "1565-union-element-join.ts",
   "1565-spawn-pipe-streams.ts",
   "1569-fsp-mkdir-unlink-chmod.ts",
   "1571-stdin-set-raw-mode-non-tty.ts",
