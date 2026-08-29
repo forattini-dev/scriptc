@@ -1285,6 +1285,7 @@ test.each([
   "2260-http2-constants.cjs",
   "2284-regexp-constructor.cjs",
   "2300-dyn-record-spread-and-keyed-access.cjs",
+  "2301-cjs-export-table-dom-attach.cjs",
   "2313-stream-underscore-assign-js.cjs",
   "2320-await-unit.ts",
   "2330-tls-server-runtime-options.cjs",
