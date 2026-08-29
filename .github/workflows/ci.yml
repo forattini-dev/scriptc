@@ -26,7 +26,7 @@ jobs:
       SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
       # Within-file partition for the large case-driven harnesses
       # (differential, llvm-differential, npm, server, coverage, and Vercel
-      # E2E): they hash stable case names into slice i of 3
+      # E2E, plus the monolithic Rust corpus gate): they hash stable case names into slice i of 3
       # (tests/harness/shard.ts), so the three shards' unions run every case
       # exactly once. vitest's own --shard is FILE-granular and cannot split
       # these monster files (differential.test.ts alone is ~9 min
@@ -56,6 +56,7 @@ jobs:
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/coverage.test.ts
           --exclude=tests/harness/vercel-e2e.test.ts
+          --exclude=packages/compiler/test/emit-rust.test.ts
           --exclude=packages/compiler/src/backend/cc.test.ts
       # Cache invalidation tests mutate compiler inputs process-wide and must
       # stay serial within a worker. They do not consume SCRIPTC_SAN, so divide
@@ -75,6 +76,7 @@ jobs:
           tests/harness/npm.test.ts
           tests/harness/server.test.ts
           tests/harness/vercel-e2e.test.ts
+          packages/compiler/test/emit-rust.test.ts
       # Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its
       # result, so the three plain slices cover the full corpus once.
       - name: Tests (coverage sweep, slice ${{ matrix.shard }}/3)

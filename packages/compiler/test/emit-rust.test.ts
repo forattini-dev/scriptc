@@ -6,8 +6,9 @@ import { dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import ts5 from "typescript5";
-import { expect, test } from "vitest";
+import { expect, test as vitestTest } from "vitest";
 import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
+import { parseShardSpec, shardSelect } from "../../../tests/harness/shard.js";
 import { compile } from "../src/index.js";
 import { compileRust } from "../src/backend/rust/compile.js";
 import { emitRustModule } from "../src/backend/rust/emitter.js";
@@ -15,6 +16,9 @@ import { validateModule } from "../src/ir/validate.js";
 import { fibModule } from "./fixtures/fib-ir.js";
 
 const execFileAsync = promisify(execFile);
+const rustShard = parseShardSpec();
+const test = rustShard === undefined || rustShard.index === 1 ? vitestTest : vitestTest.skip;
+const shardedTest = vitestTest;
 
 interface ProcessOutcome {
   stdout: string;
@@ -647,8 +651,8 @@ console.log(replaced());
   expect(rust.stderr).toBe(node.stderr);
 }, 120_000);
 
-test("supported scalar, heap, closure, and union corpus matches Node byte-for-byte", async () => {
-  for (const fixture of [
+shardedTest("supported scalar, heap, closure, and union corpus matches Node byte-for-byte", async () => {
+  for (const fixture of shardSelect([
     "001-hello.ts",
     "002-log-args.ts",
     "100-number-format.ts",
@@ -820,7 +824,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
     "2677-runtime-optional-closure.ts",
     "2678-date-instances.ts",
     "2693-dyn-has-own.cjs",
-  ]) {
+  ], (fixture) => fixture)) {
     const entryPath = resolve("tests/corpus", fixture);
     const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-corpus-"));
     const result = await compile(entryPath, {
@@ -854,7 +858,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
   }
 }, 240_000);
 
-test.each([
+shardedTest.each(shardSelect([
   "212-string-aliasing-append.ts",
   "240-stdout-write.ts",
   "404-rc-stress.ts",
@@ -1555,7 +1559,7 @@ test.each([
   "2698-process-umask.ts",
   "2700-wasi-core.ts",
   "2625-bytes-views.ts",
-])("Rust environment and late language corpus matches Node: %s", async (fixture) => {
+], (fixture) => fixture))("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
   const entryPath = resolve("tests/corpus", fixture);
   const dynamic = (await readFile(entryPath, "utf8")).split("\n", 4)
