@@ -4847,19 +4847,50 @@ export function lowerDynDispatchMethodCall(
   if (call.arguments.some((arg) => ts.isSpreadElement(arg))) {
     L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
   }
-  const predicate = method === "filter" && call.arguments[0]
-    ? L.lowerExpr(call.arguments[0])
-    : null;
-  if (arrayReceiver && predicate?.type.kind === "func" && predicate.type.ret.kind === "void") {
-    L.unsupported(
-      "SC1090",
-      call.arguments[0]!,
-      "'.filter()' with a void-returning predicate (the callback return value is erased before its truthiness can be tested)",
-    );
+  // Array.isArray narrows `unknown` to checker-`any[]`. Under --dynamic,
+  // that contextual `any` would normally make an inline HOF callback's
+  // first parameter an island handle, even though a native dyn array
+  // actually passes one checked-dynamic element. Pin that unannotated
+  // parameter to unknown while lowering the callback so guards inside it
+  // (`values.every((value) => Array.isArray(value))`) stay in the native
+  // dyn tree. Explicit annotations keep their declared boundary.
+  const callback = call.arguments[0];
+  let callbackParam: ts.Identifier | null = null;
+  if (
+    arrayReceiver &&
+    (method === "forEach" || method === "map" || method === "filter" ||
+      method === "some" || method === "every" || method === "find" ||
+      method === "findIndex") &&
+    callback &&
+    (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+  ) {
+    const param = callback.parameters[0];
+    if (
+      param && ts.isIdentifier(param.name) && !param.type && !param.initializer &&
+      !param.dotDotDotToken &&
+      (L.checker.getTypeAtLocation(param.name).flags & ts.TypeFlags.Any) !== 0 &&
+      !L.chainNarrowedType.has(param.name)
+    ) {
+      callbackParam = param.name;
+      L.chainNarrowedType.set(callbackParam, L.checker.getUnknownType());
+    }
   }
-  const args = call.arguments.map((arg, i) =>
-    i === 0 && predicate ? L.coerceInto(arg, predicate, DYN) : L.lowerExprExpecting(arg, DYN),
-  );
+  let args: IrExpr[];
+  try {
+    const predicate = method === "filter" && callback ? L.lowerExpr(callback) : null;
+    if (arrayReceiver && predicate?.type.kind === "func" && predicate.type.ret.kind === "void") {
+      L.unsupported(
+        "SC1090",
+        callback ?? call,
+        "'.filter()' with a void-returning predicate (the callback return value is erased before its truthiness can be tested)",
+      );
+    }
+    args = call.arguments.map((arg, i) =>
+      i === 0 && predicate ? L.coerceInto(arg, predicate, DYN) : L.lowerExprExpecting(arg, DYN),
+    );
+  } finally {
+    if (callbackParam) L.chainNarrowedType.delete(callbackParam);
+  }
   return {
     kind: "dynInvoke",
     recv,
