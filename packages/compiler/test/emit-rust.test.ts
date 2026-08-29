@@ -870,6 +870,7 @@ test.each([
   "1102-island-rc-stress.ts",
   "1120-web-globals-encoders.ts",
   "1123-any-conditional-spread.ts",
+  "1206-regex-dynamic-mix.ts",
   "1354-builtin-bare-specifiers.ts",
   "1359-json-module/main.ts",
   "1406-dataview-mp4.ts",
