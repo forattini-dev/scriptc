@@ -281,7 +281,6 @@ const LIB_FN_SYMS: Record<string, string> = {
   "error.domHasCause": "scr_domex_has_cause",
   "error.domCause": "scr_domex_cause",
   "error.domClone": "scr_domex_clone",
-  "dyn.errInstanceof": "scr_dyn_err_instanceof",
   "num.toExponential": "scr_num_to_exponential",
   "num.toFixed0": "scr_num_to_fixed0",
   "num.toFixed": "scr_num_to_fixed",
@@ -12064,6 +12063,17 @@ class LlEmitter {
     const B = this.B;
     // Loop liveness first (one table for generic and special shapes).
     if (USES_TIMERS_LIB_FNS.has(e.fn)) this.usesTimers = true;
+    if (e.fn === "dyn.errInstanceof") {
+      if (e.args[0]?.type.kind !== "dyn" || e.args[1]?.kind !== "strLit") {
+        throw new InternalCompilerError("llvm emitter bug: dyn error instanceof operands");
+      }
+      const value = this.emitExpr(e.args[0]);
+      const target = this.classMetaOf(e.args[1].value);
+      this.declare("declare zeroext i1 @scr_dyn_err_instanceof(ptr, double, double)");
+      const out = B.tmp();
+      B.line(`${out} = call i1 @scr_dyn_err_instanceof(ptr ${value.name}, double ${f64Lit(target.pre)}, double ${f64Lit(target.post)})`);
+      return { name: out, type: e.type };
+    }
     if (e.fn === "process.stdoutWriteBytesCb" || e.fn === "process.stderrWriteBytesCb") {
       // All arguments evaluate before bytes are submitted. The callback
       // then moves into the next-tick entry and its error-first adapter

@@ -3280,7 +3280,7 @@ bool scr_dyn_number_coerce_js(const ScrDyn *d, double *out);
  * checked-dynamic value: the from_error cache resolves the dyn encoding
  * back to its runtime error and the class's stamped preorder interval
  * answers. A dyn value that never came from an error answers false. */
-bool scr_dyn_err_instanceof(const ScrDyn *d, double kind);
+bool scr_dyn_err_instanceof(const ScrDyn *d, double pre, double post);
 
 /* structuredClone over the checked-dynamic tree: JSON-safe data + bytes deep-copy;
  * functions/handles throw the spec's catchable DataCloneError; cycles

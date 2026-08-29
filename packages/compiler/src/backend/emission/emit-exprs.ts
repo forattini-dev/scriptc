@@ -6197,7 +6197,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.errInstanceof":
             // The from_error cache resolves the dyn value to its runtime
             // error; the class's stamped interval answers. Never throws.
-            return finish(`scr_dyn_err_instanceof(${arg(0)}, ${arg(1)})`);
+            if (e.args[1]?.kind !== "strLit") {
+              throw new InternalCompilerError("emitter bug: dyn error instanceof target is not a class-name literal");
+            }
+            const dynErrorTarget = E.classMeta.get(e.args[1].value);
+            if (!dynErrorTarget) {
+              throw new InternalCompilerError(`emitter bug: dyn error instanceof unknown class ${e.args[1].value}`);
+            }
+            return finish(`scr_dyn_err_instanceof(${arg(0)}, ${dynErrorTarget.pre}, ${dynErrorTarget.post})`);
           case "dyn.structuredClone":
             // Deep dyn clone (+1); option/DataClone/cycle errors throw
             // (may-throw seed set). Both args borrowed.

@@ -132,10 +132,10 @@ export function emitRustDynamicLibCall(
     return `{ let ${value} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; sc_dyn_has_own(&${value}, &${key}) }`;
   }
   if (expr.fn === "dyn.errInstanceof" && expr.args.length === 2 &&
-    arg?.type.kind === "dyn" && secondArg?.type.kind === "f64") {
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "string") {
     const value = context.nextTemporary();
-    const kind = context.nextTemporary();
-    return `{ let ${value} = ${context.emitExpr(arg)}; let ${kind} = ${context.emitExpr(secondArg)}; sc_dyn_error_instanceof(&${value}, ${kind}) }`;
+    const target = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${target} = ${context.emitExpr(secondArg)}; sc_dyn_error_instanceof(&${value}, ${target}.as_ref()) }`;
   }
   if (expr.fn === "dyn.structuredClone" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {

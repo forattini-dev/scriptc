@@ -9212,18 +9212,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (left.type.kind === "dyn" && target.def.name === "%Error") {
       return { kind: "dynTest", test: "error", value: left, type: BOOL, loc };
     }
-    // `u instanceof TypeError` (and the other BUILTIN error classes) on a
-    // dyn value: the from_error cache holds the checked-dynamic tree↔error identity edge,
-    // so the runtime resolves the encoding back to its error and asks the
-    // vtable's stamped interval — exact for every error that crossed the
-    // boundary (a hand-built {%error} literal answers false: subclass
-    // identity is unknowable there). User subclasses keep the fence.
-    if (left.type.kind === "dyn" && RUNTIME_ERROR_CLASSES.has(target.def.name)) {
-      const rec = RUNTIME_ERROR_CLASSES.get(target.def.name)!;
+    // `u instanceof TypeError` and `u instanceof ProgramError` on a dyn
+    // value: the from-error cache retains the original runtime error, so
+    // its stamped class interval answers every builtin or program Error
+    // subclass exactly. A hand-built {%error} literal still answers false:
+    // it has no cached prototype identity.
+    if (
+      left.type.kind === "dyn" &&
+      (RUNTIME_ERROR_CLASSES.has(target.def.name) || L.isSubclassOf(target.def.name, "%Error"))
+    ) {
       return {
         kind: "libCall",
         fn: "dyn.errInstanceof",
-        args: [left, { kind: "numLit", value: rec.kind, type: F64, loc }],
+        args: [left, { kind: "strLit", value: target.def.name, type: STRING, loc }],
         type: BOOL,
         loc,
       };

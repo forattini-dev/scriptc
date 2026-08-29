@@ -667,10 +667,16 @@ export class RustDefinitionEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
-    this.context.line(`${name}::Builtin(error) => runtime::error_is_class(error, target),`);
+    this.context.line(`${name}::Builtin(error) => runtime::error_is_class(error, target.strip_prefix('%').unwrap_or(target)),`);
     for (const root of roots) {
       const classes = this.context.runtimeErrorClassNames(root.def.name);
-      this.context.line(`${name}::${this.context.errorValueVariant(root)}(_) => matches!(target, ${classes.map((value) => `"${this.context.rustString(value)}"`).join(" | ")}),`);
+      const runtimeTargets = classes.flatMap((value) => [value, `%${value}`]);
+      const userTargets = [...this.context.classMeta.values()]
+        .filter((meta) => meta.root === root)
+        .map((meta) =>
+          `(target == "${this.context.rustString(meta.def.name)}" && value.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}))`
+        );
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => matches!(target, ${runtimeTargets.map((value) => `"${this.context.rustString(value)}"`).join(" | ")})${userTargets.length > 0 ? ` || ${userTargets.join(" || ")}` : ""},`);
     }
     this.context.popIndent();
     this.context.line("}");

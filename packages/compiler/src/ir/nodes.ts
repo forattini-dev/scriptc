@@ -3478,15 +3478,14 @@ export type IrLibFn =
    * list throws DataCloneError, nothing static is transferable). Result
    * +1 %DOMException. */
   | "error.domClone"
-  /** `d instanceof TypeError` (and the other BUILTIN error classes) on a
-   * checked-dynamic value (scr_json.c): the from_error cache holds the
-   * dyn↔error identity edge, so the test resolves the runtime error and
-   * asks its vtable's stamped preorder interval — exact for every error
-   * that crossed the boundary. A dyn object that never came from an
+  /** `d instanceof TypeError` or a program-defined Error subclass on a
+   * checked-dynamic value: the from_error cache holds the dyn↔error
+   * identity edge, so the test resolves the runtime error and asks its
+   * stamped preorder interval. A dyn object that never came from an
    * error (a hand-built {%error} literal) answers false: subclass
    * identity is unknowable there (the root keeps dynTest's marker
-   * answer). args are the borrowed dyn and the SCR_ERR_* kind literal.
-   * Never throws. */
+   * answer). args are the borrowed dyn and a compile-time class-name
+   * string literal. Never throws. */
   | "dyn.errInstanceof"
   /** Object.keys/values/entries over a CHECKED-DYNAMIC receiver
    * (scr_json.c): the runtime walks the dyn node's own members in JS

@@ -881,6 +881,7 @@ export class RustDynamicEmitter {
     const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
     const errorType = this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
     const errorHelper = (helper: string): string => this.context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
+    const errorTarget = this.context.errorClassRoots().length === 0 ? "target.strip_prefix('%').unwrap_or(target)" : "target";
 
     this.context.line("std::thread_local! {");
     this.context.pushIndent();
@@ -913,12 +914,11 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(object)`);
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_error_instanceof(value: &${name}, kind: f64) -> bool {`);
+    this.context.line(`fn sc_dyn_error_instanceof(value: &${name}, target: &str) -> bool {`);
     this.context.pushIndent();
-    this.context.line("let target = match kind as i32 { 0 => \"Error\", 1 => \"TypeError\", 2 => \"RangeError\", 3 => \"SyntaxError\", 4 => \"DOMException\", _ => return false };");
     this.context.line(`let ${name}::Object(object) = value else { return false; };`);
     this.context.line("let identity = object.identity();");
-    this.context.line(`SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| ${errorHelper("is_class")}(error, target)))`);
+    this.context.line(`SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| ${errorHelper("is_class")}(error, ${errorTarget})))`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> ${errorType} {`);

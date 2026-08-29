@@ -2896,7 +2896,7 @@ ScrDyn *scr_structured_clone_missing(void) {
   return NULL;
 }
 
-bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
+bool scr_dyn_err_instanceof(const ScrDyn *d, double pre, double post) {
   /* A JSVAL node never came from a runtime ScrError, so the cache miss
    * below answers false — the documented contract ("a dyn value that
    * never came from an error answers false"). An ENGINE TypeError held
@@ -2905,8 +2905,7 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     if (scr_errdyn_cache[i].dyn == d) {
       const ScrVt *vt = scr_errdyn_cache[i].err->vt;
-      int k = (int)kind;
-      return scr_error_vts[k].pre <= vt->pre && vt->pre <= scr_error_vts[k].post;
+      return (uint32_t)pre <= vt->pre && vt->pre <= (uint32_t)post;
     }
   }
   return false;
