@@ -904,6 +904,7 @@ test.each([
   "1521-fs-lstat-lock.ts",
   "1522-spawnsync-options.ts",
   "1524-catch-narrowing.ts",
+  "1525-unknown-typeof-validation.ts",
   "1526-set-spread.ts",
   "1527-logical-mixed-operands.ts",
   "1528-delete-records-env.ts",
