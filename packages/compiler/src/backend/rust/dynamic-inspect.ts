@@ -76,6 +76,7 @@ export function emitRustDynamicInspect(
   context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
   context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
   context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("[Function: {name}]")),`);
+  context.line(`${name}::NativeMethod(method) => runtime::string(&format!("[Function: {}]", method.name())),`);
   context.line(`${name}::Getter(value) => sc_dyn_inspect(value.as_ref(), recurse, depth),`);
   for (const shape of boxedShapes) {
     context.line(`${name}::${context.dynFunctionVariant(shape)}(_, function_name, _) => if function_name.is_empty() { runtime::string("[Function (anonymous)]") } else { runtime::string(&format!("[Function: {}]", function_name)) },`);

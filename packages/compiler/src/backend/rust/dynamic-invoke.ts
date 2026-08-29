@@ -26,15 +26,17 @@ class RustDynamicInvokeEmitter {
     private readonly boxedShapes: readonly RustClosureShape[],
   ) {
     this.dyn = context.dynTypeName();
-    this.functionPatterns = boxedShapes
-      .map((shape) => `${this.dyn}::${context.dynFunctionVariant(shape)}(..)`)
-      .join(" | ");
+    this.functionPatterns = [
+      `${this.dyn}::NativeMethod(..)`,
+      ...boxedShapes.map((shape) => `${this.dyn}::${context.dynFunctionVariant(shape)}(..)`),
+    ].join(" | ");
   }
 
   emit(): void {
     this.emitIndexHelpers();
     this.emitValueHelpers();
     this.emitThisHelpers();
+    this.emitNativeMethodHelper();
     this.emitFunctionCacheHelpers();
     this.emitDefinePropertiesHelper();
     this.emitArrayCallbacks();
@@ -139,9 +141,7 @@ class RustDynamicInvokeEmitter {
     this.context.line("sc_dyn_to_string(left).as_bytes().cmp(sc_dyn_to_string(right).as_bytes())");
     this.close("}");
 
-    const callable = this.functionPatterns === ""
-      ? `${this.dyn}::Undefined`
-      : `${this.dyn}::Undefined | ${this.functionPatterns}`;
+    const callable = `${this.dyn}::Undefined | ${this.functionPatterns}`;
     this.open(`fn sc_dyn_array_sort(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}]) -> ${this.dyn} {`);
     this.context.line(`let comparator = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
     this.context.line(`if !matches!(&comparator, ${callable}) { runtime::throw_type_error(format!("The comparison function must be either a function or undefined: {}", sc_dyn_to_string(&comparator))); }`);
@@ -249,9 +249,7 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitDefinePropertiesHelper(): void {
-    const callableTarget = this.functionPatterns === ""
-      ? `${this.dyn}::Object(..)`
-      : `${this.dyn}::Object(..) | ${this.functionPatterns}`;
+    const callableTarget = `${this.dyn}::Object(..) | ${this.functionPatterns}`;
     this.open(`fn sc_dyn_define_properties(target: &${this.dyn}, descriptors: &${this.dyn}) -> ${this.dyn} {`);
     this.context.line(`if !matches!(target, ${callableTarget}) { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); }`);
     this.context.line(`let ${this.dyn}::Object(descriptors) = descriptors else { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); };`);
@@ -268,6 +266,24 @@ class RustDynamicInvokeEmitter {
     this.context.line("index += 1.0;");
     this.close("}");
     this.context.line("target.clone()");
+    this.close("}");
+  }
+
+  private emitNativeMethodHelper(): void {
+    this.open(`fn sc_dyn_invoke_number(number: f64, method: &str, args: &[${this.dyn}], callee_name: &str) -> ${this.dyn} {`);
+    this.open("match method {");
+    this.context.line(`"toString" => { let radix = match args.first() { None | Some(${this.dyn}::Undefined) => 10.0, Some(value) => sc_dyn_to_number(value), }; ${this.dyn}::String(runtime::number_to_radix_string(number, radix)) },`);
+    this.context.line(`"toFixed" => ${this.dyn}::String(runtime::number_to_fixed(number, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
+    this.context.line(`"valueOf" => ${this.dyn}::Number(number),`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    this.close("}");
+    this.close("}");
+    this.open(`fn sc_dyn_call_native_method(method: ScDynNativeMethod, args: &[${this.dyn}]) -> ${this.dyn} {`);
+    this.context.line("let receiver = sc_dyn_this_get();");
+    this.open("match (method, receiver) {");
+    this.context.line(`(method, ${this.dyn}::Number(number)) => sc_dyn_invoke_number(number, method.name(), args, method.name()),`);
+    this.context.line(`(method, _) => runtime::throw_type_error(format!("Number.prototype.{} requires that 'this' be a Number", method.name())),`);
+    this.close("}");
     this.close("}");
   }
 
@@ -336,8 +352,8 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitFunctionArm(): void {
-    if (this.functionPatterns === "") return;
-    this.open(`value @ (${this.functionPatterns}) => {`);
+    const pattern = this.boxedShapes.length === 0 ? this.functionPatterns : `(${this.functionPatterns})`;
+    this.open(`value @ ${pattern} => {`);
     this.open("match method {");
     this.context.line("\"apply\" => {");
     this.context.pushIndent();
@@ -375,11 +391,7 @@ class RustDynamicInvokeEmitter {
 
   private emitNumberArm(): void {
     this.open(`${this.dyn}::Number(number) => {`);
-    this.open("match method {");
-    this.context.line(`"toFixed" => ${this.dyn}::String(runtime::number_to_fixed(*number, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
-    this.context.line(`"valueOf" => ${this.dyn}::Number(*number),`);
-    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
-    this.close("}");
+    this.context.line("sc_dyn_invoke_number(*number, method, args, callee_name)");
     this.close("},");
   }
 
@@ -493,13 +505,6 @@ class RustDynamicInvokeEmitter {
 
   private emitHttpAgentArm(): void {
     this.context.line(`${this.dyn}::HttpAgent(agent) => sc_dyn_http_agent_invoke(agent, method, args, callee_name),`);
-  }
-
-  private functionVariants(): string[] {
-    if (this.functionPatterns === "") return [];
-    return this.functionPatterns
-      .split(" | ")
-      .map((pattern) => pattern.slice(`${this.dyn}::`.length, -4));
   }
 
   private open(line: string): void {

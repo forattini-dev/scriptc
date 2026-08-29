@@ -7,9 +7,15 @@
 // exactly like Node's, .call receiver rules included); a static build
 // reports the SC2010 dynamic-family choice.
 { let { toString } = 1; console.log(`${toString.call(9)}`); }
+{ const { toString: toStringRadix } = 1; console.log(`${toStringRadix.call(15, 16)}`); }
 {
   let { toFixed } = 1;
   console.log(`${toFixed.call(2.5, 1)}`);
+  try {
+    toFixed.call("2.5", 1);
+  } catch (error) {
+    console.log((error as Error).message);
+  }
 }
 const { length } = "abc";
 console.log(length);

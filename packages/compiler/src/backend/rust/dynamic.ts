@@ -8,6 +8,7 @@ import { emitRustDynamicInspect } from "./dynamic-inspect.js";
 import { emitRustDynamicScalarChecks } from "./dynamic-scalars.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
+import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
@@ -62,6 +63,7 @@ export class RustDynamicEmitter {
       return shape;
     });
 
+    emitRustNativeMethodDefinition(this.context);
     this.context.line("#[derive(Clone)]");
     this.context.line(`enum ${name} {`);
     this.context.pushIndent();
@@ -76,6 +78,7 @@ export class RustDynamicEmitter {
     this.context.line("TypedBytes(runtime::JsTypedBytes),");
     this.context.line("Buffer(runtime::JsBytes<u8>),");
     this.context.line("NativeConstructor(&'static str),");
+    this.context.line("NativeMethod(ScDynNativeMethod),");
     this.context.line("Promise(runtime::JsPromiseHandle),");
     this.context.line("NetServer(runtime::JsNetServer),");
     this.context.line("NetSocket(runtime::JsNetSocket),");
@@ -164,7 +167,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => writer.write_null(),`);
     }
-    this.context.line(`${name}::NativeConstructor(..) => writer.write_null(),`);
+    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => writer.write_null(),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -174,6 +177,7 @@ export class RustDynamicEmitter {
     const undefinedPatterns = [
       `${name}::Undefined`,
       `${name}::NativeConstructor(..)`,
+      `${name}::NativeMethod(..)`,
       ...boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`),
     ];
     this.context.line(`matches!(self, ${undefinedPatterns.join(" | ")})`);
@@ -332,6 +336,7 @@ export class RustDynamicEmitter {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(value, function_name, properties) => ${name}::${this.context.dynFunctionVariant(shape)}(value.clone(), function_name.clone(), properties.clone()),`);
     }
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
+    this.context.line(`${name}::NativeMethod(method) => ${name}::NativeMethod(*method),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -392,7 +397,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(..) => Err(format!("function at {path} is not JSON data")),`);
     }
-    this.context.line(`${name}::NativeConstructor(..) => Err(format!("function at {path} is not JSON data")),`);
+    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => Err(format!("function at {path} is not JSON data")),`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -422,7 +427,7 @@ export class RustDynamicEmitter {
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
-    this.context.line(`${name}::NativeConstructor(..) => "function",`);
+    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -487,7 +492,7 @@ export class RustDynamicEmitter {
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
-    this.context.line(`${name}::NativeConstructor(..) => "function",`);
+    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
     this.context.line("_ => \"object\",");
     this.context.popIndent();
     this.context.line("};");
@@ -550,6 +555,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Object(object) => sc_dyn_object_key_get(object, key, value),`);
+    this.context.line(`${name}::Number(..) => match key.as_ref() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Regex(regex) => match key.as_ref() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Url(url) => match key.as_ref() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);
@@ -577,6 +583,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::TypedBytes(bytes) => { if key.as_ref() == "length" { ${name}::Number(runtime::typed_bytes_len(bytes)) } else if key.as_ref() == "constructor" { ${name}::NativeConstructor(runtime::typed_bytes_name(bytes)) } else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::typed_bytes_len(bytes) as usize { ${name}::Number(runtime::typed_bytes_get(bytes, index as f64)) } else { ${name}::Undefined } } else { ${name}::Undefined } },`);
     this.context.line(`${name}::NativeConstructor(name) => if key.as_ref() == "name" { ${name}::String(runtime::string(name)) } else { ${name}::Undefined },`);
+    this.context.line(`${name}::NativeMethod(method) => if key.as_ref() == "name" { ${name}::String(runtime::string(method.name())) } else { ${name}::Undefined },`);
     this.context.line(`${name}::NetSocket(socket) => match key.as_ref() {`);
     this.context.pushIndent();
     this.context.line(`"destroyed" => ${name}::Boolean(runtime::net_socket_destroyed(socket)),`);
@@ -682,6 +689,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::TypedBytes(value) => runtime::typed_bytes_join(value, &runtime::string(",")),`);
     this.context.line(`${name}::Buffer(value) => runtime::bytes_to_string(value, &runtime::string("utf8")),`);
     this.context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("function {name}() {{ [native code] }}")),`);
+    this.context.line(`${name}::NativeMethod(method) => runtime::string(&format!("function {}() {{ [native code] }}", method.name())),`);
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
@@ -737,6 +745,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::TypedBytes(value) => format!("an instance of {}", runtime::typed_bytes_name(value)),`);
     this.context.line(`${name}::Buffer(..) => "an instance of Buffer".to_owned(),`);
     this.context.line(`${name}::NativeConstructor(name) => format!("function {name}"),`);
+    this.context.line(`${name}::NativeMethod(method) => format!("function {}", method.name()),`);
     this.context.line(`${name}::Array(..) => "an instance of Array".to_owned(),`);
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
     this.context.line(`${name}::Getter(..) => "function getter".to_owned(),`);
@@ -776,6 +785,7 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(closure, _, _) => Some(sc_closure_identity_${shape.index}(closure)),`);
     }
+    this.context.line(`${name}::NativeMethod(method) => Some(method.identity()),`);
     this.context.line("_ => None,");
     this.context.popIndent();
     this.context.line("}");
@@ -829,6 +839,9 @@ export class RustDynamicEmitter {
       const result = shape.type.ret.kind === "void" ? `{ let _ = ${dispatch}; ${name}::Undefined }` : this.emitDynFromValue(shape.type.ret, dispatch, loc);
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(closure, _, _) => { let sc_dyn_callee = closure.clone(); ${result} },`);
     }
+    this.context.line(this.context.usesDynamicInvoke()
+      ? `${name}::NativeMethod(method) => sc_dyn_call_native_method(*method, args),`
+      : `${name}::NativeMethod(..) => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.context.popIndent();
     this.context.line("}");
@@ -968,6 +981,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
     this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
+    this.context.line(`${name}::NativeMethod(method) => runtime::throw_dom_exception("DataCloneError", &format!("{} could not be cloned.", method.name())),`);
     this.context.line(`${name}::Getter(..) => runtime::throw_dom_exception("DataCloneError", "getter could not be cloned."),`);
     this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
     this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
@@ -1046,6 +1060,7 @@ export class RustDynamicEmitter {
     this.context.line(`(${name}::TypedBytes(left), ${name}::TypedBytes(right)) => runtime::typed_bytes_ptr_eq(left, right) || (deep && runtime::typed_bytes_deep_equals(left, right)),`);
     this.context.line(`(${name}::Buffer(left), ${name}::Buffer(right)) => left.ptr_eq(right) || (deep && runtime::bytes_deep_equals(left, right)),`);
     this.context.line(`(${name}::NativeConstructor(left), ${name}::NativeConstructor(right)) => left == right,`);
+    this.context.line(`(${name}::NativeMethod(left), ${name}::NativeMethod(right)) => left == right,`);
     this.context.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
     this.context.pushIndent();
     this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
