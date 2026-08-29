@@ -1103,6 +1103,9 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
             format_number(offset)
         ));
     }
+    if (0.0..1.0).contains(&length) {
+        return 0.0;
+    }
     if !position.is_finite() || position.fract() != 0.0 {
         throw_out_of_range(format!(
             "The value of \"position\" is out of range. It must be an integer. Received {}",
@@ -1114,9 +1117,6 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
             "The value of \"position\" is out of range. It must be >= -1 && <= 9007199254740991. Received {}",
             format_number(position)
         ));
-    }
-    if (0.0..1.0).contains(&length) {
-        return 0.0;
     }
     let byte_length = bytes.with(|data| data.length);
     if offset > byte_length as f64 {
