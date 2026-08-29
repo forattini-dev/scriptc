@@ -4,10 +4,11 @@ type Policy = {
 };
 
 const MIB = 1024 * 1024;
+const TARGET_RATIO = 0.5;
 
 export const RETENTION = {
   events: {
     maxBytes: 4 * MIB,
-    targetRatio: 0.5,
+    targetRatio: TARGET_RATIO,
   },
 } as const satisfies Readonly<Record<string, Policy>>;

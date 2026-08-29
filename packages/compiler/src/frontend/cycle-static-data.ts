@@ -54,18 +54,47 @@ function propertyChain(
 }
 
 /** Follow an exact path through ordinary object-literal data properties. */
-function objectLiteralValue(initializer: ts.Expression, keys: readonly string[]): boolean {
+function objectLiteralValue(
+  initializer: ts.Expression,
+  keys: readonly string[],
+): ts.Expression | null {
   let current = unwrapExpression(initializer);
   for (const key of keys) {
-    if (!ts.isObjectLiteralExpression(current)) return false;
+    if (!ts.isObjectLiteralExpression(current)) return null;
     const property = current.properties.find(
       (candidate): candidate is ts.PropertyAssignment =>
         ts.isPropertyAssignment(candidate) && propertyName(candidate.name) === key,
     );
-    if (property === undefined) return false;
+    if (property === undefined) return null;
     current = unwrapExpression(property.initializer);
   }
-  return true;
+  return current;
+}
+
+function constInitializerOf(
+  checker: ts.TypeChecker,
+  root: ts.Identifier,
+  keys: readonly string[],
+  acceptSource: (source: ts.SourceFile) => boolean,
+): ts.Expression | null {
+  let symbol = checker.getSymbolAtLocation(root);
+  if (symbol === undefined) return null;
+  if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+
+  for (const declaration of checker.declarationsOf(symbol)) {
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      ts.isIdentifier(declaration.name) &&
+      declaration.initializer !== undefined &&
+      ts.isVariableDeclarationList(declaration.parent) &&
+      (declaration.parent.flags & ts.NodeFlags.Const) !== 0 &&
+      acceptSource(declaration.getSourceFile())
+    ) {
+      const value = objectLiteralValue(declaration.initializer, keys);
+      if (value !== null) return value;
+    }
+  }
+  return null;
 }
 
 /**
@@ -85,21 +114,30 @@ export function isPreinitializedDataPropertyRead(
 ): boolean {
   const chain = propertyChain(expression);
   if (chain === null) return false;
+  return constInitializerOf(
+    checker,
+    chain.root,
+    chain.keys,
+    (source) => !cycleMembers.has(source),
+  ) !== null;
+}
 
-  let symbol = checker.getSymbolAtLocation(chain.root);
-  if (symbol === undefined) return false;
-  if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-
-  for (const declaration of checker.declarationsOf(symbol)) {
-    if (
-      ts.isVariableDeclaration(declaration) &&
-      ts.isIdentifier(declaration.name) &&
-      declaration.initializer !== undefined &&
-      !cycleMembers.has(declaration.getSourceFile()) &&
-      objectLiteralValue(declaration.initializer, chain.keys)
-    ) {
-      return true;
-    }
-  }
-  return false;
+/**
+ * The leaf initializer behind an imported const object's literal property
+ * chain, or null. Callers may inline it only after independently proving the
+ * leaf expression is side-effect-free.
+ */
+export function externalStaticDataPropertyInitializer(
+  checker: ts.TypeChecker,
+  expression: ts.Expression,
+): ts.Expression | null {
+  const chain = propertyChain(expression);
+  if (chain === null) return null;
+  const useSource = expression.getSourceFile();
+  return constInitializerOf(
+    checker,
+    chain.root,
+    chain.keys,
+    (source) => source !== useSource,
+  );
 }

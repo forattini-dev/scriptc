@@ -1562,6 +1562,8 @@ shardedTest.each(shardSelect([
   "2702-os-hostname.ts",
   "2703-satisfies-const-tuple.ts",
   "2704-imported-satisfies-registry/main.ts",
+  "2707-promise-then-two-handlers.ts",
+  "2708-never-rest-callback-shape.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

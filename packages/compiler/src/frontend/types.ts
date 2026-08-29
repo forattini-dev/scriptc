@@ -819,6 +819,20 @@ let mapTypeDepth = 0;
  * stay fenced instead of interning a per-context-wrong shape). */
 let contextResolutions = 0;
 
+function isNeverArrayRestParameter(
+  checker: ts.TypeChecker,
+  symbol: ts.Symbol,
+  declaration: ts.Declaration | undefined,
+): boolean {
+  if (declaration === undefined || !ts.isParameter(declaration) || !declaration.dotDotDotToken) {
+    return false;
+  }
+  const restType = checker.getTypeOfSymbol(symbol);
+  if (!checker.isArrayType(restType)) return false;
+  const element = checker.getTypeArguments(restType as ts.TypeReference)[0];
+  return element !== undefined && (element.flags & ts.TypeFlags.Never) !== 0;
+}
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const topLevel = mapTypeDepth === 0;
@@ -2520,6 +2534,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
+        // `(...args: never[])` is an uninhabited rest surface: every
+        // type-correct invocation supplies zero arguments. Its runtime ABI
+        // is therefore exactly the fixed zero-slot signature, unlike every
+        // inhabited rest array, which keeps the variadic fence.
+        if (isNeverArrayRestParameter(checker, p, decl)) continue;
         return null;
       }
       const optional =
@@ -3782,6 +3801,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl !== undefined && ts.isParameter(decl) && decl.dotDotDotToken !== undefined) {
+        if (isNeverArrayRestParameter(checker, p, decl)) continue;
         return `the function shape is supported, but its rest parameter '${p.name}' has no compiled calling convention yet (a compiled signature is fixed-arity)`;
       }
       const pTs = checker.getTypeOfSymbol(p);

@@ -27,7 +27,8 @@ import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
-import { countedFor, numLit, varRef } from "../../ir/build.js";
+import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
+import { externalStaticDataPropertyInitializer } from "../cycle-static-data.js";
 
 /** An assignable `obj.field` target — a class field, a record field, or a
  * class ACCESSOR property (reads become getter calls, writes setter calls;
@@ -56,6 +57,114 @@ export type FieldTarget =
       getType?: IrType & { kind: "func" };
       setType?: IrType & { kind: "func" };
     };
+
+const PURE_STATIC_BINARY_OPS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.PlusToken,
+  ts.SyntaxKind.MinusToken,
+  ts.SyntaxKind.AsteriskToken,
+  ts.SyntaxKind.AsteriskAsteriskToken,
+  ts.SyntaxKind.SlashToken,
+  ts.SyntaxKind.PercentToken,
+  ts.SyntaxKind.LessThanLessThanToken,
+  ts.SyntaxKind.GreaterThanGreaterThanToken,
+  ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+  ts.SyntaxKind.AmpersandToken,
+  ts.SyntaxKind.BarToken,
+  ts.SyntaxKind.CaretToken,
+]);
+
+type StaticDataScalar = boolean | number | string;
+
+/** Evaluate a side-effect-free scalar expression made only from const data. */
+function staticDataScalar(
+  L: Lowerer,
+  expression: ts.Expression,
+  resolving = new Set<ts.Symbol>(),
+): StaticDataScalar | null {
+  let expr = expression;
+  while (
+    ts.isParenthesizedExpression(expr) ||
+    ts.isAsExpression(expr) ||
+    ts.isTypeAssertion(expr) ||
+    ts.isSatisfiesExpression(expr) ||
+    ts.isNonNullExpression(expr)
+  ) {
+    expr = expr.expression;
+  }
+  if (
+    ts.isStringLiteralLike(expr)
+  ) {
+    return expr.text;
+  }
+  if (ts.isNumericLiteral(expr)) return Number(expr.text);
+  if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (ts.isIdentifier(expr)) {
+    // Deliberately use the checker directly: resolveValueSymbol flushes
+    // lowering diagnostics for runtime bindings, while this path only
+    // inspects source provenance and never needs runtime storage.
+    let symbol = L.checker.getSymbolAtLocation(expr);
+    if (symbol === undefined) return null;
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = L.checker.getAliasedSymbol(symbol);
+    if (resolving.has(symbol)) return null;
+    const declaration = L.checker.valueDeclarationOf(symbol);
+    if (
+      declaration === undefined ||
+      !ts.isVariableDeclaration(declaration) ||
+      declaration.initializer === undefined ||
+      !ts.isVariableDeclarationList(declaration.parent) ||
+      (declaration.parent.flags & ts.NodeFlags.Const) === 0 ||
+      declaration.getSourceFile() !== expr.getSourceFile() ||
+      declaration.getStart() >= expr.getStart()
+    ) {
+      return null;
+    }
+    resolving.add(symbol);
+    const value = staticDataScalar(L, declaration.initializer, resolving);
+    resolving.delete(symbol);
+    return value;
+  }
+  if (ts.isPrefixUnaryExpression(expr)) {
+    const operand = staticDataScalar(L, expr.operand, resolving);
+    if (typeof operand !== "number") return null;
+    if (expr.operator === ts.SyntaxKind.PlusToken) return operand;
+    if (expr.operator === ts.SyntaxKind.MinusToken) return -operand;
+    if (expr.operator === ts.SyntaxKind.TildeToken) return ~operand;
+    return null;
+  }
+  if (!ts.isBinaryExpression(expr) || !PURE_STATIC_BINARY_OPS.has(expr.operatorToken.kind)) {
+    return null;
+  }
+  const left = staticDataScalar(L, expr.left, resolving);
+  const right = staticDataScalar(L, expr.right, resolving);
+  if (left === null || right === null) return null;
+  if (expr.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    if (typeof left === "number" && typeof right === "number") return left + right;
+    if (typeof left === "string" && typeof right === "string") return left + right;
+    return null;
+  }
+  if (typeof left !== "number" || typeof right !== "number") return null;
+  switch (expr.operatorToken.kind) {
+    case ts.SyntaxKind.MinusToken: return left - right;
+    case ts.SyntaxKind.AsteriskToken: return left * right;
+    case ts.SyntaxKind.AsteriskAsteriskToken: return left ** right;
+    case ts.SyntaxKind.SlashToken: return left / right;
+    case ts.SyntaxKind.PercentToken: return left % right;
+    case ts.SyntaxKind.LessThanLessThanToken: return left << right;
+    case ts.SyntaxKind.GreaterThanGreaterThanToken: return left >> right;
+    case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken: return left >>> right;
+    case ts.SyntaxKind.AmpersandToken: return left & right;
+    case ts.SyntaxKind.BarToken: return left | right;
+    case ts.SyntaxKind.CaretToken: return left ^ right;
+    default: return null;
+  }
+}
+
+function staticDataScalarLit(value: StaticDataScalar, loc: SrcLoc): IrExpr {
+  if (typeof value === "number") return numLit(value, loc);
+  if (typeof value === "string") return strLit(value, loc);
+  return boolLit(value, loc);
+}
 
 /** A template piece's RAW text (String.raw's contract: escapes stay
  * characters). 7's client AST ships no rawText at runtime (the typing
@@ -732,6 +841,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           }
           return L.maybeNarrow({ kind: "varRef", localId: local.id, type: local.type, loc }, expr);
       }
+      // Opted-in workspace/package sources can be partly projected into
+      // native code while their module storage remains island-owned. A
+      // same-file, earlier const scalar has no identity or mutation to
+      // preserve, so bake its recursively proven value at the projected
+      // use. The evaluator rejects forward references and imported data,
+      // retaining TDZ and cycle behavior.
+      if (
+        !L.fileTag.has(expr.getSourceFile()) ||
+        npmStaticPackageOfPath(expr.getSourceFile().fileName) !== null
+      ) {
+        const scalar = staticDataScalar(L, expr);
+        if (scalar !== null) return staticDataScalarLit(scalar, loc);
+      }
       // `import x = N.y` aliases resolve transparently through globalOf/
       // fnSigOf below; their source-order guards live here (a no-op for
       // every non-import= binding — see lower-namespaces.ts).
@@ -1322,6 +1444,20 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const en = lowerEnumAccess(L, expr);
         if (en) return en;
+      }
+      // Imported const data tables can cross a workspace-package boundary
+      // whose runtime value lives in the island even though the checker sees
+      // the source literal. For a getter-free literal chain whose leaf is a
+      // pure scalar expression, lower that leaf directly. This preserves the
+      // initialized value without executing calls or property getters again.
+      {
+        const initializer = externalStaticDataPropertyInitializer(L.checker, expr);
+        const scalar = initializer === null ? null : staticDataScalar(L, initializer);
+        if (scalar !== null) {
+          const target = L.mapTypeOf(L.typeOf(expr));
+          const value = staticDataScalarLit(scalar, locOf(expr));
+          if (target !== null) return L.coerceInto(expr, value, target);
+        }
       }
       // `require.main.filename` / `require.main?.filename` — CommonJS
       // entry-module identity: in a compiled binary require.main IS the

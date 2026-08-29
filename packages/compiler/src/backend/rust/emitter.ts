@@ -621,6 +621,14 @@ class RustEmitter {
       }
       if (value === null || typeof value !== "object") return;
       const node = value as Record<string, unknown>;
+      // Function types can live only in record fields or nested callback
+      // signatures, with no concrete closure expression in the reachable
+      // program. Register their empty shape during discovery so Rust can
+      // still name the uninhabited enum in the containing type. A later
+      // closure node of the same signature adds its concrete targets.
+      if (node.kind === "func" && Array.isArray(node.params) && node.ret !== undefined) {
+        this.ensureClosureShape(node as unknown as IrFuncType);
+      }
       if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("emitter.")) {
         this.usesEventEmitter = true;
         if (node.fn === "emitter.on" || node.fn === "emitter.onData" || node.fn === "emitter.onDyn" || node.fn === "emitter.onDataDyn") {
@@ -779,7 +787,7 @@ class RustEmitter {
       }
       for (const child of Object.values(node)) visit(child);
     };
-    for (const fn of this.mod.functions) visit(fn.body);
+    visit(this.mod);
   }
 
   private ensureClosureShape(type: IrFuncType): RustClosureShape {
