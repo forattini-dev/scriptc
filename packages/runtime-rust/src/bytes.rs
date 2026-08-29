@@ -156,6 +156,16 @@ pub enum JsTypedBytes {
     F32(JsBytes<f32>),
 }
 
+macro_rules! with_typed_bytes {
+    ($value:expr, |$bytes:ident| $body:expr) => {
+        match $value {
+            JsTypedBytes::U32($bytes) => $body,
+            JsTypedBytes::I32($bytes) => $body,
+            JsTypedBytes::F32($bytes) => $body,
+        }
+    };
+}
+
 pub fn typed_bytes_u32_copy(value: &JsBytes<u32>) -> JsTypedBytes {
     JsTypedBytes::U32(bytes_copy(value))
 }
@@ -169,27 +179,23 @@ pub fn typed_bytes_f32_copy(value: &JsBytes<f32>) -> JsTypedBytes {
 }
 
 pub fn typed_bytes_trace(value: &JsTypedBytes, tracer: &mut Tracer<'_>) {
-    match value {
-        JsTypedBytes::U32(value) => tracer.edge(value),
-        JsTypedBytes::I32(value) => tracer.edge(value),
-        JsTypedBytes::F32(value) => tracer.edge(value),
-    }
+    with_typed_bytes!(value, |bytes| tracer.edge(bytes));
 }
 
 pub fn typed_bytes_len(value: &JsTypedBytes) -> f64 {
-    match value {
-        JsTypedBytes::U32(value) => bytes_len(value),
-        JsTypedBytes::I32(value) => bytes_len(value),
-        JsTypedBytes::F32(value) => bytes_len(value),
-    }
+    with_typed_bytes!(value, |bytes| bytes_len(bytes))
+}
+
+pub fn typed_bytes_byte_len(value: &JsTypedBytes) -> f64 {
+    with_typed_bytes!(value, |bytes| bytes_byte_len(bytes))
 }
 
 pub fn typed_bytes_get(value: &JsTypedBytes, index: f64) -> f64 {
-    match value {
-        JsTypedBytes::U32(value) => bytes_get(value, index),
-        JsTypedBytes::I32(value) => bytes_get(value, index),
-        JsTypedBytes::F32(value) => bytes_get(value, index),
-    }
+    with_typed_bytes!(value, |bytes| bytes_get(bytes, index))
+}
+
+pub fn typed_bytes_set(value: &JsTypedBytes, index: f64, field: f64) {
+    with_typed_bytes!(value, |bytes| bytes_set(bytes, index, field));
 }
 
 pub fn typed_bytes_name(value: &JsTypedBytes) -> &'static str {
@@ -201,11 +207,7 @@ pub fn typed_bytes_name(value: &JsTypedBytes) -> &'static str {
 }
 
 pub fn typed_bytes_identity(value: &JsTypedBytes) -> usize {
-    match value {
-        JsTypedBytes::U32(value) => value.identity(),
-        JsTypedBytes::I32(value) => value.identity(),
-        JsTypedBytes::F32(value) => value.identity(),
-    }
+    with_typed_bytes!(value, |bytes| bytes.identity())
 }
 
 pub fn typed_bytes_copy(value: &JsTypedBytes) -> JsTypedBytes {
@@ -243,11 +245,7 @@ pub fn typed_bytes_deep_equals(left: &JsTypedBytes, right: &JsTypedBytes) -> boo
 }
 
 pub fn typed_bytes_join(value: &JsTypedBytes, separator: &JsString) -> JsString {
-    match value {
-        JsTypedBytes::U32(value) => bytes_join(value, separator),
-        JsTypedBytes::I32(value) => bytes_join(value, separator),
-        JsTypedBytes::F32(value) => bytes_join(value, separator),
-    }
+    with_typed_bytes!(value, |bytes| bytes_join(bytes, separator))
 }
 
 fn bytes_from_elements<T: ByteElement>(elements: Vec<T>) -> JsBytes<T> {

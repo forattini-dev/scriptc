@@ -67,3 +67,14 @@ console.log(data().length, data().byteLength);
 const u = data();
 u[1] = 60;
 console.log(u[1]);
+
+// The type-erased wider typed-array representation carries the same
+// property and write semantics, with byteLength reflecting element width.
+function words(): Uint32Array;
+function words(): any {
+  return new Uint32Array([10, 20, 30]);
+}
+const w = words();
+console.log(w.length, w.byteLength);
+w[1] = 0x1_0000_0001;
+console.log(w[1]);

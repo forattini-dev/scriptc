@@ -289,11 +289,25 @@ where
     T: ArrayElement,
     F: Fn(&T, &T) -> bool,
 {
+    array_index_of_from_by(array, needle, 0.0, equal)
+}
+
+pub fn array_index_of_from_by<T, F>(
+    array: &JsArray<T>,
+    needle: &T,
+    from_index: f64,
+    equal: F,
+) -> f64
+where
+    T: ArrayElement,
+    F: Fn(&T, &T) -> bool,
+{
     array.with(|data| {
-        data.elements
+        let start = array_relative_index(from_index, data.elements.len());
+        data.elements[start..]
             .iter()
             .position(|element| equal(element, needle))
-            .map_or(-1.0, |index| index as f64)
+            .map_or(-1.0, |index| (start + index) as f64)
     })
 }
 
