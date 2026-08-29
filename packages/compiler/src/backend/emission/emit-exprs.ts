@@ -902,23 +902,43 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.receiver.type.kind === "jsval") {
           const r = E.emitExpr(e.receiver);
           const bind = `sc_t${E.tempCounter++}`;
-          E.line(`${cDecl(e.type, bind)} = NULL;`);
-          E.currentFrame().push({ name: bind, type: e.type });
+          E.line(`${cDecl(e.receiver.type, bind)} = NULL;`);
+          E.currentFrame().push({ name: bind, type: e.receiver.type });
+          if (e.type.kind === "void") {
+            E.line(`if (!scr_jsval_is_nullish(${r.name})) {`);
+            E.indent++;
+            E.line(`${bind} = scr_jsval_retain(${r.name});`);
+            E.chainTemps.set(e.id, { name: bind, type: e.receiver.type });
+            E.frames.push([]);
+            E.emitExpr(e.body);
+            E.releaseFrame(E.frames.pop()!);
+            E.chainTemps.delete(e.id);
+            E.indent--;
+            E.line(`}`);
+            return { name: "", type: e.type };
+          }
           const name = `sc_t${E.tempCounter++}`;
           E.line(`${cDecl(e.type, name)};`);
           E.line(`if (scr_jsval_is_nullish(${r.name})) {`);
           E.indent++;
-          E.line(`${name} = scr_jsval_undefined();`);
+          if (e.type.kind === "jsval") {
+            E.line(`${name} = scr_jsval_undefined();`);
+          } else {
+            if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: static jsval optChain result is not a union");
+            const undefTag = undefinedArmTag(e.type, E.unionsById);
+            if (undefTag < 0) throw new InternalCompilerError("emitter bug: static jsval optChain result lacks its undefined arm");
+            E.line(`${name} = ${E.unitInstanceRef(e.type.unionId, undefTag)};`);
+          }
           E.indent--;
           E.line(`} else {`);
           E.indent++;
           E.line(`${bind} = scr_jsval_retain(${r.name});`);
-          E.chainTemps.set(e.id, { name: bind, type: e.type });
+          E.chainTemps.set(e.id, { name: bind, type: e.receiver.type });
           E.emitBranchInto(name, e.body);
           E.chainTemps.delete(e.id);
           E.indent--;
           E.line(`}`);
-          E.currentFrame().push({ name, type: e.type });
+          if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
           return { name, type: e.type };
         }
         // A dyn (dyn) receiver — the `rawName?.match(re)` step: the nullish

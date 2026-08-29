@@ -2080,18 +2080,25 @@ function validateFunction(
         checkExpr(e.receiver);
         // An island-handle chain (`x?.y` on 'any'): the nullish test is a
         // runtime ask of the engine value; the body is the plain island
-        // operation over the bound handle, and both body and result stay
-        // jsval (the unit path is the engine's undefined).
+        // operation over the bound handle. Untyped operations keep body
+        // and result as jsval; a declared primitive package method may
+        // exit inside the guarded branch and wrap into an undefined-armed
+        // static result union.
         if (e.receiver.type.kind === "jsval") {
           if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);
           activeChains.set(e.id, JSVAL);
           checkExpr(e.body);
           activeChains.delete(e.id);
-          if (e.body.type.kind !== "jsval") {
-            err(`jsval optChain with ${e.body.type.kind} body`, e.loc);
-          }
-          if (e.type.kind !== "jsval") {
-            err(`jsval optChain must be jsval, got ${e.type.kind}`, e.loc);
+          if (e.type.kind === "void") {
+            if (e.body.type.kind !== "void") err(`void jsval optChain with ${e.body.type.kind} body`, e.loc);
+          } else if (e.type.kind === "jsval") {
+            if (e.body.type.kind !== "jsval") err(`jsval optChain with ${e.body.type.kind} body`, e.loc);
+          } else {
+            expectType(e.body, e.type, "jsval optChain body");
+            const rdef = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
+            if (!rdef || !rdef.arms.some((a) => a.kind === "undefinedT")) {
+              err("static jsval optChain result must have an undefined arm", e.loc);
+            }
           }
           break;
         }

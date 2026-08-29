@@ -30,6 +30,30 @@ pub struct IslandModule {
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
 
+pub fn island_value_undefined() -> IslandValue {
+    IslandValue(JsValue::undefined())
+}
+
+pub fn island_value_null() -> IslandValue {
+    IslandValue(JsValue::null())
+}
+
+pub fn island_value_number(value: f64) -> IslandValue {
+    IslandValue(JsValue::from(value))
+}
+
+pub fn island_value_boolean(value: bool) -> IslandValue {
+    IslandValue(JsValue::from(value))
+}
+
+pub fn island_value_string(value: &JsString) -> IslandValue {
+    IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
+}
+
+pub fn island_is_nullish(value: &IslandValue) -> bool {
+    value.0.is_null_or_undefined()
+}
+
 struct IslandState {
     context: Context,
     modules: HashMap<&'static str, Module>,
@@ -95,6 +119,26 @@ pub fn island_call(callee: &IslandValue, args: &[IslandValue]) -> IslandValue {
         let args = args.iter().map(|value| value.0.clone()).collect::<Vec<_>>();
         let value = function
             .call(&JsValue::undefined(), &args, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(value)
+    })
+}
+
+pub fn island_call_method(receiver: &IslandValue, name: &str, args: &[IslandValue]) -> IslandValue {
+    with_island_state(|state| {
+        let object = receiver
+            .0
+            .to_object(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        let member = object
+            .get(boa_engine::JsString::from(name), &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        let Some(function) = member.as_callable() else {
+            throw_type_error(format!("{name} is not a function"));
+        };
+        let args = args.iter().map(|value| value.0.clone()).collect::<Vec<_>>();
+        let value = function
+            .call(&receiver.0, &args, &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
         IslandValue(value)
     })

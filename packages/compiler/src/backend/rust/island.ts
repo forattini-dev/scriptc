@@ -132,9 +132,9 @@ function emitOperation(
     if (!context.hasEmbeddedModules()) {
       return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; sc_dyn_call(&${callee}, &${args}, "value") }`;
     }
-    const islandCall = values.length === 0
-      ? `${context.dynTypeName()}::Island(runtime::island_call(&sc_value, &[]))`
-      : "runtime::throw_error_code(\"embedded module calls with arguments are not supported yet\".to_owned(), \"SC3001\")";
+    const islandArgs = context.nextName("sc_island_call_args");
+    const islandCall = `{ let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+      `${context.dynTypeName()}::Island(runtime::island_call(&sc_value, &${islandArgs})) }`;
     return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; match ${callee} { ${context.dynTypeName()}::Island(sc_value) => ${islandCall}, sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
   }
   if ((expr.op === "truthy" || expr.op === "not") && expr.args.length === 1) {
@@ -191,6 +191,14 @@ function emitOperation(
     const receiverExpr = expr.args[0];
     if (receiverExpr === undefined) context.unsupported("island method without a receiver", expr.loc);
     const values = expr.args.slice(1).map((arg) => emitExpr(arg)).join(", ");
+    if (context.hasEmbeddedModules()) {
+      const islandArgs = context.nextName("sc_island_method_args");
+      const name = context.rustString(expr.name);
+      return `{ let ${receiver} = ${emitExpr(receiverExpr)}; let ${args} = [${values}]; match &${receiver} { ` +
+        `${context.dynTypeName()}::Island(sc_value) => { let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+        `${context.dynTypeName()}::Island(runtime::island_call_method(sc_value, "${name}", &${islandArgs})) }, ` +
+        `sc_value => sc_dyn_invoke(sc_value, "${name}", &${args}, "${name}"), } }`;
+    }
     return `{ let ${receiver} = ${emitExpr(receiverExpr)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${context.rustString(expr.name)}", &${args}, "${context.rustString(expr.name)}") }`;
   }
   context.unsupported(`island operation '${expr.op}'`, expr.loc);
@@ -202,6 +210,22 @@ function numericOperator(op: "sub" | "mul" | "div" | "mod"): string {
 
 function relationalOperator(op: "lt" | "le" | "gt" | "ge"): string {
   return { lt: "<", le: "<=", gt: ">", ge: ">=" }[op];
+}
+
+/** Convert the JSON-safe primitive argument subset into Boa-owned values.
+ * Embedded exports and methods share this bridge so argument evaluation
+ * remains left-to-right in the generated dyn array before any call. */
+function emitIslandArguments(args: string, context: RustIslandContext): string {
+  const dyn = context.dynTypeName();
+  return `${args}.iter().map(|sc_arg| match sc_arg { ` +
+    `${dyn}::Undefined => runtime::island_value_undefined(), ` +
+    `${dyn}::Null => runtime::island_value_null(), ` +
+    `${dyn}::Number(sc_value) => runtime::island_value_number(*sc_value), ` +
+    `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
+    `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
+    `${dyn}::Island(sc_value) => sc_value.clone(), ` +
+    `_ => runtime::throw_error_code("embedded module call argument is outside the primitive island subset".to_owned(), "SC3001"), ` +
+    `}).collect::<Vec<_>>()`;
 }
 
 function emitObjectLiteral(

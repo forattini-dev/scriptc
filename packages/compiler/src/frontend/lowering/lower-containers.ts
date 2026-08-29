@@ -4984,12 +4984,17 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if (dynReceiver === undefined && access.name.text === "localeCompare") return lowerLocaleCompareCall(L, call, access);
     const entry = own(STR_METHODS, access.name.text);
     if (!entry) return null;
+    const islandChainReceiver = dynReceiver === undefined
+      ? L.chainRecvByNode.get(access.expression)
+      : undefined;
     // A validated dyn receiver (`pkg.name.replace(...)` on a JSON.parse
     // value) arrives pre-extracted through `dynReceiver`; its checker type
     // is `any`, so the type/symbol gates don't apply — the dyn value's
     // methods can only BE the string intrinsics.
     if (dynReceiver === undefined) {
-      const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+      const receiverIr = islandChainReceiver?.type.kind === "jsval"
+        ? L.mapTypeOf(L.checker.getNonNullableType(L.typeOf(access.expression)))
+        : L.mapTypeOf(L.typeOf(access.expression));
       // `require.main?.filename.startsWith(...)`: the checker types the
       // receiver `string | undefined` (the chain's short-circuit arm), but
       // the entry-module fold lowers it to a compile-time STRING — the
@@ -5006,6 +5011,19 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         `.${access.name.text} with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"} on strings`,
         call,
       );
+    }
+    if (islandChainReceiver?.type.kind === "jsval") {
+      if (entry.method !== "trim") return null;
+      L.requireDynamicApi("'?.trim()' on an island-backed string", call);
+      const result: IrExpr = {
+        kind: "jsOp",
+        op: "callMethod",
+        name: access.name.text,
+        args: [islandChainReceiver],
+        type: JSVAL,
+        loc: locOf(call),
+      };
+      return { kind: "jsExit", value: result, type: entry.result, loc: locOf(call) };
     }
     const receiver = dynReceiver ? dynReceiver() : L.lowerExpr(access.expression);
     const args = entry.method === "split"

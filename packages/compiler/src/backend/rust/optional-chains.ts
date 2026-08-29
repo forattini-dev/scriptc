@@ -2,7 +2,7 @@ import type { IrExpr } from "../../ir/nodes.js";
 import type { RustExpressionContext } from "./expressions.js";
 
 type OptionalChainContext = Pick<RustExpressionContext,
-  "chainValues" | "dynTypeName" | "isUnit" | "nextName" |
+  "chainValues" | "dynTypeName" | "hasEmbeddedModules" | "isUnit" | "nextName" |
   "union" | "unionName" | "unionVariant" | "unsupported"
 >;
 
@@ -22,15 +22,27 @@ export function emitRustOptionalChain(
   }
 
   if (expr.receiver.type.kind === "dyn" || expr.receiver.type.kind === "jsval") {
-    if (expr.type.kind !== expr.receiver.type.kind && expr.type.kind !== "void") {
-      context.unsupported("dynamic optional chain result", expr.loc);
-    }
     const dyn = context.dynTypeName();
     const binding = `let ${receiver} = ${emitExpr(expr.receiver)};`;
-    const nullish = `matches!(&${receiver}, ${dyn}::Undefined | ${dyn}::Null)`;
-    return expr.type.kind === "void"
-      ? `{ ${binding} if !${nullish} { let _ = ${body}; } }`
-      : `{ ${binding} if ${nullish} { ${dyn}::Undefined } else { ${body} } }`;
+    const nativeNullish = `matches!(&${receiver}, ${dyn}::Undefined | ${dyn}::Null)`;
+    const islandNullish = context.hasEmbeddedModules()
+      ? ` || matches!(&${receiver}, ${dyn}::Island(sc_value) if runtime::island_is_nullish(sc_value))`
+      : "";
+    const nullish = `(${nativeNullish}${islandNullish})`;
+    if (expr.type.kind === "void") {
+      return `{ ${binding} if !${nullish} { let _ = ${body}; } }`;
+    }
+    if (expr.type.kind === expr.receiver.type.kind) {
+      return `{ ${binding} if ${nullish} { ${dyn}::Undefined } else { ${body} } }`;
+    }
+    if (expr.receiver.type.kind === "jsval" && expr.type.kind === "union") {
+      const result = context.union(expr.type.unionId, expr.loc);
+      const undefinedTag = result.arms.findIndex((arm) => arm.kind === "undefinedT");
+      if (undefinedTag < 0) context.unsupported("static jsval optional chain result without undefined arm", expr.loc);
+      const absent = `${context.unionName(result.id)}::${context.unionVariant(undefinedTag)}`;
+      return `{ ${binding} if ${nullish} { ${absent} } else { ${body} } }`;
+    }
+    context.unsupported("dynamic optional chain result", expr.loc);
   }
 
   if (expr.receiver.type.kind !== "union") context.unsupported("optional chain over a non-union", expr.loc);

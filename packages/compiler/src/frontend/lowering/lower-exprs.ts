@@ -3264,8 +3264,14 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         L.chainRecvByNode.delete(recvNode);
         L.chainHandled.delete(dotNode);
       }
-      if (body.type.kind !== "jsval") L.badType(expr, L.typeOf(expr));
-      return { kind: "optChain", id, receiver, body, type: JSVAL, loc };
+      if (body.type.kind === "jsval") {
+        return { kind: "optChain", id, receiver, body, type: JSVAL, loc };
+      }
+      // A package/island method with a declared primitive result exits
+      // the engine inside the guarded branch. Wrap that result into the
+      // checker's undefined-armed chain type; the receiver itself remains
+      // jsval so the nullish test still belongs to the engine.
+      return L.finishOptionalChain(expr, id, receiver, body, loc);
     }
     const def = receiver.type.kind === "union" ? L.unions.get(receiver.type.unionId) : undefined;
     if (!def || !def.arms.some(isUnitType)) {
