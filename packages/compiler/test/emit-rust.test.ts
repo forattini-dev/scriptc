@@ -1314,6 +1314,8 @@ test.each([
   "2387-tonumber-argv.ts",
   "2388-tonumber-grammar-zoo.ts",
   "2389-tonumber-unary-plus.ts",
+  "2390-dot-requires/main.cjs",
+  "2391-default-builtin-imports/main.ts",
   "2400-kill-return-edge.ts",
   "2401-kill-break-staging.ts",
   "2402-labeled-break-kill.ts",
