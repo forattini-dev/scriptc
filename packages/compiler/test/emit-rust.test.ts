@@ -882,6 +882,7 @@ test.each([
   "991-process-exit.ts",
   "1423-text-codec.ts",
   "1424-fs-options.ts",
+  "1426-stdin-read.ts",
   "1427-fromcharcode-lastindexof.ts",
   "1433-filter-narrow.ts",
   "1436-default-undef-param.ts",

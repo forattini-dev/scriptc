@@ -1,3 +1,5 @@
+const STDIN_FD: f64 = 0.0;
+
 fn fs_error_code(error: &std::io::Error) -> &'static str {
     #[cfg(unix)]
     if error.raw_os_error() == Some(9) {
@@ -1145,6 +1147,13 @@ pub fn fs_read_sync(fd: f64, bytes: &JsBytes<u8>, offset: f64, length: f64, posi
 pub fn fs_read_fd_bytes(fd: f64) -> JsBytes<u8> {
     use std::io::Read;
     let mut output = Vec::new();
+    if fd == STDIN_FD {
+        let mut stdin = std::io::stdin().lock();
+        if let Err(error) = stdin.read_to_end(&mut output) {
+            throw_fs_fd_io_error("read", error);
+        }
+        return bytes_from_vec(output);
+    }
     with_open_file(fd, "read", |file| file.read_to_end(&mut output));
     bytes_from_vec(output)
 }
