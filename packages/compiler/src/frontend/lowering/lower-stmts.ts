@@ -6231,14 +6231,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             elemT = { kind: "union", unionId: L.unions.intern(arms) };
           }
         }
-        if (elemT !== null && pureReemittable(iterable)) {
+        const tupleLiteral = iterable.kind === "recordLit" ? iterable : null;
+        if (elemT !== null && (pureReemittable(iterable) || tupleLiteral !== null)) {
           const loc = locOf(stmt.expression);
           const shapeId = iterable.type.shapeId;
           const snapshotElem = elemT;
           iterable = {
             kind: "arrayLit",
             elems: byIndex.map((f) => {
-              const read: IrExpr = {
+              const literalField = tupleLiteral?.fields.find((field) => field.name === f.name);
+              const read: IrExpr = literalField?.value ?? {
                 kind: "recordGet",
                 obj: iterable,
                 shapeId,

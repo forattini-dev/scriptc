@@ -1570,6 +1570,7 @@ shardedTest.each(shardSelect([
   "2712-process-method-typeof.ts",
   "2713-date-parse.ts",
   "2714-readonly-tuple-every.ts",
+  "2715-forof-inline-readonly-tuple.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
