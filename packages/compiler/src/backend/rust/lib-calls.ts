@@ -514,6 +514,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return `runtime::fs_realpath(&(${context.emitExpr(arg)}))`;
   }
   if (expr.fn === "os.homedir" && expr.args.length === 0) return "runtime::os_homedir()";
+  if (expr.fn === "os.hostname" && expr.args.length === 0) return "runtime::os_hostname()";
   if (expr.fn === "os.tmpdir" && expr.args.length === 0) return "runtime::os_tmpdir()";
   if (expr.fn === "os.userName" && expr.args.length === 0) return "runtime::os_user_name()";
   if (expr.fn === "os.userShell" && expr.args.length === 0) return "runtime::os_user_shell()";
@@ -1196,5 +1197,4 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return `{ let ${value} = ${context.emitExpr(arg)}; match ${value} { ${arms} _ => unreachable!("scriptc invariant: invalid class value"), } }`;
   }
   context.unsupported(`library call '${expr.fn}'`, expr.loc);
-
 }

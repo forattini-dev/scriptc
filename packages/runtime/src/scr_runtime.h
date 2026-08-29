@@ -2814,6 +2814,7 @@ ScrStr *scr_sym_to_string(ScrSym *s); /* +1 "Symbol(desc)" ("Symbol()" when abse
  * getpwuid(3) (failure aborts); tmpdir is Node's $TMPDIR/$TMP/$TEMP
  * cascade else /tmp, one trailing slash trimmed. Both +1 fresh. */
 ScrStr *scr_os_homedir(void);
+ScrStr *scr_os_hostname(void); /* machine host name — +1 fresh */
 ScrStr *scr_os_tmpdir(void);
 ScrStr *scr_os_release(void); /* uname(2) release — +1 fresh */
 ScrStr *scr_os_type(void);    /* uname(2) sysname — +1 fresh */

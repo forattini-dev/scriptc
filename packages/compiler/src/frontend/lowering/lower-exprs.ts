@@ -3757,6 +3757,14 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     const ctxType = L.checker.getContextualType(expr);
     const tsType = ctxType ?? L.typeOf(expr);
     let mapped = expected ?? L.mapTypeOf(tsType);
+    // `[...] as const satisfies readonly T[]`: `satisfies` supplies an
+    // array contextual type to the literal, but the value's inferred type
+    // remains the fixed readonly tuple created by `as const`. Runtime
+    // erasure must therefore construct that tuple, not a widened T[].
+    if (expected === undefined && underConstAssertion(expr)) {
+      const own = L.mapTypeOf(L.typeOf(expr));
+      if (own?.kind === "record" && L.shapes.get(own.shapeId)?.tuple) mapped = own;
+    }
     // A JS literal whose OWN inferred type is never-tainted
     // (neverTaintedJsType — the evolving `const gb = []`, the mixed
     // command tuple `['pwd', []]`) carries no element information: route
@@ -4605,7 +4613,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // target names the wider slot type).
     {
       let p: ts.Node = expr.parent;
-      while (ts.isParenthesizedExpression(p)) p = p.parent;
+      while (
+        ts.isParenthesizedExpression(p) ||
+        (ts.isAsExpression(p) && isConstAssertionTypeNode(p.type))
+      ) {
+        p = p.parent;
+      }
       if (ts.isSatisfiesExpression(p)) {
         const own = L.typeOf(expr);
         if (L.mapTypeOf(own)?.kind === "record") tsType = own;

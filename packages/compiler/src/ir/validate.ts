@@ -193,6 +193,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "path.win32Relative": { argTypes: [STRING, STRING], result: STRING },
   "path.win32ToNamespacedPath": { argTypes: [STRING], result: STRING },
   "os.homedir": { argTypes: [], result: STRING },
+  "os.hostname": { argTypes: [], result: STRING },
   "os.release": { argTypes: [], result: STRING },
   "os.type": { argTypes: [], result: STRING },
   "os.totalmem": { argTypes: [], result: F64 },

@@ -715,6 +715,15 @@ ScrStr *scr_os_release(void) {
   return scr_str_new(buf, (size_t)len);
 }
 
+ScrStr *scr_os_hostname(void) {
+  char name[256];
+  DWORD size = (DWORD)sizeof name;
+  if (!GetComputerNameA(name, &size)) {
+    scr_trap("scriptc: os.hostname() failed\n");
+  }
+  return scr_str_new(name, (size_t)size);
+}
+
 ScrStr *scr_os_type(void) {
   /* uv_os_uname's sysname on Windows is the constant "Windows_NT". */
   return scr_str_new("Windows_NT", 10);
@@ -755,6 +764,7 @@ ScrStr *scr_os_user_name(void) {
 ScrStr *scr_os_user_shell(void) { return scr_str_new("", 0); }
 ScrStr *scr_os_user_homedir(void) { return scr_os_homedir(); }
 ScrStr *scr_os_release(void) { return scr_str_new("", 0); }
+ScrStr *scr_os_hostname(void) { return scr_str_new("", 0); }
 ScrStr *scr_os_type(void) { return scr_str_new("WASI", 4); }
 double scr_os_totalmem(void) { return 0; }
 /* The guest temp namespace is stable across hosts. `scriptc run` preopens
@@ -819,6 +829,15 @@ ScrStr *scr_os_release(void) {
     scr_trap("scriptc: os.release() failed\n");
   }
   return scr_str_new(u.release, strlen(u.release));
+}
+
+ScrStr *scr_os_hostname(void) {
+  char name[256];
+  if (gethostname(name, sizeof name) != 0) {
+    scr_trap("scriptc: os.hostname() failed\n");
+  }
+  name[sizeof name - 1] = '\0';
+  return scr_str_new(name, strlen(name));
 }
 
 ScrStr *scr_os_type(void) {

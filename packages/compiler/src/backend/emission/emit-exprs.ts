@@ -3330,6 +3330,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_path_win32_to_namespaced_path(${arg(0)})`);
           case "os.homedir":
             return finish(`scr_os_homedir()`);
+          case "os.hostname":
+            return finish(`scr_os_hostname()`);
           case "os.type":
             return finish(`scr_os_type()`);
           case "os.totalmem":

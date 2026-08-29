@@ -454,7 +454,11 @@ function nearestPackageConfigDir(dir: string): string | null {
 
 /** package.json "imports" lookup — the exports machinery over "#" keys
  * (exact keys, then '*' patterns, condition objects in key order). */
-function resolveImportsField(imports: unknown, specifier: string): string | null {
+export function resolvePackageImports(
+  imports: unknown,
+  specifier: string,
+  conditions: ReadonlySet<string> = EXPORT_CONDITIONS,
+): string | null {
   if (!imports || typeof imports !== "object" || Array.isArray(imports)) return null;
   const map = imports as Record<string, unknown>;
   // Reuse the exports resolver by re-rooting the key space: "./" + the
@@ -464,7 +468,7 @@ function resolveImportsField(imports: unknown, specifier: string): string | null
     if (!k.startsWith("#")) continue;
     rekeyed["." + k.slice(1)] = v;
   }
-  return resolveExports(rekeyed, "." + specifier.slice(1), EXPORT_CONDITIONS);
+  return resolveExports(rekeyed, "." + specifier.slice(1), conditions);
 }
 
 /** Absolute path of the nearest package.json at or above `fromFile`'s
@@ -519,7 +523,7 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
     // Node's validity rule: only the bare "#" is never resolvable ("#/..."
     // matches "#/*"-pattern keys on current Node).
     if (specifier === "#") return null;
-    target = resolveImportsField((pkg as { imports?: unknown }).imports, specifier);
+    target = resolvePackageImports((pkg as { imports?: unknown }).imports, specifier);
     // An imports target that is not "./"-relative is PACKAGE_RESOLVE'd as
     // a bare specifier (Node's PACKAGE_IMPORTS_EXPORTS_RESOLVE): the
     // project-internal half of that re-entry is the self-name rule below —

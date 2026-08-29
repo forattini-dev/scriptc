@@ -314,6 +314,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "path.win32Relative": "scr_path_win32_relative",
   "path.win32ToNamespacedPath": "scr_path_win32_to_namespaced_path",
   "os.homedir": "scr_os_homedir",
+  "os.hostname": "scr_os_hostname",
   "os.type": "scr_os_type",
   "os.totalmem": "scr_os_totalmem",
   "os.release": "scr_os_release",

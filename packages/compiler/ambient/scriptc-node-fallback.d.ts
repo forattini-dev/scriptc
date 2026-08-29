@@ -1228,6 +1228,8 @@ declare module "node:path/win32" {
  * both type worlds map to the same IR structure). */
 declare module "os" {
   export function platform(): string;
+  /** The kernel/OS host name for this machine. */
+  export function hostname(): string;
   export function homedir(): string;
   export function tmpdir(): string;
   /* uname(2)'s release field — Node's own implementation. */

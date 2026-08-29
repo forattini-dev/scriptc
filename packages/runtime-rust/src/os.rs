@@ -76,6 +76,21 @@ pub fn os_homedir() -> JsString {
     )
 }
 
+pub fn os_hostname() -> JsString {
+    let value = if cfg!(target_os = "windows") {
+        std::env::var_os("COMPUTERNAME").map(|value| value.to_string_lossy().into_owned())
+    } else if cfg!(target_os = "linux") || cfg!(target_os = "android") {
+        std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .ok()
+            .map(|value| value.trim_end_matches(['\r', '\n']).to_owned())
+    } else if cfg!(target_os = "wasi") {
+        None
+    } else {
+        os_command_output("hostname", &[])
+    };
+    value.map_or_else(empty_string, |value| string(&value))
+}
+
 pub fn os_user_name() -> JsString {
     os_passwd_field(0)
         .or_else(|| {

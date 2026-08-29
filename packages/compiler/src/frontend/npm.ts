@@ -89,7 +89,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
-import { resolveExports } from "./resolve.js";
+import { resolveExports, resolvePackageImports } from "./resolve.js";
 import { workspacePackageOfPath } from "./shared.js";
 
 const NODE_IMPORT_CONDITIONS = new Set(["import", "node", "default"]);
@@ -754,6 +754,7 @@ interface PkgJson {
   module?: string;
   type?: string;
   exports?: unknown;
+  imports?: unknown;
 }
 
 /** Package name from a specifier ("@scope/pkg/sub" → "@scope/pkg"). */
@@ -1478,6 +1479,58 @@ export class NpmGraphBuilder {
     }
   }
 
+  /** Resolves a package-private `#name` from the importing module's nearest
+   * package scope. Node applies the edge's import/require condition set to
+   * `imports`, then resolves a relative target inside that scope or re-enters
+   * package resolution for a bare target. */
+  private resolvePackageImport(
+    fromDir: string,
+    specifier: string,
+    mode: "import" | "require",
+    ctx: { importer: string; chain: readonly string[] },
+    depth = 0,
+  ): string | null {
+    if (depth > 8) return null;
+    for (let dir = fromDir; ; ) {
+      const pkg = this.pkgJsonOf(dir);
+      if (pkg !== null) {
+        const target = resolvePackageImports(pkg.imports, specifier, nodeExportConditions(mode));
+        if (target === null) {
+          this.errors.push({
+            message:
+              `package import '${specifier}' is not defined by ${join(dir, "package.json")}` +
+              ` (imported from ${ctx.importer}; dependency chain: ${NpmGraphBuilder.chainOf(ctx.chain)})`,
+          });
+          return null;
+        }
+        if (target.startsWith("./")) {
+          const resolved = this.resolveFile(join(dir, target));
+          if (resolved !== null) return this.host.realpath(resolved);
+          this.errors.push({
+            message:
+              `package import '${specifier}' resolves to '${target}', which does not exist` +
+              ` (imported from ${ctx.importer}; dependency chain: ${NpmGraphBuilder.chainOf(ctx.chain)})`,
+          });
+          return null;
+        }
+        if (target.startsWith("#")) {
+          return this.resolvePackageImport(dir, target, mode, ctx, depth + 1);
+        }
+        return this.resolvePackage(dir, target, mode, ctx);
+      }
+      const parent = dirname(dir);
+      if (parent === dir) {
+        this.errors.push({
+          message:
+            `package import '${specifier}' has no enclosing package scope` +
+            ` (imported from ${ctx.importer}; dependency chain: ${NpmGraphBuilder.chainOf(ctx.chain)})`,
+        });
+        return null;
+      }
+      dir = parent;
+    }
+  }
+
   /* ── the walk ─────────────────────────────────────────────────── */
 
   /** Modules reached ONLY through lazy edges so far. Node has not linked
@@ -1573,7 +1626,9 @@ export class NpmGraphBuilder {
         target = file === null ? null : this.host.realpath(file);
       } else if (builtinKeyOf(next) === null) {
         const errorsBefore = this.errors.length;
-        target = this.resolvePackage(dirname(cur), next, "import", { importer: cur, chain: [] });
+        target = next.startsWith("#")
+          ? this.resolvePackageImport(dirname(cur), next, "import", { importer: cur, chain: [] })
+          : this.resolvePackage(dirname(cur), next, "import", { importer: cur, chain: [] });
         if (target === null) this.errors.length = errorsBefore;
       }
       if (target === null) break;
@@ -1674,8 +1729,9 @@ export class NpmGraphBuilder {
       // embeds TWO targets for one specifier, each behind its own
       // kind-tagged edge (the island's module loader asks with the import
       // kind, its require shim with the require kind).
-      const depName = packageNameOf(spec);
-      const nextChain = depName === pkgName ? chain : [...chain, depName];
+      const packageImport = spec.startsWith("#");
+      const depName = packageImport ? pkgName : packageNameOf(spec);
+      const nextChain = packageImport || depName === pkgName ? chain : [...chain, depName];
       if (use.require) {
         // require edges attribute to the module whose scope DEFINES the
         // require function being called: a direct require() is this file's
@@ -1688,10 +1744,10 @@ export class NpmGraphBuilder {
         if (use.requireViaHelper) froms.add(this.requireHelperOriginOf(key) ?? key);
         for (const from of froms) {
           const errorsBefore = this.errors.length;
-          const to = this.resolvePackage(dirname(from), spec, "require", {
-            importer: from,
-            chain,
-          });
+          const context = { importer: from, chain };
+          const to = packageImport
+            ? this.resolvePackageImport(dirname(from), spec, "require", context)
+            : this.resolvePackage(dirname(from), spec, "require", context);
           if (to === null) {
             // require failures are ALWAYS lazy — no edge embeds; the
             // island's require shim throws Node's MODULE_NOT_FOUND with
@@ -1723,7 +1779,10 @@ export class NpmGraphBuilder {
       }
       if (use.static || use.dynamicImport) {
         const errorsBefore = this.errors.length;
-        const to = this.resolvePackage(dirname(key), spec, "import", { importer: key, chain });
+        const context = { importer: key, chain };
+        const to = packageImport
+          ? this.resolvePackageImport(dirname(key), spec, "import", context)
+          : this.resolvePackage(dirname(key), spec, "import", context);
         if (to === null) {
           if (!eager) {
             // Roll the resolver's diagnostics back off the build — the

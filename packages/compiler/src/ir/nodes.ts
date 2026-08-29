@@ -2016,6 +2016,8 @@ export type IrLibFn =
    * cascade ($TMPDIR/$TMP/$TEMP else /tmp, one trailing slash trimmed).
    * os.platform() lowers to process.platform — one implementation. */
   | "os.homedir"
+  /** os.hostname(): the running machine's host name. */
+  | "os.hostname"
   /** os.release(): uname(2)'s release field — Node's own implementation
    * (the kernel version string, e.g. "24.6.0" on macOS 15). Interned; +1
    * per read. Never throws. */
