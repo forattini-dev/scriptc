@@ -735,20 +735,20 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     return name;
   }
 
-/** READ-ONLY array methods on TUPLE receivers — `t.slice(...)` and
-   * `t.map(f)`: a tuple is a fixed-shape record, but these methods never
+/** READ-ONLY array methods on TUPLE receivers — `t.slice(...)`,
+   * `t.map(f)`, and `t.every(f)`: a tuple is a fixed-shape record, but these methods never
    * write, so the positions snapshot into a fresh array (the for-of-over-
    * tuples stance — pure receivers only, since the reads re-emit per
    * position) and the ordinary array machinery runs over it. The element
    * type is the one position type, or the positions' interned union with
    * each read wrapped into its arm (exactly the checker's callback
-   * parameter type). Null when this isn't a tuple slice/map — writers and
+   * parameter type). Null when this isn't a supported tuple read — writers and
    * the rest of the surface keep their fences. */
   export function lowerTupleReadMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
-    if (name !== "slice" && name !== "map") return null;
+    if (name !== "slice" && name !== "map" && name !== "every") return null;
     if (!L.isStdlibMember(access)) return null;
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     let receiver: IrExpr | null = null;
@@ -811,6 +811,9 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         if (args[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
       }
       return { kind: "arrIntrinsic", method: "slice", receiver: snapshot, args, type: arrayOf(snapshotElem), loc };
+    }
+    if (name === "every") {
+      return lowerArrayFindLikeOnReceiver(L, call, snapshot, name, snapshotElem);
     }
     // map
     if (call.arguments.length !== 1) {
@@ -1079,8 +1082,15 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     access: ts.PropertyAccessExpression,
     method: "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every",
     elem: IrType,): IrExpr {
-    const loc = locOf(call);
     const receiver = L.lowerExpr(access.expression);
+    return lowerArrayFindLikeOnReceiver(L, call, receiver, method, elem);
+  }
+
+  function lowerArrayFindLikeOnReceiver(L: Lowerer, call: ts.CallExpression,
+    receiver: IrExpr,
+    method: "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every",
+    elem: IrType,): IrExpr {
+    const loc = locOf(call);
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) L.unsupported("SC1090", call, "this call form"); // tsc-guarded

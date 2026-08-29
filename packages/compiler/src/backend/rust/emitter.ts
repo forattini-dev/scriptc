@@ -1119,7 +1119,6 @@ class RustEmitter {
   }
 
   private needsClone(type: IrType): boolean { return this.valueEmitter.needsClone(type); }
-
   private arrayElementEquality(
     left: string,
     right: string,
@@ -1129,24 +1128,19 @@ class RustEmitter {
   ): string {
     return this.valueEmitter.arrayElementEquality(left, right, type, sameValueZero, loc);
   }
-
   private mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string {
     return this.valueEmitter.mapKeyEquality(left, right, type, loc);
   }
-
   private mapStoredKey(value: string, type: IrType): string {
     return this.valueEmitter.mapStoredKey(value, type);
   }
-
   private isTracedHandle(type: IrType): boolean { return this.valueEmitter.isTracedHandle(type); }
   private isEdgeValue(type: IrType): boolean { return this.valueEmitter.isEdgeValue(type); }
   private isHeapRoot(type: IrType): boolean { return this.valueEmitter.isHeapRoot(type); }
   private isUnit(type: IrType): boolean { return this.valueEmitter.isUnit(type); }
-
   private isRustJsonCompatible(type: IrType, visiting = new Set<string>()): boolean {
     return this.valueEmitter.isRustJsonCompatible(type, visiting);
   }
-
   private ensureUnionArm(type: IrType): void { this.valueEmitter.ensureUnionArm(type); }
   private closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape {
     return this.metadata.closureShapeForType(type, loc);
@@ -1170,7 +1164,6 @@ class RustEmitter {
   ): { owner: RustClassMeta; field: IrClassDef["fields"][number] }[] {
     return this.metadata.hierarchyFields(root);
   }
-
   private classSubtree(meta: RustClassMeta): RustClassMeta[] { return this.metadata.classSubtree(meta); }
   private isEmitterClass(name: string): boolean { return this.metadata.isEmitterClass(name); }
   private classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string {
