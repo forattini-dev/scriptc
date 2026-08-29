@@ -25,15 +25,22 @@ console.log(__island_eval("new TextDecoder().encoding + ' ' + new TextDecoder().
 console.log(__island_eval("new URLSearchParams('a=1&b=two&a=3').getAll('a').join('|')"));
 console.log(__island_eval("(() => { const p = new URLSearchParams({ x: '1', 'y z': '2 3' }); p.append('c d', 'e&f=g'); p.set('x', 'one'); return p.toString(); })()"));
 console.log(__island_eval("new URLSearchParams('a+b=c%20d&%C3%A9=%E2%82%AC').toString()"));
+console.log(__island_eval("new URLSearchParams('x=😀').toString()"));
 console.log(__island_eval("(() => { const p = new URLSearchParams('b=2&a=1&b=1'); p.sort(); return p.toString() + ' ' + p.size + ' ' + p.get('missing'); })()"));
 console.log(__island_eval("JSON.stringify([...new URLSearchParams('flag&x=1')])"));
 console.log(__island_eval("(() => { const p = new URLSearchParams('a=1&b=2&a=3'); p.delete('a'); return p.toString() + ' ' + p.has('a') + ' ' + p.has('b', '2'); })()"));
+console.log(__island_eval("(() => { const p = new URLSearchParams('a=1&b=2'); const seen = []; p.forEach((value, key) => { seen.push(key + value); if (key === 'a') p.append('c', '3'); }); return seen.join('|'); })()"));
+console.log(__island_eval("(() => { const p = new URLSearchParams('a=1&b=2&c=3'); const it = p.entries(); const first = it.next().value.join(''); p.delete('b'); return first + '|' + [...it].map((pair) => pair.join('')).join('|'); })()"));
+console.log(__island_eval("(() => { const p = new URLSearchParams('a=1&b=2&a=3&c=4'); const it = p.entries(); const first = it.next().value.join(''); p.set('a', '9'); return first + '|' + [...it].map((pair) => pair.join('')).join('|'); })()"));
+console.log(__island_eval("(() => { const p = new URLSearchParams('b=2&a=1&c=3'); const it = p.entries(); const first = it.next().value.join(''); p.sort(); return first + '|' + [...it].map((pair) => pair.join('')).join('|'); })()"));
 console.log(__island_eval("new URLSearchParams([['é', '😀']]).toString()"));
 
 // btoa/atob
 console.log(__island_eval("[btoa(''), btoa('a'), btoa('ab'), btoa('abc'), btoa('hello world')].join(' ')"));
 console.log(__island_eval("JSON.stringify([atob(''), atob('YQ=='), atob('YWJj'), atob('aGVsbG8gd29ybGQ='), atob(' YW Jj ')])"));
 console.log(__island_eval("String(atob(btoa('binary\\u0000\\u0001\\u00fedata')) === 'binary\\u0000\\u0001\\u00fedata')"));
+console.log(__island_eval("(() => { const seen = []; for (const call of [() => btoa('€'), () => atob('%')]) { try { call(); } catch (error) { seen.push(error.constructor.name + ':' + error.name + ':' + error.code + ':' + (typeof DOMException === 'function' && error instanceof DOMException)); } } return seen.join('|'); })()"));
 
 // console: the island shim writes to the SAME stdout, String()-formatted
 console.log(__island_eval("console.log('island console', 1.5, true); 'after-console'"));
+console.log(__island_eval("console.log(Symbol('island')); 'after-symbol-console'"));

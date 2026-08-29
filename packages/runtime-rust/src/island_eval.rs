@@ -1,8 +1,14 @@
-use boa_engine::{Context, Source, js_string};
+use boa_engine::{
+    Context, JsResult, JsValue, NativeFunction, Source, js_string,
+    object::ObjectInitializer,
+    property::Attribute,
+};
 
 thread_local! {
     static ISLAND_CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) };
 }
+
+const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
 
 /// Evaluate JavaScript in the persistent island realm and return String(result).
 ///
@@ -11,7 +17,7 @@ thread_local! {
 pub fn island_eval(code: &JsString) -> JsString {
     ISLAND_CONTEXT.with(|slot| {
         let mut slot = slot.borrow_mut();
-        let context = slot.get_or_insert_with(Context::default);
+        let context = slot.get_or_insert_with(island_context);
         let value = context
             .eval(Source::from_bytes(code.as_bytes()))
             .unwrap_or_else(|error| island_eval_error(error, context));
@@ -26,6 +32,45 @@ pub fn island_eval(code: &JsString) -> JsString {
             .unwrap_or_else(|error| island_eval_error(error, context));
         string(&rendered.to_std_string_lossy())
     })
+}
+
+fn island_context() -> Context {
+    let mut context = Context::default();
+    let console = ObjectInitializer::new(&mut context)
+        .function(
+            NativeFunction::from_fn_ptr(island_console_log),
+            js_string!("log"),
+            0,
+        )
+        .build();
+    if let Err(error) = context.register_global_property(
+        js_string!("console"),
+        console,
+        Attribute::WRITABLE | Attribute::CONFIGURABLE,
+    ) {
+        island_eval_error(error, &mut context);
+    }
+    context
+        .eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))
+        .unwrap_or_else(|error| island_eval_error(error, &mut context));
+    context
+}
+
+fn island_console_log(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let values = arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .to_string(context)
+                .map(|value| value.to_std_string_lossy())
+        })
+        .collect::<JsResult<Vec<_>>>()?;
+    console_log(&values);
+    Ok(JsValue::undefined())
 }
 
 fn island_eval_error(error: boa_engine::JsError, context: &mut Context) -> ! {

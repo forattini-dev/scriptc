@@ -868,6 +868,7 @@ test.each([
   "1100-island-eval-basics.ts",
   "1101-island-marshal-unicode.ts",
   "1102-island-rc-stress.ts",
+  "1120-web-globals-encoders.ts",
   "1123-any-conditional-spread.ts",
   "1354-builtin-bare-specifiers.ts",
   "1359-json-module/main.ts",
