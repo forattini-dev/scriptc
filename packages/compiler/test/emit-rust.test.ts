@@ -924,6 +924,7 @@ test.each([
   "1547-computed-key-fold.ts",
   "1550-param-defaults-func-set.ts",
   "1551-dyn-receiver-methods.ts",
+  "1553-truthy-hof-predicates.ts",
   "1554-caught-into-unknown.ts",
   "1558-any-joins-and-dyn-validation.ts",
   "1559-conditional-spread-index-merge.ts",
