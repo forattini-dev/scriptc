@@ -915,6 +915,7 @@ test.each([
   "1533-bool-equality.ts",
   "1533-path-platform-namespaces.ts",
   "1539-readonly-set-map.ts",
+  "1539-unknown-truthiness.ts",
   "1540-void-statement.ts",
   "1541-fs-readdir-dirent.ts",
   "1541-union-keyed-reads.ts",
