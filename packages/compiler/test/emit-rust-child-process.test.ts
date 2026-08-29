@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -45,7 +46,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
 
-  const node = await execFileAsync(process.execPath, [fixture]);
+  const node = await execFileAsync(nodeOracleExecutable(), [fixture]);
   const rust = await execFileAsync(result.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });
@@ -72,7 +73,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
 
-  const node = await execFileAsync(process.execPath, [fixture]);
+  const node = await execFileAsync(nodeOracleExecutable(), [fixture]);
   const rust = await execFileAsync(result.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });
@@ -99,7 +100,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
 
-  const node = await execFileAsync(process.execPath, [fixture]);
+  const node = await execFileAsync(nodeOracleExecutable(), [fixture]);
   const rust = await execFileAsync(result.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });
@@ -122,7 +123,7 @@ test("Rust unhandled child error preserves corpus 1363 exit behavior", async () 
   ).toBe(true);
   if (!result.ok) return;
 
-  const node = await runToExit(process.execPath, [fixture], process.env);
+  const node = await runToExit(nodeOracleExecutable(), [fixture], process.env);
   const rust = await runToExit(result.binaryPath, [], {
     ...process.env,
     SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -152,7 +153,7 @@ console.log("spawn returned");
   ).toBe(true);
   if (!result.ok) return;
 
-  const node = await execFileAsync(process.execPath, [entry]);
+  const node = await execFileAsync(nodeOracleExecutable(), [entry]);
   const rust = await execFileAsync(result.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });

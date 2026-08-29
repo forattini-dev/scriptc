@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import ts5 from "typescript5";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 import { compileRust } from "../src/backend/rust/compile.js";
 import { emitRustModule } from "../src/backend/rust/emitter.js";
@@ -186,7 +187,7 @@ catch { console.log("syntax"); }
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -214,7 +215,7 @@ catch { console.log("syntax"); }
     ).toBe(true);
     if (!corpusResult.ok) continue;
     const [corpusNode, corpusRust] = await Promise.all([
-      execFileAsync(process.execPath, [corpusPath]),
+      execFileAsync(nodeOracleExecutable(), [corpusPath]),
       execFileAsync(corpusResult.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -250,7 +251,7 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
       expect((await readFile(result.sourcePath)).length).toBeLessThan(200_000);
     }
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -321,7 +322,7 @@ test("Rust array higher-order methods preserve callbacks, references, reductions
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -397,7 +398,7 @@ console.log(token instanceof Token, token instanceof Other, token.value);
   expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -436,7 +437,7 @@ console.log(counter.value--, --counter.value, counter.value);
   if (!result.ok || result.backend !== "rust") return;
   expect(await readFile(result.sourcePath, "utf8")).toContain("with_mut(|object|");
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -473,7 +474,7 @@ console.log(self.edges.length);
   expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -518,7 +519,7 @@ console.log(positiveZero === negativeZero, sameValue(positiveZero, negativeZero)
   expect(result.ok, result.ok ? undefined : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -551,7 +552,7 @@ console.log("cycles released");
   expect(generated).toContain("runtime::JsCell<runtime::Gc<sc_closure_");
   expect(generated).not.toContain("extern \"C\"");
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -637,7 +638,7 @@ console.log(replaced());
   if (!result.ok || result.backend !== "rust") return;
   expect(await readFile(result.sourcePath, "utf8")).toContain("runtime::Completion::Throw");
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -843,7 +844,7 @@ test("supported scalar, heap, closure, and union corpus matches Node byte-for-by
       expect(generated).not.toContain("extern \"C\"");
     }
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -1598,7 +1599,7 @@ test.each([
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
   const nodeArgs = await nodeCorpusArgs(entryPath);
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, nodeArgs, env),
+    runToExit(nodeOracleExecutable(), nodeArgs, env),
     runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   const directive = (await readFile(entryPath, "utf8")).split("\n", 2)
@@ -1633,7 +1634,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   expect(rust.stdout).toBe(node.stdout);
@@ -1703,7 +1704,7 @@ export {};
   if (!result.ok || result.backend !== "rust") return;
   expect(await readFile(result.sourcePath, "utf8")).toContain("sc_async_record_clone_");
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -1853,7 +1854,7 @@ console.log(fn.name, fn.length, fn.extra, fn(2, 3));
   ).toBe(true);
   if (!result.ok || result.backend !== "rust") return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -1881,7 +1882,7 @@ test("Rust dynamic calls preserve catchable and uncaught failures", async () => 
     ).toBe(true);
     if (!result.ok || result.backend !== "rust") continue;
     const [node, rust] = await Promise.all([
-      runToExit(process.execPath, [entryPath]),
+      runToExit(nodeOracleExecutable(), [entryPath]),
       runToExit(result.binaryPath, [], {
         ...process.env,
         SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -1919,7 +1920,7 @@ test("Rust array ranges, removals, copying, and reverse searches match Node byte
     const generated = await readFile(result.sourcePath, "utf8");
     expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -1953,7 +1954,7 @@ test("Rust Buffer and StringDecoder byte surfaces match Node byte-for-byte", asy
     const generated = await readFile(result.sourcePath, "utf8");
     expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -1979,7 +1980,7 @@ test("Rust os.networkInterfaces matches Node byte-for-byte", async () => {
   if (!result.ok || result.backend !== "rust") return;
   expect(await readFile(result.sourcePath, "utf8")).not.toMatch(/\bunsafe\s*\{/);
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -2016,7 +2017,7 @@ test("Rust class inheritance, dispatch, instanceof, accessors, and cycles match 
     if (fixture.startsWith("71")) expect(generated, fixture).toContain("sc_class_pre");
     expect(generated, fixture).not.toMatch(/\bunsafe\s*\{/);
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2067,7 +2068,7 @@ for (const shape of shapes) console.log(shape.describe(), shape instanceof Polyg
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -2098,7 +2099,7 @@ test("Rust class values, expressions, and generics preserve identity, statics, h
     ).toBe(true);
     if (!result.ok || result.backend !== "rust") continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2139,7 +2140,7 @@ test("Rust Map and Set containers preserve equality, live iteration, references,
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2175,7 +2176,7 @@ test("Rust process reads and POSIX path operations match Node", async () => {
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath], { env }),
+      execFileAsync(nodeOracleExecutable(), [entryPath], { env }),
       execFileAsync(result.binaryPath, [], {
         env: { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2208,7 +2209,7 @@ test("Rust synchronous filesystem operations match Node and throw catchably", as
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2243,7 +2244,7 @@ catch (error) {
   ).toBe(true);
   if (realpathResult.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [realpathEntry]),
+      execFileAsync(nodeOracleExecutable(), [realpathEntry]),
       execFileAsync(realpathResult.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2269,7 +2270,7 @@ test("Rust synchronous child processes capture output and throw catchably", asyn
     ).toBe(true);
     if (fixtureResult.ok) {
       const [node, rust] = await Promise.all([
-        execFileAsync(process.execPath, [fixture]),
+        execFileAsync(nodeOracleExecutable(), [fixture]),
         execFileAsync(fixtureResult.binaryPath, [], {
           env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
         }),
@@ -2323,7 +2324,7 @@ if (timed.error) {
   ).toBe(true);
   if (errorsResult.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [errorsEntry]),
+      execFileAsync(nodeOracleExecutable(), [errorsEntry]),
       execFileAsync(errorsResult.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2391,7 +2392,7 @@ console.log("sync", value);
   ).toBe(true);
   if (result.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entry]),
+      execFileAsync(nodeOracleExecutable(), [entry]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2426,7 +2427,7 @@ console.log("main");
   ).toBe(true);
   if (result.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entry]),
+      execFileAsync(nodeOracleExecutable(), [entry]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2452,7 +2453,7 @@ test("Rust monotonic clocks and Atomics.wait match Node invariants", async () =>
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2490,7 +2491,7 @@ console.log("timer armed", count("Timeout"));
   ).toBe(true);
   if (result.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entry]),
+      execFileAsync(nodeOracleExecutable(), [entry]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2516,7 +2517,7 @@ test("Rust process introspection and Number predicates preserve Node invariants"
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2785,7 +2786,7 @@ export {};
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2813,7 +2814,7 @@ test("Rust unhandled async rejection matches the official exit-one corpus", asyn
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -2844,7 +2845,7 @@ test("Rust uncaught Error subclass matches the official exit-one corpus", async 
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -2880,7 +2881,7 @@ test("Rust typed arrays, byte unions, copies, views, and set match Node", async 
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2915,7 +2916,7 @@ rmSync(path);
   ).toBe(true);
   if (fsResult.ok) {
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [fsEntry]),
+      execFileAsync(nodeOracleExecutable(), [fsEntry]),
       execFileAsync(fsResult.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
@@ -2967,7 +2968,7 @@ test("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and 
     if (!result.ok) continue;
     const nodeArgs = await nodeCorpusArgs(entryPath);
     const [node, rust] = await Promise.all([
-      runToExit(process.execPath, nodeArgs),
+      runToExit(nodeOracleExecutable(), nodeArgs),
       runToExit(result.binaryPath, [], {
         ...process.env,
         SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3002,7 +3003,7 @@ test("Rust dynamic prototype dispatch preserves array mutation and string conver
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      runToExit(process.execPath, [entryPath]),
+      runToExit(nodeOracleExecutable(), [entryPath]),
       runToExit(result.binaryPath, [], {
         ...process.env,
         SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3036,7 +3037,7 @@ test("Rust EventEmitter preserves dispatch, meta-events, limits, and identity", 
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      runToExit(process.execPath, [entryPath]),
+      runToExit(nodeOracleExecutable(), [entryPath]),
       runToExit(result.binaryPath, [], {
         ...process.env,
         SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3062,7 +3063,7 @@ test("Rust EventEmitter preserves unhandled errors, CJS identity, and the global
     ).toBe(true);
     if (!result.ok) continue;
     const [node, rust] = await Promise.all([
-      runToExit(process.execPath, [entryPath]),
+      runToExit(nodeOracleExecutable(), [entryPath]),
       runToExit(result.binaryPath, [], {
         ...process.env,
         SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3097,7 +3098,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3128,7 +3129,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3164,7 +3165,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3210,7 +3211,7 @@ test.each([
   ).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",
@@ -3235,7 +3236,7 @@ test.each([
   expect(result.ok, result.ok ? fixture : result.diagnostics.map((diag) => diag.message).join("; ")).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [entryPath]),
+    runToExit(nodeOracleExecutable(), [entryPath]),
     runToExit(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",

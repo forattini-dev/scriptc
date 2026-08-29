@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 interface RunOutcome { stdout: string; stderr: string; exitCode: number }
@@ -42,7 +43,7 @@ async function expectDifferential(relativePath: string, dynamic = true, input?: 
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    run(process.execPath, ["--no-warnings", fixture], undefined, input),
+    run(nodeOracleExecutable(), ["--no-warnings", fixture], undefined, input),
     run(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }, input),
   ]);
   expect(rust.stdout).toBe(node.stdout);

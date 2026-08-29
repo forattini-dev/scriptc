@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -24,7 +25,7 @@ test("Rust TLS option validation ladders match Node byte-for-byte", async () => 
   if (!result.ok || result.backend !== "rust") return;
   expect(await readFile(result.sourcePath, "utf8")).not.toMatch(/\bunsafe\s*\{/);
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [entryPath]),
+    execFileAsync(nodeOracleExecutable(), [entryPath]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -70,7 +71,7 @@ console.log("created");
     ).toBe(true);
     if (!result.ok || result.backend !== "rust") continue;
     const [node, rust] = await Promise.all([
-      execFileAsync(process.execPath, [entryPath]),
+      execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),

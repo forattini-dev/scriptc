@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -25,7 +26,7 @@ async function expectDifferential(relativePath: string): Promise<void> {
 
   const options = { timeout: 10_000 };
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, ["--no-warnings", fixture], options),
+    execFileAsync(nodeOracleExecutable(), ["--no-warnings", fixture], options),
     execFileAsync(result.binaryPath, [], {
       ...options,
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },

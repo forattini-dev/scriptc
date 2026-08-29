@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -24,7 +25,7 @@ test("Rust dgram send validation and connected state match Node byte-for-byte", 
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [fixture]),
+    execFileAsync(nodeOracleExecutable(), [fixture]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
@@ -50,7 +51,7 @@ test("Rust UDP sockets exchange datagrams and preserve close ordering", async ()
 
   const options = { timeout: 10_000 };
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, ["--no-warnings", fixture], options),
+    execFileAsync(nodeOracleExecutable(), ["--no-warnings", fixture], options),
     execFileAsync(result.binaryPath, [], {
       ...options,
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -28,7 +29,7 @@ test.each([
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    execFileAsync(process.execPath, [fixture]),
+    execFileAsync(nodeOracleExecutable(), [fixture]),
     execFileAsync(result.binaryPath, [], {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),

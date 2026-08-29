@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 interface ProcessOutcome {
@@ -53,7 +54,7 @@ test.each([
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    runToExit(process.execPath, [fixture], process.env),
+    runToExit(nodeOracleExecutable(), [fixture], process.env),
     runToExit(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   expect(node.exitCode).toBe(expectedExit);

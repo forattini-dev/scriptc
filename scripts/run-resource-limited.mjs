@@ -32,6 +32,7 @@ const environment = {
   PATH: process.env.PATH,
   TMPDIR: temporaryRoot,
   SCRIPTC_CACHE_DIR: cacheRoot,
+  SCRIPTC_NODE_ORACLE: process.env.SCRIPTC_NODE_ORACLE,
   CARGO_TARGET_DIR: cargoTarget,
   SCRIPTC_TEST_WORKERS: process.env.SCRIPTC_TEST_WORKERS ?? "1",
   SCRIPTC_NATIVE_JOBS: process.env.SCRIPTC_NATIVE_JOBS ?? "1",

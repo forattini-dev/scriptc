@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -90,7 +91,7 @@ test.each([
     compiled.ok ? fixture : compiled.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
   ).toBe(true);
   if (!compiled.ok) return;
-  const node = await runHttpsFixture(process.execPath, [entry], driver);
+  const node = await runHttpsFixture(nodeOracleExecutable(), [entry], driver);
   const rust = await runHttpsFixture(compiled.binaryPath, [], driver);
   expect(rust.stdout.toString("utf8")).toBe(node.stdout.toString("utf8"));
   expect(rust.stdout.equals(node.stdout)).toBe(true);
@@ -112,7 +113,7 @@ test("Rust TLS clients and servers interoperate in one event loop", async () => 
     compiled.ok ? entry : compiled.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
   ).toBe(true);
   if (!compiled.ok) return;
-  const node = await execFileAsync(process.execPath, ["--no-warnings", entry]);
+  const node = await execFileAsync(nodeOracleExecutable(), ["--no-warnings", entry]);
   const rust = await execFileAsync(compiled.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });
@@ -138,7 +139,7 @@ test.each([
     compiled.ok ? fixture : compiled.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
   ).toBe(true);
   if (!compiled.ok) return;
-  const node = await execFileAsync(process.execPath, ["--no-warnings", entry]);
+  const node = await execFileAsync(nodeOracleExecutable(), ["--no-warnings", entry]);
   const rust = await execFileAsync(compiled.binaryPath, [], {
     env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
   });

@@ -17,13 +17,14 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { oracleCacheKeyBase } from "./oracle-environment.js";
+import { nodeOracleExecutable, oracleCacheKeyBase } from "./oracle-environment.js";
 import { shardSelect, shardSuffix } from "./shard.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
+const oracleExecutable = nodeOracleExecutable();
 
 // Flat single-file tests plus directory tests (<name>/main.<ext> as the
 // entry with sibling modules). JavaScript entries (.js/.mjs/.cjs) are
@@ -237,9 +238,9 @@ if (oracleDir !== null) mkdirSync(oracleDir, { recursive: true });
 
 let oracleKeyBaseMemo: Promise<string> | null = null;
 function oracleKeyBase(): Promise<string> {
-  // The spawned `node` comes from PATH, so ask IT for its version rather than
-  // trusting process.version (vitest's own node could differ).
-  oracleKeyBaseMemo ??= execFileAsync("node", ["--version"]).then(({ stdout }) =>
+  // Ask the selected oracle for its version rather than trusting
+  // process.version: the Vitest host and semantic oracle may differ.
+  oracleKeyBaseMemo ??= execFileAsync(oracleExecutable, ["--version"]).then(({ stdout }) =>
     oracleCacheKeyBase({
       nodeVersion: stdout.trim(),
       // Decorator programs run tsc's downlevel on the Node side — its
@@ -313,7 +314,7 @@ async function runNode(file: string): Promise<RunResult> {
   // Node 24 strips types natively; the supported subset is erasable by
   // construction — except `// @transform-types` programs (namespaces),
   // which run under Node's transform mode.
-  const res = await runBinary("node", nodeOracleArgs(file));
+  const res = await runBinary(oracleExecutable, nodeOracleArgs(file));
   if (cachePath !== null) {
     try {
       const tmp = `${cachePath}.${process.pid}.${Math.random().toString(36).slice(2)}`;

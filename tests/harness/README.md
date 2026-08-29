@@ -2,6 +2,15 @@
 
 Two lanes over the same suite: plain (`pnpm test`) and sanitized (`SCRIPTC_SAN=1 pnpm test`, ASan + the runtime RC audit). Node is the oracle everywhere — corpus programs run under Node and as compiled binaries, and outputs must agree byte-for-byte. Both lanes must be green before a commit.
 
+The Node that hosts Vitest/the TypeScript compiler and the Node that supplies
+the semantic oracle are separate inputs. They are identical by default;
+`SCRIPTC_NODE_ORACLE=/absolute/path/to/node` selects a different oracle. CI
+keeps the full byte-exact gate on the `.node-version` Node 24 profile and also
+builds/runs the compiler on Node 26 with the captured Node 24 executable as its
+oracle. This separation is intentional: Node-major releases can disagree on
+observable errors, and such differences must not be mislabeled as native
+backend regressions.
+
 One deliberate exception to raw byte-compare: `node:test` programs (tests/harness/node-test.test.ts over tests/fixtures/node-test) cannot live in the corpus because Node's spec reporter embeds a real duration in EVERY result line — no node:test program has deterministic stdout, under Node itself included. Those fixtures still run both lanes against the Node oracle, but with one documented normalization applied to both sides (durations, stack frames, the inspect property block); everything else — symbols, indentation, directives, summary counts, the failing-section "test at" locations and error messages — must match byte-exactly, plus exit-code parity against the fixture's `// @exit:` line. Fixtures never console.log inside test bodies: Node's reporter stream lags console output racily, so mixed programs aren't byte-comparable against any oracle.
 
 The LLVM backend rides the same two lanes through its own dual-backend differential (tests/harness/llvm-differential.test.ts): every corpus program is ATTEMPTED through `--backend=llvm`; programs the tier claims must be byte-identical through both backends AND against the Node oracle (stdout always, stderr for exit-0 programs, exit codes), and programs outside the tier must refuse with exactly one SC3001 diagnostic naming the first unsupported IR construct — never wrong code, never a silent fallback. Tier membership is auto-discovered (attempt + catch the refusal), the survey's six trivial-tier programs are pinned as a floor, and the run prints the claimed count plus the refusal histogram (the next phase's queue). Under `SCRIPTC_SAN=1` the emitted .ll's `sanitize_address` attribute opts the LLVM-emitted functions into ASan instrumentation too.

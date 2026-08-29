@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 
+/** The Node executable used as the differential oracle. */
+export function nodeOracleExecutable(
+  env: NodeJS.ProcessEnv = process.env,
+  hostExecutable: string = process.execPath,
+): string {
+  return env["SCRIPTC_NODE_ORACLE"] || hostExecutable;
+}
+
 /**
  * The complete inherited environment visible to the Node oracle. Corpus
  * programs may read arbitrary process.env keys directly or through imported

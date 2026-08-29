@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 interface ProcessOutcome {
@@ -45,7 +46,7 @@ test("Rust stdin listeners and for-await observe a closed pipe like Node", async
   expect(result.ok, result.ok ? fixture : result.diagnostics.map((diagnostic) => diagnostic.message).join("; ")).toBe(true);
   if (!result.ok) return;
   const [node, rust] = await Promise.all([
-    runWithClosedStdin(process.execPath, [fixture]),
+    runWithClosedStdin(nodeOracleExecutable(), [fixture]),
     runWithClosedStdin(result.binaryPath, [], { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
   ]);
   expect(rust).toEqual(node);

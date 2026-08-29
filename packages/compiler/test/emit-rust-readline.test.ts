@@ -3,6 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
+import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
 
 function runWithClosedStdin(file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<{
@@ -37,7 +38,7 @@ test("Rust readline closes on stdin EOF like Node", async () => {
   if (!result.ok) return;
 
   const [node, rust] = await Promise.all([
-    runWithClosedStdin(process.execPath, [fixture]),
+    runWithClosedStdin(nodeOracleExecutable(), [fixture]),
     runWithClosedStdin(result.binaryPath, [], {
       ...process.env,
       SCRIPTC_RUST_HEAP_AUDIT: "1",

@@ -1,5 +1,28 @@
 import { expect, test } from "vitest";
-import { oracleCacheKeyBase, oracleEnvironmentFingerprint } from "./oracle-environment.js";
+import {
+  nodeOracleExecutable,
+  oracleCacheKeyBase,
+  oracleEnvironmentFingerprint,
+} from "./oracle-environment.js";
+
+test("Node oracle defaults to the test host executable", () => {
+  expect(nodeOracleExecutable({}, "/opt/node-host/bin/node")).toBe("/opt/node-host/bin/node");
+});
+
+test("Node oracle can differ from the test host executable", () => {
+  expect(
+    nodeOracleExecutable(
+      { SCRIPTC_NODE_ORACLE: "/opt/node24/bin/node" },
+      "/opt/node26/bin/node",
+    ),
+  ).toBe("/opt/node24/bin/node");
+});
+
+test("empty Node oracle override keeps the test host executable", () => {
+  expect(
+    nodeOracleExecutable({ SCRIPTC_NODE_ORACLE: "" }, "/opt/node-host/bin/node"),
+  ).toBe("/opt/node-host/bin/node");
+});
 
 test("oracle environment fingerprint covers arbitrary output-affecting variables", () => {
   const base = oracleEnvironmentFingerprint({ NODE_ENV: "development", SCRIPTC_NEVER: "no" });

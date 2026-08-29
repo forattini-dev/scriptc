@@ -179,11 +179,57 @@ jobs:
           pnpm exec vitest run packages/compiler/test/cc-driver.test.ts
           --testNamePattern "Windows CA roots honor"
 
+  # The release oracle remains the pinned Node 24 build, while the compiler
+  # itself must also load, build, and execute under Node 26. Capture the Node
+  # 24 executable before switching the job host to Node 26 so differential
+  # tests do not mistake a Node-major semantic change for a backend regression.
+  node_26_host:
+    name: test (Node 26 host, Node 24 oracle)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Capture Node 24 oracle
+        id: node24
+        shell: bash
+        run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build compiler on Node 26
+        run: |
+          node --version
+          pnpm build
+      - name: Oracle selection contract
+        run: pnpm exec vitest run tests/harness/oracle-environment.test.ts
+      - name: C corpus smoke on Node 26 host
+        env:
+          SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}
+        run: >-
+          pnpm exec vitest run tests/harness/differential.test.ts
+          --testNamePattern "001-hello.ts"
+          --maxWorkers=1
+      - name: Rust Node-major semantic regression
+        env:
+          SCRIPTC_NODE_ORACLE: ${{ steps.node24.outputs.executable }}
+        run: >-
+          pnpm exec vitest run packages/compiler/test/emit-rust-stream-finished.test.ts
+          --testNamePattern "Rust stream argument ladders and socket encoding match Node"
+          --maxWorkers=1
+
   # Aggregate gate with the pre-matrix job's name, so anything keyed on the
   # single "test" check (branch protection, badges) keeps resolving. Fails
-  # unless every matrix shard and both platform integration jobs succeeded.
+  # unless every matrix shard and all platform/version integration jobs succeeded.
   test:
-    needs: [tests, linux_host_clang, windows_cli]
+    needs: [tests, linux_host_clang, windows_cli, node_26_host]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -192,3 +238,4 @@ jobs:
           test "${{ needs.tests.result }}" = success
           test "${{ needs.linux_host_clang.result }}" = success
           test "${{ needs.windows_cli.result }}" = success
+          test "${{ needs.node_26_host.result }}" = success
