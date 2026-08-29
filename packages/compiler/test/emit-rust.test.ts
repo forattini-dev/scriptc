@@ -881,6 +881,7 @@ test.each([
   "991-process-exit.ts",
   "1423-text-codec.ts",
   "1424-fs-options.ts",
+  "1427-fromcharcode-lastindexof.ts",
   "1440-interval-basics.ts",
   "1441-interval-clear-cross.ts",
   "1442-interval-throw.ts",
