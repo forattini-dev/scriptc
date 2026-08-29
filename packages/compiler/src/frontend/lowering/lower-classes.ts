@@ -100,7 +100,7 @@ export interface ClassInfo {
    * top of the class body, verified) and assigns it from the parameter's
    * body local AFTER the field initializers run (Node's order: super() →
    * field initializers → parameter-property assignments → ctor body). */
-  paramProps?: { name: string; type: IrType; param: ts.ParameterDeclaration }[];
+  paramProps?: { name: string; type: IrType; param: ts.ParameterDeclaration; /** Reuses an inherited readonly optional slot. */ redeclared?: true }[];
   /** EFFECTIVE constructor params: the own constructor's, or (constructor
    * omitted) the base's — `new Derived(...)` is typed by tsc against the
    * inherited signature, and the synthesized constructor forwards to it
@@ -1170,6 +1170,28 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           instances: new Map(),
         });
       };
+      const inheritedFieldIsReadonly = (name: string): boolean => {
+        for (let owner = base; owner; owner = owner.base) {
+          for (const member of owner.decl?.members ?? []) {
+            if (
+              ts.isPropertyDeclaration(member) &&
+              ts.isIdentifier(member.name) &&
+              member.name.text === name &&
+              !member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)
+            ) {
+              return member.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            }
+            if (!ts.isConstructorDeclaration(member)) continue;
+            const param = member.parameters.find(
+              (p) => ts.isIdentifier(p.name) && p.name.text === name,
+            );
+            if (param) {
+              return param.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            }
+          }
+        }
+        return false;
+      };
       for (const member of decl.members) {
         if (ts.isClassStaticBlockDeclaration(member)) {
           // Statics live on the FAMILY (JS has one class, one static
@@ -1587,10 +1609,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             const shape = L.paramShape(p);
             const type = shape.bodyType ?? shape.type;
             if (type.kind === "void") L.badType(p.name, L.typeOf(p.name));
-            // `override x` (and any same-named inherited member) would
-            // redeclare a base slot — the declared-field rule verbatim.
-            if (fields.has(name)) {
-              L.unsupported("SC1090", p.name, "redeclaring inherited fields");
+            const inheritedType = fields.get(name);
+            if (inheritedType) {
+              // The agent-authored Error-subclass idiom narrows a readonly
+              // optional parameter property in the derived constructor:
+              // the base owns `presence?: T`; `override readonly presence:
+              // T` assigns the same slot after super(). Reuse the inherited
+              // union slot and wrap the required parameter into its value
+              // arm. Mutable, non-override, and arbitrary type changes keep
+              // the fence: a base-typed write could invalidate the narrowed
+              // derived read.
+              const readonlyOverride =
+                p.modifiers?.some((m) => m.kind === ts.SyntaxKind.OverrideKeyword) === true &&
+                p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) === true &&
+                inheritedFieldIsReadonly(name) &&
+                inheritedType.kind === "union" &&
+                typeEquals(L.stripUndefinedArm(inheritedType), type);
+              if (!readonlyOverride) {
+                L.unsupported("SC1090", p.name, "redeclaring inherited fields");
+              }
+              paramProps.push({ name, type: inheritedType, param: p, redeclared: true });
+              continue;
             }
             if (L.findMethodOn(base, name)) {
               L.unsupported("SC1090", p.name, "fields shadowing inherited methods");
@@ -1904,7 +1943,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // them unconditionally (paramPropInitStmts).
       if (paramProps.length > 0) {
         for (const pp of paramProps) fields.set(pp.name, pp.type);
-        fieldOrder.unshift(...paramProps.map((pp) => ({ name: pp.name, type: pp.type, initializer: undefined })));
+        fieldOrder.unshift(...paramProps.map((pp) => ({
+          name: pp.name,
+          type: pp.type,
+          initializer: undefined,
+          ...(pp.redeclared ? { redeclared: true as const } : {}),
+        })));
       }
 
       // The deferred definite-assignment check: a field on the unguarded
@@ -4295,9 +4339,14 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     for (const pp of info.paramProps ?? []) {
       const loc = locOf(pp.param);
       const local = ts.isIdentifier(pp.param.name) ? L.resolveLocal(pp.param.name) : null;
-      if (!local || !typeEquals(local.type, pp.type)) {
-        // Defensive: collection derived the field type from the same
-        // paramShape the ctor's declareParams bound — they cannot diverge.
+      if (!local) {
+        L.unsupported("SC1090", pp.param, "this parameter property form");
+      }
+      let value: IrExpr = { kind: "varRef", localId: local.id, type: local.type, loc };
+      value = L.coerceInto(pp.param, value, pp.type);
+      if (!typeEquals(value.type, pp.type)) {
+        // Defensive: own parameter properties are slot-exact; the one
+        // supported inherited redeclaration wraps T into `T | undefined`.
         L.unsupported("SC1090", pp.param, "this parameter property form");
       }
       out.push({
@@ -4305,7 +4354,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc },
         className: info.def.name,
         field: pp.name,
-        value: { kind: "varRef", localId: local!.id, type: local!.type, loc },
+        value,
         loc,
       });
     }

@@ -1576,6 +1576,7 @@ shardedTest.each(shardSelect([
   "2718-computed-optional-record-spread.ts",
   "2719-computed-spread-conditional-override.ts",
   "2720-conditional-then-computed-optional-spread.ts",
+  "2721-parameter-property-inherited-override.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
