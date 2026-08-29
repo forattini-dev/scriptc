@@ -1,4 +1,5 @@
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
+import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 
 export function emitRustDynamicLibCall(
   expr: RustLibCallExpr,
@@ -6,6 +7,20 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "error.newCause" && expr.args.length === 2 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "dyn" && expr.type.kind === "object") {
+    const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);
+    if (error === undefined) context.unsupported(`error.newCause result '${expr.type.className}'`, expr.loc);
+    const value = `runtime::error_new_cause("${context.rustString(error.lib)}", ${context.emitExpr(arg)}, runtime::caught_value(${context.emitExpr(secondArg)}))`;
+    return !context.hasErrorClassRoots() ? value : `${context.errorValueName()}::Builtin(${value})`;
+  }
+  if (expr.fn === "error.cause" && expr.args.length === 1 &&
+    arg?.type.kind === "object" && expr.type.kind === "dyn") {
+    const value = context.emitExpr(arg);
+    return context.hasErrorClassRoots()
+      ? `sc_error_cause(&(${value}))`
+      : `runtime::error_cause::<${context.dynTypeName()}>(&(${value})).unwrap_or(${context.dynTypeName()}::Undefined)`;
+  }
   if (expr.fn === "island.eval" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::island_eval(&(${context.emitExpr(arg)}))`;
   }

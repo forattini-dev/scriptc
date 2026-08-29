@@ -842,6 +842,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // error.new's result and the receiver slots are builtin-error classes —
   // program-dependent object types, checked in the libCall case.
   "error.new": { argTypes: [STRING], result: VOID },
+  "error.newCause": { argTypes: [STRING, DYN], result: VOID },
+  "error.cause": { argTypes: [null], result: DYN },
   "error.nodeThrow": { argTypes: [F64, STRING, STRING], result: VOID },
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
@@ -4481,10 +4483,10 @@ function validateFunction(
           // compiler-rendered fence.
           break;
         }
-        if (e.fn === "error.new") {
+        if (e.fn === "error.new" || e.fn === "error.newCause") {
           // Which builtin the runtime constructs is named by the result type.
           if (!isBuiltinErrorObject(e.type)) {
-            err(`libCall error.new must return a builtin error class, got ${e.type.kind}`, e.loc);
+            err(`libCall ${e.fn} must return a builtin error class, got ${e.type.kind}`, e.loc);
           }
           break;
         }
@@ -4530,15 +4532,16 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "error.code") {
+        if (e.fn === "error.code" || e.fn === "error.cause") {
           // Receiver: any error-hierarchy object (a user subclass embeds
-          // the code slot in its prefix); result: the interned
-          // `string | undefined` union (the process.envGet pattern).
+          // both hidden slots in its prefix). cause returns dyn; code
+          // returns the interned `string | undefined` union.
           const recv = e.args[0];
           if (!recv || recv.type.kind !== "object") {
-            err(`libCall error.code receiver must be an error object`, e.loc);
+            err(`libCall ${e.fn} receiver must be an error object`, e.loc);
             break;
           }
+          if (e.fn === "error.cause") break;
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const ok =
             def &&

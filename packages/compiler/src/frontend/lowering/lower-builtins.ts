@@ -5170,9 +5170,8 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
   }
 
-/** `.code` on an error-hierarchy receiver — NodeJS.ErrnoException's
-   * member (the fallback declares the same shape): the runtime Error's
-   * code slot as `string | undefined` — the errno name where a throw site
+/** `.code` / `.cause` on an error-hierarchy receiver. The runtime Error's
+   * code slot is `string | undefined` — the errno name where a throw site
    * stamped one (fs, exec spawn/timeout, process.kill, the spawn 'error'
    * event), undefined everywhere else. Stdlib provenance required (a user
    * class's own `code` field takes the ordinary field paths — its
@@ -5202,14 +5201,17 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         return { kind: "libCall", fn: "error.domCause", args: [receiver], type: DYN, loc: locOf(expr) };
       }
     }
-    if (expr.name.text !== "code") return null;
+    if (expr.name.text !== "code" && expr.name.text !== "cause") return null;
     // Error-rooted classes only — builtin or user subclass (both embed the
-    // code slot in their layout prefix).
+    // hidden code/cause slots in their layout prefix).
     let info = L.classes.get(recvT.className) ?? null;
     while (info && info.base) info = info.base;
     if (!info || info.def.name !== "%Error") return null;
     if (!L.isStdlibMember(expr)) return null;
     const receiver = L.lowerExpr(expr.expression);
+    if (expr.name.text === "cause") {
+      return { kind: "libCall", fn: "error.cause", args: [receiver], type: DYN, loc: locOf(expr) };
+    }
     return {
       kind: "libCall",
       fn: "error.code",

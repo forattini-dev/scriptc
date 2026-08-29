@@ -487,6 +487,7 @@ pub fn bytes_validate_offset(name: &str, value: f64, max: f64) {
             "The value of \"{name}\" is out of range. It must be {requirement}. Received {received}"
         ),
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -644,6 +645,7 @@ fn bytes_fill_core(
             name: "TypeError".to_owned(),
             message: "The argument 'value' is invalid. Received <Buffer >".to_owned(),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            cause: None,
             dom: None,
         });
     }
@@ -755,6 +757,7 @@ pub fn bytes_swap(bytes: &JsBytes<u8>, width: usize) -> JsBytes<u8> {
             name: "RangeError".to_owned(),
             message: format!("Buffer size must be a multiple of {}-bits", width * 8),
             code: Some("ERR_INVALID_BUFFER_SIZE".to_owned()),
+            cause: None,
             dom: None,
         });
     }

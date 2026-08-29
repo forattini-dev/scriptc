@@ -697,6 +697,20 @@ export class RustDefinitionEmitter {
     this.context.line(`match value { ${name}::Builtin(error) => runtime::error_code(error), _ => None, }`);
     this.context.popIndent();
     this.context.line("}");
+    const dyn = this.context.dynTypeName();
+    this.context.line(`fn sc_error_cause(value: &${name}) -> ${dyn} {`);
+    this.context.pushIndent();
+    this.context.line("match value {");
+    this.context.pushIndent();
+    this.context.line(`${name}::Builtin(error) => runtime::error_cause::<${dyn}>(error).unwrap_or(${dyn}::Undefined),`);
+    for (const root of roots) {
+      const causeField = this.context.classFieldName(root.def.name, "%cause");
+      this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => value.with(|object| object.${causeField}.as_ref().expect("scriptc: cleared live Error cause").clone()),`);
+    }
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line(`fn sc_error_dom_code(value: &${name}) -> f64 {`);
     this.context.pushIndent();
     this.context.line(`match value { ${name}::Builtin(error) => runtime::error_dom_code(error), _ => 0.0, }`);

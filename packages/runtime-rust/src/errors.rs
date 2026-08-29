@@ -4,6 +4,7 @@ pub struct JsError {
     name: String,
     message: String,
     code: Option<String>,
+    cause: Option<Caught>,
     dom: Option<DomExceptionData>,
 }
 
@@ -79,6 +80,7 @@ impl std::fmt::Debug for JsError {
             .field("name", &self.name)
             .field("message", &self.message)
             .field("code", &self.code)
+            .field("has_cause", &self.cause.is_some())
             .field("dom_code", &self.dom.as_ref().map(|dom| dom.code))
             .field(
                 "dom_has_cause",
@@ -102,9 +104,15 @@ impl PartialEq for JsError {
             }
             _ => false,
         };
+        let cause_equal = match (&self.cause, &other.cause) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Rc::ptr_eq(&left.value, &right.value),
+            _ => false,
+        };
         self.name == other.name
             && self.message == other.message
             && self.code == other.code
+            && cause_equal
             && dom_equal
     }
 }
@@ -121,6 +129,18 @@ pub fn error_new(name: &str, message: JsString) -> JsError {
         name: name.to_owned(),
         message: message.to_string(),
         code: None,
+        cause: None,
+        dom: None,
+    }
+}
+
+pub fn error_new_cause(name: &str, message: JsString, cause: Caught) -> JsError {
+    JsError {
+        identity: Rc::new(()),
+        name: name.to_owned(),
+        message: message.to_string(),
+        code: None,
+        cause: Some(cause),
         dom: None,
     }
 }
@@ -131,6 +151,7 @@ pub fn error_new_code(name: &str, message: JsString, code: &str) -> JsError {
         name: name.to_owned(),
         message: message.to_string(),
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     }
 }
@@ -173,6 +194,7 @@ pub fn throw_reference_error(message: String) -> ! {
         name: "ReferenceError".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -187,6 +209,7 @@ pub fn throw_error(message: String) -> ! {
         name: "Error".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -197,6 +220,7 @@ pub fn throw_error_code(message: String, code: &str) -> ! {
         name: "Error".to_owned(),
         message,
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -207,6 +231,7 @@ pub fn throw_type_error_code(message: String, code: &str) -> ! {
         name: "TypeError".to_owned(),
         message,
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -217,6 +242,7 @@ pub fn throw_type_error(message: String) -> ! {
         name: "TypeError".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -246,6 +272,7 @@ pub fn throw_syntax_error(message: String) -> ! {
         name: "SyntaxError".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -256,6 +283,7 @@ pub fn throw_range_error(message: String) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -266,6 +294,7 @@ pub fn throw_range_error_code(message: String, code: &str) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -288,6 +317,7 @@ pub fn throw_uri_error(message: String) -> ! {
         name: "URIError".to_owned(),
         message,
         code: None,
+        cause: None,
         dom: None,
     })
 }
@@ -441,6 +471,10 @@ pub fn error_code(error: &JsError) -> Option<JsString> {
     error.code.as_deref().map(Rc::from)
 }
 
+pub fn error_cause<T: Clone + 'static>(error: &JsError) -> Option<T> {
+    error.cause.as_ref().map(caught_narrow::<T>)
+}
+
 pub fn error_identity(error: &JsError) -> usize {
     Rc::as_ptr(&error.identity) as usize
 }
@@ -482,6 +516,7 @@ pub fn dom_exception_new(message: JsString, name: JsString, cause: Option<Caught
         name: name.to_string(),
         message: message.to_string(),
         code: None,
+        cause: None,
         dom: Some(DomExceptionData {
             code: dom_exception_code(&name),
             cause,
@@ -530,6 +565,7 @@ fn throw_assertion_error(message: String) -> ! {
         name: "AssertionError".to_owned(),
         message,
         code: Some("ERR_ASSERTION".to_owned()),
+        cause: None,
         dom: None,
     })
 }

@@ -1855,10 +1855,11 @@ class LlEmitter {
       // strings objects lay out through it (nothing GEPs into live heap
       // arrays; those stay behind the runtime's own entry points).
       `%ScrArr = type { ${this.sizeType}, ${this.sizeType}, ${this.sizeType}, i32, ptr, ptr, ptr, ptr }`,
-      // The runtime error prefix { rc, vt, name, message, code } and the
+      // The runtime error prefix { rc, vt, name, message, code,
+      // has_cause, cause } and the
       // class-object shape { rc, pre, post, ctor, name } — field reads on
       // builtin errors and classval loads GEP through these.
-      `%ScrError = type { ${this.sizeType}, ptr, ptr, ptr, ptr }`,
+      `%ScrError = type { ${this.sizeType}, ptr, ptr, ptr, ptr, i1, ptr }`,
       `%ScrClassObj = type { ${this.sizeType}, ${this.sizeType}, ${this.sizeType}, ptr, ptr }`,
       // The runtime emitter prefix { rc, vt, reg, cls } — user subclasses
       // embed it (classes.ts), and bare-emitter GEPs address through it.
@@ -3387,7 +3388,8 @@ class LlEmitter {
   /** The field-slot pointer of a class member: rc at 0, the vtable word at
    * 1 on hierarchy members, then the flattened field list. Runtime error
    * classes GEP through %ScrError (their structs live in the runtime; the
-   * def's [name, message, %code] order matches the layout). */
+   * def's [name, message, %code, %hasCause, %cause] order matches the
+   * layout). */
   private classFieldPtr(objName: string, className: string, field: string): { ptr: string; type: IrType } {
     const meta = this.classMetaOf(className);
     const { index, type } = classFieldIndex(meta, field);
@@ -14101,6 +14103,24 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = call ptr @scr_error_new(i32 ${rec.kind}, ptr ${msg.name})`);
       return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "error.newCause") {
+      if (e.type.kind !== "object") throw new InternalCompilerError("llvm emitter bug: error.newCause result is not a class");
+      const rec = RUNTIME_ERROR_CLASSES.get(e.type.className);
+      if (!rec) throw new InternalCompilerError(`llvm emitter bug: error.newCause of ${e.type.className}`);
+      const message = this.emitExpr(e.args[0]!);
+      const cause = this.emitExpr(e.args[1]!);
+      this.declare(`declare ptr @scr_error_new_cause(i32, ptr, ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_error_new_cause(i32 ${rec.kind}, ptr ${message.name}, ptr ${cause.name})`);
+      return this.own({ name: out, type: e.type });
+    }
+    if (e.fn === "error.cause") {
+      const receiver = this.emitExpr(e.args[0]!);
+      this.declare(`declare ptr @scr_error_cause(ptr)`);
+      const out = B.tmp();
+      B.line(`${out} = call ptr @scr_error_cause(ptr ${receiver.name})`);
+      return this.own({ name: out, type: e.type });
     }
     if (e.fn === "error.ctor") {
       // super(message) into the builtin base: stamps name/message on the

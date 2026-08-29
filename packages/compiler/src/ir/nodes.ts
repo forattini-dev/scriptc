@@ -3417,13 +3417,17 @@ export type IrLibFn =
   /** The runtime-provided Error hierarchy's entry points (scr_error.c).
    * error.new: one borrowed string arg (the message), result an owned (+1)
    * builtin error instance — the result TYPE names which builtin class
-   * (backends derive the runtime kind from it). error.ctor: the
+   * (backends derive the runtime kind from it). error.newCause additionally
+   * takes a borrowed checked-dynamic cause and records the own property.
+   * error.cause reads that value (dyn undefined when absent). error.ctor: the
    * super(message) call of an `extends Error` constructor — borrowed
    * receiver (already allocated by the derived class's new) + borrowed
    * message, void; the receiver's type names the builtin class whose name
    * field to stamp. error.toString: borrowed `%Error`-typed receiver, +1
    * string in Node's "name: message" shape. None of the three throws. */
   | "error.new"
+  | "error.newCause"
+  | "error.cause"
   /** The compiler-resolved Node-parity throw for always-throwing lowered
    * arms (ERR_INVALID_THIS receivers, ERR_MISSING_ARGS arity ladders,
    * the symbol-to-string TypeError): args are [error-kind f64 (the

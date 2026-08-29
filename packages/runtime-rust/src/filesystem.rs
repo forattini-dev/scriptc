@@ -48,6 +48,7 @@ fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! 
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{}'", path),
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -64,6 +65,7 @@ fn fs_error2(operation: &str, from: &str, to: &str, error: &std::io::Error) -> J
         name: "Error".to_owned(),
         message: format!("{code}: {text}, {operation} '{from}' -> '{to}'"),
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     }
 }
@@ -74,6 +76,7 @@ fn throw_fs_fd_error(operation: &str, code: &str, description: &str) -> ! {
         name: "Error".to_owned(),
         message: format!("{code}: {description}, {operation}"),
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -90,6 +93,7 @@ fn throw_out_of_range(message: String) -> ! {
         name: "RangeError".to_owned(),
         message,
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -147,6 +151,7 @@ fn throw_invalid_arg_value(prefix: &str, value: &str) -> ! {
         name: "TypeError".to_owned(),
         message: format!("{prefix}{}", inspected_argument(value)),
         code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -838,6 +843,7 @@ fn file_handle_require_open(handle: &JsFileHandle) -> f64 {
         name: "Error".to_owned(),
         message: "file closed".to_owned(),
         code: Some("EBADF".to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -874,6 +880,7 @@ pub fn file_handle_read(
             message: "The argument 'buffer' is empty and cannot be written. Received <Buffer >"
                 .to_owned(),
             code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+            cause: None,
             dom: None,
         });
     }

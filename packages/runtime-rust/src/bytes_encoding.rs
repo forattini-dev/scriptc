@@ -291,6 +291,7 @@ fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
             name: "TypeError".to_owned(),
             message: format!("Unknown encoding: {encoding}"),
             code: Some("ERR_UNKNOWN_ENCODING".to_owned()),
+            cause: None,
             dom: None,
         })
     })
@@ -655,6 +656,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
                 bytes_received_number(value)
             ),
             code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            cause: None,
             dom: None,
         });
     }
@@ -664,6 +666,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
             name: "RangeError".to_owned(),
             message: "Attempt to access memory outside buffer bounds".to_owned(),
             code: Some("ERR_BUFFER_OUT_OF_BOUNDS".to_owned()),
+            cause: None,
             dom: None,
         });
     }
@@ -678,6 +681,7 @@ fn bytes_bounds_error(value: f64, length: f64, value_name: Option<&str>) -> ! {
             bytes_received_number(value)
         ),
         code: Some("ERR_OUT_OF_RANGE".to_owned()),
+        cause: None,
         dom: None,
     })
 }
@@ -726,6 +730,7 @@ fn bytes_check_int(
                 bytes_received_number(value)
             ),
             code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            cause: None,
             dom: None,
         });
     }

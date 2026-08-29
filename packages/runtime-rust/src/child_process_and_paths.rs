@@ -153,6 +153,7 @@ pub fn child_exec_sync(
                 name: "Error".to_owned(),
                 message: format!("spawnSync {command} {code}"),
                 code: Some(code.to_owned()),
+                cause: None,
                 dom: None,
             })
         }
@@ -166,6 +167,7 @@ pub fn child_exec_sync(
             name: "Error".to_owned(),
             message: format!("spawnSync {command} ETIMEDOUT"),
             code: Some("ETIMEDOUT".to_owned()),
+            cause: None,
             dom: None,
         });
     }
@@ -199,6 +201,7 @@ pub fn child_exec_sync(
             name: "Error".to_owned(),
             message,
             code: None,
+            cause: None,
             dom: None,
         });
     }
@@ -243,6 +246,7 @@ pub fn child_exec_capture(
             name: "Error".to_owned(),
             message: format!("spawn {command} {code}"),
             code: Some(code.to_owned()),
+            cause: None,
             dom: None,
         })
     });
@@ -262,6 +266,7 @@ pub fn child_exec_capture(
                 String::from_utf8_lossy(&output.stderr),
             ),
             code: None,
+            cause: None,
             dom: None,
         });
     }
@@ -365,6 +370,7 @@ pub fn child_spawn_sync(
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} {code}"),
                     code: Some(code.to_owned()),
+                    cause: None,
                     dom: None,
                 }),
             })
@@ -393,6 +399,7 @@ pub fn child_spawn_sync(
                     name: "Error".to_owned(),
                     message: format!("spawnSync {command} ETIMEDOUT"),
                     code: Some("ETIMEDOUT".to_owned()),
+                    cause: None,
                     dom: None,
                 }),
             })

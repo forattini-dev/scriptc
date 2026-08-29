@@ -334,6 +334,7 @@ pub fn process_cpu_prev_validate(user: f64, system: f64) {
                     format_number(value)
                 ),
                 code: Some("ERR_INVALID_ARG_VALUE".to_owned()),
+                cause: None,
                 dom: None,
             });
         }

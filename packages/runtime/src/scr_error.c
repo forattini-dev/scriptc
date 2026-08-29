@@ -18,8 +18,13 @@ static void scr_error_oom(void) {
 }
 
 static SCR_TL bool scr_error_traced = false;
+static SCR_TL void (*scr_error_cause_drop)(void *obj) = NULL;
 
 void scr_error_set_traced(void) { scr_error_traced = true; }
+
+void scr_error_install_cause_drop(void (*fn)(void *obj)) {
+  scr_error_cause_drop = fn;
+}
 
 static const char *const scr_error_names[5] = {
     "Error", "TypeError", "RangeError", "SyntaxError",
@@ -40,24 +45,17 @@ static void scr_error_gcfree(void *obj) {
   scr_str_release(e->name);
   scr_str_release(e->message);
   scr_str_release(e->code); /* NULL-safe: absent on most errors */
+  if (e->cause != NULL && scr_error_cause_drop != NULL) scr_error_cause_drop(obj);
   scr_obj_free_note();
   scr_cyc_free(e);
 }
 
-/* DOMException teardown: the ScrError fields plus the owned cause dyn
+/* ErrorOptions teardown: the ScrError fields plus the owned cause dyn
  * value. The cause is a ScrDyn — scr_json.c territory — and this file
  * must stay linkable WITHOUT the checked-dynamic tree (the runtime C-unit tests link
  * subsets), so the drop goes through a hook scr_json.c installs before
- * any cause can exist (scr_domex_new is the only producer). */
-static SCR_TL void (*scr_domex_cause_drop)(void *obj) = NULL;
-
-void scr_domex_install_cause_drop(void (*fn)(void *obj)) {
-  scr_domex_cause_drop = fn;
-}
-
+ * any cause can exist. */
 static void scr_domex_gcfree(void *obj) {
-  ScrDomException *d = (ScrDomException *)obj;
-  if (d->cause != NULL && scr_domex_cause_drop != NULL) scr_domex_cause_drop(obj);
   scr_error_gcfree(obj);
 }
 
@@ -70,6 +68,7 @@ static void scr_error_reld(void *obj) {
     scr_str_release(e->name);
     scr_str_release(e->message);
     scr_str_release(e->code); /* NULL-safe: absent on most errors */
+    if (e->cause != NULL && scr_error_cause_drop != NULL) scr_error_cause_drop(obj);
     scr_obj_free_note();
     if (scr_error_traced) scr_cyc_free(e);
     else free(e);
@@ -78,13 +77,8 @@ static void scr_error_reld(void *obj) {
   }
 }
 
-/* The DOMException vtable's direct release: the cause drops first, then
- * the shared ScrError teardown (through the hook — see scr_domex_gcfree). */
+/* DOMException shares the ErrorOptions teardown in the ScrError prefix. */
 static void scr_domex_reld(void *obj) {
-  ScrDomException *d = (ScrDomException *)obj;
-  if (d->rc == 1 && d->cause != NULL && scr_domex_cause_drop != NULL) {
-    scr_domex_cause_drop(obj);
-  }
   scr_error_reld(obj);
 }
 

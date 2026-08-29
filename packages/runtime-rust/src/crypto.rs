@@ -12,6 +12,7 @@ fn crypto_random_size(size: f64) -> usize {
                 format_number(size)
             ),
             code: Some("ERR_OUT_OF_RANGE".to_owned()),
+            cause: None,
             dom: None,
         });
     }

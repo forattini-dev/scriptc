@@ -490,6 +490,8 @@ typedef struct ScrError {
                     * the layout prefix: the compiler's %Error class defs
                     * carry a matching third field, so user subclasses
                     * embed the slot and release it NULL-guarded. */
+  bool has_cause;  /* ErrorOptions carried an own `cause` property */
+  struct ScrDyn *cause; /* owned; NULL when absent on runtime errors */
 } ScrError;
 
 enum {
@@ -505,7 +507,7 @@ extern SCR_TL ScrVt scr_error_vts[5]; /* indexed by SCR_ERR_*; main() stamps pre
 struct ScrDyn; /* full declaration below (the checked-dynamic tree section) */
 
 /* DOMException: the ScrError prefix (identical member order — an upcast is
- * a pointer reinterpret) plus the WebIDL slots. The extra slots are HIDDEN
+ * a pointer reinterpret) plus the WebIDL code slot. The extra slot is HIDDEN
  * from the compiler's IR field list (user `extends DOMException` is fenced
  * so no subclass layout ever overlaps them); reads go through the
  * scr_domex_* accessors. */
@@ -515,9 +517,9 @@ typedef struct ScrDomException {
   ScrStr *name;    /* "Error" default, or the resolved WebIDL name */
   ScrStr *message; /* "" when constructed without one */
   ScrStr *code;    /* the Node string-code slot (stays NULL here) */
+  bool has_cause;  /* inherited ErrorOptions presence bit */
+  struct ScrDyn *cause; /* inherited owned ErrorOptions cause */
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
-  bool has_cause;  /* the options form carried a `cause` member */
-  struct ScrDyn *cause; /* owned; NULL when has_cause is false */
 } ScrDomException;
 
 /* new DOMException(message?, nameOrOptions?) — both dyn args borrowed,
@@ -531,7 +533,7 @@ ScrError *scr_domex_new(const struct ScrDyn *message, const struct ScrDyn *name_
  * teardown hook scr_json.c installs before any cause can exist. */
 ScrError *scr_domex_alloc(void);
 double scr_domex_code_of(const ScrStr *name);
-void scr_domex_install_cause_drop(void (*fn)(void *obj));
+void scr_error_install_cause_drop(void (*fn)(void *obj));
 double scr_domex_code(ScrError *e);           /* borrowed receiver */
 bool scr_domex_has_cause(ScrError *e);        /* borrowed receiver */
 struct ScrDyn *scr_domex_cause(ScrError *e);  /* +1 (dyn undefined when absent) */
@@ -553,6 +555,8 @@ void scr_error_set_traced(void);
 /* Allocate + initialize (name = the kind's builtin name, message retained
  * from the borrowed argument; NULL means ""). Returns +1. */
 ScrError *scr_error_new(int kind, ScrStr *message);
+ScrError *scr_error_new_cause(int kind, ScrStr *message, const struct ScrDyn *cause);
+struct ScrDyn *scr_error_cause(ScrError *e); /* +1; dyn undefined when absent */
 /* Initialize the error prefix of an already-allocated (zeroed) object —
  * the super(message) call of a compiled `extends Error` constructor. Both
  * arguments are borrowed. */

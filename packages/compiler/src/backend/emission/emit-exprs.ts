@@ -6127,6 +6127,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             if (!rec) throw new InternalCompilerError(`emitter bug: error.new of ${e.type.className}`);
             return finish(`scr_error_new(${rec.kind}, ${arg(0)})`);
           }
+          case "error.newCause": {
+            if (e.type.kind !== "object") throw new InternalCompilerError("emitter bug: error.newCause result is not a class");
+            const rec = RUNTIME_ERROR_CLASSES.get(e.type.className);
+            if (!rec) throw new InternalCompilerError(`emitter bug: error.newCause of ${e.type.className}`);
+            return finish(`scr_error_new_cause(${rec.kind}, ${arg(0)}, ${arg(1)})`);
+          }
+          case "error.cause":
+            return finish(`scr_error_cause((ScrError *)${arg(0)})`);
           case "error.ctor": {
             // super(message) into the builtin base: stamps name/message on
             // the receiver (borrowed, like the message). The RECEIVER'S

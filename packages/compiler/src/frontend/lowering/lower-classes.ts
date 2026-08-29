@@ -345,6 +345,8 @@ export interface GenericClassInfo {
             { name: "name", type: STRING },
             { name: "message", type: STRING },
             { name: "%code", type: STRING },
+            { name: "%hasCause", type: BOOL },
+            { name: "%cause", type: DYN },
           ],
           loc,
         },
@@ -4989,7 +4991,57 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         };
       }
       if (errInfo) {
-        const msg = L.errorMessageArg(expr.arguments ?? [], loc, expr);
+        const args = expr.arguments ?? [];
+        if (args.length > 2) {
+          L.unsupported("SC1090", args[2] ?? expr, "Error constructor arguments after options");
+        }
+        const msg = L.errorMessageArg(args.slice(0, 1), loc, expr);
+        if (args.length === 2) {
+          const options = args[1]!;
+          if (!ts.isObjectLiteralExpression(options)) {
+            L.unsupported(
+              "SC1090",
+              options,
+              "Error constructor options that are not an inline { cause: value } literal",
+            );
+          }
+          let causeNode: ts.Expression | null = null;
+          for (const property of options.properties) {
+            if (ts.isPropertyAssignment(property) &&
+              ((ts.isIdentifier(property.name) && property.name.text === "cause") ||
+                (ts.isStringLiteral(property.name) && property.name.text === "cause"))) {
+              causeNode = property.initializer;
+              continue;
+            }
+            if (ts.isShorthandPropertyAssignment(property) &&
+              ts.isIdentifier(property.name) && property.name.text === "cause") {
+              causeNode = property.name;
+              continue;
+            }
+            L.unsupported("SC1090", property, "Error constructor option other than a plain 'cause' property");
+          }
+          if (causeNode !== null) {
+            const cause = L.lowerExpr(causeNode);
+            let dynCause: IrExpr;
+            if (cause.type.kind === "dyn") dynCause = cause;
+            else if (cause.kind === "unitLit" || (cause.type.kind !== "jsval" && L.dynConvertible(cause.type))) {
+              dynCause = { kind: "dynFrom", value: cause, type: DYN, loc };
+            } else {
+              L.noLowering(
+                `Error cause of type '${L.fmt(cause.type)}'`,
+                causeNode,
+                "unknown and checked-dynamic-convertible cause values lower",
+              );
+            }
+            return {
+              kind: "libCall",
+              fn: "error.newCause",
+              args: [msg, dynCause],
+              type: { kind: "object", className: errInfo.def.name },
+              loc,
+            };
+          }
+        }
         return {
           kind: "libCall",
           fn: "error.new",

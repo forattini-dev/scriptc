@@ -163,6 +163,7 @@ fn child_spawn_error(command: &JsString, error: std::io::Error) -> JsError {
         name: "Error".to_owned(),
         message: format!("spawn {command} {code}"),
         code: Some(code.to_owned()),
+        cause: None,
         dom: None,
     }
 }

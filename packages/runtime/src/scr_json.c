@@ -3286,20 +3286,32 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
 ScrDyn *scr_dyn_obj_values(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_VALUES); }
 ScrDyn *scr_dyn_obj_entries(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_ENTRIES); }
 
-/* ── DOMException's dyn-touching half ─────────────────────────────────
+/* ── Error cause / DOMException's dyn-touching half ───────────────────
  * Construction/cause/clone live HERE (not scr_error.c) so the error unit
  * stays linkable without the checked-dynamic tree (the runtime C-unit tests link
  * subsets). The cause teardown installs through scr_error.c's hook
  * before any cause can exist. */
 
-static void scr_domex_cause_drop_impl(void *obj) {
-  ScrDomException *d = (ScrDomException *)obj;
-  scr_dyn_release(d->cause);
-  d->cause = NULL;
+static void scr_error_cause_drop_impl(void *obj) {
+  ScrError *error = (ScrError *)obj;
+  scr_dyn_release(error->cause);
+  error->cause = NULL;
+}
+
+ScrError *scr_error_new_cause(int kind, ScrStr *message, const ScrDyn *cause) {
+  scr_error_install_cause_drop(&scr_error_cause_drop_impl);
+  ScrError *error = scr_error_new(kind, message);
+  error->has_cause = true;
+  error->cause = scr_dyn_retain((ScrDyn *)cause);
+  return error;
+}
+
+ScrDyn *scr_error_cause(ScrError *error) {
+  return error->cause ? scr_dyn_retain(error->cause) : scr_dyn_undefined();
 }
 
 ScrError *scr_domex_new(const ScrDyn *message, const ScrDyn *name_or_options) {
-  scr_domex_install_cause_drop(&scr_domex_cause_drop_impl);
+  scr_error_install_cause_drop(&scr_error_cause_drop_impl);
   ScrDomException *d = (ScrDomException *)scr_domex_alloc();
   d->message = (message == NULL || message->kind == SCR_DYN_UNDEF)
                    ? scr_str_new("", 0)
