@@ -1293,6 +1293,8 @@ test.each([
   "2330-tls-server-runtime-options.cjs",
   "2331-tls-server-options-typed.ts",
   "2352-void-coercions.ts",
+  "2353-decorators-member-ambient.ts",
+  "2354-decorators-expression-ambient.ts",
   "2363-nullish-retag.ts",
   "2368-set-methods.ts",
   "2369-promise-try.ts",
