@@ -2142,6 +2142,8 @@ bool scr_process_kill_named(double pid, const ScrStr *signal);
 /* fflush stdout, then _Exit((int)code): no atexit handlers run — the RC
  * audit is deliberately skipped (exiting mid-program leaves live values). */
 void scr_process_exit(double code);
+void scr_process_exit_code_set(double code);
+int scr_process_exit_code_get(void);
 /* process._exiting: true once the exit sequence began (process.exit or
  * the exit-listener runner set the flag). Never throws. */
 extern SCR_TL bool scr_process_in_exit;

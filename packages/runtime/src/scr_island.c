@@ -2764,10 +2764,9 @@ static JSValue isl_host_exit(JSContext *ctx, JSValueConst this_val, int argc,
 /* The island process shim's implicit exit status (process.exitCode):
  * mirrored here by the shim's setter, read by the emitted main after the
  * loop drains — Node's a-program-that-sets-it-and-returns contract. */
-static int isl_exit_code = 0;
 static size_t isl_exit_code_version = 0;
 
-int scr_island_exit_code(void) { return isl_exit_code; }
+int scr_island_exit_code(void) { return scr_process_exit_code_get(); }
 size_t scr_island_exit_code_version(void) { return isl_exit_code_version; }
 
 static JSValue isl_host_set_exit_code(JSContext *ctx, JSValueConst this_val,
@@ -2776,7 +2775,7 @@ static JSValue isl_host_set_exit_code(JSContext *ctx, JSValueConst this_val,
   (void)argc;
   int32_t code = 0;
   JS_ToInt32(ctx, &code, argv[0]);
-  isl_exit_code = code;
+  scr_process_exit_code_set((double)code);
   isl_exit_code_version++;
   return JS_UNDEFINED;
 }

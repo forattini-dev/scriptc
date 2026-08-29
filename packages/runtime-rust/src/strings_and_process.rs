@@ -737,6 +737,18 @@ pub fn process_exit(code: f64) -> ! {
     std::process::exit(code as i32)
 }
 
+thread_local! {
+    static PROCESS_EXIT_CODE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+pub fn process_exit_code_set(code: f64) {
+    PROCESS_EXIT_CODE.with(|slot| slot.set(to_int32(code)));
+}
+
+pub fn process_exit_code() -> i32 {
+    PROCESS_EXIT_CODE.with(std::cell::Cell::get)
+}
+
 pub fn process_is_tty(fd: f64) -> bool {
     use std::io::IsTerminal;
     match fd as i32 {

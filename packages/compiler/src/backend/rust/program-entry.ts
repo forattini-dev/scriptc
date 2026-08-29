@@ -55,7 +55,7 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
     "    };",
   );
   if (options.usesProcessExitListeners) {
-    lines.push("    sc_process_run_exit(if _sc_unsettled_tla { 13.0 } else if _sc_uncaught.is_some() || _sc_unhandled_rejection { 1.0 } else { 0.0 });");
+    lines.push("    sc_process_run_exit(if _sc_unsettled_tla { 13.0 } else if _sc_uncaught.is_some() || _sc_unhandled_rejection { 1.0 } else { f64::from(runtime::process_exit_code()) });");
   }
   for (const id of options.heapGlobalIds) {
     lines.push(`    ${mangleGlobal(id)}.with(|slot| *slot.borrow_mut() = None);`);
@@ -72,6 +72,8 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
     "    if let Some(reason) = _sc_uncaught { eprintln!(\"Uncaught {}\", reason); std::process::exit(1); }",
     "    if _sc_unhandled_rejection { std::process::exit(1); }",
     "    if _sc_unsettled_tla { std::process::exit(13); }",
+    "    let _sc_exit_code = runtime::process_exit_code();",
+    "    if _sc_exit_code != 0 { std::process::exit(_sc_exit_code); }",
     "}",
   );
   return lines;

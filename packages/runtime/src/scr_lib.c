@@ -1139,6 +1139,17 @@ void scr_os_ifaddrs_free(ScrIfaddrs *s) {
 void (*scr_process_exit_hook)(double code) = NULL;
 void (*scr_stdin_destroy_hook)(void) = NULL;
 
+static SCR_TL int scr_process_implicit_exit_code = 0;
+
+void scr_process_exit_code_set(double code) {
+  uint32_t bits = scr_to_uint32(code);
+  scr_process_implicit_exit_code = bits >= UINT32_C(0x80000000)
+      ? (int)((double)bits - 4294967296.0)
+      : (int)bits;
+}
+
+int scr_process_exit_code_get(void) { return scr_process_implicit_exit_code; }
+
 void scr_process_exit(double code) {
   /* Node runs 'exit' listeners on explicit process.exit() too — they run
    * HERE, synchronously, before the teardown-free exit below. The hook is

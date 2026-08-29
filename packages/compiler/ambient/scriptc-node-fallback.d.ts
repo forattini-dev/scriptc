@@ -168,6 +168,8 @@ declare var process: {
    * surface — the test harness reads it): true while 'exit' listeners
    * run, false otherwise. */
   readonly _exiting: boolean;
+  /** The status used when the event loop drains normally. */
+  exitCode?: number;
   /* Node's raw synchronous stderr write (internal surface the test
    * harness uses on its failure paths). */
   _rawDebug(...args: unknown[]): void;

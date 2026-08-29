@@ -1532,7 +1532,7 @@
       "kind": "node-builtin",
       "name": "process.exit",
       "status": "static",
-      "note": "process.exit and the process._exiting flag read are one surface"
+      "note": "process.exit, process.exitCode, and the process._exiting flag read are one surface"
     },
     {
       "id": "node-builtin.process.getgid",

@@ -349,6 +349,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.activeResources": "scr_active_resources",
   "process.exiting": "scr_process_exiting",
   "process.exit": "scr_process_exit",
+  "process.exitCodeSet": "scr_process_exit_code_set",
   "process.envSet": "scr_env_set",
   "process.envUnset": "scr_env_unset",
   "process.envPairs": "scr_env_pairs",
@@ -1690,6 +1691,7 @@ class LlEmitter {
       }
     }
     if (usesNodeTest) this.declare(`declare i32 @scr_test_exit_code()`);
+    this.declare(`declare i32 @scr_process_exit_code_get()`);
     if (snapshotsTlsCa) {
       this.declare(`declare void @scr_tls_ca_install()`);
     }
@@ -1757,16 +1759,14 @@ class LlEmitter {
       const lines: string[] = [];
       if (usesNodeTest) {
         lines.push(`  %tla_program_exit = call i32 @scr_test_exit_code()`);
-      } else if (usesIsland) {
-        lines.push(`  %tla_program_exit = call i32 @scr_island_exit_code()`);
+      } else {
+        lines.push(`  %tla_program_exit = call i32 @scr_process_exit_code_get()`);
       }
-      if (usesNodeTest || usesIsland) {
-        lines.push(
-          `  %tla_program_exit_zero = icmp eq i32 %tla_program_exit, 0`,
-          `  %tla_exit_status = select i1 %tla_program_exit_zero, i32 %tla_status, i32 %tla_program_exit`,
-        );
-      }
-      const exitStatus = usesNodeTest || usesIsland ? "%tla_exit_status" : "%tla_status";
+      lines.push(
+        `  %tla_program_exit_zero = icmp eq i32 %tla_program_exit, 0`,
+        `  %tla_exit_status = select i1 %tla_program_exit_zero, i32 %tla_status, i32 %tla_program_exit`,
+      );
+      const exitStatus = "%tla_exit_status";
       const tracksIslandExit = programExitUsesIsland && inlineExitListeners;
       if (tracksIslandExit) {
         lines.push(`  %tla_exit_version = call ${this.sizeType} @scr_island_exit_code_version()`);
@@ -2189,9 +2189,7 @@ class LlEmitter {
       ...globalReleases,
       ...(usesNodeTest
         ? [`  %test_exit = call i32 @scr_test_exit_code()`, `  ret i32 %test_exit`]
-        : usesIsland
-        ? [`  %island_exit = call i32 @scr_island_exit_code()`, `  ret i32 %island_exit`]
-        : [`  ret i32 0`]),
+        : [`  %process_exit = call i32 @scr_process_exit_code_get()`, `  ret i32 %process_exit`]),
       `}`,
       ``,
       // sanitize_address is inert under the plain pipeline; the sanitized

@@ -4306,6 +4306,23 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         }
         if (ts.isElementAccessExpression(expr.left)) return L.lowerElementWrite(expr);
         if (ts.isPropertyAccessExpression(expr.left)) {
+          // process.exitCode = n selects the status returned after the event
+          // loop drains; unlike process.exit(n), execution continues.
+          if (
+            !expr.left.questionDotToken &&
+            L.stdlibGlobalMember(expr.left, "process") === "exitCode"
+          ) {
+            const loc = locOf(expr);
+            const value = L.lowerExpr(expr.right);
+            if (value.type.kind !== "f64") {
+              L.unsupported("SC1090", expr.right, "non-number process.exitCode values");
+            }
+            return {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "process.exitCodeSet", args: [value], type: VOID, loc },
+              loc,
+            };
+          }
           // `process.env.NAME = v` — setenv(3): later env reads and spawned
           // children observe the write, exactly Node. Values are strings
           // (Node stringifies everything; a non-string RHS fences instead

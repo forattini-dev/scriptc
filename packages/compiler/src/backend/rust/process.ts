@@ -9,6 +9,9 @@ export function emitRustProcessCall(
   if (expr.fn === "process.exit" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::process_exit(${context.emitExpr(arg)})`;
   }
+  if (expr.fn === "process.exitCodeSet" && expr.args.length === 1 && arg?.type.kind === "f64") {
+    return `runtime::process_exit_code_set(${context.emitExpr(arg)})`;
+  }
   if (expr.fn === "process.kill" && expr.args.length === 2 &&
       arg?.type.kind === "f64" && secondArg?.type.kind === "string") {
     return `runtime::process_kill_named(${context.emitExpr(arg)}, &(${context.emitExpr(secondArg)}))`;

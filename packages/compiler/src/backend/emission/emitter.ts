@@ -874,9 +874,7 @@ export class CEmitter {
     const programExitUsesIsland = !usesNodeTest && usesIsland;
     const programExitCode = usesNodeTest
       ? "scr_test_exit_code()"
-      : usesIsland
-        ? "scr_island_exit_code()"
-        : "0";
+      : "scr_process_exit_code_get()";
     // Exit listeners can read MODULE GLOBALS directly (test/common's
     // runCallChecks over its mustCallChecks ledger — an interned top-level
     // closure, no capture boxes keeping anything alive), so they must run
@@ -1066,9 +1064,9 @@ export class CEmitter {
       // contract: 1 when any non-todo test failed). The loop-run above is
       // guaranteed for these programs — every registration libCall sets
       // usesTimers, so the runner fiber always drains before this line.
-      // Island programs exit with process.exitCode when the embedded
-      // graph set it (Node's implicit exit status: set it, return
-      // normally, exit with it) — 0 when never set.
+      // Static and island code share process.exitCode's implicit status:
+      // set it, return normally, and the process exits with it; zero when
+      // never set.
       `  return ${programExitCode};`,
       `}`,
       ``,

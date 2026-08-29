@@ -5931,6 +5931,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Flushes stdout and _Exit()s — never returns (exit handlers,
             // including the RC audit, deliberately do not run).
             return finish(`scr_process_exit(${arg(0)})`);
+          case "process.exitCodeSet":
+            return finish(`scr_process_exit_code_set(${arg(0)})`);
           case "timers.setTimeout": {
             // The loop owns the callback until it fires.
             E.usesTimers = true;

@@ -3200,6 +3200,7 @@ export type IrLibFn =
    * array; never throws. */
   | "process.envPairs"
   | "process.exit"
+  | "process.exitCodeSet"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. POSIX-only target, so both
    * always answer (the checker's `getuid?` optionality covers Windows —
