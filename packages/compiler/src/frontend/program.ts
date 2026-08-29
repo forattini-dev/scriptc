@@ -76,6 +76,7 @@ import {
   workspacePackageOfPath,
 } from "./shared.js";
 import { trackedFileExists } from "./input-tracker.js";
+import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
   strict: true,
@@ -1103,7 +1104,11 @@ function inTypePosition7(node: ts.Node): boolean {
  * conservative — anything that could CALL user code (directly, through a
  * callback-invoking builtin, a getter, an iterator, or an implicit
  * coercion of a user object) disqualifies the module's cycles. */
-function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | null {
+function nonInertTopLevel7(
+  program: ts.Program,
+  sf: ts.SourceFile,
+  cycleMembers: ReadonlySet<ts.SourceFile>,
+): ts.Node | null {
   const checker = program.getTypeChecker();
   const PRIM =
     ts.TypeFlags.StringLike |
@@ -1206,9 +1211,14 @@ function nonInertTopLevel7(program: ts.Program, sf: ts.SourceFile): ts.Node | nu
     if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
       return inert(e.expression);
     }
-    if (ts.isPropertyAccessExpression(e)) return dtsRooted(e);
+    if (ts.isPropertyAccessExpression(e)) {
+      return dtsRooted(e) || isPreinitializedDataPropertyRead(checker, e, cycleMembers);
+    }
     if (ts.isElementAccessExpression(e)) {
-      return dtsRooted(e) && inert(e.argumentExpression) && primitiveTyped(e.argumentExpression);
+      return (
+        isPreinitializedDataPropertyRead(checker, e, cycleMembers) ||
+        (dtsRooted(e) && inert(e.argumentExpression) && primitiveTyped(e.argumentExpression))
+      );
     }
     if (ts.isTemplateExpression(e)) {
       return e.templateSpans.every((s) => inert(s.expression) && primitiveTyped(s.expression));
@@ -1453,12 +1463,13 @@ export function makeCycleAdmission(
     }
     if (!sccVerdict.has(comp)) {
       let reason: string | null = null;
+      const cycleMembers = new Set(comp);
       for (const m of comp) {
         if (isCjsJsFile7(m)) {
           reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
           break;
         }
-        const off = nonInertTopLevel7(program, m);
+        const off = nonInertTopLevel7(program, m, cycleMembers);
         if (off !== null) {
           reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
           break;

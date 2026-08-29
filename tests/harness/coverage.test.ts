@@ -331,6 +331,12 @@ test("a cycle whose top level calls a builtin with a builtin function value is a
   expect(out).toContain("statements analyzed");
 });
 
+test("an external registry getter remains observable during a cycle init window", () => {
+  const out = report(fixture("cycle-external-getter/main.ts"));
+  expect(out).toContain("SC1016");
+  expect(out).toContain("circular imports");
+});
+
 test(`every corpus program is 100% static (corpus and coverage agree${shardSuffix()})`, async () => {
   // The differential corpus compiles by definition; coverage must agree.
   // `// @dynamic` programs compile under --dynamic, so analyze them that way.

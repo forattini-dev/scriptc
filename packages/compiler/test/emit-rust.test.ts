@@ -1558,6 +1558,7 @@ shardedTest.each(shardSelect([
   "2697-process-chdir.ts",
   "2698-process-umask.ts",
   "2700-wasi-core.ts",
+  "2701-cycle-external-data/main.ts",
   "2625-bytes-views.ts",
 ], (fixture) => fixture))("Rust environment and late language corpus matches Node: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-logical-tail-"));
