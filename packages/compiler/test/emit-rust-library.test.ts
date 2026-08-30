@@ -517,3 +517,80 @@ test("Rust library callbacks report an unregistered channel as SC4025", async ()
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library callbacks synchronously deliver scalar notifications", async () => {
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-notify-"));
+  try {
+    const entry = join(work, "lib.ts");
+    writeFileSync(entry, [
+      "declare function hostNote(value: number): void;",
+      "export function run(value: number): number {",
+      "  hostNote(value);",
+      "  return value + 1;",
+      "}",
+      "console.log('notify ready');",
+      "",
+    ].join("\n"));
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-scalar-notification",
+      entry,
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "rn_",
+        init_symbol: "rn_init",
+        sink_register_symbol: "rn_set_panic_sink",
+        collect_symbol: null,
+        result_reset_symbol: null,
+        callback_register_symbol: "rn_set_callback",
+      },
+      callbacks: [{ name: "hostNote", params: ["f64"], returns: "void" }],
+      exports: [{ export: "run", symbol: "rn_run", params: ["f64"], returns: "f64" }],
+    }));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <stdint.h>",
+      "#include <stdio.h>",
+      "extern void rn_init(void);",
+      "extern double rn_run(double value);",
+      "extern int32_t rn_set_callback(const char *name, void (*fn)(void), void *ctx);",
+      "static void note(void *ctx, double value) { *(double *)ctx = value * 2; }",
+      "int main(void) {",
+      "  double observed = 0;",
+      "  printf(\"register: %d\\n\", rn_set_callback(\"hostNote\", (void (*)(void))note, &observed));",
+      "  rn_init();",
+      "  printf(\"run: %.0f observed: %.0f\\n\", rn_run(6), observed);",
+      "  return 0;",
+      "}",
+      "",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      probeSource,
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    expect(execFileSync(probe, { encoding: "utf8" })).toBe(
+      "register: 0\nnotify ready\nrun: 7 observed: 12\n",
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);

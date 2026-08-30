@@ -364,17 +364,19 @@ export function emitRustFfiCall(
   const libraryCallback = libraryCallbacks.find((callback) => callback.name === expr.import);
   if (libraryCallback !== undefined) {
     if (libraryCallback.params.length !== 1 || libraryCallback.params[0] !== "f64" ||
-        libraryCallback.returns !== "f64" || expr.args.length !== 1 ||
-        expr.args[0]?.type.kind !== "f64" || expr.type.kind !== "f64") {
+        (libraryCallback.returns !== "f64" && libraryCallback.returns !== "void") ||
+        expr.args.length !== 1 || expr.args[0]?.type.kind !== "f64" ||
+        expr.type.kind !== libraryCallback.returns) {
       context.unsupported(`library callback channel '${expr.import}' outside the f64 scalar ABI`, expr.loc);
     }
     const value = emitExpr(expr.args[0]);
     const raw = context.nextName("sc_library_callback_raw");
     const opaque = context.nextName("sc_library_callback_context");
     const callback = context.nextName("sc_library_callback_typed");
+    const returns = libraryCallback.returns === "void" ? "" : " -> f64";
     return `{ let Some((${raw}, ${opaque})) = sc_library_callback(${libraryCallback.slot}) else { ` +
       `runtime::throw_error_code(${JSON.stringify(libraryCallback.unregisteredTrap)}.to_owned(), "SC4025"); }; ` +
-      `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, f64) -> f64 = ` +
+      `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, f64)${returns} = ` +
       `unsafe { std::mem::transmute(${raw}) }; unsafe { ${callback}(${opaque}, ${value}) } }`;
   }
   const index = imports.findIndex((binding) => binding.name === expr.import);
