@@ -1039,6 +1039,7 @@ shardedTest.each(shardSelect([
   "1592-js-classes.js",
   "1593-js-jsdoc-records.js",
   "1594-js-async.js",
+  "1595-js-island-gap/main.js",
   "1596-cjs-modules/main.js",
   "1597-mjs-graph/main.mjs",
   "1598-cjs-builtin-require/main.js",
