@@ -32,6 +32,11 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "  for (size_t i = 0; i < len; i++) sum += data[i];",
     "  return sum;",
     "}",
+    "double sf_bytes_sum(const unsigned char *data, size_t len) {",
+    "  double sum = 0;",
+    "  for (size_t i = 0; i < len; i++) sum += data[i];",
+    "  return sum;",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -78,6 +83,11 @@ test("Rust executables call manifest-bound native value functions", async () => 
       symbol: "sf_text_sum",
       params: ["string"],
       returns: "f64",
+    }, {
+      name: "nativeBytesSum",
+      symbol: "sf_bytes_sum",
+      params: ["bytes"],
+      returns: "f64",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -91,12 +101,14 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "declare function nativeNote(value: number): void;",
     "declare function nativeLastNote(): number;",
     "declare function nativeTextSum(value: string): number;",
+    "declare function nativeBytesSum(value: Uint8Array): number;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
     "nativeNote(12.5);",
     "console.log(nativeLastNote());",
     "console.log(nativeTextSum(\"A\\0é\"));",
+    "console.log(nativeBytesSum(new Uint8Array([1, 0, 255, 3])));",
     "",
   ].join("\n"));
 
@@ -115,6 +127,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n");
   expect(run.stderr).toBe("");
 });

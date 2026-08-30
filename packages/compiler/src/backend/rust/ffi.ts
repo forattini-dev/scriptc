@@ -27,10 +27,13 @@ function scalarSignature(binding: IrFfiImport): ScalarSignature | null {
   return { parameter, returns: binding.returns };
 }
 
-function isStringToF64(binding: IrFfiImport): boolean {
+function spanToF64(binding: IrFfiImport): "bytes" | "string" | null {
+  const parameter = binding.params[0];
   return binding.params.length === 1 &&
-    binding.params[0] === "string" &&
-    binding.returns === "f64";
+    (parameter === "bytes" || parameter === "string") &&
+    binding.returns === "f64"
+    ? parameter
+    : null;
 }
 
 function abiType(cls: ScalarClass): string {
@@ -59,7 +62,7 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
-    if (isStringToF64(binding)) {
+    if (spanToF64(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0_ptr: *const u8, sc_arg_0_len: usize) -> f64;`];
     }
@@ -83,12 +86,16 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
-  if (binding !== undefined && isStringToF64(binding)) {
+  const span = binding === undefined ? null : spanToF64(binding);
+  if (span !== null) {
     const argument = expr.args[0];
-    if (expr.args.length !== 1 || argument?.type.kind !== "string" || expr.type.kind !== "f64") {
-      context.unsupported(`native FFI import '${expr.import}' outside the string value ABI`, expr.loc);
+    if (expr.args.length !== 1 || argument?.type.kind !== span || expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the span value ABI`, expr.loc);
     }
-    const value = context.nextName("sc_ffi_string");
+    const value = context.nextName(`sc_ffi_${span}`);
+    if (span === "bytes") {
+      return `{ let ${value} = runtime::ffi_bytes_snapshot(&${emitExpr(argument)}); unsafe { ${functionName(index)}(${value}.as_ptr(), ${value}.len()) } }`;
+    }
     return `{ let ${value} = ${emitExpr(argument)}; unsafe { ${functionName(index)}(${value}.as_bytes().as_ptr(), ${value}.len()) } }`;
   }
   const signature = binding === undefined ? null : scalarSignature(binding);

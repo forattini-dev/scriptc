@@ -290,6 +290,11 @@ pub fn bytes_copy<T: ByteElement>(bytes: &JsBytes<T>) -> JsBytes<T> {
     bytes_from_elements(bytes_values(bytes))
 }
 
+/// Stable, contiguous input storage for the duration of one outbound FFI call.
+pub fn ffi_bytes_snapshot(bytes: &JsBytes<u8>) -> Vec<u8> {
+    bytes_values(bytes)
+}
+
 pub fn process_stdout_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
     use std::io::Write;
     let _ = encoding;
