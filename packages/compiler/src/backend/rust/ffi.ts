@@ -150,26 +150,39 @@ function retainedContextCallback(binding: IrFfiImport): IrFfiCallbackParam["call
     : null;
 }
 
-function foreignF64CStringCallback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
+type ForeignParamClass = "bool" | "bytes" | "cstring" | "f64" | "i32" | "string" | "u32" | "u8";
+
+function isForeignParamClass(value: unknown): value is ForeignParamClass {
+  return value === "bool" || value === "bytes" || value === "cstring" || value === "f64" ||
+    value === "i32" || value === "string" || value === "u32" || value === "u8";
+}
+
+function foreignContextCallback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
   const callback = binding.params[0];
   const context = binding.params[1];
   if (binding.params.length !== 2 || callback === undefined || context === undefined ||
       !isFfiCallbackParam(callback) || !isFfiContextParam(context)) return null;
   const params = callback.callback.params;
-  const callbackContext = params[2];
-  return params.length === 3 && params[0] === "f64" && params[1] === "cstring" &&
-    callbackContext !== undefined && isFfiContextParam(callbackContext) &&
-    callbackContext.context === callback.callback.id && context.context === callback.callback.id &&
+  const callbackContexts = params.filter(isFfiContextParam);
+  const values = params.filter((param) => !isFfiContextParam(param));
+  return values.length > 0 && values.every(isForeignParamClass) &&
+    callbackContexts.length === 1 && callbackContexts[0]?.context === callback.callback.id &&
+    context.context === callback.callback.id &&
     callback.callback.returns === "void" && callback.callback.lifetime === "retained" &&
     callback.callback.invoke === "foreign" && binding.returns === "void"
     ? callback.callback
     : null;
 }
 
-function foreignF64CStringRelease(
+interface ForeignContextRelease {
+  readonly callback: IrFfiCallbackParam["callback"];
+  readonly key: string;
+}
+
+function foreignContextRelease(
   binding: IrFfiImport,
   imports: readonly IrFfiImport[],
-): string | null {
+): ForeignContextRelease | null {
   const release = binding.params[0];
   const context = binding.params[1];
   if (binding.params.length !== 2 || release === undefined || context === undefined ||
@@ -180,8 +193,28 @@ function foreignF64CStringRelease(
   const sourceName = release.callback.release.slice(0, separator);
   const callbackId = release.callback.release.slice(separator + 1);
   const source = imports.find((candidate) => candidate.name === sourceName);
-  const callback = source === undefined ? null : foreignF64CStringCallback(source);
-  return callback?.id === callbackId ? release.callback.release : null;
+  const callback = source === undefined ? null : foreignContextCallback(source);
+  return callback?.id === callbackId
+    ? { callback, key: release.callback.release }
+    : null;
+}
+
+function foreignParamTypes(param: ForeignParamClass | { readonly context: string }): string[] {
+  if (typeof param === "object") return ["*mut std::ffi::c_void"];
+  switch (param) {
+    case "bool":
+    case "u8": return ["u8"];
+    case "u32": return ["u32"];
+    case "i32": return ["i32"];
+    case "f64": return ["f64"];
+    case "cstring": return ["*const std::ffi::c_char"];
+    case "string":
+    case "bytes": return ["*const u8", "usize"];
+  }
+}
+
+function foreignCallbackType(callback: IrFfiCallbackParam["callback"]): string {
+  return `unsafe extern "C" fn(${callback.params.flatMap(foreignParamTypes).join(", ")})`;
 }
 
 function rawRetainedCallback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
@@ -255,10 +288,11 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
-    if (foreignF64CStringRelease(binding, imports) !== null ||
-        foreignF64CStringCallback(binding) !== null) {
+    const foreign = foreignContextRelease(binding, imports)?.callback ??
+      foreignContextCallback(binding);
+    if (foreign !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
-        `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(f64, *const std::ffi::c_char, *mut std::ffi::c_void), sc_arg_1: *mut std::ffi::c_void);`];
+        `    fn ${functionName(index)}(sc_arg_0: ${foreignCallbackType(foreign)}, sc_arg_1: *mut std::ffi::c_void);`];
     }
     if (rawRetainedRelease(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
@@ -324,7 +358,7 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
-  const foreignRelease = binding === undefined ? null : foreignF64CStringRelease(binding, imports);
+  const foreignRelease = binding === undefined ? null : foreignContextRelease(binding, imports);
   if (foreignRelease !== null) {
     const callbackArgument = expr.args[0];
     if (expr.args.length !== 1 || callbackArgument?.type.kind !== "func" || expr.type.kind !== "void") {
@@ -336,10 +370,10 @@ export function emitRustFfiCall(
     const callback = context.nextName("sc_ffi_callback_typed");
     const pointer = context.nextName("sc_ffi_callback_pointer");
     const token = context.nextName("sc_ffi_callback_token");
-    const key = JSON.stringify(foreignRelease);
-    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); let (${rawCallback}, ${pointer}, ${token}) = runtime::ffi_foreign_callback(${key}, ${identity}).unwrap_or_else(|| runtime::throw_error("releasing a native callback registration that does not exist".to_owned())); let ${callback}: unsafe extern "C" fn(f64, *const std::ffi::c_char, *mut std::ffi::c_void) = unsafe { std::mem::transmute(${rawCallback}) }; unsafe { ${functionName(index)}(${callback}, ${pointer}); } runtime::ffi_release_foreign_callback(${key}, ${identity}, ${token}); }`;
+    const key = JSON.stringify(foreignRelease.key);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); let (${rawCallback}, ${pointer}, ${token}) = runtime::ffi_foreign_callback(${key}, ${identity}).unwrap_or_else(|| runtime::throw_error("releasing a native callback registration that does not exist".to_owned())); let ${callback}: ${foreignCallbackType(foreignRelease.callback)} = unsafe { std::mem::transmute(${rawCallback}) }; unsafe { ${functionName(index)}(${callback}, ${pointer}); } runtime::ffi_release_foreign_callback(${key}, ${identity}, ${token}); }`;
   }
-  const foreignCallback = binding === undefined ? null : foreignF64CStringCallback(binding);
+  const foreignCallback = binding === undefined ? null : foreignContextCallback(binding);
   if (foreignCallback !== null) {
     const callbackArgument = expr.args[0];
     if (expr.args.length !== 1 || callbackArgument?.type.kind !== "func" || expr.type.kind !== "void") {
@@ -348,19 +382,64 @@ export function emitRustFfiCall(
     const callbackValue = context.nextName("sc_ffi_callback_value");
     const identity = context.nextName("sc_ffi_callback_identity");
     const trampoline = context.nextName("sc_ffi_callback");
-    const incoming = context.nextName("sc_ffi_callback_incoming");
-    const input = context.nextName("sc_ffi_callback_cstring");
-    const opaque = context.nextName("sc_ffi_callback_context");
     const token = context.nextName("sc_ffi_callback_token");
     const pointer = context.nextName("sc_ffi_callback_pointer");
     const callbackPointer = context.nextName("sc_ffi_callback_function");
     const args = context.nextName("sc_ffi_callback_args");
-    const value = context.nextName("sc_ffi_callback_value_arg");
-    const label = context.nextName("sc_ffi_callback_string_arg");
     const active = context.nextName("sc_ffi_callback_active");
-    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [value, label], expr.loc);
+    let queueIndex = 0;
+    let opaque = "";
+    const parameters = foreignCallback.params.map((param) => {
+      const names = foreignParamTypes(param).map((_type, part) => context.nextName(
+        isFfiContextParam(param)
+          ? "sc_ffi_callback_context"
+          : part === 0 ? "sc_ffi_callback_incoming" : "sc_ffi_callback_length",
+      ));
+      if (isFfiContextParam(param)) opaque = names[0] ?? "";
+      return { names, param };
+    });
+    const copies: string[] = [];
+    const posted: string[] = [];
+    const delivered: string[] = [];
+    const dispatchArgs: string[] = [];
+    for (const parameter of parameters) {
+      if (isFfiContextParam(parameter.param)) continue;
+      const incoming = parameter.names[0] ?? "";
+      const deliveredName = context.nextName("sc_ffi_callback_argument");
+      if (parameter.param === "cstring") {
+        const bytes = context.nextName("sc_ffi_callback_bytes");
+        copies.push(`if ${incoming}.is_null() { eprintln!("scriptc: native callback passed a NULL cstring"); std::process::abort(); }`,
+          `let ${bytes} = unsafe { std::ffi::CStr::from_ptr(${incoming}) }.to_bytes().to_vec();`);
+        posted.push(`runtime::FfiForeignArg::Data(${bytes})`);
+        delivered.push(`let ${deliveredName} = runtime::ffi_foreign_arg_string(${args}, ${queueIndex});`);
+      } else if (parameter.param === "string" || parameter.param === "bytes") {
+        const length = parameter.names[1] ?? "";
+        const bytes = context.nextName("sc_ffi_callback_bytes");
+        copies.push(`if ${incoming}.is_null() && ${length} != 0 { eprintln!("scriptc: native callback passed a NULL ${parameter.param} span with nonzero length"); std::process::abort(); }`,
+          `let ${bytes} = if ${length} == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(${incoming}, ${length}) }.to_vec() };`);
+        posted.push(`runtime::FfiForeignArg::Data(${bytes})`);
+        delivered.push(`let ${deliveredName} = runtime::ffi_foreign_arg_${parameter.param}(${args}, ${queueIndex});`);
+      } else if (parameter.param === "bool") {
+        posted.push(`runtime::FfiForeignArg::Bool(${incoming} != 0)`);
+        delivered.push(`let ${deliveredName} = runtime::ffi_foreign_arg_bool(${args}, ${queueIndex});`);
+      } else if (parameter.param === "f64") {
+        posted.push(`runtime::FfiForeignArg::F64(${incoming})`);
+        delivered.push(`let ${deliveredName} = runtime::ffi_foreign_arg_f64(${args}, ${queueIndex});`);
+      } else {
+        const variant = parameter.param === "u8" ? "U8" : parameter.param === "u32" ? "U32" : "I32";
+        posted.push(`runtime::FfiForeignArg::${variant}(${incoming})`);
+        delivered.push(`let ${deliveredName} = runtime::ffi_foreign_arg_${parameter.param}(${args}, ${queueIndex});`);
+      }
+      dispatchArgs.push(deliveredName);
+      queueIndex++;
+    }
+    const trampolineParams = parameters
+      .flatMap(({ names, param }) => names.map((name, index) =>
+        `${name}: ${foreignParamTypes(param)[index] ?? ""}`))
+      .join(", ");
+    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, dispatchArgs, expr.loc);
     const key = JSON.stringify(`${binding?.name ?? ""}:${foreignCallback.id}`);
-    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); unsafe extern "C" fn ${trampoline}(${incoming}: f64, ${input}: *const std::ffi::c_char, ${opaque}: *mut std::ffi::c_void) { if ${input}.is_null() { eprintln!("scriptc: native callback passed a NULL cstring"); std::process::abort(); } let sc_ffi_callback_bytes = unsafe { std::ffi::CStr::from_ptr(${input}) }.to_bytes().to_vec(); runtime::ffi_foreign_post(${opaque} as usize, vec![runtime::FfiForeignArg::F64(${incoming}), runtime::FfiForeignArg::Data(sc_ffi_callback_bytes)]); } let ${token} = runtime::ffi_foreign_token(); let ${pointer} = runtime::ffi_foreign_context(${token}); let ${callbackPointer} = ${trampoline} as *const () as *const std::ffi::c_void; runtime::ffi_commit_foreign_callback(${key}, ${identity}, ${callbackPointer}, ${pointer}, ${token}, move |${args}: &[runtime::FfiForeignArg]| { let ${value} = runtime::ffi_foreign_arg_f64(${args}, 0); let ${label} = runtime::ffi_foreign_arg_string(${args}, 1); let ${active} = ${callbackValue}.clone(); ${dispatch} }); unsafe { ${functionName(index)}(${trampoline}, ${pointer}); } }`;
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); unsafe extern "C" fn ${trampoline}(${trampolineParams}) { ${copies.join(" ")} runtime::ffi_foreign_post(${opaque} as usize, vec![${posted.join(", ")}]); } let ${token} = runtime::ffi_foreign_token(); let ${pointer} = runtime::ffi_foreign_context(${token}); let ${callbackPointer} = ${trampoline} as *const () as *const std::ffi::c_void; runtime::ffi_commit_foreign_callback(${key}, ${identity}, ${callbackPointer}, ${pointer}, ${token}, move |${args}: &[runtime::FfiForeignArg]| { ${delivered.join(" ")} let ${active} = ${callbackValue}.clone(); ${dispatch} }); unsafe { ${functionName(index)}(${trampoline}, ${pointer}); } }`;
   }
   const rawRelease = binding === undefined ? null : rawRetainedRelease(binding);
   if (rawRelease !== null) {

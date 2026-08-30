@@ -497,3 +497,204 @@ test("Rust executables marshal retained callbacks from a foreign native thread",
   expect(run.stdout).toBe("1:foreign-copy|2:foreign-copy|3:foreign-copy\n");
   expect(run.stderr).toBe("");
 });
+
+test("Rust executables preserve foreign FIFO without starving timers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-burst-"));
+  const nativeSource = join(dir, "native.c");
+  const nativeObject = join(dir, "native.o");
+  const nativeArchive = join(dir, "libnative.a");
+  const profilePath = join(dir, "profile.json");
+  const entryPath = join(dir, "main.ts");
+  const outPath = join(dir, "program");
+
+  await writeFile(nativeSource, [
+    "#include <pthread.h>",
+    "typedef void (*sf_burst_cb)(double producer, double sequence, void *context);",
+    "typedef struct { sf_burst_cb callback; void *context; int producer; pthread_t thread; } worker_state;",
+    "static worker_state workers[2];",
+    "static void *run_worker(void *opaque) {",
+    "  worker_state *state = opaque;",
+    "  for (int i = 0; i < 500; i++)",
+    "    state->callback((double)state->producer, (double)i, state->context);",
+    "  return 0;",
+    "}",
+    "void sf_burst_start(sf_burst_cb callback, void *context) {",
+    "  for (int i = 0; i < 2; i++) {",
+    "    workers[i].callback = callback; workers[i].context = context; workers[i].producer = i;",
+    "    (void)pthread_create(&workers[i].thread, 0, run_worker, &workers[i]);",
+    "  }",
+    "}",
+    "void sf_burst_stop(sf_burst_cb callback, void *context) {",
+    "  (void)callback; (void)context;",
+    "  for (int i = 0; i < 2; i++) (void)pthread_join(workers[i].thread, 0);",
+    "}",
+    "",
+  ].join("\n"));
+  await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
+  await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
+  await writeFile(profilePath, JSON.stringify({
+    ffi_format: 5,
+    functions: [{
+      name: "nativeBurstStart",
+      symbol: "sf_burst_start",
+      params: [{
+        callback: {
+          id: "tick",
+          params: ["f64", "f64", { context: "tick" }],
+          returns: "void",
+          lifetime: "retained",
+          invoke: "foreign",
+        },
+      }, { context: "tick" }],
+      returns: "void",
+    }, {
+      name: "nativeBurstStop",
+      symbol: "sf_burst_stop",
+      params: [{ callback: { release: "nativeBurstStart:tick" } },
+        { context: "nativeBurstStart:tick" }],
+      returns: "void",
+    }],
+    libraries: [nativeArchive],
+    system_libraries: [],
+  }));
+  await writeFile(entryPath, [
+    "declare function nativeBurstStart(callback: (producer: number, sequence: number) => void): void;",
+    "declare function nativeBurstStop(callback: (producer: number, sequence: number) => void): void;",
+    "const next = [0, 0];",
+    "let count = 0;",
+    "let sum = 0;",
+    "let orderErrors = 0;",
+    "let timerTicks = 0;",
+    "const timer = setInterval(() => { timerTicks++; }, 0);",
+    "const tick = (producer: number, sequence: number) => {",
+    "  if (sequence !== next[producer]) orderErrors++;",
+    "  next[producer] = next[producer] + 1;",
+    "  count++;",
+    "  sum += producer * 500 + sequence;",
+    "  if (count === 1000) {",
+    "    nativeBurstStop(tick);",
+    "    clearInterval(timer);",
+    "    console.log(count, sum, orderErrors, timerTicks > 0);",
+    "  }",
+    "};",
+    "nativeBurstStart(tick);",
+    "",
+  ].join("\n"));
+
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath,
+    backend: "rust",
+    optimization: "dev",
+    ffiProfilePath: profilePath,
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+  expect(run.stdout).toBe("1000 499500 0 true\n");
+  expect(run.stderr).toBe("");
+});
+
+test("Rust executables copy every foreign callback ABI value before delivery", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-values-"));
+  const nativeSource = join(dir, "native.c");
+  const nativeObject = join(dir, "native.o");
+  const nativeArchive = join(dir, "libnative.a");
+  const profilePath = join(dir, "profile.json");
+  const entryPath = join(dir, "main.ts");
+  const outPath = join(dir, "program");
+
+  await writeFile(nativeSource, [
+    "#include <pthread.h>",
+    "#include <stddef.h>",
+    "#include <stdint.h>",
+    "typedef void (*sf_values_cb)(uint8_t truth, uint8_t byte, uint32_t wide,",
+    "  int32_t signed_value, double fraction, const char *label,",
+    "  const uint8_t *text, size_t text_len, const uint8_t *bytes, size_t bytes_len,",
+    "  void *context);",
+    "static sf_values_cb callback;",
+    "static void *callback_context;",
+    "static pthread_t worker;",
+    "static void *run_worker(void *unused) {",
+    "  (void)unused;",
+    "  char label[] = \"foreign\";",
+    "  uint8_t text[] = {'A', 0, 'B', 0xc3, 0xa9};",
+    "  uint8_t bytes[] = {0, 255, 1};",
+    "  callback(2, 255, 4000000000u, -7, 0.5, label,",
+    "    text, sizeof text, bytes, sizeof bytes, callback_context);",
+    "  label[0] = 'x';",
+    "  for (size_t i = 0; i < sizeof text; i++) text[i] = 'x';",
+    "  for (size_t i = 0; i < sizeof bytes; i++) bytes[i] = 42;",
+    "  return 0;",
+    "}",
+    "void sf_values_start(sf_values_cb next, void *context) {",
+    "  callback = next; callback_context = context;",
+    "  (void)pthread_create(&worker, 0, run_worker, 0);",
+    "}",
+    "void sf_values_stop(sf_values_cb next, void *context) {",
+    "  (void)next; (void)context; (void)pthread_join(worker, 0);",
+    "  callback = 0; callback_context = 0;",
+    "}",
+    "",
+  ].join("\n"));
+  await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
+  await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
+  const callback = {
+    id: "values",
+    params: ["bool", "u8", "u32", "i32", "f64", "cstring", "string", "bytes",
+      { context: "values" }],
+    returns: "void",
+    lifetime: "retained",
+    invoke: "foreign",
+  };
+  await writeFile(profilePath, JSON.stringify({
+    ffi_format: 5,
+    functions: [{
+      name: "nativeValuesStart",
+      symbol: "sf_values_start",
+      params: [{ callback }, { context: "values" }],
+      returns: "void",
+    }, {
+      name: "nativeValuesStop",
+      symbol: "sf_values_stop",
+      params: [{ callback: { release: "nativeValuesStart:values" } },
+        { context: "nativeValuesStart:values" }],
+      returns: "void",
+    }],
+    libraries: [nativeArchive],
+    system_libraries: [],
+  }));
+  await writeFile(entryPath, [
+    "type ValuesCallback = (truth: boolean, byte: number, wide: number, signed: number, fraction: number, label: string, text: string, bytes: Uint8Array) => void;",
+    "declare function nativeValuesStart(callback: ValuesCallback): void;",
+    "declare function nativeValuesStop(callback: ValuesCallback): void;",
+    "const values: ValuesCallback = (truth, byte, wide, signed, fraction, label, text, bytes) => {",
+    "  nativeValuesStop(values);",
+    "  console.log(truth, byte, wide, signed, fraction, label,",
+    "    text.length, text.charCodeAt(1), text.slice(2), bytes.join(','));",
+    "};",
+    "nativeValuesStart(values);",
+    "",
+  ].join("\n"));
+
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath,
+    backend: "rust",
+    optimization: "dev",
+    ffiProfilePath: profilePath,
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+  expect(run.stdout).toBe("true 255 4000000000 -7 0.5 foreign 4 0 Bé 0,255,1\n");
+  expect(run.stderr).toBe("");
+});

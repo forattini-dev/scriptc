@@ -1,5 +1,9 @@
 #[derive(Debug)]
 pub enum FfiForeignArg {
+    Bool(bool),
+    U8(u8),
+    U32(u32),
+    I32(i32),
     F64(f64),
     Data(Vec<u8>),
 }
@@ -137,9 +141,44 @@ pub fn ffi_foreign_arg_f64(args: &[FfiForeignArg], index: usize) -> f64 {
     }
 }
 
+pub fn ffi_foreign_arg_bool(args: &[FfiForeignArg], index: usize) -> bool {
+    match args.get(index) {
+        Some(FfiForeignArg::Bool(value)) => *value,
+        _ => panic!("scriptc: invalid staged FFI callback argument"),
+    }
+}
+
+pub fn ffi_foreign_arg_u8(args: &[FfiForeignArg], index: usize) -> f64 {
+    match args.get(index) {
+        Some(FfiForeignArg::U8(value)) => f64::from(*value),
+        _ => panic!("scriptc: invalid staged FFI callback argument"),
+    }
+}
+
+pub fn ffi_foreign_arg_u32(args: &[FfiForeignArg], index: usize) -> f64 {
+    match args.get(index) {
+        Some(FfiForeignArg::U32(value)) => f64::from(*value),
+        _ => panic!("scriptc: invalid staged FFI callback argument"),
+    }
+}
+
+pub fn ffi_foreign_arg_i32(args: &[FfiForeignArg], index: usize) -> f64 {
+    match args.get(index) {
+        Some(FfiForeignArg::I32(value)) => f64::from(*value),
+        _ => panic!("scriptc: invalid staged FFI callback argument"),
+    }
+}
+
 pub fn ffi_foreign_arg_string(args: &[FfiForeignArg], index: usize) -> JsString {
     match args.get(index) {
         Some(FfiForeignArg::Data(value)) => ffi_string_copy_in(value),
+        _ => panic!("scriptc: invalid staged FFI callback argument"),
+    }
+}
+
+pub fn ffi_foreign_arg_bytes(args: &[FfiForeignArg], index: usize) -> JsBytes<u8> {
+    match args.get(index) {
+        Some(FfiForeignArg::Data(value)) => ffi_bytes_copy_in(value),
         _ => panic!("scriptc: invalid staged FFI callback argument"),
     }
 }

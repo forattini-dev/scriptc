@@ -456,10 +456,6 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             continue;
         }
 
-        if ffi_foreign_dispatch_one() {
-            continue;
-        }
-
         if fs_renames_dispatch_one() {
             continue;
         }
@@ -543,6 +539,10 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
         if let Some(immediate) = immediate {
             EVENT_PHASE.with(|phase| phase.set(2));
             (immediate.callback)();
+            continue;
+        }
+
+        if ffi_foreign_dispatch_one() {
             continue;
         }
 
