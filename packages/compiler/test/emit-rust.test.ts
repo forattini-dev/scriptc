@@ -868,6 +868,7 @@ shardedTest.each(shardSelect([
   "420-dead-strip-modules/main.ts",
   "519-array-from-length.ts",
   "535-object-statics.ts",
+  "606-nested-mutual-recursion.ts",
   "753-cycle-owned-arrays.ts",
   "754-cycle-external-ref.ts",
   "756-cycle-inheritance.ts",
