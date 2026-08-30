@@ -952,6 +952,7 @@ shardedTest.each(shardSelect([
   "1359-json-module/main.ts",
   "1361-spawn-events.ts",
   "1362-spawn-timers.ts",
+  "1363-spawn-unhandled-error.ts",
   "1404-zlib-crypto-bytes.ts",
   "1406-dataview-mp4.ts",
   "1407-dataview-bounds.ts",
