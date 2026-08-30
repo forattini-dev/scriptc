@@ -75,7 +75,7 @@ const PURE_STATIC_BINARY_OPS = new Set<ts.SyntaxKind>([
 
 type StaticDataScalar = boolean | number | string;
 
-/** `await (typedOverride ?? islandFallback)()` with no source arguments.
+/** `await (typedOverride ?? islandFallback)(...args)`.
  *
  * Agent-written dependency seams commonly spell an optional typed test
  * override beside an async function imported from a dynamically embedded
@@ -86,15 +86,16 @@ type StaticDataScalar = boolean | number | string;
  * typed promise, while the island arm bridges a promise-of-jsval and exits
  * the fulfilled payload through the usual validated boundary.
  *
- * This first vertical slice deliberately owns the zero-source-argument
- * spelling. Omitted optional ABI slots are still completed on the native
- * call exactly like an ordinary indirect call. */
+ * Source arguments lower once into IR shared by the mutually exclusive
+ * branches: the native branch applies the typed slot coercions, the island
+ * branch marshals the same values. Omitted optional ABI slots are completed
+ * on the native call exactly like an ordinary indirect call. */
 function lowerAwaitedNullishFallbackCall(
   L: Lowerer,
   expression: ts.Expression,
   loc: SrcLoc,
 ): IrExpr | null {
-  if (!ts.isCallExpression(expression) || expression.arguments.length !== 0) return null;
+  if (!ts.isCallExpression(expression) || expression.arguments.some((arg) => ts.isSpreadElement(arg))) return null;
   let callee: ts.Expression = expression.expression;
   while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
   if (!ts.isBinaryExpression(callee) || callee.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken) {
@@ -113,6 +114,7 @@ function lowerAwaitedNullishFallbackCall(
       selected.arm.ret.kind !== "promise") {
     return null;
   }
+  if (selected.arm.rest === true || expression.arguments.length > selected.arm.params.length) return null;
   const resultType = selected.arm.ret.inner;
   if (resultType.kind === "void" || resultType.kind === "dyn" || resultType.kind === "jsval") return null;
 
@@ -145,8 +147,13 @@ function lowerAwaitedNullishFallbackCall(
     type: selected.arm,
     loc,
   };
-  const nativeArgs: IrExpr[] = [];
-  for (const param of selected.arm.params) {
+  const providedArgs = expression.arguments.map((node, index) => {
+    const param = selected.arm.params[index];
+    if (!param) throw new InternalCompilerError("lowerer bug: nullish fallback argument exceeds function arity");
+    return { node, value: L.lowerExpr(node), param };
+  });
+  const nativeArgs = providedArgs.map(({ node, value, param }) => L.coerceInto(node, value, param));
+  for (const param of selected.arm.params.slice(nativeArgs.length)) {
     const absent = omittedArgFor(L, param, loc);
     if (!absent) return null;
     nativeArgs.push(absent);
@@ -168,7 +175,10 @@ function lowerAwaitedNullishFallbackCall(
   const islandCall: IrExpr = {
     kind: "jsOp",
     op: "callFn",
-    args: [islandCallee],
+    args: [
+      islandCallee,
+      ...providedArgs.map(({ node, value }) => L.jsvalIn(value, node)),
+    ],
     type: JSVAL,
     loc,
   };
