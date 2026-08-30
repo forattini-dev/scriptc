@@ -673,9 +673,12 @@ export class RustDefinitionEmitter {
       const runtimeTargets = classes.flatMap((value) => [value, `%${value}`]);
       const userTargets = [...this.context.classMeta.values()]
         .filter((meta) => meta.root === root)
-        .map((meta) =>
-          `(target == "${this.context.rustString(meta.def.name)}" && value.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post}))`
-        );
+        .map((meta) => {
+          const member = meta.hierarchy
+            ? `value.with(|object| ${meta.pre} <= object.sc_class_pre && object.sc_class_pre <= ${meta.post})`
+            : "true";
+          return `(target == "${this.context.rustString(meta.def.name)}" && ${member})`;
+        });
       this.context.line(`${name}::${this.context.errorValueVariant(root)}(value) => matches!(target, ${runtimeTargets.map((value) => `"${this.context.rustString(value)}"`).join(" | ")})${userTargets.length > 0 ? ` || ${userTargets.join(" || ")}` : ""},`);
     }
     this.context.popIndent();
