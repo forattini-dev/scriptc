@@ -1585,6 +1585,7 @@ shardedTest.each(shardSelect([
   "2727-optional-union-or-promise-starttime.ts",
   "2728-map-promise-void-or-undefined-tail.ts",
   "2729-readonly-event-kind-tuple-includes.ts",
+  "2730-agent-posture-record-rest-tuple.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

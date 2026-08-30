@@ -1185,11 +1185,33 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const args = checker.getTypeArguments(ref);
     if (args.length === 0) return arrayOf(unitOnlyUnion(unions));
     if (tupleShape?.elementFlags === undefined) return null;
-    // Optional/rest elements (`[string?, number?]`, `[string, ...number[]]`)
-    // have no fixed shape — the ARITY is a runtime fact. Under --dynamic
-    // the value lives in the engine, a real JS array carrying its true
-    // length (reads, destructuring, JSON, .length all exact); static
-    // builds stay unmapped and badType tells the dynamic-tier story.
+    // A homogeneous required+rest tuple (`[string, ...string[]]`) has
+    // exactly the runtime representation of T[]: every position uses the
+    // same ABI and the varying arity is the array's own length. This is
+    // the agent argv/config shape; preserve its non-empty checker contract
+    // at source sites while lowering the value as the equivalent array.
+    const elementFlags = tupleShape.elementFlags;
+    if (
+      elementFlags.some((flag) => (flag & ts.ElementFlags.Rest) !== 0) &&
+      elementFlags.every(
+        (flag) => (flag & (ts.ElementFlags.Required | ts.ElementFlags.Rest)) !== 0,
+      )
+    ) {
+      const elems = args.map((arg) => mapType(arg, ctx));
+      const elem = elems[0];
+      if (
+        elem &&
+        isSupportedArrayElem(elem) &&
+        elems.every((candidate) => candidate !== null && typeEquals(candidate, elem))
+      ) {
+        return arrayOf(elem);
+      }
+    }
+    // Optional or heterogeneous rest elements (`[string?, number?]`,
+    // `[string, ...number[]]`) have no one static element ABI. Under
+    // --dynamic the value lives in the engine, a real JS array carrying
+    // its true length (reads, destructuring, JSON, .length all exact);
+    // static builds stay unmapped and badType tells the dynamic-tier story.
     if (tupleShape.elementFlags.some((f) => !(f & ts.ElementFlags.Required))) {
       return ctx.dynamic ? JSVAL : null;
     }
