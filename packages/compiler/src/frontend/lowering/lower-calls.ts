@@ -4900,6 +4900,8 @@ const DYN_PROTO_METHOD_NAMES = new Set([
   // Array.prototype (less the dyn-claimed filter/flatMap — still listed:
   // the claim above runs first)
   "at", "concat", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join", "keys", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight", "reverse", "shift", "slice", "some", "sort", "splice", "toReversed", "toSorted", "toSpliced", "unshift", "values", "with",
+  // Iterator.prototype
+  "next",
   // String.prototype (the shared-name remainder — the string-only set
   // was claimed above)
   "anchor", "big", "blink", "bold", "codePointAt", "fixed", "fontcolor", "fontsize", "isWellFormed", "italics", "link", "localeCompare", "normalize", "small", "strike", "sub", "sup", "toLocaleLowerCase", "toLocaleUpperCase", "toWellFormed",
@@ -4917,6 +4919,7 @@ const DYN_DISPATCH_METHODS = new Set([
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "flat", "reverse", "toReversed", "toSorted", "toSpliced", "with", "sort", "fill", "copyWithin", "reduce", "reduceRight",
   "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex",
+  "values", "next",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket

@@ -66,6 +66,27 @@ impl<T: ArrayElement> ClearEdges for ArrayData<T> {
 
 pub type JsArray<T> = Gc<ArrayData<T>>;
 
+pub struct ArrayIteratorData<T: ArrayElement> {
+    array: Option<JsArray<T>>,
+    index: usize,
+}
+
+impl<T: ArrayElement> Trace for ArrayIteratorData<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(array) = &self.array {
+            tracer.edge(array);
+        }
+    }
+}
+
+impl<T: ArrayElement> ClearEdges for ArrayIteratorData<T> {
+    fn clear_edges(&mut self) {
+        self.array = None;
+    }
+}
+
+pub type JsArrayIterator<T> = Gc<ArrayIteratorData<T>>;
+
 thread_local! {
     static TEMPLATE_STRINGS: RefCell<HashMap<String, JsArray<JsString>>> = RefCell::new(HashMap::new());
 }
@@ -121,6 +142,26 @@ pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
 
 pub fn array_values<T: ArrayElement>(array: &JsArray<T>) -> Vec<T> {
     array.with(|data| data.elements.clone())
+}
+
+pub fn array_iterator_new<T: ArrayElement>(array: &JsArray<T>) -> JsArrayIterator<T> {
+    Gc::new(ArrayIteratorData {
+        array: Some(array.clone()),
+        index: 0,
+    })
+}
+
+pub fn array_iterator_next<T: ArrayElement>(iterator: &JsArrayIterator<T>) -> Option<T> {
+    iterator.with_mut(|state| {
+        let array = state.array.as_ref()?;
+        if state.index >= array_len(array) as usize {
+            state.array = None;
+            return None;
+        }
+        let value = array_get(array, state.index as f64);
+        state.index += 1;
+        Some(value)
+    })
 }
 
 pub fn array_set<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) {

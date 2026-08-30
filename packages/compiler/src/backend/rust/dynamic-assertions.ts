@@ -33,6 +33,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::Regex(value) => format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value)),`);
   context.line(`${name}::Url(value) => runtime::url_href(value).to_string(),`);
   context.line(`${name}::Promise(..) => "Promise { <pending> }".to_owned(),`);
+  context.line(`${name}::ArrayIterator(..) => "Object [Array Iterator] {}".to_owned(),`);
   context.line(`${name}::NetServer(..) => "Server {}".to_owned(),`);
   context.line(`${name}::NetSocket(..) => "Socket {}".to_owned(),`);
   context.line(`${name}::HttpRequest(..) => "IncomingMessage {}".to_owned(),`);
@@ -81,7 +82,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..) | ${name}::NativeMethod(..)) }`);
   } else {

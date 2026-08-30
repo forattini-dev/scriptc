@@ -370,6 +370,9 @@ void scr_dyn_release(ScrDyn *d) {
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) scr_dyn_release(d->v.arr.items[i]);
     break;
+  case SCR_DYN_ARR_ITER:
+    scr_dyn_release(d->v.arr_iter.array);
+    break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++) {
       free(d->v.obj.entries[i].key);
@@ -641,6 +644,12 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
 }
 
 ScrDyn *scr_dyn_new_arr(void) { return scr_dyn_alloc(SCR_DYN_ARR); }
+ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array) {
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR_ITER);
+  d->v.arr_iter.array = scr_dyn_retain(array);
+  d->v.arr_iter.index = 0;
+  return d;
+}
 ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }
 ScrDyn *scr_dyn_new_obj_with_identity(
     void *source, void *(*source_retain)(void *),
@@ -1342,6 +1351,7 @@ bool scr_dyn_truthy(const ScrDyn *d) {
   case SCR_DYN_STR: return d->v.str->len != 0;
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
+  case SCR_DYN_ARR_ITER:
   case SCR_DYN_BYTES:
   case SCR_DYN_FUNC:
   case SCR_DYN_HANDLE:
@@ -1378,6 +1388,7 @@ ScrStr *scr_dyn_typeof(const ScrDyn *d) {
   case SCR_DYN_NULL:
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
+  case SCR_DYN_ARR_ITER:
   case SCR_DYN_BYTES:
   case SCR_DYN_HANDLE:
   case SCR_DYN_PROMISE:
@@ -1688,6 +1699,8 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   case SCR_DYN_PROMISE:
     /* Object.prototype.toString with the Promise @@toStringTag. */
     return scr_str_new("[object Promise]", 16);
+  case SCR_DYN_ARR_ITER:
+    return scr_str_new("[object Array Iterator]", 23);
   case SCR_DYN_ARR: {
     ScrStr *out = scr_str_new("", 0);
     for (size_t i = 0; i < d->v.arr.len; i++) {
@@ -2061,6 +2074,9 @@ void scr_jb_put_dyn(ScrJsonBuf *b, const ScrDyn *d) {
     return;
   case SCR_DYN_PROMISE:
     /* No own enumerable properties — Node stringifies a promise as {}. */
+    scr_jb_puts(b, "{}");
+    return;
+  case SCR_DYN_ARR_ITER:
     scr_jb_puts(b, "{}");
     return;
   case SCR_DYN_HANDLE: {

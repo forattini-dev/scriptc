@@ -3004,8 +3004,11 @@ typedef enum {
    * retains the original value so a statically typed reader can recover
    * its identity. `materialize` supplies the ordinary deep-copy view for
    * consumers such as fetch request bodies that need a dyn chunk. Enum
-   * position: LAST — LLVM hardcodes every preceding kind number. */
+   * position is stable — LLVM hardcodes the kind numbers. */
   SCR_DYN_TYPED_REF,
+  /* A live Array Iterator. Owns the source dyn array and advances one
+   * shared cursor across retained aliases of the iterator object. */
+  SCR_DYN_ARR_ITER,
 } ScrDynKind;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -3088,6 +3091,7 @@ struct ScrDyn {
     ScrStr *str; /* owned */
     ScrBytes *bytes; /* owned (SCR_DYN_BYTES) */
     struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
+    struct { ScrDyn *array; size_t index; } arr_iter;             /* owned */
     struct {
       size_t len;
       size_t cap;
@@ -3205,6 +3209,7 @@ ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_new_arr(void);
+ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array); /* borrows array; returns +1 */
 ScrDyn *scr_dyn_new_obj(void);
 /* The ordinary deep-copy object plus a retained typed source. source_access
  * releases that source when materialize=false and returns a fresh dyn snapshot

@@ -23,6 +23,7 @@ export function emitRustDynamicInspect(
   emitTypedArrayInspect(context, `${name}::TypedBytes(value)`, "runtime::typed_bytes_len(value)", "runtime::typed_bytes_get(value, index)", "runtime::typed_bytes_name(value)");
   context.line(`${name}::Buffer(value) => runtime::inspect_buffer(value),`);
   context.line(`${name}::Promise(..) => runtime::string("Promise { <pending> }"),`);
+  context.line(`${name}::ArrayIterator(..) => runtime::string("Object [Array Iterator] {}"),`);
   context.line(`${name}::Array(array) => {`);
   context.pushIndent();
   context.line("let length = runtime::array_len(array);");

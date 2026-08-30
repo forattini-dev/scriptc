@@ -484,6 +484,26 @@ static ScrDyn *scr_dyn_invoke_impl(
     return NULL;
   }
 
+  if (recv->kind == SCR_DYN_ARR_ITER) {
+    if (dyn_name_is(method, "next")) {
+      ScrDyn *array = recv->v.arr_iter.array;
+      bool done = !array || recv->v.arr_iter.index >= array->v.arr.len;
+      ScrDyn *value = done
+        ? scr_dyn_retain(scr_dyn_undefined())
+        : scr_dyn_retain(array->v.arr.items[recv->v.arr_iter.index++]);
+      if (done && array) {
+        recv->v.arr_iter.array = NULL;
+        scr_dyn_release(array);
+      }
+      ScrDyn *result = scr_dyn_new_obj();
+      scr_dyn_obj_set(result, "value", 5, value);
+      scr_dyn_obj_set(result, "done", 4, scr_dyn_new_bool(done));
+      return result;
+    }
+    dyn_throw_not_fn(what);
+    return NULL;
+  }
+
   if (recv->kind == SCR_DYN_STR) {
     ScrStr *s = recv->v.str;
     if (dyn_name_is(method, "slice")) {
@@ -689,6 +709,9 @@ static ScrDyn *scr_dyn_invoke_impl(
         scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       }
       return out;
+    }
+    if (dyn_name_is(method, "values")) {
+      return scr_dyn_new_arr_iter(recv);
     }
     if (dyn_name_is(method, "with")) {
       double index = dyn_index_arg(args, argc, 0, 0, what);
