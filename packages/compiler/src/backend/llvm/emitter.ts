@@ -6942,6 +6942,10 @@ class LlEmitter {
             this.declare(`declare ptr @scr_await_str(ptr)`);
             awaited = B.tmp();
             B.line(`${awaited} = call ptr @scr_await_str(ptr ${promise})`);
+          } else if (isRefCounted(inner)) {
+            this.declare(`declare ptr @scr_await_ref(ptr)`);
+            awaited = B.tmp();
+            B.line(`${awaited} = call ptr @scr_await_ref(ptr ${promise})`);
           } else {
             throw new InternalCompilerError(`llvm emitter bug: collapsed awaitUnion inner ${inner.kind}`);
           }

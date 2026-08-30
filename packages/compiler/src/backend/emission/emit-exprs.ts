@@ -7339,6 +7339,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           } else if (inner.kind === "string") {
             awaited = `scr_await_str(${peek})`;
             plain = retainCallC(inner, `(ScrString *)scr_union_peek(${u.name})`);
+          } else if (isRefCounted(inner)) {
+            const type = cType(inner).trim();
+            awaited = `(${type})scr_await_ref(${peek})`;
+            plain = retainCallC(inner, `(${type})scr_union_peek(${u.name})`);
           } else {
             throw new InternalCompilerError(`emitter bug: collapsed awaitUnion inner ${inner.kind}`);
           }
