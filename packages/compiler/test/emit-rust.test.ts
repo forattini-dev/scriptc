@@ -985,6 +985,7 @@ shardedTest.each(shardSelect([
   "1464-env-writes.ts",
   "1465-env-value.ts",
   "1468-exec-path.ts",
+  "1475-readline-closed-stdin.ts",
   "1477-in-expressions.ts",
   "1482-spawnsync-error.ts",
   "1483-array-slice.ts",
