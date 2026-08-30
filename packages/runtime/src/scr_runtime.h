@@ -2249,6 +2249,7 @@ void scr_fs_rename(ScrStr *oldpath, ScrStr *newpath);
 int scr_fs_rename_raw(const ScrStr *oldpath, const ScrStr *newpath);
 void scr_fs_rename_error(int error, const ScrStr *oldpath, const ScrStr *newpath);
 void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode);
+void scr_fs_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode);
 void scr_fs_mkdir_mode(ScrStr *path, double mode);
 void scr_fs_mkdir_recursive_mode(ScrStr *path, double mode);
 
@@ -2307,6 +2308,7 @@ double scr_stats_mtime_ms(ScrStats *s); /* ms with the ns fraction */
 ScrPromise *scr_fsp_read_file(ScrStr *path);
 ScrPromise *scr_fsp_write_file(ScrStr *path, ScrStr *data);
 ScrPromise *scr_fsp_write_file_mode(ScrStr *path, ScrStr *data, double mode);
+ScrPromise *scr_fsp_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode);
 ScrPromise *scr_fsp_mkdir(ScrStr *path);
 ScrPromise *scr_fsp_mkdir_mode(ScrStr *path, double mode);
 ScrPromise *scr_fsp_mkdir_recursive(ScrStr *path);

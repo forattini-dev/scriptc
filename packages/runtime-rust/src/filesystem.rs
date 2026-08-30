@@ -652,6 +652,27 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
     fs_write_file(path, data);
 }
 
+pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64) {
+    use std::io::Write;
+    let mode = fs_creation_mode(mode);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = match options.open(path.as_ref()) {
+        Ok(file) => file,
+        Err(error) => throw_fs_error("open", path, error),
+    };
+    if let Err(error) = file.write_all(data.as_bytes()) {
+        throw_fs_error("write", path, error);
+    }
+}
+
 #[cfg(unix)]
 pub fn fs_mkdir_mode(path: &JsString, mode: f64, recursive: bool) {
     use std::os::unix::fs::DirBuilderExt;

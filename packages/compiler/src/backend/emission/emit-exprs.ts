@@ -5814,6 +5814,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_write_file(${arg(0)}, ${arg(1)})`);
           case "fsp.writeFileMode":
             return finish(`scr_fsp_write_file_mode(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fsp.writeFileExclusiveMode":
+            return finish(`scr_fsp_write_file_exclusive_mode(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fsp.mkdir":
             return finish(`scr_fsp_mkdir(${arg(0)})`);
           case "fsp.mkdirMode":
@@ -7034,6 +7036,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_lstat(${arg(0)})`);
           case "fs.writeFileModeSync":
             return finish(`scr_fs_write_file_mode(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.writeFileExclusiveModeSync":
+            return finish(`scr_fs_write_file_exclusive_mode(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fs.mkdirModeSync":
             return finish(`scr_fs_mkdir_mode(${arg(0)}, ${arg(1)})`);
           case "fs.mkdirRecursiveModeSync":

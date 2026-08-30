@@ -381,12 +381,6 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fs.readFdSyncBytes" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_read_fd_bytes(${context.emitExpr(arg)})`;
   }
-  if (expr.fn === "fs.writeFileSync" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-    return `runtime::fs_write_file(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}))`;
-  }
-  if (expr.fn === "fs.writeFileSyncBytes" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-    return `runtime::fs_write_file_bytes(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}))`;
-  }
   if (expr.fn === "fsp.readFileBytes" && expr.args.length === 1 && arg !== undefined) {
     return context.emitPromiseFromSync([arg], (value) => `runtime::fs_read_file_bytes(&${value(0)})`);
   }
@@ -394,18 +388,6 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     return context.emitPromiseFromSync(
       [arg, expr.args[1]],
       (value) => `{ let _ = ${value(1)}; runtime::fs_read_file(&${value(0)}) }`,
-    );
-  }
-  if (expr.fn === "fsp.writeFile" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-    return context.emitPromiseFromSync(
-      [arg, expr.args[1]],
-      (value) => `runtime::fs_write_file(&${value(0)}, &${value(1)})`,
-    );
-  }
-  if (expr.fn === "fsp.writeFileMode" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
-    return context.emitPromiseFromSync(
-      [arg, expr.args[1], expr.args[2]],
-      (value) => `runtime::fs_write_file_mode(&${value(0)}, &${value(1)}, ${value(2)})`,
     );
   }
   if (expr.fn === "fsp.mkdir" && expr.args.length === 1 && arg !== undefined) {
@@ -572,9 +554,6 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "fs.chownSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
     return `runtime::fs_chown(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])}, ${context.emitExpr(expr.args[2])})`;
-  }
-  if (expr.fn === "fs.writeFileModeSync" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
-    return `runtime::fs_write_file_mode(&(${context.emitExpr(arg)}), &(${context.emitExpr(expr.args[1])}), ${context.emitExpr(expr.args[2])})`;
   }
   if ((expr.fn === "fs.mkdirModeSync" || expr.fn === "fs.mkdirRecursiveModeSync") && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::fs_mkdir_mode(&(${context.emitExpr(arg)}), ${context.emitExpr(expr.args[1])}, ${expr.fn === "fs.mkdirRecursiveModeSync"})`;

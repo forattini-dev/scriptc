@@ -1549,8 +1549,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       const operation = promiseWriteOptions ? "fs.promises.writeFile" : "writeFileSync";
       const plainFn: IrLibFn = promiseWriteOptions ? "fsp.writeFile" : "fs.writeFileSync";
       const modeFn: IrLibFn = promiseWriteOptions ? "fsp.writeFileMode" : "fs.writeFileModeSync";
+      const exclusiveModeFn: IrLibFn = promiseWriteOptions
+        ? "fsp.writeFileExclusiveMode"
+        : "fs.writeFileExclusiveModeSync";
       const resultType: IrType = promiseWriteOptions ? { kind: "promise", inner: VOID } : VOID;
       type WriteOptionValue = { kind: "effect" | "mode"; value: IrExpr };
+      let exclusive = false;
       // The runtime needs only `mode`, but every source option value is an
       // ordinary JS expression. Stage path/data and then evaluate the option
       // values in object-literal order before issuing the write; otherwise a
@@ -1574,10 +1578,15 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           stmts.push({ kind: "varDecl", localId: modeLocal.id, init: option.value, loc: option.value.loc });
           mode = varRef(modeLocal.id, modeLocal.type, loc);
         }
+        const writeMode = mode ?? (exclusive
+          ? { kind: "numLit", value: 0o666, type: F64, loc } satisfies IrExpr
+          : null);
         const result: IrExpr = {
           kind: "libCall",
-          fn: mode ? modeFn : plainFn,
-          args: mode ? [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc), mode] : [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc)],
+          fn: exclusive ? exclusiveModeFn : writeMode ? modeFn : plainFn,
+          args: writeMode
+            ? [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc), writeMode]
+            : [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc)],
           type: resultType,
           loc,
         };
@@ -1609,19 +1618,22 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
             if (!t.isStringLiteralType() || (t.value !== "utf8" && t.value !== "utf-8")) { ok = false; break; }
             optionValues.push({ kind: "effect", value: L.lowerExprExpecting(m.value, STRING) });
           } else if (m.name === "flag") {
-            // Documented, behavior-changing (open(2)'s disposition — 'a'
-            // IS appendFileSync), no lowering: fence by name.
-            L.noLowering(
-              `${operation} with the flag option`,
-              p,
-              "the write truncates-or-creates (Node's default 'w'); other flags have no lowering",
-            );
+            const t = L.typeOf(m.value);
+            if (!t.isStringLiteralType() || t.value !== "wx") {
+              L.noLowering(
+                `${operation} with the flag option`,
+                p,
+                "the supported flags are Node's default 'w' and exclusive-create 'wx'",
+              );
+            }
+            optionValues.push({ kind: "effect", value: L.lowerExprExpecting(m.value, STRING) });
+            exclusive = true;
           } else {
             // The options-record stance: documented keys with no lowering
             // fence by name; undocumented keys drop like Node.
             fenceOrDropOptionKey(
               L, p, m.name, operation, FS_WRITE_FILE_DOCUMENTED_OPTIONS,
-              'the supported options are { mode: <number>, encoding: "utf8" }',
+              'the supported options are { mode: <number>, encoding: "utf8", flag: "wx" }',
             );
           }
         }
@@ -1630,7 +1642,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           `${operation} with 3 arguments`,
           optsNode,
-          'the supported options are { mode: <number>, encoding: "utf8" } over string data',
+          'the supported options are { mode: <number>, encoding: "utf8", flag: "wx" } over string data',
         );
       }
       return finishWrite(optionValues);

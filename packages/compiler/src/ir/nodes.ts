@@ -3152,6 +3152,9 @@ export type IrLibFn =
   /** fs.promises.writeFile(path, data, { mode }): the settled-promise
    * twin of fs.writeFileModeSync. */
   | "fsp.writeFileMode"
+  /** Exclusive-create (`flag: "wx"`) write with an explicit or default
+   * creation mode. Existing paths reject with EEXIST. */
+  | "fsp.writeFileExclusiveMode"
   | "fsp.mkdir"
   /** The fs/promises option/member tail the certs pipeline uses: mkdir's
    * literal { recursive?, mode? } options (the mkdirSync matrix behind
@@ -4253,6 +4256,7 @@ export type IrLibFn =
   | "stats.atimeMs"
   | "stats.mtimeMs"
   | "fs.writeFileModeSync"
+  | "fs.writeFileExclusiveModeSync"
   | "fs.mkdirModeSync"
   | "fs.mkdirRecursiveModeSync"
   /** spawnSync with options (scr_child.c): the cp.spawnSync core plus the
@@ -7397,6 +7401,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.renameSync",
   "fs.lstatSync",
   "fs.writeFileModeSync",
+  "fs.writeFileExclusiveModeSync",
   "fs.mkdirModeSync",
   "fs.mkdirRecursiveModeSync",
   "fs.openSync",

@@ -1718,7 +1718,8 @@ void scr_fs_write_file(ScrStr *path, ScrStr *data) {
  * argument — it applies at CREATION only (umask applying), and an
  * existing file keeps its permissions, exactly Node (which never chmods
  * here). Same error shapes as the plain form. */
-void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
+static void scr_fs_write_file_open_mode(ScrStr *path, ScrStr *data,
+                                        double mode, int disposition) {
   char recv[48], msg[176];
   scr_num_received(mode, recv);
   if (!(isfinite(mode) && trunc(mode) == mode)) {
@@ -1737,7 +1738,7 @@ void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
   }
   /* O_BINARY: zero on POSIX; on Windows it keeps the CRT from translating
    * \n in these byte-exact writes (fopen's "wb" path already does). */
-  int fd = open(path->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, (mode_t)mode);
+  int fd = open(path->data, O_WRONLY | O_CREAT | disposition | O_BINARY, (mode_t)mode);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return;
@@ -1755,6 +1756,14 @@ void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
     at += (size_t)wrote;
   }
   if (close(fd) != 0) scr_fs_throw(errno, "close", path);
+}
+
+void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
+  scr_fs_write_file_open_mode(path, data, mode, O_TRUNC);
+}
+
+void scr_fs_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode) {
+  scr_fs_write_file_open_mode(path, data, mode, O_EXCL);
 }
 
 void scr_fs_append_file(ScrStr *path, ScrStr *data) {

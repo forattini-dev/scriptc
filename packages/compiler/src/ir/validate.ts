@@ -343,6 +343,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // Callback type is program-dependent (zero params or Error | null).
   "fs.renameCb": { argTypes: [STRING, STRING, null], result: VOID },
   "fs.writeFileModeSync": { argTypes: [STRING, STRING, F64], result: VOID },
+  "fs.writeFileExclusiveModeSync": { argTypes: [STRING, STRING, F64], result: VOID },
   "fs.mkdirModeSync": { argTypes: [STRING, F64], result: VOID },
   "fs.mkdirRecursiveModeSync": { argTypes: [STRING, F64], result: VOID },
   // Atomics.wait over an Int32Array — the synchronous-sleep idiom.
@@ -791,6 +792,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.readFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: STRING } },
   "fsp.writeFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: VOID } },
   "fsp.writeFileMode": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: VOID } },
+  "fsp.writeFileExclusiveMode": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.mkdir": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.mkdirMode": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.mkdirRecursive": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
