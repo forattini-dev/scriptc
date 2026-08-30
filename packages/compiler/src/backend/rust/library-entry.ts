@@ -110,6 +110,14 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     (entry) => entry.returns === "string" || entry.returns === "bytes",
   );
   const lines = [
+    `unsafe extern "C" {`,
+    `    fn fflush(stream: *mut std::ffi::c_void) -> i32;`,
+    `}`,
+    "",
+    `fn sc_library_host_entry() {`,
+    `    unsafe { fflush(std::ptr::null_mut()); }`,
+    `}`,
+    "",
     `std::thread_local! {`,
     `    static SC_LIBRARY_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
     ...(hasResults
@@ -184,6 +192,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     "",
     `#[unsafe(no_mangle)]`,
     `pub extern "C" fn ${lib.initSymbol}() {`,
+    `    sc_library_host_entry();`,
     `    let sc_was_initialized = SC_LIBRARY_INITIALIZED.with(|slot| slot.replace(true));`,
     ...(hasResults ? [`    sc_library_results_reset();`] : []),
     ...options.globals.map((global) => `    ${resetGlobal(global, unsupported)}`),
@@ -201,6 +210,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       "",
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.collectSymbol}() {`,
+      `    sc_library_host_entry();`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `    runtime::collect_cycles();`,
       `}`,
@@ -211,6 +221,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       "",
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.resultResetSymbol}() {`,
+      `    sc_library_host_entry();`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `}`,
     );
@@ -234,6 +245,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       "",
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${entry.symbol}(${params.join(", ")})${returnType(entry.returns, unsupported)} {`,
+      `    sc_library_host_entry();`,
       ...(hasResults && lib.resultResetSymbol === null
         ? [`    sc_library_results_reset();`]
         : []),

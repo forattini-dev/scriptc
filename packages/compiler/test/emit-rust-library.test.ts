@@ -245,3 +245,49 @@ test("Rust library archives round-trip the official buffer ABI fixture", async (
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library init starts byte-identical sessions", async () => {
+  const fixture = resolve("tests/library-mode/reinit");
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-reinit-"));
+  try {
+    const profile = JSON.parse(
+      readFileSync(join(fixture, "profile.json"), "utf8"),
+    ) as Record<string, unknown>;
+    profile["entry"] = join(fixture, "lib.ts");
+    profile["emission"] = "rust";
+    profile["optimization"] = "dev";
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify(profile));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      join(fixture, "probe.c"),
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    const session = [
+      "session start counter=0",
+      "bump: 1 2",
+      "note: 1 2",
+      "recall: a,b",
+      "",
+    ].join("\n");
+    expect(execFileSync(probe, { encoding: "utf8" })).toBe(session.repeat(3));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);
