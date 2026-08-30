@@ -1018,6 +1018,7 @@ shardedTest.each(shardSelect([
   "1540-void-statement.ts",
   "1541-fs-readdir-dirent.ts",
   "1541-union-keyed-reads.ts",
+  "1543-set-server-handles.ts",
   "1544-dyn-json-reads.ts",
   "1546-union-element-reads.ts",
   "1547-computed-key-fold.ts",
