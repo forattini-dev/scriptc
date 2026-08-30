@@ -1254,6 +1254,7 @@ shardedTest.each(shardSelect([
   "2101-dyn-param-defaults.ts",
   "2102-empty-pattern-decls.ts",
   "2103-optional-tuple-elements.ts",
+  "2104-computed-key-destructuring.ts",
   "2105-computed-key-static-folds.ts",
   "2106-comma-expressions.ts",
   "2110-top-object-types.ts",
