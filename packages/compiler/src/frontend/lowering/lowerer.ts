@@ -6134,11 +6134,12 @@ export class Lowerer {
       // the lift helpers walk values with no circular guard — fencing the
       // TYPE is the honest answer.
       if (visiting.has(t.shapeId)) return false;
-      visiting.add(t.shapeId);
+      const path = new Set(visiting);
+      path.add(t.shapeId);
       // An INDEX-SIGNATURE record lifts when its value slot does (dyn
       // included): declared fields write first, then the overflow keys.
-      if (shape.indexValue && !this.jsvalLiftable(shape.indexValue, visiting)) return false;
-      return shape.fields.every((f) => !f.name.startsWith("%") && this.jsvalLiftable(f.type, visiting));
+      if (shape.indexValue && !this.jsvalLiftable(shape.indexValue, path)) return false;
+      return shape.fields.every((f) => !f.name.startsWith("%") && this.jsvalLiftable(f.type, path));
     }
     if (t.kind === "array") return this.jsvalLiftable(t.elem, visiting);
     // A union crossing IN lifts arm by arm (a runtime tag switch — see

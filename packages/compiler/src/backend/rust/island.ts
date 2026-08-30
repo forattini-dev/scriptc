@@ -48,6 +48,21 @@ function emitMarshal(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string {
+  if (
+    expr.value.type.kind === "func" && context.hasEmbeddedModules() &&
+    expr.value.type.rest !== true && expr.value.type.params.every((param) => param.kind === "string") &&
+    expr.value.type.ret.kind === "string"
+  ) {
+    const closure = context.nextName("sc_island_host_closure");
+    const argumentsName = context.nextName("sc_island_host_arguments");
+    const args = expr.value.type.params.map((_, index) =>
+      `runtime::island_host_argument_string(${argumentsName}, ${index})`
+    );
+    const dispatch = context.emitClosureDispatch(closure, expr.value.type, args, expr.loc);
+    return `{ let ${closure} = ${emitExpr(expr.value)}; ` +
+      `${context.dynTypeName()}::Island(runtime::island_value_host_function(${args.length}, ` +
+      `std::rc::Rc::new(move |${argumentsName}| runtime::IslandHostResult::String(${dispatch})))) }`;
+  }
   switch (expr.value.type.kind) {
     case "f64":
     case "bool":
@@ -74,6 +89,10 @@ function emitOperation(
   if (expr.op === "objLit") return emitObjectLiteral(expr, context, emitExpr);
   if (expr.op === "arrLit") {
     const array = context.nextName("sc_island_array");
+    if (context.hasEmbeddedModules()) {
+      const elements = expr.args.map((arg) => emitOwnedIslandValue(emitExpr(arg), context)).join(", ");
+      return `${context.dynTypeName()}::Island(runtime::island_value_array(vec![${elements}]))`;
+    }
     const elements = expr.args.map((arg) => `runtime::array_push(&${array}, ${emitExpr(arg)});`).join(" ");
     return `{ let ${array}: runtime::JsArray<${context.dynTypeName()}> = runtime::array_new(Vec::new()); ${elements} ${context.dynTypeName()}::Array(${array}) }`;
   }
@@ -243,17 +262,26 @@ function relationalOperator(op: "lt" | "le" | "gt" | "ge"): string {
  * Embedded exports and methods share this bridge so argument evaluation
  * remains left-to-right in the generated dyn array before any call. */
 function emitIslandArguments(args: string, context: RustIslandContext): string {
+  return `${args}.iter().map(|sc_arg| ${emitIslandValue("sc_arg", context)}).collect::<Vec<_>>()`;
+}
+
+function emitIslandValue(value: string, context: RustIslandContext): string {
   const dyn = context.dynTypeName();
-  return `${args}.iter().map(|sc_arg| match sc_arg { ` +
+  return `match ${value} { ` +
     `${dyn}::Undefined => runtime::island_value_undefined(), ` +
     `${dyn}::Null => runtime::island_value_null(), ` +
     `${dyn}::Number(sc_value) => runtime::island_value_number(*sc_value), ` +
     `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
     `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
-    `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(sc_arg)), ` +
+    `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(${value})), ` +
     `${dyn}::Island(sc_value) => sc_value.clone(), ` +
     `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
-    `}).collect::<Vec<_>>()`;
+    `}`;
+}
+
+function emitOwnedIslandValue(value: string, context: RustIslandContext): string {
+  const temporary = context.nextName("sc_island_value");
+  return `{ let ${temporary} = ${value}; ${emitIslandValue(`&${temporary}`, context)} }`;
 }
 
 function emitObjectLiteral(
@@ -263,6 +291,23 @@ function emitObjectLiteral(
 ): string {
   if (expr.args.length % 2 !== 0) context.unsupported("island object literal arity", expr.loc);
   const object = context.nextName("sc_island_object");
+  if (context.hasEmbeddedModules()) {
+    const fields: string[] = [];
+    for (let index = 0; index < expr.args.length; index += 2) {
+      const key = expr.args[index];
+      const value = expr.args[index + 1];
+      if (
+        key?.kind !== "jsMarshal" || key.value.kind !== "strLit" ||
+        key.value.type.kind !== "string" || value === undefined
+      ) {
+        context.unsupported("island object literal key", expr.loc);
+      }
+      fields.push(
+        `(runtime::string("${context.rustString(key.value.value)}"), ${emitOwnedIslandValue(emitExpr(value), context)})`,
+      );
+    }
+    return `${context.dynTypeName()}::Island(runtime::island_value_object(vec![${fields.join(", ")}]))`;
+  }
   const fields: string[] = [];
   for (let index = 0; index < expr.args.length; index += 2) {
     const key = expr.args[index];

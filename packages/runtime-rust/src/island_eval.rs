@@ -2,8 +2,8 @@ use boa_engine::{
     Context, JsError as BoaJsError, JsResult, JsValue, Module, NativeFunction, Source, js_string,
     builtins::promise::PromiseState as BoaPromiseState,
     module::MapModuleLoader,
-    object::builtins::JsPromise as BoaJsPromise,
-    object::ObjectInitializer,
+    object::builtins::{JsArray as BoaJsArray, JsPromise as BoaJsPromise},
+    object::{FunctionObjectBuilder, ObjectInitializer},
     property::Attribute,
 };
 use std::path::Path;
@@ -11,6 +11,8 @@ use std::path::Path;
 thread_local! {
     static ISLAND_MODULES: RefCell<&'static [IslandModule]> = const { RefCell::new(&[]) };
     static ISLAND_STATE: RefCell<Option<IslandState>> = const { RefCell::new(None) };
+    static ISLAND_HOST_CALLBACKS: RefCell<HashMap<u64, IslandHostCallback>> = RefCell::new(HashMap::new());
+    static ISLAND_HOST_CALLBACK_ID: Cell<u64> = const { Cell::new(0) };
 }
 
 const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
@@ -31,6 +33,15 @@ pub struct IslandModule {
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
 
+#[derive(Clone)]
+pub struct IslandHostArgument(IslandValue);
+
+pub enum IslandHostResult {
+    String(JsString),
+}
+
+type IslandHostCallback = Rc<dyn Fn(&[IslandHostArgument]) -> IslandHostResult>;
+
 pub fn island_value_undefined() -> IslandValue {
     IslandValue(JsValue::undefined())
 }
@@ -49,6 +60,71 @@ pub fn island_value_boolean(value: bool) -> IslandValue {
 
 pub fn island_value_string(value: &JsString) -> IslandValue {
     IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
+}
+
+pub fn island_host_argument_string(arguments: &[IslandHostArgument], index: usize) -> JsString {
+    let Some(value) = arguments.get(index).and_then(|argument| argument.0.0.as_string()) else {
+        throw_type_error(format!("expected string at argument {index}"));
+    };
+    string(&value.to_std_string_lossy())
+}
+
+pub fn island_value_host_function(
+    arity: usize,
+    callback: IslandHostCallback,
+) -> IslandValue {
+    let id = ISLAND_HOST_CALLBACK_ID.with(|next| {
+        let id = next.get();
+        next.set(id.wrapping_add(1));
+        id
+    });
+    ISLAND_HOST_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, callback));
+    with_island_state(|state| {
+        let native = NativeFunction::from_copy_closure(move |_this, arguments, _context| {
+            let arguments = arguments
+                .iter()
+                .cloned()
+                .map(|value| IslandHostArgument(IslandValue(value)))
+                .collect::<Vec<_>>();
+            let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
+                let callbacks = callbacks.borrow();
+                let callback = callbacks.get(&id).expect("scriptc: missing island host callback");
+                callback(&arguments)
+            });
+            Ok(match result {
+                IslandHostResult::String(value) => {
+                    JsValue::from(boa_engine::JsString::from(value.as_ref()))
+                }
+            })
+        });
+        let function = FunctionObjectBuilder::new(state.context.realm(), native)
+            .length(arity)
+            .build();
+        IslandValue(function.into())
+    })
+}
+
+pub fn island_value_object(fields: Vec<(JsString, IslandValue)>) -> IslandValue {
+    with_island_state(|state| {
+        let mut object = ObjectInitializer::new(&mut state.context);
+        for (key, value) in fields {
+            object.property(
+                boa_engine::JsString::from(key.as_ref()),
+                value.0,
+                Attribute::WRITABLE | Attribute::ENUMERABLE | Attribute::CONFIGURABLE,
+            );
+        }
+        IslandValue(object.build().into())
+    })
+}
+
+pub fn island_value_array(values: Vec<IslandValue>) -> IslandValue {
+    with_island_state(|state| {
+        IslandValue(BoaJsArray::from_iter(
+            values.into_iter().map(|value| value.0),
+            &mut state.context,
+        ).into())
+    })
 }
 
 /// Copy one native JSON value into the embedded JavaScript realm.
@@ -341,4 +417,6 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 fn island_eval_finish() {
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
     ISLAND_MODULES.with(|slot| *slot.borrow_mut() = &[]);
+    ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());
+    ISLAND_HOST_CALLBACK_ID.with(|slot| slot.set(0));
 }
