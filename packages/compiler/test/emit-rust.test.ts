@@ -1126,6 +1126,7 @@ shardedTest.each(shardSelect([
   "1698-stream-uncaught-error.ts",
   "1699-stream-callback-shapes.ts",
   "1700-mustcall-common/main.cjs",
+  "1701-mustcall-exit-report/main.cjs",
   "1710-cjs-export-class/main.js",
   "1711-cjs-export-single-values/main.js",
   "1713-js-dyn-fields.js",
