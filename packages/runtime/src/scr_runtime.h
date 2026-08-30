@@ -2321,6 +2321,7 @@ ScrPromise *scr_fsp_unlink(ScrStr *path);
 ScrPromise *scr_fsp_chmod(ScrStr *path, double mode);
 ScrPromise *scr_fsp_readdir(ScrStr *path);
 ScrPromise *scr_fsp_rm(ScrStr *path);
+ScrPromise *scr_fsp_rm_opts(ScrStr *path, bool recursive, bool force);
 ScrPromise *scr_fsp_stat(ScrStr *path);
 ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath);
 ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags, double mode);
@@ -2437,6 +2438,10 @@ ScrSpawnRes *scr_spawn_sync(ScrStr *cmd, ScrArr *args); /* +1, never throws */
 ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
                                   ScrStr *killsignal, double in_mode,
                                   double out_mode, double err_mode);
+ScrSpawnRes *scr_spawn_sync_opts_env(ScrStr *cmd, ScrArr *args, double timeout_ms,
+                                      ScrStr *killsignal, double in_mode,
+                                      double out_mode, double err_mode,
+                                      ScrArr *env_pairs);
 /* The runtime-string stdio entry: the compiler proved the value is
  * "pipe" | "ignore" | "inherit" by type; the mode mapping happens here. */
 ScrSpawnRes *scr_spawn_sync_stdio_str(ScrStr *cmd, ScrArr *args, double timeout_ms,

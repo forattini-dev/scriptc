@@ -355,6 +355,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
     argTypes: [STRING, arrayOf(STRING), F64, STRING, F64, F64, F64],
     result: SPAWNRES_T,
   },
+  "cp.spawnSyncOptsEnv": {
+    argTypes: [STRING, arrayOf(STRING), F64, STRING, F64, F64, F64, arrayOf(STRING)],
+    result: SPAWNRES_T,
+  },
   "cp.spawnSyncStdioStr": {
     argTypes: [STRING, arrayOf(STRING), F64, STRING, STRING],
     result: SPAWNRES_T,
@@ -802,6 +806,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.rename": { argTypes: [STRING, STRING], result: { kind: "promise", inner: VOID } },
   "fsp.readdir": { argTypes: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
   "fsp.rm": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
+  "fsp.rmOpts": { argTypes: [STRING, BOOL, BOOL], result: { kind: "promise", inner: VOID } },
   "fsp.stat": { argTypes: [STRING], result: { kind: "promise", inner: STATS_T } },
   "fsp.open": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: FILEHANDLE_T } },
   "fileHandle.fd": { argTypes: [FILEHANDLE_T], result: F64 },

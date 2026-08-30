@@ -1508,6 +1508,32 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         loc,
       };
     }
+    // fs.promises.rm(p, options): the idempotent agent/daemon cleanup
+    // shape. The filesystem operation is the same checked recursive/force
+    // core as rmSync, wrapped into an already-settled promise so failures
+    // reject at await rather than escaping synchronously.
+    if (bi.module === "fs/promises" && bi.member === "rm" && expr.arguments.length === 2) {
+      const opts = literalBoolOptions(L, expr.arguments[1]!, ["recursive", "force"]);
+      if (opts === null) {
+        L.noLowering(
+          "fs.promises.rm with an options argument beyond { recursive, force }",
+          expr.arguments[1]!,
+          "the recursive/force flags must be boolean literals; other options have no lowering",
+        );
+      }
+      const path = L.lowerExprExpecting(expr.arguments[0]!, STRING);
+      return {
+        kind: "libCall",
+        fn: "fsp.rmOpts",
+        args: [
+          path,
+          boolLit(opts.bools["recursive"] === true, loc),
+          boolLit(opts.bools["force"] === true, loc),
+        ],
+        type: { kind: "promise", inner: VOID },
+        loc,
+      };
+    }
     // accessSync(p, mode?): an omitted mode is Node's F_OK (0). The mode
     // is an ordinary number — fs.constants.* reads bake to literals.
     if (bi.module === "fs" && bi.member === "accessSync") {
@@ -1878,6 +1904,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // "pipe"`) — accepted when its TYPE proves every arm is a supported
     // literal; the runtime maps the value to the modes at the call.
     let stdioStr: IrExpr | null = null;
+    let envPairs: IrExpr | null = null;
     let plain = true; // no behavior-changing option: the historical libCall
 
     if (optsNode) {
@@ -1987,6 +2014,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
             applyStdio(m.value);
             plain = false;
             break;
+          case "env":
+            envPairs = L.recordToEnvPairs(m.value);
+            plain = false;
+            break;
           case "windowsHide":
             L.lowerExpr(m.value); // Node no-op on POSIX
             break;
@@ -1994,13 +2025,29 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
             L.noLowering(
               `spawnSync option '${m.name}'`,
               p,
-              "encoding, timeout, killSignal, stdio, and windowsHide are the supported options",
+              "encoding, timeout, killSignal, stdio, env, and windowsHide are the supported options",
             );
         }
       }
     }
     if (plain) {
       return { kind: "libCall", fn: "cp.spawnSync", args: [cmd, argv], type: SPAWNRES_T, loc };
+    }
+    if (envPairs !== null) {
+      if (stdioStr !== null) {
+        L.noLowering(
+          "spawnSync with both a runtime stdio string and env",
+          optsNode ?? expr,
+          "use a literal stdio value or tuple when passing env",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "cp.spawnSyncOptsEnv",
+        args: [cmd, argv, timeout, killSignal, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), envPairs],
+        type: SPAWNRES_T,
+        loc,
+      };
     }
     if (stdioStr !== null) {
       return {

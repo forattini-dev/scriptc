@@ -322,7 +322,7 @@ fn child_exit_signal(_status: &std::process::ExitStatus) -> Option<JsString> {
     None
 }
 
-pub fn child_spawn_sync(
+fn child_spawn_sync_core(
     command: &JsString,
     arguments: &JsArray<JsString>,
     timeout_ms: f64,
@@ -330,11 +330,21 @@ pub fn child_spawn_sync(
     stdin_mode: f64,
     stdout_mode: f64,
     stderr_mode: f64,
+    env_pairs: Option<&JsArray<JsString>>,
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
     let mut child_command = Command::new(command.as_ref());
-    process_env_apply(&mut child_command);
+    if let Some(pairs) = env_pairs {
+        child_command.env_clear();
+        pairs.with(|pairs| {
+            for pair in pairs.elements.chunks_exact(2) {
+                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            }
+        });
+    } else {
+        process_env_apply(&mut child_command);
+    }
     if is_self_reexec(command, arguments) {
         child_command.arg(SELF_REEXEC_MARKER);
     }
@@ -405,6 +415,49 @@ pub fn child_spawn_sync(
             })
         }
     }
+}
+
+pub fn child_spawn_sync(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    timeout_ms: f64,
+    kill_signal: &JsString,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+) -> JsSpawnResult {
+    child_spawn_sync_core(
+        command,
+        arguments,
+        timeout_ms,
+        kill_signal,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+        None,
+    )
+}
+
+pub fn child_spawn_sync_env(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    timeout_ms: f64,
+    kill_signal: &JsString,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+    env_pairs: &JsArray<JsString>,
+) -> JsSpawnResult {
+    child_spawn_sync_core(
+        command,
+        arguments,
+        timeout_ms,
+        kill_signal,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+        Some(env_pairs),
+    )
 }
 
 pub fn child_spawn_sync_stdio(

@@ -9,7 +9,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, posix } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { wasiGuestPath } from "../../wasi-paths.js";
-import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -1463,6 +1463,34 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      // `import.meta.url` in a native executable names the executable: the
+      // bundled module graph has one runtime carrier and no source-module
+      // loader. Build its stable file URL from process.execPath rather than
+      // the mutable process.argv array; this keeps the modern ESM
+      // direct-execution check aligned with argv[1]'s native contract.
+      if (
+        !expr.questionDotToken &&
+        expr.name.text === "url" &&
+        ts.isMetaProperty(expr.expression) &&
+        expr.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+        expr.expression.name.text === "meta"
+      ) {
+        const executable: IrExpr = {
+          kind: "libCall",
+          fn: "process.execPath",
+          args: [],
+          type: STRING,
+          loc,
+        };
+        const url: IrExpr = {
+          kind: "libCall",
+          fn: "url.pathToFileURL",
+          args: [executable],
+          type: URL_T,
+          loc,
+        };
+        return { kind: "libCall", fn: "url.href", args: [url], type: STRING, loc };
+      }
       // `super.x`: the base chain's GETTER, called directly (super
       // dispatch is static in JS — never through the dynamic class).
       // super.method() calls are routed at the call site; a bare super

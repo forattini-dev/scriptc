@@ -429,6 +429,15 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fsp.rm" && expr.args.length === 1 && arg !== undefined) {
     return context.emitPromiseFromSync([arg], (value) => `runtime::fs_rm(&${value(0)})`);
   }
+  if (
+    expr.fn === "fsp.rmOpts" && expr.args.length === 3 && arg !== undefined &&
+    expr.args[1] !== undefined && expr.args[2] !== undefined
+  ) {
+    return context.emitPromiseFromSync(
+      [arg, expr.args[1], expr.args[2]],
+      (value) => `runtime::fs_rm_options(&${value(0)}, ${value(1)}, ${value(2)})`,
+    );
+  }
   if (expr.fn === "fsp.stat" && expr.args.length === 1 && arg !== undefined) {
     return context.emitPromiseFromSync([arg], (value) => `runtime::fs_stat(&${value(0)}, true)`);
   }
@@ -824,6 +833,14 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     if (argv === undefined || timeout === undefined || signal === undefined || stdinMode === undefined ||
         stdoutMode === undefined || stderrMode === undefined) context.unsupported("cp.spawnSyncOpts arguments", expr.loc);
     return `runtime::child_spawn_sync(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(signal)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)})`;
+  }
+  if (expr.fn === "cp.spawnSyncOptsEnv" && expr.args.length === 8 && arg !== undefined) {
+    const [argv, timeout, signal, stdinMode, stdoutMode, stderrMode, envPairs] = expr.args.slice(1);
+    if (argv === undefined || timeout === undefined || signal === undefined || stdinMode === undefined ||
+        stdoutMode === undefined || stderrMode === undefined || envPairs === undefined) {
+      context.unsupported("cp.spawnSyncOptsEnv arguments", expr.loc);
+    }
+    return `runtime::child_spawn_sync_env(&(${context.emitExpr(arg)}), &(${context.emitExpr(argv)}), ${context.emitExpr(timeout)}, &(${context.emitExpr(signal)}), ${context.emitExpr(stdinMode)}, ${context.emitExpr(stdoutMode)}, ${context.emitExpr(stderrMode)}, &(${context.emitExpr(envPairs)}))`;
   }
   if (expr.fn === "cp.spawnSyncStdioStr" && expr.args.length === 5 && arg !== undefined) {
     const [argv, timeout, signal, stdio] = expr.args.slice(1);

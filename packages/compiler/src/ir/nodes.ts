@@ -3173,6 +3173,9 @@ export type IrLibFn =
   | "fsp.rename"
   | "fsp.readdir"
   | "fsp.rm"
+  /** fs.promises.rm(path, { recursive?, force? }): the rmOptsSync core
+   * behind an already-settled promise. Failures become rejections. */
+  | "fsp.rmOpts"
   | "fsp.stat"
   /** fs/promises.open and the statically represented FileHandle surface.
    * Every operation returns an already-settled promise; syscall failures
@@ -4275,6 +4278,9 @@ export type IrLibFn =
    * call site's `Signals | null` union (null = exited normally or spawn
    * failure), constructed type-directedly like spawnRes.status. */
   | "cp.spawnSyncOpts"
+  /** cp.spawnSyncOpts plus a replacement environment carried as
+   * [key, value, ...] pairs. An empty array intentionally clears env. */
+  | "cp.spawnSyncOptsEnv"
   /** cp.spawnSyncOpts with the stdio carried as a RUNTIME string —
    * "pipe" | "ignore" | "inherit", proven by the call site's TYPE (the
    * defaultRunner idiom `stdio: options?.stdio ?? "pipe"`); the runtime

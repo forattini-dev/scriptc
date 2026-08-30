@@ -1151,6 +1151,7 @@ declare module "fs/promises" {
   export function mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void>;
   export function readdir(path: string): Promise<string[]>;
   export function rm(path: string): Promise<void>;
+  export function rm(path: string, options: { recursive?: boolean; force?: boolean }): Promise<void>;
   export function stat(path: string): Promise<import("node:fs").Stats>;
   export function unlink(path: string): Promise<void>;
   export function chmod(path: string, mode: number): Promise<void>;
@@ -1486,6 +1487,7 @@ declare module "child_process" {
       timeout?: number;
       killSignal?: string;
       stdio?: "pipe" | "ignore" | "inherit" | ("pipe" | "ignore" | "inherit")[];
+      env?: { [key: string]: string | undefined };
       windowsHide?: boolean;
     },
   ): SpawnSyncReturns;

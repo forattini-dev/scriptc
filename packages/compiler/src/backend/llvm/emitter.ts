@@ -571,6 +571,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // shape adapters); spawn itself is special-cased for usesTimers.
   "cp.spawnSync": "scr_spawn_sync",
   "cp.spawnSyncOpts": "scr_spawn_sync_opts",
+  "cp.spawnSyncOptsEnv": "scr_spawn_sync_opts_env",
   "cp.spawnSyncStdioStr": "scr_spawn_sync_stdio_str",
   "cp.execSync": "scr_exec_sync",
   "cp.execCapture": "scr_exec_capture",
@@ -600,6 +601,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fsp.rename": "scr_fsp_rename",
   "fsp.readdir": "scr_fsp_readdir",
   "fsp.rm": "scr_fsp_rm",
+  "fsp.rmOpts": "scr_fsp_rm_opts",
   "fsp.stat": "scr_fsp_stat",
   "fsp.open": "scr_fsp_open",
   "fileHandle.fd": "scr_file_handle_fd",

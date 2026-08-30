@@ -3855,6 +3855,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `scr_spawn_sync_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
             );
+          case "cp.spawnSyncOptsEnv":
+            return finish(
+              `scr_spawn_sync_opts_env(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)}, ${arg(7)})`,
+            );
           case "cp.spawnSyncStdioStr":
             // The runtime maps the type-proven "pipe"/"ignore"/"inherit"
             // string to the three modes; same never-throws contract.
@@ -5834,6 +5838,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_readdir(${arg(0)})`);
           case "fsp.rm":
             return finish(`scr_fsp_rm(${arg(0)})`);
+          case "fsp.rmOpts":
+            return finish(`scr_fsp_rm_opts(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fsp.stat":
             return finish(`scr_fsp_stat(${arg(0)})`);
           case "fsp.open":

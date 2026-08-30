@@ -849,9 +849,9 @@ char **scr_child_argv(ScrStr *cmd, ScrArr *args) {
 
 static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeout_ms,
                                         int killsig, int in_mode, int out_mode,
-                                        int err_mode) {
+                                        int err_mode, ScrArr *env_pairs) {
   ScrWinSyncRes w;
-  scr_win_run_sync(cmd, args, NULL, in_mode, out_mode, err_mode, NULL, NULL,
+  scr_win_run_sync(cmd, args, NULL, in_mode, out_mode, err_mode, NULL, env_pairs,
                    timeout_ms, &w);
   if (w.spawn_errname != NULL) {
     free(w.out.data);
@@ -880,7 +880,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
 }
 
 ScrSpawnRes *scr_spawn_sync(ScrStr *cmd, ScrArr *args) {
-  return scr_spawn_sync_core(cmd, args, 0, SIGTERM, 0, 0, 0);
+  return scr_spawn_sync_core(cmd, args, 0, SIGTERM, 0, 0, 0, NULL);
 }
 
 ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
@@ -892,7 +892,20 @@ ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
     if (resolved > 0) killsig = resolved;
   }
   return scr_spawn_sync_core(cmd, args, timeout_ms, killsig, (int)in_mode,
-                             (int)out_mode, (int)err_mode);
+                             (int)out_mode, (int)err_mode, NULL);
+}
+
+ScrSpawnRes *scr_spawn_sync_opts_env(ScrStr *cmd, ScrArr *args, double timeout_ms,
+                                     ScrStr *killsignal, double in_mode,
+                                     double out_mode, double err_mode,
+                                     ScrArr *env_pairs) {
+  int killsig = SIGTERM;
+  if (killsignal->len > 0) {
+    int resolved = scr_signal_from_name(killsignal);
+    if (resolved > 0) killsig = resolved;
+  }
+  return scr_spawn_sync_core(cmd, args, timeout_ms, killsig, (int)in_mode,
+                             (int)out_mode, (int)err_mode, env_pairs);
 }
 
 ScrSpawnRes *scr_spawn_sync_stdio_str(ScrStr *cmd, ScrArr *args, double timeout_ms,
@@ -1951,6 +1964,9 @@ static ScrSpawnRes *scr_spawn_res_new(bool has_status, double status,
   return r;
 }
 
+static char **scr_exec_envp(ScrArr *pairs);
+static void scr_exec_envp_free(char **envp);
+
 /* The parameterized spawnSync core. stdio modes: stdin 0 = /dev/null
  * (Node's no-input default AND "ignore"/"pipe"-without-input — all read
  * nothing), 2 = inherit; stdout/stderr 0 = capture (the pipe), 1 =
@@ -1961,7 +1977,7 @@ static ScrSpawnRes *scr_spawn_res_new(bool has_status, double status,
  * Node's spawnSync shape. */
 static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeout_ms,
                                          int killsig, int in_mode, int out_mode,
-                                         int err_mode) {
+                                         int err_mode, ScrArr *env_pairs) {
   if (out_mode == 2 || err_mode == 2) {
     /* Inherited output fds: flush the parent's buffers first so earlier
      * logs precede the child's writes (Node's practical ordering). */
@@ -1996,10 +2012,13 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
   }
 
   char **argv = scr_child_argv(cmd, args);
+  char **envp = env_pairs != NULL ? scr_exec_envp(env_pairs) : NULL;
   pid_t pid = -1;
-  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv, environ);
+  int spawn_err = posix_spawnp(&pid, cmd->data, &fa, NULL, argv,
+                               envp != NULL ? envp : environ);
   posix_spawn_file_actions_destroy(&fa);
   free(argv);
+  scr_exec_envp_free(envp);
   if (cap_out) close(outfd[1]);
   if (cap_err) close(errfd[1]);
 
@@ -2100,7 +2119,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
 }
 
 ScrSpawnRes *scr_spawn_sync(ScrStr *cmd, ScrArr *args) {
-  return scr_spawn_sync_core(cmd, args, 0, SIGTERM, 0, 0, 0);
+  return scr_spawn_sync_core(cmd, args, 0, SIGTERM, 0, 0, 0, NULL);
 }
 
 /* The options entry (cp.spawnSyncOpts): killSignal as a NAME ("" = the
@@ -2116,7 +2135,20 @@ ScrSpawnRes *scr_spawn_sync_opts(ScrStr *cmd, ScrArr *args, double timeout_ms,
     if (resolved > 0) killsig = resolved;
   }
   return scr_spawn_sync_core(cmd, args, timeout_ms, killsig, (int)in_mode,
-                              (int)out_mode, (int)err_mode);
+                              (int)out_mode, (int)err_mode, NULL);
+}
+
+ScrSpawnRes *scr_spawn_sync_opts_env(ScrStr *cmd, ScrArr *args, double timeout_ms,
+                                      ScrStr *killsignal, double in_mode,
+                                      double out_mode, double err_mode,
+                                      ScrArr *env_pairs) {
+  int killsig = SIGTERM;
+  if (killsignal->len > 0) {
+    int resolved = scr_signal_from_name(killsignal);
+    if (resolved > 0) killsig = resolved;
+  }
+  return scr_spawn_sync_core(cmd, args, timeout_ms, killsig, (int)in_mode,
+                              (int)out_mode, (int)err_mode, env_pairs);
 }
 
 /* The runtime-string stdio entry (cp.spawnSyncStdioStr): the compiler
