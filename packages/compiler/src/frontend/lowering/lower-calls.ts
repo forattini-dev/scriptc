@@ -2994,7 +2994,7 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
       // No entry means the program-level pass already diagnosed this
       // binding. Poison the statement without duplicating that diagnostic.
       if (validSymbols === undefined) throw new PoisonError();
-      if (!validSymbols.has(symbol)) {
+      if (!L.ownsValidatedFfiSymbol(binding.name, symbol)) {
         if (L.libraryCallbacks) {
           const declarations = L.checker.declarationsOf(symbol);
           const programDeclarations = declarations.filter((decl) =>

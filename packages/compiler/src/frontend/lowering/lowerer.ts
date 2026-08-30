@@ -1614,6 +1614,16 @@ export class Lowerer {
     return `${this.fileTag.get(sf) ?? ""}${name}`;
   }
 
+  /** Whether whole-program validation assigned this exact source symbol to
+   * the named manifest binding. Same-named local functions remain ordinary
+   * TypeScript declarations and never become native calls. */
+  ownsValidatedFfiSymbol(name: string, symbol: ts.Symbol): boolean {
+    return (
+      this.ffiImportsByName.has(name) &&
+      this.ffiBindingSymbols?.get(name)?.has(symbol) === true
+    );
+  }
+
   /** The IR name mapType gives class instance types — must agree with
    * collectClassShape's registration. Namespace-nested classes carry the
    * namespace path (nsPathPrefix), so `namespace A { export class C }`
