@@ -334,7 +334,7 @@ static bool dyn_arr_proto_unimpl(const char *m) {
 }
 static bool dyn_arr_proto_mutates(const char *m) {
   static const char *names[] = {
-    "push", "pop", "shift", "unshift", "reverse", "sort", "fill", "copyWithin", NULL
+    "push", "pop", "shift", "unshift", "splice", "reverse", "sort", "fill", "copyWithin", NULL
   };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -550,6 +550,24 @@ static ScrDyn *scr_dyn_invoke_impl(
       size_t end = dyn_rel_index(endD, len);
       ScrDyn *out = scr_dyn_new_arr();
       for (size_t i = start; i < end; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      return out;
+    }
+    if (dyn_name_is(method, "splice") && argc <= 2) {
+      double startD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      double countD = dyn_index_arg(args, argc, 1, (double)(len - start), what);
+      if (scr_exc_pending()) return NULL;
+      size_t count = countD <= 0 ? 0 : countD >= (double)(len - start)
+        ? len - start : (size_t)countD;
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < count; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[start + i]));
+        scr_dyn_release(recv->v.arr.items[start + i]);
+      }
+      memmove(recv->v.arr.items + start, recv->v.arr.items + start + count,
+              (len - start - count) * sizeof(ScrDyn *));
+      recv->v.arr.len -= count;
       return out;
     }
     if (dyn_name_is(method, "at")) {

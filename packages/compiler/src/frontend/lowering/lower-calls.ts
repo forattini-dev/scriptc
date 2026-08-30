@@ -4914,7 +4914,7 @@ const DYN_PROTO_METHOD_NAMES = new Set([
  * fences LOUDLY on real-but-unimplemented pairs. */
 const DYN_DISPATCH_METHODS = new Set([
   "apply", "call",
-  "push", "pop", "shift", "unshift", "slice", "at",
+  "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "flat", "reverse", "sort", "fill", "copyWithin", "reduce", "reduceRight",
   "forEach", "map", "filter", "some", "every", "find", "findIndex",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
