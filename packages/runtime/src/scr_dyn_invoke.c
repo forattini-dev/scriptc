@@ -491,6 +491,11 @@ static ScrDyn *scr_dyn_invoke_impl(
       ScrDyn *value;
       if (done) {
         value = scr_dyn_retain(scr_dyn_undefined());
+      } else if (recv->v.arr_iter.kind == SCR_DYN_ARR_ITER_ENTRIES) {
+        size_t index = recv->v.arr_iter.index++;
+        value = scr_dyn_new_arr();
+        scr_dyn_arr_push(value, scr_dyn_new_num((double)index));
+        scr_dyn_arr_push(value, scr_dyn_retain(array->v.arr.items[index]));
       } else if (recv->v.arr_iter.kind == SCR_DYN_ARR_ITER_KEYS) {
         value = scr_dyn_new_num((double)recv->v.arr_iter.index++);
       } else {
@@ -714,6 +719,9 @@ static ScrDyn *scr_dyn_invoke_impl(
         scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       }
       return out;
+    }
+    if (dyn_name_is(method, "entries")) {
+      return scr_dyn_new_arr_iter(recv, SCR_DYN_ARR_ITER_ENTRIES);
     }
     if (dyn_name_is(method, "keys")) {
       return scr_dyn_new_arr_iter(recv, SCR_DYN_ARR_ITER_KEYS);

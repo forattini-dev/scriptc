@@ -3012,6 +3012,7 @@ typedef enum {
 } ScrDynKind;
 
 typedef enum {
+  SCR_DYN_ARR_ITER_ENTRIES,
   SCR_DYN_ARR_ITER_KEYS,
   SCR_DYN_ARR_ITER_VALUES,
 } ScrDynArrayIteratorKind;

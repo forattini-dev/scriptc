@@ -74,11 +74,13 @@ pub struct ArrayIteratorData<T: ArrayElement> {
 
 #[derive(Clone, Copy)]
 pub enum ArrayIteratorKind {
+    Entries,
     Keys,
     Values,
 }
 
 pub enum ArrayIteratorItem<T: ArrayElement> {
+    Entry(f64, T),
     Key(f64),
     Value(T),
 }
@@ -179,6 +181,9 @@ pub fn array_iterator_next<T: ArrayElement>(
         let index = state.index as f64;
         state.index += 1;
         Some(match state.kind {
+            ArrayIteratorKind::Entries => {
+                ArrayIteratorItem::Entry(index, array_get(array, index))
+            }
             ArrayIteratorKind::Keys => ArrayIteratorItem::Key(index),
             ArrayIteratorKind::Values => ArrayIteratorItem::Value(array_get(array, index)),
         })

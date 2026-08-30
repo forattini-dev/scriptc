@@ -1415,7 +1415,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               if (
                 !ts.isCallExpression(init) || init.arguments.length !== 0 ||
                 !ts.isPropertyAccessExpression(init.expression) ||
-                (init.expression.name.text !== "keys" && init.expression.name.text !== "values")
+                !["entries", "keys", "values"].includes(init.expression.name.text)
               ) return false;
               let receiver: ts.Expression = init.expression.expression;
               while (ts.isParenthesizedExpression(receiver)) receiver = receiver.expression;
