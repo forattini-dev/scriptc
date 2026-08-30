@@ -1,9 +1,12 @@
-import type { IrExpr, IrFfiImport, SrcLoc } from "../../ir/nodes.js";
+import { isFfiCallbackParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import type { IrFuncType } from "./model.js";
 
 type IrFfiCall = Extract<IrExpr, { kind: "ffiCall" }>;
 
 interface RustFfiContext {
   nextName(prefix: string): string;
+  emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
+  rustType(type: IrType, loc?: SrcLoc): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -36,6 +39,21 @@ function spanToF64(binding: IrFfiImport): "bytes" | "string" | null {
     : null;
 }
 
+function rawF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
+  const callback = binding.params[0];
+  return binding.params.length === 2 &&
+    callback !== undefined &&
+    isFfiCallbackParam(callback) &&
+    callback.callback.params.length === 1 &&
+    callback.callback.params[0] === "f64" &&
+    callback.callback.returns === "f64" &&
+    callback.callback.lifetime === "call" &&
+    binding.params[1] === "f64" &&
+    binding.returns === "f64"
+    ? callback.callback
+    : null;
+}
+
 function abiType(cls: ScalarClass): string {
   return cls === "bool" ? "u8" : cls;
 }
@@ -62,6 +80,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (rawF64Callback(binding) !== null) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64) -> f64, sc_arg_1: f64) -> f64;`];
+    }
     if (spanToF64(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0_ptr: *const u8, sc_arg_0_len: usize) -> f64;`];
@@ -86,6 +108,26 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  const callback = binding === undefined ? null : rawF64Callback(binding);
+  if (callback !== null) {
+    const callbackArgument = expr.args[0];
+    const valueArgument = expr.args[1];
+    if (expr.args.length !== 2 || callbackArgument?.type.kind !== "func" ||
+        valueArgument?.type.kind !== "f64" || expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the call-scoped callback ABI`, expr.loc);
+    }
+    const callbackValue = context.nextName("sc_ffi_callback_value");
+    const nativeValue = context.nextName("sc_ffi_callback_argument");
+    const slot = context.nextName("SC_FFI_CALLBACK");
+    const trampoline = context.nextName("sc_ffi_callback");
+    const incoming = context.nextName("sc_ffi_callback_incoming");
+    const active = context.nextName("sc_ffi_callback_active");
+    const previous = context.nextName("sc_ffi_callback_previous");
+    const result = context.nextName("sc_ffi_callback_result");
+    const closureType = context.rustType(callbackArgument.type, expr.loc);
+    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; std::thread_local! { static ${slot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${trampoline}(${incoming}: f64) -> f64 { ${slot}.with(|sc_slot| { let ${active} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its call scope").clone(); ${dispatch} }) } let ${previous} = ${slot}.with(|sc_slot| sc_slot.replace(Some(${callbackValue}))); let ${result} = unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}) }; ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previous}; }); ${result} }`;
+  }
   const span = binding === undefined ? null : spanToF64(binding);
   if (span !== null) {
     const argument = expr.args[0];
