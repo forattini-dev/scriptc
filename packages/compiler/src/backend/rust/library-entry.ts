@@ -99,12 +99,10 @@ function returnType(
   }
 }
 
-/** Emit the first library-mode ABI slice: initialization, collection, and
- * scalar export wrappers. Buffer ownership and callback channels remain
- * explicit tier refusals until their public-seam cycles land. */
+/** Emit the library-mode ABI boundary: initialization, collection, export
+ * wrappers, result ownership, panic delivery, and host callbacks. */
 export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string[] {
   const { lib, unsupported } = options;
-  if ((lib.callbacks?.length ?? 0) > 0) unsupported("library callback channels");
   if (lib.identity !== undefined) unsupported("library sidecar identity");
 
   const hasResults = lib.exports.some(
@@ -120,12 +118,23 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `}`,
     "",
     `type ScLibrarySink = extern "C" fn(*mut std::ffi::c_void, *const u8, usize, u64);`,
+    ...(lib.callbacks?.length
+      ? [`type ScLibraryRawCallback = unsafe extern "C" fn();`,
+        `#[derive(Clone, Copy)]`,
+        `struct ScLibraryCallback {`,
+        `    callback: Option<ScLibraryRawCallback>,`,
+        `    context: *mut std::ffi::c_void,`,
+        `}`]
+      : []),
     "",
     `std::thread_local! {`,
     `    static SC_LIBRARY_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
     `    static SC_LIBRARY_POISONED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
     `    static SC_LIBRARY_SINK: std::cell::Cell<Option<ScLibrarySink>> = const { std::cell::Cell::new(None) };`,
     `    static SC_LIBRARY_SINK_CONTEXT: std::cell::Cell<*mut std::ffi::c_void> = const { std::cell::Cell::new(std::ptr::null_mut()) };`,
+    ...(lib.callbacks?.length
+      ? [`    static SC_LIBRARY_CALLBACKS: std::cell::RefCell<[ScLibraryCallback; ${lib.callbacks.length}]> = const { std::cell::RefCell::new([ScLibraryCallback { callback: None, context: std::ptr::null_mut() }; ${lib.callbacks.length}]) };`]
+      : []),
     ...(hasResults
       ? [`    static SC_LIBRARY_RESULTS: std::cell::RefCell<Vec<Box<[u8]>>> = const { std::cell::RefCell::new(Vec::new()) };`]
       : []),
@@ -161,6 +170,37 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    }`,
     `}`,
   );
+  if (lib.callbacks?.length) {
+    lines.push(
+      "",
+      `fn sc_library_callback(slot: usize) -> (ScLibraryRawCallback, *mut std::ffi::c_void) {`,
+      `    SC_LIBRARY_CALLBACKS.with(|callbacks| {`,
+      `        let callback = callbacks.borrow()[slot];`,
+      `        (callback.callback.expect("scriptc: unregistered library callback"), callback.context)`,
+      `    })`,
+      `}`,
+      "",
+      `#[unsafe(no_mangle)]`,
+      `pub extern "C" fn ${lib.callbackRegisterSymbol}(`,
+      `    name: *const std::ffi::c_char,`,
+      `    callback: Option<ScLibraryRawCallback>,`,
+      `    context: *mut std::ffi::c_void,`,
+      `) -> i32 {`,
+      `    if name.is_null() { return -1; }`,
+      `    let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_bytes();`,
+    );
+    for (const callback of lib.callbacks) {
+      lines.push(
+        `    if name == ${JSON.stringify(callback.name)}.as_bytes() {`,
+        `        SC_LIBRARY_CALLBACKS.with(|callbacks| {`,
+        `            callbacks.borrow_mut()[${callback.slot}] = ScLibraryCallback { callback, context };`,
+        `        });`,
+        `        return 0;`,
+        `    }`,
+      );
+    }
+    lines.push(`    -1`, `}`);
+  }
   if (lib.exports.some((entry) => entry.params.includes("string"))) {
     lines.push(
       "",

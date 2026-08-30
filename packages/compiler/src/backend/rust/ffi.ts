@@ -1,4 +1,4 @@
-import { isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrLibCallback, type IrType, type SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType } from "./model.js";
 
 type IrFfiCall = Extract<IrExpr, { kind: "ffiCall" }>;
@@ -286,8 +286,13 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
       : `f64::from(${call})`;
 }
 
-export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
+export function emitRustFfiDeclarations(
+  imports: readonly IrFfiImport[],
+  libraryCallbacks: readonly IrLibCallback[] = [],
+): string[] {
+  const callbackNames = new Set(libraryCallbacks.map((callback) => callback.name));
   const declarations = imports.flatMap((binding, index) => {
+    if (callbackNames.has(binding.name)) return [];
     const foreign = foreignContextRelease(binding, imports)?.callback ??
       foreignContextCallback(binding);
     if (foreign !== null) {
@@ -352,9 +357,25 @@ export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string
 export function emitRustFfiCall(
   expr: IrFfiCall,
   imports: readonly IrFfiImport[],
+  libraryCallbacks: readonly IrLibCallback[],
   context: RustFfiContext,
   emitExpr: (expr: IrExpr) => string,
 ): string {
+  const libraryCallback = libraryCallbacks.find((callback) => callback.name === expr.import);
+  if (libraryCallback !== undefined) {
+    if (libraryCallback.params.length !== 1 || libraryCallback.params[0] !== "f64" ||
+        libraryCallback.returns !== "f64" || expr.args.length !== 1 ||
+        expr.args[0]?.type.kind !== "f64" || expr.type.kind !== "f64") {
+      context.unsupported(`library callback channel '${expr.import}' outside the f64 scalar ABI`, expr.loc);
+    }
+    const value = emitExpr(expr.args[0]);
+    const raw = context.nextName("sc_library_callback_raw");
+    const opaque = context.nextName("sc_library_callback_context");
+    const callback = context.nextName("sc_library_callback_typed");
+    return `{ let (${raw}, ${opaque}) = sc_library_callback(${libraryCallback.slot}); ` +
+      `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, f64) -> f64 = ` +
+      `unsafe { std::mem::transmute(${raw}) }; unsafe { ${callback}(${opaque}, ${value}) } }`;
+  }
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];

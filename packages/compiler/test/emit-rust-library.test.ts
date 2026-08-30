@@ -344,3 +344,86 @@ test("Rust library exceptions escape through the registered panic sink", async (
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library callbacks synchronously round-trip scalars through the host", async () => {
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-callback-"));
+  try {
+    const entry = join(work, "lib.ts");
+    writeFileSync(entry, [
+      "declare function hostAdd(value: number): number;",
+      "export function run(value: number): number {",
+      "  return hostAdd(value) * 2;",
+      "}",
+      "console.log('callback ready');",
+      "",
+    ].join("\n"));
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-scalar-callback",
+      entry,
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "rc_",
+        init_symbol: "rc_init",
+        sink_register_symbol: "rc_set_panic_sink",
+        collect_symbol: null,
+        result_reset_symbol: null,
+        callback_register_symbol: "rc_set_callback",
+      },
+      callbacks: [{ name: "hostAdd", params: ["f64"], returns: "f64" }],
+      exports: [{
+        export: "run",
+        symbol: "rc_run",
+        params: ["f64"],
+        returns: "f64",
+      }],
+    }));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <stdint.h>",
+      "#include <stdio.h>",
+      "extern void rc_init(void);",
+      "extern double rc_run(double value);",
+      "extern int32_t rc_set_callback(const char *name, void (*fn)(void), void *ctx);",
+      "static double add(void *ctx, double value) {",
+      "  return value + *(double *)ctx;",
+      "}",
+      "int main(void) {",
+      "  double increment = 3;",
+      "  printf(\"register: %d\\n\", rc_set_callback(\"hostAdd\", (void (*)(void))add, &increment));",
+      "  rc_init();",
+      "  printf(\"run: %.0f\\n\", rc_run(5));",
+      "  return 0;",
+      "}",
+      "",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      probeSource,
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    expect(execFileSync(probe, { encoding: "utf8" })).toBe(
+      "register: 0\ncallback ready\nrun: 16\n",
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);

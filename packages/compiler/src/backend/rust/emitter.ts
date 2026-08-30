@@ -38,7 +38,6 @@ export class RustUnsupportedError extends Error {
     this.name = "RustUnsupportedError";
   }
 }
-
 /** Emit deterministic, safe Rust. Unsupported IR always refuses explicitly. */
 export function emitRustModule(mod: IrModule): string {
   return new RustEmitter(mod).emit();
@@ -254,6 +253,7 @@ class RustEmitter {
     closureShapes: this.closureShapes,
     dynBoxedFunctionShapes: this.dynBoxedFunctionShapes,
     ffiImports: () => this.mod.ffiImports ?? [],
+    libraryCallbacks: () => this.mod.lib?.callbacks ?? [],
     functions: this.functions,
     records: this.records,
     nextName: (prefix) => `${prefix}_${this.temporary++}`,
@@ -509,7 +509,7 @@ class RustEmitter {
       this.line("use std::cell::{Cell, RefCell};");
     }
     this.line("");
-    this.lines.push(...emitRustFfiDeclarations(this.mod.ffiImports ?? []));
+    this.lines.push(...emitRustFfiDeclarations(this.mod.ffiImports ?? [], this.mod.lib?.callbacks ?? []));
     this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value), (kind) => this.unsupported(kind)));
     this.emitClosureDefinitions();
     this.emitDynamicDefinition();
