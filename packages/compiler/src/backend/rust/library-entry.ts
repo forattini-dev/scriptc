@@ -78,6 +78,7 @@ function parameterValue(
     case "u8":
     case "u32":
     case "i32": return `f64::from(${name})`;
+    case "string": return `sc_library_string_in(${name}_ptr, ${name}_len)`;
     default: return unsupported(`library parameter class '${cls}'`);
   }
 }
@@ -106,6 +107,19 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `std::thread_local! {`,
     `    static SC_LIBRARY_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
     `}`,
+  ];
+  if (lib.exports.some((entry) => entry.params.includes("string"))) {
+    lines.push(
+      "",
+      `fn sc_library_string_in(data: *const u8, len: usize) -> runtime::JsString {`,
+      `    if len == 0 { return runtime::empty_string(); }`,
+      `    assert!(!data.is_null(), "scriptc: NULL library string with nonzero length");`,
+      `    let bytes = unsafe { std::slice::from_raw_parts(data, len) };`,
+      `    runtime::string(String::from_utf8_lossy(bytes).as_ref())`,
+      `}`,
+    );
+  }
+  lines.push(
     "",
     `#[unsafe(no_mangle)]`,
     `pub extern "C" fn ${lib.sinkRegisterSymbol}(`,
@@ -124,7 +138,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    runtime::init();`,
     `    ${mangleFunction(options.entryName)}();`,
     `}`,
-  ];
+  );
 
   if (lib.collectSymbol !== null) {
     lines.push(
@@ -144,8 +158,10 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
   }
 
   for (const entry of lib.exports) {
-    const params = entry.params.map(
-      (cls, index) => `sc_arg_${index}: ${parameterType(cls, unsupported)}`,
+    const params = entry.params.flatMap((cls, index) =>
+      cls === "string"
+        ? [`sc_arg_${index}_ptr: *const u8`, `sc_arg_${index}_len: usize`]
+        : [`sc_arg_${index}: ${parameterType(cls, unsupported)}`]
     );
     const args = entry.params.map(
       (cls, index) => parameterValue(`sc_arg_${index}`, cls, unsupported),

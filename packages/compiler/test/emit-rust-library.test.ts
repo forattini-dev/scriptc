@@ -56,3 +56,72 @@ test("Rust library archives expose scalar exports to a native host", async () =>
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library archives decode host string spans", async () => {
+  const fixture = resolve("tests/library-mode/buffers");
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-string-"));
+  try {
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-string-input",
+      entry: join(fixture, "lib.ts"),
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "kb_",
+        init_symbol: "kb_init",
+        sink_register_symbol: "kb_set_panic_sink",
+        collect_symbol: "kb_collect",
+        result_reset_symbol: null,
+      },
+      exports: [{
+        export: "strlen",
+        symbol: "kb_strlen",
+        params: ["string"],
+        returns: "f64",
+      }],
+    }));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <stddef.h>",
+      "#include <stdint.h>",
+      "#include <stdio.h>",
+      "extern void kb_init(void);",
+      "extern double kb_strlen(const uint8_t *p, size_t len);",
+      "int main(void) {",
+      "  kb_init();",
+      "  printf(\"lengths: %.0f %.0f\\n\", kb_strlen(NULL, 0),",
+      "         kb_strlen((const uint8_t *)\"caf\\xC3\\xA9\", 5));",
+      "  return 0;",
+      "}",
+      "",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      probeSource,
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    expect(execFileSync(probe, { encoding: "utf8" })).toBe(
+      "buffers ready\nlengths: 0 4\n",
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);
