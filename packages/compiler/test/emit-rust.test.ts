@@ -994,6 +994,7 @@ shardedTest.each(shardSelect([
   "1531-delete-optional-fields.ts",
   "1533-bool-equality.ts",
   "1533-path-platform-namespaces.ts",
+  "1534-crypto-hash-chain.ts",
   "1537-chalk-hybrid/main.ts",
   "1539-readonly-set-map.ts",
   "1539-unknown-truthiness.ts",
