@@ -993,7 +993,9 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       ? implicitCallInstance(L, expr, info)
       : genericCallInstance(L, expr, info);
     const args = L.completeArgs(expr.arguments, instance.params, loc, expr);
-    return { kind: "call", callee: instance.name, args, type: instance.returnType, loc };
+    return reconcileOverloadReturn(L, expr, {
+      kind: "call", callee: instance.name, args, type: instance.returnType, loc,
+    });
   }
 
 /** The instance a CALL of a generic function-like names: resolved
@@ -1002,20 +1004,40 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
    * prepends the receiver), and object-literal generic-method calls. */
   export function genericCallInstance(L: Lowerer, expr: ts.CallExpression, info: GenericFnInfo): GenericInstance {
     const rsig = L.checker.getResolvedSignature(expr);
-    // A GENERIC function with overload signatures: the call resolved to a
-    // signature that is not the implementation's, so the per-instantiation
-    // body lowering would type the body against parameter/return types it
-    // was never checked under. Named fence until generic overloads get an
-    // honest story (monomorphize per implementation signature with the
-    // reconcile bridge, like the non-generic path).
-    {
-      const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
-      if (rdecl && (ts.isFunctionDeclaration(rdecl) || ts.isMethodDeclaration(rdecl)) && !rdecl.body) {
-        L.unsupported("SC1090", expr, `calls selecting an overload signature of a generic ${ts.isMethodDeclaration(rdecl) ? "method" : "function"} (only the implementation signature monomorphizes)`);
-      }
-    }
-    if (!rsig || rsig.getParameters().length !== info.decl.parameters.length) {
+    const rdecl = rsig ? L.checker.signatureDeclaration(rsig) : undefined;
+    const selectedOverload =
+      rdecl !== undefined &&
+      (ts.isFunctionDeclaration(rdecl) || ts.isMethodDeclaration(rdecl)) &&
+      rdecl.body === undefined;
+    if (!rsig || (!selectedOverload && rsig.getParameters().length !== info.decl.parameters.length)) {
       L.unsupported("SC1090", expr, "this call form");
+    }
+    if (selectedOverload) {
+      // The selected signature binds the type parameters, but it is not a
+      // body contract: tsc checked the implementation only against its own
+      // wider signature. Derive the native ABI from that implementation
+      // under the recovered bindings; lowerGenericCall projects its result
+      // back through reconcileOverloadReturn at this call site.
+      const tsBindings = new Map<ts.Symbol, ts.Type>();
+      const bindings = L.inferTypeParamBindings(expr, info, rsig, tsBindings);
+      const prevBindings = L.typeParamBindings;
+      const prevTsBindings = L.typeParamTsBindings;
+      const classBindings = info.member?.cls.genericInstance?.bindings;
+      L.typeParamBindings = classBindings
+        ? new Map([...classBindings, ...bindings])
+        : bindings;
+      L.typeParamTsBindings = tsBindings;
+      try {
+        const params = L.paramShapes(info.decl.parameters);
+        const nameBlame = (ts.isArrowFunction(info.decl) ? undefined : info.decl.name) ?? info.decl;
+        const returnType = L.declaredReturnType(info.decl, nameBlame);
+        return internGenericInstance(L, expr, info, params, returnType, () => bindings, {
+          tsBindings,
+        });
+      } finally {
+        L.typeParamBindings = prevBindings;
+        L.typeParamTsBindings = prevTsBindings;
+      }
     }
     // Per-param shapes from the RESOLVED signature (types substituted) plus
     // the declaration's modes: rest stays the resolved array, a default's
