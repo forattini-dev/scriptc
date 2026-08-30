@@ -384,13 +384,11 @@ export class RustAsyncControlEmitter {
       this.containsAsyncSuspension(stmt.update)) {
       this.context.unsupported("async suspension in for init, condition, or update", stmt.loc);
     }
-    if (this.containsLoopControl(stmt.body)) {
-      this.context.unsupported("break or continue in a suspended async for", stmt.loc);
-    }
     if (stmt.init !== null) {
       this.context.emitStatement(stmt.init);
       if (stmt.init.kind === "varDecl") this.context.currentAsyncLocals()?.add(stmt.init.localId);
     }
+    const outerLoopControl = this.loopControl;
     const loopLocals = new Set(this.context.currentAsyncLocals() ?? []);
     const helper = this.context.nextName("sc_async_loop");
     const locals = [...loopLocals].map((localId) => this.context.local(localId, stmt.loc));
@@ -410,17 +408,20 @@ export class RustAsyncControlEmitter {
     this.withAsyncLocals(new Set(loopLocals), () => {
       this.context.line(`if ${stmt.cond === null ? "true" : this.context.emitExpr(stmt.cond)} {`);
       this.context.pushIndent();
-      this.emitAsyncStatements(stmt.body, () => {
-        this.withAsyncLocals(new Set(loopLocals), () => {
-          if (stmt.update !== null) this.context.emitStatement(stmt.update);
-          this.context.line(call());
-          this.context.line("return;");
-        });
+      const continueLoop = () => this.withAsyncLocals(new Set(loopLocals), () => {
+        if (stmt.update !== null) this.context.emitStatement(stmt.update);
+        this.context.line(call());
+        this.context.line("return;");
       });
+      this.withLoopControl({
+        breakLoop: () => this.withAsyncLocals(new Set(loopLocals), () =>
+          this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete))),
+        continueLoop,
+      }, () => this.emitAsyncStatements(stmt.body, continueLoop));
       this.context.popIndent();
       this.context.line("} else {");
       this.context.pushIndent();
-      this.emitAsyncStatements(remaining, onComplete);
+      this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete));
       this.context.popIndent();
       this.context.line("}");
     });
