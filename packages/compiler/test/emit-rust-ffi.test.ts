@@ -49,12 +49,22 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "uint32_t sf_mix(sf_mix_cb callback, void *context) {",
     "  return context == NULL ? 0 : callback(2, 255, 4000000000u, -7, 0.5, context);",
     "}",
+    "typedef void (*sf_spans_cb)(const uint8_t *text, size_t text_len,",
+    "                            const uint8_t *bytes, size_t bytes_len, void *context);",
+    "void sf_spans(sf_spans_cb callback, void *context) {",
+    "  uint8_t text[] = {'A', 0, 'B', 0xc3, 0xa9};",
+    "  uint8_t bytes[] = {0, 255, 1};",
+    "  callback(text, sizeof text, bytes, sizeof bytes, context);",
+    "  for (size_t i = 0; i < sizeof text; i++) text[i] = 'x';",
+    "  for (size_t i = 0; i < sizeof bytes; i++) bytes[i] = 42;",
+    "  callback(NULL, 0, NULL, 0, context);",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
   await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
   await writeFile(profilePath, JSON.stringify({
-    ffi_format: 2,
+    ffi_format: 3,
     functions: [{
       name: "nativeScale",
       symbol: "sf_scale",
@@ -136,6 +146,18 @@ test("Rust executables call manifest-bound native value functions", async () => 
         },
       }, { context: "mix" }],
       returns: "u32",
+    }, {
+      name: "nativeCallbackSpans",
+      symbol: "sf_spans",
+      params: [{
+        callback: {
+          id: "spans",
+          params: ["string", "bytes", { context: "spans" }],
+          returns: "void",
+          lifetime: "call",
+        },
+      }, { context: "spans" }],
+      returns: "void",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -153,6 +175,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "declare function nativeApply(callback: (value: number) => number, value: number): number;",
     "declare function nativeApplyContext(callback: (value: number) => number, value: number): number;",
     "declare function nativeCallbackMix(callback: (truth: boolean, byte: number, wide: number, signed: number, fraction: number) => number): number;",
+    "declare function nativeCallbackSpans(callback: (text: string, bytes: Uint8Array) => void): void;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
@@ -172,6 +195,13 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "  console.log(truth, byte, wide, signed, fraction);",
     "  return -1;",
     "}));",
+    "let copiedText = '';",
+    "let copiedBytes: Uint8Array = new Uint8Array(0);",
+    "nativeCallbackSpans((text, bytes) => {",
+    "  if (text.length === 0) console.log('empty', text.length, bytes.length);",
+    "  else { copiedText = text; copiedBytes = bytes; }",
+    "});",
+    "console.log(copiedText.length, copiedText.charCodeAt(1), copiedText.slice(2), copiedBytes.join(','));",
     "try {",
     "  nativeApplyContext(() => { throw new Error('ffi context boom'); }, 1);",
     "} catch (error) {",
@@ -195,6 +225,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n42\ncaught ffi callback boom\ntrue 255 4000000000 -7 0.5\n4294967295\ncaught ffi context boom\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n42\ncaught ffi callback boom\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught ffi context boom\n");
   expect(run.stderr).toBe("");
 });

@@ -295,6 +295,14 @@ pub fn ffi_bytes_snapshot(bytes: &JsBytes<u8>) -> Vec<u8> {
     bytes_values(bytes)
 }
 
+pub fn ffi_string_copy_in(values: &[u8]) -> JsString {
+    Rc::from(String::from_utf8_lossy(values).as_ref())
+}
+
+pub fn ffi_bytes_copy_in(values: &[u8]) -> JsBytes<u8> {
+    bytes_from_elements(values.to_vec())
+}
+
 pub fn process_stdout_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
     use std::io::Write;
     let _ = encoding;
