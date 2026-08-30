@@ -108,6 +108,10 @@ function emitOperation(
     const receiver = context.nextName("sc_island_receiver");
     const dyn = context.dynTypeName();
     const name = context.rustString(expr.name);
+    if (!context.hasEmbeddedModules()) {
+      return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; ` +
+        `sc_dyn_key_get(&${receiver}, &runtime::string("${name}"), false) }`;
+    }
     return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; match &${receiver} { ` +
       `${dyn}::Island(sc_value) => ${dyn}::Island(runtime::island_get_property(sc_value, "${name}")), ` +
       `sc_value => sc_dyn_key_get(sc_value, &runtime::string("${name}"), false), } }`;

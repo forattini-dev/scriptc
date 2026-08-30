@@ -8038,6 +8038,42 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       return null;
     }
+    // Object.defineProperty over a CHECKED-DYNAMIC target or a boxable
+    // compiled closure. Reuse the defineProperties runtime operation with
+    // a one-entry descriptor map: FUNC property tables live on the closure
+    // itself, so later boxes of the same function observe the property.
+    // Literal string keys cover the component/displayName idiom without
+    // pretending that arbitrary PropertyKey coercion is implemented.
+    if (member === "defineProperty" && call.arguments.length === 3 &&
+        !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      const keyNode = call.arguments[1]!;
+      if (ts.isStringLiteralLike(keyNode)) {
+        let target = probeLower(L, call.arguments[0]!);
+        if (
+          target && target.type.kind === "func" &&
+          canBoxFuncIntoDyn(target.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+        ) {
+          target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
+        }
+        if (target?.type.kind === "dyn") {
+          const descriptor = L.lowerExprExpecting(call.arguments[2]!, DYN);
+          if (descriptor.type.kind === "dyn") {
+            const loc = locOf(call);
+            const descriptors: IrExpr = {
+              kind: "dynObjLit",
+              fields: [{
+                key: { kind: "strLit", value: keyNode.text, type: STRING, loc: locOf(keyNode) },
+                value: descriptor,
+              }],
+              type: DYN,
+              loc,
+            };
+            return { kind: "libCall", fn: "dyn.defineProps", args: [target, descriptors], type: DYN, loc };
+          }
+        }
+      }
+      return null;
+    }
     // Object.defineProperties over a CHECKED-DYNAMIC target (test/common's
     // _mustCallInner copying name/length onto the mustCall wrapper): the
     // runtime turns each descriptor's `value` into a plain own property on

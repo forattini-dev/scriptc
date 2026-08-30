@@ -1861,6 +1861,38 @@ static JSValue isl_hostfn_invoke(JSContext *ctx, JSValueConst this_val, int argc
   return out;
 }
 
+/* A compiled closure's dynamic own-property table follows it across the
+ * typed host-function bridge. Object.defineProperty/defineProperties attach
+ * entries to the closure before it is returned through an `any`-typed
+ * overload; the fresh engine function must expose the same data properties.
+ * Descriptor flags are intentionally normalized to ordinary enumerable
+ * properties, matching scr_dyn_define_props' documented dynamic stance. */
+static bool isl_copy_closure_props(ScrClosure *c, JSValue fn) {
+  if (!c->props) return true;
+  ScrDyn *table = (ScrDyn *)scr_box_get_ref(c->props); /* +1 */
+  if (!table || table->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(table);
+    return true;
+  }
+  for (size_t i = 0; i < table->v.obj.len; i++) {
+    ScrDynEntry *ent = &table->v.obj.entries[i];
+    JSValue value = isl_from_dyn(ent->value);
+    if (JS_IsException(value)) {
+      isl_bridge_exception();
+      scr_dyn_release(table);
+      return false;
+    }
+    /* JS_SetPropertyStr consumes value, including on failure. */
+    if (JS_SetPropertyStr(isl_ctx, fn, ent->key, value) < 0) {
+      isl_bridge_exception();
+      scr_dyn_release(table);
+      return false;
+    }
+  }
+  scr_dyn_release(table);
+  return true;
+}
+
 ScrJsval *scr_jsval_from_closure(ScrClosure *c, int arity,
                                   ScrJsval *(*adapt)(ScrClosure *, ScrJsval **)) {
   isl_entry();
@@ -1884,6 +1916,10 @@ ScrJsval *scr_jsval_from_closure(ScrClosure *c, int arity,
   JSValueConst data[1] = {box};
   JSValue fn = JS_NewCFunctionData(isl_ctx, isl_hostfn_invoke, arity < 0 ? -arity - 1 : arity, 0, 1, data);
   JS_FreeValue(isl_ctx, box); /* fn's func_data holds its own reference */
+  if (!isl_copy_closure_props(c, fn)) {
+    JS_FreeValue(isl_ctx, fn);
+    return NULL;
+  }
   return isl_cell_new(fn);
 }
 
