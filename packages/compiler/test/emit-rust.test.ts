@@ -1270,6 +1270,7 @@ shardedTest.each(shardSelect([
   "2123-ambient-import-crash/main.ts",
   "2124-imports-field-wildcard/main.ts",
   "2130-overload-island-returns.ts",
+  "2160-dc-tracing-channel.cjs",
   "2161-js-object-literal-identity.cjs",
   "2162-js-dyn-destructure.cjs",
   "2165-js-throw-dyn.cjs",
