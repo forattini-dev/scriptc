@@ -5,7 +5,7 @@ import { InternalCompilerError } from "../../errors.js";
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
@@ -3249,31 +3249,43 @@ export function lowerStaticReadableStreamReaderCall(
         return { kind: "libCall", fn: staticMath.fn, args, type: F64, loc };
       }
     }
-    // `Math.max(...xs)` / `Math.min(...xs)` over a number[]: a STATIC
-    // runtime fold (JS-exact: NaN poisons, ±0 order by the JS rules, the
-    // empty array yields ∓Infinity like the zero-arg calls) — no island
-    // involved, so it works without --dynamic too. Only the exact
-    // one-spread form lowers; mixed spread/positional argument lists keep
-    // the nest-calls fence.
+    // A Math.max/Math.min list containing ONE number[] spread: pack the
+    // spread and any positional numbers into a fresh number[] in source
+    // order, then use the existing JS-exact runtime fold. This covers both
+    // Math.min(...xs) and the lease/deadline idiom
+    // Math.min(...expirations, safetyPollMs, remaining). Array construction
+    // drains the spread before evaluating the following argument, like JS.
     if (
       isMath &&
       (name === "max" || name === "min") &&
-      call.arguments.length === 1 &&
-      ts.isSpreadElement(call.arguments[0]!)
+      call.arguments.filter(ts.isSpreadElement).length === 1
     ) {
-      const spread = call.arguments[0]! as ts.SpreadElement;
-      const src = L.lowerExpr(spread.expression);
-      if (src.type.kind !== "array" || src.type.elem.kind !== "f64") {
-        L.unsupported(
-          "SC1090",
-          spread,
-          `spreading '${L.fmt(src.type)}' into Math.${name} (only a number[] spreads)`,
-        );
+      const elems: IrExpr[] = [];
+      const spreads: number[] = [];
+      for (const argument of call.arguments) {
+        if (!ts.isSpreadElement(argument)) {
+          elems.push(L.lowerExprExpecting(argument, F64));
+          continue;
+        }
+        const src = L.lowerExpr(argument.expression);
+        if (src.type.kind !== "array" || src.type.elem.kind !== "f64") {
+          L.unsupported(
+            "SC1090",
+            argument,
+            `spreading '${L.fmt(src.type)}' into Math.${name} (only a number[] spreads)`,
+          );
+        }
+        spreads.push(elems.length);
+        elems.push(src);
       }
+      const sole = elems[0];
+      const packed: IrExpr = elems.length === 1 && spreads[0] === 0 && sole !== undefined
+        ? sole
+        : { kind: "arrayLit", elems, spreads, type: arrayOf(F64), loc };
       return {
         kind: "libCall",
         fn: name === "max" ? "math.maxArr" : "math.minArr",
-        args: [src],
+        args: [packed],
         type: F64,
         loc,
       };
