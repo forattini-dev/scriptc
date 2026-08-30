@@ -54,6 +54,17 @@ function rawF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | 
     : null;
 }
 
+function isRawF64CallbackPair(binding: IrFfiImport): boolean {
+  const left = binding.params[0];
+  const right = binding.params[1];
+  const matches = (value: typeof left): boolean => value !== undefined &&
+    isFfiCallbackParam(value) && value.callback.params.length === 1 &&
+    value.callback.params[0] === "f64" && value.callback.returns === "f64" &&
+    value.callback.lifetime === "call";
+  return binding.params.length === 3 && matches(left) && matches(right) &&
+    binding.params[2] === "f64" && binding.returns === "f64";
+}
+
 function contextF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
   const callback = binding.params[0];
   const context = binding.params[2];
@@ -149,6 +160,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (isRawF64CallbackPair(binding)) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64) -> f64, sc_arg_1: extern "C" fn(f64) -> f64, sc_arg_2: f64) -> f64;`];
+    }
     if (cstringContextCallback(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(*const std::ffi::c_char, *mut std::ffi::c_void), sc_arg_1: *mut std::ffi::c_void);`];
@@ -193,6 +208,37 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  if (binding !== undefined && isRawF64CallbackPair(binding)) {
+    const leftArgument = expr.args[0];
+    const rightArgument = expr.args[1];
+    const valueArgument = expr.args[2];
+    if (expr.args.length !== 3 || leftArgument?.type.kind !== "func" ||
+        rightArgument?.type.kind !== "func" || valueArgument?.type.kind !== "f64" ||
+        expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the paired callback ABI`, expr.loc);
+    }
+    const leftValue = context.nextName("sc_ffi_callback_left_value");
+    const rightValue = context.nextName("sc_ffi_callback_right_value");
+    const nativeValue = context.nextName("sc_ffi_callback_argument");
+    const leftSlot = context.nextName("SC_FFI_CALLBACK_LEFT");
+    const rightSlot = context.nextName("SC_FFI_CALLBACK_RIGHT");
+    const panicSlot = context.nextName("SC_FFI_CALLBACK_PANIC");
+    const leftTrampoline = context.nextName("sc_ffi_callback_left");
+    const rightTrampoline = context.nextName("sc_ffi_callback_right");
+    const leftIncoming = context.nextName("sc_ffi_callback_left_incoming");
+    const rightIncoming = context.nextName("sc_ffi_callback_right_incoming");
+    const leftActive = context.nextName("sc_ffi_callback_left_active");
+    const rightActive = context.nextName("sc_ffi_callback_right_active");
+    const previousLeft = context.nextName("sc_ffi_callback_previous_left");
+    const previousRight = context.nextName("sc_ffi_callback_previous_right");
+    const previousPanic = context.nextName("sc_ffi_callback_previous_panic");
+    const result = context.nextName("sc_ffi_callback_result");
+    const panic = context.nextName("sc_ffi_callback_panic");
+    const closureType = context.rustType(leftArgument.type, expr.loc);
+    const leftDispatch = context.emitClosureDispatch(leftActive, leftArgument.type, [leftIncoming], expr.loc);
+    const rightDispatch = context.emitClosureDispatch(rightActive, rightArgument.type, [rightIncoming], expr.loc);
+    return `{ let ${leftValue} = ${emitExpr(leftArgument)}; let ${rightValue} = ${emitExpr(rightArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; std::thread_local! { static ${leftSlot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; static ${rightSlot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; static ${panicSlot}: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${leftTrampoline}(${leftIncoming}: f64) -> f64 { if ${panicSlot}.with(|sc_slot| sc_slot.borrow().is_some()) { return 0.0; } match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${leftSlot}.with(|sc_slot| { let ${leftActive} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its call scope").clone(); ${leftDispatch} }))) { Ok(sc_value) => sc_value, Err(sc_payload) => { ${panicSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = Some(sc_payload); }); 0.0 } } } extern "C" fn ${rightTrampoline}(${rightIncoming}: f64) -> f64 { if ${panicSlot}.with(|sc_slot| sc_slot.borrow().is_some()) { return 0.0; } match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${rightSlot}.with(|sc_slot| { let ${rightActive} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its call scope").clone(); ${rightDispatch} }))) { Ok(sc_value) => sc_value, Err(sc_payload) => { ${panicSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = Some(sc_payload); }); 0.0 } } } let ${previousPanic} = ${panicSlot}.with(|sc_slot| sc_slot.take()); let ${previousLeft} = ${leftSlot}.with(|sc_slot| sc_slot.replace(Some(${leftValue}))); let ${previousRight} = ${rightSlot}.with(|sc_slot| sc_slot.replace(Some(${rightValue}))); let ${result} = unsafe { ${functionName(index)}(${leftTrampoline}, ${rightTrampoline}, ${nativeValue}) }; let ${panic} = ${panicSlot}.with(|sc_slot| sc_slot.take()); ${rightSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previousRight}; }); ${leftSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previousLeft}; }); ${panicSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previousPanic}; }); if let Some(sc_payload) = ${panic} { std::panic::resume_unwind(sc_payload); } ${result} }`;
+  }
   const cstringCallback = binding === undefined ? null : cstringContextCallback(binding);
   if (cstringCallback !== null) {
     const callbackArgument = expr.args[0];
