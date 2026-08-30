@@ -326,8 +326,8 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "splice",
-    "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
+  static const char *names[] = { "keys", "values", "entries",
+    "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -552,7 +552,7 @@ static ScrDyn *scr_dyn_invoke_impl(
       for (size_t i = start; i < end; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       return out;
     }
-    if (dyn_name_is(method, "splice") && argc <= 2) {
+    if (dyn_name_is(method, "splice")) {
       double startD = dyn_index_arg(args, argc, 0, 0, what);
       if (scr_exc_pending()) return NULL;
       size_t start = dyn_rel_index(startD, len);
@@ -560,14 +560,36 @@ static ScrDyn *scr_dyn_invoke_impl(
       if (scr_exc_pending()) return NULL;
       size_t count = countD <= 0 ? 0 : countD >= (double)(len - start)
         ? len - start : (size_t)countD;
+      size_t insert_count = argc > 2 ? argc - 2 : 0;
+      ScrDyn **inserted = insert_count
+        ? (ScrDyn **)malloc(insert_count * sizeof(ScrDyn *)) : NULL;
+      if (insert_count && !inserted) {
+        scr_throw_error_msg(SCR_ERR_ERROR, "Out of memory", 13);
+        return NULL;
+      }
+      for (size_t i = 0; i < insert_count; i++) {
+        inserted[i] = scr_dyn_retain(args[i + 2]);
+      }
       ScrDyn *out = scr_dyn_new_arr();
       for (size_t i = 0; i < count; i++) {
         scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[start + i]));
         scr_dyn_release(recv->v.arr.items[start + i]);
       }
-      memmove(recv->v.arr.items + start, recv->v.arr.items + start + count,
+      size_t new_len = len - count + insert_count;
+      while (recv->v.arr.len < new_len) {
+        scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
+      }
+      for (size_t i = len; i < new_len; i++) {
+        scr_dyn_release(recv->v.arr.items[i]);
+      }
+      memmove(recv->v.arr.items + start + insert_count,
+              recv->v.arr.items + start + count,
               (len - start - count) * sizeof(ScrDyn *));
-      recv->v.arr.len -= count;
+      for (size_t i = 0; i < insert_count; i++) {
+        recv->v.arr.items[start + i] = inserted[i];
+      }
+      recv->v.arr.len = new_len;
+      free(inserted);
       return out;
     }
     if (dyn_name_is(method, "at")) {

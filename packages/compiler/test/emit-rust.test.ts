@@ -1626,6 +1626,7 @@ shardedTest.each(shardSelect([
   "2771-dyn-array-flat-default.cjs",
   "2772-dyn-array-flat-depth.cjs",
   "2773-dyn-array-splice-remove.cjs",
+  "2774-dyn-array-splice-insert.cjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

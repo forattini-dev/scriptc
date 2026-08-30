@@ -259,12 +259,21 @@ pub fn array_splice<T: ArrayElement>(
     start: f64,
     delete_count: f64,
 ) -> JsArray<T> {
+    array_splice_with_items(array, start, delete_count, Vec::new())
+}
+
+pub fn array_splice_with_items<T: ArrayElement>(
+    array: &JsArray<T>,
+    start: f64,
+    delete_count: f64,
+    items: Vec<T>,
+) -> JsArray<T> {
     let removed = array.with_mut(|data| {
         let start = array_relative_index(start, data.elements.len());
         let available = data.elements.len() - start;
         let delete_count = array_delete_count(delete_count, available);
         data.elements
-            .drain(start..start + delete_count)
+            .splice(start..start + delete_count, items)
             .collect::<Vec<_>>()
     });
     array_new(removed)
