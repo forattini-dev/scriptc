@@ -969,6 +969,7 @@ shardedTest.each(shardSelect([
   "1440-interval-basics.ts",
   "1441-interval-clear-cross.ts",
   "1442-interval-throw.ts",
+  "1443-signal-handlers.ts",
   "1445-exit-process-exit.ts",
   "1446-exit-uncaught.ts",
   "1448-stream-columns.ts",
