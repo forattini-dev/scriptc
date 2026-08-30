@@ -133,7 +133,8 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    static SC_LIBRARY_SINK: std::cell::Cell<Option<ScLibrarySink>> = const { std::cell::Cell::new(None) };`,
     `    static SC_LIBRARY_SINK_CONTEXT: std::cell::Cell<*mut std::ffi::c_void> = const { std::cell::Cell::new(std::ptr::null_mut()) };`,
     ...(lib.callbacks?.length
-      ? [`    static SC_LIBRARY_CALLBACKS: std::cell::RefCell<[ScLibraryCallback; ${lib.callbacks.length}]> = const { std::cell::RefCell::new([ScLibraryCallback { callback: None, context: std::ptr::null_mut() }; ${lib.callbacks.length}]) };`]
+      ? [`    static SC_LIBRARY_CALLBACKS: std::cell::RefCell<[ScLibraryCallback; ${lib.callbacks.length}]> = const { std::cell::RefCell::new([ScLibraryCallback { callback: None, context: std::ptr::null_mut() }; ${lib.callbacks.length}]) };`,
+        `    static SC_LIBRARY_CALLBACK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };`]
       : []),
     ...(hasResults
       ? [`    static SC_LIBRARY_RESULTS: std::cell::RefCell<Vec<Box<[u8]>>> = const { std::cell::RefCell::new(Vec::new()) };`]
@@ -142,8 +143,19 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
   ];
   lines.push(
     "",
-    `fn sc_library_check_entry() {`,
+    ...(lib.callbacks?.length
+      ? [`fn sc_library_check_reentry(symbol: &'static str) {`,
+        `    if SC_LIBRARY_CALLBACK_DEPTH.with(std::cell::Cell::get) != 0 {`,
+        `        sc_library_deliver("scriptc: library entry called from a host callback\n", "SC4019", symbol);`,
+        `    }`,
+        `}`,
+        ""]
+      : []),
+    `fn sc_library_check_entry(symbol: &'static str) {`,
     `    if SC_LIBRARY_POISONED.with(std::cell::Cell::get) { std::process::abort(); }`,
+    ...(lib.callbacks?.length
+      ? [`    sc_library_check_reentry(symbol);`]
+      : []),
     `}`,
     "",
     `fn sc_library_deliver(text: &str, code: &str, symbol: &'static str) -> ! {`,
@@ -173,7 +185,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `}`,
     "",
     `fn sc_library_call<T>(symbol: &'static str, call: impl FnOnce() -> T) -> T {`,
-    `    sc_library_check_entry();`,
+    `    sc_library_check_entry(symbol);`,
     `    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {`,
     `        Ok(value) => value,`,
     `        Err(payload) => sc_library_escape(payload, symbol),`,
@@ -182,6 +194,19 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
   );
   if (lib.callbacks?.length) {
     lines.push(
+      "",
+      `struct ScLibraryCallbackGuard;`,
+      `impl ScLibraryCallbackGuard {`,
+      `    fn enter() -> Self {`,
+      `        SC_LIBRARY_CALLBACK_DEPTH.with(|depth| depth.set(depth.get() + 1));`,
+      `        Self`,
+      `    }`,
+      `}`,
+      `impl Drop for ScLibraryCallbackGuard {`,
+      `    fn drop(&mut self) {`,
+      `        SC_LIBRARY_CALLBACK_DEPTH.with(|depth| depth.set(depth.get() - 1));`,
+      `    }`,
+      `}`,
       "",
       `fn sc_library_callback(slot: usize) -> Option<(ScLibraryRawCallback, *mut std::ffi::c_void)> {`,
       `    SC_LIBRARY_CALLBACKS.with(|callbacks| {`,
@@ -196,6 +221,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `    callback: Option<ScLibraryRawCallback>,`,
       `    context: *mut std::ffi::c_void,`,
       `) -> i32 {`,
+      `    sc_library_check_reentry(${JSON.stringify(lib.callbackRegisterSymbol)});`,
       `    if name.is_null() { return -1; }`,
       `    let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_bytes();`,
     );
@@ -275,6 +301,9 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    sink: Option<ScLibrarySink>,`,
     `    context: *mut std::ffi::c_void,`,
     `) {`,
+    ...(lib.callbacks?.length
+      ? [`    sc_library_check_reentry(${JSON.stringify(lib.sinkRegisterSymbol)});`]
+      : []),
     `    SC_LIBRARY_SINK.with(|slot| slot.set(sink));`,
     `    SC_LIBRARY_SINK_CONTEXT.with(|slot| slot.set(context));`,
     `}`,
@@ -300,7 +329,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.collectSymbol}() {`,
       `    sc_library_host_entry();`,
-      `    sc_library_check_entry();`,
+      `    sc_library_check_entry(${JSON.stringify(lib.collectSymbol)});`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `    runtime::collect_cycles();`,
       `}`,
@@ -312,7 +341,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.resultResetSymbol}() {`,
       `    sc_library_host_entry();`,
-      `    sc_library_check_entry();`,
+      `    sc_library_check_entry(${JSON.stringify(lib.resultResetSymbol)});`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `}`,
     );

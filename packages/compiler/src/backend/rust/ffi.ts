@@ -412,7 +412,8 @@ export function emitRustFfiCall(
     const callback = context.nextName("sc_library_callback_typed");
     const parameters = nativeParameters.join(", ");
     const nativeReturn = returns === "void" ? "" : ` -> ${returns}`;
-    const call = `unsafe { ${callback}(${[opaque, ...values].join(", ")}) }`;
+    const call = `{ let _sc_library_callback_guard = ScLibraryCallbackGuard::enter(); ` +
+      `unsafe { ${callback}(${[opaque, ...values].join(", ")}) } }`;
     const result = returns === "i32" || returns === "u32" ? `f64::from(${call})` : call;
     return `{ ${bindings.join(" ")} let Some((${raw}, ${opaque})) = sc_library_callback(${libraryCallback.slot}) else { ` +
       `runtime::throw_error_code(${JSON.stringify(libraryCallback.unregisteredTrap)}.to_owned(), "SC4025"); }; ` +

@@ -989,3 +989,169 @@ test("Rust library archives pass the official host callback acceptance fixture",
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library entries trap synchronous reentry from a host callback", async () => {
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-reentry-"));
+  try {
+    const entry = join(work, "lib.ts");
+    writeFileSync(entry, [
+      "declare function hostCall(value: number): number;",
+      "export function run(value: number): number { return hostCall(value); }",
+      "console.log('reentry ready');",
+      "",
+    ].join("\n"));
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-callback-reentry",
+      entry,
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "rr_",
+        init_symbol: "rr_init",
+        sink_register_symbol: "rr_set_panic_sink",
+        collect_symbol: null,
+        result_reset_symbol: null,
+        callback_register_symbol: "rr_set_callback",
+      },
+      callbacks: [{ name: "hostCall", params: ["f64"], returns: "f64" }],
+      exports: [{ export: "run", symbol: "rr_run", params: ["f64"], returns: "f64" }],
+    }));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <setjmp.h>",
+      "#include <stddef.h>",
+      "#include <stdint.h>",
+      "#include <stdio.h>",
+      "static jmp_buf escape;",
+      "static int calls = 0;",
+      "extern void rr_init(void);",
+      "extern double rr_run(double value);",
+      "extern int32_t rr_set_callback(const char *name, void (*fn)(void), void *ctx);",
+      "extern void rr_set_panic_sink(void (*fn)(void *, const uint8_t *, size_t, uint64_t), void *);",
+      "static void sink(void *ctx, const uint8_t *msg, size_t len, uint64_t address) {",
+      "  (void)ctx; (void)address;",
+      "  fputs(\"sink:\", stdout);",
+      "  for (size_t i = 0; i < len; i++) {",
+      "    if (msg[i] == 1) continue;",
+      "    fputc(msg[i] == 31 ? '|' : msg[i], stdout);",
+      "  }",
+      "  fputc('\\n', stdout);",
+      "  longjmp(escape, 1);",
+      "}",
+      "static double reenter(void *ctx, double value) {",
+      "  (void)ctx; calls++;",
+      "  if (calls == 1) return rr_run(value + 1);",
+      "  return 99;",
+      "}",
+      "int main(void) {",
+      "  rr_set_panic_sink(sink, NULL);",
+      "  rr_set_callback(\"hostCall\", (void (*)(void))reenter, NULL);",
+      "  rr_init();",
+      "  if (setjmp(escape) == 0) printf(\"returned: %.0f\\n\", rr_run(1));",
+      "  printf(\"survived calls=%d\\n\", calls);",
+      "  return 0;",
+      "}",
+      "",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      probeSource,
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    const run = spawnSync(probe, [], { encoding: "utf8" });
+    expect(run.signal).toBeNull();
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe([
+      "reentry ready",
+      "sink:scriptc: library entry called from a host callback",
+      "|SC4019|rr_run",
+      "survived calls=1",
+      "",
+    ].join("\n"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("Rust library callback registration traps reentry from a host callback", async () => {
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-register-reentry-"));
+  try {
+    const entry = join(work, "lib.ts");
+    writeFileSync(entry, [
+      "declare function hostCall(value: number): number;",
+      "export function run(value: number): number { return hostCall(value); }",
+      "console.log('register reentry ready');",
+    ].join("\n"));
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-register-reentry",
+      entry,
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "rg_", init_symbol: "rg_init", sink_register_symbol: "rg_set_panic_sink",
+        collect_symbol: null, result_reset_symbol: null, callback_register_symbol: "rg_set_callback",
+      },
+      callbacks: [{ name: "hostCall", params: ["f64"], returns: "f64" }],
+      exports: [{ export: "run", symbol: "rg_run", params: ["f64"], returns: "f64" }],
+    }));
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(result.ok, result.ok ? undefined : result.diagnostics.map((d) => d.message).join("; ")).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <setjmp.h>", "#include <stddef.h>", "#include <stdint.h>", "#include <stdio.h>",
+      "static jmp_buf escape; static int calls = 0;",
+      "extern void rg_init(void); extern double rg_run(double);",
+      "extern int32_t rg_set_callback(const char *, void (*)(void), void *);",
+      "extern void rg_set_panic_sink(void (*)(void *, const uint8_t *, size_t, uint64_t), void *);",
+      "static void sink(void *ctx, const uint8_t *msg, size_t len, uint64_t address) {",
+      "  (void)ctx; (void)address; fputs(\"sink:\", stdout);",
+      "  for (size_t i = 0; i < len; i++) { if (msg[i] != 1) fputc(msg[i] == 31 ? '|' : msg[i], stdout); }",
+      "  fputc('\\n', stdout); longjmp(escape, 1);",
+      "}",
+      "static double reenter(void *ctx, double value) {",
+      "  (void)ctx; calls++; rg_set_callback(\"hostCall\", NULL, NULL); return value;",
+      "}",
+      "int main(void) {",
+      "  rg_set_panic_sink(sink, NULL); rg_set_callback(\"hostCall\", (void (*)(void))reenter, NULL); rg_init();",
+      "  if (setjmp(escape) == 0) printf(\"returned: %.0f\\n\", rg_run(4));",
+      "  printf(\"survived calls=%d\\n\", calls); return 0;",
+      "}",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", ["-std=c11", probeSource, result.archivePath, "-lm", "-ldl", "-lpthread", "-o", probe]);
+    const run = spawnSync(probe, [], { encoding: "utf8" });
+    expect(run.signal).toBeNull();
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe([
+      "register reentry ready",
+      "sink:scriptc: library entry called from a host callback",
+      "|SC4019|rg_set_callback",
+      "survived calls=1",
+      "",
+    ].join("\n"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);
