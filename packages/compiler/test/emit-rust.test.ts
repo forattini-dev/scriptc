@@ -1034,6 +1034,7 @@ shardedTest.each(shardSelect([
   "1565-spawn-pipe-streams.ts",
   "1568-x509-fingerprint.ts",
   "1569-fsp-mkdir-unlink-chmod.ts",
+  "1570-child-unref-kill-reffed.ts",
   "1571-optional-call-tostring-tail.ts",
   "1571-stdin-set-raw-mode-non-tty.ts",
   "1572-x509-validity-date-gettime.ts",
