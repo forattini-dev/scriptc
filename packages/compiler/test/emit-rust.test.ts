@@ -1287,6 +1287,7 @@ shardedTest.each(shardSelect([
   "2252-class-iterators.ts",
   "2253-union-coercions.ts",
   "2260-http2-constants.cjs",
+  "2282-queue-microtask.cjs",
   "2284-regexp-constructor.cjs",
   "2300-dyn-record-spread-and-keyed-access.cjs",
   "2301-cjs-export-table-dom-attach.cjs",
