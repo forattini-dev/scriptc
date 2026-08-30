@@ -997,6 +997,7 @@ shardedTest.each(shardSelect([
   "1483-array-slice.ts",
   "1521-fs-lstat-lock.ts",
   "1522-spawnsync-options.ts",
+  "1523-spawn-options.ts",
   "1524-catch-narrowing.ts",
   "1525-unknown-typeof-validation.ts",
   "1526-set-spread.ts",
