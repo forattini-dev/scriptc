@@ -4666,6 +4666,141 @@ function literalUnionArmOf(
   return recordArms.find((a) => a.shapeId === only) ?? null;
 }
 
+/** `{ ...request, id }` where both `request` and the asserted/contextual
+ * result are unions of records, and the one appended shorthand field is
+ * the only structural difference between each source/target arm. The
+ * source and appended value evaluate once, in JS order; a tag dispatch
+ * clones the active record into its uniquely matching target arm. */
+function lowerUnionRecordSpreadAppend(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  target: IrType & { kind: "union" },
+  loc: SrcLoc,
+): IrExpr | null {
+  if (expr.properties.length !== 2) return null;
+  const spread = expr.properties[0];
+  const append = expr.properties[1];
+  if (
+    !spread || !ts.isSpreadAssignment(spread) ||
+    !append || !ts.isShorthandPropertyAssignment(append) || !ts.isIdentifier(append.name)
+  ) return null;
+
+  const source = L.mapTypeOf(L.typeOf(spread.expression));
+  if (source?.kind !== "union") return null;
+  const sourceDef = L.unions.get(source.unionId);
+  const targetDef = L.unions.get(target.unionId);
+  if (
+    !sourceDef || !targetDef ||
+    sourceDef.arms.length < 2 || sourceDef.arms.length !== targetDef.arms.length ||
+    !sourceDef.arms.every((arm) => arm.kind === "record") ||
+    !targetDef.arms.every((arm) => arm.kind === "record")
+  ) {
+    return null;
+  }
+
+  const field = append.name.text;
+  const pairs: {
+    source: IrType & { kind: "record" };
+    sourceShape: IrRecordShape;
+    sourceTag: number;
+    target: IrType & { kind: "record" };
+    targetShape: IrRecordShape;
+    targetTag: number;
+  }[] = [];
+  for (const [sourceTag, sourceArm] of (sourceDef.arms as (IrType & { kind: "record" })[]).entries()) {
+    const sourceShape = L.shapes.get(sourceArm.shapeId);
+    if (!sourceShape || sourceShape.tuple || sourceShape.indexValue || sourceShape.fields.some((item) => item.name === field)) {
+      return null;
+    }
+    const candidates = (targetDef.arms as (IrType & { kind: "record" })[]).flatMap((targetArm, targetTag) => {
+      const targetShape = L.shapes.get(targetArm.shapeId);
+      if (!targetShape || targetShape.tuple || targetShape.indexValue) return [];
+      if (targetShape.fields.length !== sourceShape.fields.length + 1) return [];
+      if (!targetShape.fields.some((item) => item.name === field)) return [];
+      const preservesSource = sourceShape.fields.every((sourceField) => {
+        const targetField = targetShape.fields.find((item) => item.name === sourceField.name);
+        return targetField !== undefined && typeEquals(targetField.type, sourceField.type);
+      });
+      return preservesSource ? [{ target: targetArm, targetShape, targetTag }] : [];
+    });
+    const candidate = candidates[0];
+    if (!candidate || candidates.length !== 1) return null;
+    pairs.push({ source: sourceArm, sourceShape, sourceTag, ...candidate });
+  }
+  if (new Set(pairs.map((pair) => pair.targetTag)).size !== targetDef.arms.length) return null;
+
+  const fieldTypes = pairs.map((pair) => pair.targetShape.fields.find((item) => item.name === field)?.type);
+  const fieldType = fieldTypes[0];
+  if (!fieldType || !fieldTypes.every((candidate) => candidate !== undefined && typeEquals(candidate, fieldType))) return null;
+
+  const sourceValue = L.lowerExpr(spread.expression);
+  if (!typeEquals(sourceValue.type, source)) return null;
+  const sourceLocal = L.declareHiddenLocal("%unionSpread", source);
+  const appendedValue = L.coerceInto(append, L.lowerShorthandValue(append), fieldType);
+  const appendedLocal = L.declareHiddenLocal("%unionSpreadField", fieldType);
+  const sourceRef = (): IrExpr => varRef(sourceLocal.id, source, loc);
+  const appendedRef = (): IrExpr => varRef(appendedLocal.id, fieldType, loc);
+
+  const wrap = (pair: typeof pairs[number]): IrExpr => {
+    const narrowed = (): IrExpr => ({
+      kind: "unionNarrow",
+      unionId: source.unionId,
+      tag: pair.sourceTag,
+      value: sourceRef(),
+      type: pair.source,
+      loc,
+    });
+    const value: IrExpr = {
+      kind: "recordLit",
+      fields: pair.targetShape.fields.map((targetField) => {
+        if (targetField.name === field) return { name: targetField.name, value: appendedRef() };
+        const sourceField = pair.sourceShape.fields.find((candidate) => candidate.name === targetField.name);
+        if (!sourceField) throw new InternalCompilerError("lowerer bug: union spread target field missing from source arm");
+        return {
+          name: targetField.name,
+          value: {
+            kind: "recordGet",
+            obj: narrowed(),
+            shapeId: pair.source.shapeId,
+            field: targetField.name,
+            type: sourceField.type,
+            loc,
+          },
+        };
+      }),
+      type: pair.target,
+      loc,
+    };
+    return { kind: "unionWrap", unionId: target.unionId, tag: pair.targetTag, value, type: target, loc };
+  };
+
+  const lastPair = pairs[pairs.length - 1];
+  if (!lastPair) return null;
+  let result = wrap(lastPair);
+  for (let index = pairs.length - 2; index >= 0; index--) {
+    const pair = pairs[index];
+    if (!pair) throw new InternalCompilerError("lowerer bug: missing union spread arm");
+    result = {
+      kind: "ternary",
+      cond: { kind: "unionIsTag", unionId: source.unionId, tag: pair.sourceTag, negated: false, value: sourceRef(), type: BOOL, loc },
+      then: wrap(pair),
+      else_: result,
+      type: target,
+      loc,
+    };
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [
+      { kind: "varDecl", localId: sourceLocal.id, init: sourceValue, loc },
+      { kind: "varDecl", localId: appendedLocal.id, init: appendedValue, loc },
+    ],
+    result,
+    type: target,
+    loc,
+  };
+}
+
 export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     // The RUNTIME-KEYED literal (JS): a computed key that doesn't fold to a
@@ -4791,6 +4926,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       tsType = L.checker.getAwaitedType(tsType) ?? tsType;
     }
     let mapped = L.mapTypeOf(tsType);
+    if (mapped?.kind === "union") {
+      const unionSpread = lowerUnionRecordSpreadAppend(L, expr, mapped, loc);
+      if (unionSpread) return unionSpread;
+    }
     // An EMPTY-record context under a NON-empty literal (`Object.keys({
     // ...process.env })` — the lib's `{}`-typed parameters admit every
     // object): `{}` carries no shape information, so the literal builds as
