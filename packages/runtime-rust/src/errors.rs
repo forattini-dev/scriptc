@@ -177,6 +177,27 @@ pub enum Completion<T> {
 
 struct ScriptThrow;
 
+struct RuntimeTrap {
+    text: String,
+    code: &'static str,
+}
+
+pub fn trap_range_error(message: String) -> ! {
+    std::panic::resume_unwind(Box::new(RuntimeTrap {
+        text: format!("scriptc: RangeError: {message}\n"),
+        code: "SC4014",
+    }))
+}
+
+pub fn take_runtime_trap(
+    payload: Box<dyn Any + Send>,
+) -> Result<(String, &'static str), Box<dyn Any + Send>> {
+    match payload.downcast::<RuntimeTrap>() {
+        Ok(trap) => Ok((trap.text, trap.code)),
+        Err(payload) => Err(payload),
+    }
+}
+
 pub fn throw_value<T: 'static>(value: T) -> ! {
     EXCEPTION_SLOT.with(|slot| {
         let previous = slot.borrow_mut().replace(Rc::new(value));

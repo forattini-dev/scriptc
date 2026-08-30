@@ -420,7 +420,7 @@ pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
     let count = if count.is_nan() { 0.0 } else { count.trunc() };
     if !count.is_finite() || count < 0.0 {
-        panic!("RangeError: Invalid count value");
+        trap_range_error("Invalid count value".to_owned());
     }
     Rc::<str>::from(value.repeat(count as usize))
 }

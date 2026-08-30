@@ -5,15 +5,18 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { compileLibrary } from "../src/index.js";
 
-test("Rust library traps apply the profile teaching and remediation", async () => {
+interface TrapProbeOptions {
+  readonly source: string;
+  readonly teachingCode: string;
+  readonly teaching: string;
+  readonly remediation: string;
+}
+
+async function runTrapProbe(options: TrapProbeOptions): Promise<ReturnType<typeof spawnSync>> {
   const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-teaching-"));
   try {
     const entry = join(work, "lib.ts");
-    writeFileSync(entry, [
-      "export function boom(): number { throw new Error('kaput'); }",
-      "console.log('teaching ready');",
-      "",
-    ].join("\n"));
+    writeFileSync(entry, options.source);
     const profilePath = join(work, "profile.json");
     writeFileSync(profilePath, JSON.stringify({
       profile_format: 1,
@@ -30,18 +33,14 @@ test("Rust library traps apply the profile teaching and remediation", async () =
       },
       exports: [{ export: "boom", symbol: "rt_boom", params: [], returns: "f64" }],
       determinism: {
-        teachings: { SC4013: "host-friendly exception\n" },
-        remediations: { SC4013: "inspect the command input before retrying" },
+        teachings: { [options.teachingCode]: options.teaching },
+        remediations: { [options.teachingCode]: options.remediation },
       },
     }));
     const result = await compileLibrary({ profilePath, outDir: work });
-    expect(
-      result.ok,
-      result.ok
-        ? undefined
-        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
-    ).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok) {
+      throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+    }
 
     const probeSource = join(work, "probe.c");
     writeFileSync(probeSource, [
@@ -69,17 +68,52 @@ test("Rust library traps apply the profile teaching and remediation", async () =
       "-std=c11", probeSource, result.archivePath,
       "-lm", "-ldl", "-lpthread", "-o", probe,
     ]);
-    const run = spawnSync(probe, [], { encoding: "utf8" });
-    expect(run.signal).toBeNull();
-    expect(run.status).toBe(0);
-    expect(run.stdout).toBe([
-      "teaching ready",
-      "sink:host-friendly exception",
-      "|SC4013|rt_boom|inspect the command input before retrying",
-      "survived",
-      "",
-    ].join("\n"));
+    return spawnSync(probe, [], { encoding: "utf8" });
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+test("Rust library traps apply the profile teaching and remediation", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "export function boom(): number { throw new Error('kaput'); }",
+      "console.log('teaching ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4013",
+    teaching: "host-friendly exception\n",
+    remediation: "inspect the command input before retrying",
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stdout).toBe([
+    "teaching ready",
+    "sink:host-friendly exception",
+    "|SC4013|rt_boom|inspect the command input before retrying",
+    "survived",
+    "",
+  ].join("\n"));
+}, 120_000);
+
+test("Rust library range traps select the SC4014 teaching", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "export function boom(): number { return 'x'.repeat(-1).length; }",
+      "console.log('range ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4014",
+    teaching: "host-friendly range trap\n",
+    remediation: "check the requested range before retrying",
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stdout).toBe([
+    "range ready",
+    "sink:host-friendly range trap",
+    "|SC4014|rt_boom|check the requested range before retrying",
+    "survived",
+    "",
+  ].join("\n"));
 }, 120_000);
