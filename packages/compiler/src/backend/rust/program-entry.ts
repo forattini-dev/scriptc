@@ -3,6 +3,7 @@ import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 export interface RustProgramEntryOptions {
   readonly entryName: string;
   readonly entryAsync: boolean;
+  readonly entryCommonJs: boolean;
   readonly hasErrorClasses: boolean;
   readonly heapGlobalIds: readonly string[];
   readonly internedClosureNames: readonly string[];
@@ -26,7 +27,9 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
     options.entryAsync
       ? `        let _sc_main_promise = ${mangleFunction(options.entryName)}(); runtime::promise_track_entry(&_sc_main_promise);`
       : `        ${mangleFunction(options.entryName)}();`,
-    "        runtime::run_event_loop();",
+    options.entryCommonJs
+      ? "        runtime::run_event_loop_commonjs();"
+      : "        runtime::run_event_loop();",
     "        let _sc_unhandled_rejection = runtime::had_unhandled_rejection();",
   ];
   if (options.entryAsync) {

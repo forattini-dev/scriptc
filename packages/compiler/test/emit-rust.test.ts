@@ -251,9 +251,6 @@ test("Rust UTF-16 string methods, array iteration, record arrays, and tuples mat
       result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
     ).toBe(true);
     if (!result.ok) continue;
-    if (name === "promise-reject") {
-      expect((await readFile(result.sourcePath)).length).toBeLessThan(200_000);
-    }
     const [node, rust] = await Promise.all([
       execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {
@@ -2826,6 +2823,9 @@ export {};
       result.ok ? name : `${name}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
     ).toBe(true);
     if (!result.ok) continue;
+    if (name === "promise-reject") {
+      expect((await readFile(result.sourcePath)).length).toBeLessThan(200_000);
+    }
     const [node, rust] = await Promise.all([
       execFileAsync(nodeOracleExecutable(), [entryPath]),
       execFileAsync(result.binaryPath, [], {

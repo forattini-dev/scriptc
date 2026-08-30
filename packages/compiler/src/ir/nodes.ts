@@ -766,6 +766,10 @@ export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
   irVersion: 6;
   sourceFile: string;
+  /** The entry follows Node's CommonJS first-checkpoint ordering: nextTick
+   * callbacks run before promise jobs and queueMicrotask callbacks. Absent
+   * preserves the historical ESM ordering for serialized IR producers. */
+  entryCommonJs?: true;
   functions: IrFunction[];
   /** Class shapes. Constructors and methods are ordinary module functions
    * named `%Class.constructor` / `%Class.method` whose first param is

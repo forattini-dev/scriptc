@@ -531,6 +531,7 @@ class RustEmitter {
     this.lines.push(...emitRustProgramEntry({
       entryName: entry.name,
       entryAsync: entry.async === true,
+      entryCommonJs: this.mod.entryCommonJs === true,
       hasErrorClasses: this.errorClassRoots().length !== 0,
       heapGlobalIds: [...this.globals.values()].filter((global) => this.isHeapRoot(global.type)).map((global) => global.id),
       internedClosureNames: [...this.internedClosureTargets],
@@ -1193,7 +1194,6 @@ class RustEmitter {
   private unionEqName(id: string): string { return this.metadata.unionEqName(id); }
   private rustString(value: string): string { return this.metadata.rustString(value); }
   private line(value: string): void { this.lines.push(`${"    ".repeat(this.indent)}${value}`); }
-
   private unsupported(kind: string, loc?: SrcLoc): never {
     throw new RustUnsupportedError(kind, loc);
   }

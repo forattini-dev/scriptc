@@ -406,8 +406,16 @@ pub fn process_available_memory() -> f64 {
 }
 
 pub fn run_event_loop() {
+    run_event_loop_with_first_checkpoint(true);
+}
+
+pub fn run_event_loop_commonjs() {
+    run_event_loop_with_first_checkpoint(false);
+}
+
+fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
     let mut turn = 0_u64;
-    let mut first_checkpoint = true;
+    let mut first_checkpoint = skip_initial_ticks;
     loop {
         EVENT_TURN.with(|current| current.set(turn));
         let skip_ticks = std::mem::replace(&mut first_checkpoint, false);

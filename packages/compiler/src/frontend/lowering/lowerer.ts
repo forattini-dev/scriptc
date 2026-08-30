@@ -2526,6 +2526,7 @@ export class Lowerer {
         : {
             irVersion: 6,
             sourceFile: this.entry.fileName,
+            ...(!isNodeEsmFile(this.entry) ? { entryCommonJs: true as const } : {}),
             functions,
             classes: artifacts.classes,
             records: artifacts.records,
