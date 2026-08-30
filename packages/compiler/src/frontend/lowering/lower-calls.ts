@@ -4269,6 +4269,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // Object.prototype.toString's default answer on records and
         // override-free program classes — "[object Object]", folded.
         lowerDefaultToStringCall(L, expr, expr.expression) ??
+        // The defensive legacy own-property spelling used by transpilers
+        // and generated code; semantically the modern Object.hasOwn.
+        lowerLegacyHasOwnCall(L, expr) ??
         // The remaining primitive prototype statics — toExponential(),
         // both toFixed() forms, hasOwnProperty over literal keys. Before
         // the island path. Optional-chain spellings first enter the chain
@@ -7306,10 +7309,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   }
 
   /** Interned `%obj.hasOwn.<n>(r, k)` — Object.hasOwn's membership walk
-   * over a signature-free record shape: the key compares against each
+   * over a record shape: the key compares against each
    * declared field name, undefined-armed fields answering by their tag
    * (a key is own exactly when Object.keys would list it — the two share
-   * the guard), everything else true, no match false. */
+   * the guard), everything else true. Index-signature overflow keys then
+   * consult their live key snapshot; a signature-free no-match is false. */
   function recordHasOwnHelper(L: Lowerer, shapeId: string, loc: SrcLoc): string {
     const key = `obj.hasOwn:${shapeId}`;
     const existing = L.arrHofHelpers.get(key);
@@ -7343,7 +7347,34 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         loc,
       });
     }
-    body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+    const locals: IrLocal[] = [
+      { id: "r.0", name: "r", type: recT, mutable: true },
+      { id: "k.0", name: "k", type: STRING, mutable: false },
+    ];
+    if (shape.indexValue) {
+      const keysT = arrayOf(STRING);
+      locals.push({ id: "ks.0", name: "ks", type: keysT, mutable: false });
+      body.push({
+        kind: "varDecl",
+        localId: "ks.0",
+        init: { kind: "recordOvfKeys", obj: rRef, shapeId, type: keysT, loc },
+        loc,
+      });
+      body.push({
+        kind: "return",
+        value: {
+          kind: "arrIntrinsic",
+          method: "includes",
+          receiver: { kind: "varRef", localId: "ks.0", type: keysT, loc },
+          args: [kRef],
+          type: BOOL,
+          loc,
+        },
+        loc,
+      });
+    } else {
+      body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
+    }
     L.liftedFns.push({
       name: helper,
       params: [
@@ -7351,14 +7382,60 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         { localId: "k.0", name: "k", type: STRING },
       ],
       returnType: BOOL,
-      locals: [
-        { id: "r.0", name: "r", type: recT, mutable: true },
-        { id: "k.0", name: "k", type: STRING, mutable: false },
-      ],
+      locals,
       body,
       loc,
     });
     return helper;
+  }
+
+  /** Shared Object.hasOwn / legacy hasOwnProperty.call lowering. Both
+   * forms perform ToPropertyKey and the same own-membership test. */
+  function lowerObjectHasOwnArgs(L: Lowerer, call: ts.CallExpression,
+    recvNode: ts.Expression, keyNode: ts.Expression,): IrExpr | null {
+    const probed = probeLower(L, recvNode);
+    // A CHECKED-DYNAMIC receiver (the JS file-scope object-literal
+    // identity story): the runtime dyn probe — OBJ member presence, ARR
+    // index bounds, Node's ToObject TypeError on nullish.
+    if (probed?.type.kind === "dyn") {
+      const loc = locOf(call);
+      const receiver = L.lowerExpr(recvNode);
+      let key = L.lowerExpr(keyNode);
+      if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+        key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+      }
+      if (key.type.kind !== "string") return null;
+      return { kind: "libCall", fn: "dyn.hasOwn", args: [receiver, key], type: BOOL, loc };
+    }
+    if (probed?.type.kind !== "record") return null;
+    const shape = L.shapes.get(probed.type.shapeId);
+    if (!shape || shape.tuple || shapeHasAccessorSlots(shape)) return null;
+    const loc = locOf(call);
+    const receiver = L.lowerExpr(recvNode);
+    if (receiver.type.kind !== "record") return null; // probe/lower drift: keep the fence
+    let key = L.lowerExpr(keyNode);
+    // Number/boolean/dyn keys stringify — ToPropertyKey, the keyed-write
+    // path's rule; symbol and composite keys keep the fence.
+    if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+      key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+    }
+    if (key.type.kind !== "string") return null;
+    const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
+    return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
+  }
+
+  /** Legacy robust-own-property idiom emitted by transpilers and agents:
+   * Object.prototype.hasOwnProperty.call(obj, key). */
+  function lowerLegacyHasOwnCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.questionDotToken || call.arguments.length !== 2 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const callMember = call.expression;
+    if (!ts.isPropertyAccessExpression(callMember) || callMember.questionDotToken || callMember.name.text !== "call") return null;
+    const hasOwn = callMember.expression;
+    if (!ts.isPropertyAccessExpression(hasOwn) || hasOwn.questionDotToken || hasOwn.name.text !== "hasOwnProperty") return null;
+    const prototype = hasOwn.expression;
+    if (!ts.isPropertyAccessExpression(prototype) || prototype.questionDotToken || prototype.name.text !== "prototype") return null;
+    if (!L.isStdlibGlobal(prototype.expression, "Object")) return null;
+    return lowerObjectHasOwnArgs(L, call, call.arguments[0]!, call.arguments[1]!);
   }
 
   /** Interned `%obj.assign.<n>(t, s)` — Object.assign's per-field copy
@@ -7945,42 +8022,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // fields answer by their runtime tag — the explicit-undefined-is-absent
     // stance: an omitted optional field holds the undefined arm and reads
     // as NOT own, exactly Node's absent key (an EXPLICIT `k: undefined`
-    // diverges — documented next to the child-env/JSON rule). Tuple,
-    // index-signature (overflow membership lives in the runtime map), and
-    // accessor-carrying shapes keep the SC2020 fence; non-record receivers
-    // do too.
+    // diverges — documented next to the child-env/JSON rule). Index-
+    // signature records consult their live overflow-key snapshot. Tuple
+    // and accessor-carrying shapes keep the SC2020 fence; non-record
+    // receivers do too.
     if (member === "hasOwn" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
-      const recvNode = call.arguments[0]!;
-      const keyNode = call.arguments[1]!;
-      const probed = probeLower(L, recvNode);
-      // A CHECKED-DYNAMIC receiver (the JS file-scope object-literal
-      // identity story): the runtime dyn probe — OBJ member presence, ARR
-      // index bounds, Node's ToObject TypeError on nullish.
-      if (probed?.type.kind === "dyn") {
-        const loc = locOf(call);
-        const receiver = L.lowerExpr(recvNode);
-        let key = L.lowerExpr(keyNode);
-        if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
-          key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
-        }
-        if (key.type.kind !== "string") return null;
-        return { kind: "libCall", fn: "dyn.hasOwn", args: [receiver, key], type: BOOL, loc };
-      }
-      if (probed?.type.kind !== "record") return null;
-      const shape = L.shapes.get(probed.type.shapeId);
-      if (!shape || shape.tuple || shape.indexValue || shapeHasAccessorSlots(shape)) return null;
-      const loc = locOf(call);
-      const receiver = L.lowerExpr(recvNode);
-      if (receiver.type.kind !== "record") return null; // probe/lower drift: keep the fence
-      let key = L.lowerExpr(keyNode);
-      // Number/boolean/dyn keys stringify — ToPropertyKey, the keyed-write
-      // path's rule; symbol and composite keys keep the fence.
-      if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
-        key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
-      }
-      if (key.type.kind !== "string") return null;
-      const helper = recordHasOwnHelper(L, receiver.type.shapeId, loc);
-      return { kind: "call", callee: helper, args: [receiver, key], type: BOOL, loc };
+      return lowerObjectHasOwnArgs(L, call, call.arguments[0]!, call.arguments[1]!);
     }
     if (member !== "keys" && member !== "values" && member !== "entries") return null;
     if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) return null;
