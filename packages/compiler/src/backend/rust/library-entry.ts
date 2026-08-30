@@ -157,13 +157,34 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       : []),
     `}`,
     "",
+    ...(lib.trapOverlays.length
+      ? [`fn sc_library_trap_overlay(code: &str) -> (Option<&'static str>, Option<&'static str>) {`,
+        `    match code {`,
+        ...lib.trapOverlays.map((overlay) =>
+          `        ${JSON.stringify(overlay.code)} => (${overlay.teaching === undefined ? "None" : `Some(${JSON.stringify(overlay.teaching)})`}, ${overlay.remediation === undefined ? "None" : `Some(${JSON.stringify(overlay.remediation)})`}),`
+        ),
+        `        _ => (None, None),`,
+        `    }`,
+        `}`,
+        ""]
+      : []),
     `fn sc_library_deliver(text: &str, code: &str, symbol: &'static str) -> ! {`,
+    ...(lib.trapOverlays.length
+      ? [`    let (teaching, remediation) = sc_library_trap_overlay(code);`,
+        `    let text = teaching.unwrap_or(text);`]
+      : []),
     `    let mut message = vec![1_u8];`,
     `    message.extend_from_slice(text.as_bytes());`,
     `    message.push(0x1f);`,
     `    message.extend_from_slice(code.as_bytes());`,
     `    message.push(0x1f);`,
     `    message.extend_from_slice(symbol.as_bytes());`,
+    ...(lib.trapOverlays.length
+      ? [`    if let Some(remediation) = remediation {`,
+        `        message.push(0x1f);`,
+        `        message.extend_from_slice(remediation.as_bytes());`,
+        `    }`]
+      : []),
     `    SC_LIBRARY_POISONED.with(|poisoned| poisoned.set(true));`,
     `    let sink = SC_LIBRARY_SINK.with(std::cell::Cell::get);`,
     `    let context = SC_LIBRARY_SINK_CONTEXT.with(std::cell::Cell::get);`,
