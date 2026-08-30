@@ -1233,6 +1233,7 @@ shardedTest.each(shardSelect([
   "2051-dynamic-import-then/main.ts",
   "2052-dynamic-import-self.ts",
   "2053-typeof-static-fold.ts",
+  "2054-destructuring-island-source.ts",
   "2060-empty-tuple.ts",
   "2070-computed-key-folds.ts",
   "2071-integer-key-enumeration-order.ts",
