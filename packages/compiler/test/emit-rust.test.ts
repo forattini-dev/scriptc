@@ -999,6 +999,7 @@ shardedTest.each(shardSelect([
   "1522-spawnsync-options.ts",
   "1523-spawn-options.ts",
   "1524-catch-narrowing.ts",
+  "1525-child-exit-signal.ts",
   "1525-unknown-typeof-validation.ts",
   "1526-set-spread.ts",
   "1527-logical-mixed-operands.ts",
