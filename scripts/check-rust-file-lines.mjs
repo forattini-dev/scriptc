@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_LINES = 1_200;
+// Readability is enforced per maintained source file. This is deliberately
+// not an aggregate line budget for the compiler/runtime or generated Rust.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoots = [
   { directory: path.join(root, "packages", "compiler", "src", "backend", "rust"), extension: ".ts" },
@@ -37,5 +39,7 @@ if (violations.length > 0) {
   }
   process.exitCode = 1;
 } else {
-  console.log(`Authored Rust implementation files respect the ${MAX_LINES}-line limit.`);
+  console.log(
+    `Each maintained Rust-backend/runtime source file is at most ${MAX_LINES} lines; total source size is unrestricted.`,
+  );
 }
