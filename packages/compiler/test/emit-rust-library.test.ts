@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -287,6 +287,59 @@ test("Rust library init starts byte-identical sessions", async () => {
       "",
     ].join("\n");
     expect(execFileSync(probe, { encoding: "utf8" })).toBe(session.repeat(3));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("Rust library exceptions escape through the registered panic sink", async () => {
+  const fixture = resolve("tests/library-mode/traps");
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-trap-"));
+  try {
+    const profile = JSON.parse(
+      readFileSync(join(fixture, "profile.json"), "utf8"),
+    ) as Record<string, unknown>;
+    profile["entry"] = join(fixture, "lib.ts");
+    profile["emission"] = "rust";
+    profile["optimization"] = "dev";
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify(profile));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      join(fixture, "probe.c"),
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    const run = spawnSync(probe, ["throw"], { encoding: "utf8" });
+    expect(run.signal).toBeNull();
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe([
+      "traps ready",
+      "sink[1]:",
+      "text=[Uncaught Error: kaput",
+      "]",
+      "code=[SC4013]",
+      "symbol=[kp_fail]",
+      "fields=3 text_printable=1",
+      "addr: nonzero",
+      "survived, sink_calls=1",
+      "",
+    ].join("\n"));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

@@ -4,6 +4,7 @@ import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 export interface RustLibraryEntryOptions {
   readonly lib: IrLibSection;
   readonly entryName: string;
+  readonly hasErrorClasses: boolean;
   readonly globals: readonly IrGlobal[];
   readonly internedClosureNames: readonly string[];
   readonly unsupported: (kind: string) => never;
@@ -118,13 +119,48 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    unsafe { fflush(std::ptr::null_mut()); }`,
     `}`,
     "",
+    `type ScLibrarySink = extern "C" fn(*mut std::ffi::c_void, *const u8, usize, u64);`,
+    "",
     `std::thread_local! {`,
     `    static SC_LIBRARY_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
+    `    static SC_LIBRARY_POISONED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
+    `    static SC_LIBRARY_SINK: std::cell::Cell<Option<ScLibrarySink>> = const { std::cell::Cell::new(None) };`,
+    `    static SC_LIBRARY_SINK_CONTEXT: std::cell::Cell<*mut std::ffi::c_void> = const { std::cell::Cell::new(std::ptr::null_mut()) };`,
     ...(hasResults
       ? [`    static SC_LIBRARY_RESULTS: std::cell::RefCell<Vec<Box<[u8]>>> = const { std::cell::RefCell::new(Vec::new()) };`]
       : []),
     `}`,
   ];
+  lines.push(
+    "",
+    `fn sc_library_check_entry() {`,
+    `    if SC_LIBRARY_POISONED.with(std::cell::Cell::get) { std::process::abort(); }`,
+    `}`,
+    "",
+    `fn sc_library_escape(payload: Box<dyn std::any::Any + Send>, symbol: &'static str) -> ! {`,
+    `    let caught = runtime::caught_from_panic(payload);`,
+    `    let reason = ${options.hasErrorClasses ? "sc_caught_to_string" : "runtime::caught_to_string"}(&caught);`,
+    `    drop(caught);`,
+    `    let mut message = vec![1_u8];`,
+    `    message.extend_from_slice(format!("Uncaught {}\\n", reason).as_bytes());`,
+    `    message.extend_from_slice(b"\\x1fSC4013\\x1f");`,
+    `    message.extend_from_slice(symbol.as_bytes());`,
+    `    SC_LIBRARY_POISONED.with(|poisoned| poisoned.set(true));`,
+    `    let sink = SC_LIBRARY_SINK.with(std::cell::Cell::get);`,
+    `    let context = SC_LIBRARY_SINK_CONTEXT.with(std::cell::Cell::get);`,
+    `    let Some(sink) = sink else { std::process::abort(); };`,
+    `    sink(context, message.as_ptr(), message.len(), message.as_ptr() as usize as u64);`,
+    `    std::process::abort();`,
+    `}`,
+    "",
+    `fn sc_library_call<T>(symbol: &'static str, call: impl FnOnce() -> T) -> T {`,
+    `    sc_library_check_entry();`,
+    `    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {`,
+    `        Ok(value) => value,`,
+    `        Err(payload) => sc_library_escape(payload, symbol),`,
+    `    }`,
+    `}`,
+  );
   if (lib.exports.some((entry) => entry.params.includes("string"))) {
     lines.push(
       "",
@@ -186,9 +222,12 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     "",
     `#[unsafe(no_mangle)]`,
     `pub extern "C" fn ${lib.sinkRegisterSymbol}(`,
-    `    _sink: Option<extern "C" fn(*mut std::ffi::c_void, *const u8, usize, u64)>,`,
-    `    _context: *mut std::ffi::c_void,`,
-    `) {}`,
+    `    sink: Option<ScLibrarySink>,`,
+    `    context: *mut std::ffi::c_void,`,
+    `) {`,
+    `    SC_LIBRARY_SINK.with(|slot| slot.set(sink));`,
+    `    SC_LIBRARY_SINK_CONTEXT.with(|slot| slot.set(context));`,
+    `}`,
     "",
     `#[unsafe(no_mangle)]`,
     `pub extern "C" fn ${lib.initSymbol}() {`,
@@ -201,7 +240,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     ),
     `    if sc_was_initialized { runtime::finish(); }`,
     `    runtime::init();`,
-    `    ${mangleFunction(options.entryName)}();`,
+    `    sc_library_call(${JSON.stringify(lib.initSymbol)}, || ${mangleFunction(options.entryName)}());`,
     `}`,
   );
 
@@ -211,6 +250,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.collectSymbol}() {`,
       `    sc_library_host_entry();`,
+      `    sc_library_check_entry();`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `    runtime::collect_cycles();`,
       `}`,
@@ -222,6 +262,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.resultResetSymbol}() {`,
       `    sc_library_host_entry();`,
+      `    sc_library_check_entry();`,
       ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `}`,
     );
@@ -239,7 +280,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     if (entry.returns === "string" || entry.returns === "bytes") {
       params.push("sc_out: *mut *const u8", "sc_out_len: *mut usize");
     }
-    const call = `${mangleFunction(entry.fnName)}(${args.join(", ")})`;
+    const call = `sc_library_call(${JSON.stringify(entry.symbol)}, || ${mangleFunction(entry.fnName)}(${args.join(", ")}))`;
     const result = entry.returns === "bool" ? `u8::from(${call})` : call;
     lines.push(
       "",

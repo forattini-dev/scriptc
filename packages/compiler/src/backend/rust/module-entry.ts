@@ -32,6 +32,7 @@ export function emitRustModuleEntry(options: RustModuleEntryOptions): string[] {
     return emitRustLibraryEntries({
       lib: options.lib,
       entryName: entry.name,
+      hasErrorClasses: options.hasErrorClasses,
       globals: options.globals,
       internedClosureNames: options.internedClosureNames,
       unsupported: options.unsupported,
