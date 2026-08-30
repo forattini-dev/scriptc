@@ -327,8 +327,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "keys", "values", "entries",
-    "toSorted",
-    "with", "toString", "toLocaleString", NULL };
+    "toSorted", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -689,6 +688,29 @@ static ScrDyn *scr_dyn_invoke_impl(
       for (size_t i = start + count; i < len; i++) {
         scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       }
+      return out;
+    }
+    if (dyn_name_is(method, "with")) {
+      double index = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double actual = index >= 0 ? index : (double)len + index;
+      if (!(actual >= 0) || actual >= (double)len) {
+        char num[32];
+        size_t numlen = scr_f64_to_str(index, num);
+        char message[80];
+        int message_len = snprintf(message, sizeof message,
+                                   "Invalid index : %.*s", (int)numlen, num);
+        scr_throw_error_msg(SCR_ERR_RANGE, message, (size_t)message_len);
+        return NULL;
+      }
+      ScrDyn *value = argc > 1 ? args[1] : scr_dyn_undefined();
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < len; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      }
+      size_t target = (size_t)actual;
+      scr_dyn_release(out->v.arr.items[target]);
+      out->v.arr.items[target] = scr_dyn_retain(value);
       return out;
     }
     if (dyn_name_is(method, "fill")) {
