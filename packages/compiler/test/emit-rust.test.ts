@@ -1620,6 +1620,7 @@ shardedTest.each(shardSelect([
   "2765-generic-component-concrete-callback.ts",
   "2766-dyn-array-fill-range.cjs",
   "2767-dyn-array-copywithin-overlap.cjs",
+  "2768-dyn-array-reduce-initial.cjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

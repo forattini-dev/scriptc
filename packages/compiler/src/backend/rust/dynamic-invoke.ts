@@ -94,6 +94,20 @@ class RustDynamicInvokeEmitter {
     this.context.line("sc_dyn_call(callback, &args, callback_name.as_ref())");
     this.close("}");
 
+    this.open(`fn sc_dyn_array_reduce(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}]) -> ${this.dyn} {`);
+    this.context.line(`let callback = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
+    this.context.line(`let Some(mut accumulator) = args.get(1).cloned() else { runtime::throw_error("'Array.prototype.reduce' without an initial value is not supported yet".to_owned()); };`);
+    this.context.line("let length = runtime::array_len(array);");
+    this.context.line("let callback_name = sc_dyn_to_string(&callback);");
+    this.context.line("let mut index = 0.0;");
+    this.open("while index < length && index < runtime::array_len(array) {");
+    this.context.line(`let callback_args = [accumulator, runtime::array_get(array, index), ${this.dyn}::Number(index), ${this.dyn}::Array(array.clone())];`);
+    this.context.line("accumulator = sc_dyn_call(&callback, &callback_args, callback_name.as_ref());");
+    this.context.line("index += 1.0;");
+    this.close("}");
+    this.context.line("accumulator");
+    this.close("}");
+
     this.open(`fn sc_dyn_array_iterate(array: &runtime::JsArray<${this.dyn}>, method: &str, args: &[${this.dyn}]) -> ${this.dyn} {`);
     this.context.line(`let callback = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
     this.context.line(`let output: runtime::JsArray<${this.dyn}> = runtime::array_new(Vec::new());`);
@@ -424,9 +438,10 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
     this.context.line(`"fill" => { let value = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_fill(array, value, start, end)) },`);
     this.context.line(`"copyWithin" => { let target = sc_dyn_index_arg(args, 0, 0.0, callee_name); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_copy_within(array, target, start, end)) },`);
+    this.context.line('"reduce" => sc_dyn_array_reduce(array, args),');
     this.context.line('"sort" => sc_dyn_array_sort(array, args),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"splice\" | \"reduce\" | \"reduceRight\" | \"flat\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line("\"splice\" | \"reduceRight\" | \"flat\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");

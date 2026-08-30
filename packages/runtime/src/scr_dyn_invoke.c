@@ -193,6 +193,15 @@ static ScrDyn *dyn_call_cb(ScrDyn *cb, ScrDyn *item, size_t i, ScrDyn *recv) {
   return r;
 }
 
+static ScrDyn *dyn_call_reduce_cb(
+    ScrDyn *cb, ScrDyn *accumulator, ScrDyn *item, size_t i, ScrDyn *recv) {
+  ScrDyn *idx = scr_dyn_new_num((double)i);
+  ScrDyn *cbargs[4] = { accumulator, item, idx, recv };
+  ScrDyn *r = scr_dyn_call(cb, cbargs, 4, "callback");
+  scr_dyn_release(idx);
+  return r;
+}
+
 /* The callable-callback gate: JS's "<String(cb)> is not a function". */
 static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
   ScrDyn *cb = argc > 0 ? args[0] : scr_dyn_undefined();
@@ -306,7 +315,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "splice", "reduce", "reduceRight", "flat",
+  static const char *names[] = { "splice", "reduceRight", "flat",
     "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
@@ -637,6 +646,26 @@ static ScrDyn *scr_dyn_invoke_impl(
         }
       }
       return scr_dyn_retain(recv);
+    }
+    if (dyn_name_is(method, "reduce")) {
+      if (!dyn_cb_check(args, argc)) return NULL;
+      if (argc < 2) {
+        dyn_throw_unsupported("Array", "reduce without an initial value");
+        return NULL;
+      }
+      ScrDyn *accumulator = scr_dyn_retain(args[1]);
+      ScrDyn *visible_recv = callback_recv ? callback_recv : recv;
+      size_t n = len;
+      for (size_t i = 0; i < n && i < recv->v.arr.len; i++) {
+        ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
+        ScrDyn *next = dyn_call_reduce_cb(
+            args[0], accumulator, item, i, visible_recv);
+        scr_dyn_release(item);
+        scr_dyn_release(accumulator);
+        if (!next) return NULL;
+        accumulator = next;
+      }
+      return accumulator;
     }
     if (dyn_name_is(method, "forEach") || dyn_name_is(method, "map") ||
         dyn_name_is(method, "filter") || dyn_name_is(method, "some") ||
