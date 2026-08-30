@@ -77,6 +77,19 @@ pub fn ffi_commit_retained_raw_callback(
     });
 }
 
+pub fn ffi_retire_retained_raw_callback(key: &str) {
+    let cleanup = FFI_RETAINED_CALLBACKS.with(|callbacks| {
+        let mut callbacks = callbacks.borrow_mut();
+        callbacks
+            .iter()
+            .rposition(|entry| entry.key == key && entry.cleanup.is_some())
+            .and_then(|index| callbacks.remove(index).cleanup)
+    });
+    if let Some(cleanup) = cleanup {
+        cleanup();
+    }
+}
+
 pub fn ffi_retained_callback(
     key: &str,
     identity: usize,

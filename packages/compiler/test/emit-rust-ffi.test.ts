@@ -90,6 +90,13 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "void sf_retained_raw_remove(sf_retained_raw_cb callback) {",
     "  if (retained_raw_callback == callback) retained_raw_callback = NULL;",
     "}",
+    "void sf_retained_raw_set_flush(sf_retained_raw_cb callback) {",
+    "  if (retained_raw_callback != NULL) retained_raw_callback(-1);",
+    "  retained_raw_callback = callback;",
+    "}",
+    "void sf_retained_raw_flush_remove(sf_retained_raw_cb callback) {",
+    "  sf_retained_raw_remove(callback);",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -256,6 +263,23 @@ test("Rust executables call manifest-bound native value functions", async () => 
       symbol: "sf_retained_raw_remove",
       params: [{ callback: { release: "nativeRetainedRawSet:raw" } }],
       returns: "void",
+    }, {
+      name: "nativeRetainedRawSetFlush",
+      symbol: "sf_retained_raw_set_flush",
+      params: [{
+        callback: {
+          id: "raw",
+          params: ["f64"],
+          returns: "void",
+          lifetime: "retained",
+        },
+      }],
+      returns: "void",
+    }, {
+      name: "nativeRetainedRawFlushRemove",
+      symbol: "sf_retained_raw_flush_remove",
+      params: [{ callback: { release: "nativeRetainedRawSetFlush:raw" } }],
+      returns: "void",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -282,6 +306,8 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "declare function nativeRetainedRawSet(callback: (value: number) => void): void;",
     "declare function nativeRetainedRawPump(value: number): void;",
     "declare function nativeRetainedRawRemove(callback: (value: number) => void): void;",
+    "declare function nativeRetainedRawSetFlush(callback: (value: number) => void): void;",
+    "declare function nativeRetainedRawFlushRemove(callback: (value: number) => void): void;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
@@ -316,6 +342,19 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "nativeRetainedRawRemove(rawCallback);",
     "nativeRetainedRawPump(2);",
     "console.log('raw released');",
+    "const flushEvents: string[] = [];",
+    "const installFlush = (callback: (value: number) => void) => nativeRetainedRawSetFlush(callback);",
+    "const flushFirst = (value: number) => { flushEvents.push(`first:${value}`); };",
+    "const flushSecond = (value: number) => { flushEvents.push(`second:${value}`); };",
+    "installFlush(flushFirst);",
+    "nativeRetainedRawPump(11);",
+    "installFlush(flushSecond);",
+    "nativeRetainedRawPump(12);",
+    "try { nativeRetainedRawFlushRemove(flushFirst); }",
+    "catch { console.log('caught stale raw'); }",
+    "nativeRetainedRawPump(13);",
+    "nativeRetainedRawFlushRemove(flushSecond);",
+    "console.log(flushEvents.join('|'));",
     "console.log(nativeCallbackMix((truth, byte, wide, signed, fraction) => {",
     "  console.log(truth, byte, wide, signed, fraction);",
     "  return -1;",
@@ -355,6 +394,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n28\n42\ncaught ffi callback boom\nretained 12\ncaught retained boom 2\nretained released\nraw 6\nraw released\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught cstring materialized\ncaught ffi context boom\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n28\n42\ncaught ffi callback boom\nretained 12\ncaught retained boom 2\nretained released\nraw 6\nraw released\ncaught stale raw\nfirst:11|first:-1|second:12|second:13\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught cstring materialized\ncaught ffi context boom\n");
   expect(run.stderr).toBe("");
 });
