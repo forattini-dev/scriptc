@@ -1028,6 +1028,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         : bindings;
       L.typeParamTsBindings = tsBindings;
       try {
+        bindUnobservedOverloadTypeParams(L, info, bindings, tsBindings);
         const params = L.paramShapes(info.decl.parameters);
         const nameBlame = (ts.isArrowFunction(info.decl) ? undefined : info.decl.name) ?? info.decl;
         const returnType = L.declaredReturnType(info.decl, nameBlame);
@@ -1228,6 +1229,28 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         bindings.set(tp, mapped);
         tsBindings?.set(tp, defT);
       }
+    });
+  }
+
+/** An overload may hide implementation-only parameters (`component`'s
+ * no-props signature exposes TResult but not the implementation's P).
+ * There is no call-site type to infer for those slots, so their declared
+ * constraint is the strongest honest representation; an unconstrained or
+ * unmappable parameter falls back to checked dynamic. The selected
+ * overload's result still crosses reconcileOverloadReturn. */
+  function bindUnobservedOverloadTypeParams(L: Lowerer, info: GenericFnInfo,
+    bindings: Map<ts.Symbol, IrType>, tsBindings: Map<ts.Symbol, ts.Type>,): void {
+    info.typeParams.forEach((tp, i) => {
+      if (bindings.has(tp)) return;
+      const constraintNode = info.decl.typeParameters?.[i]?.constraint;
+      const constraint = constraintNode
+        ? L.checker.getTypeFromTypeNode(constraintNode)
+        : undefined;
+      const mapped = constraint ? L.mapTypeOf(constraint) : null;
+      const fallback = mapped && mapped.kind !== "void" ? mapped : DYN;
+      bindings.set(tp, fallback);
+      L.typeParamBindings?.set(tp, fallback);
+      if (constraint) tsBindings.set(tp, constraint);
     });
   }
 

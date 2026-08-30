@@ -1609,6 +1609,7 @@ shardedTest.each(shardSelect([
   "2754-async-await-nullish-fallback.ts",
   "2755-async-for-break-continue.ts",
   "2756-generic-overload-explicit-typeargs.ts",
+  "2757-generic-overload-implementation-only-param.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
