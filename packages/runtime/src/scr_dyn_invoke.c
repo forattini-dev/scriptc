@@ -327,7 +327,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "keys", "values", "entries",
-    "toSorted", "toSpliced",
+    "toSorted",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -666,6 +666,26 @@ static ScrDyn *scr_dyn_invoke_impl(
       ScrDyn *out = scr_dyn_new_arr();
       for (size_t i = len; i > 0; i--) {
         scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i - 1]));
+      }
+      return out;
+    }
+    if (dyn_name_is(method, "toSpliced")) {
+      double startD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      size_t start = dyn_rel_index(startD, len);
+      double countD = dyn_index_arg(args, argc, 1, (double)(len - start), what);
+      if (scr_exc_pending()) return NULL;
+      size_t count = countD <= 0 ? 0 : countD >= (double)(len - start)
+        ? len - start : (size_t)countD;
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < start; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      }
+      for (size_t i = 2; i < argc; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(args[i]));
+      }
+      for (size_t i = start + count; i < len; i++) {
+        scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
       }
       return out;
     }
