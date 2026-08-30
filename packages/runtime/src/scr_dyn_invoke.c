@@ -327,7 +327,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "keys", "values", "entries",
-    "toReversed", "toSorted", "toSpliced",
+    "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -661,6 +661,13 @@ static ScrDyn *scr_dyn_invoke_impl(
         recv->v.arr.items[len - 1 - i] = tmp;
       }
       return scr_dyn_retain(recv);
+    }
+    if (dyn_name_is(method, "toReversed")) {
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = len; i > 0; i--) {
+        scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i - 1]));
+      }
+      return out;
     }
     if (dyn_name_is(method, "fill")) {
       ScrDyn *value = argc > 0 ? args[0] : scr_dyn_undefined();
