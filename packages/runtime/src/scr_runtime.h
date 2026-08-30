@@ -3221,6 +3221,7 @@ ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_new_arr(void);
 ScrDyn *scr_dyn_new_arr_iter(
     ScrDyn *array, ScrDynArrayIteratorKind kind); /* borrows array; returns +1 */
+ScrDyn *scr_dyn_arr_iter_next(ScrDyn *iterator, bool *done); /* borrows; returns +1 */
 ScrDyn *scr_dyn_new_obj(void);
 /* The ordinary deep-copy object plus a retained typed source. source_access
  * releases that source when materialize=false and returns a fresh dyn snapshot

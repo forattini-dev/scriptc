@@ -490,6 +490,17 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
     }
     return;
   }
+  if (src->kind == SCR_DYN_ARR_ITER) {
+    for (;;) {
+      bool done = false;
+      ScrDyn *item = scr_dyn_arr_iter_next((ScrDyn *)src, &done);
+      if (done) {
+        scr_dyn_release(item);
+        return;
+      }
+      scr_dyn_arr_push(arr, item);
+    }
+  }
   if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) {
     ScrJsonBuf b;
     scr_jb_init(&b);
@@ -536,7 +547,10 @@ ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
     scr_dyn_release(materialized);
     return out;
   }
-  if (src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR) {
+  if (
+    src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_ARR_ITER ||
+    src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR
+  ) {
     ScrDyn *out = scr_dyn_new_arr();
     scr_dyn_arr_push_spread(out, src, ""); /* iterable kinds never consult `what` */
     return out;
@@ -650,6 +664,28 @@ ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array, ScrDynArrayIteratorKind kind) {
   d->v.arr_iter.index = 0;
   d->v.arr_iter.kind = kind;
   return d;
+}
+ScrDyn *scr_dyn_arr_iter_next(ScrDyn *iterator, bool *done) {
+  ScrDyn *array = iterator->v.arr_iter.array;
+  *done = !array || iterator->v.arr_iter.index >= array->v.arr.len;
+  if (*done) {
+    if (array) {
+      iterator->v.arr_iter.array = NULL;
+      scr_dyn_release(array);
+    }
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
+  if (iterator->v.arr_iter.kind == SCR_DYN_ARR_ITER_ENTRIES) {
+    size_t index = iterator->v.arr_iter.index++;
+    ScrDyn *entry = scr_dyn_new_arr();
+    scr_dyn_arr_push(entry, scr_dyn_new_num((double)index));
+    scr_dyn_arr_push(entry, scr_dyn_retain(array->v.arr.items[index]));
+    return entry;
+  }
+  if (iterator->v.arr_iter.kind == SCR_DYN_ARR_ITER_KEYS) {
+    return scr_dyn_new_num((double)iterator->v.arr_iter.index++);
+  }
+  return scr_dyn_retain(array->v.arr.items[iterator->v.arr_iter.index++]);
 }
 ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }
 ScrDyn *scr_dyn_new_obj_with_identity(

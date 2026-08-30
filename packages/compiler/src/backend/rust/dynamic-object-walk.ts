@@ -122,6 +122,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`${name}::TypedBytes(source) => { let mut index = 0.0; while index < runtime::typed_bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::typed_bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::Buffer(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::String(source) => { for character in source.chars() { sc_dyn_pack_push(pack, ${name}::String(runtime::string(&character.to_string()))); } return; },`);
+  context.line(`${name}::ArrayIterator(source) => { while let Some(item) = runtime::array_iterator_next(source) { let value = match item { runtime::ArrayIteratorItem::Entry(index, value) => ${name}::Array(runtime::array_new(vec![${name}::Number(index), value])), runtime::ArrayIteratorItem::Key(index) => ${name}::Number(index), runtime::ArrayIteratorItem::Value(value) => value, }; sc_dyn_pack_push(pack, value); } return; },`);
   context.line("_ => {},");
   context.popIndent();
   context.line("}");

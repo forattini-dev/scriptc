@@ -1640,6 +1640,7 @@ shardedTest.each(shardSelect([
   "2785-dyn-array-keys-next.cjs",
   "2786-dyn-array-entries-next.cjs",
   "2787-dyn-array-iterator-alias.cjs",
+  "2788-dyn-array-iterator-for-of.cjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

@@ -486,25 +486,8 @@ static ScrDyn *scr_dyn_invoke_impl(
 
   if (recv->kind == SCR_DYN_ARR_ITER) {
     if (dyn_name_is(method, "next")) {
-      ScrDyn *array = recv->v.arr_iter.array;
-      bool done = !array || recv->v.arr_iter.index >= array->v.arr.len;
-      ScrDyn *value;
-      if (done) {
-        value = scr_dyn_retain(scr_dyn_undefined());
-      } else if (recv->v.arr_iter.kind == SCR_DYN_ARR_ITER_ENTRIES) {
-        size_t index = recv->v.arr_iter.index++;
-        value = scr_dyn_new_arr();
-        scr_dyn_arr_push(value, scr_dyn_new_num((double)index));
-        scr_dyn_arr_push(value, scr_dyn_retain(array->v.arr.items[index]));
-      } else if (recv->v.arr_iter.kind == SCR_DYN_ARR_ITER_KEYS) {
-        value = scr_dyn_new_num((double)recv->v.arr_iter.index++);
-      } else {
-        value = scr_dyn_retain(array->v.arr.items[recv->v.arr_iter.index++]);
-      }
-      if (done && array) {
-        recv->v.arr_iter.array = NULL;
-        scr_dyn_release(array);
-      }
+      bool done = false;
+      ScrDyn *value = scr_dyn_arr_iter_next(recv, &done);
       ScrDyn *result = scr_dyn_new_obj();
       scr_dyn_obj_set(result, "value", 5, value);
       scr_dyn_obj_set(result, "done", 4, scr_dyn_new_bool(done));
