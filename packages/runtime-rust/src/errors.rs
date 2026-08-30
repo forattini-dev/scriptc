@@ -189,6 +189,13 @@ pub fn trap_range_error(message: String) -> ! {
     }))
 }
 
+pub fn trap_type_error(message: String) -> ! {
+    std::panic::resume_unwind(Box::new(RuntimeTrap {
+        text: format!("scriptc: TypeError: {message}\n"),
+        code: "SC4015",
+    }))
+}
+
 pub fn take_runtime_trap(
     payload: Box<dyn Any + Send>,
 ) -> Result<(String, &'static str), Box<dyn Any + Send>> {

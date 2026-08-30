@@ -120,7 +120,7 @@ export function emitRustRecordKeyGetValues(
   if (typeKey(indexValue) !== typeKey(expr.type)) {
     context.unsupported(`indexed record read result '${expr.shapeId}'`, expr.loc);
   }
-  return `{ ${bindings} ${lookup}.expect("scriptc: missing statically-known indexed record key") }`;
+  return `{ ${bindings} ${lookup}.unwrap_or_else(|| runtime::trap_type_error(format!("record has no key '{}' (typed slot — no undefined is representable)", ${key}))) }`;
 }
 
 function missingRecordValue(

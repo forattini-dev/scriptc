@@ -117,3 +117,26 @@ test("Rust library range traps select the SC4014 teaching", async () => {
     "",
   ].join("\n"));
 }, 120_000);
+
+test("Rust library typed record misses select the SC4015 teaching", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "const values: Record<string, number> = { present: 1 };",
+      "export function boom(): number { const key = 'missing'; return values[key]; }",
+      "console.log('type ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4015",
+    teaching: "host-friendly type trap\n",
+    remediation: "check the requested key before retrying",
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stdout).toBe([
+    "type ready",
+    "sink:host-friendly type trap",
+    "|SC4015|rt_boom|check the requested key before retrying",
+    "survived",
+    "",
+  ].join("\n"));
+}, 120_000);
