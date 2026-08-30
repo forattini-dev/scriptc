@@ -1204,6 +1204,7 @@ shardedTest.each(shardSelect([
   "2019-generators-loops.ts",
   "2020-generic-value-bindings.ts",
   "2021-generic-value-binding-modules/main.ts",
+  "2022-width-index-capture.ts",
   "2023-width-readonly.ts",
   "2024-width-array-elems.ts",
   "2025-width-union-compose.ts",
