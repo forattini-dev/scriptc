@@ -2668,6 +2668,9 @@ function validateFunction(
           }
           checkExpr(e.args[0]!);
           expectType(e.args[0]!, key, "mapIntrinsic get key");
+          // `unknown | undefined` simplifies to unknown in TypeScript;
+          // dyn carries Undefined as one of its native variants.
+          if (value.kind === "dyn" && e.type.kind === "dyn") break;
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           const rest = def ? def.arms.filter((a) => a.kind !== "undefinedT") : [];
           // When V is itself a union its own undefined arm (if any) folds

@@ -234,6 +234,18 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
   return scr_map_new_full(key_kind, val_kind, val_retain, val_release, val_trace, NULL);
 }
 
+ScrMap *scr_map_new_ref_key(ScrMapValKind val_kind,
+                            void *(*val_retain)(void *),
+                            void (*val_release)(void *), ScrTraceFn val_trace,
+                            void *(*key_retain)(void *),
+                            void (*key_release)(void *), ScrTraceFn key_trace) {
+  ScrMap *m = scr_map_new_full(
+      SCR_MAP_KEY_REF, val_kind, val_retain, val_release, val_trace, key_trace);
+  m->key_retain = key_retain;
+  m->key_release = key_release;
+  return m;
+}
+
 ScrMap *scr_map_retain(ScrMap *m) {
   if (m->rc != SIZE_MAX) {
     m->rc++;
@@ -403,6 +415,12 @@ void scr_map_set_ref_f64(ScrMap *m, void *key, double v) {
   scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, scr_map_slot_from_f64(v));
 }
 
+void scr_map_set_ref_ref(ScrMap *m, void *key, void *v) {
+  uint64_t k = scr_map_slot_from_ptr(key);
+  scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k,
+              scr_map_slot_from_ptr(v));
+}
+
 ScrMap *scr_set_new_ref(void *(*elem_retain)(void *),
                         void (*elem_release)(void *), ScrTraceFn elem_trace) {
   ScrMap *m = scr_map_new_full(
@@ -459,6 +477,12 @@ bool scr_map_get_str_bool(const ScrMap *m, const ScrStr *key, bool *out) {
 
 void *scr_map_get_str_ref(const ScrMap *m, const ScrStr *key) {
   size_t e = scr_map_find_str(m, key);
+  if (e == SCR_MAP_EMPTY) return NULL;
+  return m->val_retain(scr_map_slot_to_ptr(m->entries[e].val)); /* +1 */
+}
+
+void *scr_map_get_ref_ref(const ScrMap *m, const void *key) {
+  size_t e = scr_map_find_ref(m, key);
   if (e == SCR_MAP_EMPTY) return NULL;
   return m->val_retain(scr_map_slot_to_ptr(m->entries[e].val)); /* +1 */
 }

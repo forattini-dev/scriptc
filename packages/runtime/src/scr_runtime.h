@@ -1122,10 +1122,8 @@ ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
 
 /* SCR_MAP_KEY_REF: refcounted-pointer keys hashed and compared by IDENTITY
  * (the pointer bits) — SameValueZero for JS objects IS reference identity,
- * so a Set of handle values (Set<http.Server>, the portless auxiliary-
- * server registry) is honest hashed storage. REF keys carry their own
- * retain/release/trace adapters (scr_set_new_ref); only SETS use the kind
- * so far — the Map-key surface stays f64/string. */
+ * so sets of handles and maps keyed by symbols are honest hashed storage.
+ * REF keys carry their own retain/release/trace adapters at construction. */
 typedef enum { SCR_MAP_KEY_F64, SCR_MAP_KEY_STR, SCR_MAP_KEY_REF } ScrMapKeyKind;
 typedef enum { SCR_MAP_VAL_F64, SCR_MAP_VAL_BOOL, SCR_MAP_VAL_REF } ScrMapValKind;
 
@@ -1164,6 +1162,12 @@ typedef struct ScrMap {
 ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
                      void *(*val_retain)(void *), void (*val_release)(void *),
                      ScrTraceFn val_trace); /* returns +1 */
+ScrMap *scr_map_new_ref_key(ScrMapValKind val_kind,
+                            void *(*val_retain)(void *),
+                            void (*val_release)(void *), ScrTraceFn val_trace,
+                            void *(*key_retain)(void *),
+                            void (*key_release)(void *),
+                            ScrTraceFn key_trace); /* returns +1 */
 ScrMap *scr_map_retain(ScrMap *m);
 void scr_map_release(ScrMap *m); /* NULL-tolerant */
 void *scr_map_retain_v(void *m);
@@ -1190,6 +1194,7 @@ void scr_map_set_str_f64(ScrMap *m, ScrStr *key, double v);
 void scr_map_set_str_bool(ScrMap *m, ScrStr *key, bool v);
 void scr_map_set_str_ref(ScrMap *m, ScrStr *key, void *v);
 void scr_map_set_ref_f64(ScrMap *m, void *key, double v); /* REF-key sets */
+void scr_map_set_ref_ref(ScrMap *m, void *key, void *v);
 
 /* get: scalar variants fill *out and return the found flag; ref variants
  * return +1 or NULL (values are never NULL, so NULL means "absent"). The
@@ -1201,6 +1206,7 @@ void *scr_map_get_f64_ref(const ScrMap *m, double key);
 bool scr_map_get_str_f64(const ScrMap *m, const ScrStr *key, double *out);
 bool scr_map_get_str_bool(const ScrMap *m, const ScrStr *key, bool *out);
 void *scr_map_get_str_ref(const ScrMap *m, const ScrStr *key);
+void *scr_map_get_ref_ref(const ScrMap *m, const void *key);
 
 /* Iteration primitives behind the compiler's forEach desugar: an index loop
  * over the dense entries array, re-reading iter_count every pass (appends

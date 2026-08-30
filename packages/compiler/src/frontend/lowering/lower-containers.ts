@@ -2775,9 +2775,15 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       // The checker types the call `V | undefined`, which interns the
       // result union. `undefined` sorts LAST among all possible arm
       // typeKeys, so when V is itself a union its arms keep their tags in
-      // the result union — the backend leans on that (docs/ir.md).
+      // the result union — the backend leans on that (docs/ir.md). For an
+      // unknown-valued Map the checker collapses `unknown | undefined` to
+      // unknown; dyn already has an exact Undefined representation.
       const type = L.irTypeOf(call);
-      if (type.kind !== "union") L.badType(call, L.typeOf(call));
+      if (receiverIr.value.kind === "dyn") {
+        if (type.kind !== "dyn") L.badType(call, L.typeOf(call));
+      } else if (type.kind !== "union") {
+        L.badType(call, L.typeOf(call));
+      }
       return { kind: "mapIntrinsic", method: "get", receiver, args: [k], type, loc };
     }
     if (name === "set") {

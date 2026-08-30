@@ -525,6 +525,12 @@ function emitMapLikeIntrinsic(
       // in canonical arm order, so V's tags coincide with the result
       // union's and no re-tag exists (validated).
       const k = E.emitExpr(e.args[0]!);
+      if (value.kind === "dyn" && e.type.kind === "dyn") {
+        const raw = `(${cType(value).trim()})scr_map_get_${kAcc}_ref(${r.name}, ${k.name})`;
+        const result = E.newTemp(e.type, raw);
+        E.line(`if (!${result.name}) ${result.name} = scr_dyn_retain(scr_dyn_undefined());`);
+        return result;
+      }
       if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: map get result is not a union");
       const def = E.unionsById.get(e.type.unionId);
       const undefTag = undefinedArmTag(e.type, E.unionsById);
@@ -1986,10 +1992,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.type.kind !== "map") throw new InternalCompilerError("emitter bug: mapNew of non-map type");
         const value = e.type.value;
         const rc = isRefCounted(value) ? vAdapters(value) : null;
+        const keyRc = mapKeyAccess(e.type.key) === "ref" ? vAdapters(e.type.key) : null;
         const m = E.newTemp(
           e.type,
-          `scr_map_new(${mapKeyKindC(e.type.key)}, ${mapValKindC(value)}, ` +
-            `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ${E.traceArgC(value)})`,
+          keyRc
+            ? `scr_map_new_ref_key(${mapValKindC(value)}, ` +
+              `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ${E.traceArgC(value)}, ` +
+              `&${keyRc.retain}, &${keyRc.release}, ${E.traceArgC(e.type.key)})`
+            : `scr_map_new(${mapKeyKindC(e.type.key)}, ${mapValKindC(value)}, ` +
+              `${rc ? `&${rc.retain}` : "NULL"}, ${rc ? `&${rc.release}` : "NULL"}, ${E.traceArgC(value)})`,
         );
         // Seeded construction: set() each pair in source order — exactly
         // the statements the user would write on an empty map, so a

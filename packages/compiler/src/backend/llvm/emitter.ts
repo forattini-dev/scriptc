@@ -10401,11 +10401,19 @@ class LlEmitter {
     const B = this.B;
     const value = e.type.value;
     const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
-    this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
     const m = B.tmp();
-    B.line(
-      `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
-    );
+    if (mapKeyAccess(e.type.key) === "ref") {
+      const keyRc = vAdapters(this, e.type.key);
+      this.declare(`declare ptr @scr_map_new_ref_key(i32, ptr, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new_ref_key(i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"}, ptr ${keyRc.retain}, ptr ${keyRc.release}, ptr ${traceArg(this, e.type.key)})`,
+      );
+    } else {
+      this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
+      B.line(
+        `${m} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.key)}, i32 ${mapValKindNum(value)}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${isRefCounted(value) ? traceArg(this, value) : "null"})`,
+      );
+    }
     const out = this.own({ name: m, type: e.type });
     // Seeded construction: set() each pair in source order — a repeated
     // key overwrites (the runtime releases the old value).
@@ -10457,6 +10465,35 @@ class LlEmitter {
         // instance. When V is itself a union, the stored box IS the
         // result (`undefined` sorts last in canonical arm order).
         const k = this.emitExpr(e.args[0]!);
+        if (value.kind === "dyn" && e.type.kind === "dyn") {
+          this.declare(`declare ptr @scr_map_get_${kAcc}_ref(ptr, ${kTy})`);
+          this.declare(`declare ptr @scr_dyn_undefined()`);
+          this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+          const raw = B.tmp();
+          const isnull = B.tmp();
+          const slot = B.slot();
+          const hit = B.newLabel("mgd.h");
+          const miss = B.newLabel("mgd.m");
+          const join = B.newLabel("mgd.j");
+          B.entryAllocas.push(`${slot} = alloca ptr`);
+          B.line(`${raw} = call ptr @scr_map_get_${kAcc}_ref(ptr ${r.name}, ${kTy} ${k.name})`);
+          B.line(`${isnull} = icmp eq ptr ${raw}, null`);
+          B.condBr(isnull, miss, hit);
+          B.startBlock(hit);
+          B.line(`store ptr ${raw}, ptr ${slot}`);
+          B.br(join);
+          B.startBlock(miss);
+          const singleton = B.tmp();
+          const retained = B.tmp();
+          B.line(`${singleton} = call ptr @scr_dyn_undefined()`);
+          B.line(`${retained} = call ptr @scr_dyn_retain_v(ptr ${singleton})`);
+          B.line(`store ptr ${retained}, ptr ${slot}`);
+          B.br(join);
+          B.startBlock(join);
+          const result = B.tmp();
+          B.line(`${result} = load ptr, ptr ${slot}`);
+          return this.own({ name: result, type: e.type });
+        }
         if (e.type.kind !== "union") throw new InternalCompilerError("llvm emitter bug: map get result is not a union");
         const def = this.unionsById.get(e.type.unionId);
         const undefTag = undefinedArmTag(e.type, this.unionsById);

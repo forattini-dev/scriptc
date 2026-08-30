@@ -539,14 +539,14 @@ export function setOf(elem: IrType): IrType {
   return { kind: "set", elem };
 }
 
-/** The Map KEY fence: string (content) or number (SameValueZero) — the two
- * kinds a hash of the VALUE is honest for. Booleans, objects, and the rest
- * of JS's anything-goes keys stay out. Shared by the frontend's
- * type mapping/diagnostics and the validator. Set ELEMENTS use the same
+/** The Map KEY fence: string (content), number (SameValueZero), or symbol
+ * identity — the kinds a value/identity hash is honest for. Booleans,
+ * objects, and the rest of JS's anything-goes keys stay out. Shared by the
+ * frontend's type mapping/diagnostics and the validator. Set ELEMENTS use the same
  * fence: a set is hashed storage of its elements exactly as a map is of
  * its keys (isSupportedSetElem is this predicate under its own name). */
 export function isSupportedMapKey(t: IrType): boolean {
-  return t.kind === "f64" || t.kind === "string";
+  return t.kind === "f64" || t.kind === "string" || t.kind === "symbol";
 }
 
 /** The Set ELEMENT fence — Map's key fence plus reference-identity
@@ -562,11 +562,11 @@ export function isSupportedMapKey(t: IrType): boolean {
  * closure object's identity and make the Set cycle-capable: a waiter may
  * capture the Set that retains it, so the runtime traces those key edges. */
 export function isSupportedSetElem(t: IrType): boolean {
-  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "symbol" || t.kind === "func";
+  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "func";
 }
 
-/** The Map VALUE fence: scalars plus every refcounted kind EXCEPT
- * func/promise/dyn/jsval (and map itself — no maps of maps).
+/** The Map VALUE fence: scalars, checked-dynamic values, and selected
+ * refcounted kinds (but not func/jsval or map itself — no maps of maps).
  * Record/object/union values can point back at the map holding them, which
  * is exactly why ref-valued maps are cycle-capable (see the backend's
  * cycle analysis and docs/memory.md). Shared frontend/validator. */
@@ -579,6 +579,10 @@ export function isSupportedMapValue(t: IrType): boolean {
     case "object":
     case "union":
     case "array":
+    // Dependency/resource registries commonly store heterogeneous values
+    // under symbol keys. Dyn has ordinary retain/release adapters and a
+    // missing Map.get is represented by its own Undefined arm.
+    case "dyn":
       return true;
     // A spawned child handle (Map<string, ChildProcess> — the mdns
     // publisher registry): an ordinary refcounted pointer value (the

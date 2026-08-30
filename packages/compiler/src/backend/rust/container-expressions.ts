@@ -7,6 +7,7 @@ export interface RustContainerExpressionContext {
   arrayElementEquality(left: string, right: string, type: IrType, sameValueZero: boolean, loc: SrcLoc): string;
   mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string;
   mapStoredKey(value: string, type: IrType): string;
+  dynTypeName(): string;
   rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string;
   isUnit(type: IrType): boolean;
   union(id: string, loc?: SrcLoc): IrUnionDef;
@@ -203,6 +204,9 @@ export class RustContainerExpressionEmitter {
         return `{ ${bindings} let ${value} = ${this.context.emitExpr(valueExpr)}; runtime::map_set_by(&${receiver}, ${this.context.mapStoredKey(key, type.key)}, ${value}, |left, right| ${equality}) }`;
       }
       case "get": {
+        if (type.value.kind === "dyn" && expr.type.kind === "dyn") {
+          return `{ ${bindings} runtime::map_get_by(&${receiver}, &${key}, |left, right| ${equality}).unwrap_or(${this.context.dynTypeName()}::Undefined) }`;
+        }
         if (expr.type.kind !== "union") this.context.unsupported("map get without an optional result union", expr.loc);
         const union = this.context.union(expr.type.unionId, expr.loc);
         const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");

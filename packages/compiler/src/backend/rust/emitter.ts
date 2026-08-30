@@ -93,6 +93,7 @@ class RustEmitter {
       this.arrayElementEquality(left, right, type, sameValueZero, loc),
     mapKeyEquality: (left, right, type, loc) => this.mapKeyEquality(left, right, type, loc),
     mapStoredKey: (value, type) => this.mapStoredKey(value, type),
+    dynTypeName: () => this.dynTypeName(),
     rustBytesElement: (elem) => this.rustBytesElement(elem),
     isUnit: (type) => this.isUnit(type),
     union: (id, loc) => this.union(id, loc),
@@ -1146,7 +1147,6 @@ class RustEmitter {
   private closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape {
     return this.metadata.closureShapeForType(type, loc);
   }
-
   private classDef(name: string, loc?: SrcLoc): IrClassDef { return this.metadata.classDef(name, loc); }
   private stripCasts(expr: IrExpr): IrExpr { return this.metadata.stripCasts(expr); }
   private runtimeErrorAncestor(name: string): string | null { return this.metadata.runtimeErrorAncestor(name); }
