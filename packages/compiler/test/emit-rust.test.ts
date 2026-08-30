@@ -1604,6 +1604,7 @@ shardedTest.each(shardSelect([
   "2749-agentic-imported-defaults-spread/main.ts",
   "2750-unknown-error-subclass-fields.ts",
   "2751-error-options-custom-cause.ts",
+  "2752-embedded-cjs-named-import/main.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
