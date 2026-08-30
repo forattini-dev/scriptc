@@ -795,6 +795,23 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return accumulator;
     }
+    if (dyn_name_is(method, "findLast")) {
+      if (!dyn_cb_check(args, argc)) return NULL;
+      ScrDyn *visible_recv = callback_recv ? callback_recv : recv;
+      for (size_t i = len; i > 0; i--) {
+        size_t index = i - 1;
+        ScrDyn *item = index < recv->v.arr.len
+          ? scr_dyn_retain(recv->v.arr.items[index])
+          : scr_dyn_retain(scr_dyn_undefined());
+        ScrDyn *result = dyn_call_cb(args[0], item, index, visible_recv);
+        if (!result) { scr_dyn_release(item); return NULL; }
+        bool truthy = scr_dyn_truthy(result);
+        scr_dyn_release(result);
+        if (truthy) return item;
+        scr_dyn_release(item);
+      }
+      return scr_dyn_retain(scr_dyn_undefined());
+    }
     if (dyn_name_is(method, "forEach") || dyn_name_is(method, "map") ||
         dyn_name_is(method, "filter") || dyn_name_is(method, "some") ||
         dyn_name_is(method, "every") || dyn_name_is(method, "find") ||

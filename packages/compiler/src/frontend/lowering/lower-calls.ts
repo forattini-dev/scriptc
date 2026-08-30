@@ -4916,7 +4916,7 @@ const DYN_DISPATCH_METHODS = new Set([
   "apply", "call",
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "flat", "reverse", "toReversed", "toSorted", "toSpliced", "with", "sort", "fill", "copyWithin", "reduce", "reduceRight",
-  "forEach", "map", "filter", "some", "every", "find", "findIndex",
+  "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket
@@ -4993,7 +4993,7 @@ export function lowerDynDispatchMethodCall(
     arrayReceiver &&
     (method === "forEach" || method === "map" || method === "filter" ||
       method === "some" || method === "every" || method === "find" ||
-      method === "findIndex") &&
+      method === "findIndex" || method === "findLast") &&
     callback &&
     (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
   ) {
