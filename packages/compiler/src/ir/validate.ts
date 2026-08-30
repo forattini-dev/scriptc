@@ -4943,7 +4943,11 @@ function validateFunction(
         } else if (
           !def.arms.every(
             (a, i) =>
-              i === e.promiseTag || isUnitType(a) || typeEquals(a, promiseArm.inner),
+              i === e.promiseTag ||
+              isUnitType(a) ||
+              typeEquals(a, promiseArm.inner) ||
+              (promiseArm.inner.kind === "union" &&
+                (unions.get(promiseArm.inner.unionId)?.arms.some((innerArm) => typeEquals(a, innerArm)) ?? false)),
           )
         ) {
           err("awaitUnion union has an arm that differs from the promise inner", e.loc);
@@ -4952,7 +4956,15 @@ function validateFunction(
             err("awaitUnion void result over a value-carrying promise", e.loc);
           }
         } else if (typeEquals(e.type, promiseArm.inner)) {
-          if (!def.arms.every((a, i) => i === e.promiseTag || typeEquals(a, e.type))) {
+          const resultArms = e.type.kind === "union" ? unions.get(e.type.unionId)?.arms : undefined;
+          if (
+            !def.arms.every(
+              (a, i) =>
+                i === e.promiseTag ||
+                typeEquals(a, e.type) ||
+                (resultArms?.some((resultArm) => typeEquals(a, resultArm)) ?? false),
+            )
+          ) {
             err("awaitUnion collapsed result has a non-matching plain arm", e.loc);
           }
         } else if (e.type.kind !== "union") {

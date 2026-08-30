@@ -5791,7 +5791,9 @@ const inliningPredicates = new Set<ts.Symbol>();
               arm.kind === "promise" ||
               (promises[0]!.inner.kind === "void"
                 ? arm.kind === "undefinedT"
-                : L.coercibleValue(arm, promises[0]!.inner)),
+                : L.coercibleValue(arm, promises[0]!.inner) ||
+                  (promises[0]!.inner.kind === "union" &&
+                    L.armTag(promises[0]!.inner.unionId, arm) >= 0)),
           )
         ) {
           ret = promises[0]!;

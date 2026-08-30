@@ -1309,6 +1309,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           if (plainSameInner) {
             return { kind: "awaitUnionExpr", value, promiseTag, type: inner, loc };
           }
+          const innerUnion = inner.kind === "union" ? L.unions.get(inner.unionId) : undefined;
+          const plainWithinInner =
+            innerUnion !== undefined &&
+            def.arms.every(
+              (arm, i) =>
+                i === promiseTag || innerUnion.arms.some((innerArm) => typeEquals(arm, innerArm)),
+            );
+          if (plainWithinInner) {
+            return { kind: "awaitUnionExpr", value, promiseTag, type: inner, loc };
+          }
           if (!def.arms.every((a, i) => i === promiseTag || isUnitType(a))) {
             L.unsupported(
               "SC1090",

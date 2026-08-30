@@ -6916,6 +6916,65 @@ class LlEmitter {
           this.emitPendingCheck();
           return { name: "", type: e.type };
         }
+        // `Promise<U> | U.arm...`: the awaited promise already yields U;
+        // each direct arm takes one hop and is wrapped into that same
+        // target union before the branches join.
+        if (inner.kind === "union" && typeEquals(e.type, inner)) {
+          const result = this.unionsById.get(inner.unionId);
+          if (!result) throw new InternalCompilerError("llvm emitter bug: collapsed awaitUnion result unknown");
+          const resultTag = (arm: IrType): number => {
+            const found = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+            if (found < 0) throw new InternalCompilerError("llvm emitter bug: collapsed awaitUnion arm missing");
+            return found;
+          };
+          const slot = B.slot();
+          B.entryAllocas.push(`${slot} = alloca ptr`);
+          B.line(`store ptr null, ptr ${slot}`);
+          const lp = B.newLabel("au.p");
+          const lh = B.newLabel("au.h");
+          const lj = B.newLabel("au.j");
+          B.condBr(isP, lp, lh);
+          B.startBlock(lp);
+          const promise = this.unionPeek(u.name);
+          if (this.wasi) this.emitWasiSuspend(promise);
+          this.declare(`declare ptr @scr_await_ref(ptr)`);
+          const awaited = B.tmp();
+          B.line(`${awaited} = call ptr @scr_await_ref(ptr ${promise})`);
+          B.line(`store ptr ${awaited}, ptr ${slot}`);
+          B.br(lj);
+          B.startBlock(lh);
+          if (this.wasi) this.emitWasiSuspend(null);
+          else B.line(`call void @scr_await_hop()`);
+          const plainTags = def.arms.flatMap((arm, tag) => (tag === e.promiseTag ? [] : [{ arm, tag }]));
+          const bad = B.newLabel("au.b");
+          const labels = plainTags.map(() => B.newLabel("au.u"));
+          B.terminate(
+            `switch i32 ${tag}, label %${bad} [ ${plainTags.map(({ tag: sourceTag }, i) => `i32 ${sourceTag}, label %${labels[i]}`).join(" ")} ]`,
+          );
+          plainTags.forEach(({ arm }, i) => {
+            B.startBlock(labels[i]!);
+            const targetTag = resultTag(arm);
+            let wrapped: string;
+            if (isUnitType(arm)) {
+              wrapped = this.unitInstanceRef(inner.unionId, targetTag);
+            } else {
+              const payload = this.unionExtract(u.name, arm);
+              wrapped = this.unionNewOwned(targetTag, { name: payload, type: arm });
+            }
+            B.line(`store ptr ${wrapped}, ptr ${slot}`);
+            B.br(lj);
+          });
+          B.startBlock(bad);
+          this.needsBadTag = true;
+          B.line(`call void @sc_bad_tag()`);
+          B.terminate(`unreachable`);
+          B.startBlock(lj);
+          const value = B.tmp();
+          B.line(`${value} = load ptr, ptr ${slot}`);
+          const out = this.own({ name: value, type: e.type });
+          this.emitPendingCheck();
+          return out;
+        }
         // `Promise<T> | T`: both branches join directly at T. The plain
         // payload extracts +1 after the required non-thenable await hop.
         if (typeEquals(e.type, inner)) {

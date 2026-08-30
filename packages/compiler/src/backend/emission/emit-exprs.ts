@@ -7320,6 +7320,57 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return { name: "", type: e.type };
         }
+        // `Promise<U> | U.arm...` where U is itself a tagged union. The
+        // promise already settles to the target union box; a plain source
+        // arm takes one hop, then wraps its borrowed payload into U.
+        if (inner.kind === "union" && typeEquals(e.type, inner)) {
+          const result = E.unionsById.get(inner.unionId);
+          if (!result) throw new InternalCompilerError("emitter bug: collapsed awaitUnion result unknown");
+          const resultTag = (arm: IrType): number => {
+            const tag = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+            if (tag < 0) throw new InternalCompilerError("emitter bug: collapsed awaitUnion arm missing");
+            return tag;
+          };
+          const name = `sc_t${E.tempCounter++}`;
+          E.line(`${cDecl(inner, name)} = NULL;${E.srcComment(e.loc)}`);
+          E.currentFrame().push({ name, type: inner });
+          E.line(`if (${u.name}->tag == ${e.promiseTag}) {`);
+          E.indent++;
+          E.line(`${name} = (ScrUnion *)scr_await_ref(${peek});`);
+          E.indent--;
+          E.line(`} else {`);
+          E.indent++;
+          E.line(`scr_await_hop();`);
+          E.line(`switch (${u.name}->tag) {`);
+          E.indent++;
+          def.arms.forEach((arm, tag) => {
+            if (tag === e.promiseTag) return;
+            const targetTag = resultTag(arm);
+            let wrapped: string;
+            if (isUnitType(arm)) {
+              wrapped = E.unitInstanceRef(inner.unionId, targetTag);
+            } else if (arm.kind === "f64") {
+              wrapped = `scr_union_new_f64(${targetTag}, scr_union_get_f64(${u.name}))`;
+            } else if (arm.kind === "bool") {
+              wrapped = `scr_union_new_bool(${targetTag}, scr_union_get_bool(${u.name}))`;
+            } else if (isRefCounted(arm)) {
+              const type = cType(arm).trim();
+              const payload = retainCallC(arm, `(${type})scr_union_peek(${u.name})`);
+              const adapters = vAdapters(arm);
+              wrapped = `scr_union_new_ref(${targetTag}, ${payload}, ${adapters.retain}, ${adapters.release}, ${E.traceArgC(arm)})`;
+            } else {
+              throw new InternalCompilerError(`emitter bug: collapsed awaitUnion source arm ${arm.kind}`);
+            }
+            E.line(`case ${tag}: ${name} = ${wrapped}; break;`);
+          });
+          E.line(`default: break;`);
+          E.indent--;
+          E.line(`}`);
+          E.indent--;
+          E.line(`}`);
+          E.emitPendingCheck();
+          return { name, type: e.type };
+        }
         // `Promise<T> | T`: both paths yield the same scalar/reference
         // ABI. The plain arm still takes await's mandatory one-hop turn;
         // reference payloads retain out of the borrowed union box.

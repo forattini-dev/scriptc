@@ -2754,8 +2754,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // promise-or-absent shape) and beside their own representable
             // inner type (`T | Promise<T>` agent/test seams). The latter
             // has an exact await dispatch: the promise arm parks, the
-            // plain arm takes one hop, and both yield the same ABI. Nested
-            // union/dynamic inners keep their separate boundary story.
+            // plain arm takes one hop, and both yield the same ABI. A
+            // union inner also admits its own exact arms (`A | null |
+            // Promise<A | null>`); dynamic inners keep their boundary.
             (a.kind === "promise" &&
               !arms.every(
                 (b) =>
@@ -2765,7 +2766,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
                     a.inner.kind !== "union" &&
                     a.inner.kind !== "dyn" &&
                     a.inner.kind !== "jsval") &&
-                    typeEquals(b, a.inner)),
+                    typeEquals(b, a.inner)) ||
+                  (a.inner.kind === "union" &&
+                    (unions.get(a.inner.unionId)?.arms.some((innerArm) => typeEquals(b, innerArm)) ?? false)),
               )),
         )
       ) {

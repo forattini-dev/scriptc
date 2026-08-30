@@ -31,11 +31,19 @@ export function emitAwaitDependency(
     return `{ let ${value} = ${context.emitExpr(expr.value)}; match ${value} { ${arms.join(", ")}, } }`;
   }
   if (typeKey(expr.type) === typeKey(promiseArm.inner)) {
+    const result = expr.type.kind === "union" ? context.union(expr.type.unionId, expr.loc) : undefined;
     const arms = source.arms.map((arm, tag) => {
       const variant = `${sourceName}::${context.unionVariant(tag)}`;
       if (tag === expr.promiseTag) return `${variant}(promise) => promise`;
       if (typeKey(arm) === typeKey(expr.type)) {
         return `${variant}(value) => runtime::promise_resolved(value)`;
+      }
+      const resultTag = result?.arms.findIndex((candidate) => typeKey(candidate) === typeKey(arm)) ?? -1;
+      if (result !== undefined && resultTag >= 0) {
+        const target = `${context.unionName(result.id)}::${context.unionVariant(resultTag)}`;
+        return context.isUnit(arm)
+          ? `${variant} => runtime::promise_resolved(${target})`
+          : `${variant}(value) => runtime::promise_resolved(${target}(value))`;
       }
       context.unsupported(`await union arm '${arm.kind}'`, expr.loc);
     });

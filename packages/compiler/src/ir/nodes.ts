@@ -4690,8 +4690,9 @@ export type IrExpr =
   /** Await of a promise-or-plain union (`Promise<T> | T`, plus the mapped
    * `Promise<T> | void` / absent form): the promise arm parks and rethrows
    * rejections; every non-promise arm takes exactly one microtask hop. When
-   * all plain arms equal T, `type` is T. Unit arms instead produce void or
-   * the interned union of T and those units. Only inside async fns. */
+   * all plain arms equal T, or are exact members of a union T, `type` is T.
+   * Unit arms outside T instead produce void or join T. Only inside async
+   * fns. */
   | { kind: "awaitUnionExpr"; value: IrExpr; promiseTag: number; type: IrType; loc: SrcLoc }
   /** `new Promise<T>((resolve) => ...)`: creates a pending promise and runs
    * the executor synchronously with a resolve closure; an executor throw
