@@ -595,6 +595,20 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return out;
     }
+    if (dyn_name_is(method, "flat") && argc == 0) {
+      ScrDyn *out = scr_dyn_new_arr();
+      for (size_t i = 0; i < len; i++) {
+        ScrDyn *item = recv->v.arr.items[i];
+        if (item->kind == SCR_DYN_ARR) {
+          for (size_t j = 0; j < item->v.arr.len; j++) {
+            scr_dyn_arr_push(out, scr_dyn_retain(item->v.arr.items[j]));
+          }
+        } else {
+          scr_dyn_arr_push(out, scr_dyn_retain(item));
+        }
+      }
+      return out;
+    }
     if (dyn_name_is(method, "reverse")) {
       for (size_t i = 0; i < len / 2; i++) {
         ScrDyn *tmp = recv->v.arr.items[i];

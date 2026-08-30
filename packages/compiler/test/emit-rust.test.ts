@@ -1623,6 +1623,7 @@ shardedTest.each(shardSelect([
   "2768-dyn-array-reduce-initial.cjs",
   "2769-dyn-array-reduce-seed.cjs",
   "2770-dyn-array-reduceright-initial.cjs",
+  "2771-dyn-array-flat-default.cjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
