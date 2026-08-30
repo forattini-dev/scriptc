@@ -1105,6 +1105,7 @@ shardedTest.each(shardSelect([
   "1643-metadata-dyn-return.cjs",
   "1655-spawnsync-neutral.ts",
   "1656-execsync-neutral.ts",
+  "1657-spawn-async-neutral.ts",
   "1665-dyn-fn-mustcall/main.cjs",
   "1673-symbol-cjs.cjs",
   "1674-symbol-inspect.ts",
