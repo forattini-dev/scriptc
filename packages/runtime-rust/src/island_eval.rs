@@ -160,6 +160,27 @@ pub fn island_is_nullish(value: &IslandValue) -> bool {
     value.0.is_null_or_undefined()
 }
 
+pub fn island_is_undefined(value: &IslandValue) -> bool {
+    value.0.is_undefined()
+}
+
+pub fn island_is_null(value: &IslandValue) -> bool {
+    value.0.is_null()
+}
+
+pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
+    with_island_state(|state| {
+        let object = value
+            .0
+            .to_object(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        let property = object
+            .get(boa_engine::JsString::from(name), &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(property)
+    })
+}
+
 pub fn island_is_function(value: &IslandValue) -> bool {
     value.0.as_callable().is_some()
 }

@@ -2980,8 +2980,36 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         loc,
       };
     }
-    if (other.type.kind === "jsval" || other.type.kind === "void") {
-      return null; // no static tag to test — keep the fence
+    if (other.type.kind === "jsval") {
+      // An island value asks the engine whether it is strictly null OR
+      // strictly undefined. Bind once: a package getter may be effectful,
+      // while the two strict comparisons must observe the same value.
+      const temporary = L.declareHiddenLocal("%looseNull", JSVAL);
+      const value = (): IrExpr => ({ kind: "varRef", localId: temporary.id, type: JSVAL, loc });
+      const compare = (unit: "nullLit" | "undefLit"): IrExpr => ({
+        kind: "jsOp",
+        op: negated ? "neq" : "eq",
+        args: [value(), { kind: "jsOp", op: unit, args: [], type: JSVAL, loc }],
+        type: BOOL,
+        loc,
+      });
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: temporary.id, init: other, loc }],
+        result: {
+          kind: "logical",
+          op: negated ? "&&" : "||",
+          left: compare("nullLit"),
+          right: compare("undefLit"),
+          type: BOOL,
+          loc,
+        },
+        type: BOOL,
+        loc,
+      };
+    }
+    if (other.type.kind === "void") {
+      return null; // no runtime value to test — keep the fence
     }
     // The env-volatility escape (see lowerUnitComparison): a narrowed
     // process.env read compares its FRESH union tag instead of folding.

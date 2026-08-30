@@ -105,7 +105,12 @@ function emitOperation(
   if (expr.op === "undefLit" && expr.args.length === 0) return `${context.dynTypeName()}::Undefined`;
   if (expr.op === "nullLit" && expr.args.length === 0) return `${context.dynTypeName()}::Null`;
   if (expr.op === "getProp" && expr.name !== undefined && expr.args.length === 1) {
-    return `sc_dyn_key_get(&(${emitExpr(argOf(expr, 0, context))}), &runtime::string("${context.rustString(expr.name)}"), false)`;
+    const receiver = context.nextName("sc_island_receiver");
+    const dyn = context.dynTypeName();
+    const name = context.rustString(expr.name);
+    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; match &${receiver} { ` +
+      `${dyn}::Island(sc_value) => ${dyn}::Island(runtime::island_get_property(sc_value, "${name}")), ` +
+      `sc_value => sc_dyn_key_get(sc_value, &runtime::string("${name}"), false), } }`;
   }
   if (expr.op === "getIdx" && expr.args.length === 2) {
     const receiver = context.nextName("sc_island_receiver");
@@ -198,7 +203,11 @@ function emitOperation(
   if ((expr.op === "eq" || expr.op === "neq") && expr.args.length === 2) {
     const left = context.nextName("sc_island_left");
     const right = context.nextName("sc_island_right");
-    const equal = `sc_dyn_strict_equal(&${left}, &${right})`;
+    const dyn = context.dynTypeName();
+    const equal = `match (&${left}, &${right}) { ` +
+      `(${dyn}::Island(sc_value), ${dyn}::Undefined) | (${dyn}::Undefined, ${dyn}::Island(sc_value)) => runtime::island_is_undefined(sc_value), ` +
+      `(${dyn}::Island(sc_value), ${dyn}::Null) | (${dyn}::Null, ${dyn}::Island(sc_value)) => runtime::island_is_null(sc_value), ` +
+      `_ => sc_dyn_strict_equal(&${left}, &${right}), }`;
     return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${expr.op === "neq" ? `!(${equal})` : equal} }`;
   }
   if ((expr.op === "sub" || expr.op === "mul" || expr.op === "div" || expr.op === "mod" || expr.op === "pow") && expr.args.length === 2) {
