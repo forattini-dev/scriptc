@@ -2128,6 +2128,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // so no await can observe a fulfillment value. `never` VALUES outside
     // a promise stay unmapped.
     if (arg.flags & ts.TypeFlags.Never) return { kind: "promise", inner: VOID };
+    // Promise<void | undefined> is still a valueless promise. The checker
+    // preserves both spellings after chains such as
+    // `.catch(() => undefined)`, but both fulfillment alternatives are the
+    // same JavaScript value and therefore share Promise<void>'s ABI.
+    if (
+      arg.isUnionType() &&
+      ts.constituentTypes(arg).every(
+        (part) => (part.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0,
+      )
+    ) {
+      return { kind: "promise", inner: VOID };
+    }
     // Promise<any> in a STATIC build (untyped JS entries: `new
     // Promise((resolve) => ...)` infers any): the settled value rides the
     // dyn arm exactly like Promise<unknown> — every use of the awaited

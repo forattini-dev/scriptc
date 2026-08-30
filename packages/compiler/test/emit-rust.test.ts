@@ -1583,6 +1583,7 @@ shardedTest.each(shardSelect([
   "2725-optional-maybe-async-predicate.ts",
   "2726-optional-maybe-async-census.ts",
   "2727-optional-union-or-promise-starttime.ts",
+  "2728-map-promise-void-or-undefined-tail.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

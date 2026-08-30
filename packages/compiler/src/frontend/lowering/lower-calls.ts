@@ -6180,7 +6180,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (ts.isBlock(body)) {
         catchBody = L.lowerStmts(body.statements);
       } else if (resultType.kind === "void") {
-        catchBody = [{ kind: "exprStmt", expr: L.lowerExpr(body), loc: locOf(body) }];
+        catchBody = [L.lowerExprStatement(body)];
       } else {
         catchBody = [{ kind: "return", value: L.lowerReturnValue(body), loc: locOf(body) }];
       }
