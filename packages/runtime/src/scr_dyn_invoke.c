@@ -315,7 +315,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "splice", "reduceRight", "flat",
+  static const char *names[] = { "splice", "flat",
     "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
@@ -647,16 +647,17 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return scr_dyn_retain(recv);
     }
-    if (dyn_name_is(method, "reduce")) {
+    if (dyn_name_is(method, "reduce") || dyn_name_is(method, "reduceRight")) {
+      bool reverse = dyn_name_is(method, "reduceRight");
       if (!dyn_cb_check(args, argc)) return NULL;
       ScrDyn *accumulator;
-      size_t start;
+      size_t index;
       if (argc >= 2) {
         accumulator = scr_dyn_retain(args[1]);
-        start = 0;
+        index = reverse ? len : 0;
       } else if (len > 0) {
-        accumulator = scr_dyn_retain(recv->v.arr.items[0]);
-        start = 1;
+        accumulator = scr_dyn_retain(recv->v.arr.items[reverse ? len - 1 : 0]);
+        index = reverse ? len - 1 : 1;
       } else {
         const char *message = "Reduce of empty array with no initial value";
         scr_throw_error_msg(SCR_ERR_TYPE, message, strlen(message));
@@ -664,14 +665,23 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       ScrDyn *visible_recv = callback_recv ? callback_recv : recv;
       size_t n = len;
-      for (size_t i = start; i < n && i < recv->v.arr.len; i++) {
-        ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
-        ScrDyn *next = dyn_call_reduce_cb(
-            args[0], accumulator, item, i, visible_recv);
-        scr_dyn_release(item);
-        scr_dyn_release(accumulator);
-        if (!next) return NULL;
-        accumulator = next;
+      for (;;) {
+        if (reverse) {
+          if (index == 0) break;
+          index--;
+        } else if (index >= n || index >= recv->v.arr.len) {
+          break;
+        }
+        if (index < recv->v.arr.len) {
+          ScrDyn *item = scr_dyn_retain(recv->v.arr.items[index]);
+          ScrDyn *next = dyn_call_reduce_cb(
+              args[0], accumulator, item, index, visible_recv);
+          scr_dyn_release(item);
+          scr_dyn_release(accumulator);
+          if (!next) return NULL;
+          accumulator = next;
+        }
+        if (!reverse) index++;
       }
       return accumulator;
     }
