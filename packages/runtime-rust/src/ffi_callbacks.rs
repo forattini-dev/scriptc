@@ -12,6 +12,7 @@ struct FfiRetainedCallback {
     identity: usize,
     callback: *const std::ffi::c_void,
     context: *mut std::ffi::c_void,
+    cleanup: Option<fn()>,
     _owner: Box<dyn Any>,
 }
 
@@ -52,7 +53,26 @@ pub fn ffi_commit_retained_callback<T: 'static>(
             identity,
             callback,
             context,
+            cleanup: None,
             _owner: owner,
+        });
+    });
+}
+
+pub fn ffi_commit_retained_raw_callback(
+    key: &'static str,
+    identity: usize,
+    callback: *const std::ffi::c_void,
+    cleanup: fn(),
+) {
+    FFI_RETAINED_CALLBACKS.with(|callbacks| {
+        callbacks.borrow_mut().push(FfiRetainedCallback {
+            key,
+            identity,
+            callback,
+            context: std::ptr::null_mut(),
+            cleanup: Some(cleanup),
+            _owner: Box::new(()),
         });
     });
 }
@@ -75,12 +95,13 @@ pub fn ffi_release_retained_callback(
     identity: usize,
     context: *mut std::ffi::c_void,
 ) {
-    FFI_RETAINED_CALLBACKS.with(|callbacks| {
+    let cleanup = FFI_RETAINED_CALLBACKS.with(|callbacks| {
         let mut callbacks = callbacks.borrow_mut();
-        if let Some(index) = callbacks.iter().position(|entry| {
+        callbacks.iter().position(|entry| {
             entry.key == key && entry.identity == identity && entry.context == context
-        }) {
-            callbacks.remove(index);
-        }
+        }).and_then(|index| callbacks.remove(index).cleanup)
     });
+    if let Some(cleanup) = cleanup {
+        cleanup();
+    }
 }

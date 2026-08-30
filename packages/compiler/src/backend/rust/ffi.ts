@@ -175,6 +175,15 @@ function retainedContextRelease(binding: IrFfiImport): string | null {
     : null;
 }
 
+function rawRetainedRelease(binding: IrFfiImport): string | null {
+  const release = binding.params[0];
+  if (binding.params.length !== 1 || release === undefined || !isFfiReleaseParam(release)) return null;
+  return release.callback.params.length === 1 && release.callback.params[0] === "f64" &&
+    release.callback.returns === "void" && binding.returns === "void"
+    ? release.callback.release
+    : null;
+}
+
 function hasRetainedCallback(imports: readonly IrFfiImport[]): boolean {
   return imports.some((binding) => binding.params.some((parameter) =>
     isFfiCallbackParam(parameter) && parameter.callback.lifetime === "retained"));
@@ -212,6 +221,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (rawRetainedRelease(binding) !== null) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64));`];
+    }
     if (rawRetainedCallback(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64));`];
@@ -272,6 +285,19 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  const rawRelease = binding === undefined ? null : rawRetainedRelease(binding);
+  if (rawRelease !== null) {
+    const callbackArgument = expr.args[0];
+    if (expr.args.length !== 1 || callbackArgument?.type.kind !== "func" || expr.type.kind !== "void") {
+      context.unsupported(`native FFI import '${expr.import}' outside the raw retained release ABI`, expr.loc);
+    }
+    const callbackValue = context.nextName("sc_ffi_callback_value");
+    const identity = context.nextName("sc_ffi_callback_identity");
+    const rawCallback = context.nextName("sc_ffi_callback_raw");
+    const callback = context.nextName("sc_ffi_callback_typed");
+    const key = JSON.stringify(rawRelease);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); let (${rawCallback}, _) = runtime::ffi_retained_callback(${key}, ${identity}).unwrap_or_else(|| runtime::throw_error("releasing a native callback registration that does not exist".to_owned())); let ${callback}: extern "C" fn(f64) = unsafe { std::mem::transmute(${rawCallback}) }; unsafe { ${functionName(index)}(${callback}); } runtime::ffi_release_retained_callback(${key}, ${identity}, std::ptr::null_mut()); runtime::ffi_resume_callback_panic(); }`;
+  }
   const rawRetained = binding === undefined ? null : rawRetainedCallback(binding);
   if (rawRetained !== null) {
     const callbackArgument = expr.args[0];
@@ -281,11 +307,15 @@ export function emitRustFfiCall(
     const callbackValue = context.nextName("sc_ffi_callback_value");
     const slot = context.nextName("SC_FFI_RETAINED_CALLBACK");
     const trampoline = context.nextName("sc_ffi_callback");
+    const cleanup = context.nextName("sc_ffi_callback_cleanup");
     const incoming = context.nextName("sc_ffi_callback_incoming");
     const active = context.nextName("sc_ffi_callback_active");
+    const identity = context.nextName("sc_ffi_callback_identity");
+    const callbackPointer = context.nextName("sc_ffi_callback_function");
     const closureType = context.rustType(callbackArgument.type, expr.loc);
     const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
-    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; std::thread_local! { static ${slot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${trampoline}(${incoming}: f64) { if runtime::ffi_callback_panicked() { return; } let sc_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${slot}.with(|sc_slot| { let ${active} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its retained scope").clone(); ${dispatch} }))); if let Err(sc_payload) = sc_result { runtime::ffi_store_callback_panic(sc_payload); } } unsafe { ${functionName(index)}(${trampoline}); } ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = Some(${callbackValue}); }); runtime::ffi_resume_callback_panic(); }`;
+    const key = JSON.stringify(`${binding?.name ?? ""}:${rawRetained.id}`);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${identity} = ${callbackValue}.identity(); std::thread_local! { static ${slot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${trampoline}(${incoming}: f64) { if runtime::ffi_callback_panicked() { return; } let sc_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${slot}.with(|sc_slot| { let ${active} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its retained scope").clone(); ${dispatch} }))); if let Err(sc_payload) = sc_result { runtime::ffi_store_callback_panic(sc_payload); } } fn ${cleanup}() { ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = None; }); } let ${callbackPointer} = ${trampoline} as *const () as *const std::ffi::c_void; unsafe { ${functionName(index)}(${trampoline}); } ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = Some(${callbackValue}); }); runtime::ffi_commit_retained_raw_callback(${key}, ${identity}, ${callbackPointer}, ${cleanup}); runtime::ffi_resume_callback_panic(); }`;
   }
   const retainedRelease = binding === undefined ? null : retainedContextRelease(binding);
   if (retainedRelease !== null) {
