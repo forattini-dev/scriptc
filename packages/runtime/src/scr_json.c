@@ -3087,10 +3087,33 @@ ScrDyn *scr_dyn_obj_keys(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWAL
  * (arrays, strings, bytes) ride the entries walk, so the copied key set
  * is EXACTLY what Object.keys answers for that kind (string sources per
  * UTF-16 code unit, like Node's String exotic object); nullish sources
- * copy nothing (Node skips them) and the scalar/function/handle kinds
- * have no own enumerable string keys. Non-OBJ targets copy nothing (the
- * existing two-arg stance — a dyn array target has no property table). */
+ * copy nothing (Node skips them) and scalar/handle kinds have no modeled
+ * own enumerable keys. Function-to-function copies transfer the modeled
+ * own-property tables; other non-OBJ targets copy nothing (a dyn array
+ * target has no expando-property table). */
 static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
+  /* Function wrappers created for an island ABI are distinct closures,
+   * but Object.assign still copies the original function's enumerable own
+   * properties (displayName is the component-factory case). Function
+   * property tables live on the closure and are allocated lazily. */
+  if (target->kind == SCR_DYN_FUNC && src->kind == SCR_DYN_FUNC) {
+    if (!src->v.fn.clo->props) return;
+    if (!target->v.fn.clo->props) {
+      ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);
+      scr_box_set_ref(box, scr_dyn_new_obj());
+      target->v.fn.clo->props = box;
+    }
+    ScrDyn *target_props = (ScrDyn *)scr_box_get_ref(target->v.fn.clo->props);
+    ScrDyn *source_props = (ScrDyn *)scr_box_get_ref(src->v.fn.clo->props);
+    for (size_t i = 0; i < source_props->v.obj.len; i++) {
+      ScrDynEntry *entry = &source_props->v.obj.entries[i];
+      scr_dyn_obj_set(target_props, entry->key, entry->key_len,
+                      scr_dyn_retain(entry->value));
+    }
+    scr_dyn_release(source_props);
+    scr_dyn_release(target_props);
+    return;
+  }
   if (target->kind != SCR_DYN_OBJ) return;
   if (src->kind == SCR_DYN_TYPED_REF) {
     ScrDyn *materialized = scr_dyn_typed_ref_materialize(src);

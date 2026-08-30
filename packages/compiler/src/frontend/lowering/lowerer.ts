@@ -5573,10 +5573,9 @@ export class Lowerer {
    * fixed arguments normally and one trailing engine array containing all
    * surplus arguments. Its body boxes the original closure, converts the
    * fixed arguments to dyn, wraps the engine array as dyn, and invokes the
-   * original through the spread-aware dynCall path. This preserves BOTH
-   * default-parameter omission and arbitrary surplus forwarding when a
-   * typed variadic function flows through an implementation return typed
-   * `any` (the overloaded component-wrapper shape). */
+   * original through the spread-aware dynCall path. The outer builder also
+   * copies the original function's dynamic own properties onto the wrapper,
+   * preserving component metadata such as displayName. */
   dynRestIslandAdapter(value: IrExpr, loc: SrcLoc): IrExpr | null {
     const fromT = value.type;
     if (
@@ -5584,7 +5583,7 @@ export class Lowerer {
       !canBoxFuncIntoDyn(fromT, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ||
       !fromT.params.every((p) => canConvertToDyn(p, (id) => this.shapes.get(id), (id) => this.unions.get(id))) ||
       !(
-        fromT.ret.kind === "void" || fromT.ret.kind === "dyn" ||
+        fromT.ret.kind === "void" || fromT.ret.kind === "dyn" || fromT.ret.kind === "jsval" ||
         canDynCheckTo(fromT.ret, (id) => this.shapes.get(id), (id) => this.unions.get(id))
       )
     ) {
@@ -5652,16 +5651,43 @@ export class Lowerer {
         body,
         loc,
       });
+      const wrapped: IrExpr = { kind: "varRef", localId: "wrapped.0", type: toT, loc };
       this.liftedFns.push({
         name,
         params: [{ localId: "f.0", name: "f", type: fromT }],
         returnType: toT,
-        locals: [{ id: "f.0", name: "f", type: fromT, mutable: false, boxed: true }],
-        body: [{
-          kind: "return",
-          value: { kind: "closure", fnName: impl, captures: ["f.0"], type: toT, loc },
-          loc,
-        }],
+        locals: [
+          { id: "f.0", name: "f", type: fromT, mutable: false, boxed: true },
+          { id: "wrapped.0", name: "wrapped", type: toT, mutable: false },
+        ],
+        body: [
+          {
+            kind: "varDecl",
+            localId: "wrapped.0",
+            init: { kind: "closure", fnName: impl, captures: ["f.0"], type: toT, loc },
+            loc,
+          },
+          {
+            kind: "exprStmt",
+            expr: {
+              kind: "libCall",
+              fn: "dyn.assign",
+              args: [
+                { kind: "dynFrom", value: wrapped, type: DYN, loc },
+                {
+                  kind: "dynFrom",
+                  value: { kind: "varRef", localId: "f.0", type: fromT, loc },
+                  type: DYN,
+                  loc,
+                },
+              ],
+              type: DYN,
+              loc,
+            },
+            loc,
+          },
+          { kind: "return", value: wrapped, loc },
+        ],
         loc,
       });
     }

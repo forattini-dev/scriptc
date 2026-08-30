@@ -1614,6 +1614,7 @@ shardedTest.each(shardSelect([
   "2759-overload-infers-implementation-generics.ts",
   "2760-unknown-record-intersection-overload.ts",
   "2761-define-property-on-function.ts",
+  "2762-any-result-dynamic-rest-component.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

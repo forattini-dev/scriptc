@@ -2,6 +2,12 @@ import type { RustDynamicContext } from "./dynamic-context.js";
 
 export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   const name = context.dynTypeName();
+  const functionVariants = [...context.dynBoxedFunctionShapes]
+    .flatMap((key) => {
+      const shape = context.closureShapes.get(key);
+      return shape === undefined ? [] : [context.dynFunctionVariant(shape)];
+    })
+    .filter((variant, index, variants) => variants.indexOf(variant) === index);
   context.line(`fn sc_dyn_obj_walk_push(output: &runtime::JsArray<${name}>, mode: u8, key: runtime::JsString, value: ${name}) {`);
   context.pushIndent();
   context.line("let item = match mode {");
@@ -58,12 +64,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`fn sc_dyn_obj_keys(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 0) }`);
   context.line(`fn sc_dyn_obj_values(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 1) }`);
   context.line(`fn sc_dyn_obj_entries(value: &${name}) -> ${name} { sc_dyn_obj_walk(value, 2) }`);
-  context.line(`fn sc_dyn_assign_from(target: &${name}, source: &${name}) {`);
-  context.pushIndent();
-  context.line(`let ${name}::Object(target) = target else { return; };`);
-  context.line("match source {");
-  context.pushIndent();
-  context.line(`${name}::Object(source) => {`);
+  context.line(`fn sc_dyn_assign_map(target: &runtime::JsMap<runtime::JsString, ${name}>, source: &runtime::JsMap<runtime::JsString, ${name}>) {`);
   context.pushIndent();
   context.line("let mut index = 0.0;");
   context.line("while index < runtime::map_iter_count(source) {");
@@ -73,7 +74,22 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.popIndent();
   context.line("}");
   context.popIndent();
-  context.line("},");
+  context.line("}");
+  context.line(`fn sc_dyn_assign_from(target: &${name}, source: &${name}) {`);
+  context.pushIndent();
+  context.line("let target = match target {");
+  context.pushIndent();
+  context.line(`${name}::Object(target) => target,`);
+  for (const variant of functionVariants) context.line(`${name}::${variant}(_, _, properties) => properties,`);
+  context.line("_ => return,");
+  context.popIndent();
+  context.line("};");
+  context.line("match source {");
+  context.pushIndent();
+  context.line(`${name}::Object(source) => sc_dyn_assign_map(target, source),`);
+  for (const variant of functionVariants) {
+    context.line(`${name}::${variant}(_, _, properties) => sc_dyn_assign_map(target, properties),`);
+  }
   context.line(`${name}::Array(source) => { let mut index = 0.0; while index < runtime::array_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), runtime::array_get(source, index), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
   context.line(`${name}::Bytes(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
   context.line(`${name}::TypedBytes(source) => { let mut index = 0.0; while index < runtime::typed_bytes_len(source) { runtime::map_set_by(target, runtime::string(&(index as usize).to_string()), ${name}::Number(runtime::typed_bytes_get(source, index)), |left, right| left.as_ref() == right.as_ref()); index += 1.0; } },`);
