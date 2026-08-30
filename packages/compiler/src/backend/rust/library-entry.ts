@@ -91,6 +91,7 @@ function returnType(
     case "void": return "";
     case "f64": return " -> f64";
     case "bool": return " -> u8";
+    case "string": return "";
     default: return unsupported(`library return class '${cls}'`);
   }
 }
@@ -103,9 +104,15 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
   if ((lib.callbacks?.length ?? 0) > 0) unsupported("library callback channels");
   if (lib.identity !== undefined) unsupported("library sidecar identity");
 
+  const hasResults = lib.exports.some(
+    (entry) => entry.returns === "string" || entry.returns === "bytes",
+  );
   const lines = [
     `std::thread_local! {`,
     `    static SC_LIBRARY_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };`,
+    ...(hasResults
+      ? [`    static SC_LIBRARY_RESULTS: std::cell::RefCell<Vec<Box<[u8]>>> = const { std::cell::RefCell::new(Vec::new()) };`]
+      : []),
     `}`,
   ];
   if (lib.exports.some((entry) => entry.params.includes("string"))) {
@@ -116,6 +123,29 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `    assert!(!data.is_null(), "scriptc: NULL library string with nonzero length");`,
       `    let bytes = unsafe { std::slice::from_raw_parts(data, len) };`,
       `    runtime::string(String::from_utf8_lossy(bytes).as_ref())`,
+      `}`,
+    );
+  }
+  if (hasResults) {
+    lines.push(
+      "",
+      `fn sc_library_results_reset() {`,
+      `    SC_LIBRARY_RESULTS.with(|results| results.borrow_mut().clear());`,
+      `}`,
+    );
+  }
+  if (lib.exports.some((entry) => entry.returns === "string")) {
+    lines.push(
+      "",
+      `fn sc_library_string_out(value: runtime::JsString, out: *mut *const u8, out_len: *mut usize) {`,
+      `    let len = value.len();`,
+      `    let mut bytes = Vec::with_capacity(len + 1);`,
+      `    bytes.extend_from_slice(value.as_bytes());`,
+      `    bytes.push(0);`,
+      `    let bytes = bytes.into_boxed_slice();`,
+      `    let data = bytes.as_ptr();`,
+      `    SC_LIBRARY_RESULTS.with(|results| results.borrow_mut().push(bytes));`,
+      `    unsafe { out.write(data); out_len.write(len); }`,
       `}`,
     );
   }
@@ -130,6 +160,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `#[unsafe(no_mangle)]`,
     `pub extern "C" fn ${lib.initSymbol}() {`,
     `    let sc_was_initialized = SC_LIBRARY_INITIALIZED.with(|slot| slot.replace(true));`,
+    ...(hasResults ? [`    sc_library_results_reset();`] : []),
     ...options.globals.map((global) => `    ${resetGlobal(global, unsupported)}`),
     ...options.internedClosureNames.map(
       (name) => `    ${mangleFnClosure(name)}.with(|slot| *slot.borrow_mut() = None);`,
@@ -145,6 +176,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       "",
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${lib.collectSymbol}() {`,
+      ...(hasResults ? [`    sc_library_results_reset();`] : []),
       `    runtime::collect_cycles();`,
       `}`,
     );
@@ -153,7 +185,9 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     lines.push(
       "",
       `#[unsafe(no_mangle)]`,
-      `pub extern "C" fn ${lib.resultResetSymbol}() {}`,
+      `pub extern "C" fn ${lib.resultResetSymbol}() {`,
+      ...(hasResults ? [`    sc_library_results_reset();`] : []),
+      `}`,
     );
   }
 
@@ -166,13 +200,21 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     const args = entry.params.map(
       (cls, index) => parameterValue(`sc_arg_${index}`, cls, unsupported),
     );
+    if (entry.returns === "string") {
+      params.push("sc_out: *mut *const u8", "sc_out_len: *mut usize");
+    }
     const call = `${mangleFunction(entry.fnName)}(${args.join(", ")})`;
     const result = entry.returns === "bool" ? `u8::from(${call})` : call;
     lines.push(
       "",
       `#[unsafe(no_mangle)]`,
       `pub extern "C" fn ${entry.symbol}(${params.join(", ")})${returnType(entry.returns, unsupported)} {`,
-      entry.returns === "void" ? `    ${result};` : `    ${result}`,
+      ...(hasResults && lib.resultResetSymbol === null
+        ? [`    sc_library_results_reset();`]
+        : []),
+      entry.returns === "string"
+        ? `    sc_library_string_out(${result}, sc_out, sc_out_len);`
+        : entry.returns === "void" ? `    ${result};` : `    ${result}`,
       `}`,
     );
   }
