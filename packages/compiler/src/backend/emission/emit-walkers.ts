@@ -738,6 +738,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (t.elem !== "u8") throw new InternalCompilerError(`emitter bug: dynMatch of bytes<${t.elem}>`);
         d.push(`  return d->kind == SCR_DYN_BYTES;`);
         break;
+      case "object":
+        // The one object kind admitted by canDynCheckTo: the checked-
+        // dynamic Error encoding. Union builders need the same marker
+        // predicate the bare %Error builder validates below.
+        if (t.className !== "%Error") {
+          throw new InternalCompilerError(`emitter bug: dynMatch of class ${t.className} (only %Error extracts from the checked-dynamic tree)`);
+        }
+        d.push(`  return d->kind == SCR_DYN_OBJ && scr_dyn_obj_get(d, "%error", 6) != NULL;`);
+        break;
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
         if (!shape) throw new InternalCompilerError(`emitter bug: dynCheck of unknown shape ${t.shapeId}`);

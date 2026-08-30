@@ -5815,7 +5815,7 @@ function canBoxDynComposite(
 
 /** A type a dyn value can be VALIDATED into — the dynCheck domain:
  * JSON-safe data, bytes<u8> (a fresh copy out), the %Error extraction,
- * undefined-armed unions of JSON-safe arms, adaptable function types,
+ * undefined-armed unions of JSON-safe and %Error arms, adaptable function types,
  * and the runtime HANDLE kinds (a tag-checked reference unwrap —
  * DYN_HANDLE_KINDS). */
 export function canDynCheckTo(
@@ -5830,7 +5830,13 @@ export function canDynCheckTo(
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
-    return !!def && def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion));
+    return !!def &&
+      def.arms.some((a) => a.kind === "undefinedT") &&
+      def.arms.every((a) =>
+        a.kind === "undefinedT" ||
+        isJsonSafeType(a, getRecord, getUnion) ||
+        (a.kind === "object" && a.className === "%Error")
+      );
   }
   return false;
 }

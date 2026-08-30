@@ -1137,6 +1137,16 @@ export class RustDynamicEmitter {
           const array = `${dyn}::Array(sc_array) => ${name}::${this.context.unionVariant(jsvalArrayTag)}(sc_array)`;
           return `{ let value = ${value}; match value { ${units.join(", ")}, ${array}, value => sc_dyn_check_fail("array or undefined", &value), } }`;
         }
+        const errorTag = union.arms.findIndex((arm) =>
+          arm.kind === "object" && arm.className === "%Error"
+        );
+        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        const optionalError = errorTag >= 0 && undefinedTag >= 0 &&
+          union.arms.every((_arm, tag) => tag === errorTag || tag === undefinedTag);
+        if (optionalError) {
+          const unionName = this.context.unionName(union.id);
+          return `{ let value = ${value}; match value { ${dyn}::Undefined => ${unionName}::${this.context.unionVariant(undefinedTag)}, value => ${unionName}::${this.context.unionVariant(errorTag)}(sc_dyn_error_unbox(value)), } }`;
+        }
         if (!this.context.isRustJsonCompatible(type)) {
           this.context.unsupported("dynamic checked cast to union", loc);
         }

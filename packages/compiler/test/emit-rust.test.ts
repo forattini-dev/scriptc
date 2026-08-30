@@ -1593,6 +1593,7 @@ shardedTest.each(shardSelect([
   "2738-agentic-import-meta-url.ts",
   "2739-agentic-fsp-rm-force.ts",
   "2740-agentic-spawnsync-env.ts",
+  "2741-agentic-unknown-errno-code.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

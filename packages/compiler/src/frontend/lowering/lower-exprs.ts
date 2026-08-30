@@ -7502,7 +7502,10 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // undefined` is the missing-key idiom. Parsed JSON still never
       // contains undefined, so casts over parse results keep failing on
       // non-string values with the usual path-annotated TypeError.
-      if (target.kind === "union" && L.dynConvertible(target)) {
+      if (
+        target.kind === "union" &&
+        canDynCheckTo(target, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+      ) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // Uint8Array targets: the checked-dynamic tree carries a bytes kind now (converted
