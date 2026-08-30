@@ -5022,11 +5022,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           }
           if (causeNode !== null) {
             const cause = L.lowerExpr(causeNode);
-            let dynCause: IrExpr;
-            if (cause.type.kind === "dyn") dynCause = cause;
-            else if (cause.kind === "unitLit" || (cause.type.kind !== "jsval" && L.dynConvertible(cause.type))) {
-              dynCause = { kind: "dynFrom", value: cause, type: DYN, loc };
-            } else {
+            const dynCause = L.coerceToExpected(cause, DYN);
+            if (dynCause.type.kind !== "dyn") {
               L.noLowering(
                 `Error cause of type '${L.fmt(cause.type)}'`,
                 causeNode,
