@@ -326,8 +326,8 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "keys", "values", "entries",
-    "toSorted", "toString", "toLocaleString", NULL };
+  static const char *names[] = {
+    "keys", "values", "entries", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -883,7 +883,7 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return out;
     }
-    if (dyn_name_is(method, "sort")) {
+    if (dyn_name_is(method, "sort") || dyn_name_is(method, "toSorted")) {
       ScrDyn *cmp = argc > 0 ? args[0] : scr_dyn_undefined();
       if (cmp->kind != SCR_DYN_UNDEF && cmp->kind != SCR_DYN_FUNC) {
         /* V8 appends the received value's string image. */
@@ -894,8 +894,19 @@ static ScrDyn *scr_dyn_invoke_impl(
         scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
         return NULL;
       }
-      if (len > 1 && !dyn_arr_sort(recv, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) return NULL;
-      return scr_dyn_retain(recv);
+      ScrDyn *target = recv;
+      if (dyn_name_is(method, "toSorted")) {
+        target = scr_dyn_new_arr();
+        for (size_t i = 0; i < len; i++) {
+          scr_dyn_arr_push(target, scr_dyn_retain(recv->v.arr.items[i]));
+        }
+      }
+      if (len > 1 && !dyn_arr_sort(
+            target, cmp->kind == SCR_DYN_FUNC ? cmp : NULL)) {
+        if (target != recv) scr_dyn_release(target);
+        return NULL;
+      }
+      return target == recv ? scr_dyn_retain(recv) : target;
     }
     if (dyn_arr_proto_unimpl(method)) {
       dyn_throw_unsupported("Array", method);

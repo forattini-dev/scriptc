@@ -170,11 +170,12 @@ class RustDynamicInvokeEmitter {
     this.close("}");
 
     const callable = `${this.dyn}::Undefined | ${this.functionPatterns}`;
-    this.open(`fn sc_dyn_array_sort(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}]) -> ${this.dyn} {`);
+    this.open(`fn sc_dyn_array_sort(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}], copy_first: bool) -> ${this.dyn} {`);
     this.context.line(`let comparator = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
     this.context.line(`if !matches!(&comparator, ${callable}) { runtime::throw_type_error(format!("The comparison function must be either a function or undefined: {}", sc_dyn_to_string(&comparator))); }`);
     this.context.line(`let comparator = if matches!(&comparator, ${this.dyn}::Undefined) { None } else { Some(&comparator) };`);
-    this.context.line(`${this.dyn}::Array(runtime::array_sort_by_snapshot(array, |left, right| sc_dyn_sort_compare(left, right, comparator)))`);
+    this.context.line("let target = if copy_first { runtime::array_slice(array, 0.0, f64::INFINITY) } else { array.clone() };");
+    this.context.line(`${this.dyn}::Array(runtime::array_sort_by_snapshot(&target, |left, right| sc_dyn_sort_compare(left, right, comparator)))`);
     this.close("}");
   }
 
@@ -458,9 +459,10 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"copyWithin" => { let target = sc_dyn_index_arg(args, 0, 0.0, callee_name); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_copy_within(array, target, start, end)) },`);
     this.context.line('"reduce" => sc_dyn_array_reduce(array, args, false),');
     this.context.line('"reduceRight" => sc_dyn_array_reduce(array, args, true),');
-    this.context.line('"sort" => sc_dyn_array_sort(array, args),');
+    this.context.line('"sort" => sc_dyn_array_sort(array, args, false),');
+    this.context.line('"toSorted" => sc_dyn_array_sort(array, args, true),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"keys\" | \"values\" | \"entries\" | \"toSorted\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line("\"keys\" | \"values\" | \"entries\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");

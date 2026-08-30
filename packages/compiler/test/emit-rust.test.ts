@@ -1632,6 +1632,7 @@ shardedTest.each(shardSelect([
   "2777-dyn-array-splice-empty-args.cjs",
   "2778-dyn-array-to-spliced-empty-args.cjs",
   "2779-dyn-array-with-negative-index.cjs",
+  "2780-dyn-array-to-sorted-default.cjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
