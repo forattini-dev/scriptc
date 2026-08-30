@@ -833,6 +833,24 @@ function isNeverArrayRestParameter(
   return element !== undefined && (element.flags & ts.TypeFlags.Never) !== 0;
 }
 
+/** An open-ended `any[]`/`unknown[]` call surface has no finite typed ABI,
+ * but under --dynamic it has an exact checked-dynamic representation: the
+ * function value is a dyn callable and its thunk receives the real JS
+ * argument vector. Typed rests keep their completed-array convention. */
+function isDynamicArrayRestParameter(
+  checker: ts.TypeChecker,
+  symbol: ts.Symbol,
+  declaration: ts.Declaration | undefined,
+): boolean {
+  if (declaration === undefined || !ts.isParameter(declaration) || !declaration.dotDotDotToken) {
+    return false;
+  }
+  const restType = checker.getTypeOfSymbol(symbol);
+  if (!checker.isArrayType(restType)) return false;
+  const element = checker.getTypeArguments(restType as ts.TypeReference)[0];
+  return element !== undefined && (element.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+}
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const topLevel = mapTypeDepth === 0;
@@ -2566,6 +2584,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     const params: IrType[] = [];
+    let dynamicRest = false;
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
@@ -2574,6 +2593,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // is therefore exactly the fixed zero-slot signature, unlike every
         // inhabited rest array, which keeps the variadic fence.
         if (isNeverArrayRestParameter(checker, p, decl)) continue;
+        // Under --dynamic, preserve JS arity by representing the whole
+        // callable at the checked-dynamic boundary. Its typed producer is
+        // boxed with a per-signature thunk and its result is checked at use.
+        if (ctx.dynamic && isDynamicArrayRestParameter(checker, p, decl)) {
+          dynamicRest = true;
+          continue;
+        }
         return null;
       }
       const optional =
@@ -2601,6 +2627,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // like declaredReturnType does for declarations.
     const ret = retT.flags & ts.TypeFlags.Never ? VOID : mapType(retT, ctx);
     if (!ret) return null;
+    if (dynamicRest) return DYN;
     return funcOf(params, ret);
   }
   // Records: object types whose members are all data properties (shorthand

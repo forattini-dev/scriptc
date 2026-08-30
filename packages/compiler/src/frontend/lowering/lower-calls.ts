@@ -51,6 +51,16 @@ export interface ParamShape {
   bodyType?: IrType;
 }
 
+/** Whether a rest array deliberately carries open-ended dynamic values.
+ * In TypeScript under --dynamic this uses the same dynRest ABI as inferred
+ * JavaScript rests: one checked-dynamic array containing the real surplus
+ * argument vector. */
+function isDynamicRestArray(L: Lowerer, type: ts.Type): boolean {
+  if (!L.dynamic || !L.checker.isArrayType(type)) return false;
+  const element = L.checker.getTypeArguments(type as ts.TypeReference)[0];
+  return element !== undefined && (element.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+}
+
 export interface FnSig {
   name: string;
   params: ParamShape[];
@@ -230,6 +240,10 @@ export interface GenericInstance {
       return { type: L.irTypeOf(param.name), mode: "required" };
     }
     if (param.dotDotDotToken) {
+      const restTs = L.typeOf(param.name);
+      if (!isJsSourceFile(param.getSourceFile()) && isDynamicRestArray(L, restTs)) {
+        return { type: DYN, mode: "dynRest" };
+      }
       // A JS rest param with no static element type (`(...args)` — any[]):
       // the VARIADIC dyn form. The lifted function takes one trailing dyn
       // ARRAY param the dyn call thunk fills with the call's surplus
@@ -1048,6 +1062,14 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     rsig.getParameters().forEach((p, i) => {
       const declParam = info.decl.parameters[i]!;
       const pt = L.checker.getTypeOfSymbol(p);
+      if (
+        declParam.dotDotDotToken &&
+        !isJsSourceFile(info.decl.getSourceFile()) &&
+        isDynamicRestArray(L, pt)
+      ) {
+        params.push({ type: DYN, mode: "dynRest" });
+        return;
+      }
       const mapped = L.mapTypeOf(pt);
       if (!mapped || mapped.kind === "void") L.badType(expr.arguments[i] ?? expr, pt);
       if (declParam.dotDotDotToken) {
@@ -4602,10 +4624,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
    *   shape (exactly the forwarding idiom).
    *
    * Answers null when neither lane fits (typed .ts spreads keep
-   * completeArgs' rest packing and its fences). JS sources only — the
-   * same guard as the over-arity dynCall precedent. */
+   * completeArgs' rest packing and its fences). JS sources take both
+   * lanes. TypeScript takes only the dyn-callee lane: this is the exact
+   * representation of a declared `(...args: any[] | unknown[])` function
+   * type under --dynamic. */
   function lowerSpreadArgsCall(L: Lowerer, expr: ts.CallExpression, callee: IrExpr, loc: SrcLoc): IrExpr | null {
-    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    if (!isJsSourceFile(expr.getSourceFile()) && callee.type.kind !== "dyn") return null;
     if (!expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
     if (callee.type.kind !== "dyn" && callee.type.kind !== "func" && callee.type.kind !== "jsval") return null;
     const calleeName =
