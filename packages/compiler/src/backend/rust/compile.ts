@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -30,6 +30,7 @@ export interface RustLibraryCompileOptions {
   optimization?: "release" | "dev";
   sanitize?: boolean;
   runtimeFeatures?: readonly RustRuntimeFeature[];
+  localizeSymbols?: readonly string[];
 }
 
 export class RustCompileError extends Error {
@@ -74,6 +75,54 @@ export async function compileRustLibrary(
     ],
     "compiling the generated Rust library",
   );
+  if (options.localizeSymbols !== undefined) {
+    await localizeRustLibrary(options.outPath, options.localizeSymbols);
+  }
+}
+
+async function localizeRustLibrary(
+  archivePath: string,
+  keepSymbols: readonly string[],
+): Promise<void> {
+  if (process.platform !== "linux" && process.platform !== "darwin") {
+    throw new RustCompileError(
+      `runtime localization for Rust libraries is not implemented on ${process.platform} yet`,
+    );
+  }
+  const work = await mkdtemp(join(dirname(archivePath), ".scriptc-rust-localize-"));
+  try {
+    const combined = join(work, "library.o");
+    const localized = join(work, "library.a");
+    const keepFile = join(work, "keep.syms");
+    if (process.platform === "darwin") {
+      await writeFile(keepFile, keepSymbols.map((symbol) => `_${symbol}\n`).join(""));
+      await run("ld", [
+        "-r",
+        ...keepSymbols.flatMap((symbol) => ["-u", `_${symbol}`]),
+        archivePath,
+        "-o", combined,
+        "-exported_symbols_list", keepFile,
+      ], "localizing the Rust library archive");
+    } else {
+      await writeFile(keepFile, keepSymbols.map((symbol) => `${symbol}\n`).join(""));
+      await run("ld", [
+        "-r",
+        "--force-group-allocation",
+        ...keepSymbols.flatMap((symbol) => ["-u", symbol]),
+        archivePath,
+        "-o", combined,
+      ], "combining the Rust library archive");
+      await run(
+        "objcopy",
+        [`--keep-global-symbols=${keepFile}`, combined],
+        "localizing the Rust library symbols",
+      );
+    }
+    await run("ar", ["rcs", localized, combined], "repacking the localized Rust library");
+    await rename(localized, archivePath);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 }
 
 interface RustBuildContext {

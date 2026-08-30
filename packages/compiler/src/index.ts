@@ -2412,6 +2412,7 @@ async function compileLibraryTracked(
       irPath = join(opts.outDir, `${stem}.lib.ir.json`);
       await writeFile(irPath, serializeModule(mod));
     }
+    const localizeSymbols = libraryLocalizeSymbols(profile);
     try {
       await compileRustLibrary({
         sourcePath,
@@ -2419,6 +2420,7 @@ async function compileLibraryTracked(
         optimization: profile.optimization,
         sanitize: opts.sanitize ?? false,
         runtimeFeatures: rustRuntimeFeatures(mod),
+        ...(localizeSymbols === undefined ? {} : { localizeSymbols }),
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;
