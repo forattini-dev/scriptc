@@ -137,6 +137,33 @@ function emitOperation(
       `${context.dynTypeName()}::Island(runtime::island_call(&sc_value, &${islandArgs})) }`;
     return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; match ${callee} { ${context.dynTypeName()}::Island(sc_value) => ${islandCall}, sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
   }
+  if (expr.op === "callSpread" && expr.name !== undefined && expr.args.length === 3) {
+    const callee = context.nextName("sc_island_callee");
+    const leading = context.nextName("sc_island_leading");
+    const spread = context.nextName("sc_island_spread");
+    const pack = context.nextName("sc_island_pack");
+    const args = context.nextName("sc_island_args");
+    const dyn = context.dynTypeName();
+    const collect = `let ${pack} = ${dyn}::Array(runtime::array_new(Vec::new())); ` +
+      `sc_dyn_pack_push_spread(&${pack}, &${leading}, &runtime::empty_string(), true); ` +
+      `sc_dyn_pack_push_spread(&${pack}, &${spread}, &runtime::string("${context.rustString(expr.name)}"), false); ` +
+      `let ${dyn}::Array(${args}) = ${pack} else { unreachable!("scriptc invariant: spread call pack is not an array") }; ` +
+      `let ${args} = runtime::array_values(&${args});`;
+    if (!context.hasEmbeddedModules()) {
+      return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; ` +
+        `let ${leading} = ${emitExpr(argOf(expr, 1, context))}; ` +
+        `let ${spread} = ${emitExpr(argOf(expr, 2, context))}; ${collect} ` +
+        `sc_dyn_call(&${callee}, &${args}, "value") }`;
+    }
+    const islandArgs = context.nextName("sc_island_call_args");
+    const islandCall = `{ let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+      `${dyn}::Island(runtime::island_call(&sc_value, &${islandArgs})) }`;
+    return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; ` +
+      `let ${leading} = ${emitExpr(argOf(expr, 1, context))}; ` +
+      `let ${spread} = ${emitExpr(argOf(expr, 2, context))}; ${collect} ` +
+      `match ${callee} { ${dyn}::Island(sc_value) => ${islandCall}, ` +
+      `sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
+  }
   if ((expr.op === "truthy" || expr.op === "not") && expr.args.length === 1) {
     const truthy = `sc_dyn_is_truthy(&(${emitExpr(argOf(expr, 0, context))}))`;
     return expr.op === "not" ? `!(${truthy})` : truthy;

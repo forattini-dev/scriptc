@@ -848,7 +848,7 @@ shardedTest("supported scalar, heap, closure, and union corpus matches Node byte
       expect(generated).not.toContain("extern \"C\"");
     }
     const [node, rust] = await Promise.all([
-      execFileAsync(nodeOracleExecutable(), [entryPath]),
+      execFileAsync(nodeOracleExecutable(), await nodeCorpusArgs(entryPath)),
       execFileAsync(result.binaryPath, [], {
         env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
       }),
