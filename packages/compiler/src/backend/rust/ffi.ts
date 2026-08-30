@@ -10,11 +10,14 @@ type ScalarClass = "bool" | "f64" | "i32" | "u8" | "u32";
 type ScalarReturn = ScalarClass | "void";
 
 interface ScalarSignature {
-  parameter: ScalarClass;
+  parameter: ScalarClass | null;
   returns: ScalarReturn;
 }
 
 function scalarSignature(binding: IrFfiImport): ScalarSignature | null {
+  if (binding.params.length === 0 && binding.returns === "f64") {
+    return { parameter: null, returns: "f64" };
+  }
   const parameter = binding.params[0];
   if (binding.params.length !== 1 ||
       (parameter === "f64" || parameter === "bool" || parameter === "u8" ||
@@ -39,13 +42,21 @@ function functionName(index: number): string {
   return `sc_ffi_import_${index}`;
 }
 
+function marshalReturn(call: string, cls: ScalarReturn): string {
+  return cls === "bool"
+    ? `(${call} != 0)`
+    : cls === "f64" || cls === "void"
+      ? call
+      : `f64::from(${call})`;
+}
+
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
     const signature = scalarSignature(binding);
-    return signature === null
-      ? []
-      : [`    #[link_name = "${binding.symbol}"]`,
-        `    fn ${functionName(index)}(sc_arg_0: ${abiType(signature.parameter)})${signature.returns === "void" ? "" : ` -> ${abiType(signature.returns)}`};`];
+    if (signature === null) return [];
+    const parameter = signature.parameter;
+    return [`    #[link_name = "${binding.symbol}"]`,
+      `    fn ${functionName(index)}(${parameter === null ? "" : `sc_arg_0: ${abiType(parameter)}`})${signature.returns === "void" ? "" : ` -> ${abiType(signature.returns)}`};`];
   });
   return declarations.length === 0
     ? []
@@ -61,10 +72,18 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
-  const argument = expr.args[0];
   const signature = binding === undefined ? null : scalarSignature(binding);
-  if (signature === null || expr.args.length !== 1 ||
-      argument?.type.kind !== irKind(signature.parameter) || expr.type.kind !== returnKind(signature.returns)) {
+  if (signature === null || expr.type.kind !== returnKind(signature.returns)) {
+    context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
+  }
+  if (signature.parameter === null) {
+    if (expr.args.length !== 0) {
+      context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
+    }
+    return marshalReturn(`unsafe { ${functionName(index)}() }`, signature.returns);
+  }
+  const argument = expr.args[0];
+  if (expr.args.length !== 1 || argument?.type.kind !== irKind(signature.parameter)) {
     context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
   }
   const value = emitExpr(argument);
@@ -78,9 +97,5 @@ export function emitRustFfiCall(
           ? `runtime::to_int32(${value})`
           : value;
   const call = `unsafe { ${functionName(index)}(${argumentValue}) }`;
-  return signature.returns === "bool"
-    ? `(${call} != 0)`
-    : signature.returns === "f64" || signature.returns === "void"
-      ? call
-      : `f64::from(${call})`;
+  return marshalReturn(call, signature.returns);
 }
