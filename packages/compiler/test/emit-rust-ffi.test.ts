@@ -8,7 +8,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust executables call manifest-bound native f64 and boolean functions", async () => {
+test("Rust executables call manifest-bound native scalar functions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-scalar-"));
   const nativeSource = join(dir, "native.c");
   const nativeObject = join(dir, "native.o");
@@ -20,6 +20,9 @@ test("Rust executables call manifest-bound native f64 and boolean functions", as
   await writeFile(nativeSource, [
     "double sf_scale(double value) { return value * 2.0; }",
     "unsigned char sf_invert(unsigned char value) { return value ? 0 : 1; }",
+    "unsigned char sf_u8(unsigned char value) { return value; }",
+    "unsigned int sf_u32(unsigned int value) { return value; }",
+    "int sf_i32(int value) { return value; }",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -36,6 +39,21 @@ test("Rust executables call manifest-bound native f64 and boolean functions", as
       symbol: "sf_invert",
       params: ["bool"],
       returns: "bool",
+    }, {
+      name: "nativeU8",
+      symbol: "sf_u8",
+      params: ["u8"],
+      returns: "u8",
+    }, {
+      name: "nativeU32",
+      symbol: "sf_u32",
+      params: ["u32"],
+      returns: "u32",
+    }, {
+      name: "nativeI32",
+      symbol: "sf_i32",
+      params: ["i32"],
+      returns: "i32",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -43,8 +61,12 @@ test("Rust executables call manifest-bound native f64 and boolean functions", as
   await writeFile(entryPath, [
     "declare function nativeScale(value: number): number;",
     "declare function nativeInvert(value: boolean): boolean;",
+    "declare function nativeU8(value: number): number;",
+    "declare function nativeU32(value: number): number;",
+    "declare function nativeI32(value: number): number;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
+    "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
     "",
   ].join("\n"));
 
@@ -63,6 +85,6 @@ test("Rust executables call manifest-bound native f64 and boolean functions", as
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n");
   expect(run.stderr).toBe("");
 });
