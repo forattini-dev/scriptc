@@ -346,25 +346,29 @@ export class RustAsyncControlEmitter {
     remaining: readonly IrStmt[],
     onComplete: (() => void) | null,
   ): void {
-    if (this.containsAsyncSuspension(stmt.cond)) {
-      this.context.unsupported("async suspension in an if condition", stmt.loc);
-    }
     const outerLocals = new Set(this.context.currentAsyncLocals() ?? []);
     const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "if_continue");
-    this.context.line(`if ${this.context.emitExpr(stmt.cond)} {`);
-    this.context.pushIndent();
-    this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
-    this.context.popIndent();
-    this.context.line("} else {");
-    this.context.pushIndent();
-    const elseBody = stmt.else_;
-    if (elseBody === null) {
-      resume();
-    } else {
-      this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(elseBody, resume));
+    const emitBranches = (condition: string): void => {
+      this.context.line(`if ${condition} {`);
+      this.context.pushIndent();
+      this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
+      this.context.popIndent();
+      this.context.line("} else {");
+      this.context.pushIndent();
+      const elseBody = stmt.else_;
+      if (elseBody === null) {
+        resume();
+      } else {
+        this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(elseBody, resume));
+      }
+      this.context.popIndent();
+      this.context.line("}");
+    };
+    if (this.containsAsyncSuspension(stmt.cond)) {
+      this.context.emitAsyncValue(stmt.cond, emitBranches);
+      return;
     }
-    this.context.popIndent();
-    this.context.line("}");
+    emitBranches(this.context.emitExpr(stmt.cond));
   }
 
   emitAsyncFor(
