@@ -1592,6 +1592,7 @@ shardedTest.each(shardSelect([
   "2734-agentic-interface-default-method.ts",
   "2735-agentic-named-validation-filter.ts",
   "2736-agentic-safe-own-property.ts",
+  "2737-agentic-batched-work-flat.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

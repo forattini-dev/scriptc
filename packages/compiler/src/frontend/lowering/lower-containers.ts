@@ -325,11 +325,11 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
       slice: [0, 2], shift: [0, 0], splice: [1, 2], at: [1, 1],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
       findLast: [1, 1], findLastIndex: [1, 1],
-      every: [1, 1], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
+      every: [1, 1], flat: [0, 0], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
         | "push" | "unshift" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter"
-        | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
+        | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flat" | "flatMap" | "reduce" | "reduceRight"
     ];
     if (call.arguments.length < arity[0]! || call.arguments.length > arity[1]!) {
       const hint =
@@ -564,6 +564,7 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
       return lowerArrayFindLikeCall(L, call, access, name, elem);
     }
     if (name === "at") return lowerArrayAtCall(L, call, access, elem);
+    if (name === "flat") return lowerArrayFlatCall(L, call, access, elem, receiverIr);
     if (name === "flatMap") return lowerArrayFlatMapCall(L, call, access, elem);
     // reduce / reduceRight
     return lowerArrayReduceCall(L, call, access, name as "reduce" | "reduceRight", elem);
@@ -627,7 +628,7 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
     // wrapper converts each delivered value into the callback's parameter
     // type, while incompatible/stranded signatures retain the old fence.
     const arity = fnArg.type.params.length;
-    const expected = funcOf(full.slice(0, arity), fnArg.type.ret);
+    const expected = funcOf(full.slice(0, arity), fnArg.type.ret) as IrType & { kind: "func" };
     if (!typeEquals(fnArg.type, expected)) {
       if (!L.cleanFuncAdaptable(fnArg.type, expected)) {
         L.badType(argNode, L.typeOf(argNode));
@@ -995,6 +996,63 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       { kind: "return", value: varRef("out.0", arrT, loc), loc },
     ];
     L.liftedFns.push({ name, params, returnType: arrT, locals, body, loc });
+    return name;
+  }
+
+/** `a.flat()` with the default depth. A plain T[] makes a fresh shallow
+ * copy; a static T[][] appends each inner array in order. Mixed
+ * array/non-array unions and explicit depths keep the surface fence. */
+  function lowerArrayFlatCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression, elem: IrType, receiverT: IrType & { kind: "array" },): IrExpr {
+    const loc = locOf(call);
+    const receiver = L.lowerExpr(access.expression);
+    if (elem.kind !== "array") {
+      return { kind: "arrIntrinsic", method: "slice", receiver, args: [], type: receiverT, loc };
+    }
+    const helper = arrayFlatHelper(L, elem, loc);
+    return { kind: "call", callee: helper, args: [receiver], type: elem, loc };
+  }
+
+/** Interned `%arr.flat.<n>(a)` — the one-level nested-array walk expressed
+ * entirely with existing array IR. `pushSpread` retains reference elements
+ * into the fresh result, preserving flat's shallow-copy identity. */
+  function arrayFlatHelper(L: Lowerer, innerT: IrType & { kind: "array" }, loc: SrcLoc): string {
+    const key = `flat:${typeKey(innerT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%arr.flat.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    const outerT = arrayOf(innerT);
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: innerT, loc }, loc },
+      readLenStmt(outerT, loc),
+      countedFor(loc, varRef("n.0", F64, loc), () => [{
+        kind: "exprStmt",
+        expr: {
+          kind: "arrIntrinsic",
+          method: "pushSpread",
+          receiver: varRef("out.0", innerT, loc),
+          args: [getElemExpr(outerT, innerT, loc)],
+          type: F64,
+          loc,
+        },
+        loc,
+      }]),
+      { kind: "return", value: varRef("out.0", innerT, loc), loc },
+    ];
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "a.0", name: "a", type: outerT }],
+      returnType: innerT,
+      locals: [
+        { id: "a.0", name: "a", type: outerT, mutable: false },
+        { id: "n.0", name: "n", type: F64, mutable: false },
+        { id: "i.0", name: "i", type: F64, mutable: true },
+        { id: "out.0", name: "out", type: innerT, mutable: false },
+      ],
+      body,
+      loc,
+    });
     return name;
   }
 
