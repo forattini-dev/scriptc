@@ -14,8 +14,7 @@ import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/
 import { emitRustStatements } from "./statements.js";
 import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import { RustDynamicEmitter } from "./dynamic.js";
-import { RustAsyncControlEmitter } from "./async-control.js";
-import type { RustAsyncHandlers } from "./async-control.js";
+import { RustAsyncControlEmitter, type RustAsyncHandlers } from "./async-control.js";
 import { RustAsyncValueEmitter } from "./async-values.js";
 import { RustExpressionEmitter } from "./expressions.js";
 import { RustValueEmitter } from "./values.js";
@@ -24,7 +23,7 @@ import { RustDefinitionEmitter } from "./definitions.js";
 import { RustMetadata } from "./metadata.js";
 import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
-import { emitRustProgramEntry } from "./program-entry.js";
+import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
@@ -499,7 +498,11 @@ class RustEmitter {
   }
   emit(): string {
     this.checkModuleSurface();
-    this.line((this.mod.ffiImports?.length ?? 0) === 0 ? "#![forbid(unsafe_code)]" : "#![deny(unsafe_op_in_unsafe_fn)]");
+    this.line(
+      (this.mod.ffiImports?.length ?? 0) === 0 && this.mod.lib === undefined
+        ? "#![forbid(unsafe_code)]"
+        : "#![deny(unsafe_op_in_unsafe_fn)]",
+    );
     this.line("");
     this.line("use scriptc_runtime as runtime;");
     if (this.globals.size > 0 || this.internedClosureTargets.size > 0) {
@@ -526,17 +529,13 @@ class RustEmitter {
       this.line("");
     }
     this.dynamicEmitter.emitDynFromDefinitions();
-    const entry = this.functions.get(this.mod.entry);
-    if (entry === undefined) this.unsupported(`missing entry '${this.mod.entry}'`);
-    if (entry.params.length !== 0 || entry.returnType.kind !== "void") {
-      this.unsupported("entry signature", entry.loc);
-    }
-    this.lines.push(...emitRustProgramEntry({
-      entryName: entry.name,
-      entryAsync: entry.async === true,
+    this.lines.push(...emitRustModuleEntry({
+      lib: this.mod.lib,
+      entry: this.functions.get(this.mod.entry),
+      entryName: this.mod.entry,
       entryCommonJs: this.mod.entryCommonJs === true,
       hasErrorClasses: this.errorClassRoots().length !== 0,
-      heapGlobalIds: [...this.globals.values()].filter((global) => this.isHeapRoot(global.type)).map((global) => global.id),
+      globals: [...this.globals.values()],
       internedClosureNames: [...this.internedClosureTargets],
       usesDyn: this.usesDyn,
       usesDynamicInvoke: this.usesDynamicInvoke,
@@ -544,6 +543,8 @@ class RustEmitter {
       usesProcessRejectionEvents: this.usesProcessRejectionEvents,
       usesProcessWarningEvents: this.usesProcessWarningEvents,
       usesEmbeddedModules: hasRustEmbeddedModules(this.mod),
+      isHeapGlobal: (global) => this.isHeapRoot(global.type),
+      unsupported: (kind) => this.unsupported(kind),
     }));
     return `${this.lines.join("\n")}\n`;
   }
@@ -556,7 +557,6 @@ class RustEmitter {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
     }
-    if (this.mod.lib !== undefined) this.unsupported("library mode");
   }
   private buildClassGraph(): void {
     for (const meta of this.classMeta.values()) {

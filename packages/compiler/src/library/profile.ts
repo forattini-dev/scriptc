@@ -13,7 +13,7 @@
  *     "profile_format": 1,
  *     "name": "<embedder identity string>",
  *     "entry": "src/lib.ts",                  // ONE module, profile-relative
- *     "emission": "llvm" | "c",                // pins the emission; no fallback
+ *     "emission": "llvm" | "c" | "rust",       // pins the emission; no fallback
  *     "optimization": "release" | "dev",       // optional; default release
  *     "abi": {
  *       "prefix": "<prefix>_",
@@ -361,7 +361,7 @@ export interface LibraryProfile {
   /** Resolved absolute path of the ONE entry module. */
   entry: string;
   /** The pinned emission — no fallback concept exists on the library path. */
-  emission: "llvm" | "c";
+  emission: "llvm" | "c" | "rust";
   /** Native optimizer posture. release preserves the production -O2 archive;
    * dev uses -O0 for fast iterative embedding builds. */
   optimization: "release" | "dev";
@@ -502,8 +502,8 @@ export function loadLibraryProfile(
     const entryRel = req<string>(p["entry"], "entry", "string");
     if (entryRel === "") throw new ProfileError("'entry' must name the profile's one entry module");
     const emission = req<string>(p["emission"], "emission", "string");
-    if (emission !== "llvm" && emission !== "c") {
-      throw new ProfileError(`'emission' must be "llvm" or "c", got '${emission}'`);
+    if (emission !== "llvm" && emission !== "c" && emission !== "rust") {
+      throw new ProfileError(`'emission' must be "llvm", "c", or "rust", got '${emission}'`);
     }
     const optimization = p["optimization"] === undefined
       ? "release"

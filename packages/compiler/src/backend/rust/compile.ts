@@ -24,6 +24,14 @@ export interface RustCompileOptions {
   systemLibraries?: readonly string[];
 }
 
+export interface RustLibraryCompileOptions {
+  sourcePath: string;
+  outPath: string;
+  optimization?: "release" | "dev";
+  sanitize?: boolean;
+  runtimeFeatures?: readonly RustRuntimeFeature[];
+}
+
 export class RustCompileError extends Error {
   constructor(
     message: string,
@@ -40,6 +48,43 @@ export class RustCompileError extends Error {
  * executable. No C translation unit or C compiler participates in this path.
  */
 export async function compileRust(options: RustCompileOptions): Promise<void> {
+  const context = await prepareRustBuild(options);
+  await mkdir(dirname(options.outPath), { recursive: true });
+  const rustcArgs = [
+    ...rustcBaseArgs(options.sourcePath, context, options.optimization),
+    ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
+    ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
+    "-o", options.outPath,
+  ];
+  await run("rustc", rustcArgs, "compiling the generated Rust program");
+}
+
+/** Compile a generated library-mode module into a C-linkable static archive. */
+export async function compileRustLibrary(
+  options: RustLibraryCompileOptions,
+): Promise<void> {
+  const context = await prepareRustBuild(options);
+  await mkdir(dirname(options.outPath), { recursive: true });
+  await run(
+    "rustc",
+    [
+      ...rustcBaseArgs(options.sourcePath, context, options.optimization),
+      "--crate-type", "staticlib",
+      "-o", options.outPath,
+    ],
+    "compiling the generated Rust library",
+  );
+}
+
+interface RustBuildContext {
+  runtimeRlib: string;
+  targetDir: string;
+  profile: "debug" | "release";
+}
+
+async function prepareRustBuild(
+  options: Pick<RustCompileOptions, "optimization" | "sanitize" | "runtimeFeatures">,
+): Promise<RustBuildContext> {
   const target = process.env["SCRIPTC_TARGET"];
   if (target !== undefined && target !== "" && target !== "native") {
     throw new RustCompileError(`rust backend target '${target}' is not implemented yet`);
@@ -71,21 +116,27 @@ export async function compileRust(options: RustCompileOptions): Promise<void> {
   ];
   const cargo = await run("cargo", cargoArgs, "building the Rust runtime");
 
-  const runtimeRlib = rustRuntimeArtifact(cargo.stdout);
-  await mkdir(dirname(options.outPath), { recursive: true });
-  const rustcArgs = [
-    options.sourcePath,
+  return {
+    runtimeRlib: rustRuntimeArtifact(cargo.stdout),
+    targetDir,
+    profile,
+  };
+}
+
+function rustcBaseArgs(
+  sourcePath: string,
+  context: RustBuildContext,
+  optimization: "release" | "dev" | undefined,
+): string[] {
+  return [
+    sourcePath,
     "--crate-name", "scriptc_program",
     "--edition", "2024",
-    "--extern", `scriptc_runtime=${runtimeRlib}`,
-    "-L", `dependency=${join(targetDir, profile, "deps")}`,
-    "-C", options.optimization === "dev" ? "opt-level=0" : "opt-level=2",
+    "--extern", `scriptc_runtime=${context.runtimeRlib}`,
+    "-L", `dependency=${join(context.targetDir, context.profile, "deps")}`,
+    "-C", optimization === "dev" ? "opt-level=0" : "opt-level=2",
     "-C", "debuginfo=0",
-    ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
-    ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
-    "-o", options.outPath,
   ];
-  await run("rustc", rustcArgs, "compiling the generated Rust program");
 }
 
 function rustRuntimeArtifact(output: string): string {

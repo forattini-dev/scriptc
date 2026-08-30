@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { buildCacheRoot, CcCompileError, clearCcCaches, compileC, compileLibArchive, executableNativeEnvironmentFingerprint, mobileLibraryTarget, mobileTargetRefusal, prepareBuildCacheRoot, pruneBuildCache, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule } from "./backend/emission/emitter.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
-import { compileRust, RustCompileError } from "./backend/rust/compile.js";
+import { compileRust, compileRustLibrary, RustCompileError } from "./backend/rust/compile.js";
 import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
 import { rustRuntimeFeatures } from "./backend/rust/runtime-features.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
@@ -1398,7 +1398,7 @@ export type CompileLibraryResult =
   /** `sidecarPath` is present exactly when the profile declares a
    * `sidecar` section: the contract JSON written beside the archive by
    * the same invocation (ask 2). */
-  | { ok: true; archivePath: string; cPath: string; backend: "c" | "llvm"; irPath?: string; sidecarPath?: string }
+  | { ok: true; archivePath: string; cPath: string; backend: "c" | "llvm" | "rust"; irPath?: string; sidecarPath?: string }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
 /** The marshalling-class fit over IR types (design §4.2 + the ratified
@@ -1818,6 +1818,9 @@ async function compileLibraryNative(
   sanitize: boolean,
   features: EarlyLibraryNativeFeatures,
 ): Promise<void> {
+  if (profile.emission === "rust") {
+    throw new InternalCompilerError("Rust library emission reached the C/LLVM archive compiler");
+  }
   const localizeSymbols = libraryLocalizeSymbols(profile);
   let identityCSource: string | undefined;
   let programSource: string | undefined;
@@ -1887,6 +1890,9 @@ async function emitSemanticLibraryHit(
   cacheOptions: EarlyLibraryCacheOptions,
   timing: (phase: string, detail?: Record<string, unknown>) => void,
 ): Promise<CompileLibraryResult> {
+  if (profile.emission === "rust") {
+    throw new InternalCompilerError("Rust library emission reached the C/LLVM semantic cache");
+  }
   const mod = hit.mod;
   const rootDir = dirname(resolve(opts.profilePath));
   let sidecarJson = hit.sidecarJson;
@@ -2097,7 +2103,7 @@ async function compileLibraryTracked(
     }
   }
 
-  const cacheRoot = provenanceSources() === null
+  const cacheRoot = profile.emission !== "rust" && provenanceSources() === null
     ? await prepareBuildCacheRoot(buildCacheRoot())
     : null;
   const earlyCacheOptions: EarlyLibraryCacheOptions = {
@@ -2387,6 +2393,49 @@ async function compileLibraryTracked(
 
   await mkdir(opts.outDir, { recursive: true });
   const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
+  if (profile.emission === "rust") {
+    let rustSource: string;
+    try {
+      rustSource = emitRustModule(mod);
+    } catch (error) {
+      if (!(error instanceof RustUnsupportedError)) throw error;
+      return fail([rustRefusalDiag(error, entryPath)]);
+    }
+    const sourcePath = join(opts.outDir, `${stem}.lib.rs`);
+    await writeFile(sourcePath, rustSource);
+    await Promise.all([
+      rm(join(opts.outDir, `${stem}.lib.c`), { force: true }),
+      rm(join(opts.outDir, `${stem}.lib.ll`), { force: true }),
+    ]);
+    let irPath: string | undefined;
+    if (opts.emitIr) {
+      irPath = join(opts.outDir, `${stem}.lib.ir.json`);
+      await writeFile(irPath, serializeModule(mod));
+    }
+    try {
+      await compileRustLibrary({
+        sourcePath,
+        outPath: archivePath,
+        optimization: profile.optimization,
+        sanitize: opts.sanitize ?? false,
+        runtimeFeatures: rustRuntimeFeatures(mod),
+      });
+    } catch (error) {
+      if (!(error instanceof RustCompileError)) throw error;
+      throw new InternalCompilerError(
+        `${error.message}${error.stderr === "" ? "" : `\n${error.stderr}`}`,
+      );
+    }
+    await pruneBuildCache(cacheRoot);
+    timing("complete");
+    return {
+      ok: true,
+      archivePath,
+      cPath: sourcePath,
+      backend: "rust",
+      ...(irPath !== undefined ? { irPath } : {}),
+    };
+  }
   let cPath: string;
   if (profile.emission === "llvm") {
     try {
