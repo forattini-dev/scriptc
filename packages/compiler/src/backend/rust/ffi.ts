@@ -162,14 +162,17 @@ export function emitRustFfiCall(
     const callbackValue = context.nextName("sc_ffi_callback_value");
     const nativeValue = context.nextName("sc_ffi_callback_argument");
     const slot = context.nextName("SC_FFI_CALLBACK");
+    const panicSlot = context.nextName("SC_FFI_CALLBACK_PANIC");
     const trampoline = context.nextName("sc_ffi_callback");
     const incoming = context.nextName("sc_ffi_callback_incoming");
     const active = context.nextName("sc_ffi_callback_active");
     const previous = context.nextName("sc_ffi_callback_previous");
+    const previousPanic = context.nextName("sc_ffi_callback_previous_panic");
     const result = context.nextName("sc_ffi_callback_result");
+    const panic = context.nextName("sc_ffi_callback_panic");
     const closureType = context.rustType(callbackArgument.type, expr.loc);
     const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
-    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; std::thread_local! { static ${slot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${trampoline}(${incoming}: f64) -> f64 { ${slot}.with(|sc_slot| { let ${active} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its call scope").clone(); ${dispatch} }) } let ${previous} = ${slot}.with(|sc_slot| sc_slot.replace(Some(${callbackValue}))); let ${result} = unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}) }; ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previous}; }); ${result} }`;
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; std::thread_local! { static ${slot}: std::cell::RefCell<Option<${closureType}>> = const { std::cell::RefCell::new(None) }; static ${panicSlot}: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>> = const { std::cell::RefCell::new(None) }; } extern "C" fn ${trampoline}(${incoming}: f64) -> f64 { if ${panicSlot}.with(|sc_slot| sc_slot.borrow().is_some()) { return 0.0; } match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ${slot}.with(|sc_slot| { let ${active} = sc_slot.borrow().as_ref().expect("scriptc: native callback outside its call scope").clone(); ${dispatch} }))) { Ok(sc_value) => sc_value, Err(sc_payload) => { ${panicSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = Some(sc_payload); }); 0.0 } } } let ${previousPanic} = ${panicSlot}.with(|sc_slot| sc_slot.take()); let ${previous} = ${slot}.with(|sc_slot| sc_slot.replace(Some(${callbackValue}))); let ${result} = unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}) }; let ${panic} = ${panicSlot}.with(|sc_slot| sc_slot.take()); ${slot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previous}; }); ${panicSlot}.with(|sc_slot| { *sc_slot.borrow_mut() = ${previousPanic}; }); if let Some(sc_payload) = ${panic} { std::panic::resume_unwind(sc_payload); } ${result} }`;
   }
   const span = binding === undefined ? null : spanToF64(binding);
   if (span !== null) {
