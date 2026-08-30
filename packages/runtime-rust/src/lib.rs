@@ -36,6 +36,7 @@ include!("terminal.rs");
 include!("readline.rs");
 include!("generators.rs");
 include!("errors.rs");
+include!("ffi_callbacks.rs");
 #[cfg(feature = "island-eval")]
 include!("island_eval.rs");
 include!("inspect.rs");

@@ -134,6 +134,33 @@ function cstringContextCallback(binding: IrFfiImport): IrFfiCallbackParam["callb
     : null;
 }
 
+function retainedContextCallback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
+  const callback = binding.params[0];
+  const context = binding.params[1];
+  if (binding.params.length !== 2 || callback === undefined || context === undefined ||
+      !isFfiCallbackParam(callback) || !isFfiContextParam(context)) return null;
+  const params = callback.callback.params;
+  const callbackContext = params[1];
+  return params.length === 2 && params[0] === "f64" &&
+    callbackContext !== undefined && isFfiContextParam(callbackContext) &&
+    callbackContext.context === callback.callback.id && context.context === callback.callback.id &&
+    callback.callback.returns === "void" && callback.callback.lifetime === "retained" &&
+    callback.callback.invoke !== "foreign" && binding.returns === "void"
+    ? callback.callback
+    : null;
+}
+
+function hasRetainedCallback(imports: readonly IrFfiImport[]): boolean {
+  return imports.some((binding) => binding.params.some((parameter) =>
+    isFfiCallbackParam(parameter) && parameter.callback.lifetime === "retained"));
+}
+
+function checkpointRetainedCallback(call: string, imports: readonly IrFfiImport[]): string {
+  return hasRetainedCallback(imports)
+    ? `{ let sc_ffi_call_result = ${call}; runtime::ffi_resume_callback_panic(); sc_ffi_call_result }`
+    : call;
+}
+
 function abiType(cls: ScalarClass): string {
   return cls === "bool" ? "u8" : cls;
 }
@@ -160,6 +187,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (retainedContextCallback(binding) !== null) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(f64, *mut std::ffi::c_void), sc_arg_1: *mut std::ffi::c_void);`];
+    }
     if (isRawF64CallbackPair(binding)) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64) -> f64, sc_arg_1: extern "C" fn(f64) -> f64, sc_arg_2: f64) -> f64;`];
@@ -208,6 +239,25 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  const retainedCallback = binding === undefined ? null : retainedContextCallback(binding);
+  if (retainedCallback !== null) {
+    const callbackArgument = expr.args[0];
+    if (expr.args.length !== 1 || callbackArgument?.type.kind !== "func" || expr.type.kind !== "void") {
+      context.unsupported(`native FFI import '${expr.import}' outside the retained callback ABI`, expr.loc);
+    }
+    const callbackValue = context.nextName("sc_ffi_callback_value");
+    const trampoline = context.nextName("sc_ffi_callback");
+    const incoming = context.nextName("sc_ffi_callback_incoming");
+    const opaque = context.nextName("sc_ffi_callback_context");
+    const active = context.nextName("sc_ffi_callback_active");
+    const stateType = context.nextName("ScFfiRetainedContext");
+    const state = context.nextName("sc_ffi_callback_state");
+    const registry = context.nextName("SC_FFI_RETAINED_CALLBACKS");
+    const pointer = context.nextName("sc_ffi_callback_pointer");
+    const closureType = context.rustType(callbackArgument.type, expr.loc);
+    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; struct ${stateType} { callback: ${closureType}, } std::thread_local! { static ${registry}: std::cell::RefCell<Vec<Box<${stateType}>>> = const { std::cell::RefCell::new(Vec::new()) }; } unsafe extern "C" fn ${trampoline}(${incoming}: f64, ${opaque}: *mut std::ffi::c_void) { if runtime::ffi_callback_panicked() { return; } let sc_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let ${state} = unsafe { &*${opaque}.cast::<${stateType}>() }; let ${active} = ${state}.callback.clone(); ${dispatch} })); if let Err(sc_payload) = sc_result { runtime::ffi_store_callback_panic(sc_payload); } } let ${state} = Box::new(${stateType} { callback: ${callbackValue} }); let ${pointer} = (${state}.as_ref() as *const ${stateType}).cast_mut().cast::<std::ffi::c_void>(); unsafe { ${functionName(index)}(${trampoline}, ${pointer}); } ${registry}.with(|sc_registry| sc_registry.borrow_mut().push(${state})); runtime::ffi_resume_callback_panic(); }`;
+  }
   if (binding !== undefined && isRawF64CallbackPair(binding)) {
     const leftArgument = expr.args[0];
     const rightArgument = expr.args[1];
@@ -376,7 +426,10 @@ export function emitRustFfiCall(
     if (expr.args.length !== 0) {
       context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
     }
-    return marshalReturn(`unsafe { ${functionName(index)}() }`, signature.returns);
+    return checkpointRetainedCallback(
+      marshalReturn(`unsafe { ${functionName(index)}() }`, signature.returns),
+      imports,
+    );
   }
   const argument = expr.args[0];
   if (expr.args.length !== 1 || argument?.type.kind !== irKind(signature.parameter)) {
@@ -393,5 +446,5 @@ export function emitRustFfiCall(
           ? `runtime::to_int32(${value})`
           : value;
   const call = `unsafe { ${functionName(index)}(${argumentValue}) }`;
-  return marshalReturn(call, signature.returns);
+  return checkpointRetainedCallback(marshalReturn(call, signature.returns), imports);
 }
