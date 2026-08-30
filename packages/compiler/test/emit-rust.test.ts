@@ -972,6 +972,7 @@ shardedTest.each(shardSelect([
   "1443-signal-handlers.ts",
   "1445-exit-process-exit.ts",
   "1446-exit-uncaught.ts",
+  "1447-stdin-closed-events.ts",
   "1448-stream-columns.ts",
   "1453-pmap-settled.ts",
   "1454-nonnull-narrow-and-fcc-bytes.ts",
