@@ -22,7 +22,7 @@ import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUn
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
-import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, omittedArgFor, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -74,6 +74,142 @@ const PURE_STATIC_BINARY_OPS = new Set<ts.SyntaxKind>([
 ]);
 
 type StaticDataScalar = boolean | number | string;
+
+/** `await (typedOverride ?? islandFallback)()` with no source arguments.
+ *
+ * Agent-written dependency seams commonly spell an optional typed test
+ * override beside an async function imported from a dynamically embedded
+ * package. The checker types the coalesced callee `any`, but adapting the
+ * two FUNCTION VALUES to one ABI would be dishonest when their parameter
+ * or promise payload records cross different boundaries. Select first,
+ * then call and await inside that selected branch: the native arm keeps its
+ * typed promise, while the island arm bridges a promise-of-jsval and exits
+ * the fulfilled payload through the usual validated boundary.
+ *
+ * This first vertical slice deliberately owns the zero-source-argument
+ * spelling. Omitted optional ABI slots are still completed on the native
+ * call exactly like an ordinary indirect call. */
+function lowerAwaitedNullishFallbackCall(
+  L: Lowerer,
+  expression: ts.Expression,
+  loc: SrcLoc,
+): IrExpr | null {
+  if (!ts.isCallExpression(expression) || expression.arguments.length !== 0) return null;
+  let callee: ts.Expression = expression.expression;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  if (!ts.isBinaryExpression(callee) || callee.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken) {
+    return null;
+  }
+  if (!L.dynamic) return null;
+
+  const leftType = L.mapTypeOf(L.typeOf(callee.left));
+  if (leftType?.kind !== "union") return null;
+  const union = L.unions.get(leftType.unionId);
+  if (!union) return null;
+  const functionTags = union.arms.flatMap((arm, tag) => arm.kind === "func" ? [{ arm, tag }] : []);
+  const selected = functionTags[0];
+  if (!selected || functionTags.length !== 1 ||
+      !union.arms.every((arm, tag) => tag === selected.tag || isUnitType(arm)) ||
+      selected.arm.ret.kind !== "promise") {
+    return null;
+  }
+  const resultType = selected.arm.ret.inner;
+  if (resultType.kind === "void" || resultType.kind === "dyn" || resultType.kind === "jsval") return null;
+
+  // A package import can retain its declared function type in the checker
+  // while its runtime value is still an island handle. Lowering, rather
+  // than checker-type inspection, is the authority for this boundary.
+  // This happens before hidden-local allocation so a declined probe leaves
+  // no local behind; runtime evaluation order remains left-before-right in
+  // the IR below.
+  let islandCallee: IrExpr;
+  if (ts.isIdentifier(callee.right)) {
+    const handle = L.resolveLocal(callee.right) ?? L.globalOf(callee.right);
+    islandCallee = handle?.type.kind === "jsval"
+      ? varRef(handle.id, JSVAL, locOf(callee.right))
+      : L.lowerExpr(callee.right);
+  } else {
+    islandCallee = L.lowerExpr(callee.right);
+  }
+  if (islandCallee.type.kind !== "jsval") return null;
+
+  const left = L.lowerExpr(callee.left);
+  if (!typeEquals(left.type, leftType)) return null;
+  const slot = L.declareHiddenLocal("%nullishCallee", leftType);
+  const slotRef = (): IrExpr => varRef(slot.id, leftType, loc);
+  const nativeCallee: IrExpr = {
+    kind: "unionNarrow",
+    unionId: leftType.unionId,
+    tag: selected.tag,
+    value: slotRef(),
+    type: selected.arm,
+    loc,
+  };
+  const nativeArgs: IrExpr[] = [];
+  for (const param of selected.arm.params) {
+    const absent = omittedArgFor(L, param, loc);
+    if (!absent) return null;
+    nativeArgs.push(absent);
+  }
+  const nativePromise: IrExpr = {
+    kind: "callValue",
+    callee: nativeCallee,
+    args: nativeArgs,
+    type: selected.arm.ret,
+    loc,
+  };
+  const nativeResult: IrExpr = {
+    kind: "awaitExpr",
+    value: nativePromise,
+    type: resultType,
+    loc,
+  };
+
+  const islandCall: IrExpr = {
+    kind: "jsOp",
+    op: "callFn",
+    args: [islandCallee],
+    type: JSVAL,
+    loc,
+  };
+  const islandPromise: IrExpr = {
+    kind: "jsBridgePromise",
+    value: islandCall,
+    type: { kind: "promise", inner: JSVAL },
+    loc,
+  };
+  const islandValue: IrExpr = {
+    kind: "awaitExpr",
+    value: islandPromise,
+    type: JSVAL,
+    loc,
+  };
+  const islandResult = L.coerceToExpected(islandValue, resultType);
+  if (!typeEquals(islandResult.type, resultType)) return null;
+
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: slot.id, init: left, loc }],
+    result: {
+      kind: "ternary",
+      cond: {
+        kind: "unionIsTag",
+        unionId: leftType.unionId,
+        tag: selected.tag,
+        negated: false,
+        value: slotRef(),
+        type: BOOL,
+        loc,
+      },
+      then: nativeResult,
+      else_: islandResult,
+      type: resultType,
+      loc,
+    },
+    type: resultType,
+    loc,
+  };
+}
 
 /** Evaluate a side-effect-free scalar expression made only from const data. */
 function staticDataScalar(
@@ -1288,6 +1424,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // boundary for malformed/upstream ASTs.
         L.unsupported("SC1090", expr, "top-level await (await outside async functions)");
       }
+      const nullishFallback = lowerAwaitedNullishFallbackCall(L, expr.expression, loc);
+      if (nullishFallback) return nullishFallback;
       const value = L.lowerExpr(expr.expression);
       // A promise-or-plain union (`Promise<T> | T`, plus the historical
       // `Promise<T> | undefined` shape): the promise arm parks like any

@@ -87,6 +87,28 @@ export class RustAsyncValueEmitter {
       this.emitAsyncValue(expr.value, (value) => consume(`${variant}(${value})`));
       return;
     }
+    if (expr.kind === "seqExpr" && this.context.containsAsyncSuspension(expr.result)) {
+      if (expr.stmts.some((statement) => this.context.containsAsyncSuspension(statement))) {
+        this.context.unsupported("suspending statement inside an async sequence expression", expr.loc);
+      }
+      this.context.emitAsyncStatements(expr.stmts, () => this.emitAsyncValue(expr.result, consume));
+      return;
+    }
+    if (expr.kind === "ternary" &&
+        (this.context.containsAsyncSuspension(expr.then) || this.context.containsAsyncSuspension(expr.else_))) {
+      this.emitAsyncValue(expr.cond, (condition) => {
+        this.context.line(`if ${condition} {`);
+        this.context.pushIndent();
+        this.emitAsyncValue(expr.then, consume);
+        this.context.popIndent();
+        this.context.line("} else {");
+        this.context.pushIndent();
+        this.emitAsyncValue(expr.else_, consume);
+        this.context.popIndent();
+        this.context.line("}");
+      });
+      return;
+    }
     if (expr.kind === "bin") {
       this.emitAsyncValue(expr.left, (left) => {
         this.emitAsyncValue(expr.right, (right) => consume(this.context.emitBinaryValues(expr, left, right)));

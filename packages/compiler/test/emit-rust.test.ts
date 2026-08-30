@@ -1597,6 +1597,7 @@ shardedTest.each(shardSelect([
   "2742-agentic-dynamic-function-fallback/main.ts",
   "2743-agentic-union-record-spread-id.ts",
   "2744-agentic-dynamic-async-unknown-response/main.ts",
+  "2745-agentic-dynamic-async-function-fallback/main.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
