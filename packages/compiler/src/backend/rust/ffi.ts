@@ -363,21 +363,61 @@ export function emitRustFfiCall(
 ): string {
   const libraryCallback = libraryCallbacks.find((callback) => callback.name === expr.import);
   if (libraryCallback !== undefined) {
-    if (libraryCallback.params.length !== 1 || libraryCallback.params[0] !== "f64" ||
-        (libraryCallback.returns !== "f64" && libraryCallback.returns !== "void") ||
-        expr.args.length !== 1 || expr.args[0]?.type.kind !== "f64" ||
-        expr.type.kind !== libraryCallback.returns) {
+    const returns = libraryCallback.returns;
+    const resultKind = returns === "void" ? "void" : "f64";
+    if (libraryCallback.params.length === 0 ||
+        libraryCallback.params.some((parameter) =>
+          parameter !== "f64" && parameter !== "u8" && parameter !== "i32" &&
+          parameter !== "bool" && parameter !== "string" && parameter !== "bytes" &&
+          parameter !== "u32") ||
+        (returns !== "f64" && returns !== "i32" && returns !== "u32" && returns !== "void") ||
+        expr.args.length !== libraryCallback.params.length ||
+        expr.args.some((argument, index) => {
+          const parameter = libraryCallback.params[index];
+          const kind = parameter === "bool" ? "bool"
+            : parameter === "string" ? "string" : parameter === "bytes" ? "bytes" : "f64";
+          return argument.type.kind !== kind;
+        }) ||
+        expr.type.kind !== resultKind) {
       context.unsupported(`library callback channel '${expr.import}' outside the f64 scalar ABI`, expr.loc);
     }
-    const value = emitExpr(expr.args[0]);
+    const bindings: string[] = [];
+    const nativeParameters: string[] = [];
+    const values = expr.args.flatMap((argument, index) => {
+      const value = emitExpr(argument);
+      const parameter = libraryCallback.params[index]!;
+      if (parameter === "string") {
+        const text = context.nextName("sc_library_callback_string");
+        bindings.push(`let ${text} = ${value};`);
+        nativeParameters.push("*const u8", "usize");
+        return [`${text}.as_bytes().as_ptr()`, `${text}.len()`];
+      }
+      if (parameter === "bytes") {
+        const bytes = context.nextName("sc_library_callback_bytes");
+        bindings.push(`let ${bytes} = runtime::ffi_bytes_snapshot(&${value});`);
+        nativeParameters.push("*const u8", "usize");
+        return [`${bytes}.as_ptr()`, `${bytes}.len()`];
+      }
+      nativeParameters.push(parameter === "bool" ? "u8" : parameter);
+      return [parameter === "u8"
+        ? `runtime::to_uint32(${value}) as u8`
+        : parameter === "u32"
+          ? `runtime::to_uint32(${value})`
+        : parameter === "i32"
+          ? `runtime::to_int32(${value})`
+          : parameter === "bool" ? `u8::from(${value})` : value];
+    });
     const raw = context.nextName("sc_library_callback_raw");
     const opaque = context.nextName("sc_library_callback_context");
     const callback = context.nextName("sc_library_callback_typed");
-    const returns = libraryCallback.returns === "void" ? "" : " -> f64";
-    return `{ let Some((${raw}, ${opaque})) = sc_library_callback(${libraryCallback.slot}) else { ` +
+    const parameters = nativeParameters.join(", ");
+    const nativeReturn = returns === "void" ? "" : ` -> ${returns}`;
+    const call = `unsafe { ${callback}(${[opaque, ...values].join(", ")}) }`;
+    const result = returns === "i32" || returns === "u32" ? `f64::from(${call})` : call;
+    return `{ ${bindings.join(" ")} let Some((${raw}, ${opaque})) = sc_library_callback(${libraryCallback.slot}) else { ` +
       `runtime::throw_error_code(${JSON.stringify(libraryCallback.unregisteredTrap)}.to_owned(), "SC4025"); }; ` +
-      `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, f64)${returns} = ` +
-      `unsafe { std::mem::transmute(${raw}) }; unsafe { ${callback}(${opaque}, ${value}) } }`;
+      `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, ${parameters})${nativeReturn} = ` +
+      `unsafe { std::mem::transmute(${raw}) }; ${result} }`;
   }
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
