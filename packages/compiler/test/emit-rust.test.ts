@@ -1239,6 +1239,7 @@ shardedTest.each(shardSelect([
   "2071-integer-key-enumeration-order.ts",
   "2072-expando-function-members.ts",
   "2073-destructuring-assignment.ts",
+  "2074-island-destructuring.ts",
   "2075-index-signature-runtime-keys.ts",
   "2080-destructuring-defaults.ts",
   "2081-destructuring-rest.ts",
