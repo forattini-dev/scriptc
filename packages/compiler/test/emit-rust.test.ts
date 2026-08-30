@@ -1034,6 +1034,7 @@ shardedTest.each(shardSelect([
   "1584-union-field-unassigned.ts",
   "1585-union-field-conditional-ctor.ts",
   "1586-derived-field-before-super-init.ts",
+  "1587-any-field-unassigned.ts",
   "1590-js-unannotated.js",
   "1592-js-classes.js",
   "1593-js-jsdoc-records.js",
