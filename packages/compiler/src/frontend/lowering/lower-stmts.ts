@@ -3369,6 +3369,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (type?.kind === "func" && init.type.kind === "dyn" && isJsSourceFile(decl.getSourceFile())) {
       type = DYN;
     }
+    // An unannotated const lambda with an open any[]/unknown[] rest maps
+    // to DYN at the checker-type surface, but its freshly lowered closure
+    // still has the richer completed ABI (including default parameters).
+    // Keep that concrete closure locally: boxing it here and immediately
+    // extracting it through an `as FunctionType` cast would insert an
+    // adapter between the caller's omitted argument and the closure's
+    // default prologue, turning JavaScript's omission into a failed record
+    // validation. Mutable or explicitly annotated slots keep their stated
+    // dynamic storage contract.
+    if (
+      !decl.type && !isLet && type?.kind === "dyn" &&
+      init.type.kind === "func" && init.type.rest === true
+    ) {
+      type = init.type;
+    }
     // A checker-`any` CONST whose initializer lowered to a STATIC type
     // (`const name = rawName ? rawName.replace(...) : null` — the
     // dyn-receiver machinery and the any-ternary join answer static IR):

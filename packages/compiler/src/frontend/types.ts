@@ -2878,9 +2878,19 @@ function mapBoundRecordIntersection(type: ts.Type, ctx: TypeMapperCtx): IrType |
   const declaredOrder: string[] = [];
   let indexValue: IrType | undefined;
   for (const part of parts) {
-    const mapped = part.flags & ts.TypeFlags.TypeParameter
-      ? resolveTypeParam(part)
-      : mapType(part, ctx);
+    let mapped: IrType | null;
+    if (part.flags & ts.TypeFlags.TypeParameter) {
+      mapped = resolveTypeParam(part);
+      // `unknown & R` is exactly R. The IR's checked-dynamic DYN also
+      // represents the bound `unknown`; genuine `any` uses the separate
+      // JSVAL island representation under --dynamic (and is unmappable
+      // without it), so it cannot accidentally take this identity rule.
+      if (mapped?.kind === "dyn") {
+        continue;
+      }
+    } else {
+      mapped = mapType(part, ctx);
+    }
     if (mapped?.kind !== "record") return null;
     const shape = shapes.get(mapped.shapeId);
     if (!shape || shape.tuple) return null;

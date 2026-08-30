@@ -52,7 +52,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { arrayOf, BOOL, canAdaptDynFuncTo, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayOf, BOOL, canAdaptDynFuncTo, canBoxFuncIntoDyn, canConvertToDyn, canCrossIslandBoundary, canDynCheckTo, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, RUNTIME_ERROR_CLASSES, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -3914,6 +3914,14 @@ export class Lowerer {
       if (expr.type.kind === "dyn") {
         return { kind: "jsMarshal", value: expr, type: JSVAL, loc: expr.loc };
       }
+      // Native checked-dynamic rest callbacks and island rest callbacks
+      // use different ABIs. Adapt before the ordinary marshal predicate so
+      // overloaded implementation returns preserve omitted defaults and
+      // every surplus argument when their public slot is `any`.
+      const dynRestAdapter = this.dynRestIslandAdapter(expr, expr.loc);
+      if (dynRestAdapter) {
+        return { kind: "jsMarshal", value: dynRestAdapter, type: JSVAL, loc: expr.loc };
+      }
       if (this.boundarySafe(expr.type)) {
         return { kind: "jsMarshal", value: expr, type: JSVAL, loc: expr.loc };
       }
@@ -5558,6 +5566,106 @@ export class Lowerer {
       loc,
     });
     return name;
+  }
+
+  /** Adapt a checked-dynamic variadic closure (`...unknown[]` / `...any[]`)
+   * into the island callback ABI. The island-facing closure receives its
+   * fixed arguments normally and one trailing engine array containing all
+   * surplus arguments. Its body boxes the original closure, converts the
+   * fixed arguments to dyn, wraps the engine array as dyn, and invokes the
+   * original through the spread-aware dynCall path. This preserves BOTH
+   * default-parameter omission and arbitrary surplus forwarding when a
+   * typed variadic function flows through an implementation return typed
+   * `any` (the overloaded component-wrapper shape). */
+  dynRestIslandAdapter(value: IrExpr, loc: SrcLoc): IrExpr | null {
+    const fromT = value.type;
+    if (
+      fromT.kind !== "func" || fromT.rest !== true || fromT.restAbi === "jsval" ||
+      !canBoxFuncIntoDyn(fromT, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ||
+      !fromT.params.every((p) => canConvertToDyn(p, (id) => this.shapes.get(id), (id) => this.unions.get(id))) ||
+      !(
+        fromT.ret.kind === "void" || fromT.ret.kind === "dyn" ||
+        canDynCheckTo(fromT.ret, (id) => this.shapes.get(id), (id) => this.unions.get(id))
+      )
+    ) {
+      return null;
+    }
+    const toT: IrType & { kind: "func" } = {
+      kind: "func",
+      params: [...fromT.params, JSVAL],
+      ret: fromT.ret,
+      rest: true,
+      restAbi: "jsval",
+    };
+    if (!canMarshalTypedFuncIntoIsland(toT, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
+      return null;
+    }
+    const key = `fn-island-rest:${typeKey(fromT)}`;
+    let name = this.retagHelpers.get(key);
+    if (!name) {
+      name = `%fn.islandrest.${this.retagHelpers.size}`;
+      this.retagHelpers.set(key, name);
+      this.freshClosureAdapters.add(name);
+      const impl = `${name}.impl`;
+      const params: IrParam[] = toT.params.map((t, i) => ({
+        localId: `a.${i}`,
+        name: i === toT.params.length - 1 ? "rest" : `a${i}`,
+        type: t,
+      }));
+      const fixedArgs = fromT.params.map((t, i): IrExpr => {
+        const ref: IrExpr = { kind: "varRef", localId: `a.${i}`, type: t, loc };
+        return this.coerceToExpected(ref, DYN);
+      });
+      const restIndex = toT.params.length - 1;
+      const restRef: IrExpr = { kind: "varRef", localId: `a.${restIndex}`, type: JSVAL, loc };
+      const boxed: IrExpr = {
+        kind: "dynFrom",
+        value: { kind: "varRef", localId: "f.0", type: fromT, loc },
+        type: DYN,
+        loc,
+      };
+      const call: IrExpr = {
+        kind: "dynCall",
+        callee: boxed,
+        calleeName: "function",
+        args: [...fixedArgs, { kind: "dynFromJsval", value: restRef, type: DYN, loc }],
+        spreads: [{ arg: restIndex, what: "rest arguments" }],
+        type: DYN,
+        loc,
+      };
+      const body: IrStmt[] = fromT.ret.kind === "void"
+        ? [{ kind: "exprStmt", expr: call, loc }, { kind: "return", value: null, loc }]
+        : [{
+            kind: "return",
+            value: fromT.ret.kind === "dyn" ? call : this.coerceToExpected(call, fromT.ret),
+            loc,
+          }];
+      this.liftedFns.push({
+        name: impl,
+        params,
+        returnType: fromT.ret,
+        captures: [{ localId: "f.0", name: "f", type: fromT }],
+        locals: [
+          { id: "f.0", name: "f", type: fromT, mutable: false, boxed: true },
+          ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ],
+        body,
+        loc,
+      });
+      this.liftedFns.push({
+        name,
+        params: [{ localId: "f.0", name: "f", type: fromT }],
+        returnType: toT,
+        locals: [{ id: "f.0", name: "f", type: fromT, mutable: false, boxed: true }],
+        body: [{
+          kind: "return",
+          value: { kind: "closure", fnName: impl, captures: ["f.0"], type: toT, loc },
+          loc,
+        }],
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [value], type: toT, loc };
   }
 
   /** The spawnSync-runner VALUE adapter's plan — a function returning the

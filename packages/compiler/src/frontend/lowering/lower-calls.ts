@@ -681,6 +681,17 @@ export interface GenericInstance {
     ) {
       return;
     }
+    // The checked-dynamic twin: a variadic/defaulted function whose own
+    // inferred type intentionally maps to `unknown` (the open unknown[]
+    // rest surface) enters DYN through its boxed thunk. That thunk already
+    // completes omitted arguments and preserves variadic calls, so the
+    // value has an exact runtime ABI whenever its concrete completed
+    // signature is boxable.
+    if (mapped?.kind === "dyn" &&
+      canBoxFuncIntoDyn(funcType, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+    ) {
+      return;
+    }
     L.unsupported(
       "SC1090",
       blame,

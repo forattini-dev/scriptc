@@ -87,6 +87,14 @@ import {
       // function/handle throws the catchable TypeError at runtime).
       return { kind: "jsMarshal", value: e, type: JSVAL, loc: e.loc };
     }
+    // A checked-dynamic variadic closure uses the native dyn-rest ABI,
+    // while an island callback receives its surplus arguments as one
+    // trailing engine array. Bridge those ABIs explicitly before the
+    // ordinary callback-shape gate below.
+    const dynRestAdapter = L.dynRestIslandAdapter(e, e.loc);
+    if (dynRestAdapter) {
+      return { kind: "jsMarshal", value: dynRestAdapter, type: JSVAL, loc: e.loc };
+    }
     // Closures cross INTO the island as host functions — THE package
     // callback pattern (`.action((a, b) => ...)`). Unannotated params stay
     // 'any' (contextual typing against package signatures) and pass through
