@@ -149,6 +149,11 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "} catch (error) {",
     "  console.log('caught', (error as Error).message);",
     "}",
+    "try {",
+    "  nativeApplyContext(() => { throw new Error('ffi context boom'); }, 1);",
+    "} catch (error) {",
+    "  console.log('caught', (error as Error).message);",
+    "}",
     "",
   ].join("\n"));
 
@@ -167,6 +172,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n42\ncaught ffi callback boom\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n42\ncaught ffi callback boom\ncaught ffi context boom\n");
   expect(run.stderr).toBe("");
 });

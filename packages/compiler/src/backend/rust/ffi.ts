@@ -146,10 +146,14 @@ export function emitRustFfiCall(
     const incoming = context.nextName("sc_ffi_callback_incoming");
     const opaque = context.nextName("sc_ffi_callback_context");
     const active = context.nextName("sc_ffi_callback_active");
+    const stateType = context.nextName("ScFfiCallbackContext");
+    const state = context.nextName("sc_ffi_callback_state");
     const pointer = context.nextName("sc_ffi_callback_pointer");
+    const result = context.nextName("sc_ffi_callback_result");
+    const panic = context.nextName("sc_ffi_callback_panic");
     const closureType = context.rustType(callbackArgument.type, expr.loc);
     const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
-    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; unsafe extern "C" fn ${trampoline}(${incoming}: f64, ${opaque}: *mut std::ffi::c_void) -> f64 { let ${active} = unsafe { (&*${opaque}.cast::<${closureType}>()).clone() }; ${dispatch} } let ${pointer} = (&${callbackValue} as *const ${closureType}).cast_mut().cast::<std::ffi::c_void>(); unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}, ${pointer}) } }`;
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; struct ${stateType} { callback: ${closureType}, panic: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>>, } unsafe extern "C" fn ${trampoline}(${incoming}: f64, ${opaque}: *mut std::ffi::c_void) -> f64 { let ${state} = unsafe { &*${opaque}.cast::<${stateType}>() }; if ${state}.panic.borrow().is_some() { return 0.0; } match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let ${active} = ${state}.callback.clone(); ${dispatch} })) { Ok(sc_value) => sc_value, Err(sc_payload) => { *${state}.panic.borrow_mut() = Some(sc_payload); 0.0 } } } let ${state} = ${stateType} { callback: ${callbackValue}, panic: std::cell::RefCell::new(None) }; let ${pointer} = (&${state} as *const ${stateType}).cast_mut().cast::<std::ffi::c_void>(); let ${result} = unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}, ${pointer}) }; let ${panic} = ${state}.panic.take(); if let Some(sc_payload) = ${panic} { std::panic::resume_unwind(sc_payload); } ${result} }`;
   }
   const callback = binding === undefined ? null : rawF64Callback(binding);
   if (callback !== null) {
