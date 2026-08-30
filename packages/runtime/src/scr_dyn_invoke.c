@@ -182,6 +182,17 @@ static size_t dyn_rel_index(double rel, size_t len) {
   return rel > (double)len ? len : (size_t)rel;
 }
 
+static void dyn_arr_flat_into(ScrDyn *out, const ScrDyn *array, double depth) {
+  for (size_t i = 0; i < array->v.arr.len; i++) {
+    ScrDyn *item = array->v.arr.items[i];
+    if (item->kind == SCR_DYN_ARR && depth > 0) {
+      dyn_arr_flat_into(out, item, depth - 1);
+    } else {
+      scr_dyn_arr_push(out, scr_dyn_retain(item));
+    }
+  }
+}
+
 /* The array callback runner (forEach/map/filter/some/every/find/
  * findIndex): calls cb(item, i, recv) per element through the boxed
  * thunk. Returns the owned result or NULL with the exception pending. */
@@ -315,7 +326,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
-  static const char *names[] = { "splice", "flat",
+  static const char *names[] = { "splice",
     "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
@@ -595,18 +606,12 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return out;
     }
-    if (dyn_name_is(method, "flat") && argc == 0) {
+    if (dyn_name_is(method, "flat")) {
+      double depth = dyn_index_arg(args, argc, 0, 1, what);
+      if (scr_exc_pending()) return NULL;
+      if (depth < 0) depth = 0;
       ScrDyn *out = scr_dyn_new_arr();
-      for (size_t i = 0; i < len; i++) {
-        ScrDyn *item = recv->v.arr.items[i];
-        if (item->kind == SCR_DYN_ARR) {
-          for (size_t j = 0; j < item->v.arr.len; j++) {
-            scr_dyn_arr_push(out, scr_dyn_retain(item->v.arr.items[j]));
-          }
-        } else {
-          scr_dyn_arr_push(out, scr_dyn_retain(item));
-        }
-      }
+      dyn_arr_flat_into(out, recv, depth);
       return out;
     }
     if (dyn_name_is(method, "reverse")) {

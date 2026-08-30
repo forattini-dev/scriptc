@@ -80,11 +80,15 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitArrayCallbacks(): void {
-    this.open(`fn sc_dyn_array_flat_once(array: &runtime::JsArray<${this.dyn}>) -> ${this.dyn} {`);
-    this.context.line(`let output: runtime::JsArray<${this.dyn}> = runtime::array_new(Vec::new());`);
+    this.open(`fn sc_dyn_array_flat_into(array: &runtime::JsArray<${this.dyn}>, depth: f64, output: &runtime::JsArray<${this.dyn}>) {`);
     this.open("for item in runtime::array_values(array) {");
-    this.context.line(`match item { ${this.dyn}::Array(items) => { runtime::array_extend(&output, &items); }, value => { runtime::array_push(&output, value); }, }`);
+    this.context.line(`match item { ${this.dyn}::Array(items) if depth > 0.0 => sc_dyn_array_flat_into(&items, depth - 1.0, output), value => { runtime::array_push(output, value); }, }`);
     this.close("}");
+    this.close("}");
+
+    this.open(`fn sc_dyn_array_flat(array: &runtime::JsArray<${this.dyn}>, depth: f64) -> ${this.dyn} {`);
+    this.context.line(`let output: runtime::JsArray<${this.dyn}> = runtime::array_new(Vec::new());`);
+    this.context.line("sc_dyn_array_flat_into(array, depth.max(0.0), &output);");
     this.context.line(`${this.dyn}::Array(output)`);
     this.close("}");
 
@@ -444,7 +448,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"includes" => { let needle = args.first().cloned().unwrap_or(${this.dyn}::Undefined); ${this.dyn}::Boolean(runtime::array_includes_by(array, &needle, sc_dyn_same_value_zero)) },`);
     this.context.line(`"join" => { let separator = match args.first() { None | Some(${this.dyn}::Undefined) => runtime::string(","), Some(value) => sc_dyn_to_string(value), }; ${this.dyn}::String(runtime::array_join_by(array, &separator, |element, output| { if !matches!(element, ${this.dyn}::Undefined | ${this.dyn}::Null) { output.push_str(sc_dyn_to_string(element).as_ref()); } })) },`);
     this.context.line(`"concat" => { let output = runtime::array_slice(array, 0.0, length); for arg in args { match arg { ${this.dyn}::Array(items) => { runtime::array_extend(&output, items); }, value => { runtime::array_push(&output, value.clone()); }, } } ${this.dyn}::Array(output) },`);
-    this.context.line('"flat" if args.is_empty() => sc_dyn_array_flat_once(array),');
+    this.context.line('"flat" => sc_dyn_array_flat(array, sc_dyn_index_arg(args, 0, 1.0, callee_name)),');
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
     this.context.line(`"fill" => { let value = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_fill(array, value, start, end)) },`);
     this.context.line(`"copyWithin" => { let target = sc_dyn_index_arg(args, 0, 0.0, callee_name); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_copy_within(array, target, start, end)) },`);
@@ -452,7 +456,7 @@ class RustDynamicInvokeEmitter {
     this.context.line('"reduceRight" => sc_dyn_array_reduce(array, args, true),');
     this.context.line('"sort" => sc_dyn_array_sort(array, args),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"splice\" | \"flat\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line("\"splice\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");
