@@ -427,3 +427,93 @@ test("Rust library callbacks synchronously round-trip scalars through the host",
     rmSync(work, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("Rust library callbacks report an unregistered channel as SC4025", async () => {
+  const work = mkdtempSync(join(tmpdir(), "scriptc-rust-library-orphan-"));
+  try {
+    const entry = join(work, "lib.ts");
+    writeFileSync(entry, [
+      "declare function hostAdd(value: number): number;",
+      "export function run(value: number): number { return hostAdd(value); }",
+      "console.log('orphan ready');",
+      "",
+    ].join("\n"));
+    const profilePath = join(work, "profile.json");
+    writeFileSync(profilePath, JSON.stringify({
+      profile_format: 1,
+      name: "rust-orphan-callback",
+      entry,
+      emission: "rust",
+      optimization: "dev",
+      abi: {
+        prefix: "ro_",
+        init_symbol: "ro_init",
+        sink_register_symbol: "ro_set_panic_sink",
+        collect_symbol: null,
+        result_reset_symbol: null,
+        callback_register_symbol: "ro_set_callback",
+      },
+      callbacks: [{ name: "hostAdd", params: ["f64"], returns: "f64" }],
+      exports: [{ export: "run", symbol: "ro_run", params: ["f64"], returns: "f64" }],
+    }));
+
+    const result = await compileLibrary({ profilePath, outDir: work });
+    expect(
+      result.ok,
+      result.ok
+        ? undefined
+        : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const probeSource = join(work, "probe.c");
+    writeFileSync(probeSource, [
+      "#include <setjmp.h>",
+      "#include <stddef.h>",
+      "#include <stdint.h>",
+      "#include <stdio.h>",
+      "static jmp_buf escape;",
+      "extern void ro_init(void);",
+      "extern double ro_run(double value);",
+      "extern void ro_set_panic_sink(void (*fn)(void *, const uint8_t *, size_t, uint64_t), void *);",
+      "static void sink(void *ctx, const uint8_t *msg, size_t len, uint64_t address) {",
+      "  (void)ctx; (void)address;",
+      "  fputs(\"sink:\", stdout);",
+      "  for (size_t i = 0; i < len; i++) {",
+      "    if (msg[i] == 1) continue;",
+      "    fputc(msg[i] == 31 ? '|' : msg[i], stdout);",
+      "  }",
+      "  fputc('\\n', stdout);",
+      "  longjmp(escape, 1);",
+      "}",
+      "int main(void) {",
+      "  ro_set_panic_sink(sink, NULL);",
+      "  ro_init();",
+      "  if (setjmp(escape) == 0) (void)ro_run(7);",
+      "  puts(\"survived\");",
+      "  return 0;",
+      "}",
+      "",
+    ].join("\n"));
+    const probe = join(work, "probe");
+    execFileSync("clang", [
+      "-std=c11",
+      probeSource,
+      result.archivePath,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-o",
+      probe,
+    ]);
+    expect(execFileSync(probe, { encoding: "utf8" })).toBe([
+      "orphan ready",
+      "sink:scriptc: library callback 'hostAdd' invoked before registration",
+      "|SC4025|ro_run",
+      "survived",
+      "",
+    ].join("\n"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}, 120_000);

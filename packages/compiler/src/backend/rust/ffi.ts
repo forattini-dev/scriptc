@@ -372,7 +372,8 @@ export function emitRustFfiCall(
     const raw = context.nextName("sc_library_callback_raw");
     const opaque = context.nextName("sc_library_callback_context");
     const callback = context.nextName("sc_library_callback_typed");
-    return `{ let (${raw}, ${opaque}) = sc_library_callback(${libraryCallback.slot}); ` +
+    return `{ let Some((${raw}, ${opaque})) = sc_library_callback(${libraryCallback.slot}) else { ` +
+      `runtime::throw_error_code(${JSON.stringify(libraryCallback.unregisteredTrap)}.to_owned(), "SC4025"); }; ` +
       `let ${callback}: unsafe extern "C" fn(*mut std::ffi::c_void, f64) -> f64 = ` +
       `unsafe { std::mem::transmute(${raw}) }; unsafe { ${callback}(${opaque}, ${value}) } }`;
   }
