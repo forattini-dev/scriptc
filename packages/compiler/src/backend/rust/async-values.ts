@@ -59,6 +59,7 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return [expr.receiver, ...expr.args];
     case "dynCheck":
     case "dynFromJsval":
+    case "jsExit":
       return [expr.value];
     case "jsonStringify":
       return [expr.value];

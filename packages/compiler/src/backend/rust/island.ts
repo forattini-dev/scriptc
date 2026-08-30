@@ -239,7 +239,7 @@ function relationalOperator(op: "lt" | "le" | "gt" | "ge"): string {
   return { lt: "<", le: "<=", gt: ">", ge: ">=" }[op];
 }
 
-/** Convert the JSON-safe primitive argument subset into Boa-owned values.
+/** Convert JSON-safe arguments into Boa-owned values.
  * Embedded exports and methods share this bridge so argument evaluation
  * remains left-to-right in the generated dyn array before any call. */
 function emitIslandArguments(args: string, context: RustIslandContext): string {
@@ -250,8 +250,9 @@ function emitIslandArguments(args: string, context: RustIslandContext): string {
     `${dyn}::Number(sc_value) => runtime::island_value_number(*sc_value), ` +
     `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
     `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
+    `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(sc_arg)), ` +
     `${dyn}::Island(sc_value) => sc_value.clone(), ` +
-    `_ => runtime::throw_error_code("embedded module call argument is outside the primitive island subset".to_owned(), "SC3001"), ` +
+    `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
     `}).collect::<Vec<_>>()`;
 }
 
@@ -326,7 +327,7 @@ function emitGenericPromiseBridge(
   const dyn = context.dynTypeName();
   const value = context.nextName("sc_island_promise_value");
   const source = context.nextName("sc_island_promise_source");
-  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), sc_value => runtime::promise_resolved(sc_value), }`;
+  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), ${dyn}::Island(sc_handle) => runtime::promise_resolved(${dyn}::Island(runtime::island_await(&sc_handle))), sc_value => runtime::promise_resolved(sc_value), }`;
   if (expr.type.inner.kind === "jsval") {
     return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; ${source} }`;
   }

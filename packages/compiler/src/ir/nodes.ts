@@ -5923,6 +5923,46 @@ export function islandPromisePayloadTag(
   }
 }
 
+/** The composite island-exit extension for JSON protocol envelopes whose
+ * object fields intentionally stay `unknown`. The engine value still takes
+ * the checked JSON snapshot, but dyn record fields retain the parsed subtree
+ * instead of requiring a statically-known JSON shape. Keep dyn array elements
+ * out: those would need per-element island handles rather than this snapshot. */
+function isIslandJsonExitWithDynRecordFields(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string> = new Set(),
+): boolean {
+  if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  if (t.kind === "record") {
+    const shape = getRecord(t.shapeId);
+    if (!shape || shape.tuple) return false;
+    const key = `record:${t.shapeId}`;
+    if (visiting.has(key)) return true;
+    visiting.add(key);
+    return shape.fields.every((field) =>
+      field.type.kind === "dyn" ||
+      isIslandJsonExitWithDynRecordFields(field.type, getRecord, getUnion, visiting)
+    ) && (
+      shape.indexValue === undefined ||
+      shape.indexValue.kind === "dyn" ||
+      isIslandJsonExitWithDynRecordFields(shape.indexValue, getRecord, getUnion, visiting)
+    );
+  }
+  if (t.kind === "union") {
+    const def = getUnion(t.unionId);
+    if (!def) return false;
+    const key = `union:${t.unionId}`;
+    if (visiting.has(key)) return true;
+    visiting.add(key);
+    return def.arms.every((arm) =>
+      isIslandJsonExitWithDynRecordFields(arm, getRecord, getUnion, visiting)
+    );
+  }
+  return false;
+}
+
 export function canExitIslandToType(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
@@ -5936,6 +5976,10 @@ export function canExitIslandToType(
   // array exits Array.isArray-gated, elements BY REFERENCE (identity
   // crosses; the withPlugins `loadPlugins(plugins)` boundary).
   if (t.kind === "array" && t.elem.kind === "jsval") return true;
+  // JSON protocol envelopes commonly leave one response payload unknown.
+  // Their known record/union spine validates as usual; dyn object fields
+  // keep the parsed checked-dynamic subtree.
+  if (isIslandJsonExitWithDynRecordFields(t, getRecord, getUnion)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
     if (!def || !def.arms.some((a) => a.kind === "undefinedT")) return false;

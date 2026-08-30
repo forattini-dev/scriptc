@@ -2,6 +2,7 @@ use boa_engine::{
     Context, JsError as BoaJsError, JsResult, JsValue, Module, NativeFunction, Source, js_string,
     builtins::promise::PromiseState as BoaPromiseState,
     module::MapModuleLoader,
+    object::builtins::JsPromise as BoaJsPromise,
     object::ObjectInitializer,
     property::Attribute,
 };
@@ -50,12 +51,66 @@ pub fn island_value_string(value: &JsString) -> IslandValue {
     IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
 }
 
+/// Copy one native JSON value into the embedded JavaScript realm.
+///
+/// Generated code serializes its typed record/array before this call, so the
+/// engine receives ordinary JavaScript objects rather than an opaque host
+/// handle. JSON.parse also keeps the boundary's existing deep-copy stance.
+pub fn island_value_json(value: &JsString) -> IslandValue {
+    with_island_state(|state| {
+        let context = &mut state.context;
+        let global = context.global_object();
+        let json = global
+            .get(js_string!("JSON"), context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let json = json
+            .to_object(context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let parse = json
+            .get(js_string!("parse"), context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let Some(parse) = parse.as_callable() else {
+            throw_type_error("Embedded JSON.parse is not callable".to_owned());
+        };
+        let input = JsValue::from(boa_engine::JsString::from(value.as_ref()));
+        let parsed = parse
+            .call(&JsValue::from(json), &[input], context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        IslandValue(parsed)
+    })
+}
+
 pub fn island_is_nullish(value: &IslandValue) -> bool {
     value.0.is_null_or_undefined()
 }
 
 pub fn island_is_function(value: &IslandValue) -> bool {
     value.0.as_callable().is_some()
+}
+
+/// Apply JavaScript await adoption inside the embedded realm and return the
+/// fulfilled value. Embedded module jobs are single-threaded and run on this
+/// same host turn; a promise still pending afterwards has no native event
+/// source capable of settling it in the current island subset.
+pub fn island_await(value: &IslandValue) -> IslandValue {
+    with_island_state(|state| {
+        let promise = BoaJsPromise::resolve(value.0.clone(), &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        state
+            .context
+            .run_jobs()
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        match promise.state() {
+            BoaPromiseState::Fulfilled(value) => IslandValue(value),
+            BoaPromiseState::Rejected(reason) => {
+                island_eval_error(BoaJsError::from_opaque(reason), &mut state.context)
+            }
+            BoaPromiseState::Pending => throw_error_code(
+                "Embedded module promise did not settle".to_owned(),
+                "ERR_MODULE_PROMISE_PENDING",
+            ),
+        }
+    })
 }
 
 struct IslandState {
