@@ -1252,6 +1252,7 @@ shardedTest.each(shardSelect([
   "2090-index-signature-number-keys.ts",
   "2091-index-signature-string-intersection.ts",
   "2092-package-imports/main.ts",
+  "2094-diagnostics-channel.ts",
   "2095-js-catch-unknown.js",
   "2097-js-evolving-globals.js",
   "2100-stream-default-hwm.ts",
