@@ -1018,6 +1018,7 @@ shardedTest.each(shardSelect([
   "1565-union-element-join.ts",
   "1565-spawn-pipe-streams.ts",
   "1569-fsp-mkdir-unlink-chmod.ts",
+  "1571-optional-call-tostring-tail.ts",
   "1571-stdin-set-raw-mode-non-tty.ts",
   "1573-promisify-execfile-env-spread.ts",
   "1573-tdz-scalar-forward-capture.ts",
