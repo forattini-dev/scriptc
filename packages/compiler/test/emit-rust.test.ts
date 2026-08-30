@@ -990,6 +990,7 @@ shardedTest.each(shardSelect([
   "1470-child-lifecycle.ts",
   "1471-child-unref.ts",
   "1472-errno-code.ts",
+  "1473-promisify-execfile.ts",
   "1475-readline-closed-stdin.ts",
   "1477-in-expressions.ts",
   "1482-spawnsync-error.ts",
