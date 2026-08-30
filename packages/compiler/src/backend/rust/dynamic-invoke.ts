@@ -476,9 +476,10 @@ class RustDynamicInvokeEmitter {
     this.context.line('"findLastIndex" => sc_dyn_array_find_last(array, args, true),');
     this.context.line('"sort" => sc_dyn_array_sort(array, args, false),');
     this.context.line('"toSorted" => sc_dyn_array_sort(array, args, true),');
-    this.context.line(`"values" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array)),`);
+    this.context.line(`"keys" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array, runtime::ArrayIteratorKind::Keys)),`);
+    this.context.line(`"values" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array, runtime::ArrayIteratorKind::Values)),`);
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"keys\" | \"entries\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line("\"entries\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");
@@ -487,7 +488,7 @@ class RustDynamicInvokeEmitter {
   private emitArrayIteratorArm(): void {
     this.open(`${this.dyn}::ArrayIterator(iterator) => {`);
     this.open("match method {");
-    this.context.line(`"next" => { let (value, done) = match runtime::array_iterator_next(iterator) { Some(value) => (value, false), None => (${this.dyn}::Undefined, true), }; let result = runtime::map_new(); runtime::map_set_by(&result, runtime::string("value"), value, |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&result, runtime::string("done"), ${this.dyn}::Boolean(done), |left, right| left.as_ref() == right.as_ref()); ${this.dyn}::Object(result) },`);
+    this.context.line(`"next" => { let (value, done) = match runtime::array_iterator_next(iterator) { Some(runtime::ArrayIteratorItem::Key(index)) => (${this.dyn}::Number(index), false), Some(runtime::ArrayIteratorItem::Value(value)) => (value, false), None => (${this.dyn}::Undefined, true), }; let result = runtime::map_new(); runtime::map_set_by(&result, runtime::string("value"), value, |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&result, runtime::string("done"), ${this.dyn}::Boolean(done), |left, right| left.as_ref() == right.as_ref()); ${this.dyn}::Object(result) },`);
     this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("}");
     this.close("},");

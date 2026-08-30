@@ -488,9 +488,14 @@ static ScrDyn *scr_dyn_invoke_impl(
     if (dyn_name_is(method, "next")) {
       ScrDyn *array = recv->v.arr_iter.array;
       bool done = !array || recv->v.arr_iter.index >= array->v.arr.len;
-      ScrDyn *value = done
-        ? scr_dyn_retain(scr_dyn_undefined())
-        : scr_dyn_retain(array->v.arr.items[recv->v.arr_iter.index++]);
+      ScrDyn *value;
+      if (done) {
+        value = scr_dyn_retain(scr_dyn_undefined());
+      } else if (recv->v.arr_iter.kind == SCR_DYN_ARR_ITER_KEYS) {
+        value = scr_dyn_new_num((double)recv->v.arr_iter.index++);
+      } else {
+        value = scr_dyn_retain(array->v.arr.items[recv->v.arr_iter.index++]);
+      }
       if (done && array) {
         recv->v.arr_iter.array = NULL;
         scr_dyn_release(array);
@@ -710,8 +715,11 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return out;
     }
+    if (dyn_name_is(method, "keys")) {
+      return scr_dyn_new_arr_iter(recv, SCR_DYN_ARR_ITER_KEYS);
+    }
     if (dyn_name_is(method, "values")) {
-      return scr_dyn_new_arr_iter(recv);
+      return scr_dyn_new_arr_iter(recv, SCR_DYN_ARR_ITER_VALUES);
     }
     if (dyn_name_is(method, "with")) {
       double index = dyn_index_arg(args, argc, 0, 0, what);

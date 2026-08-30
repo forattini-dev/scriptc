@@ -3011,6 +3011,11 @@ typedef enum {
   SCR_DYN_ARR_ITER,
 } ScrDynKind;
 
+typedef enum {
+  SCR_DYN_ARR_ITER_KEYS,
+  SCR_DYN_ARR_ITER_VALUES,
+} ScrDynArrayIteratorKind;
+
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
  * HANDLE kinds whose member surfaces already have complete static
  * lowerings (the http/net receiver surface); new kinds join by adding a
@@ -3091,7 +3096,11 @@ struct ScrDyn {
     ScrStr *str; /* owned */
     ScrBytes *bytes; /* owned (SCR_DYN_BYTES) */
     struct { size_t len; size_t cap; ScrDyn **items; } arr;      /* owned */
-    struct { ScrDyn *array; size_t index; } arr_iter;             /* owned */
+    struct {
+      ScrDyn *array;
+      size_t index;
+      ScrDynArrayIteratorKind kind;
+    } arr_iter;                                                   /* owned */
     struct {
       size_t len;
       size_t cap;
@@ -3209,7 +3218,8 @@ ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
 ScrDyn *scr_dyn_new_arr(void);
-ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array); /* borrows array; returns +1 */
+ScrDyn *scr_dyn_new_arr_iter(
+    ScrDyn *array, ScrDynArrayIteratorKind kind); /* borrows array; returns +1 */
 ScrDyn *scr_dyn_new_obj(void);
 /* The ordinary deep-copy object plus a retained typed source. source_access
  * releases that source when materialize=false and returns a fresh dyn snapshot

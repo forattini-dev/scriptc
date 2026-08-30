@@ -644,10 +644,11 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
 }
 
 ScrDyn *scr_dyn_new_arr(void) { return scr_dyn_alloc(SCR_DYN_ARR); }
-ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array) {
+ScrDyn *scr_dyn_new_arr_iter(ScrDyn *array, ScrDynArrayIteratorKind kind) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR_ITER);
   d->v.arr_iter.array = scr_dyn_retain(array);
   d->v.arr_iter.index = 0;
+  d->v.arr_iter.kind = kind;
   return d;
 }
 ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }

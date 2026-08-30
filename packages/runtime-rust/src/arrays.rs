@@ -69,6 +69,18 @@ pub type JsArray<T> = Gc<ArrayData<T>>;
 pub struct ArrayIteratorData<T: ArrayElement> {
     array: Option<JsArray<T>>,
     index: usize,
+    kind: ArrayIteratorKind,
+}
+
+#[derive(Clone, Copy)]
+pub enum ArrayIteratorKind {
+    Keys,
+    Values,
+}
+
+pub enum ArrayIteratorItem<T: ArrayElement> {
+    Key(f64),
+    Value(T),
 }
 
 impl<T: ArrayElement> Trace for ArrayIteratorData<T> {
@@ -144,23 +156,32 @@ pub fn array_values<T: ArrayElement>(array: &JsArray<T>) -> Vec<T> {
     array.with(|data| data.elements.clone())
 }
 
-pub fn array_iterator_new<T: ArrayElement>(array: &JsArray<T>) -> JsArrayIterator<T> {
+pub fn array_iterator_new<T: ArrayElement>(
+    array: &JsArray<T>,
+    kind: ArrayIteratorKind,
+) -> JsArrayIterator<T> {
     Gc::new(ArrayIteratorData {
         array: Some(array.clone()),
         index: 0,
+        kind,
     })
 }
 
-pub fn array_iterator_next<T: ArrayElement>(iterator: &JsArrayIterator<T>) -> Option<T> {
+pub fn array_iterator_next<T: ArrayElement>(
+    iterator: &JsArrayIterator<T>,
+) -> Option<ArrayIteratorItem<T>> {
     iterator.with_mut(|state| {
         let array = state.array.as_ref()?;
         if state.index >= array_len(array) as usize {
             state.array = None;
             return None;
         }
-        let value = array_get(array, state.index as f64);
+        let index = state.index as f64;
         state.index += 1;
-        Some(value)
+        Some(match state.kind {
+            ArrayIteratorKind::Keys => ArrayIteratorItem::Key(index),
+            ArrayIteratorKind::Values => ArrayIteratorItem::Value(array_get(array, index)),
+        })
     })
 }
 
