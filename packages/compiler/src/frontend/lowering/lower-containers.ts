@@ -617,14 +617,26 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
     const full = [...lead, F64, arrT];
     if (
       fnArg.type.kind !== "func" ||
-      fnArg.type.params.length > full.length ||
-      !fnArg.type.params.every((p, i) => typeEquals(p, full[i]!))
+      fnArg.type.params.length > full.length
     ) {
       L.badType(argNode, L.typeOf(argNode));
     }
+    // Array methods may pass a specific T to a callback that deliberately
+    // accepts a wider input such as unknown (`leases.filter(isLease)`).
+    // Adapt that contravariant function into the helper's exact T ABI: the
+    // wrapper converts each delivered value into the callback's parameter
+    // type, while incompatible/stranded signatures retain the old fence.
+    const arity = fnArg.type.params.length;
+    const expected = funcOf(full.slice(0, arity), fnArg.type.ret);
+    if (!typeEquals(fnArg.type, expected)) {
+      if (!L.cleanFuncAdaptable(fnArg.type, expected)) {
+        L.badType(argNode, L.typeOf(argNode));
+      }
+      fnArg = L.coerceInto(argNode, fnArg, expected);
+    }
     return {
       fnArg: fnArg as IrExpr & { type: IrType & { kind: "func" } },
-      arity: fnArg.type.params.length,
+      arity,
     };
   }
 
