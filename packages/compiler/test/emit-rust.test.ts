@@ -984,6 +984,7 @@ shardedTest.each(shardSelect([
   "1463-timeout-unref.ts",
   "1464-env-writes.ts",
   "1465-env-value.ts",
+  "1466-child-containers.ts",
   "1468-exec-path.ts",
   "1475-readline-closed-stdin.ts",
   "1477-in-expressions.ts",
