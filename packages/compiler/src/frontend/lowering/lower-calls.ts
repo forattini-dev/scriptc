@@ -1038,11 +1038,12 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       L.unsupported("SC1090", expr, "this call form");
     }
     if (selectedOverload) {
-      // The selected signature binds the type parameters, but it is not a
-      // body contract: tsc checked the implementation only against its own
-      // wider signature. Derive the native ABI from that implementation
-      // under the recovered bindings; lowerGenericCall projects its result
-      // back through reconcileOverloadReturn at this call site.
+      // Prefer the implementation's deliberately-wide body contract when
+      // it maps (the dynamic variadic callback path relies on it). Otherwise
+      // the resolved overload is the concrete contract for THIS monomorphic
+      // instance: using its already-substituted ABI keeps an open
+      // `(props: P, ...args: any[]) => TResult` implementation from
+      // stranding a statically fixed callback overload.
       const tsBindings = new Map<ts.Symbol, ts.Type>();
       const bindings = L.inferTypeParamBindings(expr, info, rsig, tsBindings);
       const prevBindings = L.typeParamBindings;
@@ -1054,9 +1055,18 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       L.typeParamTsBindings = tsBindings;
       try {
         bindUnobservedOverloadTypeParams(L, info, bindings, tsBindings);
-        const params = L.paramShapes(info.decl.parameters);
-        const nameBlame = (ts.isArrowFunction(info.decl) ? undefined : info.decl.name) ?? info.decl;
-        const returnType = L.declaredReturnType(info.decl, nameBlame);
+        if (genericImplementationContractMaps(L, info)) {
+          const params = L.paramShapes(info.decl.parameters);
+          const nameBlame = (ts.isArrowFunction(info.decl) ? undefined : info.decl.name) ?? info.decl;
+          const returnType = L.declaredReturnType(info.decl, nameBlame);
+          return internGenericInstance(L, expr, info, params, returnType, () => bindings, {
+            tsBindings,
+          });
+        }
+        const params = resolvedGenericParamShapes(L, expr, info, rsig);
+        const retTs = L.checker.getReturnTypeOfSignature(rsig);
+        const returnType = L.mapTypeOf(retTs);
+        if (!returnType) L.badType(expr, retTs);
         return internGenericInstance(L, expr, info, params, returnType, () => bindings, {
           tsBindings,
         });
@@ -1069,40 +1079,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     // the declaration's modes: rest stays the resolved array, a default's
     // ABI union is synthesized over the resolved body type — exactly the
     // paramShape rules, applied to post-substitution types.
-    const params: ParamShape[] = [];
-    rsig.getParameters().forEach((p, i) => {
-      const declParam = info.decl.parameters[i]!;
-      const pt = L.checker.getTypeOfSymbol(p);
-      if (
-        declParam.dotDotDotToken &&
-        !isJsSourceFile(info.decl.getSourceFile()) &&
-        isDynamicRestArray(L, pt)
-      ) {
-        params.push({ type: DYN, mode: "dynRest" });
-        return;
-      }
-      const mapped = L.mapTypeOf(pt);
-      if (!mapped || mapped.kind === "void") L.badType(expr.arguments[i] ?? expr, pt);
-      if (declParam.dotDotDotToken) {
-        if (mapped.kind !== "array") L.badType(expr.arguments[i] ?? expr, pt);
-        params.push({ type: mapped, mode: "rest" });
-      } else if (declParam.initializer) {
-        if (mapped.kind === "dyn" || mapped.kind === "jsval") {
-          // Dynamic-tier default: the slot holds its tier's undefined
-          // directly (paramShape's rule — declareParams tests at runtime).
-          params.push({ type: mapped, mode: "omittable", bodyType: mapped });
-        } else {
-          const bodyType = L.stripUndefinedArm(mapped);
-          L.checkDefaultParamBodyType(declParam, bodyType);
-          params.push({ type: L.withUndefinedArm(bodyType), mode: "omittable", bodyType });
-        }
-      } else {
-        if (declParam.questionToken && !L.bareUndefinedArmedUnion(mapped)) {
-          L.unsupported("SC1090", declParam, `optional parameters of type '${L.fmt(mapped)}'`);
-        }
-        params.push({ type: mapped, mode: declParam.questionToken ? "omittable" : "required" });
-      }
-    });
+    const params = resolvedGenericParamShapes(L, expr, info, rsig);
     const retTs = L.checker.getReturnTypeOfSignature(rsig);
     const returnType = L.mapTypeOf(retTs);
     if (!returnType) {
@@ -1139,6 +1116,63 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     return internGenericInstance(L, expr, info, params, returnType, (tsBindings) =>
       L.inferTypeParamBindings(expr, info, rsig, tsBindings),
     );
+  }
+
+  /** Whether an overloaded generic implementation's own deliberately-wide
+   * contract is representable under the recovered bindings. Dynamic builds
+   * commonly answer yes for variadic callback/union surfaces and retain that
+   * exact forwarding ABI. Static builds answer no for open `any` surfaces and
+   * use the selected overload's already-proved concrete contract instead. */
+  function genericImplementationContractMaps(L: Lowerer, info: GenericFnInfo): boolean {
+    const sig = L.checker.getSignatureFromDeclaration(info.decl);
+    if (!sig) return false;
+    const paramsMap = info.decl.parameters.every((param) => L.mapTypeOf(L.typeOf(param.name)) !== null);
+    if (!paramsMap) return false;
+    const ret = L.checker.getReturnTypeOfSignature(sig);
+    return (ret.flags & ts.TypeFlags.Never) !== 0 || L.mapTypeOf(ret) !== null;
+  }
+
+  /** Maps a resolved generic signature while retaining the implementation
+   * declaration's parameter modes. This is shared by ordinary signatures and
+   * selected overloads: in both cases the checker has already substituted the
+   * call-site type arguments into `rsig`. */
+  function resolvedGenericParamShapes(L: Lowerer, expr: ts.CallExpression,
+    info: GenericFnInfo, rsig: ts.Signature,): ParamShape[] {
+    const params: ParamShape[] = [];
+    rsig.getParameters().forEach((p, i) => {
+      const declParam = info.decl.parameters[i]!;
+      const pt = L.checker.getTypeOfSymbol(p);
+      if (
+        declParam.dotDotDotToken &&
+        !isJsSourceFile(info.decl.getSourceFile()) &&
+        isDynamicRestArray(L, pt)
+      ) {
+        params.push({ type: DYN, mode: "dynRest" });
+        return;
+      }
+      const mapped = L.mapTypeOf(pt);
+      if (!mapped || mapped.kind === "void") L.badType(expr.arguments[i] ?? expr, pt);
+      if (declParam.dotDotDotToken) {
+        if (mapped.kind !== "array") L.badType(expr.arguments[i] ?? expr, pt);
+        params.push({ type: mapped, mode: "rest" });
+      } else if (declParam.initializer) {
+        if (mapped.kind === "dyn" || mapped.kind === "jsval") {
+          // Dynamic-tier default: the slot holds its tier's undefined
+          // directly (paramShape's rule — declareParams tests at runtime).
+          params.push({ type: mapped, mode: "omittable", bodyType: mapped });
+        } else {
+          const bodyType = L.stripUndefinedArm(mapped);
+          L.checkDefaultParamBodyType(declParam, bodyType);
+          params.push({ type: L.withUndefinedArm(bodyType), mode: "omittable", bodyType });
+        }
+      } else {
+        if (declParam.questionToken && !L.bareUndefinedArmedUnion(mapped)) {
+          L.unsupported("SC1090", declParam, `optional parameters of type '${L.fmt(mapped)}'`);
+        }
+        params.push({ type: mapped, mode: declParam.questionToken ? "omittable" : "required" });
+      }
+    });
+    return params;
   }
 
 /** The one instance table both instantiation routes share: key identity IS
