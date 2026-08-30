@@ -74,6 +74,23 @@ function contextF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"
     : null;
 }
 
+function mixedContextCallback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
+  const callback = binding.params[0];
+  const context = binding.params[1];
+  if (binding.params.length !== 2 || callback === undefined || context === undefined ||
+      !isFfiCallbackParam(callback) || !isFfiContextParam(context)) return null;
+  const params = callback.callback.params;
+  const callbackContext = params[5];
+  return params.length === 6 && params[0] === "bool" && params[1] === "u8" &&
+    params[2] === "u32" && params[3] === "i32" && params[4] === "f64" &&
+    callbackContext !== undefined && isFfiContextParam(callbackContext) &&
+    callbackContext.context === callback.callback.id && context.context === callback.callback.id &&
+    callback.callback.returns === "u32" && callback.callback.lifetime === "call" &&
+    binding.returns === "u32"
+    ? callback.callback
+    : null;
+}
+
 function abiType(cls: ScalarClass): string {
   return cls === "bool" ? "u8" : cls;
 }
@@ -100,6 +117,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (mixedContextCallback(binding) !== null) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(u8, u8, u32, i32, f64, *mut std::ffi::c_void) -> u32, sc_arg_1: *mut std::ffi::c_void) -> u32;`];
+    }
     if (contextF64Callback(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(f64, *mut std::ffi::c_void) -> f64, sc_arg_1: f64, sc_arg_2: *mut std::ffi::c_void) -> f64;`];
@@ -132,6 +153,33 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  const mixedCallback = binding === undefined ? null : mixedContextCallback(binding);
+  if (mixedCallback !== null) {
+    const callbackArgument = expr.args[0];
+    if (expr.args.length !== 1 || callbackArgument?.type.kind !== "func" || expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the mixed callback ABI`, expr.loc);
+    }
+    const callbackValue = context.nextName("sc_ffi_callback_value");
+    const trampoline = context.nextName("sc_ffi_callback");
+    const truth = context.nextName("sc_ffi_callback_truth");
+    const byte = context.nextName("sc_ffi_callback_byte");
+    const wide = context.nextName("sc_ffi_callback_wide");
+    const signed = context.nextName("sc_ffi_callback_signed");
+    const fraction = context.nextName("sc_ffi_callback_fraction");
+    const opaque = context.nextName("sc_ffi_callback_context");
+    const active = context.nextName("sc_ffi_callback_active");
+    const stateType = context.nextName("ScFfiCallbackContext");
+    const state = context.nextName("sc_ffi_callback_state");
+    const pointer = context.nextName("sc_ffi_callback_pointer");
+    const result = context.nextName("sc_ffi_callback_result");
+    const panic = context.nextName("sc_ffi_callback_panic");
+    const closureType = context.rustType(callbackArgument.type, expr.loc);
+    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [
+      `(${truth} != 0)`, `f64::from(${byte})`, `f64::from(${wide})`,
+      `f64::from(${signed})`, fraction,
+    ], expr.loc);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; struct ${stateType} { callback: ${closureType}, panic: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>>, } unsafe extern "C" fn ${trampoline}(${truth}: u8, ${byte}: u8, ${wide}: u32, ${signed}: i32, ${fraction}: f64, ${opaque}: *mut std::ffi::c_void) -> u32 { let ${state} = unsafe { &*${opaque}.cast::<${stateType}>() }; if ${state}.panic.borrow().is_some() { return 0; } match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let ${active} = ${state}.callback.clone(); runtime::to_uint32(${dispatch}) })) { Ok(sc_value) => sc_value, Err(sc_payload) => { *${state}.panic.borrow_mut() = Some(sc_payload); 0 } } } let ${state} = ${stateType} { callback: ${callbackValue}, panic: std::cell::RefCell::new(None) }; let ${pointer} = (&${state} as *const ${stateType}).cast_mut().cast::<std::ffi::c_void>(); let ${result} = unsafe { ${functionName(index)}(${trampoline}, ${pointer}) }; let ${panic} = ${state}.panic.take(); if let Some(sc_payload) = ${panic} { std::panic::resume_unwind(sc_payload); } f64::from(${result}) }`;
+  }
   const contextCallback = binding === undefined ? null : contextF64Callback(binding);
   if (contextCallback !== null) {
     const callbackArgument = expr.args[0];
