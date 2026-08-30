@@ -2,6 +2,17 @@ thread_local! {
     static FFI_CALLBACK_PANIC: RefCell<Option<Box<dyn Any + Send>>> = const {
         RefCell::new(None)
     };
+    static FFI_RETAINED_CALLBACKS: RefCell<Vec<FfiRetainedCallback>> = const {
+        RefCell::new(Vec::new())
+    };
+}
+
+struct FfiRetainedCallback {
+    key: &'static str,
+    identity: usize,
+    callback: *const std::ffi::c_void,
+    context: *mut std::ffi::c_void,
+    _owner: Box<dyn Any>,
 }
 
 pub fn ffi_callback_panicked() -> bool {
@@ -22,4 +33,54 @@ pub fn ffi_resume_callback_panic() {
     if let Some(payload) = payload {
         std::panic::resume_unwind(payload);
     }
+}
+
+pub fn ffi_retained_context<T>(owner: &T) -> *mut std::ffi::c_void {
+    std::ptr::from_ref(owner).cast_mut().cast::<std::ffi::c_void>()
+}
+
+pub fn ffi_commit_retained_callback<T: 'static>(
+    key: &'static str,
+    identity: usize,
+    callback: *const std::ffi::c_void,
+    context: *mut std::ffi::c_void,
+    owner: Box<T>,
+) {
+    FFI_RETAINED_CALLBACKS.with(|callbacks| {
+        callbacks.borrow_mut().push(FfiRetainedCallback {
+            key,
+            identity,
+            callback,
+            context,
+            _owner: owner,
+        });
+    });
+}
+
+pub fn ffi_retained_callback(
+    key: &str,
+    identity: usize,
+) -> Option<(*const std::ffi::c_void, *mut std::ffi::c_void)> {
+    FFI_RETAINED_CALLBACKS.with(|callbacks| {
+        callbacks
+            .borrow()
+            .iter()
+            .find(|entry| entry.key == key && entry.identity == identity)
+            .map(|entry| (entry.callback, entry.context))
+    })
+}
+
+pub fn ffi_release_retained_callback(
+    key: &str,
+    identity: usize,
+    context: *mut std::ffi::c_void,
+) {
+    FFI_RETAINED_CALLBACKS.with(|callbacks| {
+        let mut callbacks = callbacks.borrow_mut();
+        if let Some(index) = callbacks.iter().position(|entry| {
+            entry.key == key && entry.identity == identity && entry.context == context
+        }) {
+            callbacks.remove(index);
+        }
+    });
 }

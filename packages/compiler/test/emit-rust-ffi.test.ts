@@ -76,6 +76,11 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "void sf_retained_pump(double value) {",
     "  if (retained_callback != NULL) retained_callback(value, retained_context);",
     "}",
+    "void sf_retained_remove(sf_retained_cb callback, void *context) {",
+    "  if (retained_callback == callback && retained_context == context) {",
+    "    retained_callback = NULL; retained_context = NULL;",
+    "  }",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -213,6 +218,13 @@ test("Rust executables call manifest-bound native value functions", async () => 
       symbol: "sf_retained_pump",
       params: ["f64"],
       returns: "void",
+    }, {
+      name: "nativeRetainedRemove",
+      symbol: "sf_retained_remove",
+      params: [{
+        callback: { release: "nativeRetainedAdd:tick" },
+      }, { context: "nativeRetainedAdd:tick" }],
+      returns: "void",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -235,6 +247,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "declare function nativeCallbackStringThrow(callback: (value: string) => void): void;",
     "declare function nativeRetainedAdd(callback: (value: number) => void): void;",
     "declare function nativeRetainedPump(value: number): void;",
+    "declare function nativeRetainedRemove(callback: (value: number) => void): void;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
@@ -252,12 +265,16 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "  console.log('caught', (error as Error).message);",
     "}",
     "const retainedOffset = 10;",
-    "nativeRetainedAdd((value) => {",
+    "const retainedCallback = (value: number) => {",
     "  console.log('retained', value + retainedOffset);",
     "  throw new Error(`retained boom ${value}`);",
-    "});",
+    "};",
+    "nativeRetainedAdd(retainedCallback);",
     "try { nativeRetainedPump(2); }",
     "catch (error) { console.log('caught', (error as Error).message); }",
+    "nativeRetainedRemove(retainedCallback);",
+    "nativeRetainedPump(3);",
+    "console.log('retained released');",
     "console.log(nativeCallbackMix((truth, byte, wide, signed, fraction) => {",
     "  console.log(truth, byte, wide, signed, fraction);",
     "  return -1;",
@@ -297,6 +314,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n28\n42\ncaught ffi callback boom\nretained 12\ncaught retained boom 2\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught cstring materialized\ncaught ffi context boom\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n28\n42\ncaught ffi callback boom\nretained 12\ncaught retained boom 2\nretained released\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught cstring materialized\ncaught ffi context boom\n");
   expect(run.stderr).toBe("");
 });
