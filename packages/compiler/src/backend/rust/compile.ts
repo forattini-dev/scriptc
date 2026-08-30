@@ -20,6 +20,8 @@ export interface RustCompileOptions {
   optimization?: "release" | "dev";
   sanitize?: boolean;
   runtimeFeatures?: readonly RustRuntimeFeature[];
+  linkInputs?: readonly string[];
+  systemLibraries?: readonly string[];
 }
 
 export class RustCompileError extends Error {
@@ -79,6 +81,8 @@ export async function compileRust(options: RustCompileOptions): Promise<void> {
     "-L", `dependency=${join(targetDir, profile, "deps")}`,
     "-C", options.optimization === "dev" ? "opt-level=0" : "opt-level=2",
     "-C", "debuginfo=0",
+    ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
+    ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
     "-o", options.outPath,
   ];
   await run("rustc", rustcArgs, "compiling the generated Rust program");

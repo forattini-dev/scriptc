@@ -1243,6 +1243,9 @@ async function compileTracked(
         outPath: opts.outPath,
         optimization: opts.optimization ?? "release",
         runtimeFeatures: rustRuntimeFeatures(lowered.module!),
+        ...(ffi === null
+          ? {}
+          : { linkInputs: ffi.libraries, systemLibraries: ffi.systemLibraries }),
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;

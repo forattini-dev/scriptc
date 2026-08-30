@@ -26,6 +26,7 @@ import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
+import { emitRustFfiDeclarations } from "./ffi.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
@@ -253,6 +254,7 @@ class RustEmitter {
     classMeta: this.classMeta,
     closureShapes: this.closureShapes,
     dynBoxedFunctionShapes: this.dynBoxedFunctionShapes,
+    ffiImports: () => this.mod.ffiImports ?? [],
     functions: this.functions,
     records: this.records,
     nextName: (prefix) => `${prefix}_${this.temporary++}`,
@@ -495,16 +497,16 @@ class RustEmitter {
     this.buildClassGraph();
     this.discoverClosures();
   }
-
   emit(): string {
     this.checkModuleSurface();
-    this.line("#![forbid(unsafe_code)]");
+    this.line((this.mod.ffiImports?.length ?? 0) === 0 ? "#![forbid(unsafe_code)]" : "#![deny(unsafe_op_in_unsafe_fn)]");
     this.line("");
     this.line("use scriptc_runtime as runtime;");
     if (this.globals.size > 0 || this.internedClosureTargets.size > 0) {
       this.line("use std::cell::{Cell, RefCell};");
     }
     this.line("");
+    this.lines.push(...emitRustFfiDeclarations(this.mod.ffiImports ?? []));
     this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value), (kind) => this.unsupported(kind)));
     this.emitClosureDefinitions();
     this.emitDynamicDefinition();
@@ -554,10 +556,8 @@ class RustEmitter {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }
     }
-    if ((this.mod.ffiImports?.length ?? 0) > 0) this.unsupported("native FFI");
     if (this.mod.lib !== undefined) this.unsupported("library mode");
   }
-
   private buildClassGraph(): void {
     for (const meta of this.classMeta.values()) {
       if (meta.def.base === undefined) continue;

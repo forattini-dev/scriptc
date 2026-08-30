@@ -1,4 +1,4 @@
-import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrClassDef, IrExpr, IrFfiImport, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import { emitRustLibCall } from "./lib-calls.js";
@@ -16,6 +16,7 @@ import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 import { emitRustIslandExpr } from "./island.js";
 import { emitRustArrayNewLen } from "./array-new-len.js";
+import { emitRustFfiCall } from "./ffi.js";
 
 export interface RustExpressionContext {
   readonly chainValues: Map<string, string>;
@@ -23,6 +24,7 @@ export interface RustExpressionContext {
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
   readonly dynBoxedFunctionShapes: ReadonlySet<string>;
   readonly functions: ReadonlyMap<string, IrFunction>;
+  ffiImports(): readonly IrFfiImport[];
   readonly records: ReadonlyMap<string, IrRecordShape>;
   nextName(prefix: string): string;
   currentFunction(): IrFunction | null;
@@ -1033,6 +1035,7 @@ export class RustExpressionEmitter {
             ).join(" ");
           },
         });
+      case "ffiCall": return emitRustFfiCall(expr, this.context.ffiImports(), this.context, (value) => this.emitExpr(value));
       case "genResume": return emitRustGeneratorResume(expr, this.context, (value) => this.emitExpr(value));
       case "awaitExpr":
       case "awaitUnionExpr":
