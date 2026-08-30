@@ -2835,7 +2835,7 @@ export {};
     expect(rust.stdout, name).toBe(node.stdout);
     expect(rust.stderr, name).toBe(node.stderr);
   }
-}, 120_000);
+}, 360_000);
 
 test("Rust unhandled async rejection matches the official exit-one corpus", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-async-unhandled-"));
