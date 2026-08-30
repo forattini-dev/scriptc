@@ -978,6 +978,7 @@ shardedTest.each(shardSelect([
   "518-promise-void-union-callbacks.ts",
   "1429-promise-catch-finally.ts",
   "1460-console-error-warn.ts",
+  "1461-process-pid-getuid-kill.ts",
   "1462-exec-sync.ts",
   "1463-timeout-unref.ts",
   "1464-env-writes.ts",
