@@ -1274,6 +1274,7 @@ shardedTest.each(shardSelect([
   "2165-js-throw-dyn.cjs",
   "2166-cjs-getter-this/main.cjs",
   "2170-island-array-exits.ts",
+  "2171-island-json-stringify.ts",
   "2190-new-object-and-string-wrappers.ts",
   "2192-object-default-tostring.ts",
   "2194-ambient-undef-chains.ts",
