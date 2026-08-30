@@ -4,6 +4,7 @@
 /// only the final cycle pass, while differential tests can prove that every
 /// traced array/record object was released.
 pub fn finish() {
+    ffi_foreign_finish();
     terminal_finish();
     process_signals_finish();
     readline_finish();
@@ -455,6 +456,10 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             continue;
         }
 
+        if ffi_foreign_dispatch_one() {
+            continue;
+        }
+
         if fs_renames_dispatch_one() {
             continue;
         }
@@ -486,7 +491,8 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             || children_failed_pending()
             || child_streams_pending()
             || net_pending()
-            || dgram_pending();
+            || dgram_pending()
+            || ffi_foreign_pending();
         if !has_referenced_work {
             break;
         }
@@ -558,6 +564,12 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
                 .map(|task| task.due)
                 .min()
         });
+        if ffi_foreign_pending() {
+            let wait =
+                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            ffi_foreign_wait(wait);
+            continue;
+        }
         if fs_renames_pending() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));

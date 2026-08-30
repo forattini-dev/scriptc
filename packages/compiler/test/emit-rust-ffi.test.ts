@@ -397,3 +397,103 @@ test("Rust executables call manifest-bound native value functions", async () => 
   expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n28\n42\ncaught ffi callback boom\nretained 12\ncaught retained boom 2\nretained released\nraw 6\nraw released\ncaught stale raw\nfirst:11|first:-1|second:12|second:13\ntrue 255 4000000000 -7 0.5\n4294967295\nempty 0 0\n4 0 Bé 0,255,1\ncaught cstring materialized\ncaught ffi context boom\n");
   expect(run.stderr).toBe("");
 });
+
+test("Rust executables marshal retained callbacks from a foreign native thread", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-"));
+  const nativeSource = join(dir, "native.c");
+  const nativeObject = join(dir, "native.o");
+  const nativeArchive = join(dir, "libnative.a");
+  const profilePath = join(dir, "profile.json");
+  const entryPath = join(dir, "main.ts");
+  const outPath = join(dir, "program");
+
+  await writeFile(nativeSource, [
+    "#define _POSIX_C_SOURCE 200809L",
+    "#include <pthread.h>",
+    "#include <time.h>",
+    "typedef void (*sf_foreign_cb)(double value, const char *label, void *context);",
+    "static sf_foreign_cb callback;",
+    "static void *callback_context;",
+    "static pthread_t worker;",
+    "static void *run_worker(void *unused) {",
+    "  (void)unused;",
+    "  struct timespec delay = {0, 10 * 1000 * 1000};",
+    "  (void)nanosleep(&delay, 0);",
+    "  for (int i = 1; i <= 3; i++) {",
+    "    char label[] = \"foreign-copy\";",
+    "    callback((double)i, label, callback_context);",
+    "    label[0] = 'x';",
+    "  }",
+    "  return 0;",
+    "}",
+    "void sf_foreign_start(sf_foreign_cb next, void *context) {",
+    "  callback = next; callback_context = context;",
+    "  (void)pthread_create(&worker, 0, run_worker, 0);",
+    "}",
+    "void sf_foreign_stop(sf_foreign_cb next, void *context) {",
+    "  (void)next; (void)context;",
+    "  (void)pthread_join(worker, 0);",
+    "  callback = 0; callback_context = 0;",
+    "}",
+    "",
+  ].join("\n"));
+  await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
+  await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
+  await writeFile(profilePath, JSON.stringify({
+    ffi_format: 5,
+    functions: [{
+      name: "nativeForeignStart",
+      symbol: "sf_foreign_start",
+      params: [{
+        callback: {
+          id: "tick",
+          params: ["f64", "cstring", { context: "tick" }],
+          returns: "void",
+          lifetime: "retained",
+          invoke: "foreign",
+        },
+      }, { context: "tick" }],
+      returns: "void",
+    }, {
+      name: "nativeForeignStop",
+      symbol: "sf_foreign_stop",
+      params: [{
+        callback: { release: "nativeForeignStart:tick" },
+      }, { context: "nativeForeignStart:tick" }],
+      returns: "void",
+    }],
+    libraries: [nativeArchive],
+    system_libraries: [],
+  }));
+  await writeFile(entryPath, [
+    "declare function nativeForeignStart(callback: (value: number, label: string) => void): void;",
+    "declare function nativeForeignStop(callback: (value: number, label: string) => void): void;",
+    "const events: string[] = [];",
+    "const tick = (value: number, label: string) => {",
+    "  events.push(`${value}:${label}`);",
+    "  if (value === 3) {",
+    "    nativeForeignStop(tick);",
+    "    console.log(events.join('|'));",
+    "  }",
+    "};",
+    "nativeForeignStart(tick);",
+    "",
+  ].join("\n"));
+
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath,
+    backend: "rust",
+    optimization: "dev",
+    ffiProfilePath: profilePath,
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+  expect(run.stdout).toBe("1:foreign-copy|2:foreign-copy|3:foreign-copy\n");
+  expect(run.stderr).toBe("");
+});

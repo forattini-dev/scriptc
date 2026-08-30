@@ -46,6 +46,7 @@ pub struct Tracer<'a> {
 
 pub fn init() {
     let _ = PROCESS_START.get_or_init(std::time::Instant::now);
+    ffi_foreign_init();
     PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
     UNHANDLED_REJECTION.with(|unhandled| unhandled.set(false));
     UNHANDLED_REJECTION_HANDLER.with(|handler| *handler.borrow_mut() = None);
