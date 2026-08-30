@@ -1040,6 +1040,7 @@ shardedTest.each(shardSelect([
   "1565-union-element-join.ts",
   "1565-spawn-pipe-streams.ts",
   "1566-child-duck-interface.ts",
+  "1567-server-close-override.ts",
   "1568-x509-fingerprint.ts",
   "1569-fsp-mkdir-unlink-chmod.ts",
   "1570-child-unref-kill-reffed.ts",
