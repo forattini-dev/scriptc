@@ -1031,6 +1031,7 @@ shardedTest.each(shardSelect([
   "1559-conditional-spread-index-merge.ts",
   "1560-forof-homogeneous-tuples.ts",
   "1561-forof-strings.ts",
+  "1562-spawn-conditional-spread.ts",
   "1562-optional-chain-tails.ts",
   "1563-forof-iterator-projections.ts",
   "1563-string-raw-fold.ts",
