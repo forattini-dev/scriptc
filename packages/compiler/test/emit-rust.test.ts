@@ -1251,6 +1251,7 @@ shardedTest.each(shardSelect([
   "2095-js-catch-unknown.js",
   "2097-js-evolving-globals.js",
   "2100-stream-default-hwm.ts",
+  "2101-dyn-param-defaults.ts",
   "2102-empty-pattern-decls.ts",
   "2103-optional-tuple-elements.ts",
   "2105-computed-key-static-folds.ts",

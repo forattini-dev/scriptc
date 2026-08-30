@@ -208,10 +208,12 @@ function emitOperation(
     const left = context.nextName("sc_island_left");
     const right = context.nextName("sc_island_right");
     const dyn = context.dynTypeName();
-    const equal = `match (&${left}, &${right}) { ` +
-      `(${dyn}::Island(sc_value), ${dyn}::Undefined) | (${dyn}::Undefined, ${dyn}::Island(sc_value)) => runtime::island_is_undefined(sc_value), ` +
-      `(${dyn}::Island(sc_value), ${dyn}::Null) | (${dyn}::Null, ${dyn}::Island(sc_value)) => runtime::island_is_null(sc_value), ` +
-      `_ => sc_dyn_strict_equal(&${left}, &${right}), }`;
+    const equal = context.hasEmbeddedModules()
+      ? `match (&${left}, &${right}) { ` +
+        `(${dyn}::Island(sc_value), ${dyn}::Undefined) | (${dyn}::Undefined, ${dyn}::Island(sc_value)) => runtime::island_is_undefined(sc_value), ` +
+        `(${dyn}::Island(sc_value), ${dyn}::Null) | (${dyn}::Null, ${dyn}::Island(sc_value)) => runtime::island_is_null(sc_value), ` +
+        `_ => sc_dyn_strict_equal(&${left}, &${right}), }`
+      : `sc_dyn_strict_equal(&${left}, &${right})`;
     return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${expr.op === "neq" ? `!(${equal})` : equal} }`;
   }
   if ((expr.op === "sub" || expr.op === "mul" || expr.op === "div" || expr.op === "mod" || expr.op === "pow") && expr.args.length === 2) {
