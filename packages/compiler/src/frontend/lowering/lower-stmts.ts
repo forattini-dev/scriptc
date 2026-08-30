@@ -2350,7 +2350,39 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
     srcType: IrType & { kind: "record" },
     shape: { fields: readonly { name: string; type: IrType }[]; indexValue?: IrType },): IrExpr {
     const loc = locOf(el);
-    const restT = patternBindingType(L, el.name!); // callers skip nameless elisions
+    let restT = patternBindingType(L, el.name!); // callers skip nameless elisions
+    // In a monomorphized generic body the checker keeps the rest spelling
+    // symbolic (`Omit<P & Extra, "key">`) even though srcType already has
+    // the concrete merged layout. Derive exactly CopyDataProperties' static
+    // remainder there; bindPatternTarget adopts this record for the same
+    // otherwise-unmappable generic rest identifier below.
+    if (restT === null && L.typeParamBindings !== null) {
+      const pattern = el.parent;
+      const consumed = new Set<string>();
+      let computedSibling = false;
+      if (ts.isObjectBindingPattern(pattern)) {
+        for (const sib of pattern.elements) {
+          if (sib === el || sib.dotDotDotToken) continue;
+          const key = sib.propertyName ?? sib.name;
+          if (key && ts.isComputedPropertyName(key)) computedSibling = true;
+          else if (key && (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNumericLiteral(key))) consumed.add(key.text);
+        }
+      }
+      const rem = shape.fields.filter((f) => !consumed.has(f.name));
+      if (computedSibling || shape.indexValue || rem.some((f) => f.name.startsWith("%"))) {
+        L.unsupported(
+          "SC1031",
+          el,
+          computedSibling
+            ? "rest bindings beside computed keys (the consumed set is a runtime fact)"
+            : "rest bindings over index-signature or accessor shapes (the entries would need overflow packing)",
+        );
+      }
+      restT = {
+        kind: "record",
+        shapeId: L.shapes.intern(rem.map((f) => ({ name: f.name, type: f.type }))),
+      };
+    }
     // A DYN rest type is the top-type spelling (`const { ...rest } = src`
     // where the checker's rest type is `{}` — every field consumed, or the
     // empty-source `const { ...empty } = {}`): CopyDataProperties still
@@ -2825,7 +2857,8 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
         out.push({ kind: "assign", localId: g.id, value: L.coerceInto(name, value, g.type), loc: bindLoc });
         return;
       }
-      if (symbol && hostVariableDeclarationOf(name) !== null && isVarDeclared(name)) {
+      const hostDecl = hostVariableDeclarationOf(name);
+      if (symbol && hostDecl !== null && isVarDeclared(hostDecl)) {
         const hoisted = hoistVarBinding(L, symbol, name);
         out.push({ kind: "assign", localId: hoisted.id, value: L.coerceInto(name, value, hoisted.type), loc: bindLoc });
         return;
@@ -2867,7 +2900,8 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
       // VariableDeclaration hosts only: parameter patterns (also routed
       // here by declareParams) carry no block-scope flag either, but their
       // bindings are the parameters' own.
-      if (symbol && hostVariableDeclarationOf(name) !== null && isVarDeclared(name)) {
+      const hostDecl = hostVariableDeclarationOf(name);
+      if (symbol && hostDecl !== null && isVarDeclared(hostDecl)) {
         const hoisted = hoistVarBinding(L, symbol, name);
         out.push({ kind: "assign", localId: hoisted.id, value: L.coerceInto(name, value, hoisted.type), loc });
         return;
@@ -2887,7 +2921,14 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
           const mapped = L.mapTypeOf(L.typeOf(name));
           return mapped === null || (L.dynamic && jsvalFlavoredType(mapped));
         })();
-      const type = dynStays ? DYN : L.irTypeOf(name);
+      const mapped = L.mapTypeOf(L.typeOf(name));
+      const genericRecordRest =
+        mapped === null &&
+        value.type.kind === "record" &&
+        L.typeParamBindings !== null &&
+        ts.isBindingElement(name.parent) &&
+        name.parent.dotDotDotToken !== undefined;
+      const type = dynStays ? DYN : genericRecordRest ? value.type : L.irTypeOf(name);
       if (type.kind === "void") L.badType(name, L.typeOf(name));
       const coerced = L.coerceInto(name, value, type);
       const local = L.declareLocal(name, name.text, type, isLet);

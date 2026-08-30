@@ -5370,6 +5370,16 @@ export class Lowerer {
         (dst.kind === "func" && canAdaptDynFuncTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)))
       );
     }
+    // Function parameters are contravariant at the adapter boundary. A
+    // slot record may therefore enter the wrapped callback through the
+    // same exact copy/optional-completion plan as any ordinary record
+    // assignment (`P` into `P & { key?: string }` completes key with the
+    // undefined arm). recordWidthPlan is a pure probe here; the adapter's
+    // coerceToExpected call interns the helper only after every piece has
+    // been admitted.
+    if (src.kind === "record" && dst.kind === "record") {
+      return this.recordWidthPlan(src.shapeId, dst.shapeId) !== null;
+    }
     if (dst.kind === "union") {
       if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
       if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;

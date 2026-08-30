@@ -916,6 +916,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       contextResolutions++;
       return viaNarrowedParam;
     }
+    // A generic body keeps `P & Extra` symbolic even after the instance
+    // binds P. When every constituent resolves to a record, merge their
+    // concrete fields into the structural intersection the checker means.
+    const viaBoundIntersection = mapBoundRecordIntersection(type, ctx);
+    if (viaBoundIntersection !== undefined) {
+      contextResolutions++;
+      return viaBoundIntersection;
+    }
     // `Awaited<T>` over a bound type parameter (an async generic body's
     // `await fn()` result): a CONDITIONAL type the checker keeps symbolic
     // inside the body — the object-gated utility-alias hook below never
@@ -2852,6 +2860,55 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     }
   }
   return null;
+}
+
+/** Resolve a symbolic record intersection inside a monomorphized generic
+ * body (`P & ComponentKeyProps`). The checker cannot materialize P's bound
+ * members on the original ts.Type, but the IR binding already names its
+ * concrete record. Merge only exact, record-only constituents: duplicate
+ * fields and index slots must agree byte-for-byte, otherwise the wider
+ * intersection still has no honest runtime layout. */
+function mapBoundRecordIntersection(type: ts.Type, ctx: TypeMapperCtx): IrType | null | undefined {
+  const { resolveTypeParam, shapes } = ctx;
+  if (!resolveTypeParam || !type.isIntersectionType()) return undefined;
+  const parts = ts.constituentTypes(type);
+  if (!parts.some((part) => (part.flags & ts.TypeFlags.TypeParameter) !== 0)) return undefined;
+
+  const fields = new Map<string, IrType>();
+  const declaredOrder: string[] = [];
+  let indexValue: IrType | undefined;
+  for (const part of parts) {
+    const mapped = part.flags & ts.TypeFlags.TypeParameter
+      ? resolveTypeParam(part)
+      : mapType(part, ctx);
+    if (mapped?.kind !== "record") return null;
+    const shape = shapes.get(mapped.shapeId);
+    if (!shape || shape.tuple) return null;
+    for (const field of shape.fields) {
+      const previous = fields.get(field.name);
+      if (previous && !typeEquals(previous, field.type)) return null;
+      fields.set(field.name, field.type);
+    }
+    const order = shape.declaredOrder ?? shape.fields.map((field) => field.name);
+    for (const name of order) {
+      if (!declaredOrder.includes(name)) declaredOrder.push(name);
+    }
+    if (shape.indexValue) {
+      if (indexValue && !typeEquals(indexValue, shape.indexValue)) return null;
+      indexValue = shape.indexValue;
+    }
+  }
+  return {
+    kind: "record",
+    shapeId: shapes.intern(
+      [...fields]
+        .map(([name, fieldType]) => ({ name, type: fieldType }))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+      false,
+      indexValue,
+      declaredOrder,
+    ),
+  };
 }
 
 /** The narrowed-type-parameter recognizer behind mapType's early return:
