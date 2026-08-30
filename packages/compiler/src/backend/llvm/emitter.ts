@@ -7456,6 +7456,9 @@ class LlEmitter {
         return this.own({ name: t, type: e.type });
       }
       case "dynCheck": {
+        if (e.type.kind === "func" && e.value.kind === "dynFromJsval") {
+          throw new LlvmUnsupportedError("dynCheck:island-func", e.loc);
+        }
         // The dynamic boundary: validate the checked-dynamic tree against the target type
         // and BUILD the typed value (+1) — or throw the catchable
         // path-annotated TypeError. The dyn temp is BORROWED; the result

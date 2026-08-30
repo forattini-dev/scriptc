@@ -6485,7 +6485,39 @@ export class Lowerer {
    * lowering goes through here (via lowerExprExpecting) or calls this
    * directly when the expression was already lowered. */
   coerceInto(node: ts.Node, expr: IrExpr, expected: IrType): IrExpr {
-    let e = this.coerceToExpected(expr, expected);
+    let source = expr;
+    if (expr.type.kind === "jsval" && expected.kind === "func") {
+      const symbol = ts.isIdentifier(node) ? this.resolveValueSymbol(node) : null;
+      const checkerDeclared = symbol ? this.checker.getTypeOfSymbol(symbol) : this.typeOf(node);
+      const declared = (() : IrType | null => {
+        const signatures = this.checker.getCallSignatures(checkerDeclared);
+        const signature = signatures[0];
+        if (signature === undefined || signatures.length !== 1 || signature.getTypeParameters().length > 0) return null;
+        const params: IrType[] = [];
+        for (const param of signature.getParameters()) {
+          const mapped = this.mapTypeOf(this.checker.getTypeOfSymbol(param));
+          if (mapped === null) return null;
+          params.push(mapped);
+        }
+        const ret = this.mapTypeOf(this.checker.getReturnTypeOfSignature(signature));
+        return ret === null ? null : { kind: "func", params, ret };
+      })();
+      const scalar = (type: IrType): boolean =>
+        type.kind === "f64" || type.kind === "bool" || type.kind === "string";
+      if (
+        declared?.kind === "func" &&
+        declared.params.every(scalar) && scalar(declared.ret) &&
+        canAdaptDynFuncTo(declared, (id) => this.shapes.get(id), (id) => this.unions.get(id))
+      ) {
+        source = {
+          kind: "dynCheck",
+          value: { kind: "dynFromJsval", value: expr, type: DYN, loc: expr.loc },
+          type: declared,
+          loc: expr.loc,
+        };
+      }
+    }
+    let e = this.coerceToExpected(source, expected);
     // An 'any' value PROVABLY null/undefined (the unit literal itself, or
     // a read of a binding nothing ever assigns a non-unit value) flowing
     // implicitly into a primitive slot: the validated exit refuses units

@@ -793,6 +793,9 @@ export class RustDynamicEmitter {
       if (this.context.dynBoxedFunctionShapes.has(key)) {
         this.context.line(`${name}::${this.context.dynFunctionVariant(target)}(closure, _, _) => closure,`);
       }
+      if (usesEmbeddedModules && target.type.params.every((type) => ["f64", "bool", "string"].includes(type.kind)) && ["f64", "bool", "string"].includes(target.type.ret.kind)) {
+        this.context.line(`${name}::Island(value) if runtime::island_is_function(&value) => runtime::Gc::new(${this.context.closureName(target)}::DynAdapter { value: Some(${name}::Island(value)) }),`);
+      }
       const adaptable = boxedShapes.filter((shape) => typeKey(shape.type) !== key);
       if (adaptable.length > 0) {
         const patterns = adaptable.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ");
@@ -827,6 +830,7 @@ export class RustDynamicEmitter {
     this.context.line(this.context.usesDynamicInvoke()
       ? `${name}::NativeMethod(method) => sc_dyn_call_native_method(*method, args),`
       : `${name}::NativeMethod(..) => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(callee) => { let sc_args = args.iter().map(|value| match value { ${name}::Undefined => runtime::island_value_undefined(), ${name}::Null => runtime::island_value_null(), ${name}::Number(value) => runtime::island_value_number(*value), ${name}::Boolean(value) => runtime::island_value_boolean(*value), ${name}::String(value) => runtime::island_value_string(value), ${name}::Island(value) => value.clone(), _ => runtime::throw_type_error("embedded module call argument is outside the primitive island subset".to_owned()), }).collect::<Vec<_>>(); let sc_result = runtime::island_call(callee, &sc_args); runtime::json_parse_typed::<${name}>(&runtime::island_json(&sc_result)) },`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.context.popIndent();
     this.context.line("}");

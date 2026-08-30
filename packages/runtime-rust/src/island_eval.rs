@@ -54,6 +54,10 @@ pub fn island_is_nullish(value: &IslandValue) -> bool {
     value.0.is_null_or_undefined()
 }
 
+pub fn island_is_function(value: &IslandValue) -> bool {
+    value.0.as_callable().is_some()
+}
+
 struct IslandState {
     context: Context,
     modules: HashMap<&'static str, Module>,

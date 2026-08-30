@@ -1395,8 +1395,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // (untraced — cycles through dyn never collect, SEMANTICS.md).
         const adapter = dynFuncAdapterHelper(E, t);
         const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
-        d.push(`  if (d->kind != SCR_DYN_FUNC) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
-        d.push(`  if (strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
+        d.push(`  if (d->kind != SCR_DYN_FUNC && !(d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"))) { scr_dyn_check_fail(path, ${want}, d); return NULL; }`);
+        d.push(`  if (d->kind == SCR_DYN_FUNC && strcmp(d->v.fn.sig, ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         d.push(`  {`);
         d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 1);`);
         d.push(`    a->caps[0] = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, NULL);`);
