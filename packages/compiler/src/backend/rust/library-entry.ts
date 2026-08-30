@@ -79,6 +79,7 @@ function parameterValue(
     case "u32":
     case "i32": return `f64::from(${name})`;
     case "string": return `sc_library_string_in(${name}_ptr, ${name}_len)`;
+    case "bytes": return `sc_library_bytes_in(${name}_ptr, ${name}_len)`;
     default: return unsupported(`library parameter class '${cls}'`);
   }
 }
@@ -92,6 +93,7 @@ function returnType(
     case "f64": return " -> f64";
     case "bool": return " -> u8";
     case "string": return "";
+    case "bytes": return "";
     default: return unsupported(`library return class '${cls}'`);
   }
 }
@@ -126,6 +128,17 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `}`,
     );
   }
+  if (lib.exports.some((entry) => entry.params.includes("bytes"))) {
+    lines.push(
+      "",
+      `fn sc_library_bytes_in(data: *const u8, len: usize) -> runtime::JsBytes<u8> {`,
+      `    if len == 0 { return runtime::ffi_bytes_copy_in(&[]); }`,
+      `    assert!(!data.is_null(), "scriptc: NULL library bytes with nonzero length");`,
+      `    let bytes = unsafe { std::slice::from_raw_parts(data, len) };`,
+      `    runtime::ffi_bytes_copy_in(bytes)`,
+      `}`,
+    );
+  }
   if (hasResults) {
     lines.push(
       "",
@@ -143,6 +156,18 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
       `    bytes.extend_from_slice(value.as_bytes());`,
       `    bytes.push(0);`,
       `    let bytes = bytes.into_boxed_slice();`,
+      `    let data = bytes.as_ptr();`,
+      `    SC_LIBRARY_RESULTS.with(|results| results.borrow_mut().push(bytes));`,
+      `    unsafe { out.write(data); out_len.write(len); }`,
+      `}`,
+    );
+  }
+  if (lib.exports.some((entry) => entry.returns === "bytes")) {
+    lines.push(
+      "",
+      `fn sc_library_bytes_out(value: runtime::JsBytes<u8>, out: *mut *const u8, out_len: *mut usize) {`,
+      `    let bytes = runtime::ffi_bytes_snapshot(&value).into_boxed_slice();`,
+      `    let len = bytes.len();`,
       `    let data = bytes.as_ptr();`,
       `    SC_LIBRARY_RESULTS.with(|results| results.borrow_mut().push(bytes));`,
       `    unsafe { out.write(data); out_len.write(len); }`,
@@ -193,14 +218,14 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
 
   for (const entry of lib.exports) {
     const params = entry.params.flatMap((cls, index) =>
-      cls === "string"
+      cls === "string" || cls === "bytes"
         ? [`sc_arg_${index}_ptr: *const u8`, `sc_arg_${index}_len: usize`]
         : [`sc_arg_${index}: ${parameterType(cls, unsupported)}`]
     );
     const args = entry.params.map(
       (cls, index) => parameterValue(`sc_arg_${index}`, cls, unsupported),
     );
-    if (entry.returns === "string") {
+    if (entry.returns === "string" || entry.returns === "bytes") {
       params.push("sc_out: *mut *const u8", "sc_out_len: *mut usize");
     }
     const call = `${mangleFunction(entry.fnName)}(${args.join(", ")})`;
@@ -214,6 +239,8 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
         : []),
       entry.returns === "string"
         ? `    sc_library_string_out(${result}, sc_out, sc_out_len);`
+        : entry.returns === "bytes"
+          ? `    sc_library_bytes_out(${result}, sc_out, sc_out_len);`
         : entry.returns === "void" ? `    ${result};` : `    ${result}`,
       `}`,
     );
