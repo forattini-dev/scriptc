@@ -39,6 +39,10 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "}",
     "typedef double (*sf_apply_cb)(double value);",
     "double sf_apply(sf_apply_cb callback, double value) { return callback(value); }",
+    "typedef double (*sf_apply_ctx_cb)(double value, void *context);",
+    "double sf_apply_ctx(sf_apply_ctx_cb callback, double value, void *context) {",
+    "  return context == NULL ? -1 : callback(value, context);",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -102,6 +106,18 @@ test("Rust executables call manifest-bound native value functions", async () => 
         },
       }, "f64"],
       returns: "f64",
+    }, {
+      name: "nativeApplyContext",
+      symbol: "sf_apply_ctx",
+      params: [{
+        callback: {
+          id: "applyContext",
+          params: ["f64", { context: "applyContext" }],
+          returns: "f64",
+          lifetime: "call",
+        },
+      }, "f64", { context: "applyContext" }],
+      returns: "f64",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -117,6 +133,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "declare function nativeTextSum(value: string): number;",
     "declare function nativeBytesSum(value: Uint8Array): number;",
     "declare function nativeApply(callback: (value: number) => number, value: number): number;",
+    "declare function nativeApplyContext(callback: (value: number) => number, value: number): number;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
@@ -126,6 +143,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
     "console.log(nativeBytesSum(new Uint8Array([1, 0, 255, 3])));",
     "const offset = 7;",
     "console.log(nativeApply((value) => value + offset, 5));",
+    "console.log(nativeApplyContext((value) => value * offset, 6));",
     "",
   ].join("\n"));
 
@@ -144,6 +162,6 @@ test("Rust executables call manifest-bound native value functions", async () => 
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n259\n12\n42\n");
   expect(run.stderr).toBe("");
 });

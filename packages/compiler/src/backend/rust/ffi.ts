@@ -1,4 +1,4 @@
-import { isFfiCallbackParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { isFfiCallbackParam, isFfiContextParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrType, type SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType } from "./model.js";
 
 type IrFfiCall = Extract<IrExpr, { kind: "ffiCall" }>;
@@ -54,6 +54,26 @@ function rawF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | 
     : null;
 }
 
+function contextF64Callback(binding: IrFfiImport): IrFfiCallbackParam["callback"] | null {
+  const callback = binding.params[0];
+  const context = binding.params[2];
+  if (binding.params.length !== 3 || callback === undefined || context === undefined ||
+      !isFfiCallbackParam(callback) || !isFfiContextParam(context)) return null;
+  const callbackContext = callback.callback.params[1];
+  return callback.callback.params.length === 2 &&
+    callback.callback.params[0] === "f64" &&
+    callbackContext !== undefined &&
+    isFfiContextParam(callbackContext) &&
+    callbackContext.context === callback.callback.id &&
+    context.context === callback.callback.id &&
+    callback.callback.returns === "f64" &&
+    callback.callback.lifetime === "call" &&
+    binding.params[1] === "f64" &&
+    binding.returns === "f64"
+    ? callback.callback
+    : null;
+}
+
 function abiType(cls: ScalarClass): string {
   return cls === "bool" ? "u8" : cls;
 }
@@ -80,6 +100,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (contextF64Callback(binding) !== null) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0: unsafe extern "C" fn(f64, *mut std::ffi::c_void) -> f64, sc_arg_1: f64, sc_arg_2: *mut std::ffi::c_void) -> f64;`];
+    }
     if (rawF64Callback(binding) !== null) {
       return [`    #[link_name = "${binding.symbol}"]`,
         `    fn ${functionName(index)}(sc_arg_0: extern "C" fn(f64) -> f64, sc_arg_1: f64) -> f64;`];
@@ -108,6 +132,25 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  const contextCallback = binding === undefined ? null : contextF64Callback(binding);
+  if (contextCallback !== null) {
+    const callbackArgument = expr.args[0];
+    const valueArgument = expr.args[1];
+    if (expr.args.length !== 2 || callbackArgument?.type.kind !== "func" ||
+        valueArgument?.type.kind !== "f64" || expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the contextual callback ABI`, expr.loc);
+    }
+    const callbackValue = context.nextName("sc_ffi_callback_value");
+    const nativeValue = context.nextName("sc_ffi_callback_argument");
+    const trampoline = context.nextName("sc_ffi_callback");
+    const incoming = context.nextName("sc_ffi_callback_incoming");
+    const opaque = context.nextName("sc_ffi_callback_context");
+    const active = context.nextName("sc_ffi_callback_active");
+    const pointer = context.nextName("sc_ffi_callback_pointer");
+    const closureType = context.rustType(callbackArgument.type, expr.loc);
+    const dispatch = context.emitClosureDispatch(active, callbackArgument.type, [incoming], expr.loc);
+    return `{ let ${callbackValue} = ${emitExpr(callbackArgument)}; let ${nativeValue} = ${emitExpr(valueArgument)}; unsafe extern "C" fn ${trampoline}(${incoming}: f64, ${opaque}: *mut std::ffi::c_void) -> f64 { let ${active} = unsafe { (&*${opaque}.cast::<${closureType}>()).clone() }; ${dispatch} } let ${pointer} = (&${callbackValue} as *const ${closureType}).cast_mut().cast::<std::ffi::c_void>(); unsafe { ${functionName(index)}(${trampoline}, ${nativeValue}, ${pointer}) } }`;
+  }
   const callback = binding === undefined ? null : rawF64Callback(binding);
   if (callback !== null) {
     const callbackArgument = expr.args[0];
