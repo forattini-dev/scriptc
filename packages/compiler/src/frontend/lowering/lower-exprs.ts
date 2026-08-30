@@ -5668,13 +5668,47 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         }
         let srcNode: ts.Expression = prop.expression;
         while (ts.isParenthesizedExpression(srcNode)) srcNode = srcNode.expression;
-        const srcLowered =
+        let srcLowered =
           prop === expr.properties[0] && leadingSpreadLowered !== null
             ? leadingSpreadLowered
             : ts.isIdentifier(srcNode)
               ? null
               : L.lowerExpr(srcNode);
-        const srcType = srcLowered ? srcLowered.type : L.mapTypeOf(L.typeOf(srcNode));
+        let srcType = srcLowered ? srcLowered.type : L.mapTypeOf(L.typeOf(srcNode));
+        // A package-exported defaults record lowers as an island handle
+        // even though its declaration still gives tsc a precise object
+        // type. When that declared type is assignable to the target record,
+        // validate the handle into the target once and reuse the ordinary
+        // field-copy spread path. Exclude genuine `any`: it carries no
+        // proof that required target fields exist before later overrides.
+        const srcTsType = L.typeOf(srcNode);
+        const srcProps = new Map(
+          L.checker.getPropertiesOfType(srcTsType).map((field) => [field.name, field]),
+        );
+        const declaredCoversTarget = shape.fields.every((targetField) => {
+          const sourceField = srcProps.get(targetField.name);
+          if (!sourceField) {
+            return targetField.type.kind === "union" &&
+              L.armTag(targetField.type.unionId, UNDEFINED_T) >= 0;
+          }
+          const sourceTs = L.checker.getTypeOfSymbolAtLocation(sourceField, srcNode);
+          const sourceType = L.mapTypeOf(sourceTs);
+          return sourceType !== null &&
+            (typeEquals(sourceType, targetField.type) || L.coercibleValue(sourceType, targetField.type));
+        });
+        if (
+          srcType?.kind === "jsval" &&
+          (srcTsType.flags & ts.TypeFlags.Any) === 0 &&
+          declaredCoversTarget &&
+          L.boundaryExitSafe(type)
+        ) {
+          const island = srcLowered ?? L.lowerExpr(srcNode);
+          const checked = L.coerceToExpected(island, type);
+          if (checked.type.kind === "record") {
+            srcLowered = checked;
+            srcType = checked.type;
+          }
+        }
         // `...options.installConfig` — a spread of `Partial<X> | undefined`
         // (the optional-options merge idiom `{ ...DEFAULTS, ...overrides }`):
         // JS spreads nothing for the unit arm and copies present keys
