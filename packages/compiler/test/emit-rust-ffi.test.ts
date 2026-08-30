@@ -8,7 +8,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust executables call a manifest-bound native f64 function", async () => {
+test("Rust executables call manifest-bound native f64 and boolean functions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-scalar-"));
   const nativeSource = join(dir, "native.c");
   const nativeObject = join(dir, "native.o");
@@ -17,7 +17,11 @@ test("Rust executables call a manifest-bound native f64 function", async () => {
   const entryPath = join(dir, "main.ts");
   const outPath = join(dir, "program");
 
-  await writeFile(nativeSource, "double sf_scale(double value) { return value * 2.0; }\n");
+  await writeFile(nativeSource, [
+    "double sf_scale(double value) { return value * 2.0; }",
+    "unsigned char sf_invert(unsigned char value) { return value ? 0 : 1; }",
+    "",
+  ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
   await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
   await writeFile(profilePath, JSON.stringify({
@@ -27,13 +31,20 @@ test("Rust executables call a manifest-bound native f64 function", async () => {
       symbol: "sf_scale",
       params: ["f64"],
       returns: "f64",
+    }, {
+      name: "nativeInvert",
+      symbol: "sf_invert",
+      params: ["bool"],
+      returns: "bool",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
   }));
   await writeFile(entryPath, [
     "declare function nativeScale(value: number): number;",
+    "declare function nativeInvert(value: boolean): boolean;",
     "console.log(nativeScale(21));",
+    "console.log(nativeInvert(false), nativeInvert(true));",
     "",
   ].join("\n"));
 
@@ -52,6 +63,6 @@ test("Rust executables call a manifest-bound native f64 function", async () => {
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\n");
+  expect(run.stdout).toBe("42\ntrue false\n");
   expect(run.stderr).toBe("");
 });

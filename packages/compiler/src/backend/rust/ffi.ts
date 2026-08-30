@@ -6,8 +6,18 @@ interface RustFfiContext {
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
-function supportsScalarF64(binding: IrFfiImport): boolean {
-  return binding.params.length === 1 && binding.params[0] === "f64" && binding.returns === "f64";
+type ScalarClass = "bool" | "f64";
+
+function scalarClass(binding: IrFfiImport): ScalarClass | null {
+  const parameter = binding.params[0];
+  return binding.params.length === 1 && (parameter === "f64" || parameter === "bool") &&
+      binding.returns === parameter
+    ? parameter
+    : null;
+}
+
+function abiType(cls: ScalarClass): string {
+  return cls === "bool" ? "u8" : "f64";
 }
 
 function functionName(index: number): string {
@@ -15,9 +25,12 @@ function functionName(index: number): string {
 }
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
-  const declarations = imports.flatMap((binding, index) => supportsScalarF64(binding)
-    ? [`    #[link_name = "${binding.symbol}"]`, `    fn ${functionName(index)}(sc_arg_0: f64) -> f64;`]
-    : []);
+  const declarations = imports.flatMap((binding, index) => {
+    const cls = scalarClass(binding);
+    return cls === null
+      ? []
+      : [`    #[link_name = "${binding.symbol}"]`, `    fn ${functionName(index)}(sc_arg_0: ${abiType(cls)}) -> ${abiType(cls)};`];
+  });
   return declarations.length === 0
     ? []
     : ["unsafe extern \"C\" {", ...declarations, "}", ""];
@@ -33,9 +46,12 @@ export function emitRustFfiCall(
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
   const argument = expr.args[0];
-  if (binding === undefined || !supportsScalarF64(binding) || expr.args.length !== 1 ||
-      argument?.type.kind !== "f64" || expr.type.kind !== "f64") {
-    context.unsupported(`native FFI import '${expr.import}' outside the scalar f64 ABI`, expr.loc);
+  const cls = binding === undefined ? null : scalarClass(binding);
+  if (cls === null || expr.args.length !== 1 || argument?.type.kind !== cls || expr.type.kind !== cls) {
+    context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
   }
-  return `unsafe { ${functionName(index)}(${emitExpr(argument)}) }`;
+  const value = emitExpr(argument);
+  return cls === "bool"
+    ? `(unsafe { ${functionName(index)}(if ${value} { 1 } else { 0 }) } != 0)`
+    : `unsafe { ${functionName(index)}(${value}) }`;
 }
