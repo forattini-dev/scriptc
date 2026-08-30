@@ -307,14 +307,14 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = { "splice", "reduce", "reduceRight", "flat",
-    "copyWithin", "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
+    "keys", "values", "entries", "toReversed", "toSorted", "toSpliced",
     "with", "toString", "toLocaleString", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
 static bool dyn_arr_proto_mutates(const char *m) {
   static const char *names[] = {
-    "push", "pop", "shift", "unshift", "reverse", "sort", "fill", NULL
+    "push", "pop", "shift", "unshift", "reverse", "sort", "fill", "copyWithin", NULL
   };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
@@ -607,6 +607,34 @@ static ScrDyn *scr_dyn_invoke_impl(
         ScrDyn *old = recv->v.arr.items[i];
         recv->v.arr.items[i] = scr_dyn_retain(value);
         scr_dyn_release(old);
+      }
+      return scr_dyn_retain(recv);
+    }
+    if (dyn_name_is(method, "copyWithin")) {
+      double targetD = dyn_index_arg(args, argc, 0, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double startD = dyn_index_arg(args, argc, 1, 0, what);
+      if (scr_exc_pending()) return NULL;
+      double endD = dyn_index_arg(args, argc, 2, (double)len, what);
+      if (scr_exc_pending()) return NULL;
+      size_t target = dyn_rel_index(targetD, len);
+      size_t start = dyn_rel_index(startD, len);
+      size_t end = dyn_rel_index(endD, len);
+      if (end < start) end = start;
+      size_t count = end - start;
+      if (count > len - target) count = len - target;
+      if (target < start) {
+        for (size_t i = 0; i < count; i++) {
+          ScrDyn *value = scr_dyn_retain(recv->v.arr.items[start + i]);
+          scr_dyn_release(recv->v.arr.items[target + i]);
+          recv->v.arr.items[target + i] = value;
+        }
+      } else {
+        for (size_t i = count; i > 0; i--) {
+          ScrDyn *value = scr_dyn_retain(recv->v.arr.items[start + i - 1]);
+          scr_dyn_release(recv->v.arr.items[target + i - 1]);
+          recv->v.arr.items[target + i - 1] = value;
+        }
       }
       return scr_dyn_retain(recv);
     }

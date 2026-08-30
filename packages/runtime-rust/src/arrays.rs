@@ -182,6 +182,29 @@ pub fn array_fill<T: ArrayElement>(
     array.clone()
 }
 
+pub fn array_copy_within<T: ArrayElement>(
+    array: &JsArray<T>,
+    target: f64,
+    start: f64,
+    end: f64,
+) -> JsArray<T> {
+    array.with_mut(|data| {
+        let length = data.elements.len();
+        let target = array_relative_index(target, length);
+        let start = array_relative_index(start, length);
+        let end = array_relative_index(end, length).max(start);
+        let count = (end - start).min(length - target);
+        let copied = data.elements[start..start + count].to_vec();
+        for (destination, value) in data.elements[target..target + count]
+            .iter_mut()
+            .zip(copied)
+        {
+            *destination = value;
+        }
+    });
+    array.clone()
+}
+
 pub fn array_sort_by_snapshot<T, F>(array: &JsArray<T>, mut compare: F) -> JsArray<T>
 where
     T: ArrayElement,
