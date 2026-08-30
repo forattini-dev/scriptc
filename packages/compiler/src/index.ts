@@ -2426,6 +2426,14 @@ async function compileLibraryTracked(
         `${error.message}${error.stderr === "" ? "" : `\n${error.stderr}`}`,
       );
     }
+    let sidecarPath: string | undefined;
+    if (sidecarJson !== null) {
+      sidecarPath =
+        profile.sidecar!.path !== null
+          ? resolve(dirname(archivePath), profile.sidecar!.path)
+          : `${archivePath}.contract.json`;
+      await writeFile(sidecarPath, sidecarJson);
+    }
     await pruneBuildCache(cacheRoot);
     timing("complete");
     return {
@@ -2434,6 +2442,7 @@ async function compileLibraryTracked(
       cPath: sourcePath,
       backend: "rust",
       ...(irPath !== undefined ? { irPath } : {}),
+      ...(sidecarPath !== undefined ? { sidecarPath } : {}),
     };
   }
   let cPath: string;

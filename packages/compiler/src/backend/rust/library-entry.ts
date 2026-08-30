@@ -103,7 +103,6 @@ function returnType(
  * wrappers, result ownership, panic delivery, and host callbacks. */
 export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string[] {
   const { lib, unsupported } = options;
-  if (lib.identity !== undefined) unsupported("library sidecar identity");
 
   const hasResults = lib.exports.some(
     (entry) => entry.returns === "string" || entry.returns === "bytes",
@@ -192,6 +191,20 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     `    }`,
     `}`,
   );
+  if (lib.identity !== undefined) {
+    lines.push(
+      "",
+      `#[unsafe(no_mangle)]`,
+      `pub extern "C" fn ${lib.identity.buildIdSymbol}() -> u64 {`,
+      `    0x${lib.identity.buildId}_u64`,
+      `}`,
+      "",
+      `#[unsafe(no_mangle)]`,
+      `pub extern "C" fn ${lib.identity.abiVersionSymbol}() -> u32 {`,
+      `    ${lib.identity.abiVersion}_u32`,
+      `}`,
+    );
+  }
   if (lib.callbacks?.length) {
     lines.push(
       "",
