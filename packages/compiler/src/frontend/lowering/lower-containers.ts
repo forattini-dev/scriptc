@@ -736,7 +736,8 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
   }
 
 /** READ-ONLY array methods on TUPLE receivers — `t.slice(...)`,
-   * `t.map(f)`, and `t.every(f)`: a tuple is a fixed-shape record, but these methods never
+   * `t.includes(v)`, `t.map(f)`, and `t.every(f)`: a tuple is a fixed-shape
+   * record, but these methods never
    * write, so the positions snapshot into a fresh array (the for-of-over-
    * tuples stance — pure receivers only, since the reads re-emit per
    * position) and the ordinary array machinery runs over it. The element
@@ -748,7 +749,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
-    if (name !== "slice" && name !== "map" && name !== "every") return null;
+    if (name !== "slice" && name !== "includes" && name !== "map" && name !== "every") return null;
     if (!L.isStdlibMember(access)) return null;
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
     let receiver: IrExpr | null = null;
@@ -811,6 +812,32 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         if (args[i]!.type.kind !== "f64") L.badType(call.arguments[i]!, L.typeOf(call.arguments[i]!));
       }
       return { kind: "arrIntrinsic", method: "slice", receiver: snapshot, args, type: arrayOf(snapshotElem), loc };
+    }
+    if (name === "includes") {
+      if (call.arguments.length !== 1) {
+        L.noLowering(
+          `.includes with ${call.arguments.length} arguments`,
+          call,
+          "the fromIndex parameter has no lowering — slice first, or loop",
+        );
+      }
+      if (snapshotElem.kind === "union") {
+        L.unsupported(
+          "SC1090",
+          call,
+          "'.includes()' on heterogeneous tuples (union values have no stable identity — " +
+            "loop and compare the narrowed values instead)",
+        );
+      }
+      const needle = L.lowerExprExpecting(call.arguments[0]!, snapshotElem);
+      return {
+        kind: "arrIntrinsic",
+        method: "includes",
+        receiver: snapshot,
+        args: [needle],
+        type: BOOL,
+        loc,
+      };
     }
     if (name === "every") {
       return lowerArrayFindLikeOnReceiver(L, call, snapshot, name, snapshotElem);
