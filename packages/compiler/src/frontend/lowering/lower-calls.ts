@@ -602,7 +602,23 @@ export interface GenericInstance {
     // optional/defaulted params spell their `T | undefined` slots (mapType's
     // completed-signature contract), so omitted trailing args complete with
     // the undefined arm like any direct call.
-    const target = contextual ? L.checker.getContextualType(contextual) : undefined;
+    let target = contextual ? L.checker.getContextualType(contextual) : undefined;
+    // A shorthand method is not itself an Expression, so TypeScript exposes
+    // its context on the containing object literal. Recover the method's
+    // field type there: an interface method such as `renew(x?: number)`
+    // spells the same completed `number | undefined` ABI as a defaulted
+    // implementation `renew(x = 30)`. Uncontextualized methods remain
+    // fenced — there is no target contract proving the completed shape.
+    if (
+      !target &&
+      ts.isMethodDeclaration(blame) &&
+      ts.isObjectLiteralExpression(blame.parent) &&
+      (ts.isIdentifier(blame.name) || ts.isStringLiteralLike(blame.name))
+    ) {
+      const owner = L.checker.getContextualType(blame.parent);
+      const field = owner ? L.checker.getPropertyOfType(owner, blame.name.text) : undefined;
+      if (field) target = L.checker.getTypeOfSymbolAtLocation(field, blame);
+    }
     const mapped = target
       ? L.mapTypeOf(target)
       : contextual
@@ -8368,6 +8384,16 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const params = callee.type.params;
     const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+    // Optional/defaulted record methods use the same completed ABI as any
+    // other function value: omitted trailing arguments become the slot's
+    // undefined arm before the exact-arity call reaches the backend.
+    for (let i = args.length; i < params.length; i++) {
+      const absent = omittedArgFor(L, params[i]!, locOf(call));
+      if (!absent) {
+        L.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
+      }
+      args.push(absent);
+    }
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }
 
