@@ -1302,6 +1302,7 @@ shardedTest.each(shardSelect([
   "2300-dyn-record-spread-and-keyed-access.cjs",
   "2301-cjs-export-table-dom-attach.cjs",
   "2311-next-tick-js-callbacks.js",
+  "2312-stream-underscore-assign.ts",
   "2313-stream-underscore-assign-js.cjs",
   "2320-await-unit.ts",
   "2323-timer-callback-returns.ts",
