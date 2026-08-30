@@ -8,7 +8,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust executables call manifest-bound native scalar functions", async () => {
+test("Rust executables call manifest-bound native value functions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-scalar-"));
   const nativeSource = join(dir, "native.c");
   const nativeObject = join(dir, "native.o");
@@ -18,6 +18,7 @@ test("Rust executables call manifest-bound native scalar functions", async () =>
   const outPath = join(dir, "program");
 
   await writeFile(nativeSource, [
+    "#include <stddef.h>",
     "double sf_scale(double value) { return value * 2.0; }",
     "unsigned char sf_invert(unsigned char value) { return value ? 0 : 1; }",
     "unsigned char sf_u8(unsigned char value) { return value; }",
@@ -26,6 +27,11 @@ test("Rust executables call manifest-bound native scalar functions", async () =>
     "static double last_note;",
     "void sf_note(double value) { last_note = value; }",
     "double sf_last_note(void) { return last_note; }",
+    "double sf_text_sum(const unsigned char *data, size_t len) {",
+    "  double sum = 0;",
+    "  for (size_t i = 0; i < len; i++) sum += data[i];",
+    "  return sum;",
+    "}",
     "",
   ].join("\n"));
   await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
@@ -67,6 +73,11 @@ test("Rust executables call manifest-bound native scalar functions", async () =>
       symbol: "sf_last_note",
       params: [],
       returns: "f64",
+    }, {
+      name: "nativeTextSum",
+      symbol: "sf_text_sum",
+      params: ["string"],
+      returns: "f64",
     }],
     libraries: [nativeArchive],
     system_libraries: [],
@@ -79,11 +90,13 @@ test("Rust executables call manifest-bound native scalar functions", async () =>
     "declare function nativeI32(value: number): number;",
     "declare function nativeNote(value: number): void;",
     "declare function nativeLastNote(): number;",
+    "declare function nativeTextSum(value: string): number;",
     "console.log(nativeScale(21));",
     "console.log(nativeInvert(false), nativeInvert(true));",
     "console.log(nativeU8(258), nativeU32(-1), nativeI32(4294967295));",
     "nativeNote(12.5);",
     "console.log(nativeLastNote());",
+    "console.log(nativeTextSum(\"A\\0é\"));",
     "",
   ].join("\n"));
 
@@ -102,6 +115,6 @@ test("Rust executables call manifest-bound native scalar functions", async () =>
 
   expect(result.safetyProfile).toBe("rust+external-ffi");
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n");
+  expect(run.stdout).toBe("42\ntrue false\n2 4294967295 -1\n12.5\n429\n");
   expect(run.stderr).toBe("");
 });

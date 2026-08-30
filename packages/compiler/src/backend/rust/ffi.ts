@@ -3,6 +3,7 @@ import type { IrExpr, IrFfiImport, SrcLoc } from "../../ir/nodes.js";
 type IrFfiCall = Extract<IrExpr, { kind: "ffiCall" }>;
 
 interface RustFfiContext {
+  nextName(prefix: string): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
@@ -24,6 +25,12 @@ function scalarSignature(binding: IrFfiImport): ScalarSignature | null {
         parameter === "u32" || parameter === "i32") === false) return null;
   if (binding.returns !== parameter && !(parameter === "f64" && binding.returns === "void")) return null;
   return { parameter, returns: binding.returns };
+}
+
+function isStringToF64(binding: IrFfiImport): boolean {
+  return binding.params.length === 1 &&
+    binding.params[0] === "string" &&
+    binding.returns === "f64";
 }
 
 function abiType(cls: ScalarClass): string {
@@ -52,6 +59,10 @@ function marshalReturn(call: string, cls: ScalarReturn): string {
 
 export function emitRustFfiDeclarations(imports: readonly IrFfiImport[]): string[] {
   const declarations = imports.flatMap((binding, index) => {
+    if (isStringToF64(binding)) {
+      return [`    #[link_name = "${binding.symbol}"]`,
+        `    fn ${functionName(index)}(sc_arg_0_ptr: *const u8, sc_arg_0_len: usize) -> f64;`];
+    }
     const signature = scalarSignature(binding);
     if (signature === null) return [];
     const parameter = signature.parameter;
@@ -72,6 +83,14 @@ export function emitRustFfiCall(
   const index = imports.findIndex((binding) => binding.name === expr.import);
   if (index < 0) context.unsupported(`unknown native FFI import '${expr.import}'`, expr.loc);
   const binding = imports[index];
+  if (binding !== undefined && isStringToF64(binding)) {
+    const argument = expr.args[0];
+    if (expr.args.length !== 1 || argument?.type.kind !== "string" || expr.type.kind !== "f64") {
+      context.unsupported(`native FFI import '${expr.import}' outside the string value ABI`, expr.loc);
+    }
+    const value = context.nextName("sc_ffi_string");
+    return `{ let ${value} = ${emitExpr(argument)}; unsafe { ${functionName(index)}(${value}.as_bytes().as_ptr(), ${value}.len()) } }`;
+  }
   const signature = binding === undefined ? null : scalarSignature(binding);
   if (signature === null || expr.type.kind !== returnKind(signature.returns)) {
     context.unsupported(`native FFI import '${expr.import}' outside the scalar value ABI`, expr.loc);
