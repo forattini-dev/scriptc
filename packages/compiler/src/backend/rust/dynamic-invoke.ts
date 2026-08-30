@@ -422,9 +422,10 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"concat" => { let output = runtime::array_slice(array, 0.0, length); for arg in args { match arg { ${this.dyn}::Array(items) => { runtime::array_extend(&output, items); }, value => { runtime::array_push(&output, value.clone()); }, } } ${this.dyn}::Array(output) },`);
     this.context.line('"flat" if args.is_empty() => sc_dyn_array_flat_once(array),');
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
+    this.context.line(`"fill" => { let value = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_fill(array, value, start, end)) },`);
     this.context.line('"sort" => sc_dyn_array_sort(array, args),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"splice\" | \"reduce\" | \"reduceRight\" | \"flat\" | \"fill\" | \"copyWithin\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line("\"splice\" | \"reduce\" | \"reduceRight\" | \"flat\" | \"copyWithin\" | \"keys\" | \"values\" | \"entries\" | \"toReversed\" | \"toSorted\" | \"toSpliced\" | \"with\" | \"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");

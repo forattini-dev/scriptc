@@ -168,6 +168,20 @@ pub fn array_reverse<T: ArrayElement>(array: &JsArray<T>) -> JsArray<T> {
     array.clone()
 }
 
+pub fn array_fill<T: ArrayElement>(
+    array: &JsArray<T>,
+    value: T,
+    start: f64,
+    end: f64,
+) -> JsArray<T> {
+    array.with_mut(|data| {
+        let start = array_relative_index(start, data.elements.len());
+        let end = array_relative_index(end, data.elements.len()).max(start);
+        data.elements[start..end].fill(value);
+    });
+    array.clone()
+}
+
 pub fn array_sort_by_snapshot<T, F>(array: &JsArray<T>, mut compare: F) -> JsArray<T>
 where
     T: ArrayElement,
