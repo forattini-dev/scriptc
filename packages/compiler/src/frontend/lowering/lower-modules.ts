@@ -1408,10 +1408,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // exactly the local rule (uncheckedOverloadHandleCall).
                   (uncheckedOverloadHandleCall(L, decl.initializer) ? JSVAL : null))
                 : null;
-            const storedDynArrayIterator = (() => {
+            const storedDynValue = (() => {
               if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return false;
               let init: ts.Expression = decl.initializer;
               while (ts.isParenthesizedExpression(init)) init = init.expression;
+              if (ts.isIdentifier(init)) {
+                const symbol = L.resolveValueSymbol(init);
+                return symbol !== null && L.globalsBySymbol.get(symbol)?.type.kind === "dyn";
+              }
               if (
                 !ts.isCallExpression(init) || init.arguments.length !== 0 ||
                 !ts.isPropertyAccessExpression(init.expression) ||
@@ -1423,7 +1427,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               const symbol = L.resolveValueSymbol(receiver);
               return symbol !== null && L.globalsBySymbol.get(symbol)?.type.kind === "dyn";
             })();
-            let type = storedDynArrayIterator ? DYN : handleT ?? L.irTypeOf(nameNode);
+            let type = storedDynValue ? DYN : handleT ?? L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the
