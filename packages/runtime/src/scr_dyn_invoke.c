@@ -795,7 +795,8 @@ static ScrDyn *scr_dyn_invoke_impl(
       }
       return accumulator;
     }
-    if (dyn_name_is(method, "findLast")) {
+    if (dyn_name_is(method, "findLast") || dyn_name_is(method, "findLastIndex")) {
+      bool index_result = dyn_name_is(method, "findLastIndex");
       if (!dyn_cb_check(args, argc)) return NULL;
       ScrDyn *visible_recv = callback_recv ? callback_recv : recv;
       for (size_t i = len; i > 0; i--) {
@@ -807,10 +808,15 @@ static ScrDyn *scr_dyn_invoke_impl(
         if (!result) { scr_dyn_release(item); return NULL; }
         bool truthy = scr_dyn_truthy(result);
         scr_dyn_release(result);
-        if (truthy) return item;
+        if (truthy) {
+          if (!index_result) return item;
+          scr_dyn_release(item);
+          return scr_dyn_new_num((double)index);
+        }
         scr_dyn_release(item);
       }
-      return scr_dyn_retain(scr_dyn_undefined());
+      return index_result
+        ? scr_dyn_new_num(-1) : scr_dyn_retain(scr_dyn_undefined());
     }
     if (dyn_name_is(method, "forEach") || dyn_name_is(method, "map") ||
         dyn_name_is(method, "filter") || dyn_name_is(method, "some") ||

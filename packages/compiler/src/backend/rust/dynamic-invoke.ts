@@ -122,16 +122,16 @@ class RustDynamicInvokeEmitter {
     this.context.line("accumulator");
     this.close("}");
 
-    this.open(`fn sc_dyn_array_find_last(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}]) -> ${this.dyn} {`);
+    this.open(`fn sc_dyn_array_find_last(array: &runtime::JsArray<${this.dyn}>, args: &[${this.dyn}], index_result: bool) -> ${this.dyn} {`);
     this.context.line(`let callback = args.first().cloned().unwrap_or(${this.dyn}::Undefined);`);
     this.context.line("let mut index = runtime::array_len(array);");
     this.open("while index > 0.0 {");
     this.context.line("index -= 1.0;");
     this.context.line(`let item = if index < runtime::array_len(array) { runtime::array_get(array, index) } else { ${this.dyn}::Undefined };`);
     this.context.line("let result = sc_dyn_array_callback(&callback, item.clone(), index, array);");
-    this.context.line("if sc_dyn_truthy(&result) { return item; }");
+    this.context.line(`if sc_dyn_truthy(&result) { return if index_result { ${this.dyn}::Number(index) } else { item }; }`);
     this.close("}");
-    this.context.line(`${this.dyn}::Undefined`);
+    this.context.line(`if index_result { ${this.dyn}::Number(-1.0) } else { ${this.dyn}::Undefined }`);
     this.close("}");
 
     this.open(`fn sc_dyn_array_iterate(array: &runtime::JsArray<${this.dyn}>, method: &str, args: &[${this.dyn}]) -> ${this.dyn} {`);
@@ -471,7 +471,8 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"copyWithin" => { let target = sc_dyn_index_arg(args, 0, 0.0, callee_name); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_copy_within(array, target, start, end)) },`);
     this.context.line('"reduce" => sc_dyn_array_reduce(array, args, false),');
     this.context.line('"reduceRight" => sc_dyn_array_reduce(array, args, true),');
-    this.context.line('"findLast" => sc_dyn_array_find_last(array, args),');
+    this.context.line('"findLast" => sc_dyn_array_find_last(array, args, false),');
+    this.context.line('"findLastIndex" => sc_dyn_array_find_last(array, args, true),');
     this.context.line('"sort" => sc_dyn_array_sort(array, args, false),');
     this.context.line('"toSorted" => sc_dyn_array_sort(array, args, true),');
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
