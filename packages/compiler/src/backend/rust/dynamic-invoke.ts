@@ -452,7 +452,7 @@ class RustDynamicInvokeEmitter {
     this.context.line('"flat" => sc_dyn_array_flat(array, sc_dyn_index_arg(args, 0, 1.0, callee_name)),');
     this.context.line(`"reverse" => ${this.dyn}::Array(runtime::array_reverse(array)),`);
     this.context.line(`"toReversed" => ${this.dyn}::Array(runtime::array_to_reversed(array)),`);
-    this.context.line(`"toSpliced" => { let start = sc_dyn_index_arg(args, 0, 0.0, callee_name); let delete_count = if args.len() < 2 { f64::INFINITY } else { sc_dyn_index_arg(args, 1, 0.0, callee_name) }; let items = runtime::array_new(args.get(2..).unwrap_or(&[]).to_vec()); ${this.dyn}::Array(runtime::array_to_spliced(array, start, delete_count, &items)) },`);
+    this.context.line(`"toSpliced" => { let start = sc_dyn_index_arg(args, 0, 0.0, callee_name); let delete_count = if args.is_empty() { 0.0 } else if args.len() < 2 { f64::INFINITY } else { sc_dyn_index_arg(args, 1, 0.0, callee_name) }; let items = runtime::array_new(args.get(2..).unwrap_or(&[]).to_vec()); ${this.dyn}::Array(runtime::array_to_spliced(array, start, delete_count, &items)) },`);
     this.context.line(`"fill" => { let value = args.first().cloned().unwrap_or(${this.dyn}::Undefined); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_fill(array, value, start, end)) },`);
     this.context.line(`"copyWithin" => { let target = sc_dyn_index_arg(args, 0, 0.0, callee_name); let start = sc_dyn_index_arg(args, 1, 0.0, callee_name); let end = sc_dyn_index_arg(args, 2, length, callee_name); ${this.dyn}::Array(runtime::array_copy_within(array, target, start, end)) },`);
     this.context.line('"reduce" => sc_dyn_array_reduce(array, args, false),');

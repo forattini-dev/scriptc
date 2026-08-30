@@ -674,7 +674,8 @@ static ScrDyn *scr_dyn_invoke_impl(
       double startD = dyn_index_arg(args, argc, 0, 0, what);
       if (scr_exc_pending()) return NULL;
       size_t start = dyn_rel_index(startD, len);
-      double countD = dyn_index_arg(args, argc, 1, (double)(len - start), what);
+      double countD = argc == 0 ? 0
+        : dyn_index_arg(args, argc, 1, (double)(len - start), what);
       if (scr_exc_pending()) return NULL;
       size_t count = countD <= 0 ? 0 : countD >= (double)(len - start)
         ? len - start : (size_t)countD;
