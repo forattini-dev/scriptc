@@ -378,6 +378,9 @@ export class RustValueEmitter {
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
+    if (type.kind === "func") {
+      return `${this.functionIdentity(left, type, loc)} == ${this.functionIdentity(right, type, loc)}`;
+    }
     if (type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" ||
         type.kind === "httpRes" || type.kind === "httpClientReq") {
       return `${left}.ptr_eq(${right})`;

@@ -1693,9 +1693,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (!value || !isSupportedMapValue(value)) return null;
     return mapOf(key, value);
   }
-  // Set<T>: Map's sibling — same provenance rule, elements fenced to Map's
-  // KEY kinds (f64/string, SameValueZero). Anything else stays unmapped;
-  // the `new Set` lowering names the offending element type specifically.
+  // Set<T>: Map's sibling — same provenance rule, with f64/string
+  // SameValueZero and selected reference-identity elements (callbacks,
+  // symbols, server handles). Anything else stays unmapped; the `new Set`
+  // lowering names the offending element type specifically.
   if (isStdlibInterface("Set") || isStdlibInterface("ReadonlySet")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     if (args.length !== 1) return null;
@@ -3759,7 +3760,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
         return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (functions, promises, and nested Maps stay out)`;
       }
       if ((container === "Set" || container === "ReadonlySet") && !isSupportedSetElem(mapped)) {
-        return `the ${container} shape is supported, but elements are limited to numbers and strings — '${text(arg)}' is outside that domain`;
+        return `the ${container} shape is supported, but elements are limited to numbers, strings, callbacks, symbols, and supported handles — '${text(arg)}' is outside that domain`;
       }
     }
     // Every argument passed the per-slot checks and the type still failed:

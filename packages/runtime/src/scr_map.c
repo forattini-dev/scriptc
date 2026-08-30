@@ -181,16 +181,20 @@ static void scr_map_release_val(ScrMap *m, uint64_t val) {
 static void scr_map_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrMap *m = (ScrMap *)o;
   for (size_t e = 0; e < m->nentries; e++) {
-    if (m->entries[e].live) visit(scr_map_slot_to_ptr(m->entries[e].val), ctx);
+    if (!m->entries[e].live) continue;
+    if (m->key_trace) visit(scr_map_slot_to_ptr(m->entries[e].key), ctx);
+    if (m->val_trace) visit(scr_map_slot_to_ptr(m->entries[e].val), ctx);
   }
 }
 
-/* Collector teardown: the trace visits every live VALUE (traced edges were
- * already accounted), so the complement released here is the keys. */
+/* Collector teardown releases only edges the trace did not visit. Traced
+ * keys/values were already accounted by the collector. */
 static void scr_map_gcfree(void *o) {
   ScrMap *m = (ScrMap *)o;
   for (size_t e = 0; e < m->nentries; e++) {
-    if (m->entries[e].live) scr_map_release_key(m, m->entries[e].key);
+    if (!m->entries[e].live) continue;
+    if (!m->key_trace) scr_map_release_key(m, m->entries[e].key);
+    if (!m->val_trace) scr_map_release_val(m, m->entries[e].val);
   }
   free(m->entries);
   free(m->buckets);
@@ -200,12 +204,12 @@ static void scr_map_gcfree(void *o) {
   scr_cyc_free(m);
 }
 
-ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
-                     void *(*val_retain)(void *), void (*val_release)(void *),
-                     ScrTraceFn val_trace) {
+static ScrMap *scr_map_new_full(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
+                                void *(*val_retain)(void *), void (*val_release)(void *),
+                                ScrTraceFn val_trace, ScrTraceFn key_trace) {
   ScrMap *m;
-  if (val_trace) {
-    /* Cycle-capable values can point back: collector header + trace. */
+  if (val_trace || key_trace) {
+    /* Cycle-capable values or keys can point back: collector header + trace. */
     m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
   } else {
     m = calloc(1, sizeof *m);
@@ -217,16 +221,23 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
   m->val_retain = val_retain;
   m->val_release = val_release;
   m->val_trace = val_trace;
+  m->key_trace = key_trace;
 #ifdef SCR_RC_AUDIT
   scr_live_maps++;
 #endif
   return m;
 }
 
+ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
+                    void *(*val_retain)(void *), void (*val_release)(void *),
+                    ScrTraceFn val_trace) {
+  return scr_map_new_full(key_kind, val_kind, val_retain, val_release, val_trace, NULL);
+}
+
 ScrMap *scr_map_retain(ScrMap *m) {
   if (m->rc != SIZE_MAX) {
     m->rc++;
-    if (m->val_trace) scr_cyc_mark_live(m);
+    if (m->val_trace || m->key_trace) scr_cyc_mark_live(m);
   }
   return m;
 }
@@ -234,7 +245,7 @@ ScrMap *scr_map_retain(ScrMap *m) {
 void scr_map_release(ScrMap *m) {
   if (!m || m->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--m->rc == 0) {
-    if (m->val_trace) scr_cyc_on_dead(m);
+    if (m->val_trace || m->key_trace) scr_cyc_on_dead(m);
     for (size_t e = 0; e < m->nentries; e++) {
       if (!m->entries[e].live) continue;
       scr_map_release_key(m, m->entries[e].key);
@@ -245,9 +256,9 @@ void scr_map_release(ScrMap *m) {
 #ifdef SCR_RC_AUDIT
     scr_live_maps--;
 #endif
-    if (m->val_trace) scr_cyc_free(m);
+    if (m->val_trace || m->key_trace) scr_cyc_free(m);
     else free(m);
-  } else if (m->val_trace) {
+  } else if (m->val_trace || m->key_trace) {
     scr_cyc_on_release(m); /* possible cycle root; may collect — m is done */
   }
 }
@@ -392,8 +403,10 @@ void scr_map_set_ref_f64(ScrMap *m, void *key, double v) {
   scr_map_set(m, scr_map_fnv1a((const unsigned char *)&k, 8), k, scr_map_slot_from_f64(v));
 }
 
-ScrMap *scr_set_new_ref(void *(*elem_retain)(void *), void (*elem_release)(void *)) {
-  ScrMap *m = scr_map_new(SCR_MAP_KEY_REF, SCR_MAP_VAL_F64, NULL, NULL, NULL);
+ScrMap *scr_set_new_ref(void *(*elem_retain)(void *),
+                        void (*elem_release)(void *), ScrTraceFn elem_trace) {
+  ScrMap *m = scr_map_new_full(
+      SCR_MAP_KEY_REF, SCR_MAP_VAL_F64, NULL, NULL, NULL, elem_trace);
   m->key_retain = elem_retain;
   m->key_release = elem_release;
   return m;

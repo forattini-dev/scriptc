@@ -730,6 +730,8 @@ function emitRecordCloneC(
       // collector header and their runtime trace visits every live value.
       case "map":
         return E.traceAdapterC(t.value) !== null ? "scr_map_trace_v" : null;
+      case "set":
+        return E.traceAdapterC(t.elem) !== null ? "scr_map_trace_v" : null;
       // Arrays mirror maps: cycle-capable exactly when the ELEMENT type is
       // (a record/object/union element — or a cycle-capable inner array —
       // can point back at the array holding it). Such arrays allocate with

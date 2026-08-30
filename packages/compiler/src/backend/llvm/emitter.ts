@@ -10615,8 +10615,8 @@ class LlEmitter {
     const s = B.tmp();
     if (kAcc === "ref") {
       const rc = vAdapters(this, e.type.elem);
-      this.declare(`declare ptr @scr_set_new_ref(ptr, ptr)`);
-      B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release})`);
+      this.declare(`declare ptr @scr_set_new_ref(ptr, ptr, ptr)`);
+      B.line(`${s} = call ptr @scr_set_new_ref(ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(this, e.type.elem)})`);
     } else {
       this.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
       B.line(`${s} = call ptr @scr_map_new(i32 ${mapKeyKindNum(e.type.elem)}, i32 0, ptr null, ptr null, ptr null)`);

@@ -2021,7 +2021,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const s = E.newTemp(
           e.type,
           rcAdapters
-            ? `scr_set_new_ref(&${rcAdapters.retain}, &${rcAdapters.release})`
+            ? `scr_set_new_ref(&${rcAdapters.retain}, &${rcAdapters.release}, ${E.traceArgC(e.type.elem)})`
             : `scr_map_new(${mapKeyKindC(e.type.elem)}, SCR_MAP_VAL_F64, NULL, NULL, NULL)`,
         );
         // Seeded construction (`new Set(values)`): one borrowed T[] whose

@@ -4935,9 +4935,10 @@ ScrArr *scr_set_to_arr_str(const ScrMap *s) {
 
 ScrArr *scr_set_to_arr_ref(const ScrMap *s) {
   size_t n = (size_t)scr_map_iter_count(s);
-  /* The elements' adapters ride from the set (no trace: handle elements
-   * are acyclic by the set's own construction rule). */
-  ScrArr *out = scr_arr_new_ref(s->key_retain, s->key_release, NULL, (size_t)scr_map_size(s));
+  /* The element adapters ride from the set. Callback elements carry their
+   * trace adapter into the fresh array so a snapshot can join a cycle. */
+  ScrArr *out = scr_arr_new_ref(
+      s->key_retain, s->key_release, s->key_trace, (size_t)scr_map_size(s));
   for (size_t i = 0; i < n; i++) {
     if (!scr_map_iter_live(s, (double)i)) continue;
     scr_arr_push_ref(out, scr_map_iter_key_ref(s, (double)i));

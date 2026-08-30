@@ -1588,6 +1588,7 @@ shardedTest.each(shardSelect([
   "2730-agent-posture-record-rest-tuple.ts",
   "2731-agentic-exclusive-write.ts",
   "2732-agentic-mixed-spread-min.ts",
+  "2733-agentic-callback-waiter-set.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

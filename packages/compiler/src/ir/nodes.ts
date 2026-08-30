@@ -50,11 +50,10 @@ export type IrType =
   | { kind: "map"; key: IrType; value: IrType }
   /** ES `Set<T>` — heap, refcounted, insertion-ordered. Map's sibling with
    * the value slot removed: ONE runtime representation (the backend lowers
-   * sets onto the map runtime with a constant unit value), elements are
-   * exactly Map's KEY types — f64 or string, SameValueZero. Same container
-   * fences as map (no union arms, no array elements, no map values, no sets
-   * of sets, not JSON-safe) and never cycle-capable: elements are scalars
-   * or strings, which cannot point back. */
+   * sets onto the map runtime with a constant unit value). Elements are
+   * f64/string under SameValueZero or selected reference-identity kinds,
+   * including callbacks; callback Sets are cycle-capable because a stored
+   * closure may capture its owning Set. */
   | { kind: "set"; elem: IrType }
   /** A regular expression — heap, refcounted, IMMUTABLE. No lastIndex
    * statefulness exists: /g and /y are supported only inside
@@ -550,7 +549,7 @@ export function isSupportedMapKey(t: IrType): boolean {
   return t.kind === "f64" || t.kind === "string";
 }
 
-/** The Set ELEMENT fence — Map's key fence plus the refcounted HANDLE
+/** The Set ELEMENT fence — Map's key fence plus reference-identity
  * kinds stored under identity hashing (SameValueZero for JS objects IS
  * reference identity, so a Set of server handles — portless's auxiliary-
  * server registry — is honest hashed storage; SCR_MAP_KEY_REF in the
@@ -559,9 +558,11 @@ export function isSupportedMapKey(t: IrType): boolean {
  * the child precedent's story. Symbols are identity values by DESIGN —
  * SameValueZero on a symbol IS pointer identity, so a Set of symbols (the
  * sentinel-registry idiom) is the same honest hashed storage with no
- * cycle risk at all (symbols hold only strings). */
+ * cycle risk at all (symbols hold only strings). Functions use their
+ * closure object's identity and make the Set cycle-capable: a waiter may
+ * capture the Set that retains it, so the runtime traces those key edges. */
 export function isSupportedSetElem(t: IrType): boolean {
-  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "symbol";
+  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "symbol" || t.kind === "func";
 }
 
 /** The Map VALUE fence: scalars plus every refcounted kind EXCEPT
