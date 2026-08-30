@@ -383,12 +383,13 @@ export function llFieldType(t: IrType): "double" | "i8" | "ptr" {
 
 /* ── maps and sets ────────────────────────────────────────────────────── */
 
-/** Runtime suffix for a map's KEY kind (mapKeyAccess's table): f64 with
- * SameValueZero, string content, or handle-identity REF (symbols). */
+/** Runtime suffix for a map/set key: scalar value equality or reference
+ * identity. */
 export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   if (key.kind === "f64") return "f64";
   if (key.kind === "string") return "str";
   if (key.kind === "symbol" || key.kind === "func") return "ref";
+  if (key.kind === "record") return "ref";
   if (key.kind === "netServer") return "ref"; // handle identity (Set<Server>)
   throw new LlvmUnsupportedError(`mapKey:${key.kind}`);
 }

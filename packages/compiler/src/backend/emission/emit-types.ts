@@ -384,14 +384,13 @@ export function elemAccess(elem: IrType): "f64" | "bool" | "ref" {
   return elem.kind === "f64" ? "f64" : elem.kind === "bool" ? "bool" : "ref";
 }
 
-/** Runtime suffix for a map's KEY kind (f64 with SameValueZero, or string
- * content) — the first suffix of the scr_map_* two-suffix family. */
+/** Runtime suffix for a map/set key: scalar value equality or reference
+ * identity — the first suffix of the scr_map_* two-suffix family. */
 export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   if (key.kind === "f64") return "f64";
   if (key.kind === "string") return "str";
-  // Handle-kind SET elements (identity hashing — isSupportedSetElem);
-  // Map keys proper stay f64/string.
-  if (key.kind === "netServer" || key.kind === "symbol" || key.kind === "func") return "ref";
+  // Reference-identity SET elements (isSupportedSetElem) and symbol Map keys.
+  if (key.kind === "record" || key.kind === "netServer" || key.kind === "symbol" || key.kind === "func") return "ref";
   throw new InternalCompilerError(`emitter bug: map key of ${key.kind} (frontend rejects these)`);
 }
 

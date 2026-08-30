@@ -5435,7 +5435,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             "new Set(values)",
             expr,
             "construct the Set empty and add() each value — only an array of " +
-              "already-legal elements (string or number) seeds a Set",
+              "already-legal elements (including records by identity) seeds a Set",
           );
         }
         if (mapped?.kind === "set") return { kind: "setNew", type: mapped, loc };
@@ -5445,7 +5445,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             "SC1090",
             expr,
             `Set elements of type '${L.checker.typeToString(targs[0])}' ` +
-              `(Set elements must be string or number, or a callback/symbol/server handle stored under reference identity)`,
+              `(Set elements must be string or number, or a record/callback/symbol/server handle stored under reference identity)`,
           );
         }
         L.badType(expr, tsType);

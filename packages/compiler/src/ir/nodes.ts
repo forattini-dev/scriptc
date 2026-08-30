@@ -551,18 +551,17 @@ export function isSupportedMapKey(t: IrType): boolean {
 
 /** The Set ELEMENT fence — Map's key fence plus reference-identity
  * kinds stored under identity hashing (SameValueZero for JS objects IS
- * reference identity, so a Set of server handles — portless's auxiliary-
- * server registry — is honest hashed storage; SCR_MAP_KEY_REF in the
- * runtime). netServer is the one handle admitted so far: it drops its
- * listener closures at close, so a set-in-listener cycle is temporary —
- * the child precedent's story. Symbols are identity values by DESIGN —
+ * reference identity). Records carry their generated RC/trace adapters,
+ * so a Set retaining a record that reaches back into it remains collectable.
+ * Server handles drop listener closures at close, so a set-in-listener
+ * cycle is temporary — the child precedent's story. Symbols are identity values by DESIGN —
  * SameValueZero on a symbol IS pointer identity, so a Set of symbols (the
  * sentinel-registry idiom) is the same honest hashed storage with no
  * cycle risk at all (symbols hold only strings). Functions use their
  * closure object's identity and make the Set cycle-capable: a waiter may
  * capture the Set that retains it, so the runtime traces those key edges. */
 export function isSupportedSetElem(t: IrType): boolean {
-  return isSupportedMapKey(t) || t.kind === "netServer" || t.kind === "func";
+  return isSupportedMapKey(t) || t.kind === "record" || t.kind === "netServer" || t.kind === "func";
 }
 
 /** The Map VALUE fence: scalars, checked-dynamic values, and selected

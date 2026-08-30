@@ -1720,8 +1720,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     return mapOf(key, value);
   }
   // Set<T>: Map's sibling — same provenance rule, with f64/string
-  // SameValueZero and selected reference-identity elements (callbacks,
-  // symbols, server handles). Anything else stays unmapped; the `new Set`
+  // SameValueZero and selected reference-identity elements (records,
+  // callbacks, symbols, server handles). Anything else stays unmapped; the `new Set`
   // lowering names the offending element type specifically.
   if (isStdlibInterface("Set") || isStdlibInterface("ReadonlySet")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
@@ -3854,7 +3854,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
         return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (functions, promises, and nested Maps stay out)`;
       }
       if ((container === "Set" || container === "ReadonlySet") && !isSupportedSetElem(mapped)) {
-        return `the ${container} shape is supported, but elements are limited to numbers, strings, callbacks, symbols, and supported handles — '${text(arg)}' is outside that domain`;
+        return `the ${container} shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — '${text(arg)}' is outside that domain`;
       }
     }
     // Every argument passed the per-slot checks and the type still failed:

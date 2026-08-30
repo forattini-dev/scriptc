@@ -1616,6 +1616,7 @@ shardedTest.each(shardSelect([
   "2761-define-property-on-function.ts",
   "2762-any-result-dynamic-rest-component.ts",
   "2763-symbol-unknown-resource-map.ts",
+  "2764-record-identity-set.ts",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
