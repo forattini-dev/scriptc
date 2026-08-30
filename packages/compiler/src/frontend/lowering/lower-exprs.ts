@@ -2616,12 +2616,26 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (narrowed?.kind === "bytes" && narrowed.elem === "u8") {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
-      // An `instanceof Error` narrow: the checked-dynamic tree's error encoding rebuilds a
-      // fresh %Error (name/message/code from the marker object — a COPY,
-      // the unknown boundary's stance; SEMANTICS.md 67), validated like
-      // every dyn extraction.
-      if (narrowed?.kind === "object" && narrowed.className === "%Error") {
-        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      // An `instanceof Error` (or Error-subclass) narrow: the checked-
+      // dynamic tree's error cache restores the original root Error value.
+      // For a subclass, the guard has already proved its runtime interval,
+      // so bridge from the restored root with the same checker-trusted
+      // downcast used for statically typed base-class values. This keeps
+      // custom fields available after `unknown instanceof CustomError`
+      // without ever emitting a fieldGet whose receiver is still dyn.
+      if (
+        narrowed?.kind === "object" &&
+        (narrowed.className === "%Error" || L.isSubclassOf(narrowed.className, "%Error"))
+      ) {
+        const root: IrExpr = {
+          kind: "dynCheck",
+          value: expr,
+          type: { kind: "object", className: "%Error" },
+          loc: expr.loc,
+        };
+        return narrowed.className === "%Error"
+          ? root
+          : { kind: "downcast", value: root, type: narrowed, loc: expr.loc };
       }
       return expr;
     }
