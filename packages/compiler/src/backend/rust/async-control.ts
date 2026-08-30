@@ -263,7 +263,7 @@ export class RustAsyncControlEmitter {
         : null,
       );
       if (awaited === null) {
-        if (nested !== null && ((nested.kind === "bin" || nested.kind === "toString" || nested.kind === "strConcat" ||
+        if (nested !== null && ((nested.kind === "bin" || nested.kind === "nullish" || nested.kind === "toString" || nested.kind === "strConcat" ||
           nested.kind === "seqExpr" || nested.kind === "ternary" ||
           nested.kind === "recordLit" || nested.kind === "recordClone" || nested.kind === "arrayGet" || nested.kind === "bytesNew" ||
           nested.kind === "arrIntrinsic" || nested.kind === "mapIntrinsic") || rustAsyncExpressionOperands(nested) !== null) &&

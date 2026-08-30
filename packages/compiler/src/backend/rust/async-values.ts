@@ -1,5 +1,5 @@
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { shapeHasAccessorSlots } from "../../ir/nodes.js";
+import { shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustAsyncHandlers } from "./async-control.js";
 import type { IrAwaitExpr } from "./model.js";
@@ -104,6 +104,38 @@ export class RustAsyncValueEmitter {
         this.context.line("} else {");
         this.context.pushIndent();
         this.emitAsyncValue(expr.else_, consume);
+        this.context.popIndent();
+        this.context.line("}");
+      });
+      return;
+    }
+    if (expr.kind === "nullish" && this.context.containsAsyncSuspension(expr.right)) {
+      if (expr.left.type.kind !== "union") {
+        this.context.unsupported("async nullish fallback over a non-union", expr.loc);
+      }
+      const source = this.context.union(expr.left.type.unionId, expr.loc);
+      const result = expr.type.kind === "union" ? this.context.union(expr.type.unionId, expr.loc) : null;
+      this.emitAsyncValue(expr.left, (left) => {
+        this.context.line(`match ${left} {`);
+        this.context.pushIndent();
+        source.arms.forEach((arm, tag) => {
+          const variant = `${this.context.unionName(source.id)}::${this.context.unionVariant(tag)}`;
+          this.context.line(`${variant}${this.context.isUnit(arm) ? "" : "(payload)"} => {`);
+          this.context.pushIndent();
+          if (this.context.isUnit(arm)) {
+            this.emitAsyncValue(expr.right, consume);
+          } else if (result === null) {
+            consume("payload");
+          } else {
+            const resultTag = result.arms.findIndex((candidate) => typeEquals(candidate, arm));
+            if (resultTag < 0) {
+              this.context.unsupported(`async nullish result lacks '${arm.kind}' arm`, expr.loc);
+            }
+            consume(`${this.context.unionName(result.id)}::${this.context.unionVariant(resultTag)}(payload)`);
+          }
+          this.context.popIndent();
+          this.context.line("},");
+        });
         this.context.popIndent();
         this.context.line("}");
       });
