@@ -1636,6 +1636,7 @@ shardedTest.each(shardSelect([
   "2801-http-server-max-header-size.ts",
   "2802-http-server-max-header-size-range.ts",
   "2803-http-server-max-header-size-undefined.ts",
+  "2804-http-server-max-header-size-zero.ts",
   "2697-process-chdir.ts",
   "2698-process-umask.ts",
   "2700-wasi-core.ts",

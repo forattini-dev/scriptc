@@ -5,6 +5,8 @@ pub enum JsHttpTimeout {
     String(JsString),
 }
 
+const HTTP_DEFAULT_MAX_HEADER_SIZE: usize = 16 * 1024;
+
 #[derive(Clone)]
 struct HttpRequestListener {
     invoke: Rc<dyn Fn(JsHttpRequest, JsHttpResponse)>,
@@ -255,7 +257,7 @@ pub fn http_server_new() -> JsNetServer {
                 JsHttpTimeout::Number(1_000.0),
             ],
             join_duplicate_headers: false,
-            max_header_size: 16 * 1024,
+            max_header_size: HTTP_DEFAULT_MAX_HEADER_SIZE,
             request_listeners: Vec::new(),
         });
     });
@@ -1055,12 +1057,17 @@ pub fn http_server_max_header_size_set(server: &JsNetServer, value: Option<f64>)
             "ERR_OUT_OF_RANGE",
         );
     }
+    let max_header_size = if value == 0.0 {
+        HTTP_DEFAULT_MAX_HEADER_SIZE
+    } else {
+        value as usize
+    };
     server.with_mut(|server| {
         server
             .http
             .as_mut()
             .expect("scriptc invariant: HTTP options on a net.Server")
-            .max_header_size = value as usize;
+            .max_header_size = max_header_size;
     });
 }
 

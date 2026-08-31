@@ -55,6 +55,8 @@
 #include <string.h>
 #include <time.h>
 
+#define SCR_HTTP_DEFAULT_MAX_HEADER_SIZE (16 * 1024)
+
 static void scr_http_oom(void) {
   fputs("scriptc: out of memory\n", stderr);
   abort();
@@ -2110,7 +2112,7 @@ ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, Sc
   if (!ctx) scr_http_oom();
   ctx->proto = SCR_NET_PROTO_HTTP1;
   ctx->rc = 1;
-  ctx->max_header_size = 16 * 1024;
+  ctx->max_header_size = SCR_HTTP_DEFAULT_MAX_HEADER_SIZE;
   if (handler != NULL) scr_net_ls_add(&ctx->request_ls, handler, (void *)fn, false);
   scr_net_server_set_native_conn(s, &scr_http_on_connection, ctx, &scr_http_srv_ctx_free);
   scr_net_server_set_http_ctx(s, ctx);
@@ -2151,7 +2153,9 @@ void scr_http_server_max_header_size_set(ScrNetServer *s, const ScrDyn *option) 
     return;
   }
   ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
-  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->max_header_size = (size_t)value;
+  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) {
+    ctx->max_header_size = value == 0 ? SCR_HTTP_DEFAULT_MAX_HEADER_SIZE : (size_t)value;
+  }
 }
 
 /* Late 'request' listener installs (server.on/once("request", ...)): the
