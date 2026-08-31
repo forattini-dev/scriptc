@@ -22,19 +22,19 @@ fn validate_regex_flags(flags: &str) -> String {
             'u' => 1 << 5,
             'v' => 1 << 6,
             'y' => 1 << 7,
-            _ => throw_syntax_error(format!(
+            _ => throw_syntax_error_trap(format!(
                 "Invalid flags supplied to RegExp constructor '{flags}'"
             )),
         };
         if seen & bit != 0 {
-            throw_syntax_error(format!(
+            throw_syntax_error_trap(format!(
                 "Invalid flags supplied to RegExp constructor '{flags}'"
             ));
         }
         seen |= bit;
     }
     if seen & (1 << 5) != 0 && seen & (1 << 6) != 0 {
-        throw_syntax_error(format!(
+        throw_syntax_error_trap(format!(
             "Invalid flags supplied to RegExp constructor '{flags}'"
         ));
     }

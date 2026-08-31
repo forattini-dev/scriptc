@@ -163,3 +163,26 @@ test("Rust library regular expression traps select the SC4016 teaching", async (
     "",
   ].join("\n"));
 }, 120_000);
+
+test("Rust library invalid regular expression flags select the SC4016 teaching", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "function flags(): string { return 'x'; }",
+      "export function boom(): number { return new RegExp('a', flags()).test('a') ? 1 : 0; }",
+      "console.log('flags ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4016",
+    teaching: "host-friendly flags trap\n",
+    remediation: "validate the regular expression flags before retrying",
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stdout).toBe([
+    "flags ready",
+    "sink:host-friendly flags trap",
+    "|SC4016|rt_boom|validate the regular expression flags before retrying",
+    "survived",
+    "",
+  ].join("\n"));
+}, 120_000);
