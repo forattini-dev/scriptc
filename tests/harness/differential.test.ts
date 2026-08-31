@@ -17,7 +17,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { nodeOracleExecutable, oracleCacheKeyBase } from "./oracle-environment.js";
+import { nodeOracleExecutable, nodeTransformTypesArgs, oracleCacheKeyBase } from "./oracle-environment.js";
 import { shardSelect, shardSuffix } from "./shard.js";
 
 const execFileAsync = promisify(execFile);
@@ -81,11 +81,10 @@ function wantsDynamic(file: string): boolean {
   return directiveHead(file).some((l) => /^\/\/ @dynamic\s*$/.test(l));
 }
 
-/** `// @transform-types` in the entry file's directive head: the Node
- * side runs with --experimental-transform-types — for corpus programs
- * using non-erasable TypeScript syntax (namespaces) that Node's default
- * strip-only mode refuses to parse. The transform IS the oracle there:
- * scriptc must match what Node executes under the flag. */
+/** `// @transform-types` in the entry file's directive head: corpus
+ * programs using non-erasable TypeScript syntax (namespaces) run through
+ * Node 24's native transform or the equivalent TypeScript loader on Node
+ * 26, where the native transform mode no longer exists. */
 function wantsTransformTypes(file: string): boolean {
   if (directiveHead(file).some((l) => /^\/\/ @transform-types\s*$/.test(l))) return true;
   // Enums are the other lowered construct with a runtime transform: programs
@@ -142,7 +141,7 @@ function wantsNoDeprecation(file: string): boolean {
  * transform flag). */
 function nodeOracleArgs(file: string): string[] {
   const transform = wantsTransformTypes(file)
-    ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"]
+    ? nodeTransformTypesArgs(oracleExecutable, transformTypesHook)
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
   return [...transform, ...nodep, "--import", comptimeShim, "--import", islandShim, nodeOracleFile(file)];
@@ -206,6 +205,7 @@ const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.mjs"
 // String() — the island shim defines it so Node stays the oracle for island
 // programs too; inert for the rest.
 const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).href;
+const transformTypesHook = pathToFileURL(join(import.meta.dirname, "transform-types-hook.mjs")).href;
 
 /** Entry file plus siblings for directory tests — every byte a program run
  * depends on, shared by the oracle cache key and the compile cache key.
@@ -248,6 +248,7 @@ function oracleKeyBase(): Promise<string> {
       typescriptVersion: ts5.version,
       comptimeShim: readFileSync(fileURLToPath(comptimeShim), "utf8"),
       islandShim: readFileSync(fileURLToPath(islandShim), "utf8"),
+      transformTypesHook: readFileSync(fileURLToPath(transformTypesHook), "utf8"),
       environment: process.env,
       cwd: process.cwd(),
     }),

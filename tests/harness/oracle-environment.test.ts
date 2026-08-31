@@ -57,6 +57,7 @@ test("oracle cache key invalidates when corpus output-affecting variables change
     typescriptVersion: "5.9.0",
     comptimeShim: "comptime",
     islandShim: "island",
+    transformTypesHook: "transform-types",
     cwd: "/repo",
   };
   const base = oracleCacheKeyBase({
@@ -66,4 +67,18 @@ test("oracle cache key invalidates when corpus output-affecting variables change
 
   expect(oracleCacheKeyBase({ ...inputs, environment: { NODE_ENV: "production", SCRIPTC_NEVER: "no" } })).not.toBe(base);
   expect(oracleCacheKeyBase({ ...inputs, environment: { NODE_ENV: "development", SCRIPTC_NEVER: "yes" } })).not.toBe(base);
+});
+
+test("oracle cache key invalidates when the transform-types hook changes", () => {
+  const inputs = {
+    nodeVersion: "v26.0.0",
+    typescriptVersion: "5.9.0",
+    comptimeShim: "comptime",
+    islandShim: "island",
+    environment: {},
+    cwd: "/repo",
+  };
+  expect(oracleCacheKeyBase({ ...inputs, transformTypesHook: "first" })).not.toBe(
+    oracleCacheKeyBase({ ...inputs, transformTypesHook: "second" }),
+  );
 });

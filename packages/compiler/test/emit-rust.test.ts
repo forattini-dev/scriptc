@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import ts5 from "typescript5";
 import { expect, test as vitestTest } from "vitest";
-import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
+import { nodeOracleExecutable, nodeTransformTypesArgs } from "../../../tests/harness/oracle-environment.js";
 import { parseShardSpec, shardSelect } from "../../../tests/harness/shard.js";
 import { compile } from "../src/index.js";
 import { compileRust } from "../src/backend/rust/compile.js";
@@ -32,13 +32,19 @@ function runToExit(
   env: NodeJS.ProcessEnv = process.env,
   stdin = "",
 ): Promise<ProcessOutcome> {
-  return new Promise((resolveRun) => {
+  return new Promise((resolveRun, rejectRun) => {
     const child = execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
       resolveRun({
         stdout,
         stderr,
         exitCode: error && typeof error.code === "number" ? error.code : 0,
       });
+    });
+    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      // A short-lived oracle may exit before the empty input pipe closes.
+      // Its completed process result remains authoritative; only an actual
+      // writer failure while the child is live should fail the harness.
+      if (error.code !== "EPIPE") rejectRun(error);
     });
     child.stdin?.end(stdin);
   });
@@ -79,7 +85,12 @@ async function nodeCorpusArgs(entryPath: string): Promise<string[]> {
     await rename(temporaryPath, oraclePath);
   }
   return [
-    ...(transform ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"] : []),
+    ...(transform
+      ? nodeTransformTypesArgs(
+          nodeOracleExecutable(),
+          pathToFileURL(resolve("tests/harness/transform-types-hook.mjs")).href,
+        )
+      : []),
     ...(noDeprecation ? ["--no-deprecation"] : []),
     "--import",
     pathToFileURL(resolve("tests/harness/comptime-shim.mjs")).href,

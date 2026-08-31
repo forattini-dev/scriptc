@@ -25,11 +25,13 @@ import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { nodeOracleExecutable, nodeTransformTypesArgs } from "./oracle-environment.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
+const oracleExecutable = nodeOracleExecutable();
 
 // Same corpus, same SCRIPTC_TEST_SHARD slice as differential.test.ts (the
 // two files split identically, so a shard's compile cache serves both lanes).
@@ -128,12 +130,12 @@ function comparableStderr(stderr: Buffer): Buffer {
 
 const comptimeShim = pathToFileURL(join(import.meta.dirname, "comptime-shim.mjs")).href;
 const islandShim = pathToFileURL(join(import.meta.dirname, "island-shim.mjs")).href;
+const transformTypesHook = pathToFileURL(join(import.meta.dirname, "transform-types-hook.mjs")).href;
 
-/** differential.test.ts's twin: the Node oracle runs with
- * --experimental-transform-types for corpus programs using non-erasable
- * syntax — the `// @transform-types` directive (namespaces) OR any enum
- * declaration (strip-only mode refuses to parse enums, no directive
- * needed; a pure function of the program bytes). */
+/** differential.test.ts's twin: corpus using non-erasable TypeScript
+ * syntax runs through Node 24's native transform or the TypeScript loader
+ * fallback on Node 26. The directive (namespaces) and enum discovery are
+ * pure functions of the program bytes. */
 function wantsTransformTypes(file: string): boolean {
   if (directiveHead(file).some((l) => /^\/\/ @transform-types\s*$/.test(l))) return true;
   return programInputs(file).some((f) => /\benum\s+[A-Za-z_$]/.test(readFileSync(f, "utf8")));
@@ -171,7 +173,7 @@ function wantsNoDeprecation(file: string): boolean {
 
 function nodeOracleArgs(file: string): string[] {
   const transform = wantsTransformTypes(file)
-    ? ["--experimental-transform-types", "--disable-warning=ExperimentalWarning"]
+    ? nodeTransformTypesArgs(oracleExecutable, transformTypesHook)
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
   return [...transform, ...nodep, "--import", comptimeShim, "--import", islandShim, nodeOracleFile(file)];
@@ -268,7 +270,7 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
       const [llvm, c, node] = await Promise.all([
         runBinary(llvmRes.binaryPath, []),
         runBinary(cRes.binaryPath, []),
-        runBinary("node", nodeOracleArgs(file)),
+        runBinary(oracleExecutable, nodeOracleArgs(file)),
       ]);
 
       // stdout: byte parity across all three lanes.
