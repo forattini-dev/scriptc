@@ -673,6 +673,73 @@
     }
 
     #[test]
+    fn event_loop_collects_pressured_cycles_between_microtask_callbacks() {
+        let baseline = live_heap_objects();
+        timer_queue_microtask(Box::new(|| {
+            let rooted = Gc::new(Link { next: None });
+            for _ in 0..5_000 {
+                drop(rooted.clone());
+            }
+
+            let cycle = Gc::new(Link { next: None });
+            cycle.with_mut(|link| link.next = Some(cycle.clone()));
+            drop(cycle);
+        }));
+        timer_queue_microtask(Box::new(move || {
+            assert_eq!(
+                live_heap_objects(),
+                baseline,
+                "pressure must be collected before the next callback",
+            );
+        }));
+
+        run_event_loop();
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
+    fn event_loop_collects_pressured_cycles_between_promise_checks() {
+        let calls = Rc::new(Cell::new(0));
+        let cycle = Rc::new(RefCell::new(None::<GcWeak<Link>>));
+        let handler_calls = calls.clone();
+        let handler_cycle = cycle.clone();
+        promise_set_unhandled_rejection_handler(Some(Rc::new(move |_, _| {
+            let call = handler_calls.get();
+            handler_calls.set(call + 1);
+            if call == 0 {
+                let rooted = Gc::new(Link { next: None });
+                for _ in 0..5_000 {
+                    drop(rooted.clone());
+                }
+
+                let garbage = Gc::new(Link { next: None });
+                garbage.with_mut(|link| link.next = Some(garbage.clone()));
+                *handler_cycle.borrow_mut() = Some(garbage.downgrade());
+                drop(garbage);
+            } else {
+                assert!(
+                    handler_cycle
+                        .borrow()
+                        .as_ref()
+                        .expect("first promise check must create a cycle")
+                        .upgrade()
+                        .is_none(),
+                    "pressure must be collected before the next promise check",
+                );
+            }
+        })));
+
+        drop(promise_rejected::<()>(caught_value(string("first"))));
+        drop(promise_rejected::<()>(caught_value(string("second"))));
+        run_event_loop();
+
+        assert_eq!(calls.get(), 2);
+        promise_set_unhandled_rejection_handler(None);
+        promises_finish();
+        collect_cycles();
+    }
+
+    #[test]
     fn collector_keeps_a_cycle_with_an_outside_owner() {
         let baseline = live_heap_objects();
         let rooted = Gc::new(Link { next: None });

@@ -436,6 +436,7 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             while let Some(callback) = microtask {
                 EVENT_PHASE.with(|phase| phase.set(3));
                 callback();
+                collect_cycles_if_pressured();
                 microtask = MICROTASKS.with(|tasks| tasks.borrow_mut().pop_front());
             }
             if promise_entry_failed() {
@@ -451,6 +452,7 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
         if promise_check.is_some() {
             while let Some(check) = promise_check {
                 check();
+                collect_cycles_if_pressured();
                 promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
             }
             if had_unhandled_rejection() {
