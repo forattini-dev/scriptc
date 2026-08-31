@@ -21,7 +21,7 @@ import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
-import { findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
+import { exactInstanceClassOf, findGenericMethodOn, lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, omittedArgFor, requireObjLitGenericReceiver } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../types.js";
@@ -11076,7 +11076,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * fieldSet/recordSet/accessor-call (minus value/kind) or null. */
   export function fieldTarget(L: Lowerer, access: ts.PropertyAccessExpression): FieldTarget | null {
     if (L.chainBlocked(access)) return null;
-    const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // The checker leaves `this` in an anonymous class expression as an
+    // anonymous object type. Method/constructor lowering has already
+    // established the exact nominal class, so use that proof instead of
+    // losing declared and inherited fields at assignments such as
+    // `this.name = ...` in an Error-subclass expression.
+    const exactInstance = exactInstanceClassOf(L, access.expression);
+    const receiverIr: IrType | null =
+      access.expression.kind === ts.SyntaxKind.ThisKeyword && L.currentClass
+        ? { kind: "object", className: L.currentClass.def.name }
+        : exactInstance
+          ? { kind: "object", className: exactInstance.def.name }
+          : L.mapTypeOf(L.typeOf(access.expression));
     if (receiverIr?.kind === "object") {
       const info = L.classes.get(receiverIr.className);
       if (!info) {

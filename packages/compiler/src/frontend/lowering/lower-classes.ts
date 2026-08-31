@@ -2900,11 +2900,13 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
 /** The class itself taken as a VALUE (`const X = C`, an argument, an
    * array element, a class expression's result): the classRef over the
    * per-class immortal class object. The construct thunk needs a thunk-
-   * shaped constructor, so classes whose construction is libCall-shaped —
-   * the runtime-provided builtins and anything inheriting a builtin
-   * constructor (Error/EventEmitter/stream chains complete their `new`
-   * by special rules) — are named fences here. The constructor edge is
-   * noted at every classRef: a value can always be constructed through. */
+   * shaped constructor. Runtime-provided builtins themselves remain
+   * fences. Program Error subclasses are ordinary emitted classes: their
+   * constructor function allocates the program shape and lowers super()
+   * through error.ctor, so their construct thunk is sound. EventEmitter,
+   * streams, and DOMException still have runtime-owned construction/state
+   * that cannot ride the general thunk. The constructor edge is noted at
+   * every classRef: a value can always be constructed through. */
   export function classValueRef(L: Lowerer, info: ClassInfo, blame: ts.Node): IrExpr {
     const display = info.def.name.replace(/^%|^%m\d+\./, "");
     fenceDecorationThrows(L, info, blame);
@@ -2926,9 +2928,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       );
     }
     if (
-      L.inheritsBuiltinErrorCtor(info) || L.inheritsBuiltinEmitterCtor(info) ||
+      L.inheritsBuiltinEmitterCtor(info) ||
       inheritsBuiltinStreamCtor(L, info) ||
-      (() => { for (let c = info.base; c; c = c.base) if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined) return true; return false; })()
+      (() => {
+        for (let c = info.base; c; c = c.base) {
+          if (c.builtinEmitter || c.builtinStream !== undefined || c.def.name === "%DOMException") return true;
+        }
+        return false;
+      })()
     ) {
       L.unsupported(
         "SC1090",

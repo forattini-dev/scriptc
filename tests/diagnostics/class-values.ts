@@ -21,8 +21,8 @@ class Unrelated {
 // Builtin classes as values: their construction is libCall-shaped.
 const E = Error;
 
-// Classes extending builtin bases as values (the error-message completion
-// rule has no thunk ABI).
+// Error subclasses now have ordinary class-value construct thunks: their
+// emitted constructor owns the error.ctor bridge used by super().
 class MyErr extends Error {}
 const M = MyErr;
 
