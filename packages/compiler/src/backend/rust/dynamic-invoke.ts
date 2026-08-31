@@ -480,7 +480,8 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"keys" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array, runtime::ArrayIteratorKind::Keys)),`);
     this.context.line(`"values" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array, runtime::ArrayIteratorKind::Values)),`);
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
-    this.context.line("\"toString\" | \"toLocaleString\" => runtime::throw_error(format!(\"'Array.prototype.{method}' on a dynamic value is not supported yet\")),");
+    this.context.line(`"toString" => ${this.dyn}::String(sc_dyn_to_string(&${this.dyn}::Array(array.clone()))),`);
+    this.context.line("\"toLocaleString\" => runtime::throw_error(\"'Array.prototype.toLocaleString' on a dynamic value is not supported yet\".to_owned()),");
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");
