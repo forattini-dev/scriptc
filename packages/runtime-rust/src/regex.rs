@@ -56,7 +56,7 @@ pub fn regex_new(pattern: &str, flags: &str) -> JsRegex {
     } else {
         regress::Regex::from_unicode(source.encode_utf16().map(u32::from), parsed_flags)
     }
-    .unwrap_or_else(|error| throw_syntax_error(error.to_string()));
+    .unwrap_or_else(|error| throw_syntax_error_trap(error.to_string()));
     Rc::new(RegexData {
         compiled,
         source: string(source),

@@ -16,6 +16,7 @@ struct JsErrorProperties {
 
 thread_local! {
     static ERROR_PROPERTIES: RefCell<Vec<(Weak<()>, JsErrorProperties)>> = const { RefCell::new(Vec::new()) };
+    static LIBRARY_TRAP_CODES: RefCell<Vec<(Weak<()>, &'static str)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn error_property(error: &JsError, name: bool) -> Option<JsString> {
@@ -305,6 +306,16 @@ pub fn throw_syntax_error(message: String) -> ! {
     })
 }
 
+pub fn throw_syntax_error_trap(message: String) -> ! {
+    let error = error_new("SyntaxError", Rc::from(message));
+    LIBRARY_TRAP_CODES.with(|codes| {
+        let mut codes = codes.borrow_mut();
+        codes.retain(|(identity, _)| identity.strong_count() != 0);
+        codes.push((Rc::downgrade(&error.identity), "SC4016"));
+    });
+    throw_value(error)
+}
+
 pub fn throw_range_error(message: String) -> ! {
     throw_value(JsError {
         identity: Rc::new(()),
@@ -437,6 +448,17 @@ pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
         .map(Rc::<str>::from)
 }
 
+pub fn caught_library_trap_code(caught: &Caught) -> Option<&'static str> {
+    let error = caught.value.downcast_ref::<JsError>()?;
+    LIBRARY_TRAP_CODES.with(|codes| {
+        codes
+            .borrow()
+            .iter()
+            .find(|(identity, _)| identity.as_ptr() == Rc::as_ptr(&error.identity))
+            .map(|(_, code)| *code)
+    })
+}
+
 pub fn caught_to_string(caught: &Caught) -> JsString {
     if let Some(value) = caught.value.downcast_ref::<f64>() {
         return number_to_string(*value);
@@ -493,6 +515,7 @@ pub fn error_message(error: &JsError) -> JsString {
 
 fn errors_finish() {
     ERROR_PROPERTIES.with(|properties| properties.borrow_mut().clear());
+    LIBRARY_TRAP_CODES.with(|codes| codes.borrow_mut().clear());
 }
 
 pub fn error_code(error: &JsError) -> Option<JsString> {

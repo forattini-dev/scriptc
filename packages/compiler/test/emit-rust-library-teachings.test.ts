@@ -140,3 +140,26 @@ test("Rust library typed record misses select the SC4015 teaching", async () => 
     "",
   ].join("\n"));
 }, 120_000);
+
+test("Rust library regular expression traps select the SC4016 teaching", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "function pattern(): string { return '['; }",
+      "export function boom(): number { return new RegExp(pattern()).test('x') ? 1 : 0; }",
+      "console.log('syntax ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4016",
+    teaching: "host-friendly syntax trap\n",
+    remediation: "validate the regular expression before retrying",
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stdout).toBe([
+    "syntax ready",
+    "sink:host-friendly syntax trap",
+    "|SC4016|rt_boom|validate the regular expression before retrying",
+    "survived",
+    "",
+  ].join("\n"));
+}, 120_000);
