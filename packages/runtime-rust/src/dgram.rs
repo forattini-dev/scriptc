@@ -567,28 +567,6 @@ fn dgram_dispatch_one() -> bool {
     false
 }
 
-fn dgram_pending() -> bool {
-    DGRAM_SOCKETS.with(|sockets| {
-        sockets.borrow().iter().any(|socket| {
-            socket.with(|state| {
-                state.pending_error.is_some()
-                    || state.emit_listening
-                    || state.emit_connect
-                    || (state.closing && !state.close_emitted)
-                    || !state.unrefed
-            })
-        })
-    })
-}
-
-fn dgram_wait(timeout: Option<std::time::Duration>) {
-    let interval = std::time::Duration::from_millis(1);
-    let wait = timeout.map_or(interval, |timeout| timeout.min(interval));
-    if !wait.is_zero() {
-        std::thread::sleep(wait);
-    }
-}
-
 fn dgram_finish() {
     let sockets = DGRAM_SOCKETS.with(|sockets| std::mem::take(&mut *sockets.borrow_mut()));
     for socket in sockets {
