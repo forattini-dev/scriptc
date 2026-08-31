@@ -70,6 +70,7 @@ include!("number_format.rs");
 include!("numeric_ops.rs");
 include!("network.rs");
 include!("dgram.rs");
+include!("network_wait.rs");
 include!("http.rs");
 include!("http_client.rs");
 include!("http_agent.rs");

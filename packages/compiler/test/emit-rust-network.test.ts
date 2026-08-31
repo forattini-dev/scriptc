@@ -46,9 +46,10 @@ async function runWithDelayedNetwork(
   file: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  delayMs = 50,
 ): Promise<{ stdout: string; stderr: string; elapsedMs: number }> {
   const server = createServer((socket) => {
-    setTimeout(() => socket.end("network"), 50);
+    setTimeout(() => socket.end("network"), delayMs);
   });
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once("error", rejectListen);
@@ -115,6 +116,31 @@ test("Rust TCP corpus matches Node with open stdin: 2807-event-loop-stdin-networ
   expect(node.stdout).toBe("network\n");
   expect(node.elapsedMs).toBeLessThan(1_500);
   expect(rust.elapsedMs).toBeLessThan(1_500);
+  expect(rust.stdout).toBe(node.stdout);
+  expect(rust.stderr).toBe(node.stderr);
+});
+
+test("Rust TCP waits use descriptor polling: 2809-net-poll-context-switches.ts", async () => {
+  const fixture = resolve("tests/corpus/2809-net-poll-context-switches.ts");
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-net-poll-"));
+  const result = await compile(fixture, {
+    outDir: dir,
+    outPath: join(dir, "net-poll-context-switches"),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const node = await runWithDelayedNetwork(nodeOracleExecutable(), [fixture], process.env, 750);
+  const rust = await runWithDelayedNetwork(result.binaryPath, [], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  }, 750);
+  expect(node.stdout).toBe("network true\n");
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 });

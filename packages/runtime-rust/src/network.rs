@@ -1125,31 +1125,6 @@ fn net_dispatch_one() -> bool {
         || net_socket_read_one()
 }
 
-fn net_pending() -> bool {
-    http_tls_pending()
-        || NET_TASKS.with(|tasks| !tasks.borrow().is_empty())
-        || NET_SERVERS.with(|servers| {
-            servers
-                .borrow()
-                .iter()
-                .any(|server| server.with(|server| server.listener.is_some() || server.closing))
-        })
-        || NET_SOCKETS.with(|sockets| {
-            sockets
-                .borrow()
-                .iter()
-                .any(|socket| socket.with(|socket| !socket.destroyed))
-        })
-}
-
-fn net_wait(timeout: Option<std::time::Duration>) {
-    let polling_interval = std::time::Duration::from_millis(1);
-    let wait = timeout.map_or(polling_interval, |timeout| timeout.min(polling_interval));
-    if !wait.is_zero() {
-        std::thread::sleep(wait);
-    }
-}
-
 fn net_finish() {
     http_tls_finish();
     NET_TASKS.with(|tasks| tasks.borrow_mut().clear());
