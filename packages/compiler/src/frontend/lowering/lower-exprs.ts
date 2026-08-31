@@ -11081,13 +11081,22 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // established the exact nominal class, so use that proof instead of
     // losing declared and inherited fields at assignments such as
     // `this.name = ...` in an Error-subclass expression.
-    const exactInstance = exactInstanceClassOf(L, access.expression);
+    const mappedReceiver = L.mapTypeOf(L.typeOf(access.expression));
+    // Exact-new provenance refines one NOMINAL class receiver to a more
+    // specific nominal class (`const b: Base = new Derived()`). It must not
+    // undo a real representation boundary: an annotated record initialized
+    // from a class has already been copy-projected into that record, so its
+    // later fields are recordGet targets rather than reads through the
+    // initializer's discarded class identity.
+    const exactInstance = mappedReceiver?.kind === "object"
+      ? exactInstanceClassOf(L, access.expression)
+      : null;
     const receiverIr: IrType | null =
       access.expression.kind === ts.SyntaxKind.ThisKeyword && L.currentClass
         ? { kind: "object", className: L.currentClass.def.name }
         : exactInstance
           ? { kind: "object", className: exactInstance.def.name }
-          : L.mapTypeOf(L.typeOf(access.expression));
+          : mappedReceiver;
     if (receiverIr?.kind === "object") {
       const info = L.classes.get(receiverIr.className);
       if (!info) {
