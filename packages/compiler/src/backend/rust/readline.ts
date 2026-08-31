@@ -13,6 +13,21 @@ export function emitRustReadlineCall(
   if (expr.fn === "rl.close" && expr.args.length === 1 && handle?.type.kind === "f64") {
     return `runtime::readline_close(${context.emitExpr(handle)})`;
   }
+  if (expr.fn === "rl.nextLine" && expr.args.length === 1 &&
+      handle?.type.kind === "f64" && expr.type.kind === "promise" &&
+      expr.type.inner.kind === "union") {
+    const union = context.union(expr.type.inner.unionId, expr.loc);
+    const stringTag = union.arms.findIndex((arm) => arm.kind === "string");
+    const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+    if (union.arms.length !== 2 || stringTag < 0 || undefinedTag < 0) {
+      context.unsupported("readline async iterator result shape", expr.loc);
+    }
+    const name = context.unionName(union.id);
+    const handleValue = context.nextTemporary();
+    const result = context.nextTemporary();
+    const target = context.nextTemporary();
+    return `{ let ${handleValue} = ${context.emitExpr(handle)}; let ${result}: runtime::JsPromise<${name}> = runtime::promise_new(); let ${target} = ${result}.clone(); runtime::readline_next_line(${handleValue}, Box::new(move |sc_line| { let sc_value = match sc_line { Some(sc_line) => ${name}::${context.unionVariant(stringTag)}(sc_line), None => ${name}::${context.unionVariant(undefinedTag)}, }; let _ = runtime::promise_fulfill(&${target}, sc_value); })); ${result} }`;
+  }
   if (expr.fn === "rl.onClose" && expr.args.length === 2 &&
       handle?.type.kind === "f64" && query?.type.kind === "func" &&
       query.type.params.length === 0 && query.type.ret.kind === "void") {

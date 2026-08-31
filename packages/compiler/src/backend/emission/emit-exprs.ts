@@ -6939,6 +6939,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_rl_on_close(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
+          case "rl.nextLine":
+            // The native async-iterator slice currently belongs to the Rust
+            // runtime. Keep the C switch exhaustive while refusing an
+            // accidental C emission loudly instead of generating a wrong
+            // promise representation.
+            throw new InternalCompilerError("C emitter does not implement rl.nextLine yet");
           // The StringDecoder trio (scr_bytes.c): pure functions over the
           // canonical encoding name + packed-f64 pending state; never
           // throw.

@@ -3913,7 +3913,7 @@ export type IrLibFn =
   | "strdec.write"
   | "strdec.next"
   | "strdec.end"
-  /** node:readline's question/close slice (scr_readline.c, linked under
+  /** node:readline's question/close/async-iterator slice (scr_readline.c, linked under
    * the events gate — these fns imply moduleUsesProcessEvents). The
    * interface value is an f64 handle (the Timeout-id precedent).
    * rl.create: [] → f64 — createInterface({ input: process.stdin,
@@ -3926,12 +3926,14 @@ export type IrLibFn =
    * interface (may-throw). rl.close: [handle] — fires 'close' listeners
    * SYNCHRONOUSLY (Node's inline emit) and detaches the consumer (the
    * loop stops waiting on fd 0). rl.onClose: [handle, cb] — a zero-arg
-   * listener (moves); stdin EOF closes every open interface with the
-   * buffered partial line DISCARDED, like Node. */
+   * listener (moves). rl.nextLine: [handle] → Promise<string | undefined>
+   * yields one line or the closed/EOF sentinel; the buffered partial line
+   * is delivered before EOF, like Node. */
   | "rl.create"
   | "rl.question"
   | "rl.close"
   | "rl.onClose"
+  | "rl.nextLine"
   /** node:timers/promises — the promisified pair (scr_async.c, beside
    * the timer heap they ride): tp.setTimeout: [ms] → a pending void
    * promise a one-shot heap timer fulfills (the loop's timer phase, FIFO
@@ -6166,6 +6168,7 @@ const PROCESS_EVENT_LIB_FNS: ReadonlySet<string> = new Set([
   "rl.question",
   "rl.close",
   "rl.onClose",
+  "rl.nextLine",
 ]);
 
 /** True when the module uses the process-events surface — the link switch

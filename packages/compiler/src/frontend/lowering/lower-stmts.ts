@@ -21,7 +21,7 @@ import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerHttpResPropertyAssignment, lowerHttpServerTimeoutAssignment, lowerServerCloseOverrideAssignment } from "./lower-server.js";
-import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, textCodecBindingDecl } from "./lower-builtins.js";
+import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, isReadlineTyped, textCodecBindingDecl } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, isMatchSliceType, lowerAbsenceProbe, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, runtimeOptionalTrueIds, symbolFieldInfo, withRuntimeOptionalNarrowed } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -6058,6 +6058,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       ) {
         return lowerForAwaitStdin(L, stmt);
       }
+      if (isReadlineTyped(L, stmt.expression)) {
+        return lowerForAwaitReadline(L, stmt);
+      }
       // Readable streams (the readableAsyncIterator surface): the mapped
       // receiver class roots at a readable-sided stream class.
       {
@@ -7653,6 +7656,107 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         kind: "while",
         cond: { kind: "boolLit", value: true, type: BOOL, loc },
         body: [...head, ...body],
+        loc,
+      };
+    } finally {
+      L.scopes.pop();
+    }
+  }
+
+/** `for await (const line of readlineInterface)` — the native readline
+   * async iterator. Each pass registers one pending line read and awaits a
+   * `string | undefined` promise; undefined is the closed/EOF sentinel and
+   * an empty string remains an ordinary line. The interface handle evaluates
+   * once before the loop, while every line binding is fresh per iteration. */
+  function lowerForAwaitReadline(L: Lowerer, stmt: ts.ForOfStatement): IrStmt {
+    if (!L.ctx.isAsync) {
+      L.unsupported("SC1090", stmt, "top-level 'for await' (await outside async functions)");
+    }
+    if (!ts.isVariableDeclarationList(stmt.initializer)) {
+      L.unsupported(
+        "SC1090",
+        stmt.initializer,
+        "for-await over a pre-declared variable (declare the loop variable in the loop: for await (const line of ...))",
+      );
+    }
+    const list = stmt.initializer;
+    const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+    const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+    if (!isConst && !isLet) L.unsupported("SC1030", list, "'var' loop bindings in 'for await' (use const)");
+    const decl = list.declarations[0]!;
+    if (!ts.isIdentifier(decl.name)) L.unsupported("SC1031", decl.name);
+    const loc = locOf(stmt);
+    const lineT: IrType = { kind: "union", unionId: L.unions.intern([STRING, UNDEFINED_T]) };
+    const promiseT: IrType = { kind: "promise", inner: lineT };
+    const stringTag = L.armTag(lineT.unionId, STRING);
+    const undefinedTag = L.armTag(lineT.unionId, UNDEFINED_T);
+    L.scopes.push(new Map());
+    try {
+      const receiver = L.declareHiddenLocal("%faReadline", F64);
+      const next = L.declareHiddenLocal("%readlineNext", promiseT);
+      const raw = L.declareHiddenLocal("%readlineLine", lineT);
+      const line = L.declareLocal(decl.name, decl.name.text, STRING, isLet);
+      const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement));
+      const receiverRef: IrExpr = { kind: "varRef", localId: receiver.id, type: F64, loc };
+      const rawRef: IrExpr = { kind: "varRef", localId: raw.id, type: lineT, loc };
+      return {
+        kind: "block",
+        body: [
+          { kind: "varDecl", localId: receiver.id, init: L.lowerExpr(stmt.expression), loc },
+          {
+            kind: "while",
+            cond: { kind: "boolLit", value: true, type: BOOL, loc },
+            body: [
+              {
+                kind: "varDecl",
+                localId: next.id,
+                init: { kind: "libCall", fn: "rl.nextLine", args: [receiverRef], type: promiseT, loc },
+                loc,
+              },
+              {
+                kind: "varDecl",
+                localId: raw.id,
+                init: {
+                  kind: "awaitExpr",
+                  value: { kind: "varRef", localId: next.id, type: promiseT, loc },
+                  type: lineT,
+                  loc,
+                },
+                loc,
+              },
+              {
+                kind: "if",
+                cond: {
+                  kind: "unionIsTag",
+                  unionId: lineT.unionId,
+                  tag: undefinedTag,
+                  negated: false,
+                  value: rawRef,
+                  type: BOOL,
+                  loc,
+                },
+                then: [{ kind: "break", loc }],
+                else_: null,
+                loc,
+              },
+              {
+                kind: "varDecl",
+                localId: line.id,
+                init: {
+                  kind: "unionNarrow",
+                  unionId: lineT.unionId,
+                  tag: stringTag,
+                  value: rawRef,
+                  type: STRING,
+                  loc,
+                },
+                loc,
+              },
+              ...body,
+            ],
+            loc,
+          },
+        ],
         loc,
       };
     } finally {

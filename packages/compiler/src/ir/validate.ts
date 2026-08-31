@@ -1073,6 +1073,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "rl.question": { argTypes: [F64, STRING, null], result: VOID },
   "rl.close": { argTypes: [F64], result: VOID },
   "rl.onClose": { argTypes: [F64, null], result: VOID },
+  // Result is the module's interned Promise<string | undefined>; checked
+  // structurally in the libCall case.
+  "rl.nextLine": { argTypes: [F64], result: VOID },
   "tp.setTimeout": { argTypes: [F64], result: { kind: "promise", inner: VOID } },
   "tp.setImmediate": { argTypes: [], result: { kind: "promise", inner: VOID } },
   "dc.channel": { argTypes: [STRING], result: F64 },
@@ -4561,6 +4564,15 @@ function validateFunction(
           if (!ok) {
             err(`libCall error.code must return the 'string | undefined' union`, e.loc);
           }
+          break;
+        }
+        if (e.fn === "rl.nextLine") {
+          const inner = e.type.kind === "promise" ? e.type.inner : undefined;
+          const def = inner?.kind === "union" ? unions.get(inner.unionId) : undefined;
+          const ok = def && def.arms.length === 2 &&
+            def.arms.some((arm) => arm.kind === "string") &&
+            def.arms.some((arm) => arm.kind === "undefinedT");
+          if (!ok) err("libCall rl.nextLine must return Promise<string | undefined>", e.loc);
           break;
         }
         if (

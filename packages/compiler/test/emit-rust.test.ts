@@ -30,6 +30,7 @@ function runToExit(
   file: string,
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
+  stdin = "",
 ): Promise<ProcessOutcome> {
   return new Promise((resolveRun) => {
     const child = execFile(file, args, { encoding: "utf8", env }, (error, stdout, stderr) => {
@@ -39,7 +40,7 @@ function runToExit(
         exitCode: error && typeof error.code === "number" ? error.code : 0,
       });
     });
-    child.stdin?.end();
+    child.stdin?.end(stdin);
   });
 }
 
@@ -1693,6 +1694,7 @@ shardedTest.each(shardSelect([
   "2791-js-promise-resolve-void.mjs",
   "2792-js-catch-instanceof.mjs",
   "2793-js-buffer-instanceof-guard.mjs",
+  "2794-readline-async-iterator.mjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
@@ -1739,9 +1741,10 @@ shardedTest.each(shardSelect([
   }
   const env = { ...process.env, SCRIPTC_TEST_ENV: "scriptc-test-value" };
   const nodeArgs = await nodeCorpusArgs(entryPath);
+  const stdin = fixture === "2794-readline-async-iterator.mjs" ? "alpha\r\n\nomega" : "";
   const [node, rust] = await Promise.all([
-    runToExit(nodeOracleExecutable(), nodeArgs, env),
-    runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }),
+    runToExit(nodeOracleExecutable(), nodeArgs, env, stdin),
+    runToExit(result.binaryPath, [], { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" }, stdin),
   ]);
   const directive = (await readFile(entryPath, "utf8")).split("\n", 2)
     .map((line) => /^\/\/ @exit:\s*(\d+)\s*$/u.exec(line)?.[1])

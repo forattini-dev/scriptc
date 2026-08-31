@@ -3118,7 +3118,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * provenance + the enclosing "readline" ambient module — the name alone
    * is too generic). The interface maps to an f64 handle, so the IR type
    * cannot discriminate it from a plain number. */
-  function isReadlineTyped(L: Lowerer, node: ts.Expression): boolean {
+  export function isReadlineTyped(L: Lowerer, node: ts.Expression): boolean {
     const t = L.checker.getTypeAtLocation(node);
     const sym = t.getAliasSymbol() ?? t.getSymbol();
     if (sym?.name !== "Interface") return false;

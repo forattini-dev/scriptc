@@ -1944,6 +1944,7 @@ declare module "readline" {
     question(query: string, callback: (answer: string) => void): void;
     close(): void;
     on(event: "close", listener: () => void): void;
+    [Symbol.asyncIterator](): AsyncIterableIterator<string>;
   }
   export function createInterface(options: {
     input: unknown;
