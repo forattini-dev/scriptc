@@ -90,6 +90,30 @@ function emitGeneratorValue(
     });
     return;
   }
+  if (expr.kind === "logical") {
+    emitGeneratorValue(fn, expr.left, context, flow, (leftValue) => {
+      const left = context.nextName("sc_generator_logical");
+      context.line(`let ${left} = ${leftValue};`);
+      const truthy: IrExpr = {
+        kind: "toBool",
+        operand: expr.left,
+        type: { kind: "bool" },
+        loc: expr.loc,
+      };
+      const condition = context.emitExprWithValues(truthy, [[expr.left, `${left}.clone()`]]);
+      const takeRight = expr.op === "&&" ? condition : `!(${condition})`;
+      context.line(`if ${takeRight} {`);
+      context.pushIndent();
+      emitGeneratorValue(fn, expr.right, context, flow, consume);
+      context.popIndent();
+      context.line("} else {");
+      context.pushIndent();
+      consume(`${left}.clone()`);
+      context.popIndent();
+      context.line("}");
+    });
+    return;
+  }
   if (expr.kind === "dynCheck" && containsYield(expr.value)) {
     emitGeneratorValue(fn, expr.value, context, flow, (value) => {
       consume(context.emitExprWithValues(expr, [[expr.value, value]]));

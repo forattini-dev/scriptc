@@ -270,6 +270,10 @@ export const JS_RELAXED_TSC_CODES: ReadonlySet<number> = new Set([
   // construct signatures, index reads over shapes with no index
   // signature — typeof globalThis)
   2683, 7005, 7006, 7008, 7009, 7010, 7015, 7017, 7019, 7022, 7023, 7024, 7031, 7034, 7053,
+  // A yield nested in a JavaScript expression asks for the generator's
+  // unannotated `next()` input type. Plain JS need not carry a JSDoc return
+  // annotation; lowering and the selected backend check its actual uses.
+  7057,
   // strict-null narrowing demands (possibly null/undefined receivers)
   2531, 2532, 2533, 18047, 18048, 18049,
   // assignability/arity/callability of dynamic call shapes (valid JS,

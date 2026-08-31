@@ -1689,6 +1689,7 @@ shardedTest.each(shardSelect([
   "2787-dyn-array-iterator-alias.cjs",
   "2788-dyn-array-iterator-for-of.cjs",
   "2789-crypto-hash-one-shot.ts",
+  "2790-js-generator-inference.mjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",
