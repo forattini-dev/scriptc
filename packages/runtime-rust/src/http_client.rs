@@ -95,53 +95,37 @@ fn http_client_dispatch_close(request: &JsHttpClientRequest) {
     }
 }
 
-fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) {
+/// Drains buffered response bytes into the response stream. Returns false
+/// when the framing is unrecoverable, which the caller reports as a parse
+/// error rather than stalling the connection.
+fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) -> bool {
     loop {
         let next = {
             let mut connection = connection.borrow_mut();
             let Some(response) = connection.response.clone() else {
-                return;
+                return true;
             };
             if connection.chunked {
-                if connection.chunk_remaining.is_none() {
-                    let Some(line_end) = connection
-                        .buffer
-                        .windows(2)
-                        .position(|window| window == b"\r\n")
-                    else {
-                        return;
-                    };
-                    let Ok(line) = std::str::from_utf8(&connection.buffer[..line_end]) else {
-                        return;
-                    };
-                    let Some(size) = usize::from_str_radix(line.split(';').next().unwrap_or(""), 16).ok() else {
-                        return;
-                    };
-                    connection.buffer.drain(..line_end + 2);
-                    if size == 0 {
-                        if connection.buffer.len() >= 2 {
-                            connection.buffer.drain(..2);
-                        }
-                        Some((response, Vec::new(), true))
-                    } else {
-                        connection.chunk_remaining = Some(size);
-                        None
+                let state = &mut *connection;
+                match http_chunked_step(
+                    &mut state.buffer,
+                    &mut state.chunk_remaining,
+                    HTTP_MAX_CHUNK_LINE,
+                ) {
+                    HttpChunkStep::NeedMore => return true,
+                    HttpChunkStep::Data(body) => Some((response, body, false)),
+                    HttpChunkStep::Done => Some((response, Vec::new(), true)),
+                    HttpChunkStep::Bad => {
+                        connection.buffer.clear();
+                        connection.response = None;
+                        return false;
                     }
-                } else {
-                    let size = connection.chunk_remaining.expect("checked chunk size");
-                    if connection.buffer.len() < size + 2 {
-                        return;
-                    }
-                    let body = connection.buffer.drain(..size).collect();
-                    connection.buffer.drain(..2);
-                    connection.chunk_remaining = None;
-                    Some((response, body, false))
                 }
             } else if let Some(remaining) = connection.body_remaining {
                 if remaining == 0 {
                     Some((response, Vec::new(), true))
                 } else if connection.buffer.is_empty() {
-                    return;
+                    return true;
                 } else {
                     let take = remaining.min(connection.buffer.len());
                     let body = connection.buffer.drain(..take).collect();
@@ -149,7 +133,7 @@ fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) {
                     Some((response, body, remaining == take))
                 }
             } else if connection.buffer.is_empty() {
-                return;
+                return true;
             } else {
                 let body = std::mem::take(&mut connection.buffer);
                 Some((response, body, false))
@@ -163,7 +147,7 @@ fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) {
         }
         if finish {
             http_request_finish(&response);
-            return;
+            return true;
         }
     }
 }
@@ -221,7 +205,13 @@ fn http_client_feed(
     if let Some((request, response)) = created {
         http_client_dispatch_response(&request, &response);
     }
-    http_client_drain(connection);
+    if !http_client_drain(connection) {
+        let socket = request.with(|request| request.socket.clone());
+        if let Some(socket) = socket {
+            net_socket_destroy(&socket);
+        }
+        http_client_dispatch_error(request, error_new("Error", string("Parse Error")));
+    }
 }
 
 fn http_client_eof(connection: &Rc<RefCell<HttpClientConnection>>) {

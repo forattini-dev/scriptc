@@ -74,7 +74,9 @@ include!("network.rs");
 include!("dgram.rs");
 include!("network_wait.rs");
 include!("dgram_wait.rs");
+include!("http_framing.rs");
 include!("http.rs");
+include!("http_server.rs");
 include!("http_client.rs");
 include!("http_agent.rs");
 include!("tls_ca.rs");
@@ -97,6 +99,7 @@ mod tests {
     include!("tests/zlib.rs");
     include!("tests/inspect.rs");
     include!("tests/net_and_http.rs");
+    include!("tests/http_framing.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("tests/tls.rs");
