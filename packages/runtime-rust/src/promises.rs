@@ -31,9 +31,43 @@ where
 
 type PromiseReaction<T> = Box<dyn FnOnce(Result<T, Caught>)>;
 type PromiseFinalizer = Box<dyn Fn(bool) -> bool>;
+type AsyncTrampolineTask = Box<dyn FnOnce()>;
 
 thread_local! {
     static PROMISE_FINALIZERS: RefCell<(usize, Vec<PromiseFinalizer>)> = RefCell::new((0, Vec::new()));
+    static ASYNC_TRAMPOLINES: RefCell<HashMap<usize, VecDeque<AsyncTrampolineTask>>> = RefCell::new(HashMap::new());
+}
+
+struct AsyncTrampolineGuard(usize);
+
+impl Drop for AsyncTrampolineGuard {
+    fn drop(&mut self) {
+        ASYNC_TRAMPOLINES.with(|slots| {
+            slots.borrow_mut().remove(&self.0);
+        });
+    }
+}
+
+pub fn async_trampoline(key: usize, task: AsyncTrampolineTask) {
+    let should_drain = ASYNC_TRAMPOLINES.with(|slots| {
+        let mut slots = slots.borrow_mut();
+        if let Some(queue) = slots.get_mut(&key) {
+            queue.push_back(task);
+            false
+        } else {
+            slots.insert(key, VecDeque::from([task]));
+            true
+        }
+    });
+    if !should_drain {
+        return;
+    }
+    let _guard = AsyncTrampolineGuard(key);
+    while let Some(task) = ASYNC_TRAMPOLINES.with(|slots| {
+        slots.borrow_mut().get_mut(&key).and_then(VecDeque::pop_front)
+    }) {
+        task();
+    }
 }
 
 enum PromiseState<T: HeapValue> {

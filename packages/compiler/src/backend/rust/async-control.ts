@@ -1,6 +1,7 @@
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
 import { emitAwaitDependency } from "./async-await.js";
+import { asyncTrampolineCall } from "./async-trampoline.js";
 import type { IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncProtectedWhile } from "./async-protected-loop.js";
@@ -399,10 +400,10 @@ export class RustAsyncControlEmitter {
         `${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}>`
       ),
     ];
-    const call = () => `${helper}(${[
+    const call = () => asyncTrampolineCall(this.context, helper, [
       `${result}.clone()`,
       ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
-    ].join(", ")});`;
+    ]);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
     this.withAsyncLocals(new Set(loopLocals), () => {
@@ -451,10 +452,13 @@ export class RustAsyncControlEmitter {
         `${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}>`
       ),
     ];
-    const call = `${helper}(${[
+    const args = [
       `${result}.clone()`,
       ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
-    ].join(", ")});`;
+    ];
+    const call = stmt.cond.kind === "boolLit" && stmt.cond.value
+      ? `${helper}(${args.join(", ")});`
+      : asyncTrampolineCall(this.context, helper, args);
 
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
@@ -514,12 +518,12 @@ export class RustAsyncControlEmitter {
         `${mangleLocal(candidate.id)}: runtime::JsCell<${this.context.rustType(candidate.type, stmt.loc)}>`
       ),
     ];
-    const call = (nextIndex: string) => `${helper}(${[
+    const call = (nextIndex: string) => asyncTrampolineCall(this.context, helper, [
       `${result}.clone()`,
       `${array}.clone()`,
       nextIndex,
       ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
-    ].join(", ")});`;
+    ]);
 
     this.context.line(`let ${array} = ${this.context.emitExpr(stmt.iterable)};`);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
