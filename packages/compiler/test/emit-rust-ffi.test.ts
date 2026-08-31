@@ -402,7 +402,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
   expect(run.stderr).toBe("");
 });
 
-test("Rust executables marshal retained callbacks from a foreign native thread", async () => {
+test("Rust executables marshal retained callbacks from a foreign native thread without starving child events", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-"));
   const nativeSource = join(dir, "native.c");
   const nativeObject = join(dir, "native.o");
@@ -421,7 +421,7 @@ test("Rust executables marshal retained callbacks from a foreign native thread",
     "static pthread_t worker;",
     "static void *run_worker(void *unused) {",
     "  (void)unused;",
-    "  struct timespec delay = {0, 10 * 1000 * 1000};",
+    "  struct timespec delay = {1, 0};",
     "  (void)nanosleep(&delay, 0);",
     "  for (int i = 1; i <= 3; i++) {",
     "    char label[] = \"foreign-copy\";",
@@ -470,6 +470,7 @@ test("Rust executables marshal retained callbacks from a foreign native thread",
     system_libraries: [],
   }));
   await writeFile(entryPath, [
+    "import { spawn } from 'node:child_process';",
     "declare function nativeForeignStart(callback: (value: number, label: string) => void): void;",
     "declare function nativeForeignStop(callback: (value: number, label: string) => void): void;",
     "const events: string[] = [];",
@@ -480,7 +481,10 @@ test("Rust executables marshal retained callbacks from a foreign native thread",
     "    console.log(events.join('|'));",
     "  }",
     "};",
+    "const startedAt = Date.now();",
     "nativeForeignStart(tick);",
+    "const child = spawn('sh', ['-c', 'sleep 0.05'], { stdio: 'ignore' });",
+    "child.on('exit', () => console.log('child', Date.now() - startedAt < 750));",
     "",
   ].join("\n"));
 
@@ -498,7 +502,7 @@ test("Rust executables marshal retained callbacks from a foreign native thread",
   if (!result.ok) return;
 
   const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
-  expect(run.stdout).toBe("1:foreign-copy|2:foreign-copy|3:foreign-copy\n");
+  expect(run.stdout).toBe("child true\n1:foreign-copy|2:foreign-copy|3:foreign-copy\n");
   expect(run.stderr).toBe("");
 });
 
