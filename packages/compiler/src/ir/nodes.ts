@@ -4159,6 +4159,9 @@ export type IrLibFn =
    * yields the undefined arm, exactly Node's missing `.columns`. Never
    * throws. */
   | "process.columns"
+  /** Terminal height over an fd literal (1/2), with the same undefined
+   * semantics as process.columns on non-TTY streams. */
+  | "process.rows"
   /** String surface with scr_lib.c implementations. fromCharCode takes
    * ONE f64[] arg (the frontend packs plain arguments into an array
    * literal, or forwards a whole-array spread — the path.join
@@ -7065,6 +7068,7 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["process.threadCpu", "the thread CPU clock (process.threadCpuUsage)"],
   ["process.isTTY", "terminal attachment (isTTY)"],
   ["process.columns", "terminal geometry (columns)"],
+  ["process.rows", "terminal geometry (rows)"],
   ["process.kill", "process authority (kill)"],
   ["process.umask", "process authority (umask)"],
   ["process.exit", "process authority (exit)"],

@@ -2853,6 +2853,24 @@ double scr_process_columns(double fd) {
 #endif
 }
 
+/* Terminal height for process.stdout/stderr.rows. This deliberately mirrors
+ * scr_process_columns, including Node's undefined result on non-TTY streams. */
+double scr_process_rows(double fd) {
+  if (!isatty((int)fd)) return -1;
+#ifdef _WIN32
+  HANDLE h = (HANDLE)_get_osfhandle((int)fd);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  if (h == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo(h, &info)) return -1;
+  return (double)(info.srWindow.Bottom - info.srWindow.Top + 1);
+#elif defined(__wasi__)
+  return -1;
+#else
+  struct winsize ws;
+  if (ioctl((int)fd, TIOCGWINSZ, &ws) != 0) return -1;
+  return (double)ws.ws_row;
+#endif
+}
+
 /* process.stdin.setRawMode(mode). TTY stdin: libuv's UV_TTY_MODE_RAW
  * termios flag set — exactly what Node's setRawMode(true) applies — and
  * setRawMode(false) restores the termios saved at the first raw entry

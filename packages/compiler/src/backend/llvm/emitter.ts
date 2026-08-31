@@ -14312,7 +14312,7 @@ class LlEmitter {
       B.line(`${t} = call ptr @${sym}(ptr ${v.name})`);
       return this.own({ name: t, type: e.type });
     }
-    if (e.fn === "process.envGet" || e.fn === "process.columns") {
+    if (e.fn === "process.envGet" || e.fn === "process.columns" || e.fn === "process.rows") {
       // getenv(3) / ioctl(TIOCGWINSZ): the runtime answers a +1 string or
       // NULL (a width or a negative sentinel); the union construction is
       // type-directed HERE — present wraps the value arm, absent yields
@@ -14336,8 +14336,9 @@ class LlEmitter {
         B.line(`${raw} = call ptr @scr_env_get(ptr ${args[0]!.name})`);
         B.line(`${present} = icmp ne ptr ${raw}, null`);
       } else {
-        this.declare(`declare double @scr_process_columns(double)`);
-        B.line(`${raw} = call double @scr_process_columns(double ${args[0]!.name})`);
+        const runtimeFn = e.fn === "process.columns" ? "scr_process_columns" : "scr_process_rows";
+        this.declare(`declare double @${runtimeFn}(double)`);
+        B.line(`${raw} = call double @${runtimeFn}(double ${args[0]!.name})`);
         B.line(`${present} = fcmp oge double ${raw}, ${f64Lit(0)}`);
       }
       B.condBr(present, lp, la);

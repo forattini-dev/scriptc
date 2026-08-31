@@ -2287,6 +2287,7 @@ void scr_process_stdin_set_raw_mode(bool raw);
  * union's number arm and -1 into its undefined arm (Node's non-TTY
  * `.columns` is undefined). Never throws. */
 double scr_process_columns(double fd);
+double scr_process_rows(double fd);
 
 /* Stats values (statSync / fs.promises.stat): an immutable snapshot of
  * stat(2) — follows symlinks, like Node's stat family. scr_fs_stat

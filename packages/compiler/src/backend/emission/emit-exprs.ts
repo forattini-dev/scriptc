@@ -7079,22 +7079,24 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_read_fd_bytes(${arg(0)})`);
           case "process.isTTY":
             return finish(`scr_process_is_tty(${arg(0)})`);
-          case "process.columns": {
+          case "process.columns":
+          case "process.rows": {
             // ioctl(TIOCGWINSZ): a non-negative width wraps the f64 arm;
             // a non-TTY stream (or an ioctl refusal) comes back negative
             // and yields the interned undefined-arm instance — Node's
             // missing `.columns`. Type-directed union construction, like
             // process.envGet.
             if (e.type.kind !== "union") {
-              throw new InternalCompilerError("emitter bug: process.columns result is not a union");
+              throw new InternalCompilerError(`emitter bug: ${e.fn} result is not a union`);
             }
             const def = E.unionsById.get(e.type.unionId);
             const f64Tag = def ? def.arms.findIndex((a) => a.kind === "f64") : -1;
             const undefTag = undefinedArmTag(e.type, E.unionsById);
             if (f64Tag < 0 || undefTag < 0) {
-              throw new InternalCompilerError("emitter bug: process.columns union lacks its arms");
+              throw new InternalCompilerError(`emitter bug: ${e.fn} union lacks its arms`);
             }
-            const w = E.newTemp(F64, `scr_process_columns(${arg(0)})`);
+            const runtimeFn = e.fn === "process.columns" ? "scr_process_columns" : "scr_process_rows";
+            const w = E.newTemp(F64, `${runtimeFn}(${arg(0)})`);
             const present = `scr_union_new_f64(${f64Tag}, ${w.name})`;
             const absent = E.unitInstanceRef(e.type.unionId, undefTag);
             return E.newTemp(e.type, `${w.name} >= 0 ? ${present} : ${absent}`);

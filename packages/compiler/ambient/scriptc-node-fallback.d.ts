@@ -213,11 +213,15 @@ declare var process: {
     write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean;
     write(data: string | Uint8Array, encoding: BufferEncoding, callback?: (error?: Error | null) => void): boolean;
     readonly isTTY: boolean;
+    readonly columns?: number;
+    readonly rows?: number;
   };
   stderr: {
     write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean;
     write(data: string | Uint8Array, encoding: BufferEncoding, callback?: (error?: Error | null) => void): boolean;
     readonly isTTY: boolean;
+    readonly columns?: number;
+    readonly rows?: number;
   };
   /* The stdin stream, the piped-input slice: the TTY probe, the
    * data/end/error events (on and once — a 'data' listener keeps the
