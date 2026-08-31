@@ -25,6 +25,7 @@ attempt('{"a":1,}', "trailing comma");
 attempt("[1 2]", "missing comma");
 attempt('"unterminated', "unterminated string");
 attempt('"bad \\q escape"', "bad escape");
+attempt('"\\u123é"', "split utf8 unicode escape");
 attempt("01", "leading zero");
 attempt("1.", "bare fraction dot");
 attempt("1e", "missing exponent");
