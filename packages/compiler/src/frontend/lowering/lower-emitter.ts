@@ -505,7 +505,25 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
   const member = access.name.text;
   const loc = locOf(call);
   const args = call.arguments;
-  const lowerReceiver = (): IrExpr => superRecv?.thisRef ?? L.lowerExpr(access.expression);
+  const lowerReceiver = (): IrExpr => {
+    const receiver = superRecv?.thisRef ?? L.lowerExpr(access.expression);
+    // lowerObjectMethodCall may select `info` from exact-new provenance
+    // below the receiver's annotation (`const e: EventEmitter = new C()`).
+    // The emitter specialization then dispatches from C, so materialize
+    // the checker-proven downcast before its ordinary ancestor upcasts.
+    if (
+      superRecv === undefined && receiver.type.kind === "object" &&
+      L.isSubclassOf(info.def.name, receiver.type.className)
+    ) {
+      return {
+        kind: "downcast",
+        value: receiver,
+        type: { kind: "object", className: info.def.name },
+        loc: receiver.loc,
+      };
+    }
+    return receiver;
+  };
   // The class VALUE, not an instance (`EventEmitter.setMaxListeners(n)` —
   // the receiver's checker type carries construct signatures; mapType
   // answers the instance object for every EventEmitter-symbol type, so the
