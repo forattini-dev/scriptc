@@ -314,6 +314,7 @@ class RustDynamicInvokeEmitter {
     this.open(`fn sc_dyn_invoke_number(number: f64, method: &str, args: &[${this.dyn}], callee_name: &str) -> ${this.dyn} {`);
     this.open("match method {");
     this.context.line(`"toString" => { let radix = match args.first() { None | Some(${this.dyn}::Undefined) => 10.0, Some(value) => sc_dyn_to_number(value), }; ${this.dyn}::String(runtime::number_to_radix_string(number, radix)) },`);
+    this.context.line(`"toLocaleString" => match args { [${this.dyn}::String(locale)] if locale.as_ref() == "en-US" => ${this.dyn}::String(runtime::intl_number_format_en_us(number)), _ => runtime::throw_error("dynamic Number.prototype.toLocaleString supports the explicit en-US locale with default options".to_owned()), },`);
     this.context.line(`"toFixed" => ${this.dyn}::String(runtime::number_to_fixed(number, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
     this.context.line(`"valueOf" => ${this.dyn}::Number(number),`);
     this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
@@ -356,6 +357,7 @@ class RustDynamicInvokeEmitter {
     this.emitObjectArm();
     this.emitFunctionArm();
     this.emitNumberArm();
+    this.emitBooleanArm();
     this.emitStringArm();
     this.emitRegexArm();
     this.emitArrayArm();
@@ -423,6 +425,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"charAt" => ${this.dyn}::String(runtime::string_char_at(text, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
     this.context.line(`"split" => { let limit = match args.get(1) { None | Some(${this.dyn}::Undefined) => u32::MAX as f64, Some(value) => runtime::to_uint32(sc_dyn_to_number(value)) as f64, }; let pieces = match args.first() { None | Some(${this.dyn}::Undefined) => if limit == 0.0 { runtime::array_new(Vec::new()) } else { runtime::array_new(vec![text.clone()]) }, Some(${this.dyn}::Regex(separator)) => runtime::regex_split(text, separator, limit), Some(separator) => runtime::string_split(text, &sc_dyn_to_string(separator), limit), }; sc_dyn_string_array(pieces) },`);
     this.context.line(`"concat" => { let mut output = text.to_string(); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);
+    this.context.line(`"toLocaleString" => ${this.dyn}::String(text.clone()),`);
     this.context.line(`"indexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_index_of(text, search, 0.0)), _ => runtime::throw_error("'String.prototype.indexOf' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line(`"lastIndexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_last_index_of(text, search)), _ => runtime::throw_error("'String.prototype.lastIndexOf' on a dynamic value is not supported yet".to_owned()), },`);
     this.context.line(`"includes" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Boolean(runtime::string_includes(text, search, 0.0)), _ => runtime::throw_error("'String.prototype.includes' on a dynamic value is not supported yet".to_owned()), },`);
@@ -434,6 +437,15 @@ class RustDynamicInvokeEmitter {
   private emitNumberArm(): void {
     this.open(`${this.dyn}::Number(number) => {`);
     this.context.line("sc_dyn_invoke_number(*number, method, args, callee_name)");
+    this.close("},");
+  }
+
+  private emitBooleanArm(): void {
+    this.open(`${this.dyn}::Boolean(value) => {`);
+    this.open("match method {");
+    this.context.line(`"toLocaleString" => ${this.dyn}::String(runtime::bool_to_string(*value)),`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    this.close("}");
     this.close("},");
   }
 
@@ -481,7 +493,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"values" => ${this.dyn}::ArrayIterator(runtime::array_iterator_new(array, runtime::ArrayIteratorKind::Values)),`);
     this.context.line("\"forEach\" | \"map\" | \"flatMap\" | \"filter\" | \"some\" | \"every\" | \"find\" | \"findIndex\" => sc_dyn_array_iterate(array, method, args),");
     this.context.line(`"toString" => ${this.dyn}::String(sc_dyn_to_string(&${this.dyn}::Array(array.clone()))),`);
-    this.context.line("\"toLocaleString\" => runtime::throw_error(\"'Array.prototype.toLocaleString' on a dynamic value is not supported yet\".to_owned()),");
+    this.context.line(`"toLocaleString" => ${this.dyn}::String(runtime::array_join_by(array, &runtime::string(","), |element, output| { if !matches!(element, ${this.dyn}::Undefined | ${this.dyn}::Null) { let localized = sc_dyn_invoke(element, "toLocaleString", args, "Array element.toLocaleString"); output.push_str(sc_dyn_to_string(&localized).as_ref()); } })),`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
     this.close("},");

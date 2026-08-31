@@ -4917,6 +4917,7 @@ const DYN_PROTO_METHOD_NAMES = new Set([
  * fences LOUDLY on real-but-unimplemented pairs. */
 const DYN_DISPATCH_METHODS = new Set([
   "apply", "call",
+  "toLocaleString",
   "push", "pop", "shift", "unshift", "slice", "splice", "at",
   "indexOf", "lastIndexOf", "includes", "join", "concat", "flat", "reverse", "toReversed", "toSorted", "toSpliced", "with", "sort", "fill", "copyWithin", "reduce", "reduceRight",
   "forEach", "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex",
