@@ -31,7 +31,13 @@ const laneCaseShardedFiles = [
 // Coverage analysis is frontend-only: SCRIPTC_SAN cannot change its result.
 // It still case-shards across the selected lane so every corpus entry is
 // checked, but running the same sweep in the second lane adds no coverage.
-const invariantCaseShardedFiles = ["tests/harness/coverage.test.ts"];
+// The Rust differential is sanitizer-invariant for the opposite reason: the
+// Rust backend refuses --sanitize outright, and the suite skips itself
+// under SCRIPTC_SAN=1.
+const invariantCaseShardedFiles = [
+  "tests/harness/coverage.test.ts",
+  "tests/harness/rust-differential.test.ts",
+];
 // Native-cache invalidation cases mutate process-wide compiler inputs and
 // deliberately disable the immutable-toolchain memo used by the differential
 // corpus. Keep them in their own Vitest process, matching CI: co-scheduling

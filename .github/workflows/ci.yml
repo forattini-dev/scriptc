@@ -52,6 +52,7 @@ jobs:
           pnpm test --shard=${{ matrix.shard }}/3
           --exclude=tests/harness/differential.test.ts
           --exclude=tests/harness/llvm-differential.test.ts
+          --exclude=tests/harness/rust-differential.test.ts
           --exclude=tests/harness/npm.test.ts
           --exclude=tests/harness/server.test.ts
           --exclude=tests/harness/coverage.test.ts
@@ -73,6 +74,7 @@ jobs:
           pnpm test
           tests/harness/differential.test.ts
           tests/harness/llvm-differential.test.ts
+          tests/harness/rust-differential.test.ts
           tests/harness/npm.test.ts
           tests/harness/server.test.ts
           tests/harness/vercel-e2e.test.ts
@@ -227,11 +229,50 @@ jobs:
           --testNamePattern "Rust stream argument ladders and socket encoding match Node"
           --maxWorkers=1
 
+  # The runtime crate's own gate: its unit/integration tests and a
+  # warnings-as-errors clippy sweep, on the toolchain pinned by the crate's
+  # rust-toolchain.toml (running from the package directory is what makes
+  # the pin apply). pnpm lint rides along — it runs nowhere else in CI and
+  # carries the Rust file-line cap.
+  runtime_rust:
+    name: test (rust runtime crate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/runtime-rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/runtime-rust/target
+          key: runtime-rust-${{ runner.os }}-${{ hashFiles('packages/runtime-rust/Cargo.lock', 'packages/runtime-rust/rust-toolchain.toml') }}
+      - run: cargo fetch --locked
+      - run: cargo test --locked
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: pnpm lint (file-line cap + eslint)
+        working-directory: .
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+
   # Aggregate gate with the pre-matrix job's name, so anything keyed on the
   # single "test" check (branch protection, badges) keeps resolving. Fails
   # unless every matrix shard and all platform/version integration jobs succeeded.
   test:
-    needs: [tests, linux_host_clang, windows_cli, node_26_host]
+    needs: [tests, linux_host_clang, windows_cli, node_26_host, runtime_rust]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -241,3 +282,4 @@ jobs:
           test "${{ needs.linux_host_clang.result }}" = success
           test "${{ needs.windows_cli.result }}" = success
           test "${{ needs.node_26_host.result }}" = success
+          test "${{ needs.runtime_rust.result }}" = success

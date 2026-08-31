@@ -68,8 +68,8 @@ Prebuilds the release runtime objects and native TLS/dynamic-engine archives aga
   <dt><code>--ffi &lt;file&gt;</code></dt>
   <dd>Bind signature-only TypeScript declarations to native C ABI symbols and link the manifest's archive, object, and system-library inputs. See <a href="/ffi">Native FFI</a>.</dd>
 
-  <dt><code>--backend &lt;c|llvm&gt;</code></dt>
-  <dd>Code generator: <code>llvm</code> (default — emits LLVM IR text, compiled by the same clang) or <code>c</code> (the readable debugging backend). Unset, a native build can fall back to C when the program is outside the LLVM tier. The production <code>wasm32-wasi</code> target never falls back: a missing LLVM lowering is <code>SC3001</code>. Use <code>--backend c</code> explicitly only when inspecting generated C; on WASI that inspection lane accepts async-free programs only and reports <code>SC3001</code> for coroutine-dependent surfaces.</dd>
+  <dt><code>--backend &lt;c|llvm|rust&gt;</code></dt>
+  <dd>Code generator: <code>llvm</code> (default — emits LLVM IR text, compiled by the same clang), <code>c</code> (the readable debugging backend), or <code>rust</code> (experimental, native targets only — emits Rust linked against the memory-safe <code>#![forbid(unsafe_code)]</code> runtime and builds with your <code>rustc</code>/Cargo instead of clang; it reports unsupported constructs as <code>SC3001</code> rather than falling back). Unset, a native build can fall back to C when the program is outside the LLVM tier. The production <code>wasm32-wasi</code> target never falls back: a missing LLVM lowering is <code>SC3001</code>. Use <code>--backend c</code> explicitly only when inspecting generated C; on WASI that inspection lane accepts async-free programs only and reports <code>SC3001</code> for coroutine-dependent surfaces.</dd>
 
   <dt><code>--npm-static &lt;pkg[,pkg…]|auto&gt;</code></dt>
   <dd>EXPERIMENTAL. Compile the named npm packages' shipped JS statically as program modules instead of embedding them for the engine (repeatable; <code>auto</code> opts in every eligible direct import). A package the preflight refuses falls back to the island with a coverage-report note. See <a href="/dependencies">npm Dependencies</a> for maturity notes.</dd>
@@ -136,3 +136,5 @@ $ head -1 fib.c
 ```
 
 An explicit <code>--backend llvm</code> pins the LLVM backend and fails with diagnostic SC3001, naming the unsupported construct, instead of falling back — useful for CI lanes that must notice tier changes.
+
+The experimental Rust backend (<code>--backend rust</code>) trades toolchains: it needs <code>cargo</code> and <code>rustc</code> instead of clang, emits safe Rust against the <code>#&#33;[forbid(unsafe_code)]</code> runtime crate, and never falls back — an unsupported construct is a loud <code>SC3001</code>. Native targets only; cross-compilation, WASI, and sanitizers stay on the C/LLVM lanes for now.

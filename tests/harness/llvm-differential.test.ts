@@ -25,6 +25,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { DRIVER_FIXTURES } from "./driver-fixtures.js";
 import { nodeOracleExecutable, nodeTransformTypesArgs } from "./oracle-environment.js";
 
 const execFileAsync = promisify(execFile);
@@ -40,7 +41,9 @@ const files = shardSelect(
   ENTRY_EXTS.flatMap((ext) => [
     ...globSync(join(corpusDir, `*.${ext}`)),
     ...globSync(join(corpusDir, `*/main.${ext}`)),
-  ]).sort(),
+  ])
+    .filter((f) => !DRIVER_FIXTURES.has(f.slice(corpusDir.length + 1)))
+    .sort(),
   (f) => f.slice(corpusDir.length + 1),
 );
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
