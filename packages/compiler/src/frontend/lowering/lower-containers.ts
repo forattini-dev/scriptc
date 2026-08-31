@@ -4896,6 +4896,25 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     };
   }
 
+/** The replacement-ARGUMENT gate shared by `s.replace`/`s.replaceAll` on
+   * both paths (regex pattern and string pattern). A function replacement is
+   * CALLED once per match — no lowering exists for that — and the lowered
+   * argument's IR type is NOT evidence that the argument isn't one: in a
+   * JavaScript source a stdlib global taken as a VALUE lowers to the opaque
+   * identity token, a STRING literal (`[builtin encodeURI]`), so
+   * `url.replace(re, encodeURI)` — the `encodeurl` package's exact shape —
+   * used to sail past the string-typed check and INTERPOLATE the token
+   * ("a[builtin encodeURI]b") instead of calling the builtin per match:
+   * silently wrong output, the one thing the compiler must never emit. The
+   * CHECKER type is the honest witness — anything with a call signature is
+   * a function replacement, however it lowers (a direct builtin reference,
+   * a local aliasing one, an arrow, a named function). */
+  function fenceFunctionReplacement(L: Lowerer, arg: ts.Expression | undefined): void {
+    if (!arg) return;
+    if (L.checker.getCallSignatures(L.typeOf(arg)).length === 0) return;
+    L.unsupported("SC1120", arg, "function replacement values (replacements must be string templates)");
+  }
+
 /** Regex method calls, both directions: `re.test(s)` on a regex receiver,
    * and `s.replace(re, tpl)` / `s.replaceAll(re, tpl)` / `s.split(re)` on a
    * string receiver whose FIRST ARGUMENT is a regex (the string-pattern
@@ -5049,6 +5068,10 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const arg0 = call.arguments[0];
       if (!arg0 || L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex") return null;
       const receiver = lowerReceiver();
+      // The CHECKER-level gate, before the arguments lower: a function
+      // replacement is called per match, and a lowered STRING is not
+      // evidence that it isn't one (fenceFunctionReplacement's story).
+      if (name !== "split") fenceFunctionReplacement(L, call.arguments[1]);
       // Split's omitted or undefined limit is 2^32-1. Complete it here so
       // both IR backends and the runtime have one required (regex, limit)
       // shape; an optional-number value selects the default at runtime.
@@ -5129,6 +5152,11 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       return { kind: "jsExit", value: result, type: entry.result, loc: locOf(call) };
     }
     const receiver = dynReceiver ? dynReceiver() : L.lowerExpr(access.expression);
+    // Same checker-level gate as the regex path: a function replacement
+    // is CALLED per match, whatever the argument happens to lower to.
+    if (entry.method === "replace" || entry.method === "replaceAll") {
+      fenceFunctionReplacement(L, call.arguments[1]);
+    }
     const args = entry.method === "split"
       ? [L.lowerExpr(call.arguments[0]!), lowerSplitLimitArg(L, call.arguments[1], locOf(call))]
       : call.arguments.map((a) => L.lowerExpr(a));

@@ -277,6 +277,50 @@ console.log(arr.length);
     );
   });
 
+  test.each([
+    {
+      label: "regex pattern",
+      name: "replace-builtin-ref",
+      source: `console.log("a b".replace(/ /g, encodeURIComponent));\n`,
+    },
+    {
+      label: "capture groups",
+      name: "replace-builtin-ref-captures",
+      source: `console.log("a=1&b=2".replace(/([a-z])=(\\d)/g, encodeURIComponent));\n`,
+    },
+    {
+      label: "replaceAll",
+      name: "replace-all-builtin-ref",
+      source: `console.log("a b c".replaceAll(/ /g, encodeURIComponent));\n`,
+    },
+    {
+      label: "string pattern",
+      name: "replace-string-pattern-builtin-ref",
+      source: `console.log("a b".replace(" ", encodeURIComponent));\n`,
+    },
+  ])(
+    "a builtin passed BY REFERENCE as a replacement is a deferred fence, never an interpolated token ($label, JS lane)",
+    async ({ name, source }) => {
+      // A replacement FUNCTION is called per match. In a JavaScript source
+      // a builtin taken as a VALUE lowers to the opaque identity token — a
+      // STRING literal — so the replacement paths' string-typed argument
+      // check waved these through and INTERPOLATED "[builtin
+      // encodeURIComponent]" where Node encodes ("a%20b"): silently wrong
+      // output, from exactly the shape `encodeurl` ships
+      // (url.replace(RE, encodeURI)). The gate reads the CHECKER type
+      // instead, so every one of these fences. The TS lane's compile-time
+      // spelling is tests/diagnostics/regex-function-replacement.ts.
+      const r = await compileAndRun(name, source, "js");
+      expect(r.exitCode).toBe(1);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toMatch(
+        new RegExp(
+          `^Uncaught Error: function replacement values \\(replacements must be string templates\\) are not supported yet \\[SC1120 at .*${name}\\.js:1\\]\\n$`,
+        ),
+      );
+    },
+  );
+
   test("extending a property-assigned class ABOVE its assignment is a named deferred fence (JS lane)", async () => {
     // The property-assigned class-expression family (corpus 2032/2033
     // pins what lowers): `exports.O = class extends exports.I {}` with

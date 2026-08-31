@@ -1,0 +1,44 @@
+regex-function-replacement.ts:10:36 - error SC1120: function replacement values (replacements must be string templates) are not supported yet
+
+   9 | // pins the compile-time fence for each argument shape.
+  10 | const direct = "a b".replace(/ /g, encodeURI);
+     |                                    ^~~~~~~~~
+  11 | const captures = "a=1".replace(/([a-z])=(\d)/g, encodeURIComponent);
+
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+
+regex-function-replacement.ts:11:49 - error SC1120: function replacement values (replacements must be string templates) are not supported yet
+
+  10 | const direct = "a b".replace(/ /g, encodeURI);
+  11 | const captures = "a=1".replace(/([a-z])=(\d)/g, encodeURIComponent);
+     |                                                 ^~~~~~~~~~~~~~~~~~
+  12 | const all = "a b c".replaceAll(/ /g, encodeURIComponent);
+
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+
+regex-function-replacement.ts:12:38 - error SC1120: function replacement values (replacements must be string templates) are not supported yet
+
+  11 | const captures = "a=1".replace(/([a-z])=(\d)/g, encodeURIComponent);
+  12 | const all = "a b c".replaceAll(/ /g, encodeURIComponent);
+     |                                      ^~~~~~~~~~~~~~~~~~
+  13 | const stringPattern = "a b".replace(" ", encodeURIComponent);
+
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+
+regex-function-replacement.ts:13:42 - error SC1120: function replacement values (replacements must be string templates) are not supported yet
+
+  12 | const all = "a b c".replaceAll(/ /g, encodeURIComponent);
+  13 | const stringPattern = "a b".replace(" ", encodeURIComponent);
+     |                                          ^~~~~~~~~~~~~~~~~~
+  14 | const named = "a b".replace(/[ab]/g, function up(m: string): string {
+
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
+
+regex-function-replacement.ts:14:38 - error SC1120: function replacement values (replacements must be string templates) are not supported yet
+
+  13 | const stringPattern = "a b".replace(" ", encodeURIComponent);
+  14 | const named = "a b".replace(/[ab]/g, function up(m: string): string {
+     |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  15 |   return m.toUpperCase();
+
+  hint: supported: literal regexes with the g/i/m/s/u/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates
