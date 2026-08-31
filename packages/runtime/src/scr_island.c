@@ -3610,6 +3610,80 @@ static const char isl_modules_bootstrap[] =
     "      RuntimeError, CompileError, LinkError,\n"
     "    };\n"
     "  }\n"
+    /* V8's structured stack frames (Error.prepareStackTrace's CallSite
+     * objects). quickjs-ng ships the CallSite class with only the six
+     * accessors it needs for its own trace text — getFileName,
+     * getFunctionName, getFunction, getLineNumber, getColumnNumber, plus
+     * isNative — and NO isEval/getThis/getTypeName/getMethodName. depd
+     * (the deprecation layer under http-errors, and therefore under
+     * express, router, send, body-parser and serve-static) calls
+     * `callSite.isEval()` in its callSiteLocation the moment
+     * `require('depd')('...')` runs at module scope, so every one of
+     * those packages died with "not a function" before exporting
+     * anything. The vendored engine is not modified (vendor/README.md's
+     * contract), so the missing V8 surface is filled in here, on the
+     * prototype reached through one captured frame — before any embedded
+     * module can evaluate. Values are the honest answers for frames the
+     * engine does not retain (no receiver, no eval origin, no method
+     * binding): undefined/null, never a throw. toString() gets Node's
+     * "name (file:line:col)" text, which depd renders into its trace. */
+    "  if (typeof Error.captureStackTrace === 'function') {\n"
+    "    const proto = (() => {\n"
+    "      const prep = Error.prepareStackTrace;\n"
+    "      try {\n"
+    "        Error.prepareStackTrace = (_e, frames) => frames;\n"
+    "        const holder = {};\n"
+    "        Error.captureStackTrace(holder);\n"
+    "        const frames = holder.stack;\n"
+    "        if (!Array.isArray(frames) || frames.length === 0) return null;\n"
+    "        return Object.getPrototypeOf(frames[0]);\n"
+    "      } catch (e) {\n"
+    "        return null;\n"
+    "      } finally {\n"
+    "        Error.prepareStackTrace = prep;\n"
+    "      }\n"
+    "    })();\n"
+    "    if (proto && typeof proto.getFileName === 'function') {\n"
+    "      const def = (name, fn) => {\n"
+    "        if (typeof proto[name] === 'function') return;\n"
+    "        Object.defineProperty(proto, name, { value: fn, writable: true, configurable: true });\n"
+    "      };\n"
+    "      def('getThis', function () { return undefined; });\n"
+    "      def('getTypeName', function () { return null; });\n"
+    "      def('getMethodName', function () { return null; });\n"
+    "      def('getEvalOrigin', function () { return undefined; });\n"
+    "      def('getScriptNameOrSourceURL', function () { return this.getFileName(); });\n"
+    "      def('getScriptHash', function () { return ''; });\n"
+    "      def('getEnclosingLineNumber', function () { return this.getLineNumber(); });\n"
+    "      def('getEnclosingColumnNumber', function () { return this.getColumnNumber(); });\n"
+    "      def('getPosition', function () { return 0; });\n"
+    "      def('isEval', function () { return false; });\n"
+    "      def('isConstructor', function () { return false; });\n"
+    "      def('isAsync', function () { return false; });\n"
+    "      def('isPromiseAll', function () { return false; });\n"
+    "      def('getPromiseIndex', function () { return null; });\n"
+    /* A frame with no function name is the module/script body — Node's
+     * isToplevel() for exactly those. */
+    "      def('isToplevel', function () { return !this.getFunctionName(); });\n"
+    "      Object.defineProperty(proto, 'toString', {\n"
+    "        writable: true,\n"
+    "        configurable: true,\n"
+    "        value: function () {\n"
+    "          if (this.isNative()) return 'native';\n"
+    "          const file = this.getFileName();\n"
+    "          let where = file === null || file === undefined ? '<anonymous>' : String(file);\n"
+    "          const line = this.getLineNumber();\n"
+    "          if (typeof line === 'number' && line >= 0) {\n"
+    "            where += ':' + line;\n"
+    "            const col = this.getColumnNumber();\n"
+    "            if (typeof col === 'number' && col >= 0) where += ':' + col;\n"
+    "          }\n"
+    "          const name = this.getFunctionName();\n"
+    "          return name ? name + ' (' + where + ')' : where;\n"
+    "        },\n"
+    "      });\n"
+    "    }\n"
+    "  }\n"
     "  const cache = Object.create(null);\n"
     "  const builtins = Object.create(null);\n"
     /* Node's require stack: each CJS module remembers its FIRST requirer
@@ -9330,10 +9404,26 @@ static const char isl_modules_bootstrap[] =
     "        const msg = warning instanceof Error ? warning.message : String(warning);\n"
     "        host.write(2, '(node:' + host.pid() + ') ' + name + ': ' + msg + '\\n');\n"
     "      },\n"
+    /* listener surface, accepted-and-inert — the same shape the stdio
+     * streams above carry. The QUERY forms matter as much as the
+     * registration ones: depd asks `process.listenerCount('deprecation')`
+     * (falling back to `process.listeners(type).length`) before every
+     * deprecation it prints, so a missing pair throws "not a function"
+     * out of an otherwise-harmless warning. */
     "      on: () => p,\n"
     "      once: () => p,\n"
     "      off: () => p,\n"
+    "      addListener: () => p,\n"
+    "      prependListener: () => p,\n"
+    "      prependOnceListener: () => p,\n"
     "      removeListener: () => p,\n"
+    "      removeAllListeners: () => p,\n"
+    "      listeners: () => [],\n"
+    "      rawListeners: () => [],\n"
+    "      listenerCount: () => 0,\n"
+    "      eventNames: () => [],\n"
+    "      setMaxListeners: () => p,\n"
+    "      getMaxListeners: () => 10,\n"
     "      emit: () => false,\n"
     "    };\n"
     /* process.exitCode is Node's IMPLICIT exit status: a program that
