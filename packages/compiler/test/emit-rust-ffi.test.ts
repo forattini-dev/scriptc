@@ -506,6 +506,128 @@ test("Rust executables marshal retained callbacks from a foreign native thread w
   expect(run.stderr).toBe("");
 });
 
+test("Rust foreign FFI waits do not starve datagram events", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-dgram-"));
+  const nativeSource = join(dir, "native.c");
+  const nativeObject = join(dir, "native.o");
+  const nativeArchive = join(dir, "libnative.a");
+  const profilePath = join(dir, "profile.json");
+  const entryPath = join(dir, "main.ts");
+  const outPath = join(dir, "program");
+
+  await writeFile(nativeSource, [
+    "#define _POSIX_C_SOURCE 200809L",
+    "#include <arpa/inet.h>",
+    "#include <pthread.h>",
+    "#include <string.h>",
+    "#include <sys/socket.h>",
+    "#include <time.h>",
+    "#include <unistd.h>",
+    "typedef void (*sf_foreign_cb)(double value, void *context);",
+    "static sf_foreign_cb callback;",
+    "static void *callback_context;",
+    "static unsigned short target_port;",
+    "static pthread_t worker;",
+    "static void *run_worker(void *unused) {",
+    "  (void)unused;",
+    "  struct timespec network_delay = {0, 50 * 1000 * 1000};",
+    "  (void)nanosleep(&network_delay, 0);",
+    "  int fd = socket(AF_INET, SOCK_DGRAM, 0);",
+    "  struct sockaddr_in target;",
+    "  memset(&target, 0, sizeof target);",
+    "  target.sin_family = AF_INET;",
+    "  target.sin_port = htons(target_port);",
+    "  (void)inet_pton(AF_INET, \"127.0.0.1\", &target.sin_addr);",
+    "  (void)sendto(fd, \"dgram\", 5, 0, (struct sockaddr *)&target, sizeof target);",
+    "  (void)close(fd);",
+    "  struct timespec callback_delay = {0, 950 * 1000 * 1000};",
+    "  (void)nanosleep(&callback_delay, 0);",
+    "  callback(1, callback_context);",
+    "  return 0;",
+    "}",
+    "void sf_set_port(double port) { target_port = (unsigned short)port; }",
+    "void sf_foreign_start(sf_foreign_cb next, void *context) {",
+    "  callback = next; callback_context = context;",
+    "  (void)pthread_create(&worker, 0, run_worker, 0);",
+    "}",
+    "void sf_foreign_stop(sf_foreign_cb next, void *context) {",
+    "  (void)next; (void)context; (void)pthread_join(worker, 0);",
+    "  callback = 0; callback_context = 0;",
+    "}",
+    "",
+  ].join("\n"));
+  await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
+  await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
+  await writeFile(profilePath, JSON.stringify({
+    ffi_format: 5,
+    functions: [{
+      name: "nativeSetPort",
+      symbol: "sf_set_port",
+      params: ["f64"],
+      returns: "void",
+    }, {
+      name: "nativeForeignStart",
+      symbol: "sf_foreign_start",
+      params: [{
+        callback: {
+          id: "tick",
+          params: ["f64", { context: "tick" }],
+          returns: "void",
+          lifetime: "retained",
+          invoke: "foreign",
+        },
+      }, { context: "tick" }],
+      returns: "void",
+    }, {
+      name: "nativeForeignStop",
+      symbol: "sf_foreign_stop",
+      params: [{ callback: { release: "nativeForeignStart:tick" } },
+        { context: "nativeForeignStart:tick" }],
+      returns: "void",
+    }],
+    libraries: [nativeArchive],
+    system_libraries: [],
+  }));
+  await writeFile(entryPath, [
+    "import { createSocket } from 'node:dgram';",
+    "declare function nativeSetPort(port: number): void;",
+    "declare function nativeForeignStart(callback: (value: number) => void): void;",
+    "declare function nativeForeignStop(callback: (value: number) => void): void;",
+    "const startedAt = Date.now();",
+    "const socket = createSocket('udp4');",
+    "socket.on('message', (message) => {",
+    "  console.log(message.toString(), Date.now() - startedAt < 750);",
+    "  socket.close();",
+    "});",
+    "const tick = (_value: number) => {",
+    "  nativeForeignStop(tick);",
+    "  console.log('foreign');",
+    "};",
+    "socket.bind(0, '127.0.0.1', () => {",
+    "  nativeSetPort(socket.address().port);",
+    "  nativeForeignStart(tick);",
+    "});",
+    "",
+  ].join("\n"));
+
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath,
+    backend: "rust",
+    optimization: "dev",
+    ffiProfilePath: profilePath,
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+  expect(run.stdout).toBe("dgram true\nforeign\n");
+  expect(run.stderr).toBe("");
+});
+
 test("Rust executables preserve foreign FIFO without starving timers", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-burst-"));
   const nativeSource = join(dir, "native.c");
