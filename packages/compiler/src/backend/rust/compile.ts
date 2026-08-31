@@ -68,7 +68,7 @@ export async function compileRust(options: RustCompileOptions): Promise<void> {
 export async function compileRustLibrary(
   options: RustLibraryCompileOptions,
 ): Promise<void> {
-  const context = await prepareRustBuild(options);
+  const context = await prepareRustBuild({ ...options, library: true });
   await mkdir(dirname(options.outPath), { recursive: true });
   await run(
     "rustc",
@@ -136,7 +136,9 @@ interface RustBuildContext {
 }
 
 async function prepareRustBuild(
-  options: Pick<RustCompileOptions, "optimization" | "sanitize" | "runtimeFeatures">,
+  options: Pick<RustCompileOptions, "optimization" | "sanitize" | "runtimeFeatures"> & {
+    library?: boolean;
+  },
 ): Promise<RustBuildContext> {
   const target = process.env["SCRIPTC_TARGET"];
   if (target !== undefined && target !== "" && target !== "native") {
@@ -153,8 +155,12 @@ async function prepareRustBuild(
   const manifestPath = join(runtimeRoot, "Cargo.toml");
   const cacheBase = process.env["SCRIPTC_CACHE_DIR"] ??
     join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "scriptc");
-  const targetDir = join(cacheBase, "rust-runtime-v1");
   const profile = options.optimization === "dev" ? "debug" : "release";
+  const preserveLibraryObjects = options.library === true && profile === "release";
+  const targetDir = join(
+    cacheBase,
+    preserveLibraryObjects ? "rust-runtime-v1-library" : "rust-runtime-v1",
+  );
   const runtimeFeatures = [...new Set(options.runtimeFeatures ?? [])].sort();
   const cargoArgs = [
     "build",
@@ -167,7 +173,14 @@ async function prepareRustBuild(
     ...(runtimeFeatures.length === 0 ? [] : ["--features", runtimeFeatures.join(",")]),
     ...(profile === "release" ? ["--release"] : []),
   ];
-  const cargo = await run("cargo", cargoArgs, "building the Rust runtime");
+  const cargo = await run(
+    "cargo",
+    cargoArgs,
+    "building the Rust runtime",
+    preserveLibraryObjects
+      ? { CARGO_PROFILE_RELEASE_LTO: "false", CARGO_PROFILE_RELEASE_STRIP: "none" }
+      : undefined,
+  );
 
   return {
     runtimeRlib: rustRuntimeArtifact(cargo.stdout),
@@ -215,10 +228,15 @@ function rustRuntimeArtifact(output: string): string {
   throw new RustCompileError("building the Rust runtime did not report its rlib artifact");
 }
 
-async function run(command: string, args: string[], purpose: string): Promise<CommandOutput> {
+async function run(
+  command: string,
+  args: string[],
+  purpose: string,
+  environment?: NodeJS.ProcessEnv,
+): Promise<CommandOutput> {
   try {
     return await execFileAsync(command, args, {
-      env: process.env,
+      env: { ...process.env, ...environment },
       encoding: "utf8",
       maxBuffer: 16 * 1024 * 1024,
     });

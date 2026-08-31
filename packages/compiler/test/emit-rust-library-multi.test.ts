@@ -94,7 +94,7 @@ test("runtime-localized Rust libraries keep independent state in one host", asyn
   }
 }, 120_000);
 
-test("runtime-localized Rust archives expose only profile-declared symbols", async (context) => {
+test("release runtime-localized Rust archives preserve only profile-declared symbols", async (context) => {
   if (spawnSync("nm", ["--version"], { encoding: "utf8" }).status !== 0) {
     context.skip("nm is required to inspect the archive link surface");
   }
@@ -108,7 +108,7 @@ test("runtime-localized Rust archives expose only profile-declared symbols", asy
       name: "rust-localized-symbols",
       entry,
       emission: "rust",
-      optimization: "dev",
+      optimization: "release",
       abi: {
         prefix: "ms_",
         init_symbol: "ms_init",
@@ -152,4 +152,4 @@ test("runtime-localized Rust archives expose only profile-declared symbols", asy
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
-}, 120_000);
+}, 240_000);
