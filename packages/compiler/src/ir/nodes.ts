@@ -3243,6 +3243,9 @@ export type IrLibFn =
    * execPath stance). Interned; +1 per read. Never throws. */
   | "process.versionsNode"
   | "process.versionsOpenssl"
+  /** navigator.userAgent: "Node.js/<compat-major>", derived from the same
+   * compatibility target as process.versions.node. Interned; +1. */
+  | "navigator.userAgent"
   /** umask(2): arg < 0 reads without setting (umask has no read-only form
    * — set 0, restore); otherwise sets and answers the PREVIOUS mask.
    * Never throws. */

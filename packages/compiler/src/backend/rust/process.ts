@@ -64,6 +64,7 @@ export function emitRustProcessCall(
   if (expr.fn === "process.arch" && expr.args.length === 0) return "runtime::process_arch()";
   if (expr.fn === "process.versionsNode" && expr.args.length === 0) return "runtime::process_versions_node()";
   if (expr.fn === "process.versionsOpenssl" && expr.args.length === 0) return "runtime::process_versions_openssl()";
+  if (expr.fn === "navigator.userAgent" && expr.args.length === 0) return "runtime::navigator_user_agent()";
   if (expr.fn === "process.chdir" && expr.args.length === 1 && arg?.type.kind === "string") {
     return `runtime::process_chdir(&(${context.emitExpr(arg)}))`;
   }

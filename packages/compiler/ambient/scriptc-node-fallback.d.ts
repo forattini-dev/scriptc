@@ -303,6 +303,23 @@ declare var __filename: string;
  * `global.process` read the same object as the bare name. */
 declare var global: typeof globalThis;
 
+/* Browser/loader names probed by UMD bundles. They are absent on the Node
+ * compatibility targets, but declaring their shape lets JavaScript reach
+ * the lowering pass: `typeof` folds to "undefined", while a reached direct
+ * read remains Node's ReferenceError rather than an invented host value. */
+declare var define: {
+  (factory: () => unknown): void;
+  readonly amd: boolean;
+};
+declare var window: typeof globalThis;
+declare var self: typeof globalThis;
+
+/* Node 24+ exposes a browser-compatible Navigator singleton. Keep this
+ * declaration deliberately to the scalar surface the native runtime owns. */
+declare var navigator: {
+  readonly userAgent: string;
+};
+
 /* The `require` VALUE's non-call surface. require() CALLS are module
  * edges (the checker models them as imports); the object's own members
  * are declared here so harness idioms typecheck. `require.main` lowers

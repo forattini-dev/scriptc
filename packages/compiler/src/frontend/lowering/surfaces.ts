@@ -1695,6 +1695,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     const name =
       requireSpec === "process" || requireSpec === "node:process"
         ? "process"
+        : umdGlobalThisSelector(L, init)
+        ? "globalThis"
         : stdlibGlobalNameOf(L, init);
     if (name === null) return false;
     // Only alias OBJECT-shaped globals whose members lower by receiver
@@ -1707,6 +1709,28 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     if (!symbol) return false;
     L.stdlibGlobalAliases.set(symbol, name);
     return true;
+  }
+
+/** The standard UMD host selector emitted by dependency bundles. Node 24+
+   * always defines globalThis, so `typeof globalThis < "u"` selects the
+   * first arm and the binding is the ordinary globalThis identity alias;
+   * browser fallbacks are unreachable on this compatibility target. */
+  function umdGlobalThisSelector(L: Lowerer, init: ts.Expression): boolean {
+    let expr = init;
+    while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    if (!ts.isConditionalExpression(expr) || stdlibGlobalNameOf(L, expr.whenTrue) !== "globalThis") {
+      return false;
+    }
+    let condition = expr.condition;
+    while (ts.isParenthesizedExpression(condition)) condition = condition.expression;
+    return (
+      ts.isBinaryExpression(condition) &&
+      condition.operatorToken.kind === ts.SyntaxKind.LessThanToken &&
+      ts.isTypeOfExpression(condition.left) &&
+      stdlibGlobalNameOf(L, condition.left.expression) === "globalThis" &&
+      ts.isStringLiteralLike(condition.right) &&
+      condition.right.text === "u"
+    );
   }
 
 /** True iff the symbol is declared ONLY by the adopted @types/node

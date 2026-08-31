@@ -907,8 +907,15 @@ pub fn process_env_apply(command: &mut std::process::Command) {
     });
 }
 
+const NODE_COMPAT_VERSION: &str = "24.0.0";
+const NODE_COMPAT_USER_AGENT: &str = "Node.js/24";
+
 pub fn process_versions_node() -> JsString {
-    string("24.0.0")
+    string(NODE_COMPAT_VERSION)
+}
+
+pub fn navigator_user_agent() -> JsString {
+    string(NODE_COMPAT_USER_AGENT)
 }
 
 pub fn process_versions_openssl() -> JsString {

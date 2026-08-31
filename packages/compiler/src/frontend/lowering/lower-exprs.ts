@@ -847,6 +847,27 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      if (
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === "navigator" &&
+        L.isStdlibSymbol(L.checker.getSymbolAtLocation(expr.expression))
+      ) {
+        return { kind: "strLit", value: "object", type: STRING, loc };
+      }
+      // UMD bundles probe browser/loader globals that do not exist on the
+      // Node compatibility targets. The shipped ambient declarations let
+      // the checker describe the dead branches; this provenance-checked
+      // fold gives `typeof` Node's non-throwing "undefined" answer before
+      // an ordinary identifier read can become a ReferenceError.
+      if (
+        ts.isIdentifier(expr.expression) &&
+        (expr.expression.text === "define" ||
+          expr.expression.text === "window" ||
+          expr.expression.text === "self") &&
+        L.isStdlibSymbol(L.checker.getSymbolAtLocation(expr.expression))
+      ) {
+        return { kind: "strLit", value: "undefined", type: STRING, loc };
+      }
       // The POSIX identity methods are linked native capabilities on every
       // host scriptc supports. Their optional Node declarations exist for
       // Windows, but the compiled target's direct and optional calls both
@@ -1237,10 +1258,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // SEMANTICS.md documents the stance.
       {
         const sym = L.checker.getSymbolAtLocation(expr);
-        if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
+        const canonical = stdlibGlobalNameOf(L, expr);
+        if (
+          L.isStdlibSymbol(sym) ||
+          expr.text === "globalThis" ||
+          (isJsSourceFile(expr.getSourceFile()) && canonical !== null)
+        ) {
           if (isJsSourceFile(expr.getSourceFile())) {
-            const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
-            return { kind: "strLit", value: `[builtin ${canonical}]`, type: STRING, loc };
+            return { kind: "strLit", value: `[builtin ${canonical ?? expr.text}]`, type: STRING, loc };
           }
           // The families with a WHY: each hint states what makes the
           // surface genuinely non-static (or what to use instead).
@@ -1948,6 +1973,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerDcTracingChannelProperty(expr) ??
         L.lowerTestCtxProperty(expr) ??
         L.lowerProcessProperty(expr) ??
+        L.lowerNavigatorProperty(expr) ??
         L.lowerProcessStreamProperty(expr) ??
         L.lowerFsConstantsProperty(expr) ??
         // http2.constants.NGHTTP2_CANCEL (any constants-object spelling):
@@ -3609,6 +3635,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken) {
         const isAnd = op === ts.SyntaxKind.AmpersandAmpersandToken;
         const left = L.lowerCondition(e.left);
+        // A proven literal condition has no effects left to preserve. Keep
+        // JavaScript's short circuit at lowering time so an unreachable UMD
+        // fallback is never asked to provide a static lowering.
+        if (left.kind === "boolLit") {
+          if ((isAnd && !left.value) || (!isAnd && left.value)) return left;
+          return L.lowerCondition(e.right);
+        }
         // The right operand evaluates only when the left already answered
         // (true for &&, false for ||) — aliased-typeof narrows the left
         // PROVES under that polarity hold while it lowers (`type ===
@@ -8248,6 +8281,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const left = L.lowerExpr(expr.left);
         const right = L.lowerExpr(expr.right);
         if (left.type.kind === "string" && right.type.kind === "string") {
+          if (left.kind === "strLit" && right.kind === "strLit") {
+            return {
+              kind: "boolLit",
+              value: negated ? left.value !== right.value : left.value === right.value,
+              type: BOOL,
+              loc,
+            };
+          }
           return { kind: "strEq", negated, left, right, type: BOOL, loc };
         }
         if (
@@ -8776,7 +8817,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           : op === ts.SyntaxKind.LessThanEqualsToken ? "<="
           : op === ts.SyntaxKind.GreaterThanToken ? ">" : ">=";
         if (bothNum) return { kind: "bin", op: cmpOp, left, right, type: BOOL, loc };
-        if (bothStr) return { kind: "strCmp", op: cmpOp, left, right, type: BOOL, loc };
+        if (bothStr) {
+          if (left.kind === "strLit" && right.kind === "strLit") {
+            const value = cmpOp === "<" ? left.value < right.value
+              : cmpOp === "<=" ? left.value <= right.value
+              : cmpOp === ">" ? left.value > right.value
+              : left.value >= right.value;
+            return { kind: "boolLit", value, type: BOOL, loc };
+          }
+          return { kind: "strCmp", op: cmpOp, left, right, type: BOOL, loc };
+        }
         L.unsupported("SC1043", expr);
         break;
       }
@@ -10031,6 +10081,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // AND for side-effect-free expressions (an object literal of literals
     // — the `"a" in { a: true }` shape).
     const pureRecvNode = sideEffectFreeOptionValue(expr.right);
+    if (key === "userAgent" && L.isStdlibGlobal(expr.right, "navigator")) {
+      return { kind: "boolLit", value: true, type: BOOL, loc };
+    }
     if (L.isProcessEnv(expr.right)) {
       // `"NO_COLOR" in process.env`: presence via the one envGet intrinsic —
       // getenv(3) returning non-NULL is Node's `in` on process.env exactly.

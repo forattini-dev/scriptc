@@ -2145,6 +2145,7 @@ ScrStr *scr_process_arch(void);
  * interned. */
 ScrStr *scr_process_versions_node(void);
 ScrStr *scr_process_versions_openssl(void);
+ScrStr *scr_navigator_user_agent(void);
 /* process.kill with Node's exact semantics: int32 pid validation (the
  * ERR_INVALID_ARG_TYPE TypeError text), Node's signal-name table for the
  * named form (unknown names throw the ERR_UNKNOWN_SIGNAL TypeError),

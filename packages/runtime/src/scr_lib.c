@@ -112,6 +112,7 @@ static SCR_TL ScrStr *scr_platform_str = NULL; /* interned process.platform */
 static SCR_TL ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
 static SCR_TL ScrStr *scr_arch_str = NULL;      /* interned process.arch */
 static SCR_TL ScrStr *scr_versions_node_str = NULL; /* interned process.versions.node */
+static SCR_TL ScrStr *scr_navigator_user_agent_str = NULL;
 static SCR_TL ScrStr *scr_versions_openssl_str = NULL; /* interned process.versions.openssl */
 
 static void scr_lib_cleanup(void) {
@@ -125,6 +126,8 @@ static void scr_lib_cleanup(void) {
   scr_arch_str = NULL;
   scr_str_release(scr_versions_node_str);
   scr_versions_node_str = NULL;
+  scr_str_release(scr_navigator_user_agent_str);
+  scr_navigator_user_agent_str = NULL;
   scr_str_release(scr_versions_openssl_str);
   scr_versions_openssl_str = NULL;
 }
@@ -231,13 +234,22 @@ ScrStr *scr_process_arch(void) {
  * is no Node under a compiled binary; this is the version whose semantics
  * SEMANTICS.md verifies the runtime against (divergence 60, the execPath
  * stance: answer for the world that actually exists). */
-#define SCR_NODE_COMPAT_VERSION "24.0.0"
+#define SCR_NODE_COMPAT_MAJOR "24"
+#define SCR_NODE_COMPAT_VERSION SCR_NODE_COMPAT_MAJOR ".0.0"
 ScrStr *scr_process_versions_node(void) {
   if (!scr_versions_node_str) {
     scr_versions_node_str =
         scr_str_new(SCR_NODE_COMPAT_VERSION, sizeof(SCR_NODE_COMPAT_VERSION) - 1);
   }
   return scr_str_retain(scr_versions_node_str);
+}
+
+ScrStr *scr_navigator_user_agent(void) {
+  static const char value[] = "Node.js/" SCR_NODE_COMPAT_MAJOR;
+  if (!scr_navigator_user_agent_str) {
+    scr_navigator_user_agent_str = scr_str_new(value, sizeof(value) - 1);
+  }
+  return scr_str_retain(scr_navigator_user_agent_str);
 }
 
 /* process.versions.openssl — the compat target's crypto-provider version

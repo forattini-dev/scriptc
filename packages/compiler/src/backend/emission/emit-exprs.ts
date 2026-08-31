@@ -5977,6 +5977,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_versions_node()`);
           case "process.versionsOpenssl":
             return finish(`scr_process_versions_openssl()`);
+          case "navigator.userAgent":
+            return finish(`scr_navigator_user_agent()`);
           case "process.umask":
             return finish(`scr_process_umask(${arg(0)})`);
           case "process.chdir":

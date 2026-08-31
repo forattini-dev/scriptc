@@ -5550,6 +5550,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return null;
   }
 
+/** Node's global Navigator facade. Its userAgent is tied to the runtime's
+   * compatibility version, not to the Node process running the compiler. */
+  export function lowerNavigatorProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (L.stdlibGlobalMember(expr, "navigator") !== "userAgent") return null;
+    return { kind: "libCall", fn: "navigator.userAgent", args: [], type: STRING, loc: locOf(expr) };
+  }
+
 /** True iff `node` is THE ambient `process.env` object itself (the
    * receiver of an env read). */
   export function isProcessEnv(L: Lowerer, node: ts.Expression): boolean {
