@@ -4738,6 +4738,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "http.serverJoinDupHeaders":
             E.line(`scr_http_server_join_duplicate_headers(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "http.serverMaxHeaderSizeSet":
+            return finish(`scr_http_server_max_header_size_set(${arg(0)}, ${arg(1)})`);
           case "http.serverTimeoutGet":
             return finish(`scr_net_server_timeout_get(${arg(0)}, ${arg(1)})`);
           case "http.serverTimeoutSet":

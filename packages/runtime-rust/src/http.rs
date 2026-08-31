@@ -42,6 +42,7 @@ struct HttpErrorListener {
 pub struct HttpServerState {
     timeouts: [JsHttpTimeout; 5],
     join_duplicate_headers: bool,
+    max_header_size: usize,
     request_listeners: Vec<HttpRequestListener>,
 }
 
@@ -254,6 +255,7 @@ pub fn http_server_new() -> JsNetServer {
                 JsHttpTimeout::Number(1_000.0),
             ],
             join_duplicate_headers: false,
+            max_header_size: 16 * 1024,
             request_listeners: Vec::new(),
         });
     });
@@ -414,7 +416,25 @@ fn http_server_feed(connection: &Rc<RefCell<HttpServerConnection>>, bytes: &[u8]
             )
         } else {
             connection.buffer.extend_from_slice(bytes);
-            let Some(head_len) = http_header_end(&connection.buffer) else {
+            let head_len = http_header_end(&connection.buffer);
+            let max_header_size = connection.server.with(|server| {
+                server
+                    .http
+                    .as_ref()
+                    .expect("scriptc invariant: HTTP connection on a net.Server")
+                    .max_header_size
+            });
+            if head_len.is_some_and(|length| length > max_header_size) ||
+                (head_len.is_none() && connection.buffer.len() > max_header_size)
+            {
+                net_socket_end_str(
+                    &connection.socket,
+                    &string("HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"),
+                );
+                connection.buffer.clear();
+                return;
+            }
+            let Some(head_len) = head_len else {
                 return;
             };
             let Some((method, url, headers, content_length)) =
@@ -1010,6 +1030,34 @@ pub fn http_server_join_duplicate_headers(server: &JsNetServer) {
             .as_mut()
             .expect("scriptc invariant: HTTP options on a net.Server")
             .join_duplicate_headers = true;
+    });
+}
+
+pub fn http_server_max_header_size_set(server: &JsNetServer, value: f64) {
+    if !value.is_finite() || value.trunc() != value {
+        throw_range_error_code(
+            format!(
+                "The value of \"maxHeaderSize\" is out of range. It must be an integer. Received {}",
+                display_number(value)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    if !(0.0..=9_007_199_254_740_991.0).contains(&value) {
+        throw_range_error_code(
+            format!(
+                "The value of \"maxHeaderSize\" is out of range. It must be >= 0 && <= 9007199254740991. Received {}",
+                display_number(value)
+            ),
+            "ERR_OUT_OF_RANGE",
+        );
+    }
+    server.with_mut(|server| {
+        server
+            .http
+            .as_mut()
+            .expect("scriptc invariant: HTTP options on a net.Server")
+            .max_header_size = value as usize;
     });
 }
 

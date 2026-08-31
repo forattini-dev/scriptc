@@ -2341,6 +2341,7 @@ function lowerRequestHandlerArg(L: Lowerer, node: ts.Expression): IrExpr {
 function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): {
   joinDup: boolean;
   keepAliveTimeoutBuffer: IrExpr | null;
+  maxHeaderSize: IrExpr | null;
 } {
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering(
@@ -2351,6 +2352,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
   }
   let joinDup = false;
   let keepAliveTimeoutBuffer: IrExpr | null = null;
+  let maxHeaderSize: IrExpr | null = null;
   for (const prop of node.properties) {
     let initializer: ts.Expression | null;
     if (ts.isPropertyAssignment(prop) &&
@@ -2423,13 +2425,27 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
       keepAliveTimeoutBuffer = value;
       continue;
     }
+    if (key === "maxHeaderSize") {
+      const value = initializer !== null
+        ? L.lowerExpr(initializer)
+        : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
+      if (value.type.kind !== "f64") {
+        L.noLowering(
+          `${what} with a non-number maxHeaderSize option`,
+          prop,
+          "maxHeaderSize must be a number",
+        );
+      }
+      maxHeaderSize = value;
+      continue;
+    }
     fenceOrDropOptionKey(
       L, prop, key, what, HTTP_SERVER_DOCUMENTED_OPTIONS,
-      "requireHostHeader: false, joinDuplicateHeaders, and keepAliveTimeoutBuffer are the supported options",
+      "requireHostHeader: false, joinDuplicateHeaders, keepAliveTimeoutBuffer, and maxHeaderSize are the supported options",
     );
     // An undocumented key, dropped like Node drops it.
   }
-  return { joinDup, keepAliveTimeoutBuffer };
+  return { joinDup, keepAliveTimeoutBuffer, maxHeaderSize };
 }
 
 /** The shared createServer([options][, handler]) shapes behind
@@ -2458,23 +2474,25 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
   }
   const opts = optsNode !== null
     ? lowerHttpServerOptions(L, optsNode, what)
-    : { joinDup: false, keepAliveTimeoutBuffer: null };
+    : { joinDup: false, keepAliveTimeoutBuffer: null, maxHeaderSize: null };
   const server: IrExpr = handlerNode !== null
     ? { kind: "libCall", fn: "http.createServer", args: [lowerRequestHandlerArg(L, handlerNode)], type: NETSERVER_T, loc }
     : { kind: "libCall", fn: "http.createServerEmpty", args: [], type: NETSERVER_T, loc };
-  if (!opts.joinDup && opts.keepAliveTimeoutBuffer === null) return server;
+  if (!opts.joinDup && opts.keepAliveTimeoutBuffer === null && opts.maxHeaderSize === null) return server;
   // The option-setting composition: an interned helper takes the option
   // values first (preserving Node's options-before-handler evaluation
   // order), then the fresh server, applies the modeled fields, and answers
   // the server as the constructor/factory result.
   const hasBuffer = opts.keepAliveTimeoutBuffer !== null;
-  const key = `server.opts:${opts.joinDup ? 1 : 0}:${hasBuffer ? 1 : 0}`;
+  const hasMaxHeader = opts.maxHeaderSize !== null;
+  const key = `server.opts:${opts.joinDup ? 1 : 0}:${hasBuffer ? 1 : 0}:${hasMaxHeader ? 1 : 0}`;
   const existing = L.arrHofHelpers.get(key);
   const name = existing ?? `%server.opts.${L.arrHofHelpers.size}`;
   if (!existing) {
     L.arrHofHelpers.set(key, name);
     const params = [
       ...(hasBuffer ? [{ localId: "b.0", name: "buffer", type: DYN }] : []),
+      ...(hasMaxHeader ? [{ localId: "h.0", name: "maxHeaderSize", type: F64 }] : []),
       { localId: "s.0", name: "s", type: NETSERVER_T },
     ];
     const ref: IrExpr = { kind: "varRef", localId: "s.0", type: NETSERVER_T, loc };
@@ -2485,6 +2503,14 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
       body.push({
         kind: "exprStmt",
         expr: { kind: "libCall", fn: "http.serverTimeoutOptionSet", args: [ref, selector, value], type: VOID, loc },
+        loc,
+      });
+    }
+    if (hasMaxHeader) {
+      const value: IrExpr = { kind: "varRef", localId: "h.0", type: F64, loc };
+      body.push({
+        kind: "exprStmt",
+        expr: { kind: "libCall", fn: "http.serverMaxHeaderSizeSet", args: [ref, value], type: VOID, loc },
         loc,
       });
     }
@@ -2508,7 +2534,11 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
   return {
     kind: "call",
     callee: name,
-    args: [...(opts.keepAliveTimeoutBuffer !== null ? [opts.keepAliveTimeoutBuffer] : []), server],
+    args: [
+      ...(opts.keepAliveTimeoutBuffer !== null ? [opts.keepAliveTimeoutBuffer] : []),
+      ...(opts.maxHeaderSize !== null ? [opts.maxHeaderSize] : []),
+      server,
+    ],
     type: NETSERVER_T,
     loc,
   };

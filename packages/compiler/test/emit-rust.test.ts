@@ -1633,6 +1633,8 @@ shardedTest.each(shardSelect([
   "2694-path-win32-full.ts",
   "2695-net-typed-roundtrip.ts",
   "2696-http-server-net-roundtrip.ts",
+  "2801-http-server-max-header-size.ts",
+  "2802-http-server-max-header-size-range.ts",
   "2697-process-chdir.ts",
   "2698-process-umask.ts",
   "2700-wasi-core.ts",

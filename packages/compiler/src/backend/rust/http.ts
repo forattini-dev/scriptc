@@ -444,6 +444,10 @@ export function emitRustHttpCall(
       expr.args[0]?.type.kind === "netServer") {
     return `runtime::http_server_join_duplicate_headers(&(${context.emitExpr(expr.args[0])}))`;
   }
+  if (expr.fn === "http.serverMaxHeaderSizeSet" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64") {
+    return `runtime::http_server_max_header_size_set(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;
+  }
   if (expr.fn === "http.serverTimeoutGet" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64") {
     return `runtime::http_server_timeout_get(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;

@@ -1416,6 +1416,7 @@ typedef struct ScrHttpSrvCtx {
   ScrNetLs upgrade_ls;
   ScrNetLs connect_ls; /* HTTP CONNECT — the upgrade machinery's twin */
   bool join_dup; /* createServer({ joinDuplicateHeaders: true }) */
+  size_t max_header_size;
 } ScrHttpSrvCtx;
 
 static ScrHttpSrvCtx *scr_http_srv_ctx_retain(ScrHttpSrvCtx *ctx) {
@@ -1542,6 +1543,15 @@ static void scr_http_conn_bad_request(ScrHttpConn *conn) {
   static const char bad[] =
       "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
   scr_net_sock_write_native(conn->sock, bad, sizeof bad - 1);
+  scr_net_sock_end(conn->sock);
+  conn->len = 0;
+  scr_http_conn_drop_request(conn, false);
+}
+
+static void scr_http_conn_header_overflow(ScrHttpConn *conn) {
+  static const char too_large[] =
+      "HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+  scr_net_sock_write_native(conn->sock, too_large, sizeof too_large - 1);
   scr_net_sock_end(conn->sock);
   conn->len = 0;
   scr_http_conn_drop_request(conn, false);
@@ -1856,9 +1866,9 @@ static void scr_http_conn_pump(ScrHttpConn *conn) {
         }
       }
       if (!hit) {
-        if (conn->len > 65536) {
+        if (conn->len > (conn->client_mode ? 65536 : conn->srv->max_header_size)) {
           if (conn->client_mode) scr_http_client_head_overflow(conn);
-          else scr_http_conn_bad_request(conn); /* header cap */
+          else scr_http_conn_header_overflow(conn);
         }
         return;
       }
@@ -1869,6 +1879,10 @@ static void scr_http_conn_pump(ScrHttpConn *conn) {
         }
         if (scr_exc_pending()) return;
         continue;
+      }
+      if (head_len > conn->srv->max_header_size) {
+        scr_http_conn_header_overflow(conn);
+        return;
       }
       /* a previous exchange must be COMPLETE before the next parses: the
        * response may still be streaming (keep-alive pipelining waits) */
@@ -2096,6 +2110,7 @@ ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, Sc
   if (!ctx) scr_http_oom();
   ctx->proto = SCR_NET_PROTO_HTTP1;
   ctx->rc = 1;
+  ctx->max_header_size = 16 * 1024;
   if (handler != NULL) scr_net_ls_add(&ctx->request_ls, handler, (void *)fn, false);
   scr_net_server_set_native_conn(s, &scr_http_on_connection, ctx, &scr_http_srv_ctx_free);
   scr_net_server_set_http_ctx(s, ctx);
@@ -2109,6 +2124,28 @@ ScrNetServer *scr_http_create_server(ScrClosure *handler /*moves, nullable*/, Sc
 void scr_http_server_join_duplicate_headers(ScrNetServer *s) {
   ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
   if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->join_dup = true;
+}
+
+void scr_http_server_max_header_size_set(ScrNetServer *s, double value) {
+  char recv[48], msg[224];
+  if (!(isfinite(value) && trunc(value) == value)) {
+    scr_num_received(value, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"maxHeaderSize\" is out of range. It must be an integer. Received %s",
+                       recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return;
+  }
+  if (value < 0 || value > 9007199254740991.0) {
+    scr_num_received(value, recv);
+    int len = snprintf(msg, sizeof msg,
+                       "The value of \"maxHeaderSize\" is out of range. It must be >= 0 && <= 9007199254740991. Received %s",
+                       recv);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)len, "ERR_OUT_OF_RANGE");
+    return;
+  }
+  ScrHttpSrvCtx *ctx = (ScrHttpSrvCtx *)scr_net_server_get_http_ctx(s);
+  if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->max_header_size = (size_t)value;
 }
 
 /* Late 'request' listener installs (server.on/once("request", ...)): the

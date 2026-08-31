@@ -2600,6 +2600,7 @@ export type IrLibFn =
    * joinDuplicateHeaders joins repeated request-header reads ", "). */
   | "http.createServerEmpty"
   | "http.serverJoinDupHeaders"
+  | "http.serverMaxHeaderSizeSet"
   /** The five writable numeric http.Server timeout fields use one
    * selector ABI: 0 timeout, 1 keepAliveTimeout, 2 headersTimeout,
    * 3 requestTimeout, 4 keepAliveTimeoutBuffer. These calls store/read
@@ -7145,6 +7146,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dc.chanBindStore",
   "dc.chanRunStores",
   "http.resWriteHeadDyn",
+  "http.serverMaxHeaderSizeSet",
   "http.serverTimeoutGet",
   "http.serverTimeoutOptionSet",
   "net.sockSetEncoding",
