@@ -745,6 +745,11 @@ impl<'a> JsonParser<'a> {
         let Some(bytes) = self.bytes.get(start..end) else {
             return self.syntax("incomplete unicode escape");
         };
+        // The 4-byte window can split a multi-byte scalar, so non-hex bytes
+        // must be rejected before the window is treated as text.
+        if !bytes.iter().all(u8::is_ascii_hexdigit) {
+            return Err(format!("invalid unicode escape at byte {start}"));
+        }
         let spelling = std::str::from_utf8(bytes).expect("ASCII JSON unicode escape");
         let value = u16::from_str_radix(spelling, 16)
             .map_err(|_| format!("invalid unicode escape at byte {start}"))?;

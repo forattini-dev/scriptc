@@ -887,6 +887,23 @@
     }
 
     #[test]
+    fn json_unicode_escape_split_by_multibyte_scalar_is_a_syntax_error() {
+        // "\u123é": the é lands inside the 4-byte escape window, which must
+        // surface as a catchable syntax error, never a runtime panic.
+        for input in ["\"\\u123é\"", "\"\\u12g4\""] {
+            let Err(error) = json_parse_node(&string(input)) else {
+                panic!("{input} parsed instead of erroring");
+            };
+            assert!(
+                error.contains("invalid unicode escape"),
+                "unexpected error for {input}: {error}"
+            );
+        }
+        let parsed = json_parse_node(&string("\"\\u0041\"")).expect("valid escape");
+        assert!(matches!(parsed, JsonNode::String(value) if value.as_ref() == "A"));
+    }
+
+    #[test]
     fn bitwise_conversions_follow_ecmascript_width() {
         assert_eq!(bit_not(0.0), -1.0);
         assert_eq!(shift_right_unsigned(-1.0, 1.0), 2_147_483_647.0);
