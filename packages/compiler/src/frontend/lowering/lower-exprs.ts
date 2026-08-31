@@ -11096,9 +11096,21 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         L.flushDeferredClass(receiverIr.className);
         return null;
       }
+      const lowerReceiver = (): IrExpr => {
+        const obj = L.lowerExpr(access.expression);
+        return exactInstance !== null && obj.type.kind === "object" &&
+          L.isSubclassOf(receiverIr.className, obj.type.className)
+          ? {
+              kind: "downcast",
+              value: obj,
+              type: receiverIr,
+              loc: obj.loc,
+            }
+          : obj;
+      };
       const fieldType = info.fields.get(access.name.text);
       if (fieldType) {
-        const obj = L.lowerExpr(access.expression);
+        const obj = lowerReceiver();
         return { container: "class", obj, className: receiverIr.className, field: access.name.text, fieldType };
       }
       // Accessor property: either half declared anywhere on the chain
@@ -11107,7 +11119,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const getF = L.findMethodOn(info, `get:${access.name.text}`);
       const setF = L.findMethodOn(info, `set:${access.name.text}`);
       if (getF || setF) {
-        const obj = L.lowerExpr(access.expression);
+        const obj = lowerReceiver();
         return {
           container: "accessor",
           obj,
