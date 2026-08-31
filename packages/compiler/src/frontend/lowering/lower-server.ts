@@ -2342,6 +2342,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
   joinDup: boolean;
   keepAliveTimeoutBuffer: IrExpr | null;
   maxHeaderSize: IrExpr | null;
+  valueOrder: ("buffer" | "maxHeader")[];
 } {
   if (!ts.isObjectLiteralExpression(node)) {
     L.noLowering(
@@ -2353,6 +2354,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
   let joinDup = false;
   let keepAliveTimeoutBuffer: IrExpr | null = null;
   let maxHeaderSize: IrExpr | null = null;
+  const valueOrder: ("buffer" | "maxHeader")[] = [];
   for (const prop of node.properties) {
     let initializer: ts.Expression | null;
     if (ts.isPropertyAssignment(prop) &&
@@ -2423,6 +2425,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
       // error. Coercing eagerly to F64 would reject the valid explicit-
       // undefined spelling before the option helper sees it.
       keepAliveTimeoutBuffer = value;
+      valueOrder.push("buffer");
       continue;
     }
     if (key === "maxHeaderSize") {
@@ -2438,6 +2441,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
         );
       }
       maxHeaderSize = value;
+      valueOrder.push("maxHeader");
       continue;
     }
     fenceOrDropOptionKey(
@@ -2446,7 +2450,7 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
     );
     // An undocumented key, dropped like Node drops it.
   }
-  return { joinDup, keepAliveTimeoutBuffer, maxHeaderSize };
+  return { joinDup, keepAliveTimeoutBuffer, maxHeaderSize, valueOrder };
 }
 
 /** The shared createServer([options][, handler]) shapes behind
@@ -2475,7 +2479,7 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
   }
   const opts = optsNode !== null
     ? lowerHttpServerOptions(L, optsNode, what)
-    : { joinDup: false, keepAliveTimeoutBuffer: null, maxHeaderSize: null };
+    : { joinDup: false, keepAliveTimeoutBuffer: null, maxHeaderSize: null, valueOrder: [] };
   const server: IrExpr = handlerNode !== null
     ? { kind: "libCall", fn: "http.createServer", args: [lowerRequestHandlerArg(L, handlerNode)], type: NETSERVER_T, loc }
     : { kind: "libCall", fn: "http.createServerEmpty", args: [], type: NETSERVER_T, loc };
@@ -2486,14 +2490,15 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
   // the server as the constructor/factory result.
   const hasBuffer = opts.keepAliveTimeoutBuffer !== null;
   const hasMaxHeader = opts.maxHeaderSize !== null;
-  const key = `server.opts:${opts.joinDup ? 1 : 0}:${hasBuffer ? 1 : 0}:${hasMaxHeader ? 1 : 0}`;
+  const key = `server.opts:${opts.joinDup ? 1 : 0}:${hasBuffer ? 1 : 0}:${hasMaxHeader ? 1 : 0}:${opts.valueOrder.join(",")}`;
   const existing = L.arrHofHelpers.get(key);
   const name = existing ?? `%server.opts.${L.arrHofHelpers.size}`;
   if (!existing) {
     L.arrHofHelpers.set(key, name);
     const params = [
-      ...(hasBuffer ? [{ localId: "b.0", name: "buffer", type: DYN }] : []),
-      ...(hasMaxHeader ? [{ localId: "h.0", name: "maxHeaderSize", type: DYN }] : []),
+      ...opts.valueOrder.map((option) => option === "buffer"
+        ? { localId: "b.0", name: "buffer", type: DYN }
+        : { localId: "h.0", name: "maxHeaderSize", type: DYN }),
       { localId: "s.0", name: "s", type: NETSERVER_T },
     ];
     const ref: IrExpr = { kind: "varRef", localId: "s.0", type: NETSERVER_T, loc };
@@ -2532,14 +2537,15 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
       loc,
     });
   }
+  const orderedValues: IrExpr[] = [];
+  for (const option of opts.valueOrder) {
+    const value = option === "buffer" ? opts.keepAliveTimeoutBuffer : opts.maxHeaderSize;
+    if (value !== null) orderedValues.push(value);
+  }
   return {
     kind: "call",
     callee: name,
-    args: [
-      ...(opts.keepAliveTimeoutBuffer !== null ? [opts.keepAliveTimeoutBuffer] : []),
-      ...(opts.maxHeaderSize !== null ? [opts.maxHeaderSize] : []),
-      server,
-    ],
+    args: [...orderedValues, server],
     type: NETSERVER_T,
     loc,
   };
