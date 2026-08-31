@@ -31,6 +31,7 @@ test.each([
   "1525-child-exit-signal.ts",
   "1562-spawn-conditional-spread.ts",
   "1570-child-unref-kill-reffed.ts",
+  "2806-event-loop-stdin-child-fairness.ts",
 ])("Rust async child event corpus matches Node: %s", async (fixtureName) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-child-async-"));
   const fixture = resolve("tests/corpus", fixtureName);

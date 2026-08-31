@@ -588,8 +588,12 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             continue;
         }
         if stdin_pending() {
-            let wait =
+            let mut wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+            if children_referenced_pending() || child_streams_pending() {
+                let cooperative = std::time::Duration::from_millis(1);
+                wait = Some(wait.map_or(cooperative, |timeout| timeout.min(cooperative)));
+            }
             stdin_wait(wait);
             continue;
         }
