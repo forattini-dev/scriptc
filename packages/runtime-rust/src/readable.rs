@@ -1,14 +1,18 @@
+pub type ReadableTrace = Rc<dyn Fn(&mut Tracer<'_>)>;
+pub type ReadableNotify = Rc<dyn Fn()>;
+pub type ReadableBackpressure = Rc<dyn Fn(ReadableNotify, ReadableTrace)>;
+
 #[derive(Clone)]
 struct ReadablePipe {
     identity: usize,
     end: bool,
     write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
-    finish: Rc<dyn Fn()>,
-    unpipe: Rc<dyn Fn()>,
-    resume: Rc<dyn Fn()>,
-    resume_trace: Rc<dyn Fn(&mut Tracer<'_>)>,
-    backpressure: Rc<dyn Fn(Rc<dyn Fn()>, Rc<dyn Fn(&mut Tracer<'_>)>)>,
-    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+    finish: ReadableNotify,
+    unpipe: ReadableNotify,
+    resume: ReadableNotify,
+    resume_trace: ReadableTrace,
+    backpressure: ReadableBackpressure,
+    trace: ReadableTrace,
 }
 
 #[derive(Clone)]
@@ -232,9 +236,7 @@ where
     R: Clone + Trace + 'static,
 {
     let ready = readable.with_mut(|data| {
-        if data.next_waiter.is_none() {
-            return None;
-        }
+        data.next_waiter.as_ref()?;
         let outcome = if let Some(error) = &data.errored {
             Some(Err(caught_value(error.clone())))
         } else if !data.chunks.is_empty() {
@@ -778,17 +780,18 @@ where
     readable.with(|data| !data.chunks.is_empty() || data.eof)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn readable_add_pipe<L, R>(
     readable: &JsReadable<L, R>,
     identity: usize,
     end: bool,
     write: Rc<dyn Fn(JsBytes<u8>) -> bool>,
-    finish: Rc<dyn Fn()>,
-    unpipe: Rc<dyn Fn()>,
-    resume: Rc<dyn Fn()>,
-    resume_trace: Rc<dyn Fn(&mut Tracer<'_>)>,
-    backpressure: Rc<dyn Fn(Rc<dyn Fn()>, Rc<dyn Fn(&mut Tracer<'_>)>)>,
-    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+    finish: ReadableNotify,
+    unpipe: ReadableNotify,
+    resume: ReadableNotify,
+    resume_trace: ReadableTrace,
+    backpressure: ReadableBackpressure,
+    trace: ReadableTrace,
 ) where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
@@ -919,20 +922,8 @@ where
         "readableHighWaterMark" | "rs:highWaterMark" => {
             readable.with(|data| data.high_water_mark as f64)
         }
-        "readableEnded" => {
-            if readable.with(|data| data.ended) {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        "destroyed" => {
-            if readable.with(|data| data.destroyed) {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        "readableEnded" => f64::from(readable.with(|data| data.ended)),
+        "destroyed" => f64::from(readable.with(|data| data.destroyed)),
         _ => 0.0,
     }
 }

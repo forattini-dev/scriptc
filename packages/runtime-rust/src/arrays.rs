@@ -389,7 +389,7 @@ pub fn array_with<T: ArrayElement>(array: &JsArray<T>, index: f64, value: T) -> 
     } else {
         length as f64 + relative
     };
-    if !(actual >= 0.0) || actual >= length as f64 {
+    if actual.is_nan() || actual < 0.0 || actual >= length as f64 {
         throw_range_error(format!("Invalid index : {}", format_number(index)));
     }
     let mut elements = array.with(|data| data.elements.clone());

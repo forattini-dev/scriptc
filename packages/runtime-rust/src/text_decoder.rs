@@ -261,7 +261,7 @@ fn td_big5(input: &[u8]) -> JsString {
                     index -= 1;
                 }
             }
-        } else if byte < 0x80 || byte == 0x80 {
+        } else if byte <= 0x80 {
             td_put(&mut output, u32::from(byte));
         } else if (0x81..=0xfe).contains(&byte) {
             lead = byte;

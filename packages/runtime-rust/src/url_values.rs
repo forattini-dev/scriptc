@@ -125,21 +125,20 @@ fn file_url_path(value: &JsUrl) -> JsString {
     let mut decoded = Vec::with_capacity(encoded.len());
     let mut index = 0;
     while index < encoded.len() {
-        if encoded[index] == b'%' && index + 2 < encoded.len() {
-            if let (Some(high), Some(low)) = (
+        if encoded[index] == b'%'
+            && index + 2 < encoded.len()
+            && let (Some(high), Some(low)) = (
                 percent_hex(encoded[index + 1]),
                 percent_hex(encoded[index + 2]),
-            ) {
-                let byte = high << 4 | low;
-                if byte == b'/' {
-                    throw_type_error(
-                        "File URL path must not include encoded / characters".to_owned(),
-                    );
-                }
-                decoded.push(byte);
-                index += 3;
-                continue;
+            )
+        {
+            let byte = high << 4 | low;
+            if byte == b'/' {
+                throw_type_error("File URL path must not include encoded / characters".to_owned());
             }
+            decoded.push(byte);
+            index += 3;
+            continue;
         }
         decoded.push(encoded[index]);
         index += 1;

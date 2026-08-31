@@ -412,7 +412,7 @@ fn decimal_exponent(value: f64) -> i32 {
         }
         let first = plain
             .bytes()
-            .position(|digit| digit >= b'1' && digit <= b'9')
+            .position(|digit| (b'1'..=b'9').contains(&digit))
             .expect("scriptc: non-zero number formatted without a non-zero digit");
         return 1 - first as i32;
     }
@@ -536,7 +536,7 @@ pub fn intl_number_format_en_us(value: f64) -> JsString {
         output.push('0');
     } else {
         for index in 0..exponent as usize {
-            if index > 0 && (exponent as usize - index) % 3 == 0 {
+            if index > 0 && (exponent as usize - index).is_multiple_of(3) {
                 output.push(',');
             }
             output.push(if index < digits.len() {

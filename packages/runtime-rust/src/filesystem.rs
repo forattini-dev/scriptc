@@ -892,7 +892,7 @@ pub fn file_handle_read(
     let byte_length = bytes.with(|data| data.length);
     if byte_length == 0 {
         let checked = fs_read_sync(fd, bytes, offset, 0.0, position);
-        if (!length_default && length >= 0.0 && length < 1.0) || (length_default && offset == 0.0) {
+        if (!length_default && (0.0..1.0).contains(&length)) || (length_default && offset == 0.0) {
             return checked;
         }
         throw_value(JsError {

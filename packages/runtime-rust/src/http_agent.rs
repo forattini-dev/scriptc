@@ -205,6 +205,7 @@ fn http_agent_request_slot(
     (name, queued)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn http_agent_client_request_impl(
     agent: &JsHttpAgent,
     host: &JsString,
@@ -217,7 +218,7 @@ fn http_agent_client_request_impl(
     secure: bool,
     reject_unauthorized: bool,
     ca: &JsString,
-    callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
+    callback: Option<HttpClientResponseCallback>,
 ) -> JsHttpClientRequest {
     let expected_secure = agent.with(|agent| agent.secure);
     if expected_secure != secure {
@@ -250,14 +251,15 @@ fn http_agent_client_request_impl(
         callback,
     );
     http_agent_track(agent, &request, name, queued);
-    if !queued {
-        if let Some(socket) = socket {
-            net_socket_start_connect(&socket);
-        }
+    if !queued
+        && let Some(socket) = socket
+    {
+        net_socket_start_connect(&socket);
     }
     request
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn http_agent_client_request(
     agent: &JsHttpAgent,
     host: &JsString,
@@ -284,6 +286,7 @@ pub fn http_agent_client_request(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn http_agent_client_request_callback(
     agent: &JsHttpAgent,
     host: &JsString,
@@ -320,9 +323,7 @@ fn http_agent_client_done(agent: &JsHttpAgent, request: &JsHttpClientRequest) {
             .find(|entry| entry.request.ptr_eq(request))
             .map(|entry| entry.name.clone());
         agent.entries.retain(|entry| !entry.request.ptr_eq(request));
-        let Some(name) = name else {
-            return None;
-        };
+        let name = name?;
         if agent.destroyed {
             return None;
         }

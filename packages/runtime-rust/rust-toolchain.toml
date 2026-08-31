@@ -1,0 +1,9 @@
+# Pins the crate's OWN gate (cargo test / clippy -D warnings, run from this
+# directory — CI's runtime_rust job and `pnpm --filter` scripts). Commands
+# run from the repo root (the compiler's cargo invocation, the vitest
+# lanes) do not walk down into this file and keep the host toolchain, so
+# end users are never forced onto this pin. Bump deliberately: a floating
+# stable under `-D warnings` breaks unrelated PRs when a new lint lands.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]

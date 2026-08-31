@@ -494,7 +494,7 @@ fn bytes_hex_decode(text: &str) -> Vec<u8> {
         }
     }
     let mut output = Vec::with_capacity(text.len() / 2);
-    for pair in text.as_bytes().chunks_exact(2) {
+    for pair in text.as_bytes().as_chunks::<2>().0 {
         let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
             break;
         };

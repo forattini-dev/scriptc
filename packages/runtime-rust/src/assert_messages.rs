@@ -143,6 +143,7 @@ fn assert_print_myers(diff: &[AssertDiffLine<'_>]) -> (String, bool) {
     (output, skipped)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assert_dyn_equal_message(
     actual: &str,
     expected: &str,

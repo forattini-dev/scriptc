@@ -18,6 +18,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "cargo check --manifest-path Cargo.toml"
+    "build": "cargo check --manifest-path Cargo.toml",
+    "test": "cargo test --locked --manifest-path Cargo.toml",
+    "lint": "cargo clippy --all-targets --locked --manifest-path Cargo.toml -- -D warnings"
   }
 }

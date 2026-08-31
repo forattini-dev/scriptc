@@ -14,12 +14,13 @@ struct DgramErrorListener {
 
 #[derive(Clone)]
 struct DgramMessageListener {
-    invoke: Rc<dyn Fn(JsBytes<u8>, JsString, JsString, f64, f64)>,
+    invoke: DgramMessageCallback,
     trace: DgramTrace,
     once: bool,
 }
 
 pub type DgramTrace = Rc<dyn Fn(&mut Tracer<'_>)>;
+pub type DgramMessageCallback = Rc<dyn Fn(JsBytes<u8>, JsString, JsString, f64, f64)>;
 
 pub struct DgramSocketData {
     socket: Option<std::net::UdpSocket>,
@@ -404,7 +405,7 @@ pub fn dgram_ref(socket: &JsDgramSocket) {
 
 pub fn dgram_on_message(
     socket: &JsDgramSocket,
-    callback: Rc<dyn Fn(JsBytes<u8>, JsString, JsString, f64, f64)>,
+    callback: DgramMessageCallback,
     trace: DgramTrace,
     once: bool,
 ) {

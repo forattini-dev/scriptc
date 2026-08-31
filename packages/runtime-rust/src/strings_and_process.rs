@@ -882,11 +882,11 @@ pub fn process_env_pairs() -> JsArray<JsString> {
             }
         }
         for (name, value) in writes.iter() {
-            if !seen.iter().any(|seen| process_env_name_eq(seen, name)) {
-                if let Some(value) = value {
-                    pairs.push(Rc::from(name.as_str()));
-                    pairs.push(value.clone());
-                }
+            if !seen.iter().any(|seen| process_env_name_eq(seen, name))
+                && let Some(value) = value
+            {
+                pairs.push(Rc::from(name.as_str()));
+                pairs.push(value.clone());
             }
         }
         array_new(pairs)

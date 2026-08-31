@@ -2,6 +2,11 @@
 name = "scriptc-runtime"
 version = "0.0.35"
 edition = "2024"
+# Edition 2024 implies 1.85, but the runtime already uses `as_chunks` and
+# `is_multiple_of` (both stable since 1.88), so 1.88 is the real floor and
+# `clippy::incompatible_msrv` enforces it. The crate's own gate runs on the
+# exact toolchain pinned in rust-toolchain.toml.
+rust-version = "1.88"
 license = "Apache-2.0"
 description = "Memory-safe Rust runtime for scriptc-generated programs"
 publish = false

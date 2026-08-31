@@ -278,7 +278,7 @@ pub fn child_spawn_options(
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.chunks_exact(2) {
+            for pair in pairs.elements.as_chunks::<2>().0 {
                 child_command.env(pair[0].as_ref(), pair[1].as_ref());
             }
         });

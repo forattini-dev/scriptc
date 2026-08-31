@@ -425,7 +425,7 @@ pub fn bytes_with<T: ByteElement>(bytes: &JsBytes<T>, index: f64, value: f64) ->
     } else {
         length as f64 + relative
     };
-    if !(actual >= 0.0) || actual >= length as f64 {
+    if actual.is_nan() || actual < 0.0 || actual >= length as f64 {
         throw_range_error("Invalid typed array index".to_owned());
     }
     let mut elements =

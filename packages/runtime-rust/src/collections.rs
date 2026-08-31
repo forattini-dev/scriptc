@@ -9,10 +9,8 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
 
 impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
-        for entry in &self.entries {
-            if let Some((_, value)) = entry {
-                value.trace_value(tracer);
-            }
+        for (_, value) in self.entries.iter().flatten() {
+            value.trace_value(tracer);
         }
         if let Some(prototype) = &self.prototype {
             prototype.trace_value(tracer);

@@ -20,6 +20,8 @@ struct FfiForeignShared {
     stopping: bool,
 }
 
+pub type FfiForeignDispatch = Rc<dyn Fn(&[FfiForeignArg])>;
+
 struct FfiForeignRegistration {
     key: &'static str,
     identity: usize,
@@ -27,7 +29,7 @@ struct FfiForeignRegistration {
     context: *mut std::ffi::c_void,
     token: usize,
     released: bool,
-    dispatch: Rc<dyn Fn(&[FfiForeignArg])>,
+    dispatch: FfiForeignDispatch,
 }
 
 thread_local! {

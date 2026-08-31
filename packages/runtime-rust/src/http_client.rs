@@ -14,6 +14,8 @@ impl HttpClientConnection {
     }
 }
 
+type HttpClientResponseCallback = (Rc<dyn Fn(JsHttpRequest)>, NetTrace);
+
 type ParsedHttpResponse = (
     f64,
     JsString,
@@ -242,6 +244,7 @@ fn http_client_headers(values: &JsArray<JsString>) -> Vec<(JsString, JsString)> 
     headers
 }
 
+#[allow(clippy::too_many_arguments)]
 fn http_client_new_with_socket(
     host: &JsString,
     port: f64,
@@ -254,7 +257,7 @@ fn http_client_new_with_socket(
     reject_unauthorized: bool,
     ca: &JsString,
     socket: Option<JsNetSocket>,
-    callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
+    callback: Option<HttpClientResponseCallback>,
 ) -> JsHttpClientRequest {
     let port_number = net_port(port);
     let request = Gc::new(HttpClientRequestData {
@@ -333,6 +336,7 @@ fn http_client_new_with_socket(
     request
 }
 
+#[allow(clippy::too_many_arguments)]
 fn http_client_new(
     host: &JsString,
     port: f64,
@@ -344,7 +348,7 @@ fn http_client_new(
     auto_end: bool,
     reject_unauthorized: bool,
     ca: &JsString,
-    callback: Option<(Rc<dyn Fn(JsHttpRequest)>, NetTrace)>,
+    callback: Option<HttpClientResponseCallback>,
 ) -> JsHttpClientRequest {
     let socket = (!secure).then(|| net_socket_connect(port, host));
     http_client_new_with_socket(
@@ -367,6 +371,7 @@ pub fn http_client_request(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn http_client_request_callback(
     host: &JsString,
     port: f64,
@@ -384,6 +389,7 @@ pub fn http_client_request_callback(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn https_client_request(
     host: &JsString,
     port: f64,
@@ -400,6 +406,7 @@ pub fn https_client_request(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn https_client_request_callback(
     host: &JsString,
     port: f64,

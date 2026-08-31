@@ -256,10 +256,10 @@ pub fn os_network_interfaces() -> Vec<OsNetworkInterfaceRow> {
     };
     let mut macs = HashMap::<String, [u8; 6]>::new();
     for interface in &interfaces {
-        if active(interface.flags) {
-            if let Address::Mac(mac) = &interface.address {
-                macs.insert(os_interface_name(interface).to_owned(), *mac);
-            }
+        if active(interface.flags)
+            && let Address::Mac(mac) = &interface.address
+        {
+            macs.insert(os_interface_name(interface).to_owned(), *mac);
         }
     }
     let zero_mac = [0_u8; 6];

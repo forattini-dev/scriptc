@@ -41,7 +41,7 @@ pub fn readline_create() -> f64 {
 
 fn readline_id(id: f64) -> Option<u64> {
     (id.is_finite() && id.fract() == 0.0 && id >= 1.0 && id <= u64::MAX as f64)
-        .then(|| id as u64)
+        .then_some(id as u64)
 }
 
 enum ReadlineConsumer {
@@ -96,11 +96,8 @@ pub fn readline_next_line(id: f64, callback: Box<dyn FnOnce(Option<JsString>)>) 
     let mut callback = Some(callback);
     let live_id = READLINE_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        let Some(interface) = readline_id(id)
-            .and_then(|id| state.interfaces.iter_mut().find(|interface| interface.id == id))
-        else {
-            return None;
-        };
+        let interface = readline_id(id)
+            .and_then(|id| state.interfaces.iter_mut().find(|interface| interface.id == id))?;
         if interface.closed || interface.dead {
             return None;
         }

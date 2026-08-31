@@ -25,17 +25,16 @@ fn run_sync_child(
             stderr.read_to_end(&mut bytes).map(|_| bytes)
         })
     });
-    if let Some(input) = input {
-        if let Err(error) = child
+    if let Some(input) = input
+        && let Err(error) = child
             .stdin
             .take()
             .expect("scriptc: piped child stdin missing")
             .write_all(input)
-        {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
     }
     let timeout = if timeout_ms.is_finite() && timeout_ms > 0.0 {
         Some(std::time::Duration::from_secs_f64(timeout_ms / 1000.0))
@@ -84,6 +83,7 @@ fn is_self_reexec(command: &JsString, arguments: &JsArray<JsString>) -> bool {
     resolve(command.as_ref()) == executable && resolve(first.as_ref()) == executable
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn child_exec_sync(
     command: &JsString,
     arguments: &JsArray<JsString>,
@@ -110,7 +110,7 @@ pub fn child_exec_sync(
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.chunks_exact(2) {
+            for pair in pairs.elements.as_chunks::<2>().0 {
                 child_command.env(pair[0].as_ref(), pair[1].as_ref());
             }
         });
@@ -228,7 +228,7 @@ pub fn child_exec_capture(
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.chunks_exact(2) {
+            for pair in pairs.elements.as_chunks::<2>().0 {
                 child_command.env(pair[0].as_ref(), pair[1].as_ref());
             }
         });
@@ -322,6 +322,7 @@ fn child_exit_signal(_status: &std::process::ExitStatus) -> Option<JsString> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn child_spawn_sync_core(
     command: &JsString,
     arguments: &JsArray<JsString>,
@@ -338,7 +339,7 @@ fn child_spawn_sync_core(
     if let Some(pairs) = env_pairs {
         child_command.env_clear();
         pairs.with(|pairs| {
-            for pair in pairs.elements.chunks_exact(2) {
+            for pair in pairs.elements.as_chunks::<2>().0 {
                 child_command.env(pair[0].as_ref(), pair[1].as_ref());
             }
         });
@@ -438,6 +439,7 @@ pub fn child_spawn_sync(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn child_spawn_sync_env(
     command: &JsString,
     arguments: &JsArray<JsString>,

@@ -42,12 +42,15 @@ impl FsWatchStamp {
     }
 }
 
+pub type FsWatchCallback = Rc<dyn Fn(JsString)>;
+pub type FsWatchTrace = Rc<dyn Fn(&mut Tracer<'_>)>;
+
 pub struct FsWatcherData {
     path: std::path::PathBuf,
     stamp: FsWatchStamp,
     closed: bool,
-    callback: Option<Rc<dyn Fn(JsString)>>,
-    trace: Option<Rc<dyn Fn(&mut Tracer<'_>)>>,
+    callback: Option<FsWatchCallback>,
+    trace: Option<FsWatchTrace>,
 }
 
 impl Trace for FsWatcherData {
@@ -74,8 +77,8 @@ thread_local! {
 
 pub fn fs_watch(
     path: &JsString,
-    callback: Option<Rc<dyn Fn(JsString)>>,
-    trace: Option<Rc<dyn Fn(&mut Tracer<'_>)>>,
+    callback: Option<FsWatchCallback>,
+    trace: Option<FsWatchTrace>,
 ) -> JsFsWatcher {
     let metadata = std::fs::metadata(path.as_ref())
         .unwrap_or_else(|error| throw_fs_error("watch", path, error));

@@ -97,15 +97,15 @@ fn normalize_windows_path(path: &[u8]) -> Vec<u8> {
                             device.extend_from_slice(server);
                             has_device = true;
                             root_end = 4;
-                            if let Some(colon) = path.iter().position(|byte| *byte == b':') {
-                                if colon >= 4 {
-                                    let candidate = &path[4..=colon];
-                                    if windows_reserved_name(candidate, Some(candidate.len() - 1)) {
-                                        device.clear();
-                                        device.extend_from_slice(b"\\\\?\\");
-                                        device.extend_from_slice(candidate);
-                                        root_end = colon + 1;
-                                    }
+                            if let Some(colon) = path.iter().position(|byte| *byte == b':')
+                                && colon >= 4
+                            {
+                                let candidate = &path[4..=colon];
+                                if windows_reserved_name(candidate, Some(candidate.len() - 1)) {
+                                    device.clear();
+                                    device.extend_from_slice(b"\\\\?\\");
+                                    device.extend_from_slice(candidate);
+                                    root_end = colon + 1;
                                 }
                             }
                         } else if index == path.len() {
@@ -129,21 +129,21 @@ fn normalize_windows_path(path: &[u8]) -> Vec<u8> {
         } else {
             root_end = 1;
         }
-    } else if let Some(colon) = path.iter().position(|byte| *byte == b':') {
-        if colon > 0 {
-            if windows_device_root(path[0]) && colon == 1 {
-                device.extend_from_slice(&path[..2]);
-                has_device = true;
-                root_end = 2;
-                if path.get(2).is_some_and(|byte| windows_path_separator(*byte)) {
-                    absolute = true;
-                    root_end = 3;
-                }
-            } else if windows_reserved_name(path, Some(colon)) {
-                device.extend_from_slice(&path[..=colon]);
-                has_device = true;
-                root_end = colon + 1;
+    } else if let Some(colon) = path.iter().position(|byte| *byte == b':')
+        && colon > 0
+    {
+        if windows_device_root(path[0]) && colon == 1 {
+            device.extend_from_slice(&path[..2]);
+            has_device = true;
+            root_end = 2;
+            if path.get(2).is_some_and(|byte| windows_path_separator(*byte)) {
+                absolute = true;
+                root_end = 3;
             }
+        } else if windows_reserved_name(path, Some(colon)) {
+            device.extend_from_slice(&path[..=colon]);
+            has_device = true;
+            root_end = colon + 1;
         }
     }
 

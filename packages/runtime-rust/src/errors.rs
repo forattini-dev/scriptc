@@ -499,10 +499,10 @@ pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
 pub fn error_to_string(error: &JsError) -> JsString {
     let name = error_name(error);
     let message = error_message(error);
-    if name.as_ref() == "AssertionError" {
-        if let Some(code) = &error.code {
-            return error_to_string_parts(&format!("{name} [{code}]"), &message);
-        }
+    if name.as_ref() == "AssertionError"
+        && let Some(code) = &error.code
+    {
+        return error_to_string_parts(&format!("{name} [{code}]"), &message);
     }
     error_to_string_parts(&name, &message)
 }

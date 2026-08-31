@@ -99,12 +99,18 @@ impl<T: HeapValue> ClearEdges for PromiseData<T> {
 
 pub type JsPromise<T> = Gc<PromiseData<T>>;
 
+pub type PromiseTrace = Rc<dyn Fn(&mut Tracer<'_>)>;
+pub type PromiseCatchHook = Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>;
+pub type PromiseObserveHook = Rc<dyn Fn(Box<dyn FnOnce(Result<Box<dyn Any>, Caught>)>)>;
+pub type UnhandledRejectionHandler = Rc<dyn Fn(Caught, JsPromiseHandle)>;
+pub type RejectionHandledHandler = Rc<dyn Fn(JsPromiseHandle)>;
+
 #[derive(Clone)]
 pub struct JsPromiseHandle {
     identity: usize,
-    catch: Rc<dyn Fn(Box<dyn FnOnce(Caught)>) -> JsPromiseHandle>,
-    observe: Rc<dyn Fn(Box<dyn FnOnce(Result<Box<dyn Any>, Caught>)>)>,
-    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+    catch: PromiseCatchHook,
+    observe: PromiseObserveHook,
+    trace: PromiseTrace,
 }
 
 pub fn promise_handle_identity(handle: &JsPromiseHandle) -> usize {
@@ -123,13 +129,13 @@ pub fn promise_handle_trace(handle: &JsPromiseHandle, tracer: &mut Tracer<'_>) {
 }
 
 pub fn promise_set_unhandled_rejection_handler(
-    handler: Option<Rc<dyn Fn(Caught, JsPromiseHandle)>>,
+    handler: Option<UnhandledRejectionHandler>,
 ) {
     UNHANDLED_REJECTION_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
 
 pub fn promise_set_rejection_handled_handler(
-    handler: Option<Rc<dyn Fn(JsPromiseHandle)>>,
+    handler: Option<RejectionHandledHandler>,
 ) {
     REJECTION_HANDLED_HANDLER.with(|slot| *slot.borrow_mut() = handler);
 }
