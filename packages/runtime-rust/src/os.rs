@@ -68,12 +68,15 @@ pub fn os_homedir() -> JsString {
             return string(&home);
         }
     }
-    Rc::from(
-        std::env::current_dir()
-            .expect("scriptc: os.homedir() failed")
-            .to_string_lossy()
-            .as_ref(),
-    )
+    // Last-resort fallback; if even the cwd is unreadable, Node throws a
+    // catchable system error — never abort the process for this.
+    match std::env::current_dir() {
+        Ok(dir) => Rc::from(dir.to_string_lossy().as_ref()),
+        Err(error) => throw_error_code(
+            format!("os.homedir() failed: {error}"),
+            "ERR_SYSTEM_ERROR",
+        ),
+    }
 }
 
 pub fn os_hostname() -> JsString {

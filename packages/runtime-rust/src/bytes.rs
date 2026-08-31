@@ -303,31 +303,29 @@ pub fn ffi_bytes_copy_in(values: &[u8]) -> JsBytes<u8> {
     bytes_from_elements(values.to_vec())
 }
 
+// Like the string twins in numeric_ops.rs: process-stream writes swallow
+// I/O failure (Node's EPIPE stance), never abort.
 pub fn process_stdout_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
     use std::io::Write;
     let _ = encoding;
-    bytes
-        .with(|data| {
-            let storage = data.storage.borrow();
-            std::io::stdout()
-                .lock()
-                .write_all(&storage[data.offset..data.offset + data.length])
-        })
-        .expect("scriptc: stdout write failed");
+    let _ = bytes.with(|data| {
+        let storage = data.storage.borrow();
+        std::io::stdout()
+            .lock()
+            .write_all(&storage[data.offset..data.offset + data.length])
+    });
     true
 }
 
 pub fn process_stderr_write_bytes(bytes: &JsBytes<u8>, encoding: &JsString) -> bool {
     use std::io::Write;
     let _ = encoding;
-    bytes
-        .with(|data| {
-            let storage = data.storage.borrow();
-            std::io::stderr()
-                .lock()
-                .write_all(&storage[data.offset..data.offset + data.length])
-        })
-        .expect("scriptc: stderr write failed");
+    let _ = bytes.with(|data| {
+        let storage = data.storage.borrow();
+        std::io::stderr()
+            .lock()
+            .write_all(&storage[data.offset..data.offset + data.length])
+    });
     true
 }
 

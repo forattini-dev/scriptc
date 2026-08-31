@@ -18,6 +18,11 @@ fn fs_error_code(error: &std::io::Error) -> &'static str {
         std::io::ErrorKind::IsADirectory => "EISDIR",
         std::io::ErrorKind::DirectoryNotEmpty => "ENOTEMPTY",
         std::io::ErrorKind::BrokenPipe => "EPIPE",
+        std::io::ErrorKind::AddrInUse => "EADDRINUSE",
+        std::io::ErrorKind::AddrNotAvailable => "EADDRNOTAVAIL",
+        std::io::ErrorKind::ConnectionRefused => "ECONNREFUSED",
+        std::io::ErrorKind::ConnectionReset => "ECONNRESET",
+        std::io::ErrorKind::TimedOut => "ETIMEDOUT",
         _ => "EIO",
     }
 }
@@ -35,6 +40,11 @@ fn fs_error_text(error: &std::io::Error) -> String {
         std::io::ErrorKind::IsADirectory => "illegal operation on a directory",
         std::io::ErrorKind::DirectoryNotEmpty => "directory not empty",
         std::io::ErrorKind::BrokenPipe => "broken pipe",
+        std::io::ErrorKind::AddrInUse => "address already in use",
+        std::io::ErrorKind::AddrNotAvailable => "address not available",
+        std::io::ErrorKind::ConnectionRefused => "connection refused",
+        std::io::ErrorKind::ConnectionReset => "connection reset by peer",
+        std::io::ErrorKind::TimedOut => "connection timed out",
         _ => return error.to_string(),
     };
     text.to_owned()

@@ -14,29 +14,35 @@ pub fn math_random() -> f64 {
     })
 }
 
+// Console/process stream writes never fail the program: Node swallows
+// EPIPE on process.stdout/stderr (`program | head` finishes cleanly) and
+// the C runtime ignores fwrite results the same way — a dead pipe must
+// not become an abort, and process.stdout.write never throws.
 pub fn console_log(values: &[String]) {
-    println!("{}", values.join(" "));
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    let _ = lock.write_all(values.join(" ").as_bytes());
+    let _ = lock.write_all(b"\n");
 }
 
 pub fn console_error(values: &[String]) {
-    eprintln!("{}", values.join(" "));
+    use std::io::Write;
+    let stderr = std::io::stderr();
+    let mut lock = stderr.lock();
+    let _ = lock.write_all(values.join(" ").as_bytes());
+    let _ = lock.write_all(b"\n");
 }
 
 pub fn process_stdout_write(value: &JsString) -> bool {
     use std::io::Write;
-    std::io::stdout()
-        .lock()
-        .write_all(value.as_bytes())
-        .expect("scriptc: stdout write failed");
+    let _ = std::io::stdout().lock().write_all(value.as_bytes());
     true
 }
 
 pub fn process_stderr_write(value: &JsString) -> bool {
     use std::io::Write;
-    std::io::stderr()
-        .lock()
-        .write_all(value.as_bytes())
-        .expect("scriptc: stderr write failed");
+    let _ = std::io::stderr().lock().write_all(value.as_bytes());
     true
 }
 
