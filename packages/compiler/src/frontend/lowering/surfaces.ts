@@ -1347,8 +1347,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "the one lowered shape is the composed chain " +
       'createHash("sha256").update(data).digest("hex") — the Hash handle itself has no lowering',
     hash:
-      "the one-shot digest has no lowering — the composed chain " +
-      'createHash("sha256").update(data).digest("hex") is the lowered hashing surface',
+      "the lowered one-shot shapes hash SHA-256/SHA-1 strings or Buffer/Uint8Array inputs to default hex, " +
+      'with explicit base64 also supported for strings; other algorithms and output options have no lowering yet',
     createHmac:
       "HMAC has no lowering yet — the lowered crypto surface is randomUUID, randomBytes, " +
       'the createHash("sha256"|"sha1") chain, and the introspection statics',

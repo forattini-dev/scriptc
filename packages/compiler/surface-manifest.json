@@ -680,7 +680,7 @@
       "name": "crypto.hash",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the one-shot digest has no lowering — the composed chain createHash(\"sha256\").update(data).digest(\"hex\") is the lowered hashing surface"
+      "note": "the lowered one-shot shapes hash SHA-256/SHA-1 strings or Buffer/Uint8Array inputs to default hex, with explicit base64 also supported for strings; other algorithms and output options have no lowering yet"
     },
     {
       "id": "node-builtin.crypto.hkdf",

@@ -1361,6 +1361,14 @@ declare module "crypto" {
     digest(encoding: "hex" | "base64"): string;
   }
   export function createHash(algorithm: string): Hash;
+  /* Node 24/26 one-shot digest. The lowered static slice accepts the same
+   * string/byte inputs as the fused Hash chain and returns text: omitted
+   * outputEncoding means hex, with explicit hex/base64 also supported. */
+  export function hash(
+    algorithm: string,
+    data: string | Uint8Array,
+    outputEncoding?: "hex" | "base64",
+  ): string;
   /* The lowered X509Certificate surface is the data-record slice:
    * fingerprint (the SHA-1 of the DER, uppercase colon-separated) and
    * the validFrom/validTo validity window (Node's ASN1_TIME_print

@@ -4055,6 +4055,61 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    if (bi.member === "hash") {
+      if (expr.arguments.length < 2 || expr.arguments.length > 3) {
+        L.noLowering(
+          `crypto.hash with ${expr.arguments.length} arguments`,
+          expr,
+          'the lowered one-shot forms are hash("sha256", string) and hash("sha256", string, "base64")',
+        );
+      }
+      const algorithmNode = expr.arguments[0]!;
+      const algorithmType = L.typeOf(algorithmNode);
+      if (!algorithmType.isStringLiteralType() ||
+          (algorithmType.value !== "sha256" && algorithmType.value !== "sha1")) {
+        L.noLowering(
+          "crypto.hash with this algorithm",
+          algorithmNode,
+          "sha256 and sha1 are the lowered one-shot algorithms",
+        );
+      }
+      const dataNode = expr.arguments[1]!;
+      const dataType = L.mapTypeOf(L.typeOf(dataNode));
+      if (dataType?.kind !== "string" &&
+          (dataType?.kind !== "bytes" || dataType.elem !== "u8")) {
+        L.noLowering(
+          `crypto.hash of '${dataType ? L.fmt(dataType) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
+          dataNode,
+          "string and Buffer/Uint8Array inputs are the lowered one-shot forms",
+        );
+      }
+      const algorithm = L.lowerExprExpecting(algorithmNode, STRING);
+      const data = dataType.kind === "string"
+        ? L.lowerExprExpecting(dataNode, STRING)
+        : L.lowerExpr(dataNode);
+      const encodingNode = expr.arguments[2];
+      let encoding: IrExpr;
+      if (encodingNode === undefined) {
+        encoding = { kind: "strLit", value: "hex", type: STRING, loc };
+      } else {
+        const encodingType = L.typeOf(encodingNode);
+        if (!encodingType.isStringLiteralType() || encodingType.value !== "base64") {
+          L.noLowering(
+            "crypto.hash with this output encoding",
+            encodingNode,
+            'base64 is the lowered explicit output encoding: hash("sha256", string, "base64")',
+          );
+        }
+        encoding = L.lowerExprExpecting(encodingNode, STRING);
+      }
+      return {
+        kind: "libCall",
+        fn: dataType.kind === "string" ? "crypto.hashDigestStr" : "crypto.hashDigestBytes",
+        args: [algorithm, data, encoding],
+        type: STRING,
+        loc,
+      };
+    }
     const LISTS: Record<string, readonly string[] | undefined> = {
       getCiphers: CRYPTO_CIPHERS,
       getHashes: CRYPTO_HASHES,
