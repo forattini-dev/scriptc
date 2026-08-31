@@ -1,53 +1,47 @@
 const STDIN_FD: f64 = 0.0;
 
+/// Node's (code, message) pair for an io error kind, shared by
+/// fs_error_code and fs_error_text so the two can never drift.
+fn fs_error_entry(kind: std::io::ErrorKind) -> Option<(&'static str, &'static str)> {
+    use std::io::ErrorKind as Kind;
+    Some(match kind {
+        Kind::NotFound => ("ENOENT", "no such file or directory"),
+        Kind::PermissionDenied => ("EACCES", "permission denied"),
+        Kind::AlreadyExists => ("EEXIST", "file already exists"),
+        Kind::InvalidInput => ("EINVAL", "invalid argument"),
+        Kind::NotADirectory => ("ENOTDIR", "not a directory"),
+        Kind::IsADirectory => ("EISDIR", "illegal operation on a directory"),
+        Kind::DirectoryNotEmpty => ("ENOTEMPTY", "directory not empty"),
+        Kind::BrokenPipe => ("EPIPE", "broken pipe"),
+        Kind::AddrInUse => ("EADDRINUSE", "address already in use"),
+        Kind::AddrNotAvailable => ("EADDRNOTAVAIL", "address not available"),
+        Kind::ConnectionRefused => ("ECONNREFUSED", "connection refused"),
+        Kind::ConnectionReset => ("ECONNRESET", "connection reset by peer"),
+        Kind::TimedOut => ("ETIMEDOUT", "connection timed out"),
+        _ => return None,
+    })
+}
+
+fn fs_error_is_badf(error: &std::io::Error) -> bool {
+    (cfg!(unix) && error.raw_os_error() == Some(9))
+        || (cfg!(windows) && error.raw_os_error() == Some(6))
+}
+
 fn fs_error_code(error: &std::io::Error) -> &'static str {
-    #[cfg(unix)]
-    if error.raw_os_error() == Some(9) {
+    if fs_error_is_badf(error) {
         return "EBADF";
     }
-    #[cfg(windows)]
-    if error.raw_os_error() == Some(6) {
-        return "EBADF";
-    }
-    match error.kind() {
-        std::io::ErrorKind::NotFound => "ENOENT",
-        std::io::ErrorKind::PermissionDenied => "EACCES",
-        std::io::ErrorKind::AlreadyExists => "EEXIST",
-        std::io::ErrorKind::InvalidInput => "EINVAL",
-        std::io::ErrorKind::NotADirectory => "ENOTDIR",
-        std::io::ErrorKind::IsADirectory => "EISDIR",
-        std::io::ErrorKind::DirectoryNotEmpty => "ENOTEMPTY",
-        std::io::ErrorKind::BrokenPipe => "EPIPE",
-        std::io::ErrorKind::AddrInUse => "EADDRINUSE",
-        std::io::ErrorKind::AddrNotAvailable => "EADDRNOTAVAIL",
-        std::io::ErrorKind::ConnectionRefused => "ECONNREFUSED",
-        std::io::ErrorKind::ConnectionReset => "ECONNRESET",
-        std::io::ErrorKind::TimedOut => "ETIMEDOUT",
-        _ => "EIO",
-    }
+    fs_error_entry(error.kind()).map_or("EIO", |(code, _)| code)
 }
 
 fn fs_error_text(error: &std::io::Error) -> String {
-    if fs_error_code(error) == "EBADF" {
+    if fs_error_is_badf(error) {
         return "bad file descriptor".to_owned();
     }
-    let text = match error.kind() {
-        std::io::ErrorKind::NotFound => "no such file or directory",
-        std::io::ErrorKind::PermissionDenied => "permission denied",
-        std::io::ErrorKind::AlreadyExists => "file already exists",
-        std::io::ErrorKind::InvalidInput => "invalid argument",
-        std::io::ErrorKind::NotADirectory => "not a directory",
-        std::io::ErrorKind::IsADirectory => "illegal operation on a directory",
-        std::io::ErrorKind::DirectoryNotEmpty => "directory not empty",
-        std::io::ErrorKind::BrokenPipe => "broken pipe",
-        std::io::ErrorKind::AddrInUse => "address already in use",
-        std::io::ErrorKind::AddrNotAvailable => "address not available",
-        std::io::ErrorKind::ConnectionRefused => "connection refused",
-        std::io::ErrorKind::ConnectionReset => "connection reset by peer",
-        std::io::ErrorKind::TimedOut => "connection timed out",
-        _ => return error.to_string(),
-    };
-    text.to_owned()
+    match fs_error_entry(error.kind()) {
+        Some((_, text)) => text.to_owned(),
+        None => error.to_string(),
+    }
 }
 
 fn throw_fs_error(operation: &str, path: &JsString, error: std::io::Error) -> ! {
