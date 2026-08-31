@@ -70,6 +70,18 @@ fn timer_delay(delay_ms: f64) -> std::time::Duration {
     std::time::Duration::from_millis(delay_ms)
 }
 
+fn event_loop_wait_timeout(
+    next_due: Option<std::time::Instant>,
+    cooperative: bool,
+) -> Option<std::time::Duration> {
+    let wait = next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
+    if !cooperative {
+        return wait;
+    }
+    let quantum = std::time::Duration::from_millis(1);
+    Some(wait.map_or(quantum, |timeout| timeout.min(quantum)))
+}
+
 fn timer_schedule(callback: Box<dyn FnMut()>, delay_ms: f64, repeat: bool) -> f64 {
     let registered_context = async_context_capture();
     let mut callback = callback;
@@ -570,16 +582,13 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
                 .min()
         });
         if ffi_foreign_pending() {
-            let mut wait =
-                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
-            if net_pending()
-                || dgram_pending()
-                || children_referenced_pending()
-                || child_streams_pending()
-            {
-                let cooperative = std::time::Duration::from_millis(1);
-                wait = Some(wait.map_or(cooperative, |timeout| timeout.min(cooperative)));
-            }
+            let wait = event_loop_wait_timeout(
+                next_due,
+                net_pending()
+                    || dgram_pending()
+                    || children_referenced_pending()
+                    || child_streams_pending(),
+            );
             ffi_foreign_wait(wait);
             continue;
         }
@@ -596,16 +605,13 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
             continue;
         }
         if stdin_pending() {
-            let mut wait =
-                next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
-            if net_pending()
-                || dgram_pending()
-                || children_referenced_pending()
-                || child_streams_pending()
-            {
-                let cooperative = std::time::Duration::from_millis(1);
-                wait = Some(wait.map_or(cooperative, |timeout| timeout.min(cooperative)));
-            }
+            let wait = event_loop_wait_timeout(
+                next_due,
+                net_pending()
+                    || dgram_pending()
+                    || children_referenced_pending()
+                    || child_streams_pending(),
+            );
             stdin_wait(wait);
             continue;
         }
