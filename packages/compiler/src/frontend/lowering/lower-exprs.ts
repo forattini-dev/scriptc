@@ -9525,17 +9525,44 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       L.builtinStreamInfoOf(rhsMemberSymbol) ??
       undefined;
     if (!target) {
-      // `u instanceof Uint8Array` on an `unknown` value: the checked-dynamic tree carries a
-      // bytes kind — one runtime tag test, and tsc's narrowing types the
-      // true branch (reads bridge through maybeNarrow's validated
-      // extraction, like the typeof tests). Node's Buffer IS a Uint8Array
-      // subclass and rides the same bytes kind, so both worlds answer true
-      // for Buffer payloads — Node-exact (the bytes kind's other
+      // `u instanceof Uint8Array` on an `unknown` value: the checked-dynamic
+      // tree carries a bytes kind — one runtime tag test, and tsc's
+      // narrowing types the true branch (reads bridge through maybeNarrow's
+      // validated extraction, like the typeof tests). Node's Buffer IS a
+      // Uint8Array subclass and rides the same bytes kind, so both worlds
+      // answer true for Buffer payloads — Node-exact (the bytes kind's other
       // divergences are SEMANTICS.md 45). Catch bindings stay out (their
       // payload is a typed snapshot, not a dyn).
+      //
+      // Bundlers commonly append the redundant Node guard
+      //   u instanceof Uint8Array || typeof Buffer !== "undefined" &&
+      //     u instanceof Buffer
+      // after erasing source types. The first test already covers every
+      // Buffer. Recognize only that exact same-identifier shape: an isolated
+      // `unknown instanceof Buffer` must stay fenced because the dyn bytes
+      // representation deliberately does not retain the Buffer-vs-plain-
+      // Uint8Array brand.
+      const guardedBuffer = (() => {
+        if (!ts.isIdentifier(expr.right) || !L.isStdlibGlobal(expr.right, "Buffer")) return false;
+        if (!ts.isIdentifier(expr.left)) return false;
+        const andExpr = expr.parent;
+        if (!ts.isBinaryExpression(andExpr) ||
+          andExpr.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken ||
+          andExpr.right !== expr) return false;
+        const orExpr = andExpr.parent;
+        if (!ts.isBinaryExpression(orExpr) ||
+          orExpr.operatorToken.kind !== ts.SyntaxKind.BarBarToken ||
+          orExpr.right !== andExpr ||
+          !ts.isBinaryExpression(orExpr.left) ||
+          orExpr.left.operatorToken.kind !== ts.SyntaxKind.InstanceOfKeyword ||
+          !ts.isIdentifier(orExpr.left.left) ||
+          !ts.isIdentifier(orExpr.left.right) ||
+          !L.isStdlibGlobal(orExpr.left.right, "Uint8Array")) return false;
+        return L.resolveValueSymbol(orExpr.left.left) === L.resolveValueSymbol(expr.left);
+      })();
       if (
         ts.isIdentifier(expr.right) &&
-        L.isStdlibGlobal(expr.right, "Uint8Array") &&
+        (L.isStdlibGlobal(expr.right, "Uint8Array") || guardedBuffer) &&
         !L.caughtLocalOf(expr.left)
       ) {
         const left = L.lowerExpr(expr.left);
@@ -9646,6 +9673,56 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       };
     }
     const left = L.lowerExpr(expr.left);
+    // `message instanceof Error` and `errorOrMessage instanceof Error` are
+    // ordinary JavaScript even though tsc rejects the primitive-only form
+    // in checked JS. A union of native class instances and non-objects has
+    // already encoded the prototype distinction in its runtime tag, so the
+    // instanceof test is exactly a tag-in-set test. This also gives the
+    // checker-narrowed true branch the same unionNarrow bridge used by
+    // typeof and RegExp union tests.
+    if (left.type.kind === "union") {
+      const unionId = left.type.unionId;
+      const def = L.unions.get(unionId);
+      if (!def) throw new InternalCompilerError(`lowerer bug: unknown union ${unionId}`);
+      const tags = def.arms.flatMap((arm, tag) =>
+        arm.kind === "object" &&
+        (arm.className === target.def.name || L.isSubclassOf(arm.className, target.def.name))
+          ? [tag]
+          : []
+      );
+      if (tags.length === 0 || tags.length === def.arms.length) {
+        if (!droppableStatic(left)) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            "statically-decided 'instanceof' tests over effectful union operands (bind the value to a const first)",
+          );
+        }
+        return { kind: "boolLit", value: tags.length !== 0, type: BOOL, loc };
+      }
+      const isTag = (tag: number): IrExpr => ({
+        kind: "unionIsTag",
+        unionId,
+        tag,
+        negated: false,
+        value: left,
+        type: BOOL,
+        loc,
+      });
+      if (tags.length === 1) return isTag(tags[0]!);
+      if (!pureReemittable(left)) {
+        L.unsupported(
+          "SC1090",
+          expr,
+          "'instanceof' tests matching several union arms over operands that aren't plain reads (bind the value to a const first)",
+        );
+      }
+      let test = isTag(tags[0]!);
+      for (const tag of tags.slice(1)) {
+        test = { kind: "logical", op: "||", left: test, right: isTag(tag), type: BOOL, loc };
+      }
+      return test;
+    }
     // `u instanceof Error` on an `unknown` value: the checked-dynamic tree's error encoding
     // (the shape caughtToDyn builds for Error payloads — the reserved
     // "%error" marker) answers the test, so a caught Error passed through
@@ -9683,11 +9760,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       );
     }
     if (left.type.kind !== "object") {
-      L.unsupported(
-        "SC1090",
-        expr,
-        "'instanceof' on values other than class instances (narrow union-typed values first)",
-      );
+      if (!droppableStatic(left)) {
+        L.unsupported(
+          "SC1090",
+          expr,
+          "statically-false 'instanceof' tests over effectful primitive operands (bind the value to a const first)",
+        );
+      }
+      return { kind: "boolLit", value: false, type: BOOL, loc };
     }
     const lhsInfo = L.classes.get(left.type.className);
     if (!lhsInfo) throw new InternalCompilerError(`lowerer bug: unknown class ${left.type.className}`);

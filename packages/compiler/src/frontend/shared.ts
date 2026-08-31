@@ -274,6 +274,17 @@ export const JS_RELAXED_TSC_CODES: ReadonlySet<number> = new Set([
   // unannotated `next()` input type. Plain JS need not carry a JSDoc return
   // annotation; lowering and the selected backend check its actual uses.
   7057,
+  // TypeScript asks JavaScript authors to annotate a Promise executor before
+  // allowing `resolve()` with no value. That call is valid JavaScript and its
+  // undefined settlement value is preserved by lowering.
+  2810,
+  // JavaScript permits primitive and mixed primitive/object values on the
+  // left of instanceof. A primitive answers false; mixed unions become
+  // runtime tag tests in the lowerer.
+  // It likewise permits runtime constructors on the right; supported
+  // constructors lower per site and arbitrary values retain SC1090 rather
+  // than being rejected as an authoring-time type error.
+  2358, 2359,
   // strict-null narrowing demands (possibly null/undefined receivers)
   2531, 2532, 2533, 18047, 18048, 18049,
   // assignability/arity/callability of dynamic call shapes (valid JS,
