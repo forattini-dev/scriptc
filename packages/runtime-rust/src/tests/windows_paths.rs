@@ -54,7 +54,9 @@ fn windows_path_family_matches_the_committed_node_oracle() {
         }
         let bytes = field
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let digit = |byte: u8| match byte {
                     b'0'..=b'9' => byte - b'0',

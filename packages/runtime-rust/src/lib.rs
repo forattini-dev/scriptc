@@ -87,6 +87,7 @@ include!("util_parse_args.rs");
 mod tests {
     use super::*;
 
+    include!("tests/support.rs");
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
     include!("tests/language_and_heap.rs");
@@ -95,4 +96,8 @@ mod tests {
     include!("tests/querystring.rs");
     include!("tests/zlib.rs");
     include!("tests/inspect.rs");
+    include!("tests/net_and_http.rs");
+    include!("tests/dgram.rs");
+    include!("tests/child_process.rs");
+    include!("tests/tls.rs");
 }

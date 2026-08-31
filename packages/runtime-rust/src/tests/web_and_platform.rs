@@ -51,8 +51,7 @@
 
         let payload =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| date_to_iso(f64::NAN)))
-                .err()
-                .expect("an invalid Date must throw");
+                .expect_err("an invalid Date must throw");
         let caught = caught_from_panic(payload);
         assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
         assert_eq!(caught_error_message(&caught).as_ref(), "Invalid time value");
@@ -192,8 +191,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 url_string_to_path(&string(input))
             }))
-            .err()
-            .expect("invalid file URL must throw");
+            .expect_err("invalid file URL must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
             assert_eq!(caught_error_message(&caught).as_ref(), message);
@@ -372,8 +370,7 @@
         assert_eq!(string_at(&value, -2.0).as_ref(), "�");
         let payload =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| string_at(&value, 4.0)))
-                .err()
-                .expect("out-of-range string.at must throw");
+                .expect_err("out-of-range string.at must throw");
         let caught = caught_from_panic(payload);
         assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
         assert_eq!(
@@ -592,8 +589,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 bytes_compare(&source, &greater, 1, -1.0, 0.0, 0.0, 0.0)
             }))
-            .err()
-            .expect("a negative compare offset must throw");
+            .expect_err("a negative compare offset must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
             assert_eq!(
@@ -779,8 +775,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 bytes_read_num(&fixed, "u16be", 4_294_967_297.0)
             }))
-            .err()
-            .expect("an out-of-range numeric offset must throw");
+            .expect_err("an out-of-range numeric offset must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(
                 caught_error_code(&caught).expect("error code").as_ref(),
@@ -827,8 +822,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 bytes_to_string_checked(&raw, &string("wat"))
             }))
-            .err()
-            .expect("an unknown dynamic encoding must throw");
+            .expect_err("an unknown dynamic encoding must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(
                 caught_error_code(&caught).expect("error code").as_ref(),
@@ -1058,7 +1052,7 @@
         process_env_set(&name, &value);
         assert_eq!(process_env_get(&name).as_deref(), Some("written"));
         let pairs = process_env_pairs();
-        assert!(pairs.with(|pairs| pairs.elements.chunks_exact(2).any(|pair| {
+        assert!(pairs.with(|pairs| pairs.elements.as_chunks::<2>().0.iter().any(|pair| {
             pair[0].as_ref() == name.as_ref() && pair[1].as_ref() == value.as_ref()
         })));
 
@@ -1073,7 +1067,8 @@
 
         process_env_unset(&name);
         assert_eq!(process_env_get(&name), None);
-        assert!(!process_env_pairs().with(|pairs| pairs.elements.chunks_exact(2)
+        assert!(!process_env_pairs().with(|pairs| pairs.elements.as_chunks::<2>().0
+            .iter()
             .any(|pair| pair[0].as_ref() == name.as_ref())));
     }
 

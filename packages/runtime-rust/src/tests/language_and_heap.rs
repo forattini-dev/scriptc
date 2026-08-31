@@ -233,8 +233,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 string_decode_uri_component(&string(malformed))
             }))
-            .err()
-            .expect("malformed URI escapes must throw");
+            .expect_err("malformed URI escapes must throw");
             let caught = caught_from_panic(payload);
             assert_eq!(caught_error_name(&caught).as_ref(), "URIError");
             assert_eq!(caught_error_message(&caught).as_ref(), "URI malformed");
@@ -288,8 +287,7 @@
             let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 string_atob(&string(malformed))
             }))
-            .err()
-            .expect("invalid base64 must throw");
+            .expect_err("invalid base64 must throw");
             let caught = caught_from_panic(payload);
             assert!(caught_is_error_class(&caught, "DOMException"));
             let error = caught_error_value(&caught);
@@ -301,9 +299,8 @@
             );
         }
 
-        let payload = std::panic::catch_unwind(|| string_base64_missing_argument())
-            .err()
-            .expect("missing base64 input must throw");
+        let payload = std::panic::catch_unwind(string_base64_missing_argument)
+            .expect_err("missing base64 input must throw");
         let caught = caught_from_panic(payload);
         assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
         assert_eq!(
@@ -858,7 +855,7 @@
         let observed = saw_rejection.clone();
         promise_then(
             &handled,
-            Box::new(move |outcome| observed.set(matches!(outcome, Err(_)))),
+            Box::new(move |outcome| observed.set(outcome.is_err())),
         );
         run_event_loop();
         assert!(saw_rejection.get());
