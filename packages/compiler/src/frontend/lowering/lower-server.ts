@@ -2426,14 +2426,15 @@ function lowerHttpServerOptions(L: Lowerer, node: ts.Expression, what: string): 
       continue;
     }
     if (key === "maxHeaderSize") {
-      const value = initializer !== null
+      const raw = initializer !== null
         ? L.lowerExpr(initializer)
         : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
-      if (value.type.kind !== "f64") {
+      const value = L.coerceToExpected(raw, DYN);
+      if (value.type.kind !== "dyn") {
         L.noLowering(
-          `${what} with a non-number maxHeaderSize option`,
+          `${what} with a maxHeaderSize value that cannot cross the runtime option boundary`,
           prop,
-          "maxHeaderSize must be a number",
+          "maxHeaderSize is a number or undefined",
         );
       }
       maxHeaderSize = value;
@@ -2492,7 +2493,7 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
     L.arrHofHelpers.set(key, name);
     const params = [
       ...(hasBuffer ? [{ localId: "b.0", name: "buffer", type: DYN }] : []),
-      ...(hasMaxHeader ? [{ localId: "h.0", name: "maxHeaderSize", type: F64 }] : []),
+      ...(hasMaxHeader ? [{ localId: "h.0", name: "maxHeaderSize", type: DYN }] : []),
       { localId: "s.0", name: "s", type: NETSERVER_T },
     ];
     const ref: IrExpr = { kind: "varRef", localId: "s.0", type: NETSERVER_T, loc };
@@ -2507,7 +2508,7 @@ function lowerHttpCreateServerForms(L: Lowerer, expr: ts.CallExpression | ts.New
       });
     }
     if (hasMaxHeader) {
-      const value: IrExpr = { kind: "varRef", localId: "h.0", type: F64, loc };
+      const value: IrExpr = { kind: "varRef", localId: "h.0", type: DYN, loc };
       body.push({
         kind: "exprStmt",
         expr: { kind: "libCall", fn: "http.serverMaxHeaderSizeSet", args: [ref, value], type: VOID, loc },

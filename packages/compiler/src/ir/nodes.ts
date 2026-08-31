@@ -2595,9 +2595,11 @@ export type IrLibFn =
   | "http.createServer"
   /** http.createServer() / http.Server() with no handler — the
    * on("request") route; createServerOpts is the (options[, listener])
-   * overload's twin carrying the two lowered parser flags
+   * overload's twin carrying the lowered parser options
    * (requireHostHeader: false is already this parser's behavior;
-   * joinDuplicateHeaders joins repeated request-header reads ", "). */
+   * joinDuplicateHeaders joins repeated request-header reads ", ";
+   * maxHeaderSize takes dyn so explicit undefined remains distinguishable
+   * from a number until its Node validation ladder). */
   | "http.createServerEmpty"
   | "http.serverJoinDupHeaders"
   | "http.serverMaxHeaderSizeSet"

@@ -2126,7 +2126,13 @@ void scr_http_server_join_duplicate_headers(ScrNetServer *s) {
   if (ctx != NULL && ctx->proto == SCR_NET_PROTO_HTTP1) ctx->join_dup = true;
 }
 
-void scr_http_server_max_header_size_set(ScrNetServer *s, double value) {
+void scr_http_server_max_header_size_set(ScrNetServer *s, const ScrDyn *option) {
+  if (option->kind == SCR_DYN_UNDEF) return;
+  if (option->kind != SCR_DYN_NUM) {
+    scr_dyn_arg_type_fail("maxHeaderSize", "of type number", option);
+    return;
+  }
+  double value = option->v.num;
   char recv[48], msg[224];
   if (!(isfinite(value) && trunc(value) == value)) {
     scr_num_received(value, recv);

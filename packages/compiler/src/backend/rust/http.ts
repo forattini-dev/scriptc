@@ -445,8 +445,11 @@ export function emitRustHttpCall(
     return `runtime::http_server_join_duplicate_headers(&(${context.emitExpr(expr.args[0])}))`;
   }
   if (expr.fn === "http.serverMaxHeaderSizeSet" && expr.args.length === 2 &&
-      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64") {
-    return `runtime::http_server_max_header_size_set(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])})`;
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "dyn") {
+    const server = context.nextTemporary();
+    const value = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${server} = ${context.emitExpr(expr.args[0])}; let ${value} = ${context.emitExpr(expr.args[1])}; let sc_option = match &${value} { ${dyn}::Undefined => None, ${dyn}::Number(sc_number) => Some(*sc_number), sc_value => sc_dyn_arg_type_fail("maxHeaderSize", "of type number", sc_value), }; runtime::http_server_max_header_size_set(&${server}, sc_option); }`;
   }
   if (expr.fn === "http.serverTimeoutGet" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64") {

@@ -1033,7 +1033,10 @@ pub fn http_server_join_duplicate_headers(server: &JsNetServer) {
     });
 }
 
-pub fn http_server_max_header_size_set(server: &JsNetServer, value: f64) {
+pub fn http_server_max_header_size_set(server: &JsNetServer, value: Option<f64>) {
+    let Some(value) = value else {
+        return;
+    };
     if !value.is_finite() || value.trunc() != value {
         throw_range_error_code(
             format!(

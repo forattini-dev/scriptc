@@ -19,6 +19,7 @@ test.each([
   "2689-http-server-timeout-properties.ts",
   "2801-http-server-max-header-size.ts",
   "2802-http-server-max-header-size-range.ts",
+  "2803-http-server-max-header-size-undefined.ts",
 ])("Rust HTTP corpus matches Node: %s", async (fixtureName) => {
   const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-http-"));

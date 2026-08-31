@@ -452,7 +452,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.createServer": { argTypes: [null], result: NETSERVER_T },
   "http.createServerEmpty": { argTypes: [], result: NETSERVER_T },
   "http.serverJoinDupHeaders": { argTypes: [NETSERVER_T], result: VOID },
-  "http.serverMaxHeaderSizeSet": { argTypes: [NETSERVER_T, F64], result: VOID },
+  "http.serverMaxHeaderSizeSet": { argTypes: [NETSERVER_T, DYN], result: VOID },
   "http.serverTimeoutGet": { argTypes: [NETSERVER_T, F64], result: F64 },
   "http.serverTimeoutSet": { argTypes: [NETSERVER_T, F64, F64], result: VOID },
   "http.serverTimeoutOptionSet": { argTypes: [NETSERVER_T, F64, DYN], result: VOID },
