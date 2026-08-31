@@ -572,7 +572,11 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
         if ffi_foreign_pending() {
             let mut wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
-            if dgram_pending() || children_referenced_pending() || child_streams_pending() {
+            if net_pending()
+                || dgram_pending()
+                || children_referenced_pending()
+                || child_streams_pending()
+            {
                 let cooperative = std::time::Duration::from_millis(1);
                 wait = Some(wait.map_or(cooperative, |timeout| timeout.min(cooperative)));
             }

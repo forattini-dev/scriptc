@@ -628,6 +628,132 @@ test("Rust foreign FFI waits do not starve datagram events", async () => {
   expect(run.stderr).toBe("");
 });
 
+test("Rust foreign FFI waits do not starve TCP events", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-net-"));
+  const nativeSource = join(dir, "native.c");
+  const nativeObject = join(dir, "native.o");
+  const nativeArchive = join(dir, "libnative.a");
+  const profilePath = join(dir, "profile.json");
+  const entryPath = join(dir, "main.ts");
+  const outPath = join(dir, "program");
+
+  await writeFile(nativeSource, [
+    "#define _POSIX_C_SOURCE 200809L",
+    "#include <arpa/inet.h>",
+    "#include <pthread.h>",
+    "#include <string.h>",
+    "#include <sys/socket.h>",
+    "#include <time.h>",
+    "#include <unistd.h>",
+    "typedef void (*sf_foreign_cb)(double value, void *context);",
+    "static sf_foreign_cb callback;",
+    "static void *callback_context;",
+    "static unsigned short target_port;",
+    "static pthread_t worker;",
+    "static void *run_worker(void *unused) {",
+    "  (void)unused;",
+    "  struct timespec network_delay = {0, 50 * 1000 * 1000};",
+    "  (void)nanosleep(&network_delay, 0);",
+    "  int fd = socket(AF_INET, SOCK_STREAM, 0);",
+    "  struct sockaddr_in target;",
+    "  memset(&target, 0, sizeof target);",
+    "  target.sin_family = AF_INET;",
+    "  target.sin_port = htons(target_port);",
+    "  (void)inet_pton(AF_INET, \"127.0.0.1\", &target.sin_addr);",
+    "  (void)connect(fd, (struct sockaddr *)&target, sizeof target);",
+    "  (void)send(fd, \"network\", 7, 0);",
+    "  (void)close(fd);",
+    "  struct timespec callback_delay = {0, 950 * 1000 * 1000};",
+    "  (void)nanosleep(&callback_delay, 0);",
+    "  callback(1, callback_context);",
+    "  return 0;",
+    "}",
+    "void sf_set_port(double port) { target_port = (unsigned short)port; }",
+    "void sf_foreign_start(sf_foreign_cb next, void *context) {",
+    "  callback = next; callback_context = context;",
+    "  (void)pthread_create(&worker, 0, run_worker, 0);",
+    "}",
+    "void sf_foreign_stop(sf_foreign_cb next, void *context) {",
+    "  (void)next; (void)context; (void)pthread_join(worker, 0);",
+    "  callback = 0; callback_context = 0;",
+    "}",
+    "",
+  ].join("\n"));
+  await execFileAsync("clang", ["-std=c11", "-O2", "-c", nativeSource, "-o", nativeObject]);
+  await execFileAsync("ar", ["rcs", nativeArchive, nativeObject]);
+  await writeFile(profilePath, JSON.stringify({
+    ffi_format: 5,
+    functions: [{
+      name: "nativeSetPort",
+      symbol: "sf_set_port",
+      params: ["f64"],
+      returns: "void",
+    }, {
+      name: "nativeForeignStart",
+      symbol: "sf_foreign_start",
+      params: [{
+        callback: {
+          id: "tick",
+          params: ["f64", { context: "tick" }],
+          returns: "void",
+          lifetime: "retained",
+          invoke: "foreign",
+        },
+      }, { context: "tick" }],
+      returns: "void",
+    }, {
+      name: "nativeForeignStop",
+      symbol: "sf_foreign_stop",
+      params: [{ callback: { release: "nativeForeignStart:tick" } },
+        { context: "nativeForeignStart:tick" }],
+      returns: "void",
+    }],
+    libraries: [nativeArchive],
+    system_libraries: [],
+  }));
+  await writeFile(entryPath, [
+    "import { createServer } from 'node:net';",
+    "declare function nativeSetPort(port: number): void;",
+    "declare function nativeForeignStart(callback: (value: number) => void): void;",
+    "declare function nativeForeignStop(callback: (value: number) => void): void;",
+    "const startedAt = Date.now();",
+    "const server = createServer();",
+    "server.on('connection', (socket) => {",
+    "  socket.on('data', (message) => {",
+    "    console.log(message.toString(), Date.now() - startedAt < 750);",
+    "    socket.end();",
+    "    server.close();",
+    "  });",
+    "});",
+    "const tick = (_value: number) => {",
+    "  nativeForeignStop(tick);",
+    "  console.log('foreign');",
+    "};",
+    "server.listen(0, '127.0.0.1', () => {",
+    "  nativeSetPort(server.address().port);",
+    "  nativeForeignStart(tick);",
+    "});",
+    "",
+  ].join("\n"));
+
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath,
+    backend: "rust",
+    optimization: "dev",
+    ffiProfilePath: profilePath,
+  });
+  expect(
+    result.ok,
+    result.ok ? undefined : result.diagnostics.map((diagnostic) => diagnostic.message).join("; "),
+  ).toBe(true);
+  if (!result.ok) return;
+
+  const run = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+  expect(run.stdout).toBe("network true\nforeign\n");
+  expect(run.stderr).toBe("");
+});
+
 test("Rust executables preserve foreign FIFO without starving timers", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-foreign-burst-"));
   const nativeSource = join(dir, "native.c");
