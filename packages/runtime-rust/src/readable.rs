@@ -214,37 +214,16 @@ where
     R: Clone + Trace + 'static,
 {
     let chunk = data.chunks.pop_front()?;
-    if data.object_mode {
-        data.buffered_length = data.buffered_length.saturating_sub(1);
-        return Some(chunk);
-    }
-    let remaining = std::mem::take(&mut data.chunks);
-    data.buffered_length = 0;
-    match chunk {
-        ReadableChunk::Bytes(first) => {
-            let mut pieces = vec![first];
-            for chunk in remaining {
-                let ReadableChunk::Bytes(bytes) = chunk else {
-                    unreachable!("scriptc invariant: mixed encoded and byte Readable chunks");
-                };
-                pieces.push(bytes);
-            }
-            Some(ReadableChunk::Bytes(if pieces.len() == 1 {
-                pieces.pop().expect("scriptc: one readable byte chunk")
-            } else {
-                buffer_concat(&array_new(pieces))
-            }))
+    let length = if data.object_mode {
+        1
+    } else {
+        match &chunk {
+            ReadableChunk::Bytes(bytes) => bytes_len(bytes) as usize,
+            ReadableChunk::String(text) => text.encode_utf16().count(),
         }
-        ReadableChunk::String(mut text) => {
-            for chunk in remaining {
-                let ReadableChunk::String(next) = chunk else {
-                    unreachable!("scriptc invariant: mixed byte and encoded Readable chunks");
-                };
-                text = string_concat(&text, &next);
-            }
-            Some(ReadableChunk::String(text))
-        }
-    }
+    };
+    data.buffered_length = data.buffered_length.saturating_sub(length);
+    Some(chunk)
 }
 
 fn readable_settle_next<L, R>(readable: &JsReadable<L, R>)
