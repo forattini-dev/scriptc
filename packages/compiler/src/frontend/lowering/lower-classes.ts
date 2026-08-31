@@ -5796,14 +5796,20 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             );
           }
           const unionValue = L.lowerExpr(expr.expression);
-          const callee: IrExpr = {
-            kind: "unionNarrow",
-            unionId: calleeT.unionId,
-            tag: L.armTag(calleeT.unionId, classType),
-            value: unionValue,
-            type: classType,
-            loc,
-          };
+          // The ordinary identifier/property lowering already bridges a
+          // checker-narrowed optional class binding to its classval arm.
+          // Only extract here when the operand still carries the tagged
+          // union; wrapping the pre-narrowed value would mint invalid IR.
+          const callee: IrExpr = unionValue.type.kind === "classval"
+            ? unionValue
+            : {
+                kind: "unionNarrow",
+                unionId: calleeT.unionId,
+                tag: L.armTag(calleeT.unionId, classType),
+                value: unionValue,
+                type: classType,
+                loc,
+              };
           L.noteEdge(`%${info.def.name}.constructor`);
           const below = (c: ClassInfo): void => {
             for (const s of c.subclasses) {
