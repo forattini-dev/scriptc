@@ -643,6 +643,36 @@
     }
 
     #[test]
+    fn pressured_collection_waits_for_the_threshold_then_drains_candidates() {
+        let baseline = live_heap_objects();
+        let rooted = Gc::new(Link { next: None });
+        assert_eq!(collect_cycles_if_pressured(), 0, "no pressure yet");
+
+        // Every aliased drop records a candidate; a long-running program
+        // accumulates these between callbacks even without new cycles.
+        for _ in 0..CYCLE_PRESSURE_THRESHOLD {
+            drop(rooted.clone());
+        }
+        let cycle = Gc::new(Link { next: None });
+        cycle.with_mut(|link| link.next = Some(cycle.clone()));
+        drop(cycle);
+
+        assert_eq!(collect_cycles_if_pressured(), 1, "cycle reclaimed under pressure");
+        // Clearing edges during the pass may re-record already-dead
+        // candidates; what matters is that nothing live stays buffered.
+        let live_residue = CYCLE_CANDIDATES.with(|buffer| {
+            let buffer = buffer.borrow();
+            assert!(buffer.len() < CYCLE_PRESSURE_THRESHOLD, "buffer rebounded");
+            buffer.iter().filter(|weak| weak.upgrade().is_some()).count()
+        });
+        assert_eq!(live_residue, 0, "no live candidates remain buffered");
+        assert_eq!(collect_cycles_if_pressured(), 0, "pressure resets after a pass");
+
+        drop(rooted);
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn collector_keeps_a_cycle_with_an_outside_owner() {
         let baseline = live_heap_objects();
         let rooted = Gc::new(Link { next: None });

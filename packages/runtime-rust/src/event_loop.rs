@@ -419,6 +419,9 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
     let mut first_checkpoint = skip_initial_ticks;
     loop {
         EVENT_TURN.with(|current| current.set(turn));
+        // Between callbacks no user borrow is live, so this is the safe
+        // point where accumulated drop candidates may be traced.
+        collect_cycles_if_pressured();
         let skip_ticks = std::mem::replace(&mut first_checkpoint, false);
         if !skip_ticks {
             let next_tick = NEXT_TICKS.with(|tasks| tasks.borrow_mut().pop_front());

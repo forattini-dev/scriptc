@@ -172,6 +172,25 @@ where
     }
 }
 
+/// Dropped-alias candidates that trigger an incremental collection pass.
+///
+/// Tracing borrows every candidate node, so collection is only safe between
+/// callbacks; the event loop applies this threshold at its dispatch safe
+/// point rather than inside `Gc::drop`, where a traced node may still be
+/// mutably borrowed.
+const CYCLE_PRESSURE_THRESHOLD: usize = 4096;
+
+/// Run a collection pass when enough drop candidates have accumulated.
+///
+/// Every aliased handle drop records a candidate, so a long-running program
+/// that never collected until exit would retain each candidate's node
+/// allocation through its `Weak`. Draining on pressure bounds that growth.
+pub fn collect_cycles_if_pressured() -> usize {
+    let pressured =
+        CYCLE_CANDIDATES.with(|buffer| buffer.borrow().len() >= CYCLE_PRESSURE_THRESHOLD);
+    if pressured { collect_cycles() } else { 0 }
+}
+
 /// Collect cycles reachable from handles whose reference count decreased.
 ///
 /// The pass snapshots the candidate subgraph, subtracts its internal edges
