@@ -22,6 +22,7 @@ import { uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
+import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -3070,8 +3071,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         "class expressions inside generic functions (each instantiation would need its own class)",
       );
     }
+    const esbuildOnce = classExpressionRunsOnceInEsbuildInitializer(L, expr);
     for (let p: ts.Node = expr.parent; !ts.isSourceFile(p); p = p.parent) {
       if (ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p)) {
+        if (esbuildOnce && ts.isArrowFunction(p)) break;
         L.unsupported(
           "SC1090",
           expr,
@@ -3597,6 +3600,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     while (ts.isParenthesizedExpression(e)) e = e.expression;
     const classOfNew = (n: ts.Expression): ClassInfo | null => {
       if (!ts.isNewExpression(n)) return null;
+      const exact = exactClassOfReceiver(L, n.expression);
+      if (exact) return exact;
+      if (ts.isIdentifier(n.expression)) {
+        const stored = (L.resolveLocal(n.expression) ?? L.globalOf(n.expression))?.type;
+        if (stored?.kind === "union") {
+          const arms = L.unions.get(stored.unionId)?.arms ?? [];
+          const classArms = arms.filter((arm) => arm.kind === "classval");
+          const classArm = classArms[0];
+          if (
+            classArms.length === 1 && classArm !== undefined &&
+            arms.every((arm) => arm.kind === "classval" || isUnitType(arm))
+          ) {
+            return L.classes.get(classArm.className) ?? null;
+          }
+        }
+      }
       const t = L.mapTypeOf(L.typeOf(n));
       return t?.kind === "object" ? (L.classes.get(t.className) ?? null) : null;
     };
@@ -5197,6 +5216,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (bytesNew) return bytesNew;
       const info =
         (symbol ? L.classBySymbol.get(symbol) : undefined) ??
+        exactClassOfReceiver(L, expr.expression) ??
         // `const C = require('./x'); new C()` over `module.exports =
         // class {…}`: the binding aliases the expression's own symbol —
         // the declaration story, collected on demand.
@@ -5675,7 +5695,23 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // callee (unannotated heterogeneous registries) keeps a pointed
     // fence — annotate the slot with the common constructor type.
     {
-      const calleeT = L.mapTypeOf(L.typeOf(expr.expression));
+      const storedCalleeT = ts.isIdentifier(expr.expression)
+        ? (L.resolveLocal(expr.expression) ?? L.globalOf(expr.expression))?.type
+        : undefined;
+      const storedOptionalClass =
+        storedCalleeT?.kind === "union" &&
+        (() => {
+          const arms = L.unions.get(storedCalleeT.unionId)?.arms ?? [];
+          return arms.filter((arm) => arm.kind === "classval").length === 1 &&
+            arms.every((arm) => arm.kind === "classval" || isUnitType(arm));
+        })();
+      // In untyped bundle output the checker can forget the callback write
+      // and report only nullish residue at the construction site. The
+      // pre-registered global/local storage is authoritative for the one
+      // proven optional-class shape; every other callee stays checker-led.
+      const calleeT = storedOptionalClass
+        ? storedCalleeT
+        : (L.mapTypeOf(L.typeOf(expr.expression)) ?? storedCalleeT);
       if (calleeT?.kind === "classval") {
         let info = L.classes.get(calleeT.className);
         if (!info && ts.isPropertyAccessExpression(expr.expression) && ts.isIdentifier(expr.expression.name)) {
@@ -5733,7 +5769,47 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       }
       if (calleeT?.kind === "union") {
         const def = L.unions.get(calleeT.unionId);
-        if (def?.arms.some((a) => a.kind === "classval")) {
+        const classArms = def?.arms.filter((a) => a.kind === "classval") ?? [];
+        if (
+          def && classArms.length === 1 &&
+          def.arms.every((a) => a.kind === "classval" || isUnitType(a))
+        ) {
+          const classType = classArms[0];
+          if (!classType) throw new InternalCompilerError("lowerer bug: missing optional class arm");
+          const info = L.classes.get(classType.className);
+          if (!info || info.generic) {
+            L.unsupported(
+              "SC1090",
+              expr,
+              "constructing through an optional class value whose class has no concrete lowering",
+            );
+          }
+          const unionValue = L.lowerExpr(expr.expression);
+          const callee: IrExpr = {
+            kind: "unionNarrow",
+            unionId: calleeT.unionId,
+            tag: L.armTag(calleeT.unionId, classType),
+            value: unionValue,
+            type: classType,
+            loc,
+          };
+          L.noteEdge(`%${info.def.name}.constructor`);
+          const below = (c: ClassInfo): void => {
+            for (const s of c.subclasses) {
+              L.noteEdge(`%${s.def.name}.constructor`);
+              below(s);
+            }
+          };
+          below(info);
+          return {
+            kind: "newValue",
+            callee,
+            args: L.completeArgs(expr.arguments ?? [], info.ctorParams, loc, expr),
+            type: { kind: "object", className: info.def.name },
+            loc,
+          };
+        }
+        if (classArms.length > 0) {
           L.unsupported(
             "SC1090",
             expr,

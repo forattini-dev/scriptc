@@ -1698,6 +1698,8 @@ shardedTest.each(shardSelect([
   "2795-node-absent-host-globals.cjs",
   "2796-js-umd-host-fallbacks.cjs",
   "2797-node-navigator-user-agent.cjs",
+  "2798-js-esbuild-once-class-expression.mjs",
+  "2799-js-esbuild-once-assigned-class.mjs",
   "2705-tuple-method-refinement.ts",
   "2706-unknown-class-field.ts",
   "2625-bytes-views.ts",

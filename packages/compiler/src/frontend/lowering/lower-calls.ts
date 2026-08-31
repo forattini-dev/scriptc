@@ -9397,10 +9397,11 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
   export function lowerObjectMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
+    const exact = exactInstanceClassOf(L, access.expression);
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
-    if (receiverIr?.kind !== "object") return null;
-    const info = L.classes.get(receiverIr.className);
-    if (!info) L.flushDeferredClass(receiverIr.className);
+    if (receiverIr?.kind !== "object" && !exact) return null;
+    const info = exact ?? (receiverIr?.kind === "object" ? L.classes.get(receiverIr.className) : undefined);
+    if (!info && receiverIr?.kind === "object") L.flushDeferredClass(receiverIr.className);
     const found = info ? L.findMethodOn(info, access.name.text) : null;
     // The stream surface: API-named calls on stream-rooted receivers
     // lower through the stream spoke (checked before the emitter surface

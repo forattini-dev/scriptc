@@ -3292,7 +3292,22 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // is inference residue, not element information — unmappable, so the
     // dyn initializer keeps the binding checked-dynamic.
     const bindingTainted = neverTaintedJsType(L, decl.name, L.typeOf(decl.name));
+    const optionalClassValue =
+      init.type.kind === "union" &&
+      (() => {
+        const arms = L.unions.get(init.type.unionId)?.arms ?? [];
+        return arms.filter((arm) => arm.kind === "classval").length === 1 &&
+          arms.every((arm) => arm.kind === "classval" || isUnitType(arm));
+      })();
     let type =
+      // An unannotated JS alias of esbuild's lazy class binding inherits
+      // the runtime slot's `classval | undefined` type. The checker loses
+      // the callback assignment and may report only unit residue here;
+      // keeping that residue would reject the class object already held by
+      // the initializer and break identity across repeated init calls.
+      (!decl.type && !isLet && isJsSourceFile(decl.getSourceFile()) && optionalClassValue
+        ? init.type
+        : null) ??
       (L.dynamic &&
       (init.type.kind === "jsval" ||
         (init.type.kind === "promise" && init.type.inner.kind === "jsval"))

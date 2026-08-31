@@ -22,8 +22,9 @@ import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-name
 import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
+import { decoratorNodesOf, exactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
+import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
 export interface FileParts {
@@ -1280,6 +1281,33 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         for (const nameNode of boundIdentifiersOf(decl.name)) {
           const diagsBefore = L.diags.length;
           try {
+            // esbuild's lazy ESM transform declares module classes as
+            // `var C;` and assigns `C = class {}` inside its clearing-once
+            // callback. Keep the binding as an actual optional class-value
+            // global: undefined before initialization, the immortal class
+            // object afterwards, and one shared identity across every read.
+            if (
+              isJsSourceFile(sf) && ts.isIdentifier(decl.name) && nameNode === decl.name
+            ) {
+              const assigned = esbuildOnceAssignedClassExpression(L, decl);
+              if (assigned) {
+                const symbol = L.checker.getSymbolAtLocation(nameNode);
+                if (symbol && !L.globalsBySymbol.has(symbol)) {
+                  const info = L.lowerClassExpressionInfo(assigned);
+                  const classType: IrType = { kind: "classval", className: info.def.name };
+                  const g: IrGlobal = {
+                    id: `%g.${tag}${nsPrefix}${nameNode.text}`,
+                    name: nameNode.text,
+                    type: L.withUndefinedArm(classType),
+                    mutable: true,
+                  };
+                  L.globalsBySymbol.set(symbol, g);
+                  L.globalsList.push(g);
+                  noteVarGlobalEntryInit(L, sf, g);
+                }
+                continue;
+              }
+            }
             // A JS file-scope evolving ARRAY (`const mustCallChecks = [];`
             // — test/common's exit-accounting ledger): the strict type
             // (any[]) has no mapping, but the VALUE is the dyn array the
@@ -1427,7 +1455,30 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               const symbol = L.resolveValueSymbol(receiver);
               return symbol !== null && L.globalsBySymbol.get(symbol)?.type.kind === "dyn";
             })();
-            let type = storedDynValue ? DYN : handleT ?? L.irTypeOf(nameNode);
+            const storedOptionalClassValue = (() => {
+              if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return null;
+              let init: ts.Expression = decl.initializer;
+              while (ts.isParenthesizedExpression(init)) init = init.expression;
+              if (!ts.isIdentifier(init)) return null;
+              const symbol = L.resolveValueSymbol(init);
+              const source = symbol === null ? undefined : L.globalsBySymbol.get(symbol);
+              if (source?.type.kind !== "union") return null;
+              const arms = L.unions.get(source.type.unionId)?.arms ?? [];
+              return arms.filter((arm) => arm.kind === "classval").length === 1 &&
+                arms.every((arm) => arm.kind === "classval" || isUnitType(arm))
+                ? source.type
+                : null;
+            })();
+            const exactNewClass =
+              isJsSourceFile(sf) && decl.type === undefined &&
+              ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
+                ? exactInstanceClassOf(L, decl.initializer)
+                : null;
+            let type = storedDynValue
+              ? DYN
+              : storedOptionalClassValue ??
+                (exactNewClass ? { kind: "object", className: exactNewClass.def.name } : null) ??
+                handleT ?? L.irTypeOf(nameNode);
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the
