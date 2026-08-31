@@ -13,9 +13,17 @@ fn dgram_pending() -> bool {
 }
 
 #[cfg(all(not(windows), not(target_os = "wasi")))]
-fn dgram_poll(timeout: Option<std::time::Duration>) -> bool {
-    let mut sockets = Vec::new();
-    let mut unpollable = false;
+struct DgramPollHandles {
+    sockets: Vec<std::net::UdpSocket>,
+    unpollable: bool,
+}
+
+#[cfg(all(not(windows), not(target_os = "wasi")))]
+fn dgram_poll_handles() -> DgramPollHandles {
+    let mut handles = DgramPollHandles {
+        sockets: Vec::new(),
+        unpollable: false,
+    };
     DGRAM_SOCKETS.with(|registered| {
         for socket in registered.borrow().iter() {
             socket.with(|state| {
@@ -24,32 +32,39 @@ fn dgram_poll(timeout: Option<std::time::Duration>) -> bool {
                     || state.emit_connect
                     || state.closing
                 {
-                    unpollable = true;
+                    handles.unpollable = true;
                 }
                 let Some(socket) = &state.socket else {
                     if !state.unrefed {
-                        unpollable = true;
+                        handles.unpollable = true;
                     }
                     return;
                 };
                 match socket.try_clone() {
-                    Ok(socket) => sockets.push(socket),
-                    Err(_) => unpollable = true,
+                    Ok(socket) => handles.sockets.push(socket),
+                    Err(_) => handles.unpollable = true,
                 }
             });
         }
     });
-    if sockets.is_empty() {
+    handles
+}
+
+#[cfg(all(not(windows), not(target_os = "wasi")))]
+fn dgram_poll(timeout: Option<std::time::Duration>) -> bool {
+    let handles = dgram_poll_handles();
+    if handles.sockets.is_empty() {
         return false;
     }
-    let timeout = if unpollable || net_pending() {
+    let timeout = if handles.unpollable || net_pending() {
         let quantum = std::time::Duration::from_millis(1);
         Some(timeout.map_or(quantum, |timeout| timeout.min(quantum)))
     } else {
         timeout
     };
     let timeout = io_poll_timeout(timeout);
-    let mut fds = sockets
+    let mut fds = handles
+        .sockets
         .iter()
         .map(|socket| rustix::event::PollFd::new(socket, rustix::event::PollFlags::IN))
         .collect::<Vec<_>>();

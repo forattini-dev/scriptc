@@ -88,17 +88,25 @@ fn net_poll_handles() -> NetPollHandles {
 #[cfg(all(not(windows), not(target_os = "wasi")))]
 fn net_poll(timeout: Option<std::time::Duration>) -> bool {
     let handles = net_poll_handles();
-    if handles.listeners.is_empty() && handles.streams.is_empty() {
+    let dgram_handles = dgram_pending().then(dgram_poll_handles);
+    let dgram_count = dgram_handles
+        .as_ref()
+        .map_or(0, |handles| handles.sockets.len());
+    if handles.listeners.is_empty() && handles.streams.is_empty() && dgram_count == 0 {
         return false;
     }
-    let timeout = if handles.unpollable || dgram_pending() {
+    let dgram_unpollable = dgram_handles
+        .as_ref()
+        .is_some_and(|handles| handles.unpollable);
+    let timeout = if handles.unpollable || dgram_unpollable {
         let quantum = std::time::Duration::from_millis(1);
         Some(timeout.map_or(quantum, |timeout| timeout.min(quantum)))
     } else {
         timeout
     };
     let timeout = io_poll_timeout(timeout);
-    let mut fds = Vec::with_capacity(handles.listeners.len() + handles.streams.len());
+    let mut fds =
+        Vec::with_capacity(handles.listeners.len() + handles.streams.len() + dgram_count);
     for listener in &handles.listeners {
         fds.push(rustix::event::PollFd::new(
             listener,
@@ -107,6 +115,14 @@ fn net_poll(timeout: Option<std::time::Duration>) -> bool {
     }
     for (stream, events) in &handles.streams {
         fds.push(rustix::event::PollFd::new(stream, *events));
+    }
+    if let Some(dgram_handles) = &dgram_handles {
+        for socket in &dgram_handles.sockets {
+            fds.push(rustix::event::PollFd::new(
+                socket,
+                rustix::event::PollFlags::IN,
+            ));
+        }
     }
     rustix::event::poll(&mut fds, timeout.as_ref()).is_ok()
 }
