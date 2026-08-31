@@ -9489,12 +9489,25 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     else L.noteEdge(`%${found.declarer.def.name}.${method}`);
     const receiver = L.lowerExpr(access.expression);
     const args = L.completeArgs(call.arguments, found.sig.params, locOf(call), call);
+    // exactInstanceClassOf may resolve below the receiver's annotated
+    // class (`const b: Base = new Derived(); b.m()`). In that statically
+    // proven case the selected implementation needs a checker-trusted
+    // downcast, not the derived-to-base upcast used on the ordinary path.
+    const receiverAs = (className: string): IrExpr =>
+      receiver.type.kind === "object" && L.isSubclassOf(className, receiver.type.className)
+        ? {
+            kind: "downcast",
+            value: receiver,
+            type: { kind: "object", className },
+            loc: receiver.loc,
+          }
+        : L.upcastTo(receiver, className);
     if (L.overrideBelow(info, method)) {
       return reconcileOverloadReturn(L, call, {
         kind: "virtualCall",
         className: info.def.name,
         method,
-        args: [L.upcastTo(receiver, info.def.name), ...args],
+        args: [receiverAs(info.def.name), ...args],
         type: found.sig.ret,
         loc: locOf(call),
       });
@@ -9502,7 +9515,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     return reconcileOverloadReturn(L, call, {
       kind: "call",
       callee: `%${found.declarer.def.name}.${method}`,
-      args: [L.upcastTo(receiver, found.declarer.def.name), ...args],
+      args: [receiverAs(found.declarer.def.name), ...args],
       type: found.sig.ret,
       loc: locOf(call),
     });
