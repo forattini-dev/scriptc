@@ -53,6 +53,10 @@ export async function compileRust(options: RustCompileOptions): Promise<void> {
   await mkdir(dirname(options.outPath), { recursive: true });
   const rustcArgs = [
     ...rustcBaseArgs(options.sourcePath, context, options.optimization),
+    // The runtime rlib carries std's debug sections; without stripping they
+    // dominate a small executable. Library archives keep their symbols for
+    // the nm/ld localization pass, so this applies to executables only.
+    ...(options.optimization === "dev" ? [] : ["-C", "strip=symbols"]),
     ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
     ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
     "-o", options.outPath,
