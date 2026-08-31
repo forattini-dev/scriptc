@@ -3610,7 +3610,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const exact = exactClassOfReceiver(L, n.expression);
       if (exact) return exact;
       if (ts.isIdentifier(n.expression)) {
-        const stored = (L.resolveLocal(n.expression) ?? L.globalOf(n.expression))?.type;
+        // This helper is a read-only inference probe and also runs during
+        // collectGlobals, before any function context exists. peekLocal is
+        // phase-safe and avoids mutating capture state when called later
+        // from expression/member lowering.
+        const stored = (L.peekLocal(n.expression) ?? L.globalOf(n.expression))?.type;
         if (stored?.kind === "union") {
           const arms = L.unions.get(stored.unionId)?.arms ?? [];
           const classArms = arms.filter((arm) => arm.kind === "classval");
