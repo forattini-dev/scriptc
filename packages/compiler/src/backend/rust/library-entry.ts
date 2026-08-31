@@ -215,6 +215,7 @@ export function emitRustLibraryEntries(options: RustLibraryEntryOptions): string
     "",
     `fn sc_library_call<T>(symbol: &'static str, call: impl FnOnce() -> T) -> T {`,
     `    sc_library_check_entry(symbol);`,
+    `    runtime::library_traps_enable();`,
     `    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(call)) {`,
     `        Ok(value) => value,`,
     `        Err(payload) => sc_library_escape(payload, symbol),`,

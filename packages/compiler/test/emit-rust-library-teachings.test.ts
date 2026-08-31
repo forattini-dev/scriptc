@@ -10,6 +10,7 @@ interface TrapProbeOptions {
   readonly teachingCode: string;
   readonly teaching: string;
   readonly remediation: string;
+  readonly probeSetup?: readonly string[];
 }
 
 async function runTrapProbe(options: TrapProbeOptions): Promise<ReturnType<typeof spawnSync>> {
@@ -44,10 +45,13 @@ async function runTrapProbe(options: TrapProbeOptions): Promise<ReturnType<typeo
 
     const probeSource = join(work, "probe.c");
     writeFileSync(probeSource, [
+      "#define _GNU_SOURCE",
       "#include <setjmp.h>",
       "#include <stddef.h>",
       "#include <stdint.h>",
       "#include <stdio.h>",
+      "#include <stdlib.h>",
+      "#include <unistd.h>",
       "static jmp_buf escape;",
       "extern void rt_init(void); extern double rt_boom(void);",
       "extern void rt_set_panic_sink(void (*)(void *, const uint8_t *, size_t, uint64_t), void *);",
@@ -58,6 +62,7 @@ async function runTrapProbe(options: TrapProbeOptions): Promise<ReturnType<typeo
       "}",
       "int main(void) {",
       "  rt_set_panic_sink(sink, NULL); rt_init();",
+      ...(options.probeSetup ?? []),
       "  if (setjmp(escape) == 0) printf(\"returned %.0f\\n\", rt_boom());",
       "  puts(\"survived\"); return 0;",
       "}",
@@ -182,6 +187,34 @@ test("Rust library invalid regular expression flags select the SC4016 teaching",
     "flags ready",
     "sink:host-friendly flags trap",
     "|SC4016|rt_boom|validate the regular expression flags before retrying",
+    "survived",
+    "",
+  ].join("\n"));
+}, 120_000);
+
+test("Rust library environment traps select the residual SC4019 teaching", async () => {
+  const run = await runTrapProbe({
+    source: [
+      "export function boom(): number { return process.cwd().length; }",
+      "console.log('cwd ready');",
+      "",
+    ].join("\n"),
+    teachingCode: "SC4019",
+    teaching: "host-friendly environment trap\n",
+    remediation: "restore a valid working directory before retrying",
+    probeSetup: [
+      "  char cwd_template[] = \"/tmp/scriptc-rust-cwd-XXXXXX\";",
+      "  char *cwd = mkdtemp(cwd_template);",
+      "  if (cwd == NULL || chdir(cwd) != 0 || rmdir(cwd) != 0) return 2;",
+    ],
+  });
+  expect(run.signal).toBeNull();
+  expect(run.status).toBe(0);
+  expect(run.stderr).toBe("");
+  expect(run.stdout).toBe([
+    "cwd ready",
+    "sink:host-friendly environment trap",
+    "|SC4019|rt_boom|restore a valid working directory before retrying",
     "survived",
     "",
   ].join("\n"));

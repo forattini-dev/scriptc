@@ -17,6 +17,7 @@ struct JsErrorProperties {
 thread_local! {
     static ERROR_PROPERTIES: RefCell<Vec<(Weak<()>, JsErrorProperties)>> = const { RefCell::new(Vec::new()) };
     static LIBRARY_TRAP_CODES: RefCell<Vec<(Weak<()>, &'static str)>> = const { RefCell::new(Vec::new()) };
+    static LIBRARY_TRAPS_ENABLED: Cell<bool> = const { Cell::new(false) };
 }
 
 fn error_property(error: &JsError, name: bool) -> Option<JsString> {
@@ -183,18 +184,28 @@ struct RuntimeTrap {
     code: &'static str,
 }
 
+pub fn library_traps_enable() {
+    LIBRARY_TRAPS_ENABLED.with(|enabled| enabled.set(true));
+}
+
+fn detected_trap(text: String, code: &'static str) -> ! {
+    if LIBRARY_TRAPS_ENABLED.with(Cell::get) {
+        std::panic::resume_unwind(Box::new(RuntimeTrap { text, code }));
+    }
+    eprint!("{text}");
+    std::process::abort();
+}
+
 pub fn trap_range_error(message: String) -> ! {
-    std::panic::resume_unwind(Box::new(RuntimeTrap {
-        text: format!("scriptc: RangeError: {message}\n"),
-        code: "SC4014",
-    }))
+    detected_trap(format!("scriptc: RangeError: {message}\n"), "SC4014")
 }
 
 pub fn trap_type_error(message: String) -> ! {
-    std::panic::resume_unwind(Box::new(RuntimeTrap {
-        text: format!("scriptc: TypeError: {message}\n"),
-        code: "SC4015",
-    }))
+    detected_trap(format!("scriptc: TypeError: {message}\n"), "SC4015")
+}
+
+pub fn trap_other(message: String) -> ! {
+    detected_trap(message, "SC4019")
 }
 
 pub fn take_runtime_trap(
@@ -516,6 +527,7 @@ pub fn error_message(error: &JsError) -> JsString {
 fn errors_finish() {
     ERROR_PROPERTIES.with(|properties| properties.borrow_mut().clear());
     LIBRARY_TRAP_CODES.with(|codes| codes.borrow_mut().clear());
+    LIBRARY_TRAPS_ENABLED.with(|enabled| enabled.set(false));
 }
 
 pub fn error_code(error: &JsError) -> Option<JsString> {

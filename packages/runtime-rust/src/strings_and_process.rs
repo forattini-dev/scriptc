@@ -658,12 +658,9 @@ pub fn process_platform() -> JsString {
 }
 
 pub fn process_cwd() -> JsString {
-    Rc::from(
-        std::env::current_dir()
-            .expect("scriptc: current directory is unavailable")
-            .to_string_lossy()
-            .as_ref(),
-    )
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| trap_other("scriptc: process.cwd() failed\n".to_owned()));
+    Rc::from(cwd.to_string_lossy().as_ref())
 }
 
 pub fn process_chdir(path: &JsString) {
