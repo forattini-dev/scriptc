@@ -1,11 +1,14 @@
 /**
- * Version-pinned conformance for the WHATWG URL / URLSearchParams slice.
+ * Matrix conformance for the WHATWG URL / URLSearchParams slice.
  *
  * The compatibility profile is compiler input, not test-only metadata: its
  * rows project into the shipped surface manifest. This suite holds the
  * profile to four things:
  *
- *  - the running oracle is the exact Node the census was reflected under;
+ *  - the running runtime IS one of the profile's declared targets — the
+ *    suite selects the target from the host rather than demanding one
+ *    particular pin, so it is green under every first-class Node and red
+ *    only on a runtime the matrix does not declare at all;
  *  - the REFLECTED census of URL, URLSearchParams, and the search-params
  *    iterator equals the declared inventory, member for member, setter for
  *    setter — the tripwire that makes a Node upgrade a deliberate profile
@@ -20,14 +23,18 @@ import { describe, expect, test } from "vitest";
 import {
   compatEvidenceKey,
   compatRowName,
+  compatRowTargetLabel,
   compatTargetLabel,
   NODE24_URL_COMPAT_PROFILE,
   type CompatInventoryPlacement,
   type SurfaceManifest,
 } from "@scriptc/compiler";
 import {
+  activeCompatTarget,
+  compatTargetVersions,
   publicSymbolName,
   reflectInterface,
+  rowsForTarget,
   wellKnownSymbolNames,
 } from "./compat-census.js";
 
@@ -39,8 +46,16 @@ const manifest = JSON.parse(
   readFileSync(join(repoRoot, "packages/compiler/surface-manifest.json"), "utf8"),
 ) as SurfaceManifest;
 
+/** The matrix target this run IS. Every comparison below is made against
+ * this target's rows, so the suite is green on Node 24 and on Node 26 and
+ * red only on a runtime the profile does not declare at all. */
+const target = activeCompatTarget(profile.targets);
+const entries = target === null
+  ? inventory.entries
+  : rowsForTarget(inventory.entries, target);
+
 const membersAt = (owner: string, placement: CompatInventoryPlacement): string[] =>
-  inventory.entries
+  entries
     .filter((entry) => entry.owner === owner && entry.placement === placement)
     .map((entry) => entry.member)
     .sort();
@@ -52,15 +67,22 @@ function corpusExists(name: string): boolean {
   );
 }
 
-describe("Node 24 URL compatibility profile", () => {
-  test("the running oracle is the exact pinned Node", () => {
+describe("URL compatibility profile", () => {
+  test("the running runtime is one of the declared matrix targets", () => {
+    // The primary is what .node-version pins; the candidates are equally
+    // supported runtimes, each with its own reflected census.
     const pinnedNode = readFileSync(join(repoRoot, ".node-version"), "utf8").trim();
     expect(profile.targets.primary.node).toBe(pinnedNode);
-    expect(process.versions.node).toBe(profile.targets.primary.node);
-    // The version axis exists so a second runtime is a filled slot rather
-    // than a schema change; a candidate is only ever added with its own
-    // reflected census, so the pinned profile declares none.
-    expect(profile.targets.candidates).toEqual([]);
+    expect(profile.targets.candidates.length).toBeGreaterThan(0);
+
+    // Selection, not equality: the only failure this can produce is a host
+    // outside the whole matrix. Running on any declared target is green.
+    expect(
+      target,
+      `Node ${process.versions.node} is not a declared target of the URL profile ` +
+        `(declared: ${compatTargetVersions(profile.targets)}) — add it to the ` +
+        `matrix with its own reflected census, or run the suite under one of them`,
+    ).not.toBeNull();
   });
 
   test("the inventory classifies every supported row and every gap", () => {
@@ -68,7 +90,7 @@ describe("Node 24 URL compatibility profile", () => {
     const ids = inventory.entries.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(
-      inventory.entries
+      entries
         .filter((entry) => entry.status === "static")
         .map((entry) => entry.id)
         .sort(),
@@ -103,7 +125,7 @@ describe("Node 24 URL compatibility profile", () => {
     for (const owner of inventory.interfaces) {
       const source = inventory.sources?.[owner];
       const actual = reflectInterface(owner, source);
-      const declaredConstructors = inventory.entries.filter(
+      const declaredConstructors = entries.filter(
         (entry) => entry.owner === owner && entry.placement === "constructor",
       ).length;
       // An interface with no reachable constructor object claims neither a
@@ -170,24 +192,28 @@ describe("Node 24 URL compatibility profile", () => {
     }
   });
 
+  // The manifest is a shipped artifact, not a per-host one: it carries
+  // every row of the matrix whatever runtime generated it, so this test
+  // compares against the WHOLE inventory rather than the active target's
+  // slice, and each row against the label its own targets produce.
   test("the shipped manifest carries every projected row", () => {
-    const entries = new Map(manifest.entries.map((entry) => [entry.id, entry]));
-    const target = compatTargetLabel(profile.targets.primary);
-    expect(target).toBe(`Node ${profile.targets.primary.node}`);
+    const published = new Map(manifest.entries.map((entry) => [entry.id, entry]));
+    const primaryLabel = compatTargetLabel(profile.targets.primary);
+    expect(primaryLabel).toBe(`Node ${profile.targets.primary.node}`);
 
     for (const operation of profile.operations) {
-      const entry = entries.get(operation.id);
+      const entry = published.get(operation.id);
       expect(entry, `${operation.id} is missing from the manifest`).toBeDefined();
       expect(entry!.status, `${operation.id}: manifest status`).toBe("static");
       expect(entry!.name).toBe(operation.name);
-      expect(entry!.note).toContain(target);
+      expect(entry!.note).toContain(primaryLabel);
       for (const evidence of operation.evidence) {
         expect(entry!.note).toContain(compatEvidenceKey(evidence));
       }
     }
 
     for (const row of inventory.entries) {
-      const entry = entries.get(row.id);
+      const entry = published.get(row.id);
       if (row.status === "out-of-scope") {
         // Exclusions stay in the profile: the manifest publishes claims,
         // not the deliberate silences behind them.
@@ -199,7 +225,9 @@ describe("Node 24 URL compatibility profile", () => {
       expect(entry!.status, `${row.id}: manifest status`).toBe(row.status);
       expect(entry!.code, `${row.id}: manifest fence`).toBe(row.code);
       expect(entry!.name).toBe(compatRowName(row));
-      expect(entry!.note).toBe(`${target}; ${row.reason}`);
+      expect(entry!.note).toBe(
+        `${compatRowTargetLabel(profile.targets, row)}; ${row.reason}`,
+      );
     }
   });
 });

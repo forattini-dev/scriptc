@@ -1,10 +1,13 @@
 /**
- * Generated, version-pinned conformance for the engine-free fetch slice.
+ * Generated, matrix conformance for the engine-free fetch slice.
  *
  * The compatibility profile is compiler input, not test-only metadata: its
  * member allowlists drive lowering and its entries project into the shipped
  * surface manifest. The reflected inventory supplies the denominator. This
- * suite checks that the pinned Node executable is the intended oracle, every
+ * suite selects the profile target the running runtime IS — this is the one
+ * profile whose census genuinely differs across the matrix, so a row that
+ * exists on Node 26 alone is compared only against Node 26 — and checks
+ * that the host is a declared target at all, that every
  * profile row names differential evidence, and the generated
  * WebIDL/state-machine program agrees through both native backends.
  */
@@ -22,6 +25,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { beforeAll, describe, expect, test } from "vitest";
 import {
+  compatTargetFor,
+  compatTargetList,
+  compatRowOnTarget,
   compile,
   NODE24_FETCH_COMPAT_PROFILE,
   renderAll,
@@ -39,6 +45,15 @@ const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/fetch");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 const profile = NODE24_FETCH_COMPAT_PROFILE;
+/** The matrix target this run IS — selected from the running runtime
+ * rather than demanded of it, so the suite is green under every declared
+ * Node and red only on one the profile does not declare at all. */
+const target = compatTargetFor(profile.targets, process.versions.node);
+/** The census rows that exist on the active target: unqualified rows plus
+ * the rows that name it (Node 26's Request/Response.textStream). */
+const targetEntries = target === null
+  ? profile.inventory.entries
+  : profile.inventory.entries.filter((entry) => compatRowOnTarget(entry, target.id));
 function configuredInteger(
   name: string,
   fallback: number,
@@ -231,26 +246,44 @@ beforeAll(() => {
   writeFileSync(entry, generatedSource);
 });
 
-describe("Node 24 fetch compatibility profile", () => {
-  test("the running oracle is the exact pinned Node/Undici tuple", () => {
+describe("fetch compatibility profile", () => {
+  test("the running runtime is one of the declared matrix targets", () => {
+    // The primary is what .node-version pins; the candidates are equally
+    // supported runtimes, each with its own reflected census.
     const pinnedNode = readFileSync(join(repoRoot, ".node-version"), "utf8").trim();
-    expect(profile.target.node).toBe(pinnedNode);
-    expect(process.versions.node).toBe(profile.target.node);
-    expect(process.versions.undici).toBe(profile.target.undici);
+    expect(profile.targets.primary.node).toBe(pinnedNode);
+    expect(profile.targets.candidates.length).toBeGreaterThan(0);
+
+    // Selection, not equality: the only failure this can produce is a host
+    // outside the whole matrix. Running on any declared target is green.
+    const declared = compatTargetList(profile.targets);
+    expect(
+      target,
+      `Node ${process.versions.node} is not a declared target of the fetch profile ` +
+        `(declared: ${declared.map((row) => row.node).join(", ")}) — add it to the ` +
+        `matrix with its own reflected census, or run the suite under one of them`,
+    ).not.toBeNull();
+
+    // Undici is the profile's second observable component, so the target
+    // that claims to be this runtime must agree about it too. A Node build
+    // carrying an unexpected Undici is a real census divergence.
+    expect(target!.components?.["undici"]).toBe(process.versions.undici);
   });
 
   test("the inventory classifies every supported row and every gap", () => {
     const supported = [...profile.operations, ...profile.requestInit, ...profile.responseInit]
       .map((row) => row.id)
       .sort();
-    const entries = profile.inventory.entries;
-    const ids = entries.map((entry) => entry.id);
+    const entries = targetEntries;
+    const ids = profile.inventory.entries.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(
       entries.filter((entry) => entry.status === "static").map((entry) => entry.id).sort(),
     ).toEqual(supported);
 
-    for (const entry of entries) {
+    // Row SHAPE is validated across the whole matrix, not just the active
+    // target: a malformed Node 26 row must fail on Node 24 too.
+    for (const entry of profile.inventory.entries) {
       if (entry.status === "static") {
         expect(entry.code, `${entry.id}: static rows have no refusal code`).toBeUndefined();
         expect(entry.reason, `${entry.id}: static rows are explained by evidence`).toBeUndefined();
@@ -263,9 +296,10 @@ describe("Node 24 fetch compatibility profile", () => {
       }
     }
 
-    expect(entries.some((entry) => entry.status === "dynamic-only")).toBe(true);
-    expect(entries.some((entry) => entry.status === "unsupported")).toBe(true);
-    expect(entries.some((entry) => entry.status === "out-of-scope")).toBe(true);
+    const all = profile.inventory.entries;
+    expect(all.some((entry) => entry.status === "dynamic-only")).toBe(true);
+    expect(all.some((entry) => entry.status === "unsupported")).toBe(true);
+    expect(all.some((entry) => entry.status === "out-of-scope")).toBe(true);
     expect(profile.inventory.excludedInterfaces.length).toBeGreaterThan(0);
     for (const exclusion of profile.inventory.excludedInterfaces) {
       expect(exclusion.name.length).toBeGreaterThan(0);
@@ -274,7 +308,7 @@ describe("Node 24 fetch compatibility profile", () => {
   });
 
   test("the selected runtime interfaces match the complete public census", () => {
-    const entries = profile.inventory.entries;
+    const entries = targetEntries;
     const expected = (owner: string, placement: string): string[] =>
       entries
         .filter((entry) => entry.owner === owner && entry.placement === placement)
@@ -313,7 +347,7 @@ describe("Node 24 fetch compatibility profile", () => {
 
   test("the WebIDL dictionary census matches Node's conversion reads", () => {
     const expected = (owner: string): string[] =>
-      profile.inventory.entries
+      targetEntries
         .filter((entry) => entry.owner === owner && entry.placement === "dictionary")
         .map((entry) => entry.member);
     expect(dictionaryReads((init) =>
