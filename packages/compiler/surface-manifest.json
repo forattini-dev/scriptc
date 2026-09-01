@@ -3429,7 +3429,7 @@
       "kind": "stdlib",
       "name": "string.prototype.endsWith",
       "status": "static",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 2 arguments"
     },
     {
       "id": "stdlib.string.includes",
@@ -3506,7 +3506,7 @@
       "kind": "stdlib",
       "name": "string.prototype.startsWith",
       "status": "static",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 2 arguments"
     },
     {
       "id": "stdlib.string.substring",
@@ -3799,9 +3799,8 @@
       "id": "stdlib.url.hash",
       "kind": "stdlib",
       "name": "URL.hash",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: '#' + fragment, but the empty string for both no fragment at all and a bare '#'; the fragment runs to the end of the input; differential evidence: corpus:2832-url-hash"
     },
     {
       "id": "stdlib.url.host",
@@ -3828,17 +3827,15 @@
       "id": "stdlib.url.origin",
       "kind": "stdlib",
       "name": "URL.origin",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, serialization; supported scope: the WHATWG tuple origin for the schemes that have one, and the literal string 'null' for file: and every opaque-path scheme; userinfo is never part of it and the default port is already stripped; differential evidence: corpus:2831-url-origin"
     },
     {
       "id": "stdlib.url.password",
       "kind": "stdlib",
       "name": "URL.password",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the percent-encoded userinfo component after the first ':', the empty string when absent or empty, with no null/empty distinction; differential evidence: corpus:2833-url-userinfo"
     },
     {
       "id": "stdlib.url.pathname",
@@ -3851,9 +3848,8 @@
       "id": "stdlib.url.port",
       "kind": "stdlib",
       "name": "URL.port",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the digit-string tail of host; the empty string whenever the port is absent or equals the scheme's own default, dropped at parse time so the getter is a verbatim field read; differential evidence: corpus:2830-url-port"
     },
     {
       "id": "stdlib.url.protocol",
@@ -3960,9 +3956,8 @@
       "id": "stdlib.url.static.canParse",
       "kind": "stdlib",
       "name": "URL.canParse",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; canParse has no compiler lowering in either tier — neither the one-argument form nor the (input, base) form; parse an absolute string with new URL and catch the TypeError instead"
+      "status": "static",
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape; supported scope: the one-argument form; the input's accept/reject decision as a boolean, never throwing — the (input, base) relative-resolution overload is refused; differential evidence: corpus:2834-url-can-parse"
     },
     {
       "id": "stdlib.url.static.createObjectURL",
@@ -4007,9 +4002,8 @@
       "id": "stdlib.url.username",
       "kind": "stdlib",
       "name": "URL.username",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the percent-encoded userinfo component before the first ':', the empty string when absent; differential evidence: corpus:2833-url-userinfo"
     },
     {
       "id": "syntax.class-declarations-inside-functions",

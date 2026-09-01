@@ -190,6 +190,20 @@ export const NODE24_URL_COMPAT_PROFILE = {
       [corpus("1577-url-hostname"), corpus("1611-url-file-bridge-neutral")],
     ),
     urlOperation(
+      "port",
+      "property",
+      ["property-read"],
+      [corpus("2830-url-port")],
+      "the digit-string tail of host; the empty string whenever the port is absent or equals the scheme's own default, dropped at parse time so the getter is a verbatim field read",
+    ),
+    urlOperation(
+      "origin",
+      "property",
+      ["property-read", "serialization"],
+      [corpus("2831-url-origin")],
+      "the WHATWG tuple origin for the schemes that have one, and the literal string 'null' for file: and every opaque-path scheme; userinfo is never part of it and the default port is already stripped",
+    ),
+    urlOperation(
       "pathname",
       "property",
       ["property-read"],
@@ -210,12 +224,41 @@ export const NODE24_URL_COMPAT_PROFILE = {
       "the live query view, cached so repeated reads of one URL return the same params identity and writes through it are visible in href/search",
     ),
     urlOperation(
+      "hash",
+      "property",
+      ["property-read"],
+      [corpus("2832-url-hash")],
+      "'#' + fragment, but the empty string for both no fragment at all and a bare '#'; the fragment runs to the end of the input",
+    ),
+    urlOperation(
+      "username",
+      "property",
+      ["property-read"],
+      [corpus("2833-url-userinfo")],
+      "the percent-encoded userinfo component before the first ':', the empty string when absent",
+    ),
+    urlOperation(
+      "password",
+      "property",
+      ["property-read"],
+      [corpus("2833-url-userinfo")],
+      "the percent-encoded userinfo component after the first ':', the empty string when absent or empty, with no null/empty distinction",
+    ),
+    urlOperation(
       "toString",
       "method",
       ["serialization"],
       [corpus("1355-url-parse")],
       "the zero-argument call, equal to href; the method value itself is not a first-class handle",
     ),
+    {
+      id: "stdlib.url.static.canParse",
+      name: "URL.canParse",
+      kind: "static-method",
+      facets: ["parsing", "webidl-conversion", "error-shape"],
+      scope: "the one-argument form; the input's accept/reject decision as a boolean, never throwing — the (input, base) relative-resolution overload is refused",
+      evidence: [corpus("2834-url-can-parse")],
+    },
 
     paramsOperation(
       "constructor",
@@ -332,15 +375,14 @@ export const NODE24_URL_COMPAT_PROFILE = {
     },
     entries: [
       staticEntry("stdlib.url.constructor", "URL", "constructor", "constructor"),
-      ...["parse", "canParse"].map((member) =>
-        unsupportedEntry(
-          `stdlib.url.static.${member}`,
-          "URL",
-          member,
-          "static",
-          `${member} has no compiler lowering in either tier — neither the one-argument form nor the (input, base) form; parse an absolute string with new URL and catch the TypeError instead`,
-        )
+      unsupportedEntry(
+        "stdlib.url.static.parse",
+        "URL",
+        "parse",
+        "static",
+        "parse has no compiler lowering in either tier — neither the one-argument form nor the (input, base) form; parse an absolute string with new URL and catch the TypeError instead",
       ),
+      staticEntry("stdlib.url.static.canParse", "URL", "canParse", "static"),
       unsupportedEntry(
         "stdlib.url.static.createObjectURL",
         "URL",
@@ -357,10 +399,10 @@ export const NODE24_URL_COMPAT_PROFILE = {
       ),
       staticEntry("stdlib.url.toString", "URL", "toString", "prototype"),
       staticEntry("stdlib.url.href", "URL", "href", "prototype"),
-      unsupportedEntry("stdlib.url.origin", "URL", "origin", "prototype", islandOnly),
+      staticEntry("stdlib.url.origin", "URL", "origin", "prototype"),
       staticEntry("stdlib.url.protocol", "URL", "protocol", "prototype"),
       ...["username", "password", "port", "hash"].map((member) =>
-        unsupportedEntry(`stdlib.url.${member}`, "URL", member, "prototype", islandOnly)
+        staticEntry(`stdlib.url.${member}`, "URL", member, "prototype")
       ),
       staticEntry("stdlib.url.host", "URL", "host", "prototype"),
       staticEntry("stdlib.url.hostname", "URL", "hostname", "prototype"),
