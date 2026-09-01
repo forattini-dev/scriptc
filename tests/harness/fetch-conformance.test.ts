@@ -39,6 +39,7 @@ import {
   generateFetchConformanceProgram,
   generatedScenarioIds,
 } from "./fetch-conformance-program.js";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -54,6 +55,9 @@ const target = compatTargetFor(profile.targets, process.versions.node);
 const targetEntries = target === null
   ? profile.inventory.entries
   : profile.inventory.entries.filter((entry) => compatRowOnTarget(entry, target.id));
+/** The Node the generated differential compares native output against —
+ * the matrix primary, not the host. See tests/harness/node-matrix.ts. */
+const oracleExecutable = primaryOracleExecutable(profile.targets);
 function configuredInteger(
   name: string,
   fallback: number,
@@ -432,8 +436,16 @@ describe(
       "%s backend matches the pinned Node oracle",
       async (backend) => {
         const binary = await build(backend);
+        // NOT process.execPath: the census above follows the host, but a
+        // compiled binary reproduces ONE Node's observable behavior, so
+        // the differential compares against the matrix primary (or an
+        // explicit SCRIPTC_NODE_ORACLE). Node 26 rewords error messages
+        // Node 24 emits — AbortSignal.any's ERR_INVALID_ARG_TYPE is
+        // "cannot" there and "can not" here — and comparing against
+        // whichever Node happened to launch vitest would red on spelling
+        // while saying nothing about either backend.
         const [nodeResult, nativeResult] = await Promise.all([
-          run(process.execPath, [entry]),
+          run(oracleExecutable, [entry]),
           run(binary, []),
         ]);
         if (!nativeResult.stdout.equals(nodeResult.stdout)) {
