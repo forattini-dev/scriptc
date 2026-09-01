@@ -341,8 +341,8 @@ fn island_host_resolve(
 /// tables, the Node builtin shims behind it, and the globals they install
 /// (`process`, `Buffer`, the formatting `console`).
 ///
-/// Called once per realm, before any embedded module is parsed: the CJS
-/// facades the ES graph evaluates call straight into `__scr_require`.
+/// Called once per realm, before any embedded or external module is parsed:
+/// CJS facades and external builtin imports call into `__scr_require`.
 pub(crate) fn island_modules_boot(context: &mut Context) -> JsResult<()> {
     let host = island_host_object(context);
     let boot = context.eval(Source::from_bytes(ISLAND_MODULE_BOOTSTRAP))?;

@@ -774,13 +774,12 @@ fn island_state() -> IslandState {
         island_eval_error(error, &mut context);
     }
     island_web_boot(&mut context).unwrap_or_else(|error| island_eval_error(error, &mut context));
+    // External modules loaded through a computed file URL can import Node
+    // builtins even when the build embedded no npm modules. Install the
+    // shared require/builtin bootstrap before parsing either graph.
+    island_modules_boot(&mut context)
+        .unwrap_or_else(|error| island_eval_error(error, &mut context));
     let embedded_modules = island_registered_modules();
-    if !embedded_modules.is_empty() {
-        // __scr_require must exist before any module is PARSED, because a
-        // CJS facade's first statement calls it.
-        island_modules_boot(&mut context)
-            .unwrap_or_else(|error| island_eval_error(error, &mut context));
-    }
     let mut modules = HashMap::new();
     for embedded in embedded_modules {
         // A JSON module keeps its native parse for the ES graph; CJS

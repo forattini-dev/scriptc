@@ -36,5 +36,5 @@ test("Rust imports a computed file URL beside the native executable", async () =
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
-  expect(rust.stdout).toBe("computed external module\n");
+  expect(rust.stdout).toBe("computed module\n");
 });
