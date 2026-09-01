@@ -3019,19 +3019,10 @@ function mapBoundIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null
   return mapType(checker.getTypeOfSymbol(prop), ctx);
 }
 
-/** `Partial<T>` / `Readonly<T>` where T is a STILL-GENERIC type parameter —
- * the one mapped-type spelling a monomorphized body can contain that the
- * checker cannot resolve for us (`keyof T` is unknown inside the body, so
- * getPropertiesOfType returns nothing). The lowerer's binding can: Readonly
- * maps exactly like T (writes are tsc errors, trusted), and Partial arms
- * every field of T's record with undefined — precisely what the longhand
- * optional spelling produces, so the result interns to the same shape as
- * the concrete `Partial<Config>` at the call boundary. Other utility
- * aliases (Pick, Omit, Record, Required) need literal KEYS or the
- * optional/required distinction, which IR types deliberately do not carry
- * (`{a?: string}` and `{a: string | undefined}` are ONE shape) — those stay
- * unmapped inside generic bodies; their concrete uses resolve structurally
- * through mapRecordType. */
+/** Utility aliases whose checker shape stays symbolic inside a generic body.
+ * Partial/Readonly derive from the bound record. Record<K,V> materializes
+ * only when K's checker binding is a finite set of string literals; broad
+ * string keys keep the ordinary index-signature path. */
 /** `Awaited<T>` where T is a STILL-GENERIC type parameter, resolved against
  * the lowerer's binding: promise kinds unwrap recursively (the alias's own
  * recursion), everything else is already its awaited self — including
@@ -3118,6 +3109,21 @@ function mapGenericIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | nu
   const { resolveTypeParam, shapes } = ctx;
   if (!resolveTypeParam || !type.isIndexedAccessType()) return null;
   const obj = type.getObjectType();
+  const alias = obj.getAliasSymbol();
+  if (alias?.name === "Record") {
+    const [recordKey, value] = obj.getAliasTypeArguments();
+    const idx = type.getIndexType();
+    const sameKey = recordKey === idx || (
+      recordKey !== undefined &&
+      (recordKey.flags & ts.TypeFlags.TypeParameter) !== 0 &&
+      (idx.flags & ts.TypeFlags.TypeParameter) !== 0 &&
+      recordKey.getSymbol() === idx.getSymbol()
+    );
+    const isLibAlias = ctx.checker.declarationsOf(alias).some(
+      (d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
+    );
+    if (recordKey && value && sameKey && isLibAlias) return mapType(value, ctx);
+  }
   if (!(obj.flags & ts.TypeFlags.TypeParameter)) return null;
   const bound = resolveTypeParam(obj);
   if (!bound || bound.kind !== "record") return null;
@@ -3143,19 +3149,38 @@ function mapGenericIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | nu
 }
 
 function mapGenericUtilityAlias(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
-  const { resolveTypeParam, shapes, unions } = ctx;
+  const { resolveTypeParam, resolveTypeParamTs, shapes, unions } = ctx;
   if (!resolveTypeParam) return null;
   const alias = widened.getAliasSymbol();
-  if (!alias || (alias.name !== "Partial" && alias.name !== "Readonly")) return null;
+  if (!alias || !["Partial", "Readonly", "Record"].includes(alias.name)) return null;
   const aliasArgs = widened.getAliasTypeArguments();
-  const arg = aliasArgs[0];
-  if (aliasArgs.length !== 1 || !arg) return null;
-  if (!(arg.flags & ts.TypeFlags.TypeParameter)) return null;
   // Provenance: the STANDARD LIBRARY's alias, not a user's shadowing one.
   const isLibAlias = ctx.checker.declarationsOf(alias).some(
     (d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()),
   );
   if (!isLibAlias) return null;
+  if (alias.name === "Record") {
+    const [keyArg, valueArg] = aliasArgs;
+    if (!keyArg || !valueArg || aliasArgs.length !== 2 || !resolveTypeParamTs) return null;
+    const boundKeys = keyArg.flags & ts.TypeFlags.TypeParameter
+      ? resolveTypeParamTs(keyArg)
+      : keyArg;
+    if (!boundKeys) return null;
+    const keyTypes = boundKeys.isUnionType() ? ts.constituentTypes(boundKeys) : [boundKeys];
+    const names: string[] = [];
+    for (const keyType of keyTypes) {
+      if (!keyType.isStringLiteralType() || names.includes(keyType.value)) return null;
+      names.push(keyType.value);
+    }
+    const value = mapType(valueArg, ctx);
+    if (!value || value.kind === "void") return null;
+    const fields = names
+      .map((name) => ({ name, type: value }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return { kind: "record", shapeId: shapes.intern(fields, false, undefined, names) };
+  }
+  const arg = aliasArgs[0];
+  if (aliasArgs.length !== 1 || !arg || !(arg.flags & ts.TypeFlags.TypeParameter)) return null;
   const bound = resolveTypeParam(arg);
   if (!bound || bound.kind !== "record") return null;
   if (alias.name === "Readonly") return bound;
