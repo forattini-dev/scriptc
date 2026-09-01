@@ -105,6 +105,13 @@ export interface CompatInventoryEntry {
    * different compiler claims behind each; without an override the two
    * rows would publish under one name and opposite statuses. */
   publishAs?: string;
+  /** The version qualifier: the target ids whose reflected census contains
+   * this member. OMITTED means every target in the matrix — the common
+   * case, and deliberately the default, so a shared row cannot be silently
+   * narrowed by forgetting a target id. A row lists targets only where the
+   * majors genuinely disagree (Node 26's Request/Response.textStream), and
+   * then the value is a census result, never a prediction. */
+  targets?: readonly string[];
 }
 
 export interface CompatInventoryExclusion {
@@ -140,21 +147,64 @@ export interface CompatInventory {
   excludedInterfaces: readonly CompatInventoryExclusion[];
 }
 
-/** One pinned runtime the profile can be censused against. Node's version
- * is the axis; `components` pins whatever else is behaviorally observable
+/** One pinned runtime the profile is censused against. Node's version is
+ * the axis; `components` pins whatever else is behaviorally observable
  * (the bundled Undici build, an ICU level). */
 export interface CompatRuntimeTarget {
+  /** Stable target id, the qualifier an inventory row names ("node24"). */
+  id: string;
   node: string;
   components?: Readonly<Record<string, string>>;
 }
 
-/** The version axis. `primary` is the runtime this profile's inventory was
- * reflected under and the only one its conformance suite asserts;
- * `candidates` names runtimes a future census must cover, so adding
- * Node 26 is a filled-in slot rather than a new schema. */
+/** The version axis — a MATRIX, not a pin. `primary` is the runtime whose
+ * label stamps every shared manifest row and whose version the repository
+ * pins in .node-version; `candidates` are the further runtimes the profile
+ * also claims. The rule that keeps the matrix honest is unchanged: a
+ * runtime enters this list only once its own reflection has been run and
+ * every disagreement with the primary census is written down as a
+ * version-qualified row. */
 export interface CompatTargets {
   primary: CompatRuntimeTarget;
   candidates: readonly CompatRuntimeTarget[];
+}
+
+/** Every declared target, primary first. */
+export function compatTargetList(
+  targets: CompatTargets,
+): readonly CompatRuntimeTarget[] {
+  return [targets.primary, ...targets.candidates];
+}
+
+/** The declared target a running runtime IS, or null when the runtime is
+ * outside the matrix. This is the oracle-selection primitive: a
+ * conformance suite asks the running Node which target it is instead of
+ * demanding it be one particular pin, so a red only ever means "this host
+ * is in no declared target", never "this host is not the pinned host". */
+export function compatTargetFor(
+  targets: CompatTargets,
+  nodeVersion: string,
+): CompatRuntimeTarget | null {
+  return compatTargetList(targets).find((target) => target.node === nodeVersion) ?? null;
+}
+
+/** Whether a census row exists on one target. An unqualified row — the
+ * common case — exists on every target in the matrix. */
+export function compatRowOnTarget(
+  row: Pick<CompatInventoryEntry, "targets">,
+  targetId: string,
+): boolean {
+  return row.targets === undefined || row.targets.includes(targetId);
+}
+
+/** Attach a version qualifier to census rows built by the shared entry
+ * constructors, so a matrix delta reads as data at the row rather than as
+ * a second constructor family. */
+export function compatOnTargets(
+  targetIds: readonly string[],
+  ...entries: readonly CompatInventoryEntry[]
+): CompatInventoryEntry[] {
+  return entries.map((entry) => ({ ...entry, targets: targetIds }));
 }
 
 /** Human-readable target stamp for manifest notes: "Node X / Undici Y". */
@@ -163,6 +213,25 @@ export function compatTargetLabel(target: CompatRuntimeTarget): string {
     ([name, version]) => `${name[0]!.toUpperCase()}${name.slice(1)} ${version}`,
   );
   return [`Node ${target.node}`, ...components].join(" / ");
+}
+
+/** The stamp a census row publishes under. A row that exists across the
+ * whole matrix stamps the primary — the manifest's one canonical runtime
+ * label — while a version-qualified row stamps exactly the targets whose
+ * census contains it, so a reader can tell "Node 26 only" from "both"
+ * without cross-referencing the profile. */
+export function compatRowTargetLabel(
+  targets: CompatTargets,
+  row: Pick<CompatInventoryEntry, "targets">,
+): string {
+  if (row.targets === undefined) return compatTargetLabel(targets.primary);
+  const qualified = compatTargetList(targets).filter((target) =>
+    row.targets!.includes(target.id),
+  );
+  if (qualified.length === 0) {
+    throw new Error("compat inventory row names no declared target");
+  }
+  return qualified.map(compatTargetLabel).join(" + ");
 }
 
 /** The profile shape the manifest projection and the registry consume.

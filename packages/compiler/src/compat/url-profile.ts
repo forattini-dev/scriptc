@@ -34,6 +34,7 @@ import {
   type CompatProfileProjection,
   type CompatTargets,
 } from "./profile-schema.js";
+import { NODE_COMPAT_MATRIX } from "./node-matrix.js";
 
 export type UrlCompatFacet =
   | "argument-evaluation"
@@ -154,10 +155,13 @@ const paramsStatic = (member: string): CompatInventoryEntry =>
 export const NODE24_URL_COMPAT_PROFILE = {
   schemaVersion: 1,
   targets: {
-    // The census below was reflected under this runtime. A second entry
-    // arrives only with its own reflected census, never as an assumption.
-    primary: { node: "24.15.0" },
-    candidates: [],
+    // The census below was reflected under BOTH runtimes, and the two
+    // reflections were identical: URL, URLSearchParams, and the
+    // search-params iterator expose the same members, the same setters,
+    // and the same symbols on Node 24 and Node 26. So no row here carries
+    // a version qualifier — the shared census IS the Node 26 census, not
+    // an assumption that it carries over.
+    ...NODE_COMPAT_MATRIX,
   },
   operations: [
     urlOperation(

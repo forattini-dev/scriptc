@@ -62,6 +62,7 @@ import {
   type CompatProfileProjection,
   type CompatTargets,
 } from "./profile-schema.js";
+import { NODE_COMPAT_MATRIX } from "./node-matrix.js";
 
 export type EventsCompatFacet =
   | "argument-tuple"
@@ -169,10 +170,13 @@ const LITERAL_NAME =
 export const NODE24_EVENTS_COMPAT_PROFILE = {
   schemaVersion: 1,
   targets: {
-    // The census below was reflected under this runtime. A second entry
-    // arrives only with its own reflected census, never as an assumption.
-    primary: { node: "24.15.0" },
-    candidates: [],
+    // The census below was reflected under BOTH runtimes, and the two
+    // reflections were identical: EventEmitter's statics, prototype
+    // members, the three public internals, and the own properties of a
+    // constructed instance are the same on Node 24 and Node 26. So no row
+    // here carries a version qualifier — the shared census IS the Node 26
+    // census, not an assumption that it carries over.
+    ...NODE_COMPAT_MATRIX,
   },
   operations: [
     emitterOperation(
