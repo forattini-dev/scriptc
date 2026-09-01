@@ -332,20 +332,51 @@
         .join("&");
     }
 
+    /* WebIDL pair-iterable iteration is LIVE: forEach and the
+     * entries/keys/values iterators hold the params object plus a
+     * positional index and re-read the CURRENT list on every step — they
+     * do NOT snapshot. So a callback that appends is re-entered for the
+     * new tail, a delete() mid-iteration makes the iterator skip forward
+     * over the hole, and a sort() mid-iteration can re-yield a pair that
+     * moved past the cursor. Oracle-pinned by corpus 1120 lines 32-35
+     * against Node, and the exact twin of scr_web.c's copy. */
     forEach(callback, thisArg) {
-      for (const [key, value] of this._pairs) callback.call(thisArg, value, key, this);
+      for (let index = 0; index < this._pairs.length; index += 1) {
+        const [key, value] = this._pairs[index];
+        callback.call(thisArg, value, key, this);
+      }
     }
 
-    *entries() {
-      for (const [key, value] of this._pairs) yield [key, value];
+    _iterate(kind) {
+      const params = this;
+      let index = 0;
+      const iterator = {
+        next() {
+          if (index >= params._pairs.length) return { value: undefined, done: true };
+          const [key, value] = params._pairs[index];
+          index += 1;
+          return {
+            value: kind === "key" ? key : kind === "value" ? value : [key, value],
+            done: false,
+          };
+        },
+        [Symbol.iterator]() {
+          return iterator;
+        },
+      };
+      return iterator;
     }
 
-    *keys() {
-      for (const [key] of this._pairs) yield key;
+    entries() {
+      return this._iterate("key+value");
     }
 
-    *values() {
-      for (const [, value] of this._pairs) yield value;
+    keys() {
+      return this._iterate("key");
+    }
+
+    values() {
+      return this._iterate("value");
     }
 
     [Symbol.iterator]() {
