@@ -101,6 +101,11 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // (yaml's browser-vs-node shape) and the opted-in resolution must
     // land on the SAME artifact, never the browser build.
     ["dualist", "dualist-cli.ts"],
+    // statuses pins the EXPANDO-FUNCTION idiom (`module.exports = status`
+    // with the data tables hung off the function) — the shape Express and
+    // its middleware reach for. Its driven surface is the member reads;
+    // statuses-cli.ts documents the two undriven ones.
+    ["statuses", "statuses-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -177,6 +182,37 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     for (const f of fences) {
       expect(f.message).toMatch(/bare 'return'/);
     }
+  }, 120_000);
+
+  // statuses' driven surface is WHOLLY static: every member read routes
+  // to the expando slot the package's own body writes, and dead-stripping
+  // takes the undriven helpers with their fences. The zeroes are the pin —
+  // the expando lowering must not quietly regress into runtime fences.
+  test("statuses compiles static with no fence on the expando surface", () => {
+    const { coverage } = analyze(join(pilotRoot, "statuses-cli.ts"), { npmStatic: ["statuses"] });
+    expect(coverage.npmStatic).toEqual([{ package: "statuses", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    expect(coverage.stats.statementsFailed).toBe(0);
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+  }, 120_000);
+
+  // The two surfaces statuses-cli.ts documents but does not drive, pinned
+  // so the frontier moves deliberately. Both are OUTSIDE the expando
+  // story: `status(code)` claims `@returns {number}` in JSDoc while its
+  // body returns a string (the ms precedent — a JSDoc claim the body
+  // contradicts), and getStatusCode indexes the `var map = {}` that
+  // createMessageToStatusCodeMap builds, which inference gives no index
+  // signature. The package still COMPILES static — the fences are runtime.
+  test("statuses' JSDoc-contradicting call path stays a runtime fence", () => {
+    const { coverage } = analyze(join(pilotRoot, "statuses-call-cli.ts"), { npmStatic: ["statuses"] });
+    expect(coverage.npmStatic).toEqual([{ package: "statuses", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
+    const fences = coverage.runtimeFences ?? [];
+    expect(fences).toHaveLength(3);
+    expect(fences.filter((f) => /'string' values where 'number' is expected/.test(f.message))).toHaveLength(2);
+    expect(fences.filter((f) => /indexing records with non-string or non-number keys/.test(f.message))).toHaveLength(1);
   }, 120_000);
 
   // Tier 2: commander opts in and COMPILES as program modules — the
