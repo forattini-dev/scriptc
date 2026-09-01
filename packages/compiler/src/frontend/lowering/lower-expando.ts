@@ -4,6 +4,14 @@
  * (`const c: Combo = () => 1; c.p = {}` — an interface member written
  * through the const's name).
  *
+ * The same lowering carries the CJS shape of the idiom in an opted-in
+ * --npm-static package's shipped JS (`module.exports = status;
+ * status.message = codes` — the `statuses` package Express reaches for,
+ * and the "module.exports = fn with tables hung off it" family generally).
+ * Only that JS qualifies: those files ARE program modules under the flag,
+ * the line implicitMonoFile already draws. User JS and island values keep
+ * today's member story.
+ *
  * The lowering: each written member is a MODULE GLOBAL keyed by
  * (function symbol × member key), registered during collection by
  * scanning the file for member-assignment statements whose receiver is a
@@ -34,6 +42,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { IrExpr, IrGlobal, IrStmt, IrType } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
+import { npmStaticPackageOfPath } from "../npm-static.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 
 /** The registry entry for one expando member slot. */
@@ -66,6 +75,13 @@ function memberKeyOf(L: Lowerer, expr: ts.PropertyAccessExpression | ts.ElementA
   return L.foldedStringKeyOf(expr.argumentExpression);
 }
 
+/** An opted-in npm-static package's shipped JS — the only JS whose
+ * function members lower as expando globals (its files ARE program
+ * modules under the flag; implicitMonoFile draws the same line). */
+function npmStaticJsFile(sf: ts.SourceFile): boolean {
+  return isJsSourceFile(sf) && npmStaticPackageOfPath(sf.fileName) !== null;
+}
+
 /** The module-level function-ish symbol a receiver expression resolves
  * to, or null: a top-level FunctionDeclaration, or a top-level `const`
  * variable whose checker type is callable (arrow/function-expression
@@ -75,17 +91,26 @@ function expandoFnSymbolOf(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
   if (!ts.isIdentifier(recv)) return null;
   // Island and checked-dynamic receivers never qualify by construction:
   // the declaration-shape checks below (a function DECLARATION, or a
-  // const whose initializer is a function/arrow LITERAL in a TS file)
-  // exclude import bindings, call results, and JS-file values — their
-  // member stories (engine property writes, dyn keyed writes) stay put.
+  // const whose initializer is a function/arrow LITERAL) exclude import
+  // bindings, call results, and every JS value but an opted-in
+  // npm-static package's own function declarations — their member stories
+  // (engine property writes, dyn keyed writes) stay put.
   const sym = L.resolveValueSymbol(recv);
   if (!sym) return null;
   const decl = L.checker.valueDeclarationOf(sym);
   if (!decl || decl.getSourceFile().isDeclarationFile) return null;
-  if (isJsSourceFile(decl.getSourceFile())) return null;
+  const declJs = isJsSourceFile(decl.getSourceFile());
+  // JS files: only an opted-in npm-static package's shipped JS, whose
+  // bodies compile as PROGRAM modules (implicitMonoFile's gate). User JS
+  // and island files keep today's member story — engine property writes
+  // and dyn keyed reads live elsewhere.
+  if (declJs && !npmStaticJsFile(decl.getSourceFile())) return null;
   if (ts.isFunctionDeclaration(decl)) {
     return ts.isSourceFile(decl.parent) ? sym : null;
   }
+  // A `var`/`function`-declared JS module never reaches the const rules
+  // below (JS has no `const` expando idiom worth the extra surface).
+  if (declJs) return null;
   if (ts.isVariableDeclaration(decl)) {
     if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
     if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;

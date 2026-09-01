@@ -1,0 +1,13 @@
+expando-function-members-fenced.ts:22:1 - error SC1090: assigning the read-only function member 'name' (strict-mode JS — every module — throws TypeError here) is not supported yet
+
+  21 | 
+  22 | status.name = "renamed";
+     | ^~~~~~~~~~~
+  23 | console.log(status.name);
+
+expando-function-members-fenced.ts:23:13 - error SC1090: reading 'name' from a value of type '{ (code: number): string; message: string; name: string; }' is not supported yet
+
+  22 | status.name = "renamed";
+  23 | console.log(status.name);
+     |             ^~~~~~~~~~~
+  24 | 
