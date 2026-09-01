@@ -7,6 +7,9 @@ settings:
 overrides:
   '@napi-rs/wasm-runtime': 1.1.6
 
+patchedDependencies:
+  typescript@7.0.2: 19477ace740a1ff8e54486a3b3730ccc72fc6f6de0eb7fb73fbe1a2a17a7a1d7
+
 importers:
 
   .:
@@ -49,7 +52,7 @@ importers:
         version: link:../runtime-rust
       typescript:
         specifier: 7.0.2
-        version: 7.0.2
+        version: 7.0.2(patch_hash=19477ace740a1ff8e54486a3b3730ccc72fc6f6de0eb7fb73fbe1a2a17a7a1d7)
       typescript5:
         specifier: npm:typescript@5.9.3
         version: typescript@5.9.3
@@ -4683,7 +4686,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  typescript@7.0.2:
+  typescript@7.0.2(patch_hash=19477ace740a1ff8e54486a3b3730ccc72fc6f6de0eb7fb73fbe1a2a17a7a1d7):
     optionalDependencies:
       '@typescript/typescript-aix-ppc64': 7.0.2
       '@typescript/typescript-darwin-arm64': 7.0.2

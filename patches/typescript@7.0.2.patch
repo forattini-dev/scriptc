@@ -1,0 +1,16 @@
+diff --git a/dist/api/node/wtf8.js b/dist/api/node/wtf8.js
+index ae98df97dbbd44e17ea27f0fceda045a2115ce60..9b602c592dcbc536510eadf7bb1450157f8dbfb9 100644
+--- a/dist/api/node/wtf8.js
++++ b/dist/api/node/wtf8.js
+@@ -28,6 +28,11 @@ function toUint8Array(input) {
+     return new Uint8Array(input);
+ }
+ export class Wtf8Decoder extends TextDecoder {
++    constructor() {
++        // The protocol decodes independent string-table entries, not whole
++        // files. A leading U+FEFF is therefore data, never a byte-order mark.
++        super("utf-8", { ignoreBOM: true });
++    }
+     decode(input, options) {
+         if (input === undefined) {
+             return super.decode(input, options);

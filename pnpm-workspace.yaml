@@ -6,3 +6,5 @@ allowBuilds:
   esbuild: true
 overrides:
   "@napi-rs/wasm-runtime": "1.1.6"
+patchedDependencies:
+  typescript@7.0.2: patches/typescript@7.0.2.patch
