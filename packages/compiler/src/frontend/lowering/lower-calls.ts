@@ -6292,9 +6292,6 @@ const inliningPredicates = new Set<ts.Symbol>();
           "becomes a typed-catch binding, which only an inline `(e) => ...` can receive)",
       );
     }
-    if (handlerNode.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) {
-      L.unsupported("SC1090", handlerNode, "async rejection handlers");
-    }
     if (handlerNode.parameters.length > 1) {
       L.unsupported("SC1090", handlerNode, "rejection handlers with more than one parameter");
     }
