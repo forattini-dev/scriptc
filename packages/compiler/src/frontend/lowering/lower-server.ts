@@ -989,7 +989,7 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
       return receiverReturningCall(L, fn, callArgs, NETSERVER_T, loc);
     };
     const receiver = handleReceiver(L, access.expression, NETSERVER_T);
-    // The options-object form — listen({ port, host?, ipv6Only? }[, cb]),
+    // The options-object form — listen({ port, host?, ipv6Only?, reusePort? }[, cb]),
     // the portless listenOnProxyInterface shape: host binds that ONE
     // address (an IP literal — the runtime has no resolver here; absent
     // = Node's host-less dual-stack any), ipv6Only sets IPV6_V6ONLY
@@ -999,6 +999,7 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
       let port: IrExpr | null = null;
       let host: IrExpr | null = null;
       let v6only: IrExpr | null = null;
+      let reusePort: IrExpr | null = null;
       for (const prop of (args[0] as ts.ObjectLiteralExpression).properties) {
         let initializer: ts.Expression | null;
         if (ts.isPropertyAssignment(prop) &&
@@ -1042,6 +1043,18 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
             }
             v6only = v;
           }
+        } else if (key === "reusePort") {
+          const value = initializer !== null
+            ? L.lowerExpr(initializer)
+            : L.lowerShorthandValue(prop as ts.ShorthandPropertyAssignment);
+          if (value.type.kind !== "bool") {
+            L.noLowering(
+              `a listen 'reusePort' option of '${L.fmt(value.type)}' values`,
+              prop,
+              "reusePort must be a boolean in this typed options form",
+            );
+          }
+          reusePort = value;
         } else if (key === "signal" && ts.isPropertyAssignment(prop) &&
                    isJsSourceFile(call.getSourceFile())) {
           // A provably-non-AbortSignal signal (the invalid-input probes:
@@ -1067,13 +1080,13 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
           L.noLowering(
             `listen option 'signal'`,
             prop,
-            "abort-driven close has no lowering yet — port, host, and ipv6Only are the supported listen options",
+            "abort-driven close has no lowering yet — port, host, ipv6Only, and reusePort are supported",
           );
         } else {
           L.noLowering(
             `listen option '${key}'`,
             prop,
-            "port, host, and ipv6Only are the supported listen options",
+            "port, host, ipv6Only, and reusePort are the supported listen options",
           );
         }
       }
@@ -1081,13 +1094,17 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
         L.noLowering(
           "listen options without a port",
           args[0]!,
-          "the supported options object is { port, host?, ipv6Only? } — port 0 binds an ephemeral port",
+          "the supported options object is { port, host?, ipv6Only?, reusePort? } — port 0 binds an ephemeral port",
         );
       }
       host ??= { kind: "strLit", value: "", type: STRING, loc }; /* "" = the dual-stack any default */
       v6only ??= boolLit(false, loc);
+      const optionsFn: IrLibFn = reusePort === null ? "net.listenOpts" : "net.listenOptsReusePort";
+      const optionsCbFn: IrLibFn = reusePort === null ? "net.listenOptsCb" : "net.listenOptsReusePortCb";
       if (args.length === 1) {
-        return listenResult("net.listenOpts", [receiver, port, host, v6only]);
+        return listenResult(optionsFn, reusePort === null
+          ? [receiver, port, host, v6only]
+          : [receiver, port, host, v6only, reusePort]);
       }
       // The callback may be an OPTIONAL binding — `(() => void) |
       // undefined`, portless's listenOnProxyInterface pass-through: the
@@ -1120,7 +1137,9 @@ function lowerNetServerMethodCall(L: Lowerer, call: ts.CallExpression,
           `listen callbacks of type '${L.fmt(cbV.type)}' (use () — an optional \`(() => void) | undefined\` binding also flows)`,
         );
       }
-      return listenResult("net.listenOptsCb", [receiver, port, host, v6only, cbV]);
+      return listenResult(optionsCbFn, reusePort === null
+        ? [receiver, port, host, v6only, cbV]
+        : [receiver, port, host, v6only, reusePort, cbV]);
     }
     const port = L.lowerExprExpecting(args[0]!, F64);
     // The optional middle host — listen(port, '127.0.0.1'[, cb]): a

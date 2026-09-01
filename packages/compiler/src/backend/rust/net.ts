@@ -228,6 +228,12 @@ export function emitRustNetCall(
       expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
     return `runtime::net_server_listen_options(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])})`;
   }
+  if (expr.fn === "net.listenOptsReusePort" && expr.args.length === 5 &&
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool" &&
+      expr.args[4]?.type.kind === "bool") {
+    return `runtime::net_server_listen_options_reuse_port(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])}, ${context.emitExpr(expr.args[4])})`;
+  }
   if (expr.fn === "net.listenOptsCb" && expr.args.length === 5 &&
       expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64" &&
       expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool") {
@@ -242,6 +248,23 @@ export function emitRustNetCall(
     const exclusive = context.emitExpr(expr.args[3]);
     return emitVoidCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::net_server_listen_options_callback(&(${server}), ${port}, &(${host}), ${exclusive}, ${invoke}, ${trace});`);
+  }
+  if (expr.fn === "net.listenOptsReusePortCb" && expr.args.length === 6 &&
+      expr.args[0]?.type.kind === "netServer" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "string" && expr.args[3]?.type.kind === "bool" &&
+      expr.args[4]?.type.kind === "bool") {
+    const callbackExpr = expr.args[5];
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func") {
+      context.unsupported("net.listenOptsReusePortCb callback", expr.loc);
+    }
+    const server = context.emitExpr(expr.args[0]);
+    const port = context.emitExpr(expr.args[1]);
+    const host = context.emitExpr(expr.args[2]);
+    const ipv6Only = context.emitExpr(expr.args[3]);
+    const reusePort = context.emitExpr(expr.args[4]);
+    return emitVoidCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::net_server_listen_options_reuse_port_callback(&(${server}), ${port}, &(${host}), ${ipv6Only}, ${reusePort}, ${invoke}, ${trace});`);
   }
   if (expr.fn === "net.serverPort" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_port(&(${context.emitExpr(expr.args[0])}))`;

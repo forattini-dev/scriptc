@@ -109,6 +109,14 @@
 #include <sys/socket.h>
 #endif
 
+#ifndef ENOTSUP
+#ifdef EOPNOTSUPP
+#define ENOTSUP EOPNOTSUPP
+#else
+#define ENOTSUP 4095
+#endif
+#endif
+
 static void scr_net_oom(void) {
   fputs("scriptc: out of memory\n", stderr);
   abort();
@@ -707,6 +715,17 @@ static void scr_net_listen_reuseaddr(int fd) {
 #else
   int one = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#endif
+}
+
+static int scr_net_listen_reuseport(int fd) {
+#if defined(__linux__) && defined(SO_REUSEPORT)
+  int one = 1;
+  return setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+#else
+  (void)fd;
+  errno = ENOTSUP;
+  return -1;
 #endif
 }
 
@@ -1355,10 +1374,17 @@ void scr_net_listen(ScrNetServer *s, double port, ScrClosure *cb /*moves, nullab
  * listener, exactly the portless pair). Failures are the async 'error'
  * with Node's listen message naming the requested host; a non-IP host is
  * the async getaddrinfo ENOTFOUND (no resolver in this slice). */
-void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
-                          bool ipv6_only, ScrClosure *cb /*moves, nullable*/) {
+static void scr_net_listen_opts_impl(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
+                                     bool ipv6_only, bool reuse_port,
+                                     ScrClosure *cb /*moves, nullable*/) {
   if (host == NULL || host->len == 0) {
-    scr_net_listen(s, port, cb);
+    if (!reuse_port) {
+      scr_net_listen(s, port, cb);
+      return;
+    }
+    ScrStr *any = scr_str_new("0.0.0.0", 7);
+    scr_net_listen_opts_impl(s, port, any, ipv6_only, true, cb);
+    scr_str_release(any);
     return;
   }
   if (cb) scr_net_ls_add(&s->listening_cbs, cb, NULL, true);
@@ -1408,7 +1434,8 @@ void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/
   }
   scr_net_listen_reuseaddr(fd);
   scr_net_nonblock(fd);
-  int rc = bind(fd, sa, salen);
+  int rc = reuse_port ? scr_net_listen_reuseport(fd) : 0;
+  if (rc == 0) rc = bind(fd, sa, salen);
   if (rc == 0) rc = listen(fd, 511); /* Node's default backlog */
   if (rc != 0) {
     int err = errno;
@@ -1438,6 +1465,17 @@ void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/
   s->bound_host = scr_str_new(h, strlen(h));
   scr_net_watch_read(fd, s, true);
   scr_net_server_register(s);
+}
+
+void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
+                          bool ipv6_only, ScrClosure *cb /*moves, nullable*/) {
+  scr_net_listen_opts_impl(s, port, host, ipv6_only, false, cb);
+}
+
+void scr_net_listen_opts_reuse_port(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
+                                    bool ipv6_only, bool reuse_port,
+                                    ScrClosure *cb /*moves, nullable*/) {
+  scr_net_listen_opts_impl(s, port, host, ipv6_only, reuse_port, cb);
 }
 
 double scr_net_server_port(ScrNetServer *s) { return (double)s->port; }

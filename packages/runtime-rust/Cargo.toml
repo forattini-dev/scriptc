@@ -28,7 +28,7 @@ url = "=2.5.0"
 webpki-roots = "=1.0.9"
 
 [target.'cfg(all(not(windows), not(target_os = "wasi")))'.dependencies]
-rustix = { version = "=1.1.4", default-features = false, features = ["event", "fs", "process", "std", "termios"] }
+rustix = { version = "=1.1.4", default-features = false, features = ["event", "fs", "net", "process", "std", "termios"] }
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
 terminal_size = "=0.4.4"

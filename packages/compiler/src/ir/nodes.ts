@@ -2440,6 +2440,9 @@ export type IrLibFn =
    * the requested host. Never throws. */
   | "net.listenOpts"
   | "net.listenOptsCb"
+  /** Additive listen-options ABI carrying reusePort after ipv6Only. */
+  | "net.listenOptsReusePort"
+  | "net.listenOptsReusePortCb"
   | "net.serverPort"
   /** server.address() as the full AddressInfo record (the dgram.address
    * materialization pattern: the emitter builds the record from the three

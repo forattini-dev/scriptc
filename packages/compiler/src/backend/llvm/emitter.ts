@@ -937,6 +937,7 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "sp.finished", "sp.pipeline",
   "sc.text", "sc.json", "sc.buffer",
   "net.listen", "net.listenCb", "net.listenOpts", "net.listenOptsCb",
+  "net.listenOptsReusePort", "net.listenOptsReusePortCb",
   "net.connect", "net.connectCb", "net.connectLookup", "net.connectAttempt",
   "fs.existsChk",
   "http.createServer", "http.createServerEmpty",
@@ -13721,28 +13722,34 @@ class LlEmitter {
       B.line(`call void @scr_net_listen(ptr ${args[0]!.name}, double ${args[1]!.name}, ptr ${cb})`);
       return { name: "", type: e.type };
     }
-    if (e.fn === "net.listenOpts" || e.fn === "net.listenOptsCb") {
+    if (e.fn === "net.listenOpts" || e.fn === "net.listenOptsCb" ||
+        e.fn === "net.listenOptsReusePort" || e.fn === "net.listenOptsReusePortCb") {
       // The callback slot may be the `(() => void) | undefined` optional-
       // binding union: unwrap to a nullable closure.
       const args = e.args.map((a) => this.emitExpr(a));
       let cb = "null";
-      if (e.fn === "net.listenOptsCb") {
-        const cbT = e.args[4]!.type;
+      const reusePort = e.fn === "net.listenOptsReusePort" || e.fn === "net.listenOptsReusePortCb";
+      const withCallback = e.fn === "net.listenOptsCb" || e.fn === "net.listenOptsReusePortCb";
+      const cbIndex = reusePort ? 5 : 4;
+      if (withCallback) {
+        const cbT = e.args[cbIndex]!.type;
         if (cbT.kind === "func") {
-          this.moveTemp(args[4]!);
-          cb = args[4]!.name;
+          this.moveTemp(args[cbIndex]!);
+          cb = args[cbIndex]!.name;
         } else {
-          if (cbT.kind !== "union") throw new InternalCompilerError("llvm emitter bug: net.listenOptsCb callback shape");
+          if (cbT.kind !== "union") throw new InternalCompilerError(`llvm emitter bug: ${e.fn} callback shape`);
           const def = this.unionsById.get(cbT.unionId);
           const funcTag = def ? def.arms.findIndex((a) => a.kind === "func") : -1;
-          if (funcTag < 0) throw new InternalCompilerError("llvm emitter bug: net.listenOptsCb union lacks its func arm");
-          cb = this.unwrapNullableClosure(args[4]!.name, funcTag);
+          if (funcTag < 0) throw new InternalCompilerError(`llvm emitter bug: ${e.fn} union lacks its func arm`);
+          cb = this.unwrapNullableClosure(args[cbIndex]!.name, funcTag);
         }
       }
-      const decls = e.args.slice(0, 4).map((a) => (this.llType(a.type) === "i1" ? "i1 zeroext" : this.llType(a.type)));
-      this.declare(`declare void @scr_net_listen_opts(${decls.join(", ")}, ptr)`);
+      const valueCount = reusePort ? 5 : 4;
+      const decls = e.args.slice(0, valueCount).map((a) => (this.llType(a.type) === "i1" ? "i1 zeroext" : this.llType(a.type)));
+      const runtimeFn = reusePort ? "scr_net_listen_opts_reuse_port" : "scr_net_listen_opts";
+      this.declare(`declare void @${runtimeFn}(${decls.join(", ")}, ptr)`);
       B.line(
-        `call void @scr_net_listen_opts(${args.slice(0, 4).map((a) => `${this.llType(a.type)} ${a.name}`).join(", ")}, ptr ${cb})`,
+        `call void @${runtimeFn}(${args.slice(0, valueCount).map((a) => `${this.llType(a.type)} ${a.name}`).join(", ")}, ptr ${cb})`,
       );
       return { name: "", type: e.type };
     }

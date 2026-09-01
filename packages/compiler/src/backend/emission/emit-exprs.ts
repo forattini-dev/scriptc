@@ -4105,6 +4105,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.usesTimers = true;
             E.line(`scr_net_listen_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL);${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
+          case "net.listenOptsReusePort":
+            E.usesTimers = true;
+            E.line(`scr_net_listen_opts_reuse_port(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, NULL);${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
           case "net.listenOptsCb": {
             E.usesTimers = true;
             // The callback slot may be the `(() => void) | undefined`
@@ -4130,6 +4134,30 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               cbExpr = t.name;
             }
             E.line(`scr_net_listen_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${cbExpr});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "net.listenOptsReusePortCb": {
+            E.usesTimers = true;
+            const cbT = e.args[5]!.type;
+            let cbExpr: string;
+            if (cbT.kind === "func") {
+              const cb = args[5]!;
+              E.moveTemp(cb);
+              cbExpr = cb.name;
+            } else {
+              if (cbT.kind !== "union") throw new InternalCompilerError("emitter bug: net.listenOptsReusePortCb callback shape");
+              const def = E.unionsById.get(cbT.unionId);
+              const funcTag = def ? def.arms.findIndex((a) => a.kind === "func") : -1;
+              if (funcTag < 0) throw new InternalCompilerError("emitter bug: net.listenOptsReusePortCb union lacks its func arm");
+              const u = args[5]!;
+              const t = E.newTemp(
+                def!.arms[funcTag]!,
+                `${u.name}->tag == ${funcTag} ? scr_closure_retain((ScrClosure *)scr_union_peek(${u.name})) : NULL`,
+              );
+              E.moveTemp(t);
+              cbExpr = t.name;
+            }
+            E.line(`scr_net_listen_opts_reuse_port(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${cbExpr});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
           case "net.serverPort":

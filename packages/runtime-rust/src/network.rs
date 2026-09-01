@@ -334,10 +334,21 @@ fn net_server_register(server: &JsNetServer) {
     });
 }
 
-fn net_server_listen_host(server: &JsNetServer, port: f64, host: &str) {
+fn net_server_listen_host(
+    server: &JsNetServer,
+    port: f64,
+    host: &str,
+    ipv6_only: bool,
+    reuse_port: bool,
+) {
     let port = net_port(port);
-    let listener = std::net::TcpListener::bind((host, port))
-        .unwrap_or_else(|error| throw_error(format!("listen {}", fs_error_code(&error))));
+    let listener = if host.is_empty() {
+        net_listener("::", port, ipv6_only, reuse_port)
+            .or_else(|_| net_listener("0.0.0.0", port, ipv6_only, reuse_port))
+    } else {
+        net_listener(host, port, ipv6_only, reuse_port)
+    }
+    .unwrap_or_else(|error| throw_error(format!("listen {}", fs_error_code(&error))));
     listener
         .set_nonblocking(true)
         .unwrap_or_else(|error| throw_error(format!("listen {}", fs_error_code(&error))));
@@ -355,16 +366,26 @@ fn net_server_listen_host(server: &JsNetServer, port: f64, host: &str) {
 }
 
 pub fn net_server_listen(server: &JsNetServer, port: f64) {
-    net_server_listen_host(server, port, "127.0.0.1");
+    net_server_listen_host(server, port, "127.0.0.1", false, false);
 }
 
 pub fn net_server_listen_options(
     server: &JsNetServer,
     port: f64,
     host: &JsString,
-    _exclusive: bool,
+    ipv6_only: bool,
 ) {
-    net_server_listen_host(server, port, host);
+    net_server_listen_host(server, port, host, ipv6_only, false);
+}
+
+pub fn net_server_listen_options_reuse_port(
+    server: &JsNetServer,
+    port: f64,
+    host: &JsString,
+    ipv6_only: bool,
+    reuse_port: bool,
+) {
+    net_server_listen_host(server, port, host, ipv6_only, reuse_port);
 }
 
 pub fn net_server_listen_callback(
@@ -387,6 +408,19 @@ pub fn net_server_listen_options_callback(
 ) {
     net_server_on_listening(server, callback, trace, true);
     net_server_listen_options(server, port, host, exclusive);
+}
+
+pub fn net_server_listen_options_reuse_port_callback(
+    server: &JsNetServer,
+    port: f64,
+    host: &JsString,
+    ipv6_only: bool,
+    reuse_port: bool,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+) {
+    net_server_on_listening(server, callback, trace, true);
+    net_server_listen_options_reuse_port(server, port, host, ipv6_only, reuse_port);
 }
 
 pub fn net_server_port(server: &JsNetServer) -> f64 {
