@@ -25,6 +25,7 @@ import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
+import { rustRuntimeFeatures } from "./runtime-features.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
@@ -121,7 +122,7 @@ class RustEmitter {
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     errorClassRoots: () => this.errorClassRoots(),
     errorValueName: () => this.errorValueName(),
-    hasEmbeddedModules: () => hasRustEmbeddedModules(this.mod),
+    hasEmbeddedModules: () => rustRuntimeFeatures(this.mod).includes("island-eval"),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),
@@ -313,7 +314,7 @@ class RustEmitter {
     errorValueName: () => this.errorValueName(),
     errorValueVariant: (meta) => this.errorValueVariant(meta),
     hierarchyFields: (root) => this.hierarchyFields(root),
-    hasEmbeddedModules: () => hasRustEmbeddedModules(this.mod),
+    hasEmbeddedModules: () => rustRuntimeFeatures(this.mod).includes("island-eval"),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),
@@ -862,7 +863,6 @@ class RustEmitter {
   private containsAsyncSuspension(value: unknown): boolean {
     return this.asyncControlEmitter.containsAsyncSuspension(value);
   }
-
   private awaitExpression(expr: IrExpr | null): IrAwaitExpr | null {
     return this.asyncControlEmitter.awaitExpression(expr);
   }

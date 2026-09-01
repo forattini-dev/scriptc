@@ -2761,25 +2761,39 @@ export function lowerStaticReadableStreamReaderCall(
    * `Promise<jsval>` (jsBridgePromise, the fetch precedent) — so `await
    * import(x)` parks the fiber and resumes with the namespace HANDLE, and
    * a load/evaluation failure crosses as a catchable rejection, exactly
-   * where Node puts it. Specifiers must be string literals: the module
-   * graph is a BUILD-time artifact — a runtime-computed name has nothing
-   * to embed, and the fence says so. Static builds report the per-site
-   * SC2012. Null for anything that isn't `import(...)`. */
+   * where Node puts it. Literal specifiers use the build-time embedded
+   * graph. A computed string uses the Rust runtime's external file-URL
+   * loader; the C/LLVM island keeps its existing non-embedded-key rejection.
+   * Static builds report the per-site SC2012. Null for anything that isn't
+   * `import(...)`. */
   export function lowerDynamicImportCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
     L.requireDynamicApi("'import()'", call);
     const loc = locOf(call);
     const arg = call.arguments[0];
-    if (arg === undefined || !ts.isStringLiteralLike(arg)) {
-      L.unsupported(
-        "SC1090",
-        call,
-        "dynamic import() of computed specifiers (the module graph embeds at " +
-          "build time — the specifier must be a string literal)",
-      );
-    }
     if (call.arguments.length !== 1) {
       L.unsupported("SC1090", call, "dynamic import() with import attributes");
+    }
+    if (arg === undefined) {
+      L.unsupported("SC1090", call, "dynamic import() without a specifier");
+    }
+    if (!ts.isStringLiteralLike(arg)) {
+      const specifier = L.lowerExpr(arg);
+      if (specifier.type.kind !== "string") {
+        L.unsupported(
+          "SC1090",
+          arg,
+          "dynamic import() of a computed value that is not statically a string",
+        );
+      }
+      const raw: IrExpr = {
+        kind: "libCall",
+        fn: "island.importDynPath",
+        args: [specifier],
+        type: JSVAL,
+        loc,
+      };
+      return { kind: "jsBridgePromise", value: raw, type: { kind: "promise", inner: JSVAL }, loc };
     }
     const res = L.dynImports.get(`${call.getSourceFile().fileName}\u0000${arg.text}`);
     if (!res) {

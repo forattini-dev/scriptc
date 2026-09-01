@@ -414,8 +414,9 @@ pub fn island_await(value: &IslandValue) -> IslandValue {
 
 struct IslandState {
     context: Context,
+    loader: Rc<IslandModuleLoader>,
     modules: HashMap<&'static str, Module>,
-    evaluated: HashSet<&'static str>,
+    evaluated: HashSet<String>,
     /// `node:` wrappers synthesized on demand for `import()`. Keyed by
     /// specifier because builtin keys are not in the embedded table.
     builtins: HashMap<String, Module>,
@@ -469,7 +470,7 @@ fn island_module_namespace(
         ));
     };
     let module = module.clone();
-    if state.evaluated.insert(module_key) {
+    if state.evaluated.insert(module_key.to_owned()) {
         island_module_evaluate(state, &module, key)?;
     }
     Ok(module.namespace(&mut state.context).into())
@@ -579,6 +580,52 @@ pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
 pub fn island_import_dyn(key: &JsString) -> IslandValue {
     with_island_state(|state| {
         let promise = match island_module_namespace(state, key.as_ref()) {
+            Ok(namespace) => BoaJsPromise::resolve(namespace, &mut state.context),
+            Err(failure) => {
+                let reason = island_import_reason(failure, &mut state.context);
+                BoaJsPromise::reject(reason, &mut state.context)
+            }
+        };
+        let promise = promise.unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(promise.into())
+    })
+}
+
+/// Dynamic `import(specifier)` for a runtime-computed external file URL.
+/// The call still answers an engine promise: URL, I/O, parse and evaluation
+/// failures reject it rather than throwing synchronously.
+pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
+    with_island_state(|state| {
+        let loaded: Result<JsValue, IslandImportFailure> = (|| {
+            let url = url::Url::parse(specifier.as_ref()).map_err(|_| {
+                IslandImportFailure::Coded(
+                    format!("Only file: URLs can be imported at runtime: '{specifier}'"),
+                    "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+                )
+            })?;
+            if url.scheme() != "file" {
+                return Err(IslandImportFailure::Coded(
+                    format!("Only file: URLs can be imported at runtime: '{specifier}'"),
+                    "ERR_UNSUPPORTED_ESM_URL_SCHEME",
+                ));
+            }
+            let path = url.to_file_path().map_err(|()| {
+                IslandImportFailure::Coded(
+                    format!("Invalid file URL '{specifier}'"),
+                    "ERR_INVALID_FILE_URL_PATH",
+                )
+            })?;
+            let key = path.to_string_lossy().into_owned();
+            let module = state
+                .loader
+                .load_external(&path, &mut state.context)
+                .map_err(IslandImportFailure::Engine)?;
+            if state.evaluated.insert(key.clone()) {
+                island_module_evaluate(state, &module, &key)?;
+            }
+            Ok(module.namespace(&mut state.context).into())
+        })();
+        let promise = match loaded {
             Ok(namespace) => BoaJsPromise::resolve(namespace, &mut state.context),
             Err(failure) => {
                 let reason = island_import_reason(failure, &mut state.context);
@@ -755,6 +802,7 @@ fn island_state() -> IslandState {
     }
     IslandState {
         context,
+        loader,
         modules,
         evaluated: HashSet::new(),
         builtins: HashMap::new(),

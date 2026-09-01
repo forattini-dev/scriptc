@@ -13,7 +13,13 @@ export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
       return;
     }
     const node = value as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && node.fn === "island.eval") {
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "island.eval" ||
+        node.fn === "island.import" ||
+        node.fn === "island.importDyn" ||
+        node.fn === "island.importDynPath")
+    ) {
       islandEval = true;
       return;
     }

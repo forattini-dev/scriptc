@@ -3248,6 +3248,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // itself never throws; the frontend's jsBridgePromise carries
             // the settlement across. +1 jsval holding the engine promise.
             return finish(`scr_jsval_import_dyn(${arg(0)})`);
+          case "island.importDynPath":
+            // Rust owns runtime-computed file URLs today. Keep the shared
+            // IR exhaustive; the C island's loader rejects non-embedded
+            // keys until it gains the corresponding filesystem path.
+            return finish(`scr_jsval_import_dyn(${arg(0)})`);
           case "island.castFail":
             // The deferred boundary failure: the island value was
             // evaluated (arg 0 — its side effects are real), the throw is

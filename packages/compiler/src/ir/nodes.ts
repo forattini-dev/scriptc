@@ -1912,6 +1912,10 @@ export type IrLibFn =
    * awaiting parks the fiber and a rejection crosses catchably. --dynamic
    * only; result is an owned jsval holding the engine promise. */
   | "island.importDyn"
+  /** Dynamic `import(spec)` for a runtime-computed file URL. The Rust
+   * runtime loads it externally; unlike island.importDyn, the argument is
+   * the written runtime specifier, not a build-resolved embedded key. */
+  | "island.importDynPath"
   /** A checked cast the boundary can never satisfy, DEFERRED to runtime:
    * `islandValue as Promise<T>` — the value is an ENGINE promise and T
    * has no validated exit (Node-typed async APIs put class-shaped

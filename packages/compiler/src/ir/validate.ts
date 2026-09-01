@@ -105,6 +105,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "island.eval": { argTypes: [STRING], result: STRING },
   "island.import": { argTypes: [STRING, STRING, STRING], result: JSVAL },
   "island.importDyn": { argTypes: [STRING], result: JSVAL },
+  "island.importDynPath": { argTypes: [STRING], result: JSVAL },
   // Result is the cast's mapped PROMISE target (program-dependent) —
   // checked in the libCall case, like error.new.
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },

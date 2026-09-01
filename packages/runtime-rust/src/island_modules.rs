@@ -137,6 +137,25 @@ impl IslandModuleLoader {
         self.modules.borrow_mut().insert(key.to_owned(), module);
     }
 
+    pub(crate) fn load_external(
+        &self,
+        path: &Path,
+        context: &mut Context,
+    ) -> JsResult<Module> {
+        let key = path.to_string_lossy();
+        if let Some(module) = self.modules.borrow().get(key.as_ref()) {
+            return Ok(module.clone());
+        }
+        let source = Source::from_filepath(path).map_err(|error| {
+            boa_engine::JsNativeError::typ()
+                .with_message(format!("could not open file `{}`", path.display()))
+                .with_cause(BoaJsError::from_rust(error))
+        })?;
+        let module = Module::parse(source, None, context)?;
+        self.insert(key.as_ref(), module.clone());
+        Ok(module)
+    }
+
     /// Map `(referrer, specifier)` onto an embedded key.
     ///
     /// `node:` specifiers are their own keys. A referrer with no path is

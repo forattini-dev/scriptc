@@ -291,6 +291,7 @@ export function stmtUsesIsland(stmts: IrStmt | IrStmt[]): boolean {
     if (
       kind === "jsOp" || kind === "jsExit" || kind === "jsBridgePromise" ||
       fn === "island.eval" || fn === "island.import" || fn === "island.importDyn" ||
+      fn === "island.importDynPath" ||
       fn === "island.castFail"
     ) {
       found = true;
