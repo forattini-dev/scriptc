@@ -319,9 +319,12 @@ int main(int argc, char **argv) {
       size_t nee_len = hex_decode(args, needle_bytes);
       if (nee_len == (size_t)-1) goto badline_release;
       ScrStr *needle = scr_str_new(needle_bytes, nee_len);
+      /* The boundary predicates take a position (added with the dynamic
+       * startsWith/endsWith work); these cases pin the no-position
+       * spelling, so pass each one's JS default. */
       bool got = op[0] == 'i'   ? scr_str_includes(input, needle)
-                 : op[0] == 's' ? scr_str_starts_with(input, needle)
-                                : scr_str_ends_with(input, needle);
+                 : op[0] == 's' ? scr_str_starts_with(input, needle, 0)
+                                : scr_str_ends_with(input, needle, INFINITY);
       check_bool(op, args, input, got, expected_bytes, exp_len);
       scr_str_release(needle);
     } else {

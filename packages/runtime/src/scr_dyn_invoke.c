@@ -173,6 +173,16 @@ static double dyn_index_arg(ScrDyn *const *args, size_t argc, size_t i, double d
   return 0;
 }
 
+/* ToIntegerOrInfinity over lastIndexOf's OPTIONAL position argument.
+ * It cannot share dyn_index_arg's rule: lastIndexOf reads a MISSING
+ * position AND a NaN one as +Infinity ("search the whole string"),
+ * where every other index argument reads NaN as 0. */
+static double dyn_last_index_arg(ScrDyn *const *args, size_t argc, size_t i, const char *what) {
+  if (i >= argc || args[i]->kind == SCR_DYN_UNDEF) return INFINITY;
+  if (args[i]->kind == SCR_DYN_NUM && args[i]->v.num != args[i]->v.num) return INFINITY;
+  return dyn_index_arg(args, argc, i, INFINITY, what);
+}
+
 /* JS relative-index normalization (slice's rule). */
 static size_t dyn_rel_index(double rel, size_t len) {
   if (rel < 0) {
@@ -327,7 +337,7 @@ static bool dyn_arr_sort(ScrDyn *recv, ScrDyn *cmp) {
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_arr_proto_unimpl(const char *m) {
   static const char *names[] = {
-    "keys", "values", "entries", "toString", "toLocaleString", NULL };
+    "keys", "values", "entries", NULL };
   for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
   return false;
 }
@@ -509,16 +519,37 @@ static ScrDyn *scr_dyn_invoke_impl(
       scr_str_release(piece);
       return r;
     }
-    if (dyn_name_is(method, "at") || dyn_name_is(method, "concat") ||
-        dyn_name_is(method, "indexOf") || dyn_name_is(method, "lastIndexOf") ||
+    /* String.prototype.toLocaleString is the identity in every locale —
+     * no locale-sensitive transform exists for strings. */
+    if (dyn_name_is(method, "toLocaleString")) return scr_dyn_retain(recv);
+    if (dyn_name_is(method, "indexOf") || dyn_name_is(method, "lastIndexOf") ||
         dyn_name_is(method, "includes")) {
-      if ((dyn_name_is(method, "indexOf") || dyn_name_is(method, "lastIndexOf") ||
-           dyn_name_is(method, "includes")) &&
-          argc >= 1 && args[0]->kind == SCR_DYN_STR) {
-        if (dyn_name_is(method, "includes")) return scr_dyn_new_bool(scr_str_includes(s, args[0]->v.str));
-        if (dyn_name_is(method, "indexOf")) return scr_dyn_new_num(scr_str_index_of(s, args[0]->v.str, 0));
-        return scr_dyn_new_num(scr_str_last_index_of(s, args[0]->v.str, INFINITY));
+      /* JS ToString on the search value (a number searches its decimal
+       * spelling; a MISSING argument searches the literal "undefined")
+       * and ToIntegerOrInfinity on the position. Positions were pinned
+       * to 0/+Infinity here while the Rust dispatcher already honored
+       * them — corpus 2817-2824 are that divergence. */
+      ScrStr *needle = scr_dyn_string_coerce(argc >= 1 ? args[0] : scr_dyn_undefined());
+      bool last = dyn_name_is(method, "lastIndexOf");
+      double pos = last ? dyn_last_index_arg(args, argc, 1, what)
+                        : dyn_index_arg(args, argc, 1, 0, what);
+      if (scr_exc_pending()) {
+        scr_str_release(needle);
+        return NULL;
       }
+      ScrDyn *r;
+      if (last) {
+        r = scr_dyn_new_num(scr_str_last_index_of(s, needle, pos));
+      } else if (dyn_name_is(method, "includes")) {
+        /* scr_str_includes takes no position; indexOf IS includes with one. */
+        r = scr_dyn_new_bool(scr_str_index_of(s, needle, pos) >= 0);
+      } else {
+        r = scr_dyn_new_num(scr_str_index_of(s, needle, pos));
+      }
+      scr_str_release(needle);
+      return r;
+    }
+    if (dyn_name_is(method, "at") || dyn_name_is(method, "concat")) {
       dyn_throw_unsupported("String", method);
       return NULL;
     }
@@ -639,6 +670,45 @@ static ScrDyn *scr_dyn_invoke_impl(
         const ScrDyn *e = recv->v.arr.items[i];
         if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
         scr_dyn_display_buf(&b, e);
+      }
+      ScrStr *joined = scr_jb_finish(&b);
+      ScrDyn *r = scr_dyn_new_str(joined); /* retains */
+      scr_str_release(joined);
+      return r;
+    }
+    /* Array.prototype.toString IS join(",") — same "," separator, same
+     * empty rendering for null/undefined holes. */
+    if (dyn_name_is(method, "toString")) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      for (size_t i = 0; i < len; i++) {
+        if (i > 0) scr_jb_putc(&b, ',');
+        const ScrDyn *e = recv->v.arr.items[i];
+        if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
+        scr_dyn_display_buf(&b, e);
+      }
+      ScrStr *joined = scr_jb_finish(&b);
+      ScrDyn *r = scr_dyn_new_str(joined); /* retains */
+      scr_str_release(joined);
+      return r;
+    }
+    /* Array.prototype.toLocaleString: join(",") over each element's OWN
+     * toLocaleString (so numbers localize and nested arrays recurse),
+     * with the locale arguments forwarded down unchanged. */
+    if (dyn_name_is(method, "toLocaleString")) {
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      for (size_t i = 0; i < len; i++) {
+        if (i > 0) scr_jb_putc(&b, ',');
+        ScrDyn *e = recv->v.arr.items[i];
+        if (e->kind == SCR_DYN_UNDEF || e->kind == SCR_DYN_NULL) continue;
+        ScrDyn *piece = scr_dyn_invoke_impl(e, "toLocaleString", args, argc, what, NULL);
+        if (!piece) {
+          scr_str_release(scr_jb_finish(&b));
+          return NULL;
+        }
+        scr_dyn_display_buf(&b, piece);
+        scr_dyn_release(piece);
       }
       ScrStr *joined = scr_jb_finish(&b);
       ScrDyn *r = scr_dyn_new_str(joined); /* retains */
@@ -1007,6 +1077,38 @@ static ScrDyn *scr_dyn_invoke_impl(
       dyn_throw_unsupported("Uint8Array", method);
       return NULL;
     }
+  }
+
+  /* Number.prototype.toLocaleString at the ONE locale the static runtime
+   * embeds: "en-US" with default options (scr_intl_num_format_en_us —
+   * the same formatter the typed lowering emits). Every other locale, and
+   * any options bag, fences loudly rather than answering an unlocalized
+   * spelling: locale data lives outside the runtime by decision. */
+  if (recv->kind == SCR_DYN_NUM && dyn_name_is(method, "toLocaleString")) {
+    bool en_us = argc >= 1 && args[0]->kind == SCR_DYN_STR &&
+                 args[0]->v.str->len == 5 && memcmp(args[0]->v.str->data, "en-US", 5) == 0;
+    bool plain_options = argc < 2 || args[1]->kind == SCR_DYN_UNDEF;
+    if (en_us && plain_options) {
+      ScrStr *formatted = scr_intl_num_format_en_us(recv->v.num);
+      ScrDyn *r = scr_dyn_new_str(formatted); /* retains */
+      scr_str_release(formatted);
+      return r;
+    }
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "'Number.prototype.toLocaleString' on a dynamic value supports the explicit "
+                    "\"en-US\" locale with default options");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return NULL;
+  }
+  /* Boolean.prototype.toString/toLocaleString: locale-independent, and
+   * the array toLocaleString join above calls straight into this. */
+  if (recv->kind == SCR_DYN_BOOL &&
+      (dyn_name_is(method, "toString") || dyn_name_is(method, "toLocaleString"))) {
+    ScrStr *text = recv->v.b ? scr_str_new("true", 4) : scr_str_new("false", 5);
+    ScrDyn *r = scr_dyn_new_str(text); /* retains */
+    scr_str_release(text);
+    return r;
   }
 
   /* NUM/BOOL/BYTES-remainder: the name is no method of this kind — JS's
