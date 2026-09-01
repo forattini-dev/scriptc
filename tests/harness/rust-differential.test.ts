@@ -193,9 +193,9 @@ async function build(file: string) {
 // Parity ledger, summarized after the run. Refusals fail their test, but
 // still land in the histogram so a batch of regressions reads as one
 // summary line instead of N stack traces.
-const claimed: string[] = [];
+const claimed = new Set<string>();
 const refusalKinds = new Map<string, number>();
-const refusalPrograms = new Map<string, string[]>();
+const refusalPrograms = new Map<string, Set<string>>();
 
 function refusalKind(message: string): string {
   return /^rust backend does not support (.+?) yet$/.exec(message)?.[1] ?? message;
@@ -213,15 +213,16 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
       if (!res.ok) {
         for (const d of res.diagnostics.filter((d) => d.code === "SC3001")) {
           const kind = refusalKind(d.message);
-          refusalKinds.set(kind, (refusalKinds.get(kind) ?? 0) + 1);
-          refusalPrograms.set(kind, [...(refusalPrograms.get(kind) ?? []), rel]);
+          const programs = refusalPrograms.get(kind) ?? new Set<string>();
+          programs.add(rel);
+          refusalPrograms.set(kind, programs);
+          refusalKinds.set(kind, programs.size);
         }
         throw new Error(
           `rust backend regressed out of full-corpus parity on ${rel}: ` +
             res.diagnostics.map((d) => `${d.code} ${d.message}`).join("; "),
         );
       }
-      claimed.push(rel);
       expect(res.backend).toBe("rust");
 
       const stdin = STDIN_FIXTURES[rel] ?? "";
@@ -248,22 +249,22 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
       }
       expect(rust.exitCode).toBe(expectedExit);
       expect(node.exitCode).toBe(expectedExit);
+      claimed.add(rel);
     },
   );
 
   afterAll(() => {
     const hist = [...refusalKinds].sort((a, b) => b[1] - a[1]);
-    // eslint-disable-next-line no-console
     console.info(
-      `rust parity: ${claimed.length}/${files.length} corpus programs claimed` +
+      `rust parity: ${claimed.size}/${files.length} corpus programs claimed` +
         (hist.length === 0
           ? ""
           : `; REGRESSED kinds: ${hist.map(([k, n]) => `${k}×${n}`).join(", ")}`),
     );
     if (process.env["SCRIPTC_RUST_REFUSALS"] === "1") {
       for (const [kind] of hist) {
-        // eslint-disable-next-line no-console
-        console.info(`  ${kind}: ${refusalPrograms.get(kind)!.join(" ")}`);
+        const programs = refusalPrograms.get(kind);
+        if (programs) console.info(`  ${kind}: ${[...programs].join(" ")}`);
       }
     }
   });
