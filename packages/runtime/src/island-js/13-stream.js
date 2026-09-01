@@ -214,6 +214,13 @@ function makeStream(env) {
       this._closeEmitted = true;
       nextTick(() => this.emit("close"));
     }
+    _takeAll() {
+      const out = this._decoder || typeof this._rBuf[0] === "string" ? this._rBuf.join("") : Buffer.concat(this._rBuf);
+      this._rBuf = [];
+      this._rLen = 0;
+      this._maybeEmitEnd();
+      return out;
+    }
     read(n) {
       if (this._rBuf.length === 0) {
         this._callRead();
@@ -222,23 +229,36 @@ function makeStream(env) {
         this._maybeEmitEnd();
         return null;
       }
-      if (n === undefined || n === null) {
+      if (n === undefined || n === null || (typeof n === "number" && Number.isNaN(n))) {
         if (this._objectMode) return this._takeChunk();
-        let out;
-        if (typeof this._rBuf[0] === "string") {
-          out = this._rBuf.join("");
-        } else {
-          out = Buffer.concat(this._rBuf);
-        }
-        this._rBuf = [];
-        this._rLen = 0;
+        /* Node's howMuchToRead() answers a bare read() with
+         * state.buffer.first().length, not state.length: raw Buffer mode
+         * hands back exactly ONE queued chunk, so the boundaries created by
+         * push() and unshift() survive the read. Only a stream with a
+         * decoder attached collapses the queue into a single string. */
+        if (this._decoder) return this._takeAll();
+        const c = this._takeChunk();
         this._maybeEmitEnd();
-        return out;
+        return c;
       }
       if (this._objectMode) return this._takeChunk();
       if (n <= 0) return null;
       if (this._rLen === 0) return null;
-      if (n >= this._rLen) return this.read();
+      if (n === this._rLen) return this._takeAll();
+      if (n > this._rLen) {
+        /* Node withholds a short read until the stream ends, then releases
+         * whatever is left. Ask the source for more first: the buffer is
+         * non-empty here, so the _callRead() above did not fire and nothing
+         * else would wake a consumer that only ever asks for n bytes. */
+        if (!this._rEnded) {
+          this._callRead();
+          if (this._rEnded && n > this._rLen) return this._rLen > 0 ? this._takeAll() : null;
+          if (n <= this._rLen) return this.read(n);
+          this._maybeEmitEnd();
+          return null;
+        }
+        return this._takeAll();
+      }
       let out;
       if (typeof this._rBuf[0] === "string") {
         let s = "";
