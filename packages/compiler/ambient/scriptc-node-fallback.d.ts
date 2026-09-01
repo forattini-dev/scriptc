@@ -1596,10 +1596,7 @@ declare module "child_process" {
     readonly stdout: NodeJS.ReadableStream | null;
     readonly stderr: NodeJS.ReadableStream | null;
   }
-  export function spawn(
-    command: string,
-    args?: string[],
-    options?: {
+  interface SpawnOptions {
       /* The 3-tuple form admits number fds in the stdout/stderr slots —
        * openSync results dup2'd into the child (the daemon-log idiom
        * ["ignore", logFd, logFd]) — and "pipe" there too (child.stdout/
@@ -1612,8 +1609,10 @@ declare module "child_process" {
       env?: { [k: string]: string | undefined };
       cwd?: string;
       windowsHide?: boolean;
-    },
-  ): ChildProcess;
+      shell?: boolean;
+  }
+  export function spawn(command: string, options: SpawnOptions): ChildProcess;
+  export function spawn(command: string, args?: string[], options?: SpawnOptions): ChildProcess;
 
   /* The synchronous exec pair: execFileSync runs a file directly (no
    * shell), execSync runs a command through /bin/sh -c. Both capture

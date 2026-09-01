@@ -2080,8 +2080,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * orientation — POSIX_SPAWN_SETSID, the child gets its own session and
    * process group like Node's), `env` (a
    * REPLACEMENT environment, the exec-core pairs machinery), `cwd`, and
-   * `windowsHide` (a POSIX no-op). The bare `{ stdio: "ignore" }` shape
-   * keeps its historical cp.spawn lowering. */
+   * `windowsHide` (a POSIX no-op), and `shell: true` for the two-argument
+   * `spawn(command, options)` form (`/bin/sh -c command`). The bare
+   * `{ stdio: "ignore" }` shape keeps its historical cp.spawn lowering. */
   export function lowerSpawnCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr {
     if (expr.arguments.length > 3 || expr.arguments.some(ts.isSpreadElement)) {
       L.noLowering(
@@ -2106,6 +2107,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     let hasEnv: IrExpr = boolLit(false, loc);
     let envPairs: IrExpr = { kind: "arrayLit", elems: [], type: arrayOf(STRING), loc };
     let cwd: IrExpr = emptyStr;
+    let shell = false;
     let plain = true; // exactly { stdio: "ignore" }: the historical libCall
 
     const pipeFence = (node: ts.Node): never =>
@@ -2249,11 +2251,30 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           case "windowsHide":
             L.lowerExpr(m.value); // Node no-op on POSIX
             break;
+          case "shell":
+            if (m.value.kind === ts.SyntaxKind.TrueKeyword) {
+              if (argsNode !== undefined) {
+                L.noLowering(
+                  "spawn with shell enabled and an args array",
+                  m.value,
+                  "pass one command-line string with spawn(command, { shell: true, stdio: ... })",
+                );
+              }
+              shell = true;
+              plain = false;
+            } else if (m.value.kind !== ts.SyntaxKind.FalseKeyword) {
+              L.noLowering(
+                "spawn with a non-literal shell option",
+                m.value,
+                "shell must be a boolean literal",
+              );
+            }
+            break;
           default:
             L.noLowering(
               `spawn option '${m.name}'`,
               p,
-              "stdio, detached, env, cwd, and windowsHide are the supported options",
+              "stdio, detached, env, cwd, windowsHide, and shell are the supported options",
             );
         }
       }
@@ -2265,14 +2286,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         'Node\'s default stdio is "pipe" (streams, no lowering) — pass { stdio: "ignore" } or { stdio: "inherit" } explicitly, or capture with spawnSync',
       );
     }
-    const argv = L.lowerChildArgsArg(argsNode, loc);
+    const argv: IrExpr = shell
+      ? { kind: "arrayLit", elems: [{ kind: "strLit", value: "-c", type: STRING, loc }, cmd], type: arrayOf(STRING), loc }
+      : L.lowerChildArgsArg(argsNode, loc);
+    const command: IrExpr = shell
+      ? { kind: "strLit", value: "/bin/sh", type: STRING, loc }
+      : cmd;
     if (plain) {
       return { kind: "libCall", fn: "cp.spawn", args: [cmd, argv], type: CHILD_T, loc };
     }
     return {
       kind: "libCall",
       fn: "cp.spawnOpts",
-      args: [cmd, argv, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), outFd, errFd, detached, hasEnv, envPairs, cwd],
+      args: [command, argv, numLit(inMode, loc), numLit(outMode, loc), numLit(errMode, loc), outFd, errFd, detached, hasEnv, envPairs, cwd],
       type: CHILD_T,
       loc,
     };
