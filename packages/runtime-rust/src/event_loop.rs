@@ -199,6 +199,57 @@ pub fn timer_refresh(id: f64) -> f64 {
     id
 }
 
+/// Fire the earliest armed timer, sleeping to its deadline, and report
+/// whether one was armed at all.
+///
+/// Module evaluation runs BEFORE `run_event_loop` starts, so an island
+/// `await` on a promise that only a timer can settle would otherwise be
+/// unsettleable and reach ERR_MODULE_PROMISE_PENDING. This drives the
+/// timer phase alone — the only phase able to settle such a promise —
+/// which keeps the pump small and its ordering identical to the loop's
+/// (same earliest-`(due, id)` choice, same re-arm on repeat/refresh).
+///
+/// Turn gating is deliberately NOT applied: there is no loop turn to
+/// belong to yet, and a timer armed during module evaluation must still
+/// be reachable from the same evaluation.
+pub fn timers_pump_once() -> bool {
+    let Some(due) = TIMER_TASKS.with(|tasks| tasks.borrow().iter().map(|task| task.due).min())
+    else {
+        return false;
+    };
+    if let Some(wait) = due.checked_duration_since(std::time::Instant::now()) {
+        std::thread::sleep(wait);
+    }
+    let now = std::time::Instant::now();
+    let timer = TIMER_TASKS.with(|tasks| {
+        let mut tasks = tasks.borrow_mut();
+        let index = tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, task)| task.due <= now)
+            .min_by_key(|(_, task)| (task.due, task.id))
+            .map(|(index, _)| index)?;
+        Some(tasks.swap_remove(index))
+    });
+    let Some(mut timer) = timer else {
+        return true;
+    };
+    FIRING_TIMER_ID.with(|id| id.set(timer.id));
+    FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.set(false));
+    FIRING_TIMER_CLEARED.with(|cleared| cleared.set(false));
+    FIRING_TIMER_REFERENCED.with(|referenced| referenced.set(timer.referenced));
+    (timer.callback)();
+    let refreshed = FIRING_TIMER_REFRESHED.with(|refreshed| refreshed.get());
+    let cleared = FIRING_TIMER_CLEARED.with(|cleared| cleared.get());
+    timer.referenced = FIRING_TIMER_REFERENCED.with(|referenced| referenced.get());
+    FIRING_TIMER_ID.with(|id| id.set(0));
+    if !cleared && (timer.repeat || refreshed) {
+        timer.due = std::time::Instant::now() + timer.delay;
+        TIMER_TASKS.with(|tasks| tasks.borrow_mut().push(timer));
+    }
+    true
+}
+
 pub fn timer_set_immediate(callback: Box<dyn FnOnce()>) -> f64 {
     let registered_context = async_context_capture();
     let callback: Box<dyn FnOnce()> = Box::new(move || {

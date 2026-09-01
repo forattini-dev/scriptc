@@ -9,7 +9,7 @@
 
 /// Named exports per shimmed builtin, mirroring the C island's
 /// `isl_builtins`.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 31] = [
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 33] = [
     ("node:events", "EventEmitter,once,on,listenerCount,getEventListeners,setMaxListeners,defaultMaxListeners,errorMonitor,captureRejectionSymbol"),
     ("node:path", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
     ("node:path/posix", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
@@ -39,6 +39,8 @@ static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 31] = [
     ("node:querystring", "parse,stringify,decode,encode,escape,unescape,unescapeBuffer"),
     ("node:constants", "F_OK,R_OK,W_OK,X_OK"),
     ("node:console", "Console,log,info,debug,warn,error,trace,dir,assert,count,countReset,time,timeEnd,group,groupEnd,table,clear"),
+    ("node:timers", "setTimeout,clearTimeout,setInterval,clearInterval,setImmediate,clearImmediate"),
+    ("node:timers/promises", "setTimeout,setImmediate,setInterval,scheduler"),
     ("node:zlib", "deflateSync,inflateSync,deflateRawSync,inflateRawSync,gzipSync,gunzipSync,unzipSync,deflate,inflate,deflateRaw,inflateRaw,gzip,gunzip,unzip,Deflate,Inflate,DeflateRaw,InflateRaw,Gzip,Gunzip,Unzip,BrotliCompress,BrotliDecompress,createDeflate,createInflate,createDeflateRaw,createInflateRaw,createGzip,createGunzip,createUnzip,createBrotliCompress,createBrotliDecompress,brotliCompressSync,brotliDecompressSync,constants"),
     ("node:process", "argv,env,platform,execPath,execArgv,version,versions,stdout,stderr,stdin,cwd,exit,nextTick,hrtime,pid,ppid,title,argv0,release,config,allowedNodeEnvironmentFlags,emitWarning,uptime,memoryUsage,umask,exitCode,on,once,off,removeListener,emit"),
 ];

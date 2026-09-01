@@ -65,6 +65,7 @@
     "25-querystring.js",
     "26-constants.js",
     "27-console.js",
+    "28-timers.js",
     "29-zlib.js",
     "31-process.js",
     "32-epilogue.js"
