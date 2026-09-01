@@ -8200,9 +8200,29 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     {
       const probed = probeLower(L, argNode);
       const isDyn = probed?.type.kind === "dyn";
+      const isJsval = probed?.type.kind === "jsval";
       // Unit-typed arguments (Object.keys(null)) ride the same runtime
       // walk: it throws Node's catchable TypeError.
       const isUnit = probed !== null && probed !== undefined && isUnitType(probed.type);
+      if (isJsval && member === "keys") {
+        const loc = locOf(call);
+        const objectGlobal: IrExpr = {
+          kind: "jsOp",
+          op: "globalGet",
+          name: "Object",
+          args: [],
+          type: JSVAL,
+          loc,
+        };
+        return {
+          kind: "jsOp",
+          op: "callMethod",
+          name: "keys",
+          args: [objectGlobal, L.lowerExpr(argNode)],
+          type: JSVAL,
+          loc,
+        };
+      }
       if (isDyn || isUnit) {
         const fn = member === "keys" ? "dyn.objKeys" : member === "values" ? "dyn.objValues" : "dyn.objEntries";
         let v = L.lowerExpr(argNode);
@@ -8580,6 +8600,38 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (L.chainBlocked(call)) return null;
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "record") return null;
     const target = L.fieldTarget(access);
+    // In a monomorphized union-generic body, control-flow can expose a
+    // callable field from one constraint arm even when this concrete
+    // instance has a narrower record shape that omits it. The branch is
+    // normally unreachable (the discriminant selected another arm), but
+    // it must still lower. Model the absent JS property as dyn undefined:
+    // if control ever does reach it, dynCall throws the same catchable
+    // TypeError as `undefined(...)` instead of inventing a native slot.
+    if (!target) {
+      const declaredCallee = L.mapTypeOf(L.typeOf(access));
+      const probed = declaredCallee?.kind === "func" ? probeLower(L, access.expression) : null;
+      if (probed?.type.kind === "record") {
+        const concreteShape = L.shapes.get(probed.type.shapeId);
+        if (
+          concreteShape && !concreteShape.indexValue &&
+          !concreteShape.fields.some((f) => f.name === access.name.text)
+        ) {
+          if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+            L.unsupported("SC1090", call, "spread arguments in calls through absent generic record fields");
+          }
+          const receiver = L.lowerExpr(access.expression);
+          const callee: IrExpr = {
+            kind: "seqExpr",
+            stmts: [{ kind: "exprStmt", expr: receiver, loc: receiver.loc }],
+            result: dynUndefinedExpr(locOf(access)),
+            type: DYN,
+            loc: locOf(access),
+          };
+          const args = call.arguments.map((arg) => L.lowerExprExpecting(arg, DYN));
+          return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
+        }
+      }
+    }
     let callee = target
       ? L.maybeNarrow(L.fieldGetExpr(target, locOf(access), access), access)
       : null;

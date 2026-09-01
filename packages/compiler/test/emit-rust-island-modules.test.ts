@@ -181,4 +181,14 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("armed:idle\n");
   });
+
+  test("Object.keys follows the runtime shape of a package-returned record", async () => {
+    const fixture = join(fixtures, "object-keys-package-record.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("object-keys-package-record.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("alpha:one\nbeta:true\n");
+  });
 });

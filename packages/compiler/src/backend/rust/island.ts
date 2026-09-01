@@ -35,6 +35,11 @@ export function emitRustIslandExpr(
       }
       const value = context.nextName("sc_island_exit");
       const dyn = context.dynTypeName();
+      if (expr.type.kind === "bytes" && expr.type.elem === "u8") {
+        const checked = context.emitDynCheckValue(expr.type, "sc_value", expr.loc);
+        return `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ` +
+          `${dyn}::Island(sc_value) => runtime::island_exit_bytes(&sc_value), sc_value => ${checked}, } }`;
+      }
       const normalized = `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ${dyn}::Island(sc_value) => runtime::json_parse_typed::<${dyn}>(&runtime::island_json(&sc_value)), sc_value => sc_value, } }`;
       return context.emitDynCheckValue(expr.type, normalized, expr.loc);
     }
@@ -155,6 +160,9 @@ function emitOperation(
   }
   if (expr.op === "undefLit" && expr.args.length === 0) return `${context.dynTypeName()}::Undefined`;
   if (expr.op === "nullLit" && expr.args.length === 0) return `${context.dynTypeName()}::Null`;
+  if (expr.op === "globalGet" && expr.name !== undefined && expr.args.length === 0 && context.hasEmbeddedModules()) {
+    return `${context.dynTypeName()}::Island(runtime::island_global_get("${context.rustString(expr.name)}"))`;
+  }
   if (expr.op === "getProp" && expr.name !== undefined && expr.args.length === 1) {
     const receiver = context.nextName("sc_island_receiver");
     const dyn = context.dynTypeName();
@@ -171,6 +179,14 @@ function emitOperation(
     const receiver = context.nextName("sc_island_receiver");
     const key = context.nextName("sc_island_key");
     const keyExpr = argOf(expr, 1, context);
+    if (context.hasEmbeddedModules()) {
+      const dyn = context.dynTypeName();
+      return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; ` +
+        `let ${key} = ${emitExpr(keyExpr)}; match (&${receiver}, &${key}) { ` +
+        `(${dyn}::Island(sc_receiver), ${dyn}::Island(sc_key)) => ` +
+        `${dyn}::Island(runtime::island_get_index(sc_receiver, sc_key)), ` +
+        `_ => sc_dyn_key_get(&${receiver}, &sc_dyn_to_string(&${key}), false), } }`;
+    }
     if (keyExpr.kind !== "jsMarshal" || !["f64", "string", "bool"].includes(keyExpr.value.type.kind)) {
       context.unsupported("island computed key outside the native primitive subset", expr.loc);
     }
@@ -200,6 +216,13 @@ function emitOperation(
     const dyn = context.dynTypeName();
     return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${getter} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${target}, sc_dyn_to_string(&${key}), ${dyn}::Getter(Box::new(${getter}))); ${target} }`;
   }
+  if (expr.op === "iterNew" && expr.args.length === 1 && context.hasEmbeddedModules()) {
+    const value = context.nextName("sc_island_iterable");
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; match &${value} { ` +
+      `${dyn}::Island(sc_value) => ${dyn}::Island(runtime::island_iter_new(sc_value)), ` +
+      `_ => runtime::throw_type_error("value is not iterable".to_owned()), } }`;
+  }
   const builtin = emitRustIslandBuiltin(expr, context, emitExpr);
   if (builtin !== null) return builtin;
   const destructuring = emitRustIslandDestructuringFunction(expr, context, emitExpr);
@@ -215,6 +238,24 @@ function emitOperation(
     const islandCall = `{ let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
       `${context.dynTypeName()}::Island(runtime::island_call(&sc_value, &${islandArgs})) }`;
     return `{ let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}]; match ${callee} { ${context.dynTypeName()}::Island(sc_value) => ${islandCall}, sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
+  }
+  if (expr.op === "callFnThis" && expr.args.length > 1) {
+    const callee = context.nextName("sc_island_callee");
+    const receiver = context.nextName("sc_island_receiver");
+    const args = context.nextName("sc_island_args");
+    const values = expr.args.slice(2).map((arg) => emitExpr(arg)).join(", ");
+    const bind = `let ${callee} = ${emitExpr(argOf(expr, 0, context))}; ` +
+      `let ${receiver} = ${emitExpr(argOf(expr, 1, context))}; let ${args} = [${values}];`;
+    if (!context.hasEmbeddedModules()) {
+      return `{ ${bind} let _ = &${receiver}; sc_dyn_call(&${callee}, &${args}, "value") }`;
+    }
+    const dyn = context.dynTypeName();
+    const islandArgs = context.nextName("sc_island_call_args");
+    return `{ ${bind} match (&${callee}, &${receiver}) { ` +
+      `(${dyn}::Island(sc_callee), ${dyn}::Island(sc_receiver)) => { ` +
+      `let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+      `${dyn}::Island(runtime::island_call_this(sc_callee, sc_receiver, &${islandArgs})) }, ` +
+      `_ => sc_dyn_call(&${callee}, &${args}, "value"), } }`;
   }
   if (expr.op === "callSpread" && expr.name !== undefined && expr.args.length === 3) {
     const callee = context.nextName("sc_island_callee");
@@ -244,7 +285,12 @@ function emitOperation(
       `sc_value => sc_dyn_call(&sc_value, &${args}, "value"), } }`;
   }
   if ((expr.op === "truthy" || expr.op === "not") && expr.args.length === 1) {
-    const truthy = `sc_dyn_is_truthy(&(${emitExpr(argOf(expr, 0, context))}))`;
+    const emitted = emitExpr(argOf(expr, 0, context));
+    const truthy = context.hasEmbeddedModules()
+      ? `{ let sc_value = ${emitted}; match &sc_value { ` +
+        `${context.dynTypeName()}::Island(sc_island) => runtime::island_truthy(sc_island), ` +
+        `_ => sc_dyn_is_truthy(&sc_value), } }`
+      : `sc_dyn_is_truthy(&(${emitted}))`;
     return expr.op === "not" ? `!(${truthy})` : truthy;
   }
   if (expr.op === "add" && expr.args.length === 2) {
@@ -437,6 +483,7 @@ function emitIslandValue(value: string, context: RustIslandContext): string {
     `${dyn}::Number(sc_value) => runtime::island_value_number(*sc_value), ` +
     `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
     `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
+    `${dyn}::Bytes(sc_value) | ${dyn}::Buffer(sc_value) => runtime::island_value_bytes(sc_value), ` +
     `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(${value})), ` +
     // A native RegExp crosses as its own source+flags, rebuilt by the
     // realm's RegExp constructor (the `z.string().regex(/^a+$/)` shape).

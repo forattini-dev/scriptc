@@ -29,6 +29,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
 import { externalStaticDataPropertyInitializer } from "../cycle-static-data.js";
+import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
 
 /** An assignable `obj.field` target — a class field, a record field, or a
  * class ACCESSOR property (reads become getter calls, writes setter calls;
@@ -8009,6 +8010,8 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       if (targetTs.flags & ts.TypeFlags.Any) return inner;
       const target = L.mapTypeOf(targetTs);
       if (!target) L.badType(expr.type, targetTs);
+      const callableRecord = lowerIslandCallableRecordCast(L, inner, target, locOf(expr));
+      if (callableRecord) return callableRecord;
       if (!L.boundarySafe(target)) {
         L.unsupported(
           "SC1090",
@@ -10917,6 +10920,29 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * ordinary closure values, so bare references to them work (unlike class
    * methods, which have no bound-value form). */
   export function lowerFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    // A generic instance may lower its receiver to a narrower concrete
+    // record than the checker-visible constraint. When that concrete shape
+    // omits an OPTIONAL constraint field, JavaScript still performs the
+    // receiver evaluation and answers undefined. Handle that value case
+    // before fieldTarget (which only describes assignable storage slots).
+    const accessType = L.mapTypeOf(L.typeOf(expr));
+    const absent = accessType ? L.wrappedUndefined(accessType, locOf(expr)) : null;
+    if (absent) {
+      const probed = probeLower(L, expr.expression);
+      if (probed?.type.kind === "record") {
+        const concreteShape = L.shapes.get(probed.type.shapeId);
+        if (concreteShape && !concreteShape.fields.some((f) => f.name === expr.name.text)) {
+          const receiver = L.lowerExpr(expr.expression);
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "exprStmt", expr: receiver, loc: receiver.loc }],
+            result: absent,
+            type: absent.type,
+            loc: locOf(expr),
+          };
+        }
+      }
+    }
     const target = L.fieldTarget(expr);
     if (target) return L.fieldGetExpr(target, locOf(expr), expr);
     if (expr.questionDotToken) return null;
@@ -11273,6 +11299,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         // all-unknown-fields cast — `(err as { code?: unknown }).code`):
         // decline, and the dyn keyed-read fallback answers.
         if (obj.type.kind !== "record") return null;
+        // A monomorphized generic body can retain the constraint's checker
+        // type while the lowered parameter already carries the concrete
+        // instance shape. The runtime value is authoritative: naming the
+        // constraint shape here emits an invalid recordGet (same field,
+        // different layout id). Re-resolve the member on the value shape;
+        // if it is absent, decline to the ordinary keyed-read diagnostics.
+        if (obj.type.shapeId !== receiverIr.shapeId) {
+          const concrete = L.shapes.get(obj.type.shapeId);
+          const concreteField = concrete?.fields.find((f) => f.name === access.name.text);
+          if (!concreteField) return null;
+          return {
+            container: "record",
+            obj,
+            shapeId: obj.type.shapeId,
+            field: access.name.text,
+            fieldType: concreteField.type,
+          };
+        }
         return { container: "record", obj, shapeId: receiverIr.shapeId, field: access.name.text, fieldType };
       }
       // A RECORD accessor property: either slot present makes the name an

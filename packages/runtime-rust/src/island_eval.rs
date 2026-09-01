@@ -74,6 +74,30 @@ pub fn island_value_string(value: &JsString) -> IslandValue {
     IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
 }
 
+pub fn island_value_bytes(value: &JsBytes<u8>) -> IslandValue {
+    with_island_state(|state| {
+        let bytes = bytes_values(value);
+        let array = BoaJsUint8Array::from_iter(bytes, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(array.into())
+    })
+}
+
+pub fn island_exit_bytes(value: &IslandValue) -> JsBytes<u8> {
+    with_island_state(|state| {
+        let Some(object) = value.0.as_object() else {
+            throw_type_error("expected Uint8Array from embedded module".to_owned());
+        };
+        let Ok(array) = BoaJsUint8Array::from_object(object) else {
+            throw_type_error("expected Uint8Array from embedded module".to_owned());
+        };
+        let values = array
+            .to_vec(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        bytes_from_vec(values)
+    })
+}
+
 /* ── engine argument → native value ────────────────────────────────────
  * Strict, like the C adapters' `scr_jsval_exit_*`: a lying engine
  * argument throws a TypeError at the boundary instead of coercing. An
@@ -326,8 +350,65 @@ pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
     })
 }
 
+pub fn island_get_index(value: &IslandValue, key: &IslandValue) -> IslandValue {
+    with_island_state(|state| {
+        let object = value
+            .0
+            .to_object(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        let property_key = key
+            .0
+            .to_property_key(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        let property = object
+            .get(property_key, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(property)
+    })
+}
+
+pub fn island_global_get(name: &str) -> IslandValue {
+    with_island_state(|state| {
+        let global = state.context.global_object();
+        let value = global
+            .get(
+                boa_engine::JsString::from(name),
+                &mut state.context,
+            )
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(value)
+    })
+}
+
 pub fn island_is_function(value: &IslandValue) -> bool {
     value.0.as_callable().is_some()
+}
+
+pub fn island_truthy(value: &IslandValue) -> bool {
+    value.0.to_boolean()
+}
+
+pub fn island_iter_new(value: &IslandValue) -> IslandValue {
+    with_island_state(|state| {
+        let context = &mut state.context;
+        let object = value
+            .0
+            .to_object(context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let method = object
+            .get(BoaJsSymbol::iterator(), context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let Some(method) = method.as_callable() else {
+            throw_type_error("value is not iterable".to_owned());
+        };
+        let iterator = method
+            .call(&value.0, &[], context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        if !iterator.is_object() {
+            throw_type_error("iterator method returned a non-object".to_owned());
+        }
+        IslandValue(iterator)
+    })
 }
 
 /// Consume an embedded JavaScript value through its synchronous iterator.
@@ -725,6 +806,18 @@ fn island_call_with_this(
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
         IslandValue(value)
     })
+}
+
+/// Call an already-read engine function with an explicit receiver.
+///
+/// Interface adapters read each method once when the namespace crosses the
+/// checked boundary, then retain both handles and preserve member-call `this`.
+pub fn island_call_this(
+    callee: &IslandValue,
+    receiver: &IslandValue,
+    args: &[IslandValue],
+) -> IslandValue {
+    island_call_with_this(callee, receiver, "value", args)
 }
 
 pub fn island_call_method(receiver: &IslandValue, name: &str, args: &[IslandValue]) -> IslandValue {
