@@ -9,7 +9,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, posix } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { wasiGuestPath } from "../../wasi-paths.js";
-import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -3952,21 +3952,34 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // host field verbatim (Node would keep IPv6 brackets here, but the
       // parser rejects IPv6 hosts — documented divergence — so the getter
       // never sees one).
-      if (name === "protocol" || name === "pathname" || name === "href" || name === "host" || name === "hostname" || name === "search") {
+      // Every string-valued component getter is a pure read of a field the
+      // parser already normalized, so they all share one table: `port` is
+      // "" when absent or equal to the scheme default; `origin` is the
+      // tuple origin for http/https/ws/wss/ftp and the literal "null" for
+      // file: and opaque-path schemes; `hash` is "" for both no fragment
+      // and a bare '#'; `username`/`password` are "" when absent.
+      // A Map, NOT an object literal: an object literal inherits
+      // Object.prototype, so a member named `toString` / `valueOf` /
+      // `constructor` would look up a FUNCTION, pass the undefined guard,
+      // and emit a libCall with a junk `fn` — shadowing the SC1090 fence
+      // for `u.toString` as a value just below.
+      const URL_STRING_GETTERS = new Map<string, IrLibFn>([
+        ["protocol", "url.protocol"],
+        ["pathname", "url.pathname"],
+        ["host", "url.host"],
+        ["hostname", "url.hostname"],
+        ["search", "url.search"],
+        ["href", "url.href"],
+        ["port", "url.port"],
+        ["origin", "url.origin"],
+        ["hash", "url.hash"],
+        ["username", "url.username"],
+        ["password", "url.password"],
+      ]);
+      const stringGetter = URL_STRING_GETTERS.get(name);
+      if (stringGetter !== undefined) {
         const receiver = L.lowerExpr(expr.expression);
-        const fn =
-          name === "protocol"
-            ? "url.protocol"
-            : name === "pathname"
-              ? "url.pathname"
-              : name === "host"
-                ? "url.host"
-                : name === "hostname"
-                  ? "url.hostname"
-                  : name === "search"
-                    ? "url.search"
-                    : "url.href";
-        return { kind: "libCall", fn, args: [receiver], type: STRING, loc: locOf(expr) };
+        return { kind: "libCall", fn: stringGetter, args: [receiver], type: STRING, loc: locOf(expr) };
       }
       // `u.searchParams`: the LIVE cached view (one identity per URL —
       // mutations through it re-serialize into the URL's query, so href
@@ -3981,7 +3994,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       L.noLowering(
         `URL.${name}`,
         expr,
-        "protocol, pathname, href, host, hostname, search, searchParams, and toString() are the supported URL members",
+        "protocol, pathname, href, host, hostname, port, origin, hash, username, password, search, searchParams, and toString() are the supported URL members (the component SETTERS have no lowering — URL values are read-only apart from searchParams)",
         L.checker.getSymbolAtLocation(expr.name),
       );
     }

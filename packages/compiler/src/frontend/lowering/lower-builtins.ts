@@ -4292,7 +4292,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     L.noLowering(
       `URL.${name}`,
       call,
-      "protocol, pathname, href, and toString() are the supported URL members",
+      "protocol, pathname, href, host, hostname, port, origin, hash, username, password, search, searchParams, and toString() are the supported URL members",
       L.checker.getSymbolAtLocation(access.name),
     );
   }

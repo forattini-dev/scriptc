@@ -66,6 +66,58 @@ pub fn url_port_or(value: &JsUrl, default_port: f64) -> f64 {
     value.value.borrow().port().map_or(default_port, f64::from)
 }
 
+/// WHATWG port getter: the digit string, or "" when the port is absent or
+/// equals the scheme's default. `url::Url::port` already answers `None` for
+/// both cases (defaults never survive serialization), so this is a direct
+/// read — Node-exact, port 0 included (a real, non-default port).
+pub fn url_port(value: &JsUrl) -> JsString {
+    match value.value.borrow().port() {
+        Some(port) => string(&port.to_string()),
+        None => empty_string(),
+    }
+}
+
+/// WHATWG origin getter: `scheme://host[:non-default-port]` for the special
+/// schemes with a tuple origin (http/https/ws/wss/ftp), and the literal
+/// "null" for file: and every opaque-path scheme (data:, mailto:, git:, ...).
+/// `Origin::ascii_serialization` implements exactly that split, and drops
+/// userinfo — Node's getter byte-for-byte across the corpus.
+pub fn url_origin(value: &JsUrl) -> JsString {
+    string(&value.value.borrow().origin().ascii_serialization())
+}
+
+/// WHATWG hash getter: "#" + fragment, or "" for BOTH no fragment and the
+/// bare-'#' fragment (`http://a.com/#` keeps the '#' in href but answers ""
+/// here) — the same empty-vs-absent rule `url_search` applies to the query.
+pub fn url_hash(value: &JsUrl) -> JsString {
+    let parsed = value.value.borrow();
+    match parsed.fragment() {
+        Some(fragment) if !fragment.is_empty() => string(&format!("#{fragment}")),
+        _ => empty_string(),
+    }
+}
+
+/// WHATWG username getter: the percent-encoded username verbatim, "" when
+/// absent (`url::Url::username` already answers "" rather than an Option).
+pub fn url_username(value: &JsUrl) -> JsString {
+    string(value.value.borrow().username())
+}
+
+/// WHATWG password getter: the percent-encoded password, "" when absent.
+/// `url::Url::password` answers `None` both for no ':' at all and for the
+/// empty `user:@host` form — Node answers "" for both, so the flattening is
+/// exact.
+pub fn url_password(value: &JsUrl) -> JsString {
+    string(value.value.borrow().password().unwrap_or(""))
+}
+
+/// `URL.canParse(input)`: whether `url_new` would succeed, without throwing.
+/// Mirrors `url_new`'s accept/reject exactly — the extra-file-slash bookkeeping
+/// there is post-parse and never fails, so the parse result alone decides.
+pub fn url_can_parse(input: &JsString) -> bool {
+    url::Url::parse(input).is_ok()
+}
+
 pub fn url_pathname(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
     if value.extra_file_slashes == 0 {

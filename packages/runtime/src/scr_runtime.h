@@ -2767,6 +2767,14 @@ void scr_url_release_v(void *p);
 ScrStr *scr_url_protocol(ScrUrl *u); /* +1 "https:" */
 ScrStr *scr_url_host(ScrUrl *u);     /* +1 "host[:port]" (defaults stripped) */
 ScrStr *scr_url_hostname(ScrUrl *u); /* +1 port-less host ("" when none) */
+ScrStr *scr_url_port(ScrUrl *u);     /* +1 digits, "" when absent/default */
+ScrStr *scr_url_origin(ScrUrl *u);   /* +1 "scheme://host[:port]", or "null" */
+ScrStr *scr_url_hash(ScrUrl *u);     /* +1 "#..." or "" (bare '#' answers "") */
+ScrStr *scr_url_username(ScrUrl *u); /* +1 "" when absent */
+ScrStr *scr_url_password(ScrUrl *u); /* +1 "" when absent */
+/* URL.canParse(input): scr_url_new's accept/reject as a boolean. NEVER
+ * throws — the one URL entry point that answers instead of trapping. */
+bool scr_url_can_parse(ScrStr *input);
 ScrStr *scr_url_pathname(ScrUrl *u); /* +1 */
 ScrStr *scr_url_href(ScrUrl *u);     /* +1; also toString() */
 ScrStr *scr_url_to_path(ScrUrl *u);      /* +1, or throws */

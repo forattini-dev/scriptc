@@ -336,6 +336,13 @@ static bool parse_authority(const char *raw, size_t len, bool special, bool is_f
       }
     }
   }
+  /* An EMPTY password drops its separator: WHATWG serializes the ':' only
+   * when the password is non-empty, so `user:@host` stores "user" and
+   * `:@host` stores "" (href then omits the '@' as well) — Node exactly.
+   * Stripping here rather than in the href serializer also makes the
+   * username/password split at the first ':' answer "" for the password
+   * without a special case. */
+  if (ub.len > 0 && ub.data[ub.len - 1] == ':') ub.len--;
   *userinfo = ub_take(&ub);
   const char *hp = at >= 0 ? raw + at + 1 : raw;
   size_t hp_len = at >= 0 ? len - (size_t)at - 1 : len;
@@ -430,7 +437,10 @@ static bool parse_authority(const char *raw, size_t len, bool special, bool is_f
 }
 
 /* The full constructor-path parser. Returns NULL after throwing. */
-ScrUrl *scr_url_new(ScrStr *input) {
+/* The parser core. `throwing` picks the failure mode: scr_url_new wants the
+ * catchable TypeError, URL.canParse wants a silent NULL — the accept/reject
+ * decision itself is identical, so both share this one body. */
+static ScrUrl *scr_url_parse_impl(ScrStr *input, bool throwing) {
   /* WHATWG pre-processing: trim leading/trailing C0-or-space, strip every
    * TAB/LF/CR. */
   size_t raw_len = input->len;
@@ -462,7 +472,7 @@ ScrUrl *scr_url_new(ScrStr *input) {
   }
   if (sl == 0 || sl >= len || buf[sl] != ':') {
     free(buf);
-    scr_url_throw_invalid();
+    if (throwing) scr_url_throw_invalid();
     return NULL;
   }
   for (size_t i = 0; i < sl; i++) {
@@ -514,7 +524,7 @@ ScrUrl *scr_url_new(ScrStr *input) {
         scr_str_release(host);
         scr_str_release(port);
         free(buf);
-        scr_url_throw_invalid();
+        if (throwing) scr_url_throw_invalid();
         return NULL;
       }
       has_authority = true;
@@ -559,7 +569,7 @@ ScrUrl *scr_url_new(ScrStr *input) {
       scr_str_release(host);
       scr_str_release(port);
       free(buf);
-      scr_url_throw_invalid();
+      if (throwing) scr_url_throw_invalid();
       return NULL;
     }
     has_authority = true;
@@ -625,6 +635,18 @@ ScrUrl *scr_url_new(ScrStr *input) {
   return u;
 }
 
+ScrUrl *scr_url_new(ScrStr *input) { return scr_url_parse_impl(input, true); }
+
+/* URL.canParse(input): whether scr_url_new would succeed, WITHOUT throwing
+ * (Node's static answers a boolean and never throws). Same parser, same
+ * accept/reject — the result is simply discarded. */
+bool scr_url_can_parse(ScrStr *input) {
+  ScrUrl *u = scr_url_parse_impl(input, false);
+  if (!u) return false;
+  scr_url_release(u);
+  return true;
+}
+
 ScrStr *scr_url_protocol(ScrUrl *u) {
   UrlBuf b;
   ub_init(&b);
@@ -652,6 +674,57 @@ ScrStr *scr_url_host(ScrUrl *u) {
 /* WHATWG hostname getter: the stored port-less host verbatim ("" for
  * authority-less URLs); IPv6 literals retain their brackets. */
 ScrStr *scr_url_hostname(ScrUrl *u) { return scr_str_retain(u->host); }
+
+/* WHATWG port getter: the digit string, "" when absent OR equal to the
+ * scheme's default — the parser already dropped defaults into an empty
+ * port field, so this is a verbatim read. Port 0 is a real port and stays. */
+ScrStr *scr_url_port(ScrUrl *u) { return scr_str_retain(u->port); }
+
+/* WHATWG origin getter: the tuple origin scheme://host[:port] for the
+ * special schemes that HAVE one (http/https/ws/wss/ftp) — userinfo dropped,
+ * default port already stripped — and the literal "null" for file: and every
+ * opaque-path scheme (data:, mailto:, git:, ...). */
+ScrStr *scr_url_origin(ScrUrl *u) {
+  bool is_file = u->scheme->len == 4 && memcmp(u->scheme->data, "file", 4) == 0;
+  if (is_file || !is_special_scheme(u->scheme->data, u->scheme->len)) {
+    return scr_str_new("null", 4);
+  }
+  UrlBuf b;
+  ub_init(&b);
+  ub_append(&b, u->scheme->data, u->scheme->len);
+  ub_append(&b, "://", 3);
+  ub_append(&b, u->host->data, u->host->len);
+  if (u->port->len > 0) {
+    ub_push(&b, ':');
+    ub_append(&b, u->port->data, u->port->len);
+  }
+  return ub_take(&b);
+}
+
+/* WHATWG hash getter: "#..." verbatim, but "" for BOTH no fragment and the
+ * bare-'#' fragment (href keeps that '#'; the getter does not) — the same
+ * empty-vs-absent rule scr_url_search applies to the query. */
+ScrStr *scr_url_hash(ScrUrl *u) {
+  if (u->fragment->len <= 1) return scr_str_new("", 0);
+  return scr_str_retain(u->fragment);
+}
+
+/* The userinfo field stores "user[:password]" with the FIRST ':' verbatim
+ * (the parser encodes every other byte), so username/password are a split
+ * at that colon: no colon means the whole field is the username and the
+ * password is "" — Node's answer for `user@host` and `user:@host` alike. */
+ScrStr *scr_url_username(ScrUrl *u) {
+  const char *colon = memchr(u->userinfo->data, ':', u->userinfo->len);
+  if (!colon) return scr_str_retain(u->userinfo);
+  return scr_str_new(u->userinfo->data, (size_t)(colon - u->userinfo->data));
+}
+
+ScrStr *scr_url_password(ScrUrl *u) {
+  const char *colon = memchr(u->userinfo->data, ':', u->userinfo->len);
+  if (!colon) return scr_str_new("", 0);
+  size_t offset = (size_t)(colon - u->userinfo->data) + 1;
+  return scr_str_new(colon + 1, u->userinfo->len - offset);
+}
 
 ScrStr *scr_url_href(ScrUrl *u) {
   UrlBuf b;

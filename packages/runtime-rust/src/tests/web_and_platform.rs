@@ -160,6 +160,70 @@
         assert_eq!(caught_error_message(&caught).as_ref(), "Invalid URL");
     }
 
+    #[test]
+    fn url_component_getters_match_node_empty_and_default_rules() {
+        // port: "" for absent AND for the scheme default; a real port 0 stays.
+        assert_eq!(url_port(&url_new(&string("http://e.com/a"))).as_ref(), "");
+        assert_eq!(url_port(&url_new(&string("http://e.com:80/a"))).as_ref(), "");
+        assert_eq!(url_port(&url_new(&string("https://e.com:443/"))).as_ref(), "");
+        assert_eq!(url_port(&url_new(&string("ftp://e.com:21/x"))).as_ref(), "");
+        assert_eq!(url_port(&url_new(&string("http://e.com:8080/a"))).as_ref(), "8080");
+        assert_eq!(url_port(&url_new(&string("http://e.com:0/"))).as_ref(), "0");
+        assert_eq!(url_port(&url_new(&string("http://e.com:00080/"))).as_ref(), "");
+
+        // origin: the tuple origin for the special schemes that have one,
+        // the literal "null" for file: and every opaque-path scheme.
+        assert_eq!(url_origin(&url_new(&string("http://e.com/a?q#f"))).as_ref(), "http://e.com");
+        assert_eq!(url_origin(&url_new(&string("http://e.com:8080/"))).as_ref(), "http://e.com:8080");
+        assert_eq!(url_origin(&url_new(&string("https://e.com:443/"))).as_ref(), "https://e.com");
+        assert_eq!(url_origin(&url_new(&string("ftp://e.com:21/x"))).as_ref(), "ftp://e.com");
+        assert_eq!(url_origin(&url_new(&string("ws://e.com:80/"))).as_ref(), "ws://e.com");
+        // Userinfo is never part of an origin.
+        assert_eq!(url_origin(&url_new(&string("http://u:p@e.com:99/"))).as_ref(), "http://e.com:99");
+        assert_eq!(url_origin(&url_new(&string("file:///tmp/x"))).as_ref(), "null");
+        assert_eq!(url_origin(&url_new(&string("mailto:x@y.com"))).as_ref(), "null");
+        assert_eq!(url_origin(&url_new(&string("data:text/plain,hi"))).as_ref(), "null");
+        assert_eq!(url_origin(&url_new(&string("git://e.com:9/x"))).as_ref(), "null");
+
+        // hash: "" for no fragment AND for a bare '#' (which href keeps).
+        assert_eq!(url_hash(&url_new(&string("http://e.com/p"))).as_ref(), "");
+        assert_eq!(url_hash(&url_new(&string("http://e.com/p#"))).as_ref(), "");
+        assert_eq!(url_hash(&url_new(&string("http://e.com/p#frag"))).as_ref(), "#frag");
+        assert_eq!(url_hash(&url_new(&string("http://e.com/#a#b"))).as_ref(), "#a#b");
+        assert_eq!(url_hash(&url_new(&string("http://e.com/#f?x"))).as_ref(), "#f?x");
+        let bare = url_new(&string("http://e.com/#"));
+        assert_eq!(url_href(&bare).as_ref(), "http://e.com/#");
+        assert_eq!(url_hash(&bare).as_ref(), "");
+
+        // username/password: percent-encoded verbatim, "" when absent — and
+        // "" for the empty `user:@host` password too.
+        let both = url_new(&string("http://user:pw@e.com:99/p"));
+        assert_eq!(url_username(&both).as_ref(), "user");
+        assert_eq!(url_password(&both).as_ref(), "pw");
+        let none = url_new(&string("http://e.com/a"));
+        assert_eq!(url_username(&none).as_ref(), "");
+        assert_eq!(url_password(&none).as_ref(), "");
+        let user_only = url_new(&string("http://user@e.com/"));
+        assert_eq!(url_username(&user_only).as_ref(), "user");
+        assert_eq!(url_password(&user_only).as_ref(), "");
+        let empty_password = url_new(&string("http://user:@e.com/"));
+        assert_eq!(url_username(&empty_password).as_ref(), "user");
+        assert_eq!(url_password(&empty_password).as_ref(), "");
+        assert_eq!(url_href(&empty_password).as_ref(), "http://user@e.com/");
+        let encoded = url_new(&string("http://%75ser:p%40ss@e.com/"));
+        assert_eq!(url_username(&encoded).as_ref(), "%75ser");
+        assert_eq!(url_password(&encoded).as_ref(), "p%40ss");
+
+        // canParse: url_new's accept/reject, answered instead of thrown.
+        assert!(url_can_parse(&string("http://e.com/a")));
+        assert!(url_can_parse(&string("mailto:x@y.com")));
+        assert!(url_can_parse(&string("  http://e.com/  ")));
+        assert!(!url_can_parse(&string("not a url")));
+        assert!(!url_can_parse(&string("")));
+        assert!(!url_can_parse(&string("/relative")));
+        assert!(!url_can_parse(&string("http://")));
+    }
+
     #[cfg(not(windows))]
     #[test]
     fn file_url_bridge_round_trips_paths_and_throws_node_messages() {

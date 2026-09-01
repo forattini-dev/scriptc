@@ -9251,11 +9251,33 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
    * throws before the registry lookup, so the zero-argument contract is
    * exact without any blob machinery. The one-argument form (Node's
    * silent no-op for unregistered ids) and createObjectURL keep their
-   * fences — a compiled program has no blob registry to consult. */
+   * fences — a compiled program has no blob registry to consult.
+   *
+   * URL.canParse(input) is `new URL(input)`'s accept/reject as a boolean,
+   * answered by the same parser and never throwing. The BASE form
+   * (canParse(input, base)) fences for exactly the reason `new URL(input,
+   * base)` does — neither runtime parser resolves a relative reference
+   * against a base — so admitting it would answer the wrong boolean rather
+   * than fail loudly. */
   function lowerUrlStaticCall(L: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
     if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
     if (!ts.isIdentifier(callee.expression) || callee.expression.text !== "URL") return null;
-    if (callee.name.text !== "revokeObjectURL" || call.arguments.length !== 0) return null;
+    const member = callee.name.text;
+    if (member === "canParse") {
+      const sym = L.resolveValueSymbol(callee.expression);
+      if (!sym || !L.isStdlibSymbol(sym)) return null;
+      if (call.arguments.length !== 1) {
+        L.noLowering(
+          `URL.canParse with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
+          call,
+          "one absolute-URL string is the supported form (the base argument would need relative-reference resolution, which the parser does not implement — resolve the input against its base yourself)",
+          sym,
+        );
+      }
+      const input = L.lowerExprExpecting(call.arguments[0]!, STRING);
+      return { kind: "libCall", fn: "url.canParse", args: [input], type: BOOL, loc: locOf(call) };
+    }
+    if (member !== "revokeObjectURL" || call.arguments.length !== 0) return null;
     const sym = L.resolveValueSymbol(callee.expression);
     if (!sym || !L.isStdlibSymbol(sym)) return null;
     return nodeThrowExpr(1, "ERR_MISSING_ARGS", 'The "url" argument must be specified', VOID, locOf(call));

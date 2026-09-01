@@ -2227,6 +2227,22 @@ export type IrLibFn =
   | "url.hostname"
   | "url.pathname"
   | "url.href"
+  /** The remaining WHATWG component getters, all pure reads of fields the
+   * parser already normalized: url.port answers "" when the port is absent
+   * or the scheme default; url.origin answers "scheme://host[:port]" for
+   * the tuple-origin special schemes and the literal "null" for file: and
+   * every opaque-path scheme; url.hash answers "" for BOTH no fragment and
+   * a bare '#'; url.username / url.password split the stored userinfo at
+   * its first ':' and answer "" when absent. */
+  | "url.port"
+  | "url.origin"
+  | "url.hash"
+  | "url.username"
+  | "url.password"
+  /** URL.canParse(input): url.new's accept/reject as a boolean. The one
+   * URL entry point that NEVER throws — deliberately absent from the
+   * may-throw seed set below. */
+  | "url.canParse"
   | "url.fileURLToPathUrl"
   | "url.fileURLToPathStr"
   | "url.pathToFileURL"

@@ -3679,6 +3679,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_url_pathname(${arg(0)})`);
           case "url.href":
             return finish(`scr_url_href(${arg(0)})`);
+          case "url.port":
+            return finish(`scr_url_port(${arg(0)})`);
+          case "url.origin":
+            return finish(`scr_url_origin(${arg(0)})`);
+          case "url.hash":
+            return finish(`scr_url_hash(${arg(0)})`);
+          case "url.username":
+            return finish(`scr_url_username(${arg(0)})`);
+          case "url.password":
+            return finish(`scr_url_password(${arg(0)})`);
+          case "url.canParse":
+            return finish(`scr_url_can_parse(${arg(0)})`);
           case "url.fileURLToPathUrl":
             return finish(`scr_url_to_path(${arg(0)})`);
           case "url.fileURLToPathStr":

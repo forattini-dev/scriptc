@@ -668,15 +668,17 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "url.new" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::url_new(&(${context.emitExpr(arg)}))`;
   }
-  const urlGetter = new Map<string, string>([
-    ["url.protocol", "url_protocol"],
-    ["url.host", "url_host"],
-    ["url.hostname", "url_hostname"],
-    ["url.pathname", "url_pathname"],
-    ["url.href", "url_href"],
-  ]).get(expr.fn);
-  if (urlGetter !== undefined && expr.args.length === 1 && arg !== undefined) {
-    return `runtime::${urlGetter}(&(${context.emitExpr(arg)}))`;
+  // The WHATWG component getters, plus URL.canParse — one borrowed argument
+  // (a URL value for the getters, the input STRING for canParse) and a
+  // runtime name that is just the member in snake_case, so the set alone
+  // drives emission. Deliberately NOT here: searchParams/search (below) and
+  // the fileURLToPath bridge (distinct runtime names).
+  const URL_MEMBER_CALLS = new Set(["protocol", "host", "hostname", "pathname",
+    "href", "port", "origin", "hash", "username", "password", "canParse"]);
+  const urlMember = expr.fn.startsWith("url.") ? expr.fn.slice(4) : undefined;
+  if (urlMember !== undefined && URL_MEMBER_CALLS.has(urlMember) && expr.args.length === 1 && arg !== undefined) {
+    const snake = urlMember.replace(/[A-Z]/g, (upper) => `_${upper.toLowerCase()}`);
+    return `runtime::url_${snake}(&(${context.emitExpr(arg)}))`;
   }
   const urlFileBridge = new Map<string, string>([
     ["url.fileURLToPathUrl", "url_file_url_to_path"],
