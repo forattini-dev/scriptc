@@ -457,6 +457,51 @@
       return host.uuid();
     },
   };
+
+  /* Timers: Node's setTimeout/clearTimeout/setInterval/clearInterval for
+   * embedded code, bridged onto the SHARED native timer heap
+   * (host.setTimer/host.clearTimer) — REF'd like Node's (an armed timer
+   * keeps the process alive), FIFO-ordered against static timers on one
+   * heap. Returns a Timeout-shaped object (ref/unref/refresh/close,
+   * numeric via toPrimitive) that clearTimeout/clearInterval accept
+   * alongside plain ids; unref is accepted but not honored (the entry
+   * stays ref'd — the same documented approximation the C island makes in
+   * scr_web.c, kept identical so the two lanes cannot drift). */
+  class Timeout {
+    constructor(fn, delay, repeat) {
+      this._fn = fn;
+      this._delay = delay;
+      this._repeat = repeat;
+      this._id = host.setTimer(fn, delay, repeat);
+    }
+    ref() { return this; }
+    unref() { return this; }
+    hasRef() { return true; }
+    refresh() {
+      host.clearTimer(this._id);
+      this._id = host.setTimer(this._fn, this._delay, this._repeat);
+      return this;
+    }
+    close() { host.clearTimer(this._id); return this; }
+    [Symbol.toPrimitive]() { return this._id; }
+  }
+  const mkTimer = (fn, ms, args, repeat) => {
+    if (typeof fn !== "function") {
+      throw new TypeError(
+        'The "callback" argument must be of type function. Received type ' + typeof fn,
+      );
+    }
+    const cb = args.length === 0 ? fn : () => fn(...args);
+    return new Timeout(cb, Number(ms), repeat);
+  };
+  global.setTimeout = (fn, ms, ...args) => mkTimer(fn, ms, args, false);
+  global.setInterval = (fn, ms, ...args) => mkTimer(fn, ms, args, true);
+  global.clearTimeout = (t) => {
+    if (t === undefined || t === null) return;
+    const id = typeof t === "number" ? t : Number(t);
+    if (Number.isFinite(id)) host.clearTimer(id);
+  };
+  global.clearInterval = global.clearTimeout;
   const nativeConsoleLog = global.console.log;
   global.console.log = (...values) => nativeConsoleLog(...values.map((value) => String(value)));
 }

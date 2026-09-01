@@ -392,24 +392,49 @@ pub fn island_spread_values(value: &IslandValue) -> Option<Vec<IslandValue>> {
 /// same host turn; a promise still pending afterwards has no native event
 /// source capable of settling it in the current island subset.
 pub fn island_await(value: &IslandValue) -> IslandValue {
-    with_island_state(|state| {
+    let promise = with_island_state(|state| {
         let promise = BoaJsPromise::resolve(value.0.clone(), &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        state
-            .context
-            .run_jobs()
-            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        match promise.state() {
-            BoaPromiseState::Fulfilled(value) => IslandValue(value),
+        island_run_jobs(state);
+        promise
+    });
+    loop {
+        // The borrow is taken per probe and DROPPED before pumping: a
+        // timer callback re-enters the island to call into the realm, and
+        // ISLAND_STATE is a RefCell, so holding it across the pump would
+        // panic rather than run the timer.
+        let settled = with_island_state(|state| match promise.state() {
+            BoaPromiseState::Fulfilled(value) => Some(IslandValue(value)),
             BoaPromiseState::Rejected(reason) => {
                 island_eval_error(BoaJsError::from_opaque(reason), &mut state.context)
             }
-            BoaPromiseState::Pending => throw_error_code(
+            BoaPromiseState::Pending => None,
+        });
+        if let Some(settled) = settled {
+            return settled;
+        }
+        // Pending with no timer armed is genuinely unsettleable: nothing
+        // left on this thread can advance it.
+        if !timers_pump_once() {
+            throw_error_code(
                 "Embedded module promise did not settle".to_owned(),
                 "ERR_MODULE_PROMISE_PENDING",
-            ),
+            );
         }
-    })
+        with_island_state(island_run_jobs);
+    }
+}
+
+/// Drain the realm's queued promise jobs.
+///
+/// Safe to call synchronously only because the island never enqueues a
+/// boa clock job — island timers live on the native heap — so
+/// `run_jobs` has nothing to block on and returns once the queue empties.
+fn island_run_jobs(state: &mut IslandState) {
+    state
+        .context
+        .run_jobs()
+        .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
 }
 
 struct IslandState {
@@ -743,6 +768,70 @@ pub fn island_json_node(value: &IslandValue) -> JsonNode {
 
 pub fn island_to_string(value: &IslandValue) -> JsString {
     with_island_state(|state| island_render(value.0.clone(), &mut state.context))
+}
+
+/// Arm one island timer on the SHARED native timer heap.
+///
+/// Island `setTimeout`/`setInterval` ride `event_loop`'s `TIMER_TASKS` —
+/// the very heap static code schedules on — so the two are one ordering
+/// and one liveness account: an armed island timer keeps the process
+/// alive, exactly as the C island's `host.setTimer` does (scr_web.c).
+/// Scheduling through boa's own `TimeoutJob` was the alternative and is
+/// wrong here: `SimpleJobExecutor::run_jobs` blocks on its private clock,
+/// which would both stall the native loop and order island timers against
+/// static ones by a second, unrelated clock.
+///
+/// A host function runs while `ISLAND_STATE` is ALREADY borrowed by the
+/// call that reached it, so this must not re-enter — it only hands the
+/// engine callback to the loop. The firing closure re-enters later, from
+/// the timer phase, where no borrow is live.
+fn island_timer_set(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(callback) = arguments.first().and_then(JsValue::as_callable) else {
+        return Ok(JsValue::from(0.0));
+    };
+    let delay = arguments.get(1).and_then(JsValue::as_number).unwrap_or(0.0);
+    let repeat = arguments.get(2).is_some_and(JsValue::to_boolean);
+    let fire: Box<dyn FnMut()> = Box::new(move || island_timer_fire(&callback));
+    let id = if repeat {
+        timer_set_interval(fire, delay)
+    } else {
+        timer_set_timeout_handle(fire, delay)
+    };
+    Ok(JsValue::from(id))
+}
+
+fn island_timer_clear(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    if let Some(id) = arguments.first().and_then(JsValue::as_number) {
+        timer_clear(id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Run one island timer callback, then drain the microtasks it queued.
+///
+/// This is the island's macrotask boundary: the callback runs on the
+/// loop's timer phase and its promise continuations settle before the
+/// loop advances — Node's ordering, and what `web_timer_fire_cb` does on
+/// the C side. Re-entering here is safe precisely because the loop owns
+/// this call: no `ISLAND_STATE` borrow is live on the stack below it.
+fn island_timer_fire(callback: &boa_engine::JsObject) {
+    with_island_state(|state| {
+        if let Err(error) = callback.call(&JsValue::undefined(), &[], &mut state.context) {
+            island_eval_error(error, &mut state.context);
+        }
+        state
+            .context
+            .run_jobs()
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+    });
 }
 
 fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {

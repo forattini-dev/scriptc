@@ -1,6 +1,12 @@
 /* The embedded module/edge tables the island resolves against. */
 
-static TEST_MODULES: [IslandModule; 3] = [
+static TEST_MODULES: [IslandModule; 4] = [
+    IslandModule {
+        key: "/pkg/timer.js",
+        source: "export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}",
+        format: IslandModuleFormat::Esm,
+        esm: None,
+    },
     IslandModule {
         key: "/pkg/index.js",
         source: "module.exports = require('./inner.js');",
@@ -346,6 +352,24 @@ fn island_bytes_arguments_copy_out_of_the_realm() {
     let produced = island_call(&produce, &[]);
     let value = island_call(&consume, &[produced]);
     assert_eq!(island_to_string(&value).as_ref(), "7");
+    island_eval_finish();
+}
+
+/// A promise ONLY a timer can settle resolves through `island_await`.
+///
+/// Module evaluation runs before `run_event_loop` starts, so before the
+/// timer bridge existed this shape had no native event source capable of
+/// advancing it and reached ERR_MODULE_PROMISE_PENDING. The await now
+/// drops the ISLAND_STATE borrow between probes and pumps the timer
+/// phase — which is also what lets the timer callback re-enter the realm.
+#[test]
+fn island_await_settles_a_promise_only_a_timer_can_resolve() {
+    with_tables(|| {
+        let delay = island_import(&JsString::from("/pkg/timer.js"), &JsString::from("delay"));
+        let pending = island_call(&delay, &[island_value_number(5.0), island_value_number(42.0)]);
+        let settled = island_await(&pending);
+        assert_eq!(island_to_string(&settled).as_ref(), "42");
+    });
     island_eval_finish();
 }
 

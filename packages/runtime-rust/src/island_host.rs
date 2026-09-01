@@ -323,7 +323,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 31] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 33] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -353,6 +353,11 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 31] = [
     // on its own web host object.
     ("random", island_host_random, 1),
     ("uuid", island_host_uuid, 0),
+    // The timer bridge the web prelude builds its Timeout class over; the
+    // C island registers the same pair on its own web host object, and
+    // both arm on the SHARED native timer heap.
+    ("setTimer", island_timer_set, 3),
+    ("clearTimer", island_timer_clear, 1),
     ("zlib", island_host_zlib, 4),
     ("arch", island_host_arch, 0),
     ("hostname", island_host_hostname, 0),
