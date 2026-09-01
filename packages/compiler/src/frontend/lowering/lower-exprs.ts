@@ -5142,7 +5142,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       let p: ts.Node = expr.parent;
       while (
         ts.isParenthesizedExpression(p) ||
-        (ts.isAsExpression(p) && isConstAssertionTypeNode(p.type))
+        (ts.isAsExpression(p) && isConstAssertionTypeNode(p.type)) ||
+        ts.isPropertyAssignment(p) ||
+        ts.isObjectLiteralExpression(p)
       ) {
         p = p.parent;
       }
