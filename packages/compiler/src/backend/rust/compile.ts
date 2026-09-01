@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { withNativeBuildSlot } from "../native-build-slot.js";
 import type { RustRuntimeFeature } from "./runtime-features.js";
 
 const execFileAsync = promisify(execFile);
@@ -49,6 +50,10 @@ export class RustCompileError extends Error {
  * executable. No C translation unit or C compiler participates in this path.
  */
 export async function compileRust(options: RustCompileOptions): Promise<void> {
+  await withNativeBuildSlot(() => compileRustUnbounded(options));
+}
+
+async function compileRustUnbounded(options: RustCompileOptions): Promise<void> {
   const context = await prepareRustBuild(options);
   await mkdir(dirname(options.outPath), { recursive: true });
   const rustcArgs = [
@@ -66,6 +71,12 @@ export async function compileRust(options: RustCompileOptions): Promise<void> {
 
 /** Compile a generated library-mode module into a C-linkable static archive. */
 export async function compileRustLibrary(
+  options: RustLibraryCompileOptions,
+): Promise<void> {
+  await withNativeBuildSlot(() => compileRustLibraryUnbounded(options));
+}
+
+async function compileRustLibraryUnbounded(
   options: RustLibraryCompileOptions,
 ): Promise<void> {
   const context = await prepareRustBuild({ ...options, library: true });

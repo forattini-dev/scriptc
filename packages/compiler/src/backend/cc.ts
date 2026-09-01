@@ -10,6 +10,7 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { localizeElfObject, mergeAndLocalizeCoffObjects } from "./object-localize.js";
+import { withNativeBuildSlot } from "./native-build-slot.js";
 
 const execFileAsync = promisify(execFile);
 const CC_IMPLEMENTATION_PATH = fileURLToPath(import.meta.url);
@@ -1630,7 +1631,7 @@ async function resolveProgramShardMergeIdentity(driver: CcDriver): Promise<strin
   return null;
 }
 
-export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> {
+async function compileLibArchiveUnbounded(opts: LibArchiveOptions): Promise<void> {
   clearCcCaches();
   const rtDir = runtimeSrcDir();
   const driver = resolveCc();
@@ -2291,6 +2292,10 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
   if (persistentCache !== null) {
     await pruneCache(persistentCache.root).catch(() => undefined);
   }
+}
+
+export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> {
+  await withNativeBuildSlot(() => compileLibArchiveUnbounded(opts));
 }
 
 /* Multi-instance library mode's localization step: combine the program
@@ -5973,8 +5978,10 @@ async function compileCInternal(
 }
 
 export async function compileC(opts: CcOptions): Promise<void> {
-  clearCcCaches();
-  await compileCInternal(opts, false);
+  await withNativeBuildSlot(async () => {
+    clearCcCaches();
+    await compileCInternal(opts, false);
+  });
 }
 
 export type NativeCacheWarmProfile = "runtime" | "tls" | "dynamic";
@@ -6053,15 +6060,15 @@ export async function warmNativeCaches(
   try {
     const results = await Promise.all(profiles.map(async (profile) => {
       const started = performance.now();
-      await compileCInternal({
-        cPath,
-        outPath: join(workDir, process.platform === "win32" ? `${profile}.exe` : profile),
-        cacheIdentity: "scriptc-native-cache-warm-v1",
-        optimization: options.optimization ?? "release",
-        sanitize: options.sanitize ?? false,
-        ...(profile === "tls" ? { fetch: true } : {}),
-        ...(profile === "dynamic" ? { dynamic: true } : {}),
-      }, true, protectedPaths);
+      await withNativeBuildSlot(() => compileCInternal({
+          cPath,
+          outPath: join(workDir, process.platform === "win32" ? `${profile}.exe` : profile),
+          cacheIdentity: "scriptc-native-cache-warm-v1",
+          optimization: options.optimization ?? "release",
+          sanitize: options.sanitize ?? false,
+          ...(profile === "tls" ? { fetch: true } : {}),
+          ...(profile === "dynamic" ? { dynamic: true } : {}),
+        }, true, protectedPaths));
       return {
         profile,
         elapsedMs: Math.round((performance.now() - started) * 10) / 10,

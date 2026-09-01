@@ -76,7 +76,7 @@ fixture or generated scenario the implementation worklist.
 
 Full-suite runs (`vitest run` with no filters) take one advisory machine-wide lock (a pidfile in the OS temp dir) so plain and sanitized suites queue instead of oversubscribing the CPU. Filtered and watch runs never wait. `SCRIPTC_NO_LOCK=1` opts out; stale locks from dead processes are stolen automatically.
 
-Direct local runs default to two Vitest workers, two nested native compiler jobs per worker, and one Cargo job. Their temporary build trees live under `~/.cache/scriptc/test-tmp` instead of a RAM-backed system `/tmp` when the shell has not selected its own `TMPDIR`. `SCRIPTC_TEST_WORKERS`, `SCRIPTC_NATIVE_WORKERS`, `CARGO_BUILD_JOBS`, and `TMPDIR` override those defaults for CI or deliberate high-capacity runs.
+Direct local runs default to two Vitest workers, two nested native compiler jobs per worker, and one Cargo job. C/LLVM and Rust build transactions additionally share two host-wide seats across processes and worktrees; a dead owner is reclaimed automatically. `pnpm limit` narrows every one of those controls to one seat. Their temporary build trees live under `~/.cache/scriptc/test-tmp` instead of a RAM-backed system `/tmp` when the shell has not selected its own `TMPDIR`. `SCRIPTC_TEST_WORKERS`, `SCRIPTC_NATIVE_WORKERS`, `SCRIPTC_NATIVE_HOST_WORKERS`, `CARGO_BUILD_JOBS`, `SCRIPTC_NATIVE_LOCK_DIR`, and `TMPDIR` override those defaults for CI or deliberate high-capacity runs.
 
 ## Build and oracle caches
 
