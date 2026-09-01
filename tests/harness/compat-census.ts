@@ -26,6 +26,10 @@ export interface InterfaceCensus {
   instance: string[];
 }
 
+interface ConstructorObject {
+  readonly prototype: object;
+}
+
 const publicWellKnownSymbols = new Map<symbol, string>();
 for (const name of Object.getOwnPropertyNames(Symbol)) {
   const value = (Symbol as unknown as Record<string, unknown>)[name];
@@ -52,12 +56,15 @@ export function reflectInterface(
   source?: CompatInterfaceSource,
 ): InterfaceCensus {
   const explicitPrototype = source?.prototype?.();
-  const ctor = explicitPrototype === undefined
-    ? resolveConstructor(name, source)
-    : null;
-  const prototype = explicitPrototype !== undefined
-    ? (explicitPrototype as object)
-    : (ctor!.prototype as object);
+  let ctor: ConstructorObject | null;
+  let prototype: object;
+  if (explicitPrototype === undefined) {
+    ctor = resolveConstructor(name, source);
+    prototype = ctor.prototype;
+  } else {
+    ctor = null;
+    prototype = explicitPrototype as object;
+  }
 
   const own = Object.getOwnPropertyNames(prototype).filter(
     (member) => member !== "constructor",
@@ -111,11 +118,11 @@ export function reflectInterface(
 function resolveConstructor(
   name: string,
   source?: CompatInterfaceSource,
-): Function & { prototype: object } {
+): ConstructorObject {
   const value = source?.resolve?.()
     ?? (globalThis as unknown as Record<string, unknown>)[name];
   if (typeof value !== "function") {
     throw new Error(`${name} must resolve to a constructor object`);
   }
-  return value as Function & { prototype: object };
+  return value as unknown as ConstructorObject;
 }
