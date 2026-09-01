@@ -40,7 +40,11 @@ export function emitRustIslandExpr(
         return `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ` +
           `${dyn}::Island(sc_value) => runtime::island_exit_bytes(&sc_value), sc_value => ${checked}, } }`;
       }
-      const normalized = `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ${dyn}::Island(sc_value) => runtime::json_parse_typed::<${dyn}>(&runtime::island_json(&sc_value)), sc_value => sc_value, } }`;
+      const normalized = `{ let ${value} = ${emitExpr(expr.value)}; match ${value} { ` +
+        `${dyn}::Island(sc_value) if runtime::island_is_undefined(&sc_value) => ${dyn}::Undefined, ` +
+        `${dyn}::Island(sc_value) if runtime::island_is_null(&sc_value) => ${dyn}::Null, ` +
+        `${dyn}::Island(sc_value) => runtime::json_parse_typed::<${dyn}>(&runtime::island_json(&sc_value)), ` +
+        `sc_value => sc_value, } }`;
       return context.emitDynCheckValue(expr.type, normalized, expr.loc);
     }
     case "jsOp": return emitOperation(expr, context, emitExpr);
@@ -201,6 +205,19 @@ function emitOperation(
     const receiver = context.nextName("sc_island_receiver");
     const key = context.nextName("sc_island_key");
     const value = context.nextName("sc_island_value");
+    if (context.hasEmbeddedModules()) {
+      const islandKey = context.nextName("sc_island_property_key");
+      const islandValue = context.nextName("sc_island_property_value");
+      const dyn = context.dynTypeName();
+      return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; ` +
+        `let ${key} = ${emitExpr(argOf(expr, 1, context))}; ` +
+        `let ${value} = ${emitExpr(argOf(expr, 2, context))}; match &${receiver} { ` +
+        `${dyn}::Island(sc_receiver) => { ` +
+        `let ${islandKey} = ${emitIslandValue(`&${key}`, context)}; ` +
+        `let ${islandValue} = ${emitIslandValue(`&${value}`, context)}; ` +
+        `runtime::island_set_index(sc_receiver, &${islandKey}, &${islandValue}); }, ` +
+        `_ => sc_dyn_key_set(&${receiver}, sc_dyn_to_string(&${key}), ${value}), } }`;
+    }
     return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(argOf(expr, 1, context))}; let ${value} = ${emitExpr(argOf(expr, 2, context))}; sc_dyn_key_set(&${receiver}, sc_dyn_to_string(&${key}), ${value}); }`;
   }
   if (expr.op === "objSpread" && expr.args.length === 2) {

@@ -367,6 +367,23 @@ pub fn island_get_index(value: &IslandValue, key: &IslandValue) -> IslandValue {
     })
 }
 
+pub fn island_set_index(value: &IslandValue, key: &IslandValue, field: &IslandValue) {
+    with_island_state(|state| {
+        let context = &mut state.context;
+        let object = value
+            .0
+            .to_object(context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let property_key = key
+            .0
+            .to_property_key(context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        object
+            .set(property_key, field.0.clone(), true, context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+    });
+}
+
 pub fn island_global_get(name: &str) -> IslandValue {
     with_island_state(|state| {
         let global = state.context.global_object();

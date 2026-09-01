@@ -191,4 +191,24 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("alpha:one\nbeta:true\n");
   });
+
+  test("computed writes mutate a package-returned record inside its realm", async () => {
+    const fixture = join(fixtures, "computed-write-package-record.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("computed-write-package-record.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("boolean\n");
+  });
+
+  test("undefined package results cross the island without JSON serialization", async () => {
+    const fixture = join(fixtures, "undefined-package-result.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("undefined-package-result.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("true\n");
+  });
 });
