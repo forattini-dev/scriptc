@@ -48,21 +48,8 @@ function emitMarshal(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string {
-  if (
-    expr.value.type.kind === "func" && context.hasEmbeddedModules() &&
-    expr.value.type.rest !== true && expr.value.type.params.every((param) => param.kind === "string") &&
-    expr.value.type.ret.kind === "string"
-  ) {
-    const closure = context.nextName("sc_island_host_closure");
-    const argumentsName = context.nextName("sc_island_host_arguments");
-    const args = expr.value.type.params.map((_, index) =>
-      `runtime::island_host_argument_string(${argumentsName}, ${index})`
-    );
-    const dispatch = context.emitClosureDispatch(closure, expr.value.type, args, expr.loc);
-    return `{ let ${closure} = ${emitExpr(expr.value)}; ` +
-      `${context.dynTypeName()}::Island(runtime::island_value_host_function(${args.length}, ` +
-      `std::rc::Rc::new(move |${argumentsName}| runtime::IslandHostResult::String(${dispatch})))) }`;
-  }
+  const host = emitHostFunction(expr, context, emitExpr);
+  if (host !== null) return host;
   switch (expr.value.type.kind) {
     case "f64":
     case "bool":
@@ -79,6 +66,70 @@ function emitMarshal(
     default:
       context.unsupported(`island marshal from '${expr.value.type.kind}'`, expr.loc);
   }
+}
+
+/** Extract one engine argument as a closure parameter's static type.
+ *
+ * Strict by kind, like the C island's typed adapters: the engine's value
+ * is checked at the boundary, never coerced. */
+function hostArgument(type: IrType, args: string, index: number): string | null {
+  const extract = (helper: string): string => `runtime::${helper}(${args}, ${index})`;
+  switch (type.kind) {
+    case "string": return extract("island_host_argument_string");
+    case "f64": return extract("island_host_argument_number");
+    case "bool": return extract("island_host_argument_bool");
+    case "bytes": return type.elem === "u8" ? extract("island_host_argument_bytes") : null;
+    default: return null;
+  }
+}
+
+/** Marshal a closure's return back into the realm.
+ *
+ * `record` rides the JSON path — the type-directed serializer, then the
+ * realm's own parser: the deep copy the rest of this boundary already
+ * performs for composites. */
+function hostResult(type: IrType, value: string): string | null {
+  const result = (variant: string, payload: string): string =>
+    `runtime::IslandHostResult::${variant}(${payload})`;
+  switch (type.kind) {
+    case "void": return `{ ${value}; runtime::IslandHostResult::Undefined }`;
+    case "string": return result("String", value);
+    case "f64": return result("Number", value);
+    case "bool": return result("Bool", value);
+    case "bytes":
+      return type.elem === "u8"
+        ? result("Bytes", `runtime::island_bytes_values(&(${value}))`)
+        : null;
+    case "record": return result("Json", `runtime::json_stringify(&(${value}))`);
+    default: return null;
+  }
+}
+
+/** A scriptc closure crossing into the realm as a callable.
+ *
+ * Returns null when the signature is outside the marshaled subset, so the
+ * caller falls through to the generic checked-dynamic paths. */
+function emitHostFunction(
+  expr: Extract<IrExpr, { kind: "jsMarshal" }>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string | null {
+  const type = expr.value.type;
+  if (type.kind !== "func" || !context.hasEmbeddedModules() || type.rest === true) return null;
+  const closure = context.nextName("sc_island_host_closure");
+  const argumentsName = context.nextName("sc_island_host_arguments");
+  const args: string[] = [];
+  for (const [index, param] of type.params.entries()) {
+    const argument = hostArgument(param, argumentsName, index);
+    if (argument === null) return null;
+    args.push(argument);
+  }
+  const dispatch = context.emitClosureDispatch(closure, type, args, expr.loc);
+  const result = hostResult(type.ret, dispatch);
+  if (result === null) return null;
+  return `{ let ${closure} = ${emitExpr(expr.value)}; ` +
+    `${context.dynTypeName()}::Island(runtime::island_value_host_function(${args.length}, ` +
+    `std::rc::Rc::new(move |${argumentsName}| ${result}))) }`;
 }
 
 function emitOperation(

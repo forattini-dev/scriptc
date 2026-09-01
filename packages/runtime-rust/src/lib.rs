@@ -39,6 +39,8 @@ include!("errors.rs");
 include!("ffi_callbacks.rs");
 include!("ffi_foreign.rs");
 #[cfg(feature = "island-eval")]
+include!("island_modules.rs");
+#[cfg(feature = "island-eval")]
 include!("island_eval.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
@@ -105,4 +107,6 @@ mod tests {
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("tests/tls.rs");
+    #[cfg(feature = "island-eval")]
+    include!("tests/island_modules.rs");
 }
