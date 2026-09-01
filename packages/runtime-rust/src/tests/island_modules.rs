@@ -386,3 +386,70 @@ fn island_edge_lookup_misses_are_none() {
         );
     });
 }
+
+/* ── panic hardening ───────────────────────────────────────────────── */
+
+/// A genuine Rust panic reached while the island realm is active (an
+/// `assert!` failure inside code that entered the island, not a scriptc
+/// `throw`) must surface with its OWN message and leave the realm torn
+/// down and safely rebuildable -- not corrupt `ISLAND_STATE` for whatever
+/// runs next.
+///
+/// This is `with_island_state`'s catch/resume boundary from island_eval.rs
+/// exercised directly: before it existed, the panicking `RefMut` borrow
+/// simply released on unwind without dropping the `IslandState` it guarded,
+/// so the SAME (possibly mid-mutation) realm silently kept serving later
+/// calls, and it was only torn down much later at uncontrolled thread-exit
+/// -- which is where the original bug turned into a glibc heap-corruption
+/// abort that buried this very message.
+#[test]
+fn island_panic_gets_orderly_teardown_not_left_for_thread_exit() {
+    island_eval(&string("globalThis.marker = 1;"));
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_island_state(|_state| {
+            assert_eq!(1, 2, "island hardening probe");
+        });
+    }));
+    let message = outcome.err().and_then(|payload| {
+        payload.downcast_ref::<String>().cloned().or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|text| (*text).to_owned())
+        })
+    });
+    assert!(
+        message.is_some_and(|message| message.contains("island hardening probe")),
+        "expected the assertion's own message to survive the unwind, not a masked abort"
+    );
+
+    // A pre-fix realm would still answer "number" here: the old marker
+    // survived because nothing ever dropped the mid-panic IslandState.
+    let rendered = island_eval(&string("typeof globalThis.marker"));
+    assert_eq!(rendered.as_ref(), "undefined");
+    let rendered = island_eval(&string("1 + 1"));
+    assert_eq!(rendered.as_ref(), "2");
+    island_eval_finish();
+}
+
+/// A scriptc `throw` (the runtime's OWN panic-based control flow) crossing
+/// this same boundary is expected, not a defect: the realm's globals must
+/// survive so a later `island_eval` after the catch sees them, exactly
+/// like Node's `try { throw x } catch {}` followed by more code in the
+/// same module scope.
+#[test]
+fn island_scriptc_throw_leaves_the_realm_intact() {
+    island_eval(&string("globalThis.marker = 'kept';"));
+
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        island_eval(&string("throw new TypeError('expected')"));
+    }));
+    assert!(
+        outcome.is_err(),
+        "the island throw must still unwind the call"
+    );
+
+    let rendered = island_eval(&string("globalThis.marker"));
+    assert_eq!(rendered.as_ref(), "kept");
+    island_eval_finish();
+}

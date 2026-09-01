@@ -184,6 +184,19 @@ struct RuntimeTrap {
     code: &'static str,
 }
 
+/// Whether an unwind payload is scriptc's own throw/trap marker rather
+/// than a genuine Rust panic (`assert!`, `.unwrap()`, a boa-internal bug).
+///
+/// A scriptc `throw` is expected control flow: it unwinds up to a compiled
+/// `try`/`catch` (itself a `catch_unwind`) and execution may resume with
+/// the same persistent state afterward, so callers must resume it
+/// untouched. Anything else crossing a realm boundary is a real defect —
+/// see `is_scriptc_unwind`'s callers in island_eval.rs for the teardown
+/// this distinction gates.
+pub fn is_scriptc_unwind(payload: &(dyn Any + Send)) -> bool {
+    payload.is::<ScriptThrow>() || payload.is::<RuntimeTrap>()
+}
+
 pub fn library_traps_enable() {
     LIBRARY_TRAPS_ENABLED.with(|enabled| enabled.set(true));
 }

@@ -834,12 +834,37 @@ fn island_timer_fire(callback: &boa_engine::JsObject) {
     });
 }
 
+/// The single funnel every island call passes through, so it is also the
+/// one place that can catch an unwind crossing the realm and decide what
+/// it means for `ISLAND_STATE`.
+///
+/// A scriptc `throw` reaching here (a `ScriptThrow`/`RuntimeTrap` marker)
+/// is ordinary control flow — it is resumed untouched, and the realm's
+/// globals stay live for a later `island_eval` call after the catch. Any
+/// OTHER panic (an `assert!`/`.unwrap()` failure, a boa-internal bug) may
+/// have left the engine's GC arena mid-mutation, so it gets `IslandState`
+/// torn down right here, deterministically, before the unwind continues.
+/// Previously that teardown never happened at all: the thread_local only
+/// drops at uncontrolled thread-exit, by which point the corrupted
+/// invariant had already turned into a glibc heap-corruption abort that
+/// buried the original panic message.
 fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {
-    ISLAND_STATE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let state = slot.get_or_insert_with(island_state);
-        f(state)
-    })
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ISLAND_STATE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let state = slot.get_or_insert_with(island_state);
+            f(state)
+        })
+    }));
+    match outcome {
+        Ok(value) => value,
+        Err(payload) => {
+            if !is_scriptc_unwind(payload.as_ref()) {
+                island_eval_finish();
+            }
+            std::panic::resume_unwind(payload)
+        }
+    }
 }
 
 fn island_state() -> IslandState {
@@ -958,6 +983,12 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
         .unwrap_or_else(|_| fallback.to_owned())
 }
 
+/// Normal end-of-run teardown of the island realm and its host bridges.
+///
+/// Also reused as the panic-teardown path in `with_island_state`: an
+/// unexpected panic (not a scriptc throw) crossing the realm calls this
+/// too, so `ISLAND_STATE` never survives to an uncontrolled thread-exit
+/// drop with the GC arena mid-mutation.
 fn island_eval_finish() {
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
     island_modules_reset();
