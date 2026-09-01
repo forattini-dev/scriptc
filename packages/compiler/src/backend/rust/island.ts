@@ -333,7 +333,11 @@ function emitOperation(
  * whole operation); a NATIVE receiver reads it twice — once for the
  * nullish guard, once inside sc_dyn_invoke — which is observable only
  * through a dyn accessor property, and never on the island receivers this
- * operation is lowered for. */
+ * operation is lowered for.
+ *
+ * Because that arm calls sc_dyn_invoke, this op MUST stay listed in the
+ * emitter's usesDynamicInvoke scan; otherwise the helper is never emitted
+ * and the generated program does not compile. */
 function emitOptionalMethodCall(
   expr: Extract<IrExpr, { kind: "jsOp" }>,
   context: RustIslandContext,
