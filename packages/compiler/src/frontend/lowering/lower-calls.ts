@@ -4696,9 +4696,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const getU = (id: string) => L.unions.get(id);
     const anyJsvalSpread = spreadParts.some((p) => p.v.type.kind === "jsval");
     if (
-      !anyJsvalSpread &&
+      (!anyJsvalSpread || (L.dynamic && callee.type.kind === "dyn")) &&
       (callee.type.kind === "dyn" || (callee.type.kind === "func" && canBoxFuncIntoDyn(callee.type, getR, getU))) &&
-      spreadParts.every((p) => p.v.type.kind === "dyn" || canConvertToDyn(p.v.type, getR, getU))
+      spreadParts.every((p) =>
+        p.v.type.kind === "dyn" ||
+        (L.dynamic && callee.type.kind === "dyn" && p.v.type.kind === "jsval") ||
+        canConvertToDyn(p.v.type, getR, getU)
+      )
     ) {
       const args: IrExpr[] = [];
       const spreads: { arg: number; what: string }[] = [];

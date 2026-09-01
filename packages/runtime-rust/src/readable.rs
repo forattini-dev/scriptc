@@ -218,16 +218,49 @@ where
     R: Clone + Trace + 'static,
 {
     let chunk = data.chunks.pop_front()?;
-    let length = if data.object_mode {
-        1
-    } else {
-        match &chunk {
-            ReadableChunk::Bytes(bytes) => bytes_len(bytes) as usize,
-            ReadableChunk::String(text) => text.encode_utf16().count(),
+    if data.object_mode {
+        data.buffered_length = data.buffered_length.saturating_sub(1);
+        return Some(chunk);
+    }
+
+    // Node's Readable async iterator obtains each value with read(), whose
+    // absent size consumes all content buffered at that instant. Preserve
+    // object-mode boundaries above, but join byte/string pushes that arrived
+    // before this next() settles. Chunks produced in later event-loop turns
+    // are still delivered by later next() calls.
+    let joined = match chunk {
+        ReadableChunk::Bytes(first) => {
+            let mut pieces = vec![first];
+            while matches!(data.chunks.front(), Some(ReadableChunk::Bytes(_))) {
+                let Some(ReadableChunk::Bytes(piece)) = data.chunks.pop_front() else {
+                    unreachable!("scriptc: checked buffered Readable byte chunk")
+                };
+                pieces.push(piece);
+            }
+            ReadableChunk::Bytes(if pieces.len() == 1 {
+                pieces.pop().expect("scriptc: first Readable byte chunk")
+            } else {
+                buffer_concat(&array_new(pieces))
+            })
+        }
+        ReadableChunk::String(mut text) => {
+            while matches!(data.chunks.front(), Some(ReadableChunk::String(_))) {
+                let Some(ReadableChunk::String(piece)) = data.chunks.pop_front() else {
+                    unreachable!("scriptc: checked buffered Readable string chunk")
+                };
+                text = string_concat(&text, &piece);
+            }
+            ReadableChunk::String(text)
         }
     };
-    data.buffered_length = data.buffered_length.saturating_sub(length);
-    Some(chunk)
+    data.buffered_length = data.chunks.iter().fold(0, |length, chunk| {
+        length
+            + match chunk {
+                ReadableChunk::Bytes(bytes) => bytes_len(bytes) as usize,
+                ReadableChunk::String(text) => text.encode_utf16().count(),
+            }
+    });
+    Some(joined)
 }
 
 fn readable_settle_next<L, R>(readable: &JsReadable<L, R>)

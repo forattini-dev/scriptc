@@ -1,6 +1,8 @@
 use boa_engine::{
-    Context, JsError as BoaJsError, JsResult, JsValue, Module, NativeFunction, Source, js_string,
+    Context, JsError as BoaJsError, JsResult, JsSymbol as BoaJsSymbol, JsValue, Module,
+    NativeFunction, Source,
     builtins::promise::PromiseState as BoaPromiseState,
+    js_string,
     module::MapModuleLoader,
     object::builtins::{JsArray as BoaJsArray, JsPromise as BoaJsPromise},
     object::{FunctionObjectBuilder, ObjectInitializer},
@@ -63,16 +65,16 @@ pub fn island_value_string(value: &JsString) -> IslandValue {
 }
 
 pub fn island_host_argument_string(arguments: &[IslandHostArgument], index: usize) -> JsString {
-    let Some(value) = arguments.get(index).and_then(|argument| argument.0.0.as_string()) else {
+    let Some(value) = arguments
+        .get(index)
+        .and_then(|argument| argument.0.0.as_string())
+    else {
         throw_type_error(format!("expected string at argument {index}"));
     };
     string(&value.to_std_string_lossy())
 }
 
-pub fn island_value_host_function(
-    arity: usize,
-    callback: IslandHostCallback,
-) -> IslandValue {
+pub fn island_value_host_function(arity: usize, callback: IslandHostCallback) -> IslandValue {
     let id = ISLAND_HOST_CALLBACK_ID.with(|next| {
         let id = next.get();
         next.set(id.wrapping_add(1));
@@ -88,7 +90,9 @@ pub fn island_value_host_function(
                 .collect::<Vec<_>>();
             let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
                 let callbacks = callbacks.borrow();
-                let callback = callbacks.get(&id).expect("scriptc: missing island host callback");
+                let callback = callbacks
+                    .get(&id)
+                    .expect("scriptc: missing island host callback");
                 callback(&arguments)
             });
             Ok(match result {
@@ -120,10 +124,10 @@ pub fn island_value_object(fields: Vec<(JsString, IslandValue)>) -> IslandValue 
 
 pub fn island_value_array(values: Vec<IslandValue>) -> IslandValue {
     with_island_state(|state| {
-        IslandValue(BoaJsArray::from_iter(
-            values.into_iter().map(|value| value.0),
-            &mut state.context,
-        ).into())
+        IslandValue(
+            BoaJsArray::from_iter(values.into_iter().map(|value| value.0), &mut state.context)
+                .into(),
+        )
     })
 }
 
@@ -185,6 +189,63 @@ pub fn island_is_function(value: &IslandValue) -> bool {
     value.0.as_callable().is_some()
 }
 
+/// Consume an embedded JavaScript value through its synchronous iterator.
+///
+/// `None` means the value has no callable `Symbol.iterator`; errors thrown by
+/// getters or by the iterator itself retain their JavaScript exception path.
+/// Generated spread code owns the Node-specific message for the `None` case.
+pub fn island_spread_values(value: &IslandValue) -> Option<Vec<IslandValue>> {
+    with_island_state(|state| {
+        let context = &mut state.context;
+        if value.0.is_null_or_undefined() {
+            return None;
+        }
+        let object = value
+            .0
+            .to_object(context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let method = object
+            .get(BoaJsSymbol::iterator(), context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let Some(method) = method.as_callable() else {
+            return None;
+        };
+        let iterator = method
+            .call(&value.0, &[], context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let Some(iterator) = iterator.as_object() else {
+            throw_type_error("iterator method returned a non-object".to_owned());
+        };
+        let next = iterator
+            .get(js_string!("next"), context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        let Some(next) = next.as_callable() else {
+            throw_type_error("iterator.next is not a function".to_owned());
+        };
+        let mut values = Vec::new();
+        loop {
+            let result = next
+                .call(&iterator.clone().into(), &[], context)
+                .unwrap_or_else(|error| island_eval_error(error, context));
+            let Some(result) = result.as_object() else {
+                throw_type_error("iterator result is not an object".to_owned());
+            };
+            let done = result
+                .get(js_string!("done"), context)
+                .unwrap_or_else(|error| island_eval_error(error, context))
+                .to_boolean();
+            if done {
+                break;
+            }
+            let item = result
+                .get(js_string!("value"), context)
+                .unwrap_or_else(|error| island_eval_error(error, context));
+            values.push(IslandValue(item));
+        }
+        Some(values)
+    })
+}
+
 /// Apply JavaScript await adoption inside the embedded realm and return the
 /// fulfilled value. Embedded module jobs are single-threaded and run on this
 /// same host turn; a promise still pending afterwards has no native event
@@ -238,7 +299,10 @@ pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
     with_island_state(|state| {
         let key = key.as_ref();
         let Some((&module_key, module)) = state.modules.get_key_value(key) else {
-            throw_error_code(format!("Cannot find embedded module '{key}'"), "ERR_MODULE_NOT_FOUND");
+            throw_error_code(
+                format!("Cannot find embedded module '{key}'"),
+                "ERR_MODULE_NOT_FOUND",
+            );
         };
         if state.evaluated.insert(module_key) {
             let promise = module.load_link_evaluate(&mut state.context);
@@ -261,7 +325,10 @@ pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
         }
         let value = module
             .namespace(&mut state.context)
-            .get(boa_engine::JsString::from(export.as_ref()), &mut state.context)
+            .get(
+                boa_engine::JsString::from(export.as_ref()),
+                &mut state.context,
+            )
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
         IslandValue(value)
     })
@@ -306,7 +373,9 @@ pub fn island_json(value: &IslandValue) -> JsString {
             .0
             .to_json(&mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context))
-            .unwrap_or_else(|| throw_type_error("Island value is not JSON-serializable".to_owned()));
+            .unwrap_or_else(|| {
+                throw_type_error("Island value is not JSON-serializable".to_owned())
+            });
         string(&json.to_string())
     })
 }
@@ -371,7 +440,11 @@ fn island_state() -> IslandState {
             modules.insert(embedded.key, module);
         }
     });
-    IslandState { context, modules, evaluated: HashSet::new() }
+    IslandState {
+        context,
+        modules,
+        evaluated: HashSet::new(),
+    }
 }
 
 fn island_render(value: JsValue, context: &mut Context) -> JsString {

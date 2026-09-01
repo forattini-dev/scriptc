@@ -123,12 +123,18 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`${name}::Buffer(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::String(source) => { for character in source.chars() { sc_dyn_pack_push(pack, ${name}::String(runtime::string(&character.to_string()))); } return; },`);
   context.line(`${name}::ArrayIterator(source) => { while let Some(item) = runtime::array_iterator_next(source) { let value = match item { runtime::ArrayIteratorItem::Entry(index, value) => ${name}::Array(runtime::array_new(vec![${name}::Number(index), value])), runtime::ArrayIteratorItem::Key(index) => ${name}::Number(index), runtime::ArrayIteratorItem::Value(value) => value, }; sc_dyn_pack_push(pack, value); } return; },`);
+  if (context.hasEmbeddedModules()) {
+    context.line(`${name}::Island(source) => { if let Some(values) = runtime::island_spread_values(source) { for value in values { sc_dyn_pack_push(pack, ${name}::Island(value)); } return; } },`);
+  }
   context.line("_ => {},");
   context.popIndent();
   context.line("}");
   context.line("if !iterated {");
   context.pushIndent();
   context.line(`if matches!(source, ${name}::Undefined | ${name}::Null) { let property = if matches!(source, ${name}::Undefined) { "undefined" } else { "null" }; runtime::throw_type_error(format!("{what} is not iterable (cannot read property {property})")); }`);
+  if (context.hasEmbeddedModules()) {
+    context.line(`if let ${name}::Island(value) = source { let property = if runtime::island_is_undefined(value) { Some("undefined") } else if runtime::island_is_null(value) { Some("null") } else { None }; if let Some(property) = property { runtime::throw_type_error(format!("{what} is not iterable (cannot read property {property})")); } }`);
+  }
   context.line('runtime::throw_type_error("Spread syntax requires ...iterable[Symbol.iterator] to be a function".to_owned());');
   context.popIndent();
   context.line("}");
