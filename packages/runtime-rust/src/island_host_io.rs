@@ -390,6 +390,34 @@ fn island_host_hmac(
     }
 }
 
+/// `host.random(n)` → `n` fresh CSPRNG bytes as a `Uint8Array`.
+///
+/// The C island writes randomness straight into the caller's view
+/// (`web_host_fill`, scr_web.c); Boa has no in-place typed-array write at
+/// the host boundary, so this hands back a byte array the web prelude
+/// copies over the target through a `Uint8Array` view of the same buffer.
+/// Same CSPRNG, same observable result — only the copy differs.
+fn island_host_random(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let size = island_host_arg_number(arguments, 0, context)?;
+    let bytes = island_host_run(|| crypto_random_bytes(size), context)?;
+    island_host_bytes(&bytes, context)
+}
+
+/// `host.uuid()` → a version 4 UUID, the same primitive the static lane's
+/// `crypto.randomUUID` lowers to.
+fn island_host_uuid(
+    _this: &JsValue,
+    _arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let uuid = island_host_run(crypto_random_uuid, context)?;
+    Ok(JsValue::from(boa_engine::JsString::from(uuid.as_ref())))
+}
+
 /* ── zlib ──────────────────────────────────────────────────────────── */
 
 /// `host.zlib(deflating, bytes, mode, level)`.

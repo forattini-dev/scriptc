@@ -1,4 +1,9 @@
-((global) => {
+/* The web-platform prelude, called from island_eval.rs with the same
+ * `host` bridge the module bootstrap gets. It is an ARROW, not an IIFE,
+ * so the host object can cross in — mirroring scr_island_web_boot on the
+ * C lane, which evals its prelude to a function and calls it with a host. */
+(host) => {
+  const global = globalThis;
   class TextEncoder {
     get encoding() {
       return "utf-8";
@@ -414,6 +419,44 @@
   if (global.queueMicrotask === undefined) {
     global.queueMicrotask = (callback) => { Promise.resolve().then(callback); };
   }
+  /* globalThis.crypto: the WebCrypto slice node:crypto's shim routes its
+   * randomness through (12-crypto.js reads globalThis.crypto once, at
+   * shim-factory time, so this must exist before the module bootstrap).
+   * The validation — integer-TypedArray kind, the 65536-byte quota, and
+   * the DOMException names Node reports — lives HERE, matching the C
+   * island's web prelude text; only the fill itself differs, because Boa
+   * cannot write a caller's view in place: host.random hands back bytes
+   * this copies over the target through a view of the same buffer.
+   * No `subtle`: the shim already answers `undefined` for it. */
+  const integerTypedArrays = [
+    "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
+    "Int32Array", "Uint32Array", "BigInt64Array", "BigUint64Array",
+  ];
+  global.crypto = {
+    getRandomValues(view) {
+      const tag = view === null || typeof view !== "object"
+        ? ""
+        : Object.prototype.toString.call(view).slice(8, -1);
+      if (integerTypedArrays.indexOf(tag) < 0) {
+        const error = new TypeError("crypto.getRandomValues takes an integer TypedArray");
+        error.name = "TypeMismatchError";
+        throw error;
+      }
+      if (view.byteLength > 65536) {
+        const error = new Error("The requested length exceeds 65,536 bytes");
+        error.name = "QuotaExceededError";
+        throw error;
+      }
+      if (view.byteLength > 0) {
+        const target = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+        target.set(host.random(view.byteLength));
+      }
+      return view;
+    },
+    randomUUID() {
+      return host.uuid();
+    },
+  };
   const nativeConsoleLog = global.console.log;
   global.console.log = (...values) => nativeConsoleLog(...values.map((value) => String(value)));
-})(globalThis);
+}

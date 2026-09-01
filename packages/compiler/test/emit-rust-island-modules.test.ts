@@ -120,6 +120,57 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe("go:undefined\n");
   });
 
+  test("a static RegExp argument arrives as a real realm RegExp", async () => {
+    // The frontend rebuilds the value as `new RegExp(source, flags)`,
+    // which on this lane lands as a NATIVE regex; the argument marshal
+    // then has to hand the realm an engine RegExp built from the same
+    // text rather than refusing the call (SC3001). The `instanceof
+    // RegExp` column is what proves a realm object arrived, not a
+    // stringified stand-in, and the trailing line pins that the host
+    // value survives the crossing intact.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "regexp-argument.ts")]),
+      await run(await build("regexp-argument.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe(
+      "true:^a+$::true\ntrue:b:i:true\ntrue:z\\s:gimsu:true\n" +
+        "true:c\\d+::true\nc\\d+::true\n",
+    );
+  });
+
+  test("globalThis.crypto backs the node:crypto randomness surface", async () => {
+    // The realm's web prelude installs `crypto` over the host CSPRNG
+    // before the module bootstrap runs, because node:crypto's shim
+    // captures the global ONCE at shim-factory time. Shape-only, so the
+    // Node oracle agrees byte for byte.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "web-crypto.ts")]),
+      await run(await build("web-crypto.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe(
+      "bytes:16:0|uuid:true|uuid-global:true|grv:true:4|grv-global:true|" +
+        "grv-offset:0,0,0,0|int:true\n",
+    );
+  });
+
+  test("events.on iterates an emitter's buffered events", async () => {
+    // The named export the builtin table announced but the shim never
+    // defined. Everything is emitted before the loop, so the iterator
+    // only drains its own buffer — no timer source is involved, and the
+    // three exits (break, options.close, an 'error' behind a buffered
+    // event) all resolve synchronously against the job queue.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "events-on.ts")]),
+      await run(await build("events-on.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe(
+      "types:function:function|break:1,2|close:xy|error:kept:boom|once:7,8\n",
+    );
+  });
+
   test("dynamic import() answers the embedded module's namespace", async () => {
     // The realm's promise of the whole namespace, bridged to the static
     // promise the await parks on.

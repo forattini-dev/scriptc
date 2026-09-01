@@ -322,6 +322,80 @@ static const char isl_modules_bootstrap[] =
     "      emitter.once(name, onEvent);\n"
     "      if (name !== 'error') emitter.once('error', onError);\n"
     "    });\n"
+    /* events.on(emitter, name, options): the async iterator over an
+     * emitter's events. Announced as a named export since the shim
+     * landed, but never defined — `import { on } from "events"` bound
+     * undefined. Events arriving faster than the consumer buffer in
+     * `queue`; a consumer arriving first parks in `pending`. An 'error'
+     * event (unless that IS the watched name) throws into the iterator,
+     * `options.close` names events that end it, and `options.signal`
+     * aborts it — Node's own three exits, plus `return()` for a `break`.
+     * The C island drives this to completion; the Rust island has no
+     * timer source, so a `for await` that outruns already-buffered
+     * events parks forever there (ERR_MODULE_PROMISE_PENDING) — the
+     * limit EventEmitter.once already carries on that lane. */
+    "    EventEmitter.on = (emitter, name, options) => {\n"
+    "      const closes = options && options.close ? options.close : [];\n"
+    "      const queue = [];\n"
+    "      const pending = [];\n"
+    "      let failure = null;\n"
+    "      let done = false;\n"
+    "      const push = (...args) => {\n"
+    "        const next = pending.shift();\n"
+    "        if (next) next.resolve({ value: args, done: false });\n"
+    "        else queue.push(args);\n"
+    "      };\n"
+    "      const stop = () => {\n"
+    "        emitter.removeListener(name, push);\n"
+    "        if (name !== 'error') emitter.removeListener('error', fail);\n"
+    "        for (const close of closes) emitter.removeListener(close, finish);\n"
+    "      };\n"
+    "      const finish = () => {\n"
+    "        done = true;\n"
+    "        stop();\n"
+    "        const next = pending.shift();\n"
+    "        if (next) next.resolve({ value: undefined, done: true });\n"
+    "      };\n"
+    "      const fail = (err) => {\n"
+    "        const next = pending.shift();\n"
+    "        if (next) { done = true; stop(); next.reject(err); return; }\n"
+    "        failure = err;\n"
+    "        finish();\n"
+    "      };\n"
+    "      emitter.on(name, push);\n"
+    "      if (name !== 'error') emitter.on('error', fail);\n"
+    "      for (const close of closes) emitter.on(close, finish);\n"
+    "      if (options && options.signal) {\n"
+    "        options.signal.addEventListener('abort', () => {\n"
+    "          const e = new Error('The operation was aborted');\n"
+    "          e.name = 'AbortError';\n"
+    "          e.code = 'ABORT_ERR';\n"
+    "          fail(e);\n"
+    "        });\n"
+    "      }\n"
+    "      return {\n"
+    "        next() {\n"
+    "          if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false });\n"
+    "          if (failure !== null) { const err = failure; failure = null; return Promise.reject(err); }\n"
+    "          if (done) return Promise.resolve({ value: undefined, done: true });\n"
+    "          return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });\n"
+    "        },\n"
+        /* Node's own return() only detaches and resolves the parked
+         * consumers — already-buffered events stay readable — so a
+         * `break` here leaves the same observable state it does there. */
+    "        return() {\n"
+    "          finish();\n"
+    "          return Promise.resolve({ value: undefined, done: true });\n"
+    "        },\n"
+    "        throw(err) {\n"
+    "          failure = err;\n"
+    "          done = true;\n"
+    "          stop();\n"
+    "          return Promise.reject(err);\n"
+    "        },\n"
+    "        [Symbol.asyncIterator]() { return this; },\n"
+    "      };\n"
+    "    };\n"
     "    EventEmitter.EventEmitter = EventEmitter;\n"
     "    EventEmitter.default = EventEmitter;\n"
     "    return EventEmitter;\n"
