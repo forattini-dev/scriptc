@@ -4145,16 +4145,20 @@ static size_t scr_lib_u16_units(const char *s, size_t end) {
   return units;
 }
 
-/* lastIndexOf(needle), the one-argument form: last occurrence as a UTF-16
- * index, -1 when absent; the empty needle finds the length (per spec's
- * clamped +Infinity fromIndex). A byte-wise reverse scan is boundary-safe:
- * a well-formed needle's first byte is never a continuation byte. */
-double scr_str_last_index_of(ScrStr *s, ScrStr *needle) {
-  if (needle->len == 0) return (double)scr_lib_u16_units(s->data, s->len);
+/* lastIndexOf(needle, position): last occurrence at or before the clamped
+ * UTF-16 position. A byte-wise reverse scan is boundary-safe: a well-formed
+ * needle's first byte is never a continuation byte. */
+double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position) {
+  double length = (double)scr_lib_u16_units(s->data, s->len);
+  position = isnan(position) ? length : trunc(position);
+  if (position < 0.0) position = 0.0;
+  if (position > length) position = length;
+  if (needle->len == 0) return position;
   if (needle->len > s->len) return -1.0;
   for (size_t i = s->len - needle->len + 1; i-- > 0;) {
     if (memcmp(s->data + i, needle->data, needle->len) == 0) {
-      return (double)scr_lib_u16_units(s->data, i);
+      double index = (double)scr_lib_u16_units(s->data, i);
+      if (index <= position) return index;
     }
   }
   return -1.0;

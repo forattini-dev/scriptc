@@ -4726,14 +4726,14 @@ ScrStr *scr_bool_to_scrstr(bool b); /* interned "true"/"false" */
 /* ── String surface (scr_lib.c) ───────────────────────────────────────
  * fromCharCode: ONE packed f64[] of UTF-16 code units — ToUint16 each,
  * adjacent surrogate pairs combine, lone surrogates become U+FFFD
- * (divergence 1's policy). lastIndexOf: last occurrence as a UTF-16
- * index (-1 absent; empty needle finds the length). Borrowed args; the
- * string result is +1; neither throws. */
+ * (divergence 1's policy). lastIndexOf: last occurrence at or before its
+ * ToIntegerOrInfinity-clamped UTF-16 position (-1 absent; empty needle
+ * finds that position). Borrowed args; the string result is +1; neither throws. */
 ScrStr *scr_str_from_char_code(ScrArr *codes);
 /* The spread-typed-array form (String.fromCharCode(...bytes) — the
  * magic-number ASCII probe); same semantics per element. */
 ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes);
-double scr_str_last_index_of(ScrStr *s, ScrStr *needle);
+double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position);
 
 /* ── Number statics (scr_lib.c) ───────────────────────────────────────
  * JS-exact by construction: Number.isFinite/isNaN/isInteger/isSafeInteger

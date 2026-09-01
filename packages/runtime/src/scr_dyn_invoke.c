@@ -517,7 +517,7 @@ static ScrDyn *scr_dyn_invoke_impl(
           argc >= 1 && args[0]->kind == SCR_DYN_STR) {
         if (dyn_name_is(method, "includes")) return scr_dyn_new_bool(scr_str_includes(s, args[0]->v.str));
         if (dyn_name_is(method, "indexOf")) return scr_dyn_new_num(scr_str_index_of(s, args[0]->v.str, 0));
-        return scr_dyn_new_num(scr_str_last_index_of(s, args[0]->v.str));
+        return scr_dyn_new_num(scr_str_last_index_of(s, args[0]->v.str, INFINITY));
       }
       dyn_throw_unsupported("String", method);
       return NULL;

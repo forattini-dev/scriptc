@@ -304,8 +304,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "num.parseFloat" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::number_parse_float(&(${context.emitExpr(arg)}))`;
   }
-  if (expr.fn === "string.lastIndexOf" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
-    return `runtime::string_last_index_of(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), f64::INFINITY)`;
+  if (expr.fn === "string.lastIndexOf" && expr.args.length === 3 && arg !== undefined && secondArg !== undefined && thirdArg !== undefined) {
+    return `runtime::string_last_index_of(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), ${context.emitExpr(thirdArg)})`;
   }
   if (expr.fn === "string.fromCharCode" && expr.args.length === 1 && arg !== undefined) {
     if (arg.type.kind === "array" && arg.type.elem.kind === "f64") {

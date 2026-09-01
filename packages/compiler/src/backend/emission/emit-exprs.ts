@@ -7112,7 +7112,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                 : `scr_str_from_char_code(${arg(0)})`,
             );
           case "string.lastIndexOf":
-            return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)})`);
+            return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "string.raw":
             // Raw literals + pre-stringified substitutions; +1 string.
             return finish(`scr_str_raw(${arg(0)}, ${arg(1)})`);

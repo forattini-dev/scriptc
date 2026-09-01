@@ -7353,11 +7353,9 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     return { kind: "libCall", fn: "string.fromCharCode", args: [packed], type: STRING, loc };
   }
 
-/** `s.lastIndexOf(needle)` on string receivers — a libCall (scr_lib.c)
-   * rather than a strIntrinsic, but the same UTF-16 index semantics as
-   * indexOf. The lib's fromIndex parameter has no lowering (Node clamps
-   * it with ToIntegerOrInfinity; nothing in the corpus wants it) and
-   * fences per site. Null for non-string receivers / other members. */
+/** `s.lastIndexOf(needle, fromIndex?)` on string receivers — a libCall
+   * (scr_lib.c) rather than a strIntrinsic, but the same UTF-16 index
+   * semantics as indexOf. Null for non-string receivers / other members. */
   export function lowerStringLastIndexOfCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -7365,16 +7363,19 @@ function staticTextDecoderEncoding(label: string): StaticTextDecoderEncoding | n
     if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "string") return null;
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
-    if (call.arguments.length !== 1) {
+    if (call.arguments.length < 1 || call.arguments.length > 2) {
       L.noLowering(
-        "lastIndexOf with a fromIndex argument",
+        "lastIndexOf arity",
         call,
-        "the one-argument form lowers",
+        "lastIndexOf(needle, fromIndex?) lowers",
       );
     }
     const receiver = L.lowerExprExpecting(access.expression, STRING);
     const needle = L.lowerExprExpecting(call.arguments[0]!, STRING);
-    return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle], type: F64, loc };
+    const position = call.arguments[1] === undefined
+      ? { kind: "numLit" as const, value: Infinity, type: F64, loc }
+      : L.lowerExprExpecting(call.arguments[1], F64);
+    return { kind: "libCall", fn: "string.lastIndexOf", args: [receiver, needle, position], type: F64, loc };
   }
 
 /** `Promise.race([...])` on THE Promise global: the entries lower

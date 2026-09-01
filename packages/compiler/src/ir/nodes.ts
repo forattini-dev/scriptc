@@ -4172,9 +4172,10 @@ export type IrLibFn =
    * goes through ToUint16, adjacent surrogate pairs combine into one
    * code point, and LONE surrogates become U+FFFD (divergence 1's
    * storage policy — printed output still matches Node byte-for-byte).
-   * lastIndexOf is the one-argument form: the LAST occurrence as a
-   * UTF-16 index (-1 when absent; the empty needle finds the length,
-   * per spec). Borrowed args; +1 string / plain f64; neither throws. */
+   * lastIndexOf receives the explicit/defaulted fromIndex: the LAST
+   * occurrence at or before its ToIntegerOrInfinity-clamped UTF-16 index
+   * (-1 when absent; the empty needle finds the clamped position).
+   * Borrowed args; +1 string / plain f64; neither throws. */
   | "string.fromCharCode"
   | "string.lastIndexOf"
   /** String.raw(template, ...subs): the raw literals array (a string[]
