@@ -403,6 +403,17 @@
   global.DOMException = DOMException;
   global.btoa = btoa;
   global.atob = atob;
+  /* queueMicrotask: the engine ships the job queue but not this spelling,
+   * and the shared island bootstrap's process.nextTick and stream
+   * scheduling are written against it. A resolved promise's reaction IS a
+   * microtask, so ordering against other promise jobs is right; the one
+   * divergence is a THROWING callback, which the spec reports as an
+   * uncaught exception and this turns into an unhandled rejection. The
+   * queue drains where the island runs jobs — after each island entry —
+   * so a tick queued by the last statement of a program still runs. */
+  if (global.queueMicrotask === undefined) {
+    global.queueMicrotask = (callback) => { Promise.resolve().then(callback); };
+  }
   const nativeConsoleLog = global.console.log;
   global.console.log = (...values) => nativeConsoleLog(...values.map((value) => String(value)));
 })(globalThis);
