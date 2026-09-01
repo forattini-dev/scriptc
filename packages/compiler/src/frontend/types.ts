@@ -1882,6 +1882,20 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "child" };
   }
+  // @types/node selects this generic for an explicit three-entry stdio
+  // tuple. It extends ChildProcess and is the same native handle; the type
+  // parameters only refine which stdin/stdout/stderr properties are null.
+  if (
+    psym?.name === "ChildProcessByStdio" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        ts.isInterfaceDeclaration(d) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "child_process"),
+    )
+  ) {
+    return { kind: "child" };
+  }
   // net.Server / net.Socket: @types/node's classes or the fallback
   // declarations' interfaces. The NAME is ambiguous across builtin
   // modules (http.Server, tls.Socket share it), so the provenance check

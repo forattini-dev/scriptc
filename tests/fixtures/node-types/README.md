@@ -17,6 +17,9 @@ What the fixture pins (see tests/harness/project-config.test.ts):
   `console` stand down (their types come from @types/node), but the same
   members lower to the same libCalls, recognized by name + @types/node
   provenance.
+- `child-process-by-stdio.ts` — an explicit stdio tuple selects
+  `ChildProcessByStdio` in @types/node; its streams and lifecycle events map
+  to the same native child handle and run differentially on the Rust backend.
 - `fenced.ts` — surface @types/node DECLARES but scriptc does not lower
   (process.uptime, Buffer.from, setInterval) reports the SC2020-family
   fence naming @types/node, instead of typechecking its way into a broken
