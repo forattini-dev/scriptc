@@ -6,6 +6,7 @@
  *
  * Driver homes:
  * - 2807 → packages/compiler/test/emit-rust-network.test.ts ("open stdin")
+ * - 2808 → packages/compiler/test/emit-rust-dgram.test.ts (dgram with open stdin)
  * - 2809, 2811 → packages/compiler/test/emit-rust-io-poll.test.ts
  * - 2810 → packages/compiler/test/emit-rust-network.test.ts (dgram driver)
  *
@@ -15,6 +16,7 @@
  */
 export const DRIVER_FIXTURES: ReadonlySet<string> = new Set([
   "2807-event-loop-stdin-network-fairness.ts",
+  "2808-event-loop-stdin-dgram-fairness.ts",
   "2809-net-poll-context-switches.ts",
   "2810-dgram-poll-context-switches.ts",
   "2811-net-dgram-unified-poll.ts",
