@@ -4444,6 +4444,13 @@ export class Lowerer {
         if (isUnitType(arm)) return;
         const sameFamily =
           (src.kind === "record" && arm.kind === "record") ||
+          // Tuple values use the record IR shape but may lift into an
+          // array arm (for example `aliases: ["h"]` entering the optional
+          // `string[] | undefined` field of a generic schema). The
+          // recursive probe below still enforces tupleArrayWidthHelper's
+          // tuple and per-position rules, so ordinary records do not gain
+          // an array conversion here.
+          (src.kind === "record" && arm.kind === "array") ||
           (src.kind === "array" && arm.kind === "array") ||
           (src.kind === "object" && arm.kind === "record") ||
           (src.kind === "record" && arm.kind === "object") ||
