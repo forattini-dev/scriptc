@@ -442,6 +442,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.concatLen": "scr_bytes_concat_len",
   "buffer.byteLenStr": "scr_bytes_byte_length_str",
   "buffer.isEncoding": "scr_bytes_is_encoding",
+  "buffer.isUtf8": "scr_bytes_is_utf8",
   // The checked-dynamic compare/equals validators (scr_bytes_io.c):
   // Node's argument ladders throw catchably (MAY_THROW_LIB_FNS).
   "dyn.toStringCoerce": "scr_dyn_string_coerce_js",

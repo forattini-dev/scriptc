@@ -880,6 +880,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "buffer.isEncoding" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::buffer_is_encoding(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "buffer.isUtf8" && expr.args.length === 1 && arg?.type.kind === "bytes" && arg.type.elem === "u8") {
+    return `runtime::buffer_is_utf8(&(${context.emitExpr(arg)}))`;
+  }
   if (expr.fn === "text.decode" && expr.args.length === 1 && arg?.type.kind === "bytes" && arg.type.elem === "u8") {
     return `runtime::text_decode(&(${context.emitExpr(arg)}))`;
   }

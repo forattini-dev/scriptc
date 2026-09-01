@@ -1917,6 +1917,35 @@ bool scr_bytes_is_encoding(const ScrStr *s) {
   return false;
 }
 
+bool scr_bytes_is_utf8(const ScrBytes *b) {
+  size_t i = 0;
+  while (i < b->len) {
+    unsigned char lead = b->data[i++];
+    if (lead < 0x80) continue;
+    size_t continuation;
+    uint32_t codepoint;
+    uint32_t minimum;
+    if ((lead & 0xe0) == 0xc0) {
+      continuation = 1; codepoint = lead & 0x1f; minimum = 0x80;
+    } else if ((lead & 0xf0) == 0xe0) {
+      continuation = 2; codepoint = lead & 0x0f; minimum = 0x800;
+    } else if ((lead & 0xf8) == 0xf0) {
+      continuation = 3; codepoint = lead & 0x07; minimum = 0x10000;
+    } else {
+      return false;
+    }
+    if (continuation > b->len - i) return false;
+    for (size_t j = 0; j < continuation; j++) {
+      unsigned char next = b->data[i++];
+      if ((next & 0xc0) != 0x80) return false;
+      codepoint = (codepoint << 6) | (next & 0x3f);
+    }
+    if (codepoint < minimum || codepoint > 0x10ffff ||
+        (codepoint >= 0xd800 && codepoint <= 0xdfff)) return false;
+  }
+  return true;
+}
+
 ScrBytes *scr_bytes_concat(const ScrArr *list) {
   size_t total = 0;
   for (size_t i = 0; i < list->len; i++) {

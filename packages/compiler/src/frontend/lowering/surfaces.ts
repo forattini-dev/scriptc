@@ -737,6 +737,9 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // the bare calls and non-composed uses.
     randomBytes: { fn: "crypto.randomBytes", params: [F64], result: BYTES_U8 },
   },
+  buffer: {
+    isUtf8: { fn: "buffer.isUtf8", params: [BYTES_U8], result: BOOL },
+  },
   zlib: {
     // Buffer in, Buffer out, Node's default options; string inputs fence
     // per site (see the zlib special case in lowerBuiltinModuleCall).

@@ -446,6 +446,10 @@ fn bytes_u8_values(bytes: &JsBytes<u8>) -> Vec<u8> {
     bytes_values(bytes)
 }
 
+pub fn buffer_is_utf8(bytes: &JsBytes<u8>) -> bool {
+    std::str::from_utf8(&bytes_u8_values(bytes)).is_ok()
+}
+
 fn bytes_u8_at(bytes: &JsBytes<u8>, index: usize) -> u8 {
     bytes.with(|data| match &data.backing {
         Some(backing) => backing.get(data.offset + index),

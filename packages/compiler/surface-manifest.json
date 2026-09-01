@@ -450,6 +450,12 @@
       "note": "recognized module (bare and node:-prefixed specifiers)"
     },
     {
+      "id": "node-builtin.buffer.isUtf8",
+      "kind": "node-builtin",
+      "name": "buffer.isUtf8",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.child_process",
       "kind": "node-builtin",
       "name": "child_process",

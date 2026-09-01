@@ -5062,11 +5062,12 @@ ScrStr *scr_text_decode_legacy(const ScrBytes *b, double encoding);
  * both; +1 u8 result. Never throws. */
 ScrBytes *scr_bytes_from_str(const ScrStr *s, const ScrStr *enc);
 
-/* Buffer.byteLength(string, enc) — enc NORMALIZED like from_str — and
- * Buffer.isEncoding(name) (case-insensitive over Node's alias set).
- * Borrow; never throw. */
+/* Buffer.byteLength(string, enc) — enc NORMALIZED like from_str —,
+ * Buffer.isEncoding(name), and node:buffer.isUtf8(bytes). Borrow;
+ * never throw. */
 double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc);
 bool scr_bytes_is_encoding(const ScrStr *s);
+bool scr_bytes_is_utf8(const ScrBytes *b);
 
 /* equals / compare / indexOf-lastIndexOf / fill / copy / swap / write on
  * u8 bytes, Node-exact (corpus 1663). compare and copy take nargs — the

@@ -3137,6 +3137,7 @@ declare module "node:worker_threads" {
 declare module "buffer" {
   export function atob(data: string): string;
   export function btoa(data: string): string;
+  export function isUtf8(input: ArrayBuffer | ArrayBufferView): boolean;
   export const kMaxLength: number;
   export const kStringMaxLength: number;
   export const Buffer: BufferConstructor;

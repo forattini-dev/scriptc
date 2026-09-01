@@ -5663,6 +5663,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_byte_length_str(${arg(0)}, ${arg(1)})`);
           case "buffer.isEncoding":
             return finish(`scr_bytes_is_encoding(${arg(0)})`);
+          case "buffer.isUtf8":
+            return finish(`scr_bytes_is_utf8(${arg(0)})`);
           // The checked-dynamic compare/equals validators
           // (scr_bytes_io.c): Node's argument ladders throw catchably
           // (may-throw seed set); all dyn args borrowed.

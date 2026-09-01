@@ -3103,10 +3103,12 @@ export type IrLibFn =
   | "buffer.fromStr"
   | "buffer.concat"
   /** Buffer.byteLength(string, enc) — enc a NORMALIZED literal like
-   * fromStr's — and Buffer.isEncoding(name) over a runtime string
-   * (case-insensitive against Node's alias set). Pure; never throw. */
+   * fromStr's; Buffer.isEncoding(name) over a runtime string; and
+   * node:buffer.isUtf8(bytes), which validates the complete byte view.
+   * Pure; never throw. */
   | "buffer.byteLenStr"
   | "buffer.isEncoding"
+  | "buffer.isUtf8"
   /** Buffer.concat(list, totalLength): the concatenation truncated or
    * zero-padded to the total. THROWS Node's 'length' RangeError on a
    * negative/non-integer total (may-throw seed). */
