@@ -210,9 +210,12 @@ const PROBES: Probe[] = [
   // METHOD-extraction refusal carries the sample now.
   { id: "diagnostic.sc1031", source: "class C {\n  f = 1;\n  m(): number {\n    return this.f;\n  }\n}\nconst { m } = new C();\nconsole.log(m());\n" },
   { id: "diagnostic.sc1121", source: 'console.log(/ab/g.test("abab"));\n' },
+  // The lowered one-shot compressors take Buffers — a string argument keeps
+  // its own wrap-it-first fence, so the static probe hands over bytes.
   {
     id: "node-builtin.zlib.gzipSync",
-    source: 'import { gzipSync } from "node:zlib";\ngzipSync("data");\nconsole.log(0);\n',
+    source:
+      'import { gzipSync } from "node:zlib";\nconsole.log(gzipSync(Buffer.from("data", "utf8")).length > 0);\n',
   },
 ];
 

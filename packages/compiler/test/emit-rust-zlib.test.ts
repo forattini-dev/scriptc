@@ -9,8 +9,12 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust zlib sync compression matches the differential corpus", async () => {
-  const fixture = resolve("tests/corpus/1404-zlib-crypto-bytes.ts");
+test.for([
+  "tests/corpus/1404-zlib-crypto-bytes.ts",
+  // The gzip/unzip/raw one-shots, corrupt-input rejections included.
+  "tests/corpus/2825-zlib-gzip-oneshot.ts",
+])("Rust zlib sync compression matches the differential corpus (%s)", async (program) => {
+  const fixture = resolve(program);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-zlib-"));
   const result = await compile(fixture, {
     outDir: dir,

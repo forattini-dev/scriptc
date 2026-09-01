@@ -2010,14 +2010,18 @@ declare module "node:readline" {
   export * from "readline";
 }
 
-/* node:zlib — deflateSync/inflateSync lower (Buffer in, Buffer out,
- * Node's default options; libz links only into zlib-using binaries);
- * gzip and friends typecheck and fence at their use sites. */
+/* node:zlib — the one-shot family lowers (Buffer in, Buffer out, Node's
+ * default options; libz links only into zlib-using binaries): the zlib
+ * wrapper, gzip framing, the header-sniffing unzipSync, and the raw pair.
+ * brotli typechecks and fences at its use sites. */
 declare module "zlib" {
   export function deflateSync(data: string | Uint8Array): Buffer;
   export function inflateSync(data: Uint8Array): Buffer;
   export function gzipSync(data: string | Uint8Array): Buffer;
   export function gunzipSync(data: Uint8Array): Buffer;
+  export function unzipSync(data: Uint8Array): Buffer;
+  export function deflateRawSync(data: string | Uint8Array): Buffer;
+  export function inflateRawSync(data: Uint8Array): Buffer;
 }
 declare module "node:zlib" {
   export * from "zlib";

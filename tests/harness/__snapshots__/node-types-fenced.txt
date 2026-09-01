@@ -113,14 +113,14 @@ fenced.ts:55:13 - error SC2020: 'deflateSync of 'string' data' is part of the st
 
   hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
 
-fenced.ts:56:1 - error SC2020: 'zlib.gzipSync' is typed by @types/node but has no scriptc lowering yet
+fenced.ts:56:10 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   55 | deflateSync("data");
   56 | gzipSync("data");
-     | ^~~~~~~~~~~~~~~~
+     |          ^~~~~~
   57 | /* The http2 compatibility slice's @types/node-world fences (divergence
 
-  hint: deflateSync and inflateSync are the lowered zlib surface
+  hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))
 
 fenced.ts:65:71 - error SC2020: 'a createSecureServer SNICallback of 'undefined' values' is part of the standard library types but has no scriptc lowering yet
 

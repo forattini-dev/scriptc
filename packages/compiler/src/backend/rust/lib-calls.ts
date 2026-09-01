@@ -14,6 +14,7 @@ import { emitRustDgramCall } from "./dgram.js";
 import { emitRustReadlineCall } from "./readline.js";
 import { emitRustInspectCall } from "./inspect.js";
 import { emitRustCryptoCall } from "./crypto.js";
+import { emitRustZlibCall } from "./zlib.js";
 import { emitRustTimerCall } from "./timers.js";
 import { emitRustFilesystemCall } from "./filesystem.js";
 import { emitRustDiagnosticsChannelCall } from "./diagnostics-channel.js";
@@ -101,6 +102,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (inspectCall !== null) return inspectCall;
   const cryptoCall = emitRustCryptoCall(expr, context);
   if (cryptoCall !== null) return cryptoCall;
+  const zlibCall = emitRustZlibCall(expr, context);
+  if (zlibCall !== null) return zlibCall;
   const timerCall = emitRustTimerCall(expr, context);
   if (timerCall !== null) return timerCall;
   const filesystemCall = emitRustFilesystemCall(expr, context);
@@ -519,14 +522,6 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   }
   if (expr.fn === "crypto.randomBytesToString" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return `runtime::crypto_random_string(${context.emitExpr(arg)}, &(${context.emitExpr(expr.args[1])}))`;
-  }
-  if (expr.fn === "zlib.deflateSync" && expr.args.length === 1 &&
-    arg?.type.kind === "bytes" && arg.type.elem === "u8") {
-    return `runtime::zlib_deflate_sync(&(${context.emitExpr(arg)}))`;
-  }
-  if (expr.fn === "zlib.inflateSync" && expr.args.length === 1 &&
-    arg?.type.kind === "bytes" && arg.type.elem === "u8") {
-    return `runtime::zlib_inflate_sync(&(${context.emitExpr(arg)}))`;
   }
   if (expr.fn === "fs.mkdtempSync" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::fs_mkdtemp(&(${context.emitExpr(arg)}))`;

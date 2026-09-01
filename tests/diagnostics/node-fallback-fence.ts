@@ -29,5 +29,5 @@ const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // runt
 // The computed encoding is now part of the static Buffer surface.
 import { deflateSync, gzipSync } from "node:zlib";
 const packed = deflateSync("data"); // string data: the wrap-it-first hint
-const zipped = gzipSync("data"); // beyond the lowered pair: fenced
+const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
 // The remaining imports continue the declared-but-not-lowered surface.

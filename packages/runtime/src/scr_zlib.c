@@ -1,6 +1,7 @@
-/* node:zlib, the lowered slice: deflateSync/inflateSync over u8 bytes with
- * Node's DEFAULT options (zlib format, Z_DEFAULT_COMPRESSION, windowBits
- * 15). Compiled ONLY when the program uses zlib (cc.ts gates it exactly
+/* node:zlib, the lowered slice: deflateSync/inflateSync, gzipSync/
+ * gunzipSync, unzipSync and the raw pair over u8 bytes with Node's
+ * DEFAULT options (Z_DEFAULT_COMPRESSION, windowBits 15 per format).
+ * Compiled ONLY when the program uses zlib (cc.ts gates it exactly
  * like scr_regex.c/libregexp), so zlib-free binaries keep their
  * historical link line. Host builds link the system -lz; cross targets
  * link the vendored zlib built per target (ensureZlibObjects in cc.ts).
@@ -21,70 +22,9 @@ static void scr_zlib_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
-ScrBytes *scr_zlib_deflate(const ScrBytes *data) {
-  uLong srcLen = (uLong)data->len;
-  uLong cap = compressBound(srcLen);
-  uint8_t *buf = malloc(cap ? cap : 1);
-  if (!buf) scr_zlib_oom();
-  uLongf outLen = cap;
-  int rc = compress2(buf, &outLen, data->data, srcLen, Z_DEFAULT_COMPRESSION);
-  if (rc != Z_OK) scr_zlib_oom(); /* Z_MEM_ERROR is the only reachable code */
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)outLen);
-  memcpy(out->data, buf, outLen);
-  free(buf);
-  return out;
-}
-
-ScrBytes *scr_zlib_inflate(const ScrBytes *data) {
-  z_stream zs;
-  memset(&zs, 0, sizeof zs);
-  if (inflateInit(&zs) != Z_OK) scr_zlib_oom();
-  size_t cap = data->len > 64 ? data->len * 4 : 256;
-  uint8_t *buf = malloc(cap);
-  if (!buf) scr_zlib_oom();
-  zs.next_in = data->data;
-  zs.avail_in = (uInt)data->len;
-  size_t len = 0;
-  for (;;) {
-    zs.next_out = buf + len;
-    zs.avail_out = (uInt)(cap - len);
-    int rc = inflate(&zs, Z_NO_FLUSH);
-    len = cap - zs.avail_out;
-    if (rc == Z_STREAM_END) break;
-    if (rc == Z_OK || rc == Z_BUF_ERROR) {
-      if (rc == Z_BUF_ERROR && zs.avail_in == 0 && zs.avail_out > 0) {
-        /* Truncated input: Node throws "unexpected end of file". */
-        inflateEnd(&zs);
-        free(buf);
-        static const char msg[] = "unexpected end of file";
-        scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
-        return NULL;
-      }
-      if (cap - len < 64) {
-        cap *= 2;
-        uint8_t *grown = realloc(buf, cap);
-        if (!grown) scr_zlib_oom();
-        buf = grown;
-      }
-      continue;
-    }
-    /* Corrupt data: zlib's msg is exactly Node's error message text. */
-    const char *msg = zs.msg ? zs.msg : "zlib error";
-    size_t mlen = strlen(msg);
-    inflateEnd(&zs);
-    free(buf);
-    scr_throw_error_msg(SCR_ERR_ERROR, msg, mlen);
-    return NULL;
-  }
-  inflateEnd(&zs);
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)len);
-  memcpy(out->data, buf, len);
-  free(buf);
-  return out;
-}
-
-/* ── the island's mode variants (scr_zlib_island.c bridges these into
- * the embedded engine's node:zlib shim) ───────────────────────────────
+/* ── the mode engines. The lowered surface below and the island's
+ * node:zlib shim (scr_zlib_island.c bridges these into the embedded
+ * engine) are mode selections over this pair ──────────────────────────
  * mode: 0 zlib (windowBits 15), 1 raw (-15), 2 gzip (15+16); inflate
  * additionally takes 3 = auto-detect zlib/gzip (15+32, Node's unzip). */
 
@@ -172,6 +112,39 @@ ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode) {
   memcpy(out->data, buf, len);
   free(buf);
   return out;
+}
+
+/* ── the lowered one-shot surface: deflateSync/inflateSync (zlib),
+ * gzipSync/gunzipSync (gzip framing), unzipSync (header sniffing), and
+ * the raw pair — each one mode selection over the engines above, so all
+ * five share their Node-exact error messages and codes. */
+
+ScrBytes *scr_zlib_deflate(const ScrBytes *data) {
+  return scr_zlib_deflate_mode(data, 0, Z_DEFAULT_COMPRESSION);
+}
+
+ScrBytes *scr_zlib_inflate(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 0);
+}
+
+ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data) {
+  return scr_zlib_deflate_mode(data, 1, Z_DEFAULT_COMPRESSION);
+}
+
+ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 1);
+}
+
+ScrBytes *scr_zlib_gzip(const ScrBytes *data) {
+  return scr_zlib_deflate_mode(data, 2, Z_DEFAULT_COMPRESSION);
+}
+
+ScrBytes *scr_zlib_gunzip(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 2);
+}
+
+ScrBytes *scr_zlib_unzip(const ScrBytes *data) {
+  return scr_zlib_inflate_mode(data, 3);
 }
 
 /* One-shot raw-DEFLATE inflate into a caller-sized buffer: the island's

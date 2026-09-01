@@ -1870,7 +1870,7 @@
       "name": "zlib.brotliCompressSync",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "note": "deflateSync/inflateSync, gzipSync/gunzipSync, unzipSync and the raw pair are the lowered zlib surface"
     },
     {
       "id": "node-builtin.zlib.brotliDecompressSync",
@@ -1878,7 +1878,13 @@
       "name": "zlib.brotliDecompressSync",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "note": "deflateSync/inflateSync, gzipSync/gunzipSync, unzipSync and the raw pair are the lowered zlib surface"
+    },
+    {
+      "id": "node-builtin.zlib.deflateRawSync",
+      "kind": "node-builtin",
+      "name": "zlib.deflateRawSync",
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.deflateSync",
@@ -1890,17 +1896,19 @@
       "id": "node-builtin.zlib.gunzipSync",
       "kind": "node-builtin",
       "name": "zlib.gunzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.gzipSync",
       "kind": "node-builtin",
       "name": "zlib.gzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.zlib.inflateRawSync",
+      "kind": "node-builtin",
+      "name": "zlib.inflateRawSync",
+      "status": "static"
     },
     {
       "id": "node-builtin.zlib.inflateSync",
@@ -1912,9 +1920,7 @@
       "id": "node-builtin.zlib.unzipSync",
       "kind": "node-builtin",
       "name": "zlib.unzipSync",
-      "status": "unsupported",
-      "code": "SC2020",
-      "note": "deflateSync and inflateSync are the lowered zlib surface"
+      "status": "static"
     },
     {
       "id": "stdlib.abort-controller.abort",

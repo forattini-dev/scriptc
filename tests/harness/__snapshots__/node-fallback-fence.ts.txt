@@ -21,15 +21,15 @@ node-fallback-fence.ts:31:28 - error SC2020: 'deflateSync of 'string' data' is p
   30 | import { deflateSync, gzipSync } from "node:zlib";
   31 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
      |                            ^~~~~~
-  32 | const zipped = gzipSync("data"); // beyond the lowered pair: fenced
+  32 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
 
   hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
 
-node-fallback-fence.ts:32:16 - error SC2020: 'zlib.gzipSync' is part of the standard library types but has no scriptc lowering yet
+node-fallback-fence.ts:32:25 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
   31 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
-  32 | const zipped = gzipSync("data"); // beyond the lowered pair: fenced
-     |                ^~~~~~~~~~~~~~~~
+  32 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
+     |                         ^~~~~~
   33 | // The remaining imports continue the declared-but-not-lowered surface.
 
-  hint: deflateSync and inflateSync are the lowered zlib surface
+  hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))

@@ -5267,6 +5267,14 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path);
  * ("incorrect header check", ...). Borrow their input; results +1. */
 ScrBytes *scr_zlib_deflate(const ScrBytes *data);
 ScrBytes *scr_zlib_inflate(const ScrBytes *data);
+/* The rest of the one-shot family: gzip framing (gzipSync/gunzipSync),
+ * Node's header-sniffing unzipSync, and the wrapper-free raw pair. The
+ * decompressors throw exactly like inflate. */
+ScrBytes *scr_zlib_gzip(const ScrBytes *data);
+ScrBytes *scr_zlib_gunzip(const ScrBytes *data);
+ScrBytes *scr_zlib_unzip(const ScrBytes *data);
+ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data);
+ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data);
 /* The island's mode variants (0 zlib / 1 raw / 2 gzip; inflate adds
  * 3 = auto-detect) — scr_zlib_island.c bridges them into the embedded
  * engine's node:zlib shim. */
