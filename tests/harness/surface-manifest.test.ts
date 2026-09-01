@@ -200,6 +200,23 @@ const PROBES: Probe[] = [
     id: "stdlib.readable-stream.symbol.asyncIterator",
     source: '/// <reference types="node" />\nfunction f(s: ReadableStream<Uint8Array>): void {\n  void s[Symbol.asyncIterator]();\n}\nvoid f;\n',
   },
+  {
+    id: "stdlib.url.host",
+    source: 'const u = new URL("https://example.com/a");\nconsole.log(u.host);\n',
+  },
+  {
+    id: "stdlib.url.origin",
+    source:
+      '/// <reference types="node" />\nconst u = new URL("https://example.com/a");\nconsole.log(u.origin);\n',
+  },
+  {
+    // The write half of a component the profile supports READS of: the
+    // setter rows are a claim about assignment, and this is the code it
+    // actually raises.
+    id: "stdlib.url.setter.pathname",
+    source:
+      '/// <reference types="node" />\nconst u = new URL("https://example.com/a");\nu.pathname = "/b";\nconsole.log(u.href);\n',
+  },
   { id: "syntax.debugger-statements", source: "debugger;\nconsole.log(0);\n" },
   {
     id: "syntax.delete-expressions",

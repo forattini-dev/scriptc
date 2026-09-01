@@ -27,6 +27,34 @@ A fifth lane covers LIBRARY MODE across targets: `SCRIPTC_CROSS=1 pnpm exec vite
 
 Iterate filtered, gate full: while developing, run just what you're touching (`pnpm exec vitest run tests/harness/differential.test.ts -t <name>` or a single test file); run the full lanes (`pnpm test`, then `SCRIPTC_SAN=1 pnpm test`) as the gate before committing.
 
+### Builtin-class compatibility profiles
+
+Each engine-free builtin-class slice has one versioned, data-only profile under
+`packages/compiler/src/compat/`. They share the row algebra in
+`profile-schema.ts` — statuses, placements, entry constructors, evidence keys,
+the version axis — and are listed in `registry.ts`, which is what the surface
+manifest iterates: adding a profile is one registry line plus its data module
+and its conformance suite. Notes in the manifest are stamped with the runtime
+the profile was censused under, so two profiles can pin different targets.
+
+Schema pieces worth knowing before adding rows:
+
+- the fence code is **per row** (`compatEntries("SC2020")` /
+  `compatEntries("SC1090")`), because one surface can refuse a member and a
+  whole expression shape with different codes;
+- `placement` covers `prototype-setter` (writes are a separate claim from
+  reads) and `instance` (own properties of a constructed object — usually an
+  empty declared set, which is exactly what catches a runtime that starts
+  stamping them);
+- `inventory.sources` names how to reach an interface that is not a global
+  constructor (a module export, or a prototype with no constructor object at
+  all, such as an iterator result);
+- `targets` is `{ primary, candidates }`: `primary` is the runtime the census
+  was reflected under, and a candidate runtime is added only with its own
+  reflected census.
+
+The shared reflection probes live in `compat-census.ts`.
+
 ### Fetch compatibility profile
 
 The engine-free fetch/Web Streams slice has one versioned source of truth in
@@ -69,6 +97,23 @@ fails the focused suite until that member is classified. The static,
 dynamic-only, and unsupported rows project into the shipped surface manifest;
 filter `NODE24_FETCH_COMPAT_PROFILE.inventory.entries` by `status`/`owner` for
 the next cohesive implementation queue.
+
+### URL compatibility profile
+
+`packages/compiler/src/compat/url-profile.ts` censuses the WHATWG slice —
+`URL`, `URLSearchParams`, and the search-params iterator — under the same
+pinned Node. `pnpm test:url-conformance` re-reflects those interfaces and holds
+the profile to the census, to resolvable corpus evidence on every supported
+row, and to the shipped manifest's status/fence/note for every projected row.
+
+Two statuses in that profile are worth reading carefully. URL component
+**writes** are their own rows (`prototype-setter`): the static tier lowers
+reads only, so every writable component is refused even where its read is
+supported. And the members the dynamic engine's emulated URL class provides —
+`origin`, `port`, `hash`, `username`, `password`, `toJSON`, `URL.parse`,
+`URL.canParse` — are `unsupported` rather than `dynamic-only`, because that
+class serves island and npm JS: a compiled `URL` value never exposes them, with
+or without `--dynamic`.
 
 When Node changes, update `.node-version` and the profile's Node/Undici tuple
 together, regenerate with `pnpm manifest`, then run the focused plain and

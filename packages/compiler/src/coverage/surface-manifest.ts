@@ -40,6 +40,13 @@ import { InternalCompilerError } from "../errors.js";
  * order, and the output carries no timestamps or absolute paths. */
 import { FENCE_CODES, UNSUPPORTED } from "../diagnostics/diagnostic.js";
 import { NODE24_FETCH_COMPAT_PROFILE } from "../compat/fetch-profile.js";
+import { COMPAT_PROFILES } from "../compat/registry.js";
+import {
+  compatEvidenceKey,
+  compatRowName,
+  compatTargetLabel,
+} from "../compat/profile-schema.js";
+import { NODE24_URL_COMPAT_PROFILE } from "../compat/url-profile.js";
 import { SUPPORTED_BUILTIN_MODULES, SUPPORTED_NODE_MODULES } from "../frontend/shared.js";
 import {
   AMBIENT_SURFACE_FNS,
@@ -94,6 +101,7 @@ const COVERAGE_NOTES: string[] = [
   "Entries with status 'dynamic-only' compile when the build embeds the dynamic engine (--dynamic); without the flag each use site is refused with the entry's code.",
   `The engine-free fetch projection targets Node ${NODE24_FETCH_COMPAT_PROFILE.target.node} with bundled Undici ${NODE24_FETCH_COMPAT_PROFILE.target.undici}. Each projected row names the differential evidence that guards it; changing the pinned Node or Undici version is an explicit profile update.`,
   "The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static, dynamic-only, and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.",
+  `The WHATWG URL projection targets Node ${NODE24_URL_COMPAT_PROFILE.targets.primary.node}. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS and query operations are projected as static rows with their differential corpus evidence, while component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.`,
   "Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.",
   "Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.",
   "No scheduling metadata is published; entry ids are the stable diff keys across releases.",
@@ -329,81 +337,56 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     }
   }
 
-  // ── fetch/Web platform: one explicit, versioned compatibility profile ─
-  const fetchTarget =
-    `Node ${NODE24_FETCH_COMPAT_PROFILE.target.node} / ` +
-    `Undici ${NODE24_FETCH_COMPAT_PROFILE.target.undici}`;
-  for (const operation of NODE24_FETCH_COMPAT_PROFILE.operations) {
-    const evidence = operation.evidence.map((item) =>
-      item.generated !== undefined
-        ? `generated:${item.generated}`
-        : `fixture:${item.fixture!}`
-    );
-    add({
-      id: operation.id,
-      kind: "stdlib",
-      name: operation.name,
-      status: "static",
-      note:
-        `${fetchTarget}; facets: ${operation.facets.join(", ")};` +
-        (operation.scope !== undefined ? ` supported scope: ${operation.scope};` : "") +
-        " " +
-        `differential evidence: ${evidence.join(", ")}`,
-    });
-  }
-  for (const option of NODE24_FETCH_COMPAT_PROFILE.requestInit) {
-    const evidence = option.evidence.map((item) =>
-      item.generated !== undefined
-        ? `generated:${item.generated}`
-        : `fixture:${item.fixture!}`
-    );
-    add({
-      id: option.id,
-      kind: "stdlib",
-      name: option.name,
-      status: "static",
-      note:
-        `${fetchTarget}; conversion: ${option.conversion}; ` +
-        `differential evidence: ${evidence.join(", ")}`,
-    });
-  }
-  for (const option of NODE24_FETCH_COMPAT_PROFILE.responseInit) {
-    const evidence = option.evidence.map((item) =>
-      item.generated !== undefined
-        ? `generated:${item.generated}`
-        : `fixture:${item.fixture!}`
-    );
-    add({
-      id: option.id,
-      kind: "stdlib",
-      name: option.name,
-      status: "static",
-      note:
-        `${fetchTarget}; conversion: ${option.conversion}; ` +
-        `differential evidence: ${evidence.join(", ")}`,
-    });
-  }
-  for (const row of NODE24_FETCH_COMPAT_PROFILE.inventory.entries) {
-    if (row.status !== "dynamic-only" && row.status !== "unsupported") continue;
-    if (row.code === undefined || row.reason === undefined) {
-      throw new InternalCompilerError(`non-static fetch inventory row '${row.id}' is incomplete`);
+  // ── builtin-class compat profiles: explicit, versioned censuses ───────
+  // Every profile in the registry projects the same way: supported
+  // operations and dictionary members become static rows carrying their
+  // differential evidence, the reflected inventory's refused rows become
+  // the fenced rows, and each note is stamped with the runtime the
+  // profile was censused under.
+  for (const profile of COMPAT_PROFILES) {
+    const target = compatTargetLabel(profile.targets.primary);
+    for (const operation of profile.operations) {
+      const evidence = operation.evidence.map(compatEvidenceKey);
+      add({
+        id: operation.id,
+        kind: "stdlib",
+        name: operation.name,
+        status: "static",
+        note:
+          `${target}; facets: ${operation.facets.join(", ")};` +
+          (operation.scope !== undefined ? ` supported scope: ${operation.scope};` : "") +
+          " " +
+          `differential evidence: ${evidence.join(", ")}`,
+      });
     }
-    const name =
-      row.placement === "constructor"
-        ? `${row.owner} constructor`
-        : row.placement === "dictionary"
-          ? `${row.owner}.${row.member}`
-          : row.owner === "globalThis"
-            ? row.member
-            : `${row.owner}.${row.member}`;
-    add({
-      id: row.id,
-      kind: "stdlib",
-      name,
-      status: row.status,
-      code: row.code,
-      note: `${fetchTarget}; ${row.reason}`,
-    });
+    for (const option of profile.options) {
+      const evidence = option.evidence.map(compatEvidenceKey);
+      add({
+        id: option.id,
+        kind: "stdlib",
+        name: option.name,
+        status: "static",
+        note:
+          `${target}; conversion: ${option.conversion}; ` +
+          `differential evidence: ${evidence.join(", ")}`,
+      });
+    }
+    for (const row of profile.inventory.entries) {
+      if (row.status !== "dynamic-only" && row.status !== "unsupported") continue;
+      if (row.code === undefined || row.reason === undefined) {
+        throw new InternalCompilerError(
+          `non-static ${profile.id} inventory row '${row.id}' is incomplete`,
+        );
+      }
+      add({
+        id: row.id,
+        kind: "stdlib",
+        name: compatRowName(row),
+        status: row.status,
+        code: row.code,
+        note: `${target}; ${row.reason}`,
+      });
+    }
   }
 
   // ── ambient dedicated-path surfaces: the attestation's ground ─────────

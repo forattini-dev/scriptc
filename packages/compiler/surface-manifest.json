@@ -10,6 +10,7 @@
     "Entries with status 'dynamic-only' compile when the build embeds the dynamic engine (--dynamic); without the flag each use site is refused with the entry's code.",
     "The engine-free fetch projection targets Node 24.15.0 with bundled Undici 7.24.4. Each projected row names the differential evidence that guards it; changing the pinned Node or Undici version is an explicit profile update.",
     "The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static, dynamic-only, and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.",
+    "The WHATWG URL projection targets Node 24.15.0. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS and query operations are projected as static rows with their differential corpus evidence, while component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.",
     "Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.",
     "Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.",
     "No scheduling metadata is published; entry ids are the stable diff keys across releases."
@@ -3428,7 +3429,7 @@
       "kind": "stdlib",
       "name": "string.prototype.endsWith",
       "status": "static",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 2 arguments"
     },
     {
       "id": "stdlib.string.includes",
@@ -3505,7 +3506,7 @@
       "kind": "stdlib",
       "name": "string.prototype.startsWith",
       "status": "static",
-      "note": "the lowered call form takes exactly 1 argument"
+      "note": "the lowered call form takes 0 to 2 arguments"
     },
     {
       "id": "stdlib.string.substring",
@@ -3569,6 +3570,440 @@
       "name": "string.prototype.trimStart",
       "status": "static",
       "note": "the lowered call form takes no arguments"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.drop",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.drop",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.every",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.every",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.filter",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.filter",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.find",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.find",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.flatMap",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.flatMap",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.forEach",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.forEach",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.map",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.map",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.next",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.next",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; materialized iterator objects are not first-class handles; for-of over the params, or directly over keys()/values()/entries(), is the lowered iteration form"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.reduce",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.reduce",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.some",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.some",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.symbol.dispose",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.[Symbol.dispose]",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; explicit resource management has no static lowering"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.symbol.iterator",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.[Symbol.iterator]",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; materialized iterator objects are not first-class handles; for-of over the params, or directly over keys()/values()/entries(), is the lowered iteration form"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.take",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.take",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params-iterator.toArray",
+      "kind": "stdlib",
+      "name": "URLSearchParams Iterator.toArray",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either"
+    },
+    {
+      "id": "stdlib.url-search-params.append",
+      "kind": "stdlib",
+      "name": "URLSearchParams.append",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, mutation, missing-arguments, error-shape; supported scope: the two-argument call; non-string arguments follow Node's ToString conversion and the missing-argument and Symbol-conversion throws are reproduced; differential evidence: corpus:1791-searchparams-core, corpus:1792-searchparams-encoding, corpus:2571-searchparams-arg-validation"
+    },
+    {
+      "id": "stdlib.url-search-params.constructor",
+      "kind": "stdlib",
+      "name": "URLSearchParams constructor",
+      "status": "static",
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape, identity; supported scope: one init argument: omitted/undefined, an application/x-www-form-urlencoded string (one leading '?' stripped), a string[][] pair list, another URLSearchParams (snapshot copy, not an alias), or an inline object literal with literal keys; differential evidence: corpus:1791-searchparams-core, corpus:1794-searchparams-url-live"
+    },
+    {
+      "id": "stdlib.url-search-params.delete",
+      "kind": "stdlib",
+      "name": "URLSearchParams.delete",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, mutation, missing-arguments; supported scope: the name-only and the value-aware two-argument forms as separate call shapes; a 'string | undefined' value argument is narrowed to one of them first; differential evidence: corpus:1791-searchparams-core, corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url-search-params.entries",
+      "kind": "stdlib",
+      "name": "URLSearchParams.entries",
+      "status": "static",
+      "note": "Node 24.15.0; facets: iteration, liveness; supported scope: the direct for-of head `for (const x of params.entries())`; the iterator object itself is not a first-class handle; differential evidence: corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url-search-params.forEach",
+      "kind": "stdlib",
+      "name": "URLSearchParams.forEach",
+      "status": "static",
+      "note": "Node 24.15.0; facets: callback-order, callback-this, liveness, mutation; supported scope: the one-callback call at one, two, or three parameters, walking the live list so mutations during the walk are observed; differential evidence: corpus:1792-searchparams-encoding, corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url-search-params.get",
+      "kind": "stdlib",
+      "name": "URLSearchParams.get",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, property-read, missing-arguments; supported scope: the one-argument call, returning string | null; differential evidence: corpus:1791-searchparams-core, corpus:1792-searchparams-encoding"
+    },
+    {
+      "id": "stdlib.url-search-params.getAll",
+      "kind": "stdlib",
+      "name": "URLSearchParams.getAll",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, property-read, missing-arguments; supported scope: the one-argument call, returning the values in insertion order; differential evidence: corpus:1791-searchparams-core"
+    },
+    {
+      "id": "stdlib.url-search-params.has",
+      "kind": "stdlib",
+      "name": "URLSearchParams.has",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, property-read, missing-arguments; supported scope: the name-only and the value-aware two-argument forms as separate call shapes; differential evidence: corpus:1791-searchparams-core"
+    },
+    {
+      "id": "stdlib.url-search-params.keys",
+      "kind": "stdlib",
+      "name": "URLSearchParams.keys",
+      "status": "static",
+      "note": "Node 24.15.0; facets: iteration, liveness; supported scope: the direct for-of head `for (const x of params.keys())`; the iterator object itself is not a first-class handle; differential evidence: corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url-search-params.set",
+      "kind": "stdlib",
+      "name": "URLSearchParams.set",
+      "status": "static",
+      "note": "Node 24.15.0; facets: webidl-conversion, mutation, missing-arguments; supported scope: the two-argument call, replacing the first match in place and dropping the rest; differential evidence: corpus:1791-searchparams-core, corpus:1794-searchparams-url-live"
+    },
+    {
+      "id": "stdlib.url-search-params.size",
+      "kind": "stdlib",
+      "name": "URLSearchParams.size",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, liveness; differential evidence: corpus:1791-searchparams-core, corpus:1792-searchparams-encoding"
+    },
+    {
+      "id": "stdlib.url-search-params.sort",
+      "kind": "stdlib",
+      "name": "URLSearchParams.sort",
+      "status": "static",
+      "note": "Node 24.15.0; facets: mutation; supported scope: the zero-argument call, with WHATWG code-unit ordering and stable pairs; differential evidence: corpus:1791-searchparams-core, corpus:1792-searchparams-encoding"
+    },
+    {
+      "id": "stdlib.url-search-params.symbol.iterator",
+      "kind": "stdlib",
+      "name": "URLSearchParams.[Symbol.iterator]",
+      "status": "static",
+      "note": "Node 24.15.0; facets: iteration, liveness; supported scope: for-of over the params object, yielding live [name, value] pairs; the explicit params[Symbol.iterator]() spelling is refused; differential evidence: corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url-search-params.toString",
+      "kind": "stdlib",
+      "name": "URLSearchParams.toString",
+      "status": "static",
+      "note": "Node 24.15.0; facets: serialization; supported scope: the zero-argument call; the method value itself is not a first-class handle; differential evidence: corpus:1791-searchparams-core, corpus:1792-searchparams-encoding"
+    },
+    {
+      "id": "stdlib.url-search-params.values",
+      "kind": "stdlib",
+      "name": "URLSearchParams.values",
+      "status": "static",
+      "note": "Node 24.15.0; facets: iteration, liveness; supported scope: the direct for-of head `for (const x of params.values())`; the iterator object itself is not a first-class handle; differential evidence: corpus:1793-searchparams-iteration"
+    },
+    {
+      "id": "stdlib.url.constructor",
+      "kind": "stdlib",
+      "name": "URL constructor",
+      "status": "static",
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape, missing-arguments; supported scope: one absolute-URL string argument; the (input, base) relative-resolution overload and the zero-argument form are refused per site, and an unparseable input throws Node's TypeError('Invalid URL'); differential evidence: corpus:1355-url-parse, corpus:2573-fs-url-arg-ladders"
+    },
+    {
+      "id": "stdlib.url.hash",
+      "kind": "stdlib",
+      "name": "URL.hash",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: '#' + fragment, but the empty string for both no fragment at all and a bare '#'; the fragment runs to the end of the input; differential evidence: corpus:2832-url-hash"
+    },
+    {
+      "id": "stdlib.url.host",
+      "kind": "stdlib",
+      "name": "URL.host",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the WHATWG host serialization, including the empty host of opaque-path URLs; differential evidence: corpus:1557-url-host"
+    },
+    {
+      "id": "stdlib.url.hostname",
+      "kind": "stdlib",
+      "name": "URL.hostname",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; differential evidence: corpus:1577-url-hostname, corpus:1611-url-file-bridge-neutral"
+    },
+    {
+      "id": "stdlib.url.href",
+      "kind": "stdlib",
+      "name": "URL.href",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, serialization; differential evidence: corpus:1355-url-parse, corpus:1356-url-file-bridge, corpus:1794-searchparams-url-live"
+    },
+    {
+      "id": "stdlib.url.origin",
+      "kind": "stdlib",
+      "name": "URL.origin",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, serialization; supported scope: the WHATWG tuple origin for the schemes that have one, and the literal string 'null' for file: and every opaque-path scheme; userinfo is never part of it and the default port is already stripped; differential evidence: corpus:2831-url-origin"
+    },
+    {
+      "id": "stdlib.url.password",
+      "kind": "stdlib",
+      "name": "URL.password",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the percent-encoded userinfo component after the first ':', the empty string when absent or empty, with no null/empty distinction; differential evidence: corpus:2833-url-userinfo"
+    },
+    {
+      "id": "stdlib.url.pathname",
+      "kind": "stdlib",
+      "name": "URL.pathname",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; differential evidence: corpus:1355-url-parse, corpus:1611-url-file-bridge-neutral"
+    },
+    {
+      "id": "stdlib.url.port",
+      "kind": "stdlib",
+      "name": "URL.port",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the digit-string tail of host; the empty string whenever the port is absent or equals the scheme's own default, dropped at parse time so the getter is a verbatim field read; differential evidence: corpus:2830-url-port"
+    },
+    {
+      "id": "stdlib.url.protocol",
+      "kind": "stdlib",
+      "name": "URL.protocol",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; differential evidence: corpus:1355-url-parse, corpus:1611-url-file-bridge-neutral"
+    },
+    {
+      "id": "stdlib.url.search",
+      "kind": "stdlib",
+      "name": "URL.search",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, liveness; supported scope: reads the serialization of the URL's live query, including the empty string a bare '?' produces; differential evidence: corpus:1794-searchparams-url-live"
+    },
+    {
+      "id": "stdlib.url.searchParams",
+      "kind": "stdlib",
+      "name": "URL.searchParams",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, identity, liveness; supported scope: the live query view, cached so repeated reads of one URL return the same params identity and writes through it are visible in href/search; differential evidence: corpus:1794-searchparams-url-live"
+    },
+    {
+      "id": "stdlib.url.setter.hash",
+      "kind": "stdlib",
+      "name": "URL.hash (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.host",
+      "kind": "stdlib",
+      "name": "URL.host (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.hostname",
+      "kind": "stdlib",
+      "name": "URL.hostname (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.href",
+      "kind": "stdlib",
+      "name": "URL.href (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.password",
+      "kind": "stdlib",
+      "name": "URL.password (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.pathname",
+      "kind": "stdlib",
+      "name": "URL.pathname (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.port",
+      "kind": "stdlib",
+      "name": "URL.port (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.protocol",
+      "kind": "stdlib",
+      "name": "URL.protocol (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.search",
+      "kind": "stdlib",
+      "name": "URL.search (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.setter.username",
+      "kind": "stdlib",
+      "name": "URL.username (setter)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+    },
+    {
+      "id": "stdlib.url.static.canParse",
+      "kind": "stdlib",
+      "name": "URL.canParse",
+      "status": "static",
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape; supported scope: the one-argument form; the input's accept/reject decision as a boolean, never throwing — the (input, base) relative-resolution overload is refused; differential evidence: corpus:2834-url-can-parse"
+    },
+    {
+      "id": "stdlib.url.static.createObjectURL",
+      "kind": "stdlib",
+      "name": "URL.createObjectURL",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the Blob URL store has no engine-free representation; Blob itself is outside this slice"
+    },
+    {
+      "id": "stdlib.url.static.parse",
+      "kind": "stdlib",
+      "name": "URL.parse",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; parse has no compiler lowering in either tier — neither the one-argument form nor the (input, base) form; parse an absolute string with new URL and catch the TypeError instead"
+    },
+    {
+      "id": "stdlib.url.static.revokeObjectURL",
+      "kind": "stdlib",
+      "name": "URL.revokeObjectURL",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the Blob URL store has no engine-free representation; only Node's zero-argument ERR_MISSING_ARGS throw is reproduced, which is a refusal parity detail rather than support"
+    },
+    {
+      "id": "stdlib.url.toJSON",
+      "kind": "stdlib",
+      "name": "URL.toJSON",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier"
+    },
+    {
+      "id": "stdlib.url.toString",
+      "kind": "stdlib",
+      "name": "URL.toString",
+      "status": "static",
+      "note": "Node 24.15.0; facets: serialization; supported scope: the zero-argument call, equal to href; the method value itself is not a first-class handle; differential evidence: corpus:1355-url-parse"
+    },
+    {
+      "id": "stdlib.url.username",
+      "kind": "stdlib",
+      "name": "URL.username",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the percent-encoded userinfo component before the first ':', the empty string when absent; differential evidence: corpus:2833-url-userinfo"
     },
     {
       "id": "syntax.class-declarations-inside-functions",

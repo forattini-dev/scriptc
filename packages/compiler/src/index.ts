@@ -84,6 +84,31 @@ export {
   type FetchCompatOption,
   type FetchCompatProfile,
 } from "./compat/fetch-profile.js";
+export { COMPAT_PROFILES } from "./compat/registry.js";
+export {
+  NODE24_URL_COMPAT_PROFILE,
+  type UrlCompatFacet,
+  type UrlCompatOperation,
+  type UrlCompatProfile,
+} from "./compat/url-profile.js";
+export {
+  compatEvidenceKey,
+  compatRowName,
+  compatTargetLabel,
+  type CompatEvidence,
+  type CompatFenceCode,
+  type CompatInterfaceSource,
+  type CompatInventory,
+  type CompatInventoryEntry,
+  type CompatInventoryExclusion,
+  type CompatInventoryPlacement,
+  type CompatInventoryStatus,
+  type CompatOperation,
+  type CompatOption,
+  type CompatProfileProjection,
+  type CompatRuntimeTarget,
+  type CompatTargets,
+} from "./compat/profile-schema.js";
 export { LIB_FN_SIGS, validateModule } from "./ir/validate.js";
 export { resolveLibraryFences, type LibraryFenceDecl, type ResolvedLibraryFence } from "./library/fence-eval.js";
 export {
