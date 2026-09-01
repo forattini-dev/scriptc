@@ -43,6 +43,8 @@ include!("island_modules.rs");
 #[cfg(feature = "island-eval")]
 include!("island_host.rs");
 #[cfg(feature = "island-eval")]
+include!("island_host_io.rs");
+#[cfg(feature = "island-eval")]
 include!("island_eval.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
@@ -65,6 +67,7 @@ include!("querystring.rs");
 include!("os.rs");
 include!("filesystem.rs");
 include!("filesystem_dirent.rs");
+include!("filesystem_whole_file.rs");
 include!("fs_watch.rs");
 include!("child_process_and_paths.rs");
 include!("child_stream.rs");

@@ -5480,7 +5480,7 @@ static const char isl_modules_bootstrap[] =
     "    tp.default = tp;\n"
     "    return tp;\n"
     "  });\n"
-    /* ── island-js/29-net-http-tls-zlib.js ───────────────────────────────── */
+    /* ── island-js/29-zlib.js ────────────────────────────────────────────── */
     /* node:zlib — one-shot sync/callback codecs over the zlib bridge
      * (zlib/raw/gzip modes; inflate auto-detects for unzip), plus
      * BUFFERING stream classes: a Transform that collects its input
@@ -5585,6 +5585,7 @@ static const char isl_modules_bootstrap[] =
     "    z.default = z;\n"
     "    return z;\n"
     "  });\n"
+    /* ── island-js/30-net-http-tls.js ────────────────────────────────────── */
     /* node:http/node:https — the CLIENT slice over the socket units
      * (scr_net_island.c's host functions; registered only when that
      * bridge is linked, so bridge-less builds keep the does-not-provide
@@ -6299,7 +6300,7 @@ static const char isl_modules_bootstrap[] =
     "      return mod;\n"
     "    });\n"
     "  }\n"
-    /* ── island-js/30-process.js ─────────────────────────────────────────── */
+    /* ── island-js/31-process.js ─────────────────────────────────────────── */
     "  builtins.process = memo(() => {\n"
     "    const argv = host.argv();\n"
     "    const stream = (fd) => {\n"
@@ -6449,7 +6450,7 @@ static const char isl_modules_bootstrap[] =
     "    p.default = p;\n"
     "    return p;\n"
     "  });\n"
-    /* ── island-js/31-epilogue.js ────────────────────────────────────────── */
+    /* ── island-js/32-epilogue.js ────────────────────────────────────────── */
     "  globalThis.process = builtins.process();\n"
     /* Node's Buffer global (and `global` itself) — embedded CJS
      * reaches both without requiring anything. */

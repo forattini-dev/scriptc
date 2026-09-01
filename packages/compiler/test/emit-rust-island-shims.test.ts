@@ -77,14 +77,46 @@ describe.sequential("Rust island builtin shims", () => {
   });
 
   test("a builtin outside the island's manifest still throws at RUNTIME", async () => {
-    // The fence the shims do not remove: node:os has no Rust host surface
-    // yet, so requiring it is an honest throw, not a wrong answer.
+    // The fence the shims do not remove: node:net needs an event loop
+    // inside the island, which the Rust bridge does not carry, so its
+    // part stays out of the manifest and requiring it is an honest
+    // throw rather than a wrong answer.
     const failure = await run(await build("builtin-unshimmed.ts")).catch(
       (error: unknown) => error,
     );
     expect(failure).toHaveProperty("stderr");
     expect((failure as { stderr: string }).stderr).toContain(
-      "the island does not provide the 'node:os' builtin",
+      "the island does not provide the 'node:net' builtin",
     );
+  });
+
+  // The I/O shims are the half that reaches the operating system, so the
+  // question they answer is not "does the JavaScript run" but "does it
+  // reach the SAME runtime unit the static lane does". Node is the
+  // oracle: fs, crypto, zlib and os must all agree with it byte for byte.
+  test("the I/O shims answer exactly what Node's own modules answer", async () => {
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "io-shims.ts")]),
+      await run(await build("io-shims.ts")),
+    ];
+    expect(Buffer.from(rust.stdout).equals(Buffer.from(node.stdout))).toBe(true);
+    // Every line is a different operation, so name the one that drifts.
+    for (const [index, line] of node.stdout.split("\n").entries()) {
+      expect(rust.stdout.split("\n")[index], line.split(" ")[0]).toBe(line);
+    }
+  });
+
+  test("each I/O module is really bridged, not silently absent", async () => {
+    // A guard against the whole suite passing because both lanes threw
+    // the same way: the report must actually carry every module's rows.
+    const rust = await run(await build("io-shims.ts"));
+    for (const prefix of ["fs:read ", "hash:sha256 ", "zlib:gzip ", "os:platform ", "promises:read "]) {
+      expect(rust.stdout, prefix).toContain(prefix);
+    }
+    // fs errors have to cross the bridge Node-shaped, code and all —
+    // that is what fs.existsSync's catch and statSync's throwIfNoEntry
+    // escape hatch are written against.
+    expect(rust.stdout).toContain("fs:enoent ENOENT");
+    expect(rust.stdout).toContain("fs:stat-missing undefined");
   });
 });
