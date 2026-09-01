@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
-import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
+import { isRelativeSpecifier, isRuntimeSourceFileName } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -271,7 +271,7 @@ export interface FileParts {
         if (
           npm !== null &&
           isNpmStaticPackage(npm.packageName) &&
-          isJsSourceFileName(npm.typesFile) &&
+          isRuntimeSourceFileName(npm.typesFile) &&
           L.program.getSourceFile(npm.typesFile) !== undefined
         ) {
           continue;

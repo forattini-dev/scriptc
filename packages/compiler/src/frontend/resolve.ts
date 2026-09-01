@@ -17,6 +17,7 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { provenanceEntryFor } from "./provenance-registry.js";
+import { isRuntimeSourceFileName, isTsSourceFileName } from "./shared.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 function isFile(path: string): boolean {
@@ -273,11 +274,16 @@ export function projectDtsRuntimeSibling(path: string): string | null {
  * paths as spelled), or null. */
 export function resolveRelativeModule(fromFile: string, specifier: string): string | null {
   const base = resolve(dirname(resolve(fromFile)), specifier);
-  // Inside an opted-in --npm-static package, relative edges resolve to the
-  // shipped JS, never to a sibling declaration twin: the .d.ts is the
-  // claim, the JS is the code that compiles (npm-static.ts — the tsgo
-  // host hides the same files, so both worlds answer the JS).
+  // Inside an opted-in --npm-static package, relative edges stay in the
+  // runtime graph, never in a declaration twin. A package-authored scriptc
+  // entry may itself be TypeScript; its `.js`-spelled internal imports then
+  // resolve to the sibling `.ts` sources exactly as the checker resolved
+  // them. Shipped-JS entries retain the strict JS-only path.
   if (npmStaticPackageOfPath(resolve(fromFile)) !== null) {
+    if (isTsSourceFileName(fromFile)) {
+      const answer = loadAsFile(base) ?? loadAsDirectory(base);
+      return answer !== null && !/\.d\.(ts|mts|cts)$/.test(answer) ? answer : null;
+    }
     return loadAsJsFile(base) ?? loadAsJsDirectory(base);
   }
   const answer = loadAsFile(base) ?? loadAsDirectory(base);
@@ -334,9 +340,10 @@ const EXPORT_CONDITIONS = new Set(["types", "import", "default"]);
 
 /** The bundler condition set minus "types" — what an opted-in --npm-static
  * package resolves with (its declarations are hidden from resolution; the
- * runtime JS is the compile target). Mirrors the types-stripped
+ * runtime source is the compile target). Mirrors the types-stripped
  * package.json the tsgo host serves for the same package. */
-const JS_ONLY_CONDITIONS = new Set(["import", "default"]);
+export const NPM_STATIC_EXPORT_CONDITIONS: ReadonlySet<string> =
+  new Set(["scriptc", "import", "default"]);
 
 /** package.json "exports" lookup: exact subpath keys, then '*' patterns
  * (longest literal prefix wins), condition objects matched against the
@@ -576,12 +583,14 @@ function extensionsFor(pass: NmPass, flavor: "plain" | "x" | "m" | "c"): string[
 
 /** File resolution of an exports-map target (or types/typings/main field)
  * inside node_modules, for one pass: recognized-extension substitution,
- * extension addition, then directory index. */
+ * extension addition, then directory index. The npm-static runtime pass also
+ * accepts an explicit TypeScript source target: package-authored `scriptc`
+ * conditions are compiler entries, not files Node must execute directly. */
 function loadTargetInPass(pkgDir: string, target: string, pass: NmPass): string | null {
   const path = join(pkgDir, target);
   if (pass === "types") {
     if (/\.(d\.ts|d\.mts|d\.cts|ts|tsx|mts|cts)$/.test(path) && isFile(path)) return path;
-  } else if (/\.(js|jsx|mjs|cjs)$/.test(path) && isFile(path)) {
+  } else if (isRuntimeSourceFileName(path) && isFile(path)) {
     return path;
   }
   const sub = (ext: string, flavor: "plain" | "x" | "m" | "c"): string | null => {
@@ -706,11 +715,11 @@ export function resolveBareModule(
   const pkgName = packagePrefixOf(specifier);
   const rest = specifier.slice(pkgName.length).replace(/^\//, "");
   const subpath = rest === "" ? "." : `./${rest}`;
-  // An opted-in --npm-static package resolves to its RUNTIME JS: the js
+  // An opted-in --npm-static package resolves to its RUNTIME SOURCE: the js
   // pass only, the "types" export condition dropped, the @types mangling
   // never consulted — mirroring the shadowed world the tsgo host serves.
   const npmStatic = mode === "js-only" || isNpmStaticPackage(pkgName);
-  const conditions = npmStatic ? JS_ONLY_CONDITIONS : EXPORT_CONDITIONS;
+  const conditions = npmStatic ? NPM_STATIC_EXPORT_CONDITIONS : EXPORT_CONDITIONS;
 
   const inPackage = (nmPkgDir: string, name: string, pass: NmPass): BareResolution | null => {
     // A workspace link: the answer's realpath escaped node_modules, so the

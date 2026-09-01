@@ -174,8 +174,12 @@ function shadowTargetOf(path: string): { pkg: string; viaTypes: boolean } | null
  *   1. every types claim goes — the top-level "types"/"typings" fields
  *      and every "types"/"typings" condition key inside "exports"
  *      (recursively; condition objects nest) — so resolution lands on
- *      runtime JS;
- *   2. CJS-first: a condition object carrying BOTH "import" and "require"
+ *      runtime source;
+ *   2. a package-authored "scriptc" condition is hoisted into the standard
+ *      import/require conditions understood by the TypeScript resolver. The
+ *      runtime resolver already includes "scriptc" in its condition set;
+ *      this rewrite makes the checker join that same portable source graph;
+ *   3. CJS-first: a condition object carrying BOTH "import" and "require"
  *      has its "import" value REWRITTEN to the "require" target. The
  *      import-side of a wrapper-style dual (commander's esm.mjs) is pure
  *      name plumbing over the CJS implementation — `export const {…} =
@@ -199,20 +203,12 @@ export function npmStaticTransformPkgJson(pkg: Record<string, unknown>): void {
     const obj = v as Record<string, unknown>;
     delete obj["types"];
     delete obj["typings"];
-    // 0. The "node" condition HOISTS: Node's runtime resolution matches it
-    //    (yaml's `{ types, node: "./dist/index.js", default: "./browser/
-    //    index.js" }` runs the node dist; the browser dist is a DIFFERENT
-    //    artifact), while the bundler condition set both resolution worlds
-    //    use ({types, import, default}) would fall through to "default".
-    //    The node target splices in AT ITS KEY POSITION — a string emits
-    //    under import+require (either matcher finds it there), an object's
-    //    entries splice inline — earlier real keys keep winning, exactly
-    //    Node's first-match-in-key-order rule.
-    if (obj["node"] !== undefined) {
+    const hoistCondition = (condition: "scriptc" | "node"): void => {
+      if (obj[condition] === undefined) return;
       const entries = Object.entries(obj);
       for (const k of Object.keys(obj)) delete obj[k];
       for (const [k, val] of entries) {
-        if (k !== "node") {
+        if (k !== condition) {
           if (!(k in obj)) obj[k] = val;
           continue;
         }
@@ -226,7 +222,21 @@ export function npmStaticTransformPkgJson(pkg: Record<string, unknown>): void {
           if (!(ik in obj)) obj[ik] = iv;
         }
       }
-    }
+    };
+    // 0. The package-authored "scriptc" condition HOISTS for the checker.
+    //    Only opted-in packages pass through this transform, so ordinary
+    //    TypeScript/Node consumers continue to resolve their normal entry.
+    hoistCondition("scriptc");
+    // 1. The "node" condition HOISTS: Node's runtime resolution matches it
+    //    (yaml's `{ types, node: "./dist/index.js", default: "./browser/
+    //    index.js" }` runs the node dist; the browser dist is a DIFFERENT
+    //    artifact), while the bundler condition set both resolution worlds
+    //    use ({types, import, default}) would fall through to "default".
+    //    The node target splices in AT ITS KEY POSITION — a string emits
+    //    under import+require (either matcher finds it there), an object's
+    //    entries splice inline — earlier real keys keep winning, exactly
+    //    Node's first-match-in-key-order rule.
+    hoistCondition("node");
     if (obj["import"] !== undefined && obj["require"] !== undefined) {
       obj["import"] = obj["require"];
     }

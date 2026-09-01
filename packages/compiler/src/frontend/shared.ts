@@ -349,3 +349,13 @@ export const JS_ANY_OPERATOR_CODES: ReadonlySet<number> = new Set([2362, 2363, 2
 export function isJsSourceFileName(fileName: string): boolean {
   return /\.(js|mjs|cjs|jsx)$/.test(fileName);
 }
+
+/** True for executable TypeScript sources, excluding declaration-only files. */
+export function isTsSourceFileName(fileName: string): boolean {
+  return /\.(ts|tsx|mts|cts)$/.test(fileName) && !/\.d\.(ts|mts|cts)$/.test(fileName);
+}
+
+/** True for JavaScript or executable TypeScript runtime source files. */
+export function isRuntimeSourceFileName(fileName: string): boolean {
+  return isJsSourceFileName(fileName) || isTsSourceFileName(fileName);
+}

@@ -65,6 +65,7 @@ import {
   isJsSourceFileName,
   isNodeTypesPath,
   isRelativeSpecifier,
+  isRuntimeSourceFileName,
   isWorkspacePackageName,
   JS_ANY_OPERATOR_CODES,
   JS_RELAXED_TSC_CODES,
@@ -1547,10 +1548,10 @@ function npmStaticProgramDep(
   packageName: string,
   resolvedFile: string,
 ): ts.SourceFile | null {
-  if (!isJsSourceFileName(resolvedFile)) {
+  if (!isRuntimeSourceFileName(resolvedFile)) {
     reportNpmStaticOffender(
       packageName,
-      `its import resolves to '${resolvedFile}', not to runtime JavaScript`,
+      `its import resolves to '${resolvedFile}', not to JavaScript or TypeScript runtime source`,
     );
     return null;
   }
@@ -2828,7 +2829,7 @@ export function orderedImportsOf(
 }
 
 /** The program source file a bare specifier reaches when it names an
- * opted-in --npm-static package (the shipped-JS entry preflight admitted
+ * opted-in --npm-static package (the runtime-source entry preflight admitted
  * as a module edge), else null. No offender reporting here — preflight
  * already classified the import; this is the lookup the module-order and
  * lowering paths share. */
@@ -2837,7 +2838,7 @@ export function npmStaticDepSf7(program: ts.Program, sf: ts.SourceFile, spec: st
   if (spec.startsWith("node:") || spec.startsWith("#")) return null;
   const npm = resolveNpmImport7(sf.fileName, spec);
   if (npm === null || !isNpmStaticPackage(npm.packageName)) return null;
-  if (!isJsSourceFileName(npm.typesFile)) return null;
+  if (!isRuntimeSourceFileName(npm.typesFile)) return null;
   return program.getSourceFile(npm.typesFile) ?? null;
 }
 
