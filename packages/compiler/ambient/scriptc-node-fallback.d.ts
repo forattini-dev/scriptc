@@ -1318,9 +1318,10 @@ declare module "node:os" {
  * LIVE query view — mutations through it re-serialize into the URL, so
  * href reflects immediately; every read answers the same object, Node's
  * caching), and toString() (the href serialization).
- * URL values have no SETTERS — the component fields are read-only (the
- * one supported mutation path is searchParams) — and participate in
- * unions (URL | undefined). The parser covers the common CLI schemes
+ * pathname is the one WRITABLE component — assignment re-runs the WHATWG
+ * path parse and re-serializes href; every other component field is
+ * read-only (the other mutation path is searchParams). URL values
+ * participate in unions (URL | undefined). The parser covers the common CLI schemes
  * exactly (http/https/ws/wss/ftp/file authority URLs, opaque paths like
  * data: and mailto:) — divergences from the full WHATWG algorithm are
  * documented in SEMANTICS.md. */
