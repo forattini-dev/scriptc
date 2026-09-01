@@ -235,6 +235,57 @@ pub fn island_value_json(value: &JsString) -> IslandValue {
     })
 }
 
+/// Install the web-platform globals, before any embedded module parses.
+///
+/// The prelude is an arrow taking the same `host` bridge the module
+/// bootstrap gets, because `globalThis.crypto` needs native randomness;
+/// the C island's scr_island_web_boot has exactly this shape.
+fn island_web_boot(context: &mut Context) -> JsResult<()> {
+    let host = island_host_object(context);
+    let boot = context.eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))?;
+    let Some(boot) = boot.as_callable() else {
+        return Err(boa_engine::JsNativeError::typ()
+            .with_message("scriptc: island web bootstrap is not callable")
+            .into());
+    };
+    boot.call(&JsValue::undefined(), &[host.into()], context)?;
+    Ok(())
+}
+
+/// Rebuild one native RegExp as a FRESH engine RegExp from its
+/// source and flags — the pattern TEXT crosses, not the compiled
+/// program (host and realm each compile the ES-spec grammar). Identity
+/// and `lastIndex` state deliberately do not cross: every marshal mints
+/// a new realm object, matching the C island's stance.
+pub fn island_value_regexp(source: &JsString, flags: &JsString) -> IslandValue {
+    with_island_state(|state| {
+        let context = &mut state.context;
+        let value = island_construct_regexp(source, flags, context)
+            .unwrap_or_else(|error| island_eval_error(error, context));
+        IslandValue(value)
+    })
+}
+
+/// Run the realm's own `RegExp` constructor over host-produced text.
+fn island_construct_regexp(
+    source: &JsString,
+    flags: &JsString,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let global = context.global_object();
+    let regexp = global.get(js_string!("RegExp"), context)?;
+    let Some(regexp) = regexp.as_constructor() else {
+        return Err(boa_engine::JsNativeError::typ()
+            .with_message("Embedded RegExp is not a constructor")
+            .into());
+    };
+    let args = [
+        JsValue::from(boa_engine::JsString::from(source.as_ref())),
+        JsValue::from(boa_engine::JsString::from(flags.as_ref())),
+    ];
+    Ok(regexp.construct(&args, None, context)?.into())
+}
+
 /// Run the realm's own `JSON.parse` over host-produced text.
 fn island_parse_json(value: &JsString, context: &mut Context) -> JsResult<JsValue> {
     let global = context.global_object();
@@ -675,9 +726,7 @@ fn island_state() -> IslandState {
     ) {
         island_eval_error(error, &mut context);
     }
-    context
-        .eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))
-        .unwrap_or_else(|error| island_eval_error(error, &mut context));
+    island_web_boot(&mut context).unwrap_or_else(|error| island_eval_error(error, &mut context));
     let embedded_modules = island_registered_modules();
     if !embedded_modules.is_empty() {
         // __scr_require must exist before any module is PARSED, because a

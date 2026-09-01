@@ -438,6 +438,12 @@ function emitIslandValue(value: string, context: RustIslandContext): string {
     `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
     `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
     `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(${value})), ` +
+    // A native RegExp crosses as its own source+flags, rebuilt by the
+    // realm's RegExp constructor (the `z.string().regex(/^a+$/)` shape).
+    // A fresh engine object per marshal: identity and lastIndex stay
+    // host-side, exactly as SEMANTICS.md states for the C island.
+    `${dyn}::Regex(sc_value) => runtime::island_value_regexp(` +
+    `&runtime::regex_source(sc_value), &runtime::regex_flags(sc_value)), ` +
     `${dyn}::Island(sc_value) => sc_value.clone(), ` +
     `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
     `}`;

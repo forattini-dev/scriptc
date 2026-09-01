@@ -263,6 +263,65 @@
       emitter.once(name, onEvent);
       if (name !== 'error') emitter.once('error', onError);
     });
+    EventEmitter.on = (emitter, name, options) => {
+      const closes = options && options.close ? options.close : [];
+      const queue = [];
+      const pending = [];
+      let failure = null;
+      let done = false;
+      const push = (...args) => {
+        const next = pending.shift();
+        if (next) next.resolve({ value: args, done: false });
+        else queue.push(args);
+      };
+      const stop = () => {
+        emitter.removeListener(name, push);
+        if (name !== 'error') emitter.removeListener('error', fail);
+        for (const close of closes) emitter.removeListener(close, finish);
+      };
+      const finish = () => {
+        done = true;
+        stop();
+        const next = pending.shift();
+        if (next) next.resolve({ value: undefined, done: true });
+      };
+      const fail = (err) => {
+        const next = pending.shift();
+        if (next) { done = true; stop(); next.reject(err); return; }
+        failure = err;
+        finish();
+      };
+      emitter.on(name, push);
+      if (name !== 'error') emitter.on('error', fail);
+      for (const close of closes) emitter.on(close, finish);
+      if (options && options.signal) {
+        options.signal.addEventListener('abort', () => {
+          const e = new Error('The operation was aborted');
+          e.name = 'AbortError';
+          e.code = 'ABORT_ERR';
+          fail(e);
+        });
+      }
+      return {
+        next() {
+          if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false });
+          if (failure !== null) { const err = failure; failure = null; return Promise.reject(err); }
+          if (done) return Promise.resolve({ value: undefined, done: true });
+          return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+        },
+        return() {
+          finish();
+          return Promise.resolve({ value: undefined, done: true });
+        },
+        throw(err) {
+          failure = err;
+          done = true;
+          stop();
+          return Promise.reject(err);
+        },
+        [Symbol.asyncIterator]() { return this; },
+      };
+    };
     EventEmitter.EventEmitter = EventEmitter;
     EventEmitter.default = EventEmitter;
     return EventEmitter;

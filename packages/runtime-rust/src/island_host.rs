@@ -313,7 +313,9 @@ type IslandHostMember = (
     usize,
 );
 
-/// Every name the shared bootstrap's `rust` manifest calls.
+/// Every name the realm's JavaScript calls on `host` — the shared
+/// bootstrap's `rust` manifest, plus the web prelude (island_web.js),
+/// which is handed this same object.
 ///
 /// `source` and `resolve` come from the module tables
 /// (island_modules.rs), and the I/O members — fs, crypto, zlib, os —
@@ -321,7 +323,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 29] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 31] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -346,6 +348,11 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 29] = [
     ("fsConstants", island_host_fs_constants, 0),
     ("digest", island_host_digest, 2),
     ("hmac", island_host_hmac, 3),
+    // The web prelude's randomness (island_web.js builds globalThis.crypto
+    // over these); the C island registers the same pair as `fill`/`uuid`
+    // on its own web host object.
+    ("random", island_host_random, 1),
+    ("uuid", island_host_uuid, 0),
     ("zlib", island_host_zlib, 4),
     ("arch", island_host_arch, 0),
     ("hostname", island_host_hostname, 0),
