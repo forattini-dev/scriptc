@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:fetch-conformance": "vitest run tests/harness/fetch-conformance.test.ts",
     "test:url-conformance": "vitest run tests/harness/url-conformance.test.ts",
+    "test:events-conformance": "vitest run tests/harness/events-conformance.test.ts",
     "test:cache-identity": "node tests/harness/cache-identity.mjs",
     "test:sandbox": "node scripts/sandbox-test.mjs",
     "test:sandbox:image": "node scripts/sandbox-image.mjs",

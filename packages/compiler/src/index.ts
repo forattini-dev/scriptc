@@ -86,6 +86,12 @@ export {
 } from "./compat/fetch-profile.js";
 export { COMPAT_PROFILES } from "./compat/registry.js";
 export {
+  NODE24_EVENTS_COMPAT_PROFILE,
+  type EventsCompatFacet,
+  type EventsCompatOperation,
+  type EventsCompatProfile,
+} from "./compat/events-profile.js";
+export {
   NODE24_URL_COMPAT_PROFILE,
   type UrlCompatFacet,
   type UrlCompatOperation,

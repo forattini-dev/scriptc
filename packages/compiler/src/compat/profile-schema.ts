@@ -97,6 +97,14 @@ export interface CompatInventoryEntry {
   status: CompatInventoryStatus;
   code?: CompatFenceCode;
   reason?: string;
+  /** The published name, when owner + placement cannot disambiguate one.
+   * Normally placement does the work — a setter row says "(setter)", an
+   * instance row says "(instance)". But an interface whose MODULE OBJECT
+   * IS the class (Node's `module.exports = EventEmitter`) carries the
+   * same name as a class-value static and as a prototype member, with
+   * different compiler claims behind each; without an override the two
+   * rows would publish under one name and opposite statuses. */
+  publishAs?: string;
 }
 
 export interface CompatInventoryExclusion {
@@ -175,6 +183,7 @@ export interface CompatProfileProjection {
  * row names the bare global, a setter row says so, everything else is
  * owner-dotted. */
 export function compatRowName(row: CompatInventoryEntry): string {
+  if (row.publishAs !== undefined) return row.publishAs;
   switch (row.placement) {
     case "constructor":
       return `${row.owner} constructor`;
@@ -182,6 +191,11 @@ export function compatRowName(row: CompatInventoryEntry): string {
       return row.owner === "globalThis" ? row.member : `${row.owner}.${row.member}`;
     case "prototype-setter":
       return `${row.owner}.${row.member} (setter)`;
+    // An own property of a constructed instance is a separate claim from
+    // the prototype property of the same name — a pre-private-field class
+    // carries both — so the two rows publish under distinct names.
+    case "instance":
+      return `${row.owner}.${row.member} (instance)`;
     default:
       return `${row.owner}.${row.member}`;
   }
