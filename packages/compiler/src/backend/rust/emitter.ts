@@ -510,7 +510,7 @@ class RustEmitter {
     }
     this.line("");
     this.lines.push(...emitRustFfiDeclarations(this.mod.ffiImports ?? [], this.mod.lib?.callbacks ?? []));
-    this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value), (kind) => this.unsupported(kind)));
+    this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value)));
     this.emitClosureDefinitions();
     this.emitDynamicDefinition();
     this.eventEmitter.emitDefinition();

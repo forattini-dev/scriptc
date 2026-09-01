@@ -1,7 +1,7 @@
 use boa_engine::{
     Context, JsError as BoaJsError, JsResult, JsValue, Module, NativeFunction, Source, js_string,
     builtins::promise::PromiseState as BoaPromiseState,
-    module::MapModuleLoader,
+    module::{ModuleRequest, Referrer},
     object::builtins::{JsArray as BoaJsArray, JsPromise as BoaJsPromise},
     object::{FunctionObjectBuilder, ObjectInitializer},
     property::Attribute,
@@ -310,7 +310,7 @@ fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {
 }
 
 fn island_state() -> IslandState {
-    let loader = Rc::new(MapModuleLoader::new());
+    let loader = Rc::new(IslandModuleLoader::default());
     let mut context = Context::builder()
         .module_loader(loader.clone())
         .build()
@@ -332,20 +332,27 @@ fn island_state() -> IslandState {
     context
         .eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))
         .unwrap_or_else(|error| island_eval_error(error, &mut context));
+    let embedded_modules = island_registered_modules();
+    if !embedded_modules.is_empty() {
+        // __scr_require must exist before any module is PARSED, because a
+        // CJS facade's first statement calls it.
+        island_modules_boot(&mut context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut context));
+    }
     let mut modules = HashMap::new();
-    for embedded in island_registered_modules() {
-        let module = match embedded.format {
-            IslandModuleFormat::Esm | IslandModuleFormat::Cjs => {
-                let mut bytes = embedded.source.as_bytes();
-                Module::parse(
-                    Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
-                    None,
-                    &mut context,
-                )
-            }
-            IslandModuleFormat::Json => {
-                Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
-            }
+    for embedded in embedded_modules {
+        // A JSON module keeps its native parse for the ES graph; CJS
+        // files enter through their build-time facade over __scr_require.
+        let module = if embedded.format == IslandModuleFormat::Json {
+            Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
+        } else {
+            let source = island_module_esm_source(embedded);
+            let mut bytes = source.as_bytes();
+            Module::parse(
+                Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
+                None,
+                &mut context,
+            )
         }
         .unwrap_or_else(|error| island_eval_error(error, &mut context));
         loader.insert(embedded.key, module.clone());
