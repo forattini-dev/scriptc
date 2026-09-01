@@ -391,8 +391,8 @@ export const STR_METHODS: Record<
   // spec routes both through StringIndexOf) — the emitter composes
   // scr_str_index_of(...) != -1 for the two-argument form.
   includes: { method: "includes", result: BOOL, minArgs: 1, maxArgs: 2 },
-  startsWith: { method: "startsWith", result: BOOL, minArgs: 1, maxArgs: 1 },
-  endsWith: { method: "endsWith", result: BOOL, minArgs: 1, maxArgs: 1 },
+  startsWith: { method: "startsWith", result: BOOL, minArgs: 1, maxArgs: 2 },
+  endsWith: { method: "endsWith", result: BOOL, minArgs: 1, maxArgs: 2 },
   slice: { method: "slice", result: STRING, minArgs: 0, maxArgs: 2 },
   // substring: slice's clamp-and-swap sibling (negatives clamp to 0
   // instead of counting from the end; start > end swaps).

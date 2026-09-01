@@ -56,6 +56,7 @@ include!("writable.rs");
 include!("duplex.rs");
 include!("transform.rs");
 include!("strings_and_process.rs");
+include!("string_search.rs");
 include!("querystring.rs");
 include!("os.rs");
 include!("filesystem.rs");

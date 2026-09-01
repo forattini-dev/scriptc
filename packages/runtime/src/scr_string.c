@@ -672,15 +672,28 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle) {
   return scr_byte_find(s->data, s->len, needle->data, needle->len) != NULL;
 }
 
-bool scr_str_starts_with(ScrStr *s, ScrStr *needle) {
-  return needle->len <= s->len &&
-         memcmp(s->data, needle->data, needle->len) == 0;
+bool scr_str_starts_with(ScrStr *s, ScrStr *needle, double position) {
+  double pos = scr_to_integer_or_infinity(position);
+  double len16 = scr_str_utf16_len(s);
+  double start16 = pos <= 0 ? 0 : pos >= len16 ? len16 : pos;
+  return scr_str_index_of(s, needle, start16) == start16;
 }
 
-bool scr_str_ends_with(ScrStr *s, ScrStr *needle) {
-  return needle->len <= s->len &&
-         memcmp(s->data + (s->len - needle->len), needle->data,
-                needle->len) == 0;
+bool scr_str_ends_with(ScrStr *s, ScrStr *needle, double endPosition) {
+  double pos = scr_to_integer_or_infinity(endPosition);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t end16 = pos <= 0             ? 0
+                 : pos >= (double)len16 ? len16
+                                        : (size_t)pos;
+  size_t needle16 = (size_t)scr_str_utf16_len(needle);
+  if (needle16 > end16) return false;
+  if (needle16 == 0) return true;
+  bool start_mid, end_mid;
+  size_t start_b = scr_u16_to_byte_c(s, e, end16 - needle16, &start_mid);
+  size_t end_b = scr_u16_to_byte_c(s, e, end16, &end_mid);
+  return !start_mid && !end_mid && end_b - start_b == needle->len &&
+         memcmp(s->data + start_b, needle->data, needle->len) == 0;
 }
 
 /* Resolve one slice() boundary: negatives are relative to the end, then

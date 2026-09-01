@@ -1607,7 +1607,9 @@ export type IrSetIntrinsicMethod =
  * default. `replace`/`replaceAll` take a string search pattern and string
  * replacement template (regex patterns use regexIntrinsic); `at` uses a
  * relative UTF-16 index and throws the documented TypeError divergence
- * out of range. `trimStart`/`trimEnd` are trim's one-sided halves. */
+ * out of range. `startsWith` takes an optional UTF-16 position (omitted =
+ * 0), while `endsWith` takes an optional UTF-16 end position (omitted =
+ * length). `trimStart`/`trimEnd` are trim's one-sided halves. */
 export type IrStrIntrinsicMethod =
   | "length"
   | "charCodeAt"

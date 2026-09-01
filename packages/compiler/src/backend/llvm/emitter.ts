@@ -10063,9 +10063,9 @@ class LlEmitter {
         return call("scr_str_includes", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
       }
       case "startsWith":
-        return call("scr_str_starts_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
+        return call("scr_str_starts_with", "zeroext i1 (ptr, ptr, double)", `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1]?.name ?? f64Lit(0)}`, "i1", false);
       case "endsWith":
-        return call("scr_str_ends_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
+        return call("scr_str_ends_with", "zeroext i1 (ptr, ptr, double)", `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1]?.name ?? f64Lit(Infinity)}`, "i1", false);
       case "slice":
         return call(
           "scr_str_slice",

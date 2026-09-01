@@ -629,9 +629,9 @@ double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex);
 /* includes(needle) — no position argument. Empty needle → true. */
 bool scr_str_includes(ScrStr *s, ScrStr *needle);
 
-/* startsWith(needle) / endsWith(needle) — no position argument. */
-bool scr_str_starts_with(ScrStr *s, ScrStr *needle);
-bool scr_str_ends_with(ScrStr *s, ScrStr *needle);
+/* startsWith(needle, position = 0) / endsWith(needle, endPosition = length). */
+bool scr_str_starts_with(ScrStr *s, ScrStr *needle, double position);
+bool scr_str_ends_with(ScrStr *s, ScrStr *needle, double endPosition);
 
 /* slice(start, end): UTF-16 indices, negatives count from length, clamped
  * to [0, length]; empty when start >= end. The frontend passes

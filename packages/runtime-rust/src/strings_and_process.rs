@@ -567,18 +567,6 @@ pub fn string_to_upper_case(value: &JsString) -> JsString {
     Rc::<str>::from(value.to_uppercase())
 }
 
-pub fn string_includes(value: &JsString, search: &JsString, from_index: f64) -> bool {
-    string_index_of(value, search, from_index) >= 0.0
-}
-
-pub fn string_starts_with(value: &JsString, search: &JsString) -> bool {
-    value.starts_with(search.as_ref())
-}
-
-pub fn string_ends_with(value: &JsString, search: &JsString) -> bool {
-    value.ends_with(search.as_ref())
-}
-
 fn javascript_whitespace(ch: char) -> bool {
     matches!(
         ch,
