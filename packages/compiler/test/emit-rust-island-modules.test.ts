@@ -1,6 +1,7 @@
 /* The Rust island's embedded module system: the edge table, the CommonJS
- * require shim over it, the synthetic ESM wrapper an unshimmed Node
- * builtin takes, and the widened host-call marshaling.
+ * require shim over it, the synthetic ESM wrapper a `node:` specifier
+ * takes, and the widened host-call marshaling. The shims those wrappers
+ * reach are pinned in emit-rust-island-shims.test.ts.
  *
  * The fixture node_modules under tests/fixtures/island-modules are
  * COMMITTED TEST DATA — minimal hand-made packages; the binaries embed
@@ -52,22 +53,25 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe("relcjs:5:object\n");
   });
 
-  test("a required builtin the island does not shim throws at RUNTIME, not at build", async () => {
-    const binary = await build("builtin-require.ts");
-    const failure = await run(binary).catch((error: unknown) => error);
-    expect(failure).toHaveProperty("stderr");
-    expect((failure as { stderr: string }).stderr).toContain(
-      "the island does not provide the 'node:events' builtin",
-    );
+  test("a REQUIRED builtin reaches the shim through the same require shim", async () => {
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "builtin-require.ts")]),
+      await run(await build("builtin-require.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("EventEmitter\n");
   });
 
   test("an IMPORTED builtin takes the synthesized node: wrapper", async () => {
-    const binary = await build("builtin-import.ts");
-    const failure = await run(binary).catch((error: unknown) => error);
-    expect(failure).toHaveProperty("stderr");
-    expect((failure as { stderr: string }).stderr).toContain(
-      "the island does not provide the 'node:events' builtin",
-    );
+    // The wrapper destructures the builtin's named exports, so this LINKS
+    // against the export table both islands share, then evaluates the
+    // shim behind __scr_require.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "builtin-import.ts")]),
+      await run(await build("builtin-import.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("EventEmitter\n");
   });
 
   test("a closure with mixed primitive parameters crosses as a host function", async () => {
