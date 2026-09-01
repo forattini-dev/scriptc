@@ -1601,6 +1601,13 @@ function makeStream(env) {
       this._closeEmitted = true;
       nextTick(() => this.emit("close"));
     }
+    _takeAll() {
+      const out = this._decoder || typeof this._rBuf[0] === "string" ? this._rBuf.join("") : Buffer.concat(this._rBuf);
+      this._rBuf = [];
+      this._rLen = 0;
+      this._maybeEmitEnd();
+      return out;
+    }
     read(n) {
       if (this._rBuf.length === 0) {
         this._callRead();
@@ -1609,23 +1616,27 @@ function makeStream(env) {
         this._maybeEmitEnd();
         return null;
       }
-      if (n === undefined || n === null) {
+      if (n === undefined || n === null || (typeof n === "number" && Number.isNaN(n))) {
         if (this._objectMode) return this._takeChunk();
-        let out;
-        if (typeof this._rBuf[0] === "string") {
-          out = this._rBuf.join("");
-        } else {
-          out = Buffer.concat(this._rBuf);
-        }
-        this._rBuf = [];
-        this._rLen = 0;
+        if (this._decoder) return this._takeAll();
+        const c = this._takeChunk();
         this._maybeEmitEnd();
-        return out;
+        return c;
       }
       if (this._objectMode) return this._takeChunk();
       if (n <= 0) return null;
       if (this._rLen === 0) return null;
-      if (n >= this._rLen) return this.read();
+      if (n === this._rLen) return this._takeAll();
+      if (n > this._rLen) {
+        if (!this._rEnded) {
+          this._callRead();
+          if (this._rEnded && n > this._rLen) return this._rLen > 0 ? this._takeAll() : null;
+          if (n <= this._rLen) return this.read(n);
+          this._maybeEmitEnd();
+          return null;
+        }
+        return this._takeAll();
+      }
       let out;
       if (typeof this._rBuf[0] === "string") {
         let s = "";

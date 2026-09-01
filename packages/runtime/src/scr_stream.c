@@ -713,7 +713,16 @@ static void *scr_stream_read_n(ScrStream *s, double size) {
     /* objectMode-style: one whole entry per read, whatever n says */
     want = st->r.length > 0 ? 1 : 0;
   } else if (absent) {
-    want = st->r.flowing == 1 && st->r.n > 0
+    /* Node's howMuchToRead() answers a bare read() with the HEAD entry's
+     * remaining length rather than state.length, so exactly ONE queued
+     * chunk comes back and the boundaries push() and unshift() created
+     * survive the read. That holds in paused mode too, not just while
+     * flowing — the `flowing` gate this used to carry made a paused
+     * read() concatenate the whole queue. The ONE case that still
+     * collapses it is a PAUSED read() on a decoder-backed stream, which
+     * joins the queue into a single string; while flowing, an encoded
+     * stream keeps emitting its chunks one data event at a time. */
+    want = (st->r.flowing == 1 || !st->r.encoded) && st->r.n > 0
         ? scr_stream_entry_len(st, st->r.buf[0]) - st->r.head_off
         : st->r.length;
   } else {
@@ -735,7 +744,8 @@ static void *scr_stream_read_n(ScrStream *s, double size) {
       if (st->r.object_entries) {
         want = st->r.length > 0 ? 1 : 0;
       } else if (absent) {
-        want = st->r.flowing == 1 && st->r.n > 0
+        /* same head-entry rule as above, re-derived after the refill */
+        want = (st->r.flowing == 1 || !st->r.encoded) && st->r.n > 0
             ? scr_stream_entry_len(st, st->r.buf[0]) - st->r.head_off
             : st->r.length;
       } else {

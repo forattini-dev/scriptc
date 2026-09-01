@@ -524,13 +524,26 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    let (available, eof, encoded) = readable.with_mut(|data| {
+    let (available, eof, encoded, head) = readable.with_mut(|data| {
         // Node clears emittedReadable for every read except read(0).
         // The absent read() form arrives as -1 and therefore clears too.
         if size != 0.0 {
             data.emitted_readable = false;
         }
-        (data.buffered_length, data.eof, data.encoding.is_some())
+        // Node's howMuchToRead() answers a bare read() with
+        // state.buffer.first().length rather than state.length, so a raw
+        // Buffer stream hands back exactly ONE queued chunk and the
+        // boundaries created by push() and unshift() survive the read.
+        let head = match data.chunks.front() {
+            Some(ReadableChunk::Bytes(chunk)) => bytes_len(chunk) as usize,
+            _ => 0,
+        };
+        (
+            data.buffered_length,
+            data.eof,
+            data.encoding.is_some(),
+            head,
+        )
     });
     if encoded {
         throw_error("read() on a stream with an encoding set is not supported yet (consume 'data' events, which deliver strings)".to_owned());
@@ -541,7 +554,7 @@ where
     let requested = if size.is_finite() && size >= 0.0 {
         size.trunc() as usize
     } else {
-        available
+        head
     };
     if requested == 0 || (requested > available && !eof) {
         return None;
