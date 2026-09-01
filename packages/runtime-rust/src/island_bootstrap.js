@@ -7,10 +7,14 @@
  *   01-prelude.js
  *   02-events.js
  *   03-path.js
+ *   04-fs.js
+ *   05-os.js
+ *   06-tty.js
  *   07-diagnostics-channel.js
  *   08-module.js
  *   10-buffer.js
  *   11-string-decoder.js
+ *   12-crypto.js
  *   13-stream.js
  *   14-assert.js
  *   15-util.js
@@ -20,9 +24,11 @@
  *   21-v8.js
  *   24-punycode.js
  *   25-querystring.js
+ *   26-constants.js
  *   27-console.js
- *   30-process.js
- *   31-epilogue.js
+ *   29-zlib.js
+ *   31-process.js
+ *   32-epilogue.js
  *
  * A builtin whose part is absent stays unregistered, which is the
  * island's does-not-provide throw — a fence, not a wrong answer. */
@@ -472,6 +478,355 @@ function makeFormat(sep) {
     const p = builtins.path().win32;
     p.default = p;
     return p;
+  });
+  builtins.fs = memo(() => {
+function makeFs(env) {
+  const Buffer = env.Buffer;
+  const constants = env.fsConstants();
+  const call = env.fs;
+  const pathOf = (p) => {
+    if (typeof p === "string") return p;
+    if (p instanceof Uint8Array) return Buffer.from(p).toString("utf8");
+    if (p !== null && typeof p === "object" && typeof p.href === "string" && p.href.startsWith("file://")) {
+      return decodeURIComponent(p.href.slice(7));
+    }
+    const e = new TypeError('The "path" argument must be of type string or an instance of Buffer or URL. Received ' + (p === null ? "null" : typeof p === "object" ? "an instance of " + ((p.constructor && p.constructor.name) || "Object") : "type " + typeof p + " (" + JSON.stringify(p) + ")"));
+    e.code = "ERR_INVALID_ARG_TYPE";
+    throw e;
+  };
+  const encodingOf = (options, def) => {
+    if (options === undefined || options === null) return def;
+    if (typeof options === "string") return options;
+    return options.encoding !== undefined && options.encoding !== null ? options.encoding : def;
+  };
+  const dataToU8 = (data, options) => {
+    if (typeof data === "string") return Buffer.from(data, encodingOf(options, "utf8"));
+    if (data instanceof Uint8Array) return data;
+    if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const e = new TypeError('The "data" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received ' + (data === null ? "null" : typeof data === "object" ? "an instance of " + ((data.constructor && data.constructor.name) || "Object") : "type " + typeof data));
+    e.code = "ERR_INVALID_ARG_TYPE";
+    throw e;
+  };
+  class Stats {
+    constructor(row) {
+      this._f = row[0];
+      this._d = row[1];
+      this._l = row[2];
+      this.size = row[3];
+      this.mtimeMs = row[4];
+      this.blocks = row[5];
+      this.nlink = row[6];
+      this.atimeMs = row[7];
+      this.atime = new Date(row[7]);
+      this.mtime = new Date(row[4]);
+      this.mode = (this._f ? constants.S_IFREG : this._d ? constants.S_IFDIR : this._l ? (constants.S_IFLNK || 0) : 0);
+    }
+    isFile() { return this._f; }
+    isDirectory() { return this._d; }
+    isSymbolicLink() { return this._l; }
+    isBlockDevice() { return false; }
+    isCharacterDevice() { return false; }
+    isFIFO() { return false; }
+    isSocket() { return false; }
+  }
+  class Dirent {
+    constructor(name, kind, parentPath) {
+      this.name = name;
+      this.parentPath = parentPath;
+      this.path = parentPath;
+      this._kind = kind;
+    }
+    isFile() { return this._kind === 1; }
+    isDirectory() { return this._kind === 2; }
+    isSymbolicLink() { return this._kind === 3; }
+    isFIFO() { return this._kind === 4; }
+    isSocket() { return this._kind === 5; }
+    isCharacterDevice() { return this._kind === 6; }
+    isBlockDevice() { return this._kind === 7; }
+  }
+  const readFileSync = (p, options) => {
+    const u8 = call("readFile", pathOf(p));
+    const enc = encodingOf(options, null);
+    const buf = Buffer.from(u8.buffer, u8.byteOffset, u8.length);
+    return enc === null ? buf : buf.toString(enc);
+  };
+  const writeFileSync = (p, data, options) => {
+    call("writeFile", pathOf(p), dataToU8(data, options));
+  };
+  const appendFileSync = (p, data, options) => {
+    call("appendFile", pathOf(p), dataToU8(data, options));
+  };
+  const existsSync = (p) => {
+    try {
+      return call("exists", pathOf(p));
+    } catch (e) {
+      return false;
+    }
+  };
+  const realpathSync = (p) => call("realpath", pathOf(p));
+  realpathSync.native = realpathSync;
+  const mkdirSync = (p, options) => {
+    const recursive = !!(options && options.recursive);
+    const mode = options && options.mode !== undefined ? options.mode : -1;
+    call("mkdir", pathOf(p), recursive ? 1 : 0, mode);
+    return undefined;
+  };
+  const rmSync = (p, options) => {
+    call("rm", pathOf(p), options && options.recursive ? 1 : 0, options && options.force ? 1 : 0);
+  };
+  const rmdirSync = (p) => call("rmdir", pathOf(p));
+  const unlinkSync = (p) => call("unlink", pathOf(p));
+  const readdirSync = (p, options) => {
+    const path = pathOf(p);
+    if (options && options.withFileTypes) {
+      const flat = call("scandir", path);
+      const out = [];
+      for (let i = 0; i < flat.length; i += 2) out.push(new Dirent(flat[i], flat[i + 1], path));
+      return out;
+    }
+    return call("readdir", path);
+  };
+  const statSync = (p, options) => {
+    try {
+      return new Stats(call("stat", pathOf(p)));
+    } catch (e) {
+      if (options && options.throwIfNoEntry === false && e.code === "ENOENT") return undefined;
+      throw e;
+    }
+  };
+  const lstatSync = (p, options) => {
+    try {
+      return new Stats(call("lstat", pathOf(p)));
+    } catch (e) {
+      if (options && options.throwIfNoEntry === false && e.code === "ENOENT") return undefined;
+      throw e;
+    }
+  };
+  const accessSync = (p, mode) => call("access", pathOf(p), mode === undefined ? constants.F_OK : mode);
+  const mkdtempSync = (prefix) => call("mkdtemp", String(prefix));
+  const chmodSync = (p, mode) => call("chmod", pathOf(p), mode);
+  const readlinkSync = (p) => call("readlink", pathOf(p));
+  const copyFileSync = (src, dest) => call("copyFile", pathOf(src), pathOf(dest));
+  const renameSync = (src, dest) => call("rename", pathOf(src), pathOf(dest));
+  const sync = {
+    readFileSync, writeFileSync, appendFileSync, existsSync, realpathSync,
+    mkdirSync, rmSync, rmdirSync, unlinkSync, readdirSync, statSync,
+    lstatSync, accessSync, mkdtempSync, chmodSync, copyFileSync, renameSync,
+    readlinkSync,
+  };
+  const callbackify = (syncFn) => (...args) => {
+    const cb = args.pop();
+    if (typeof cb !== "function") {
+      const e = new TypeError('The "cb" argument must be of type function. Received ' + (cb === undefined ? "undefined" : "type " + typeof cb));
+      e.code = "ERR_INVALID_ARG_TYPE";
+      throw e;
+    }
+    let result;
+    try {
+      result = syncFn(...args);
+    } catch (err) {
+      env.nextTick(() => cb(err));
+      return;
+    }
+    env.nextTick(() => cb(null, result));
+  };
+  const promisify = (syncFn) => (...args) => new Promise((resolve, reject) => {
+    try {
+      resolve(syncFn(...args));
+    } catch (err) {
+      reject(err);
+    }
+  });
+  const fs = {
+    ...sync,
+    constants,
+    Stats,
+    Dirent,
+    readFile: callbackify(readFileSync),
+    writeFile: callbackify(writeFileSync),
+    appendFile: callbackify(appendFileSync),
+    exists: (p, cb) => {
+      env.nextTick(() => cb(existsSync(p)));
+    },
+    realpath: Object.assign(callbackify(realpathSync), { native: callbackify(realpathSync) }),
+    mkdir: callbackify(mkdirSync),
+    rm: callbackify(rmSync),
+    rmdir: callbackify(rmdirSync),
+    unlink: callbackify(unlinkSync),
+    readdir: callbackify(readdirSync),
+    stat: callbackify(statSync),
+    lstat: callbackify(lstatSync),
+    access: callbackify(accessSync),
+    mkdtemp: callbackify(mkdtempSync),
+    chmod: callbackify(chmodSync),
+    copyFile: callbackify(copyFileSync),
+    rename: callbackify(renameSync),
+    readlink: callbackify(readlinkSync),
+    createReadStream: (p, options) => {
+      const enc = typeof options === "string" ? options : options && options.encoding;
+      const r = new env.Readable({
+        read() {
+          if (this._started) return;
+          this._started = true;
+          try {
+            const buf = readFileSync(p);
+            for (let i = 0; i < buf.length; i += 65536) this.push(buf.subarray(i, Math.min(i + 65536, buf.length)));
+            this.push(null);
+          } catch (err) {
+            this.destroy(err);
+          }
+        },
+      });
+      if (enc) r.setEncoding(enc);
+      r.path = typeof p === "string" ? p : pathOf(p);
+      return r;
+    },
+    createWriteStream: (p, options) => {
+      const chunks = [];
+      const w = new env.Writable({
+        write(chunk, e, cb) {
+          chunks.push(chunk);
+          cb();
+        },
+        final(cb) {
+          try {
+            const flags = options && options.flags;
+            const data = Buffer.concat(chunks.map((c) => (typeof c === "string" ? Buffer.from(c) : c)));
+            if (flags === "a") appendFileSync(p, data);
+            else writeFileSync(p, data);
+            cb();
+          } catch (err) {
+            cb(err);
+          }
+        },
+      });
+      w.path = typeof p === "string" ? p : pathOf(p);
+      return w;
+    },
+    watch: () => {
+      throw new Error("fs.watch is not available in the scriptc island");
+    },
+    watchFile: () => {
+      throw new Error("fs.watchFile is not available in the scriptc island");
+    },
+    openSync: () => {
+      throw new Error("fs.openSync is not available in the scriptc island (whole-file reads/writes only)");
+    },
+    closeSync: () => undefined,
+    readSync: () => {
+      throw new Error("fs.readSync is not available in the scriptc island (whole-file reads/writes only)");
+    },
+    writeSync: () => {
+      throw new Error("fs.writeSync is not available in the scriptc island (whole-file reads/writes only)");
+    },
+    read: () => {
+      throw new Error("fs.read is not available in the scriptc island (whole-file reads/writes only)");
+    },
+    open: () => {
+      throw new Error("fs.open is not available in the scriptc island (whole-file reads/writes only)");
+    },
+    unwatchFile: () => undefined,
+  };
+  fs.promises = {
+    readFile: promisify(readFileSync),
+    writeFile: promisify(writeFileSync),
+    appendFile: promisify(appendFileSync),
+    realpath: promisify(realpathSync),
+    mkdir: promisify(mkdirSync),
+    rm: promisify(rmSync),
+    rmdir: promisify(rmdirSync),
+    unlink: promisify(unlinkSync),
+    readdir: promisify(readdirSync),
+    stat: promisify(statSync),
+    lstat: promisify(lstatSync),
+    access: promisify(accessSync),
+    mkdtemp: promisify(mkdtempSync),
+    chmod: promisify(chmodSync),
+    copyFile: promisify(copyFileSync),
+    rename: promisify(renameSync),
+    readlink: promisify(readlinkSync),
+    constants,
+    open: () => {
+      return Promise.reject(new Error("fs.promises.open is not available in the scriptc island (whole-file reads/writes only)"));
+    },
+  };
+  return fs;
+}
+    const fs = makeFs({ fs: (...a) => host.fs(...a), fsConstants: () => host.fsConstants(), Buffer: builtins.buffer().Buffer, Readable: builtins.stream().Readable, Writable: builtins.stream().Writable, nextTick: (fn) => queueMicrotask(fn) });
+    fs.default = fs;
+    return fs;
+  });
+  builtins['fs/promises'] = memo(() => {
+    const p = { ...builtins.fs().promises };
+    p.default = p;
+    return p;
+  });
+  builtins.os = memo(() => {
+    const plat = host.platform();
+    const os = {
+      EOL: plat === 'win32' ? '\r\n' : '\n',
+      platform: () => plat,
+      arch: () => host.arch(),
+      hostname: () => host.hostname(),
+      homedir: () => host.homedir(),
+      tmpdir: () => host.tmpdir(),
+      type: () => (plat === 'darwin' ? 'Darwin' : plat === 'win32' ? 'Windows_NT' : 'Linux'),
+      endianness: () => 'LE',
+      userInfo: () => {
+        const ids = host.ids();
+        const env = builtins.process().env;
+        return {
+          uid: ids[0],
+          gid: ids[1],
+          username: env.USER || env.USERNAME || env.LOGNAME || '',
+          homedir: host.homedir(),
+          shell: plat === 'win32' ? null : env.SHELL || null,
+        };
+      },
+      release: () => '',
+      version: () => '',
+      machine: () => (host.arch() === 'arm64' ? 'arm64' : host.arch() === 'x64' ? 'x86_64' : host.arch()),
+      cpus: () => [],
+      availableParallelism: () => 1,
+      totalmem: () => 0,
+      freemem: () => 0,
+      loadavg: () => [0, 0, 0],
+      uptime: () => 0,
+      networkInterfaces: () => ({}),
+      constants: {
+        signals: host.signals(),
+        errno: {},
+        priority: { PRIORITY_LOW: 19, PRIORITY_BELOW_NORMAL: 10, PRIORITY_NORMAL: 0, PRIORITY_ABOVE_NORMAL: -7, PRIORITY_HIGH: -14, PRIORITY_HIGHEST: -20 },
+      },
+    };
+    os.default = os;
+    return os;
+  });
+  builtins.tty = memo(() => {
+    const isatty = (fd) => Number.isInteger(fd) && fd >= 0 && host.isatty(fd);
+    class ReadStream {
+      constructor(fd) { this.fd = fd; this.isTTY = isatty(fd); this.isRaw = false; }
+      setRawMode(mode) { this.isRaw = !!mode; return this; }
+    }
+    class WriteStream {
+      constructor(fd) {
+        this.fd = fd;
+        this.isTTY = isatty(fd);
+        const c = host.columns(fd);
+        if (c > 0) this.columns = c;
+      }
+      write(s) { return host.write(this.fd, String(s)); }
+      getColorDepth() { return this.isTTY ? 8 : 1; }
+      hasColors(n) { return this.isTTY && (n === undefined || n <= 256); }
+      getWindowSize() { return [this.columns || 0, 0]; }
+      clearLine() { return true; }
+      clearScreenDown() { return true; }
+      cursorTo() { return true; }
+      moveCursor() { return true; }
+    }
+    const tty = { isatty, ReadStream, WriteStream };
+    tty.default = tty;
+    return tty;
   });
   builtins.diagnostics_channel = memo(() => {
     const channels = Object.create(null);
@@ -1396,6 +1751,291 @@ function makeStringDecoder(Buffer) {
   return { StringDecoder };
 }
     const mod = makeStringDecoder(builtins.buffer().Buffer);
+    mod.default = mod;
+    return mod;
+  });
+  builtins.crypto = memo(() => {
+function makeCrypto(env) {
+  const Buffer = env.Buffer;
+  const webcrypto = globalThis.crypto;
+  const toU8 = (data, enc, name) => {
+    if (typeof data === "string") return Buffer.from(data, enc === undefined ? "utf8" : enc);
+    if (data instanceof Uint8Array) return data;
+    if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+    const e = new TypeError('The "' + name + '" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received ' + (data === null ? "null" : typeof data === "object" ? "an instance of " + ((data.constructor && data.constructor.name) || "Object") : typeof data === "undefined" ? "undefined" : "type " + typeof data + " (" + JSON.stringify(data) + ")"));
+    e.code = "ERR_INVALID_ARG_TYPE";
+    throw e;
+  };
+  const unsupportedDigest = () => {
+    return new Error("Digest method not supported");
+  };
+  const concatChunks = (chunks) => {
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) {
+      out.set(c, o);
+      o += c.length;
+    }
+    return out;
+  };
+  class Hash {
+    constructor(algorithm, from) {
+      if (from === undefined) {
+        const alg = String(algorithm).toLowerCase();
+        if (env.digest(alg, new Uint8Array(0)) === undefined) throw unsupportedDigest();
+        this._alg = alg;
+        this._chunks = [];
+      } else {
+        this._alg = from._alg;
+        this._chunks = from._chunks.slice();
+      }
+      this._done = false;
+    }
+    update(data, inputEncoding) {
+      if (this._done) {
+        const e = new Error("Digest already called");
+        e.code = "ERR_CRYPTO_HASH_FINALIZED";
+        throw e;
+      }
+      this._chunks.push(toU8(data, inputEncoding, "data"));
+      return this;
+    }
+    copy() {
+      return new Hash(this._alg, this);
+    }
+    digest(outputEncoding) {
+      if (this._done) {
+        const e = new Error("Digest already called");
+        e.code = "ERR_CRYPTO_HASH_FINALIZED";
+        throw e;
+      }
+      this._done = true;
+      const raw = env.digest(this._alg, concatChunks(this._chunks));
+      const buf = Buffer.from(raw.buffer, raw.byteOffset, raw.length);
+      return outputEncoding === undefined || outputEncoding === "buffer" ? buf : buf.toString(outputEncoding);
+    }
+  }
+  class Hmac {
+    constructor(algorithm, key) {
+      const alg = String(algorithm).toLowerCase();
+      if (env.digest(alg, new Uint8Array(0)) === undefined) throw unsupportedDigest();
+      this._alg = alg;
+      this._key = toU8(key, "utf8", "key");
+      this._chunks = [];
+      this._done = false;
+    }
+    update(data, inputEncoding) {
+      this._chunks.push(toU8(data, inputEncoding, "data"));
+      return this;
+    }
+    digest(outputEncoding) {
+      this._done = true;
+      const raw = env.hmac(this._alg, this._key, concatChunks(this._chunks));
+      const buf = Buffer.from(raw.buffer, raw.byteOffset, raw.length);
+      return outputEncoding === undefined || outputEncoding === "buffer" ? buf : buf.toString(outputEncoding);
+    }
+  }
+  const createHash = (algorithm) => new Hash(algorithm);
+  const createHmac = (algorithm, key) => new Hmac(algorithm, key);
+  const hash = (algorithm, data, outputEncoding) => {
+    const h = new Hash(algorithm);
+    h.update(typeof data === "string" ? Buffer.from(data, "utf8") : data);
+    return h.digest(outputEncoding === undefined ? "hex" : outputEncoding);
+  };
+  const fillRandom = (u8) => {
+    for (let i = 0; i < u8.length; i += 65536) {
+      webcrypto.getRandomValues(u8.subarray(i, Math.min(i + 65536, u8.length)));
+    }
+    return u8;
+  };
+  const randomBytes = (size, callback) => {
+    if (typeof size !== "number" || Number.isNaN(size) || size < 0) {
+      const e = new RangeError('The value of "size" is out of range. It must be >= 0 && <= 2147483647. Received ' + size);
+      e.code = "ERR_OUT_OF_RANGE";
+      throw e;
+    }
+    const buf = fillRandom(Buffer.alloc(size));
+    if (typeof callback === "function") {
+      queueMicrotask(() => callback(null, buf));
+      return undefined;
+    }
+    return buf;
+  };
+  const randomFillSync = (buf, offset, size) => {
+    const off = offset === undefined ? 0 : offset;
+    const n = size === undefined ? buf.byteLength - off : size;
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf.buffer || buf);
+    fillRandom(u8.subarray(off, off + n));
+    return buf;
+  };
+  const randomFill = (buf, ...rest) => {
+    const callback = rest.pop();
+    if (typeof callback !== "function") {
+      const e = new TypeError('The "callback" argument must be of type function. Received ' + (callback === undefined ? "undefined" : "type " + typeof callback));
+      e.code = "ERR_INVALID_ARG_TYPE";
+      throw e;
+    }
+    randomFillSync(buf, ...rest);
+    queueMicrotask(() => callback(null, buf));
+  };
+  const randomInt = (min, max, callback) => {
+    if (max === undefined || typeof max === "function") {
+      callback = max;
+      max = min;
+      min = 0;
+    }
+    if (!Number.isSafeInteger(min)) {
+      const e = new TypeError('The "min" argument must be a safe integer. Received ' + min);
+      e.code = "ERR_INVALID_ARG_TYPE";
+      throw e;
+    }
+    if (max <= min) {
+      const e = new RangeError('The value of "max" is out of range. It must be greater than the value of "min" (' + min + "). Received " + max);
+      e.code = "ERR_OUT_OF_RANGE";
+      throw e;
+    }
+    const range = max - min;
+    const draw = () => {
+      const bytes = fillRandom(new Uint8Array(6));
+      let v = 0;
+      for (let i = 0; i < 6; i++) v = v * 256 + bytes[i];
+      return v;
+    };
+    const limit = Math.floor(Math.pow(2, 48) / range) * range;
+    let v = draw();
+    while (v >= limit) v = draw();
+    const result = min + (v % range);
+    if (typeof callback === "function") {
+      queueMicrotask(() => callback(null, result));
+      return undefined;
+    }
+    return result;
+  };
+  const randomUUID = () => webcrypto.randomUUID();
+  const timingSafeEqual = (a, b) => {
+    const ua = toU8(a, undefined, "buf1");
+    const ub = toU8(b, undefined, "buf2");
+    if (ua.byteLength !== ub.byteLength) {
+      const e = new RangeError("Input buffers must have the same byte length");
+      e.code = "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH";
+      throw e;
+    }
+    let diff = 0;
+    for (let i = 0; i < ua.length; i++) diff |= ua[i] ^ ub[i];
+    return diff === 0;
+  };
+  const pbkdf2Sync = (password, salt, iterations, keylen, digestAlg) => {
+    const alg = String(digestAlg).toLowerCase();
+    if (env.digest(alg, new Uint8Array(0)) === undefined) throw unsupportedDigest();
+    const pw = toU8(password, undefined, "password");
+    const st = toU8(salt, undefined, "salt");
+    const hLen = env.digest(alg, new Uint8Array(0)).length;
+    const blocks = Math.ceil(keylen / hLen);
+    const dk = new Uint8Array(blocks * hLen);
+    for (let i = 1; i <= blocks; i++) {
+      const block = new Uint8Array(st.length + 4);
+      block.set(st, 0);
+      block[st.length] = (i >>> 24) & 0xff;
+      block[st.length + 1] = (i >>> 16) & 0xff;
+      block[st.length + 2] = (i >>> 8) & 0xff;
+      block[st.length + 3] = i & 0xff;
+      let u = env.hmac(alg, pw, block);
+      const t = new Uint8Array(u);
+      for (let j = 1; j < iterations; j++) {
+        u = env.hmac(alg, pw, u);
+        for (let k = 0; k < hLen; k++) t[k] ^= u[k];
+      }
+      dk.set(t, (i - 1) * hLen);
+    }
+    return Buffer.from(dk.buffer, 0, keylen);
+  };
+  const pbkdf2 = (password, salt, iterations, keylen, digestAlg, callback) => {
+    if (typeof callback !== "function") {
+      const e = new TypeError('The "callback" argument must be of type function. Received undefined');
+      e.code = "ERR_INVALID_ARG_TYPE";
+      throw e;
+    }
+    let derived;
+    try {
+      derived = pbkdf2Sync(password, salt, iterations, keylen, digestAlg);
+    } catch (err) {
+      queueMicrotask(() => callback(err));
+      return;
+    }
+    queueMicrotask(() => callback(null, derived));
+  };
+  const die = (name) => function unsupported() {
+    throw new Error("crypto." + name + " is not available in the scriptc island (the embedded runtime carries the hashing/random slice only)");
+  };
+  class KeyObject {
+    constructor() {
+      throw new Error("crypto.KeyObject is not available in the scriptc island (the embedded runtime carries the hashing/random slice only)");
+    }
+  }
+  const constants = {
+    RSA_PKCS1_PADDING: 1,
+    RSA_NO_PADDING: 3,
+    RSA_PKCS1_OAEP_PADDING: 4,
+    RSA_PKCS1_PSS_PADDING: 6,
+    RSA_PSS_SALTLEN_DIGEST: -1,
+    RSA_PSS_SALTLEN_MAX_SIGN: -2,
+    RSA_PSS_SALTLEN_AUTO: -2,
+    defaultCoreCipherList: "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256",
+  };
+  constants.defaultCipherList = constants.defaultCoreCipherList;
+  const crypto = {
+    createHash, createHmac, hash, Hash, Hmac,
+    randomBytes, randomFillSync, randomFill, randomInt, randomUUID,
+    getRandomValues: (ta) => webcrypto.getRandomValues(ta),
+    timingSafeEqual, pbkdf2, pbkdf2Sync,
+    getHashes: () => ["md5", "sha1", "sha256", "sha384", "sha512"],
+    getCiphers: () => [],
+    getCurves: () => [],
+    webcrypto,
+    constants,
+    KeyObject,
+    createCipheriv: die("createCipheriv"),
+    createDecipheriv: die("createDecipheriv"),
+    createSign: die("createSign"),
+    createVerify: die("createVerify"),
+    createDiffieHellman: die("createDiffieHellman"),
+    createECDH: die("createECDH"),
+    createPublicKey: die("createPublicKey"),
+    createPrivateKey: die("createPrivateKey"),
+    createSecretKey: die("createSecretKey"),
+    diffieHellman: die("diffieHellman"),
+    generateKeyPair: die("generateKeyPair"),
+    generateKeyPairSync: die("generateKeyPairSync"),
+    generateKey: die("generateKey"),
+    generateKeySync: die("generateKeySync"),
+    sign: die("sign"),
+    verify: die("verify"),
+    publicEncrypt: die("publicEncrypt"),
+    publicDecrypt: die("publicDecrypt"),
+    privateEncrypt: die("privateEncrypt"),
+    privateDecrypt: die("privateDecrypt"),
+    scrypt: die("scrypt"),
+    scryptSync: die("scryptSync"),
+    hkdf: die("hkdf"),
+    hkdfSync: die("hkdfSync"),
+    X509Certificate: die("X509Certificate"),
+    Certificate: die("Certificate"),
+    checkPrime: die("checkPrime"),
+    checkPrimeSync: die("checkPrimeSync"),
+    generatePrime: die("generatePrime"),
+    generatePrimeSync: die("generatePrimeSync"),
+    secureHeapUsed: die("secureHeapUsed"),
+    setEngine: die("setEngine"),
+    setFips: () => {},
+    getFips: () => 0,
+  };
+  crypto.subtle = webcrypto ? webcrypto.subtle : undefined;
+  return crypto;
+}
+    const mod = makeCrypto({ digest: (a, d) => host.digest(a, d), hmac: (a, k, d) => host.hmac(a, k, d), Buffer: builtins.buffer().Buffer });
     mod.default = mod;
     return mod;
   });
@@ -4221,6 +4861,11 @@ function makeQuerystring() {
     q.default = q;
     return q;
   });
+  builtins.constants = memo(() => {
+    const c = { ...host.signals(), ...host.fsConstants(), ...builtins.crypto().constants };
+    c.default = c;
+    return c;
+  });
   builtins.console = memo(() => {
     const format = (...a) => builtins.util().formatWithOptions({}, ...a);
     class Console {
@@ -4248,6 +4893,104 @@ function makeQuerystring() {
     c.Console = Console;
     c.default = c;
     return c;
+  });
+  builtins.zlib = memo(() => {
+    const Buffer = builtins.buffer().Buffer;
+    const Transform = builtins.stream().Transform;
+    const toU8 = (data) => {
+      if (typeof data === 'string') return Buffer.from(data, 'utf8');
+      if (data instanceof Uint8Array) return data;
+      if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (data instanceof ArrayBuffer) return new Uint8Array(data);
+      const e = new TypeError('The "buffer" argument must be of type string or an instance of Buffer, TypedArray, DataView, or ArrayBuffer. Received ' + (data === null ? 'null' : typeof data === 'object' ? 'an instance of ' + ((data.constructor && data.constructor.name) || 'Object') : 'type ' + typeof data));
+      e.code = 'ERR_INVALID_ARG_TYPE';
+      throw e;
+    };
+    const codec = (deflating, mode) => (data, options) => {
+      const level = options !== undefined && options !== null && options.level !== undefined ? options.level : -1;
+      const raw = host.zlib(deflating ? 1 : 0, toU8(data), mode, level);
+      return Buffer.from(raw.buffer, raw.byteOffset, raw.length);
+    };
+    const asyncify = (syncFn) => (data, optionsOrCb, maybeCb) => {
+      const cb = typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb;
+      const options = typeof optionsOrCb === 'function' ? undefined : optionsOrCb;
+      if (typeof cb !== 'function') {
+        const e = new TypeError('The "callback" argument must be of type function');
+        e.code = 'ERR_INVALID_ARG_TYPE';
+        throw e;
+      }
+      let out;
+      try { out = syncFn(data, options); }
+      catch (err) { queueMicrotask(() => cb(err)); return; }
+      queueMicrotask(() => cb(null, out));
+    };
+    const mkStreamClass = (name, syncFn) => {
+      const cls = class extends Transform {
+        constructor(options) {
+          super({});
+          this._zopts = options;
+          this._zchunks = [];
+          this.bytesWritten = 0;
+        }
+        _transform(chunk, enc, cb) {
+          this._zchunks.push(toU8(chunk));
+          this.bytesWritten += chunk.length;
+          cb();
+        }
+        _flush(cb) {
+          try {
+            cb(null, syncFn(Buffer.concat(this._zchunks), this._zopts));
+          } catch (err) {
+            cb(err);
+          }
+        }
+        close(cb) { if (typeof cb === 'function') queueMicrotask(cb); }
+        reset() { this._zchunks = []; }
+        flush(k, cb) { const f = typeof k === 'function' ? k : cb; if (typeof f === 'function') queueMicrotask(f); }
+      };
+      Object.defineProperty(cls, 'name', { value: name, configurable: true });
+      return cls;
+    };
+    const die = (name) => class { constructor() { throw new Error('zlib.' + name + ' is not available in the scriptc island (brotli/zstd are not linked)'); } };
+    const deflateSync = codec(true, 0), inflateSync = codec(false, 0);
+    const deflateRawSync = codec(true, 1), inflateRawSync = codec(false, 1);
+    const gzipSync = codec(true, 2), gunzipSync = codec(false, 2);
+    const unzipSync = codec(false, 3);
+    const Deflate = mkStreamClass('Deflate', deflateSync), Inflate = mkStreamClass('Inflate', inflateSync);
+    const DeflateRaw = mkStreamClass('DeflateRaw', deflateRawSync), InflateRaw = mkStreamClass('InflateRaw', inflateRawSync);
+    const Gzip = mkStreamClass('Gzip', gzipSync), Gunzip = mkStreamClass('Gunzip', gunzipSync);
+    const Unzip = mkStreamClass('Unzip', unzipSync);
+    const BrotliCompress = die('BrotliCompress'), BrotliDecompress = die('BrotliDecompress');
+    const constants = {
+      Z_NO_FLUSH: 0, Z_PARTIAL_FLUSH: 1, Z_SYNC_FLUSH: 2, Z_FULL_FLUSH: 3, Z_FINISH: 4, Z_BLOCK: 5, Z_TREES: 6,
+      Z_OK: 0, Z_STREAM_END: 1, Z_NEED_DICT: 2, Z_ERRNO: -1, Z_STREAM_ERROR: -2, Z_DATA_ERROR: -3, Z_MEM_ERROR: -4, Z_BUF_ERROR: -5, Z_VERSION_ERROR: -6,
+      Z_NO_COMPRESSION: 0, Z_BEST_SPEED: 1, Z_BEST_COMPRESSION: 9, Z_DEFAULT_COMPRESSION: -1,
+      Z_FILTERED: 1, Z_HUFFMAN_ONLY: 2, Z_RLE: 3, Z_FIXED: 4, Z_DEFAULT_STRATEGY: 0,
+      Z_DEFAULT_WINDOWBITS: 15, Z_MIN_WINDOWBITS: 8, Z_MAX_WINDOWBITS: 15,
+      Z_MIN_CHUNK: 64, Z_MAX_CHUNK: Infinity, Z_DEFAULT_CHUNK: 16384,
+      Z_MIN_MEMLEVEL: 1, Z_MAX_MEMLEVEL: 9, Z_DEFAULT_MEMLEVEL: 8,
+      Z_MIN_LEVEL: -1, Z_MAX_LEVEL: 9, Z_DEFAULT_LEVEL: -1,
+      ZLIB_VERNUM: 4865,
+      BROTLI_OPERATION_PROCESS: 0, BROTLI_OPERATION_FLUSH: 1, BROTLI_OPERATION_FINISH: 2,
+      BROTLI_PARAM_MODE: 0, BROTLI_PARAM_QUALITY: 1, BROTLI_PARAM_SIZE_HINT: 3,
+      BROTLI_MAX_QUALITY: 11, BROTLI_MIN_QUALITY: 0, BROTLI_DEFAULT_QUALITY: 11,
+    };
+    const z = {
+      deflateSync, inflateSync, deflateRawSync, inflateRawSync, gzipSync, gunzipSync, unzipSync,
+      deflate: asyncify(deflateSync), inflate: asyncify(inflateSync),
+      deflateRaw: asyncify(deflateRawSync), inflateRaw: asyncify(inflateRawSync),
+      gzip: asyncify(gzipSync), gunzip: asyncify(gunzipSync), unzip: asyncify(unzipSync),
+      Deflate, Inflate, DeflateRaw, InflateRaw, Gzip, Gunzip, Unzip, BrotliCompress, BrotliDecompress,
+      createDeflate: (o) => new Deflate(o), createInflate: (o) => new Inflate(o),
+      createDeflateRaw: (o) => new DeflateRaw(o), createInflateRaw: (o) => new InflateRaw(o),
+      createGzip: (o) => new Gzip(o), createGunzip: (o) => new Gunzip(o), createUnzip: (o) => new Unzip(o),
+      createBrotliCompress: () => new BrotliCompress(), createBrotliDecompress: () => new BrotliDecompress(),
+      brotliCompressSync: () => { throw new Error('zlib.brotliCompressSync is not available in the scriptc island'); },
+      brotliDecompressSync: () => { throw new Error('zlib.brotliDecompressSync is not available in the scriptc island'); },
+      constants,
+    };
+    z.default = z;
+    return z;
   });
   builtins.process = memo(() => {
     const argv = host.argv();

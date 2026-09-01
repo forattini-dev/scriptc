@@ -9,15 +9,20 @@
 
 /// Named exports per shimmed builtin, mirroring the C island's
 /// `isl_builtins`.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 24] = [
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 31] = [
     ("node:events", "EventEmitter,once,on,listenerCount,getEventListeners,setMaxListeners,defaultMaxListeners,errorMonitor,captureRejectionSymbol"),
     ("node:path", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
     ("node:path/posix", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
     ("node:path/win32", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
+    ("node:fs", "readFileSync,writeFileSync,appendFileSync,existsSync,realpathSync,mkdirSync,rmSync,rmdirSync,unlinkSync,readdirSync,statSync,lstatSync,accessSync,mkdtempSync,chmodSync,copyFileSync,renameSync,constants,Stats,Dirent,promises,readFile,writeFile,appendFile,exists,realpath,mkdir,rm,rmdir,unlink,readdir,stat,lstat,access,mkdtemp,chmod,copyFile,rename,readlink,readlinkSync,createReadStream,createWriteStream,watch,watchFile,unwatchFile,openSync,closeSync,readSync,read,open"),
+    ("node:fs/promises", "readFile,writeFile,appendFile,realpath,mkdir,rm,rmdir,unlink,readdir,stat,lstat,access,mkdtemp,chmod,copyFile,rename,readlink,constants,open"),
+    ("node:os", "EOL,platform,arch,hostname,homedir,tmpdir,type,endianness,userInfo,release,version,machine,cpus,availableParallelism,totalmem,freemem,loadavg,uptime,networkInterfaces,constants"),
+    ("node:tty", "isatty,ReadStream,WriteStream"),
     ("node:diagnostics_channel", "channel,subscribe,unsubscribe,hasSubscribers,tracingChannel"),
     ("node:module", "createRequire,builtinModules,isBuiltin,syncBuiltinESMExports,register,findSourceMap"),
     ("node:buffer", "Buffer,SlowBuffer,INSPECT_MAX_BYTES,kMaxLength,kStringMaxLength,constants,isAscii,isUtf8,atob,btoa,Blob,File,transcode,resolveObjectURL"),
     ("node:string_decoder", "StringDecoder"),
+    ("node:crypto", "createHash,createHmac,hash,Hash,Hmac,randomBytes,randomFillSync,randomFill,randomInt,randomUUID,getRandomValues,timingSafeEqual,pbkdf2,pbkdf2Sync,getHashes,getCiphers,getCurves,webcrypto,subtle,constants,KeyObject,createCipheriv,createDecipheriv,createSign,createVerify,createDiffieHellman,createECDH,createPublicKey,createPrivateKey,createSecretKey,diffieHellman,generateKeyPair,generateKeyPairSync,generateKey,generateKeySync,sign,verify,publicEncrypt,publicDecrypt,privateEncrypt,privateDecrypt,scrypt,scryptSync,hkdf,hkdfSync,X509Certificate,Certificate,checkPrime,checkPrimeSync,generatePrime,generatePrimeSync,secureHeapUsed,setEngine,setFips,getFips"),
     ("node:stream", "Stream,Readable,Writable,Duplex,Transform,PassThrough,pipeline,finished,addAbortSignal,promises,isErrored,isDestroyed,isReadable,isWritable"),
     ("node:stream/promises", "pipeline,finished"),
     ("node:stream/consumers", "text,buffer,arrayBuffer,json,blob"),
@@ -32,6 +37,8 @@ static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 24] = [
     ("node:v8", "startupSnapshot,cachedDataVersionTag,getHeapStatistics,getHeapSpaceStatistics,getHeapCodeStatistics,getCppHeapStatistics,setFlagsFromString,takeCoverage,stopCoverage,setHeapSnapshotNearHeapLimit,serialize,deserialize,writeHeapSnapshot,getHeapSnapshot,queryObjects,startCpuProfile,isStringOneByteRepresentation,promiseHooks,Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler"),
     ("node:punycode", "version,ucs2,decode,encode,toASCII,toUnicode"),
     ("node:querystring", "parse,stringify,decode,encode,escape,unescape,unescapeBuffer"),
+    ("node:constants", "F_OK,R_OK,W_OK,X_OK"),
     ("node:console", "Console,log,info,debug,warn,error,trace,dir,assert,count,countReset,time,timeEnd,group,groupEnd,table,clear"),
+    ("node:zlib", "deflateSync,inflateSync,deflateRawSync,inflateRawSync,gzipSync,gunzipSync,unzipSync,deflate,inflate,deflateRaw,inflateRaw,gzip,gunzip,unzip,Deflate,Inflate,DeflateRaw,InflateRaw,Gzip,Gunzip,Unzip,BrotliCompress,BrotliDecompress,createDeflate,createInflate,createDeflateRaw,createInflateRaw,createGzip,createGunzip,createUnzip,createBrotliCompress,createBrotliDecompress,brotliCompressSync,brotliDecompressSync,constants"),
     ("node:process", "argv,env,platform,execPath,execArgv,version,versions,stdout,stderr,stdin,cwd,exit,nextTick,hrtime,pid,ppid,title,argv0,release,config,allowedNodeEnvironmentFlags,emitWarning,uptime,memoryUsage,umask,exitCode,on,once,off,removeListener,emit"),
 ];

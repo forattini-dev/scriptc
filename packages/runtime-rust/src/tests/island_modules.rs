@@ -185,19 +185,20 @@ fn island_require_walks_relative_edges_and_caches() {
 
 #[test]
 fn island_require_of_an_unshimmed_builtin_reports_the_island_message() {
-    // node:os is outside the island-js "rust" manifest — it needs a host
-    // surface this island has not grown yet — so it is the fence the
-    // shims deliberately do NOT remove. A builtin the manifest does list
-    // (node:events) answers its shim instead; that is pinned end-to-end
-    // in packages/compiler/test/emit-rust-island-shims.test.ts.
+    // node:net is outside the island-js "rust" manifest — its shims need
+    // an event loop inside the island, which this bridge does not carry —
+    // so it is the fence the shims deliberately do NOT remove. A builtin
+    // the manifest does list (node:events, and now node:fs/os/crypto/zlib)
+    // answers its shim instead; that is pinned end-to-end in
+    // packages/compiler/test/emit-rust-island-shims.test.ts.
     with_require_realm(|| {
         let rendered = island_eval(&string(
-            "(() => { try { globalThis.__scr_require('node:os'); } \
+            "(() => { try { globalThis.__scr_require('node:net'); } \
              catch (e) { return e.message; } return 'no throw'; })()",
         ));
         assert_eq!(
             rendered.as_ref(),
-            "the island does not provide the 'node:os' builtin",
+            "the island does not provide the 'node:net' builtin",
         );
     });
 }

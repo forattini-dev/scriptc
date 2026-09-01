@@ -316,11 +316,12 @@ type IslandHostMember = (
 /// Every name the shared bootstrap's `rust` manifest calls.
 ///
 /// `source` and `resolve` come from the module tables
-/// (island_modules.rs); everything else is this file. A name the shared
+/// (island_modules.rs), and the I/O members — fs, crypto, zlib, os —
+/// from island_host_io.rs; everything else is this file. A name the shared
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 18] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 29] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -339,6 +340,19 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 18] = [
     ("readStdin", island_host_read_stdin, 0),
     ("promiseState", island_host_promise_state, 1),
     ("path", island_host_path, 4),
+    // The I/O bridge (island_host_io.rs): the arities match the C
+    // island's registrations, because one body of JavaScript calls both.
+    ("fs", island_host_fs, 4),
+    ("fsConstants", island_host_fs_constants, 0),
+    ("digest", island_host_digest, 2),
+    ("hmac", island_host_hmac, 3),
+    ("zlib", island_host_zlib, 4),
+    ("arch", island_host_arch, 0),
+    ("hostname", island_host_hostname, 0),
+    ("homedir", island_host_homedir, 0),
+    ("tmpdir", island_host_tmpdir, 0),
+    ("ids", island_host_ids, 0),
+    ("signals", island_host_signals, 0),
 ];
 
 /// Build the `host` object the bootstrap arrow is called with.

@@ -36,7 +36,7 @@ the slice its own manifest registers.
   builtin unregistered, which is the island's does-not-provide throw — a
   fence, not a silently wrong answer.
 - **Every part is a statement fragment**, not a module. `01-prelude.js`
-  opens the `(host) => {` arrow and `31-epilogue.js` closes it; everything
+  opens the `(host) => {` arrow and `32-epilogue.js` closes it; everything
   between is statements in that one scope. A part is not independently
   parseable, on purpose — the shims share `builtins`, `memo` and the
   require closure.
@@ -63,8 +63,9 @@ the slice its own manifest registers.
 | `13-stream` | `host.platform` (the default highWaterMark only) |
 | `15-util` | `host.pid`, `host.promiseState`, `host.write` |
 | `26-constants` | `host.fsConstants`, `host.signals` |
-| `29-net-http-tls-zlib` | the socket, server and zlib bridges |
-| `30-process` | the process bridge |
-| `31-epilogue` | `host.write` (the console wiring) |
+| `29-zlib` | `host.zlib` |
+| `30-net-http-tls` | the socket and server bridges, behind `host.httpStart` |
+| `31-process` | the process bridge |
+| `32-epilogue` | `host.write` (the console wiring) |
 
 Every other part is pure JavaScript over the engine's own builtins.

@@ -47,16 +47,54 @@ pub fn crypto_random_uuid() -> JsString {
     string(&output)
 }
 
+/// The four lowered digest algorithms, as a LOOKUP: `None` is "this
+/// runtime has no such digest".
+///
+/// The static lane never reaches the `None` arm — the frontend fences
+/// every other literal — but the island does: `createHash(alg)` takes a
+/// runtime string, so the island needs to ask rather than assert. Node's
+/// `md5` is deliberately absent (ring does not carry it), which is why
+/// asking has to be possible at all.
+fn crypto_digest_algorithm_opt(algorithm: &JsString) -> Option<&'static ring::digest::Algorithm> {
+    match algorithm.as_ref() {
+        "sha1" => Some(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY),
+        "sha256" => Some(&ring::digest::SHA256),
+        "sha384" => Some(&ring::digest::SHA384),
+        "sha512" => Some(&ring::digest::SHA512),
+        _ => None,
+    }
+}
+
 /// The four lowered digest algorithms. The frontend fences every other
 /// literal, so an unknown name here is a compiler invariant break.
 fn crypto_digest_algorithm(algorithm: &JsString) -> &'static ring::digest::Algorithm {
-    match algorithm.as_ref() {
-        "sha1" => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
-        "sha256" => &ring::digest::SHA256,
-        "sha384" => &ring::digest::SHA384,
-        "sha512" => &ring::digest::SHA512,
-        _ => unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"),
-    }
+    crypto_digest_algorithm_opt(algorithm)
+        .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"))
+}
+
+/// `host.digest(alg, bytes)`: the raw digest, or `None` for an algorithm
+/// this runtime does not carry. The island's crypto shim probes with an
+/// empty input and raises Node's "Digest method not supported" itself, so
+/// an unknown name must ANSWER here, never throw.
+pub fn crypto_digest_raw(algorithm: &JsString, data: &JsBytes<u8>) -> Option<JsBytes<u8>> {
+    let algorithm = crypto_digest_algorithm_opt(algorithm)?;
+    let digest = crypto_with_bytes(data, |data| ring::digest::digest(algorithm, data));
+    Some(bytes_from_vec(digest.as_ref().to_vec()))
+}
+
+/// `host.hmac(alg, key, bytes)`, with the same `None` fence as
+/// `crypto_digest_raw` — the two algorithm tables carry the same names.
+pub fn crypto_hmac_raw(
+    algorithm: &JsString,
+    key: &JsBytes<u8>,
+    data: &JsBytes<u8>,
+) -> Option<JsBytes<u8>> {
+    let algorithm = crypto_hmac_algorithm_opt(algorithm)?;
+    let tag = crypto_with_bytes(key, |key| {
+        let key = ring::hmac::Key::new(algorithm, key);
+        crypto_with_bytes(data, |data| ring::hmac::sign(&key, data))
+    });
+    Some(bytes_from_vec(tag.as_ref().to_vec()))
 }
 
 fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
@@ -73,14 +111,20 @@ fn crypto_with_bytes<T>(data: &JsBytes<u8>, body: impl FnOnce(&[u8]) -> T) -> T 
     })
 }
 
-fn crypto_hmac_algorithm(algorithm: &JsString) -> ring::hmac::Algorithm {
+/// The HMAC counterpart of `crypto_digest_algorithm_opt`.
+fn crypto_hmac_algorithm_opt(algorithm: &JsString) -> Option<ring::hmac::Algorithm> {
     match algorithm.as_ref() {
-        "sha1" => ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
-        "sha256" => ring::hmac::HMAC_SHA256,
-        "sha384" => ring::hmac::HMAC_SHA384,
-        "sha512" => ring::hmac::HMAC_SHA512,
-        _ => unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"),
+        "sha1" => Some(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY),
+        "sha256" => Some(ring::hmac::HMAC_SHA256),
+        "sha384" => Some(ring::hmac::HMAC_SHA384),
+        "sha512" => Some(ring::hmac::HMAC_SHA512),
+        _ => None,
     }
+}
+
+fn crypto_hmac_algorithm(algorithm: &JsString) -> ring::hmac::Algorithm {
+    crypto_hmac_algorithm_opt(algorithm)
+        .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"))
 }
 
 /// The composed createHmac(alg, key).update(data).digest(enc) chain. The
