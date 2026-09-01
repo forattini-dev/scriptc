@@ -434,7 +434,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"concat" => { let mut output = text.to_string(); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);
     this.context.line(`"toLocaleString" => ${this.dyn}::String(text.clone()),`);
     this.context.line(`"indexOf" => match args.first() { Some(search) => ${this.dyn}::Number(runtime::string_index_of(text, &sc_dyn_to_string(search), sc_dyn_index_arg(args, 1, 0.0, callee_name))), None => runtime::throw_error("'String.prototype.indexOf' without a search value is not supported yet".to_owned()), },`);
-    this.context.line(`"lastIndexOf" => match args.first() { Some(${this.dyn}::String(search)) => ${this.dyn}::Number(runtime::string_last_index_of(text, search, sc_dyn_last_index_arg(args, callee_name))), _ => runtime::throw_error("'String.prototype.lastIndexOf' on a dynamic value is not supported yet".to_owned()), },`);
+    this.context.line(`"lastIndexOf" => match args.first() { Some(search) => ${this.dyn}::Number(runtime::string_last_index_of(text, &sc_dyn_to_string(search), sc_dyn_last_index_arg(args, callee_name))), None => ${this.dyn}::Number(runtime::string_last_index_of(text, &runtime::string("undefined"), f64::INFINITY)), },`);
     this.context.line(`"includes" => match args.first() { Some(search) => ${this.dyn}::Boolean(runtime::string_includes(text, &sc_dyn_to_string(search), sc_dyn_index_arg(args, 1, 0.0, callee_name))), None => ${this.dyn}::Boolean(runtime::string_includes(text, &runtime::string("undefined"), 0.0)), },`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.close("}");
