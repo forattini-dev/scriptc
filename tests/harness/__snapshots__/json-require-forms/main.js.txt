@@ -12,6 +12,6 @@ json-require-forms/main.js:10:1 - error SC1012: bare require() of JSON modules a
    9 | const { version } = require("./pkg.json");
   10 | require("./pkg.json");
      | ^~~~~~~~~~~~~~~~~~~~~
-  11 | 
+  11 |
 
   hint: use named exports: export function f() {} / import { f } from "./m"

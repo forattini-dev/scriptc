@@ -92,6 +92,7 @@ mod tests {
     include!("tests/support.rs");
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
+    include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
     include!("tests/text_decoder.rs");
