@@ -9,8 +9,8 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust dynamic String.prototype.includes honors position", async () => {
-  const fixture = resolve("tests/corpus/2819-dyn-string-includes-position.cjs");
+async function expectRustToMatchNode(fixtureName: string, expectedStdout: string): Promise<void> {
+  const fixture = resolve(`tests/corpus/${fixtureName}`);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-dyn-string-includes-"));
   const result = await compile(fixture, {
     outDir: dir,
@@ -31,7 +31,19 @@ test("Rust dynamic String.prototype.includes honors position", async () => {
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
   ]);
-  expect(node.stdout).toBe("false\n");
+  expect(node.stdout).toBe(expectedStdout);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
+}
+
+test("Rust dynamic String.prototype.includes honors position", async () => {
+  await expectRustToMatchNode("2819-dyn-string-includes-position.cjs", "false\n");
+});
+
+test("Rust dynamic String.prototype.includes coerces its search value", async () => {
+  await expectRustToMatchNode("2820-dyn-string-includes-search-coercion.cjs", "true\n");
+});
+
+test("Rust dynamic String.prototype.includes treats a missing search as undefined", async () => {
+  await expectRustToMatchNode("2821-dyn-string-includes-missing-search.cjs", "true\n");
 });
