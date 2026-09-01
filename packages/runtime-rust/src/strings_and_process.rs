@@ -366,14 +366,23 @@ pub fn string_index_of(value: &JsString, search: &JsString, from_index: f64) -> 
         .map_or(-1.0, |index| (start + index) as f64)
 }
 
-pub fn string_last_index_of(value: &JsString, search: &JsString) -> f64 {
+pub fn string_last_index_of(value: &JsString, search: &JsString, position: f64) -> f64 {
     let haystack: Vec<u16> = value.encode_utf16().collect();
     let needle: Vec<u16> = search.encode_utf16().collect();
+    let position = if position.is_nan() || position == f64::INFINITY {
+        haystack.len()
+    } else {
+        position.trunc().clamp(0.0, haystack.len() as f64) as usize
+    };
     if needle.is_empty() {
-        return haystack.len() as f64;
+        return position as f64;
     }
+    let Some(last_start) = haystack.len().checked_sub(needle.len()) else {
+        return -1.0;
+    };
     haystack
         .windows(needle.len())
+        .take(position.min(last_start) + 1)
         .rposition(|window| window == needle)
         .map_or(-1.0, |index| index as f64)
 }

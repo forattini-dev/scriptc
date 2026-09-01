@@ -323,9 +323,9 @@
     #[test]
     fn string_last_index_of_and_substring_use_utf16_indices() {
         let value = string("😀ab😀ab");
-        assert_eq!(string_last_index_of(&value, &string("😀")), 4.0);
-        assert_eq!(string_last_index_of(&value, &empty_string()), 8.0);
-        assert_eq!(string_last_index_of(&value, &string("x")), -1.0);
+        assert_eq!(string_last_index_of(&value, &string("😀"), f64::INFINITY), 4.0);
+        assert_eq!(string_last_index_of(&value, &empty_string(), f64::INFINITY), 8.0);
+        assert_eq!(string_last_index_of(&value, &string("x"), f64::INFINITY), -1.0);
         assert_eq!(string_substring(&value, 6.0, 2.0).as_ref(), "ab😀");
         assert_eq!(string_substring(&value, -3.0, 2.0).as_ref(), "😀");
         assert!(string_compare_utf16(&string("😀"), &string("\u{e000}")) < 0);
