@@ -2336,6 +2336,283 @@
       "note": "the same millisecond read as getTime()"
     },
     {
+      "id": "stdlib.events.emitter.addListener",
+      "kind": "stdlib",
+      "name": "EventEmitter.addListener",
+      "status": "static",
+      "note": "Node 24.15.0; facets: registration-order, argument-tuple, meta-events, return-value; supported scope: the alias of on, sharing its lowering and its literal-name requirement; differential evidence: corpus:1644-ee-basics"
+    },
+    {
+      "id": "stdlib.events.emitter.constructor",
+      "kind": "stdlib",
+      "name": "EventEmitter constructor",
+      "status": "static",
+      "note": "Node 24.15.0; facets: argument-tuple; supported scope: the zero-argument form, under every spelling that names the class — `new EventEmitter()` from a named import, `new events.EventEmitter()` through the module namespace, and `class X extends EventEmitter`; the options-object form is refused per site (SC1090, 'EventEmitter constructor options'); differential evidence: corpus:1644-ee-basics, corpus:1645-ee-extends, corpus:1654-ee-namespace"
+    },
+    {
+      "id": "stdlib.events.emitter.emit",
+      "kind": "stdlib",
+      "name": "EventEmitter.emit",
+      "status": "static",
+      "note": "Node 24.15.0; facets: callback-order, argument-tuple, liveness, error-shape, return-value, snapshot; supported scope: the literal-name call supplying the event's EXACT unified argument tuple; dispatch walks a snapshot taken at emit time, returns whether any listener ran, and an unhandled 'error' payload throws catchably. The one member a subclass may override, per event name, with `super.emit` chaining; differential evidence: corpus:1644-ee-basics, corpus:1648-ee-error-event, corpus:1652-ee-snapshot, corpus:2618-ee-emit-override"
+    },
+    {
+      "id": "stdlib.events.emitter.eventNames",
+      "kind": "stdlib",
+      "name": "EventEmitter.eventNames",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, liveness, registration-order; supported scope: the zero-argument call, in first-registration order, with names dropped as their last listener leaves; differential evidence: corpus:1647-ee-meta-events, corpus:1649-ee-names-counts, corpus:1761-emitter-special-event-names"
+    },
+    {
+      "id": "stdlib.events.emitter.getMaxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.getMaxListeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: max-listeners, property-read, liveness; supported scope: the per-instance cap when one was set, otherwise a LIVE read of the process-wide default — an emitter pinned before a default change still answers the new default; differential evidence: corpus:1651-ee-max-listeners, corpus:2574-emitter-max-listeners-ladders"
+    },
+    {
+      "id": "stdlib.events.emitter.instance._events",
+      "kind": "stdlib",
+      "name": "EventEmitter._events (instance)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph; EventEmitter.init stamps it onto every instance as an enumerable own property, so it is part of the observable instance shape too"
+    },
+    {
+      "id": "stdlib.events.emitter.instance._eventsCount",
+      "kind": "stdlib",
+      "name": "EventEmitter._eventsCount (instance)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph; EventEmitter.init stamps it onto every instance as an enumerable own property, so it is part of the observable instance shape too"
+    },
+    {
+      "id": "stdlib.events.emitter.instance._maxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter._maxListeners (instance)",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph; EventEmitter.init stamps it onto every instance as an enumerable own property, so it is part of the observable instance shape too"
+    },
+    {
+      "id": "stdlib.events.emitter.internal._events",
+      "kind": "stdlib",
+      "name": "EventEmitter._events",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph"
+    },
+    {
+      "id": "stdlib.events.emitter.internal._eventsCount",
+      "kind": "stdlib",
+      "name": "EventEmitter._eventsCount",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph"
+    },
+    {
+      "id": "stdlib.events.emitter.internal._maxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter._maxListeners",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; Node's pre-private-field internals are public properties of the prototype and of every instance, but nothing in the static tier claims their shapes: the registry behind a compiled emitter is a native structure, not a JS object graph"
+    },
+    {
+      "id": "stdlib.events.emitter.listenerCount",
+      "kind": "stdlib",
+      "name": "EventEmitter.listenerCount",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read, liveness; supported scope: the name-only and the identity-filtering (name, listener) forms, both reading the live list; differential evidence: corpus:1644-ee-basics, corpus:1649-ee-names-counts, corpus:1677-emitter-listeners"
+    },
+    {
+      "id": "stdlib.events.emitter.listeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.listeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: snapshot, listener-identity; supported scope: the fresh originals array, in list order, for events whose unified argument tuple is EMPTY — the declared element type would otherwise lie about what a pulled-out listener is callable with. Events with arguments, and events carrying any unannotated JS-lane registration, are refused per site; differential evidence: corpus:1677-emitter-listeners"
+    },
+    {
+      "id": "stdlib.events.emitter.off",
+      "kind": "stdlib",
+      "name": "EventEmitter.off",
+      "status": "static",
+      "note": "Node 24.15.0; facets: listener-identity, mutation, meta-events, return-value; supported scope: the compile-time string-literal event name; the event's argument tuple is unified program-wide across every emit site and every annotated listener, so a computed or symbol name (EventEmitter.errorMonitor included) is refused per site; removes by listener IDENTITY, the LAST matching registration first, and fires 'removeListener' per removal; differential evidence: corpus:1646-ee-once-remove, corpus:2623-ee-job-queue"
+    },
+    {
+      "id": "stdlib.events.emitter.on",
+      "kind": "stdlib",
+      "name": "EventEmitter.on",
+      "status": "static",
+      "note": "Node 24.15.0; facets: registration-order, argument-tuple, callback-this, meta-events, return-value; supported scope: the compile-time string-literal event name; the event's argument tuple is unified program-wide across every emit site and every annotated listener, so a computed or symbol name (EventEmitter.errorMonitor included) is refused per site; returns the emitter for chaining, and fires 'newListener' before the add; differential evidence: corpus:1644-ee-basics, corpus:1646-ee-once-remove, corpus:1761-emitter-special-event-names"
+    },
+    {
+      "id": "stdlib.events.emitter.once",
+      "kind": "stdlib",
+      "name": "EventEmitter.once",
+      "status": "static",
+      "note": "Node 24.15.0; facets: registration-order, once-consumption, meta-events, callback-order; supported scope: the compile-time string-literal event name; the event's argument tuple is unified program-wide across every emit site and every annotated listener, so a computed or symbol name (EventEmitter.errorMonitor included) is refused per site; the registration is consumed by the first emit and its 'removeListener' fires BEFORE the body runs, as in Node; differential evidence: corpus:1646-ee-once-remove, corpus:1647-ee-meta-events, corpus:2620-ee-override-once-order"
+    },
+    {
+      "id": "stdlib.events.emitter.prependListener",
+      "kind": "stdlib",
+      "name": "EventEmitter.prependListener",
+      "status": "static",
+      "note": "Node 24.15.0; facets: registration-order, callback-order, meta-events; supported scope: the compile-time string-literal event name; the event's argument tuple is unified program-wide across every emit site and every annotated listener, so a computed or symbol name (EventEmitter.errorMonitor included) is refused per site; the listener goes to the front of the live list; differential evidence: corpus:1650-ee-prepend, corpus:2620-ee-override-once-order"
+    },
+    {
+      "id": "stdlib.events.emitter.prependOnceListener",
+      "kind": "stdlib",
+      "name": "EventEmitter.prependOnceListener",
+      "status": "static",
+      "note": "Node 24.15.0; facets: registration-order, callback-order, once-consumption, meta-events; supported scope: the compile-time string-literal event name; the event's argument tuple is unified program-wide across every emit site and every annotated listener, so a computed or symbol name (EventEmitter.errorMonitor included) is refused per site; the front-of-list and once-consumption flags combined; differential evidence: corpus:1650-ee-prepend"
+    },
+    {
+      "id": "stdlib.events.emitter.rawListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.rawListeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: snapshot, listener-identity; supported scope: the same empty-tuple restriction as listeners; the once WRAPPER identity is a documented divergence — this returns the original, not Node's wrapper object; differential evidence: corpus:1677-emitter-listeners"
+    },
+    {
+      "id": "stdlib.events.emitter.removeAllListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.removeAllListeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: mutation, meta-events, return-value; supported scope: the name-argument and the whole-emitter zero-argument forms; removal is LIFO per name and 'removeListener' is the last event drained, as in Node; differential evidence: corpus:1644-ee-basics, corpus:1647-ee-meta-events, corpus:1652-ee-snapshot"
+    },
+    {
+      "id": "stdlib.events.emitter.removeListener",
+      "kind": "stdlib",
+      "name": "EventEmitter.removeListener",
+      "status": "static",
+      "note": "Node 24.15.0; facets: listener-identity, mutation, meta-events, return-value; supported scope: the alias of off, sharing its lowering and its identity-removal order; differential evidence: corpus:1646-ee-once-remove, corpus:1652-ee-snapshot"
+    },
+    {
+      "id": "stdlib.events.emitter.setMaxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.setMaxListeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: max-listeners, mutation, return-value, error-shape; supported scope: the per-instance cap, returning the emitter for chaining; 0 is unlimited and a negative or non-integer argument throws Node's catchable ERR_OUT_OF_RANGE; differential evidence: corpus:1651-ee-max-listeners, corpus:2574-emitter-max-listeners-ladders"
+    },
+    {
+      "id": "stdlib.events.static.EventEmitter",
+      "kind": "stdlib",
+      "name": "EventEmitter.EventEmitter",
+      "status": "static",
+      "note": "Node 24.15.0; facets: property-read; supported scope: the class's self-reference, reached through the module-namespace and named-import spellings (`events.EventEmitter`, `import { EventEmitter }`) for construction, `extends`, and `instanceof`; re-reading it off an already-resolved class value has no lowering; differential evidence: corpus:1654-ee-namespace"
+    },
+    {
+      "id": "stdlib.events.static.EventEmitterAsyncResource",
+      "kind": "stdlib",
+      "name": "EventEmitter.EventEmitterAsyncResource",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; the async_hooks-backed emitter subclass; async_hooks has no static lowering, reading the class off the class value has none either, and its own surface is excluded from this profile rather than censused"
+    },
+    {
+      "id": "stdlib.events.static.addAbortListener",
+      "kind": "stdlib",
+      "name": "EventEmitter.addAbortListener",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; AbortSignal listener registration is EventTarget surface reached through the events module, not EventEmitter surface; nothing lowers it and no instance member of the same name catches the call"
+    },
+    {
+      "id": "stdlib.events.static.captureRejectionSymbol",
+      "kind": "stdlib",
+      "name": "EventEmitter.captureRejectionSymbol",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; the captureRejections protocol is not implemented in the static tier — the constructor option is refused with the same fence — so its symbol key has nothing behind it and reading it off the class has no lowering"
+    },
+    {
+      "id": "stdlib.events.static.captureRejections",
+      "kind": "stdlib",
+      "name": "EventEmitter.captureRejections",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; the process-wide captureRejections switch; the protocol it turns on is not implemented in the static tier, so reading or writing the flag would promise dispatch behavior nothing delivers"
+    },
+    {
+      "id": "stdlib.events.static.defaultMaxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.defaultMaxListeners",
+      "status": "static",
+      "note": "Node 24.15.0; facets: max-listeners, property-read, liveness, mutation; supported scope: the process-wide default, read and written through the module binding (`events.defaultMaxListeners`); every emitter with no per-instance cap answers the live value; differential evidence: corpus:2574-emitter-max-listeners-ladders"
+    },
+    {
+      "id": "stdlib.events.static.errorMonitor",
+      "kind": "stdlib",
+      "name": "EventEmitter.errorMonitor",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; a SYMBOL event name, and event names must be compile-time string literals for the per-event tuple monomorphization; reading the value off the class has no lowering, and passing it as a name is refused at the registration site with the non-literal-name fence"
+    },
+    {
+      "id": "stdlib.events.static.getEventListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.getEventListeners",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; no lowering in either tier, and no instance member of the same name to fall back on; the emitter's own listeners()/rawListeners() are the lowered introspection form"
+    },
+    {
+      "id": "stdlib.events.static.getMaxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.getMaxListeners (static)",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the class-value statics have no lowering yet; instance emitters lower the same-named member, and the module-member spelling raises the same fence; emitter.getMaxListeners() is the lowered read"
+    },
+    {
+      "id": "stdlib.events.static.init",
+      "kind": "stdlib",
+      "name": "EventEmitter.init",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; the internal initializer Node calls to stamp _events/_eventsCount/_maxListeners onto a foreign object; a compiled emitter's registry is a native structure, so there is nothing to stamp and nothing claims the property read"
+    },
+    {
+      "id": "stdlib.events.static.listenerCount",
+      "kind": "stdlib",
+      "name": "EventEmitter.listenerCount (static)",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the class-value statics have no lowering yet; instance emitters lower the same-named member, and the module-member spelling raises the same fence; the deprecated static delegates to emitter.listenerCount(name), which does lower"
+    },
+    {
+      "id": "stdlib.events.static.on",
+      "kind": "stdlib",
+      "name": "EventEmitter.on (static)",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the promise/async-iterator module functions have no static lowering: neither has an engine-free representation, and the island shim's own EventEmitter is not what a compiled emitter is"
+    },
+    {
+      "id": "stdlib.events.static.once",
+      "kind": "stdlib",
+      "name": "EventEmitter.once (static)",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 24.15.0; the promise/async-iterator module functions have no static lowering: neither has an engine-free representation, and the island shim's own EventEmitter is not what a compiled emitter is; the instance member of the same name is a different function and does lower"
+    },
+    {
+      "id": "stdlib.events.static.setMaxListeners",
+      "kind": "stdlib",
+      "name": "EventEmitter.setMaxListeners (static)",
+      "status": "static",
+      "note": "Node 24.15.0; facets: max-listeners, mutation, error-shape; supported scope: the one-argument number form off the CLASS VALUE, writing the process-wide default after Node's validateNumber; the (n, ...targets) per-target overload is refused, and so is the identical property read off the module binding (`events.setMaxListeners`), which raises the stdlib fence; differential evidence: corpus:2321-emitter-static-setmax"
+    },
+    {
+      "id": "stdlib.events.static.usingDomains",
+      "kind": "stdlib",
+      "name": "EventEmitter.usingDomains",
+      "status": "unsupported",
+      "code": "SC1090",
+      "note": "Node 24.15.0; the node:domain integration flag; domains are island-only legacy surface, and reading the flag off the class value has no lowering"
+    },
+    {
       "id": "stdlib.fetch",
       "kind": "stdlib",
       "name": "fetch",

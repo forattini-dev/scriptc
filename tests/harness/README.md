@@ -115,6 +115,31 @@ supported. And the members the dynamic engine's emulated URL class provides —
 class serves island and npm JS: a compiled `URL` value never exposes them, with
 or without `--dynamic`.
 
+### EventEmitter compatibility profile
+
+`packages/compiler/src/compat/events-profile.ts` censuses `node:events` under
+the same pinned Node; `vitest run tests/harness/events-conformance.test.ts`
+holds it to the same four checks. Three things are specific to this slice:
+
+- EventEmitter is **not a global**. It is the first profile to use the schema's
+  `sources.resolve` factory, and the suite asserts the factory is what reaches
+  it — plus that Node still does `module.exports = EventEmitter`, so the module
+  object and the class object are the same census.
+- Because module and class are one object, five names — `once`, `on`,
+  `listenerCount`, `getMaxListeners`, `setMaxListeners` — exist at BOTH
+  placements, four of them with opposite statuses. Those class-value rows carry
+  a `publishAs` override so the manifest never prints one name twice.
+- The census is the first with a non-empty **instance** placement.
+  `_events`/`_eventsCount`/`_maxListeners` are enumerable own properties of the
+  prototype and of every constructed emitter — Node's pre-private-field
+  internals — so all three are declared twice and refused with SC1090.
+
+Every fence in that profile was verified by compiling a probe, not by reading
+the lowering. The split is worth knowing: a class-value CALL whose name the
+emitter also carries as an instance member reaches the emitter lowering and is
+refused SC2020, while a call with no instance counterpart, and every plain
+property read off the class value, is refused SC1090.
+
 When Node changes, update `.node-version` and the profile's Node/Undici tuple
 together, regenerate with `pnpm manifest`, then run the focused plain and
 sanitized conformance lanes before the full sandbox gate. When the static fetch

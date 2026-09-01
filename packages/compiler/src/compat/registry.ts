@@ -7,6 +7,7 @@
  * plus its own data module and conformance suite.
  */
 
+import { EVENTS_COMPAT_PROJECTION } from "./events-profile.js";
 import { FETCH_COMPAT_PROJECTION } from "./fetch-profile.js";
 import { URL_COMPAT_PROJECTION } from "./url-profile.js";
 import type { CompatProfileProjection } from "./profile-schema.js";
@@ -14,4 +15,5 @@ import type { CompatProfileProjection } from "./profile-schema.js";
 export const COMPAT_PROFILES: readonly CompatProfileProjection[] = [
   FETCH_COMPAT_PROJECTION,
   URL_COMPAT_PROJECTION,
+  EVENTS_COMPAT_PROJECTION,
 ];
