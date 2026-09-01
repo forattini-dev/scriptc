@@ -27,6 +27,7 @@ test("Rust imports a computed file URL beside the native executable", async () =
   if (!result.ok) return;
 
   await copyFile(join(fixtures, "computed-target.mjs"), join(dir, "computed-target.mjs"));
+  await copyFile(join(fixtures, "computed-helper.mjs"), join(dir, "computed-helper.mjs"));
   const env = { ...process.env, NODE_NO_WARNINGS: "1" };
   const [node, rust] = await Promise.all([
     execFileAsync(nodeOracleExecutable(), [entry], { env }),
@@ -36,5 +37,5 @@ test("Rust imports a computed file URL beside the native executable", async () =
   ]);
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
-  expect(rust.stdout).toBe("computed module\n");
+  expect(rust.stdout).toBe("computed module helper\n");
 });

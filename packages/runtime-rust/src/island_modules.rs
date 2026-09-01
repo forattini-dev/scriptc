@@ -130,6 +130,7 @@ const ISLAND_MODULE_BOOTSTRAP: &str = include_str!("island_bootstrap.js");
 #[derive(Default)]
 pub(crate) struct IslandModuleLoader {
     modules: RefCell<HashMap<String, Module>>,
+    external: RefCell<HashSet<String>>,
 }
 
 impl IslandModuleLoader {
@@ -146,6 +147,7 @@ impl IslandModuleLoader {
         if let Some(module) = self.modules.borrow().get(key.as_ref()) {
             return Ok(module.clone());
         }
+        self.external.borrow_mut().insert(key.to_string());
         let source = Source::from_filepath(path).map_err(|error| {
             boa_engine::JsNativeError::typ()
                 .with_message(format!("could not open file `{}`", path.display()))
@@ -168,21 +170,35 @@ impl IslandModuleLoader {
         let Some(from) = referrer.path().and_then(Path::to_str) else {
             return Ok(specifier.to_owned());
         };
-        island_edge_find(from, specifier, IslandEdgeKind::Import)
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                boa_engine::JsNativeError::reference()
-                    .with_message(format!(
-                        "cannot resolve module '{specifier}' from '{from}' \
-                         (scriptc embeds npm code at build time)"
-                    ))
-                    .into()
-            })
+        if let Some(key) = island_edge_find(from, specifier, IslandEdgeKind::Import) {
+            return Ok(key.to_owned());
+        }
+        if self.external.borrow().contains(from) &&
+            (specifier.starts_with("./") || specifier.starts_with("../"))
+        {
+            let Some(parent) = Path::new(from).parent() else {
+                return Err(boa_engine::JsNativeError::reference()
+                    .with_message(format!("cannot resolve module '{specifier}' from '{from}'"))
+                    .into());
+            };
+            let key = parent.join(specifier).to_string_lossy().into_owned();
+            self.external.borrow_mut().insert(key.clone());
+            return Ok(key);
+        }
+        Err(boa_engine::JsNativeError::reference()
+            .with_message(format!(
+                "cannot resolve module '{specifier}' from '{from}' \
+                 (scriptc embeds npm code at build time)"
+            ))
+            .into())
     }
 
     fn load(&self, key: &str, context: &mut Context) -> JsResult<Module> {
         if let Some(module) = self.modules.borrow().get(key) {
             return Ok(module.clone());
+        }
+        if self.external.borrow().contains(key) {
+            return self.load_external(Path::new(key), context);
         }
         if !key.starts_with("node:") {
             return Err(boa_engine::JsNativeError::reference()
