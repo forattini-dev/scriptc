@@ -5030,12 +5030,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return null;
   }
 
-/** Method calls on ChildProcess receivers: `child.on("exit"|"error", cb)`
+/** Method calls on ChildProcess receivers: `child.on/once("exit"|"error", cb)`
    * registers a listener with the event loop's child registry. The event
    * name must be one of the two terminal-event LITERALS; the callback
    * takes at most one parameter — `(code: number | null)` for exit (the
    * signal parameter has no lowering), `(err: Error)` for error — or none.
-   * `on` is statement-only (Node returns the child for chaining; here the
+   * Both methods are statement-only (Node returns the child for chaining; here the
    * result is void and chaining is fenced). kill(signal?) and unref()
    * lower too (the property reads — pid/exitCode/killed — live in
    * lowerIntrinsicProperty). Everything else @types/node declares on
@@ -5048,12 +5048,12 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!isChildSurfaceMember(L, access)) return null;
     const name = access.name.text;
     const loc = locOf(call);
-    if (name === "on" && call.arguments.length === 2) {
+    if ((name === "on" || name === "once") && call.arguments.length === 2) {
       const evT = L.typeOf(call.arguments[0]!);
       const event = evT.isStringLiteralType() ? evT.value : null;
       if (event !== "exit" && event !== "error") {
         L.noLowering(
-          `child.on(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
+          `child.${name}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
           '"exit" and "error" are the supported child events (as literals)',
         );
@@ -5062,7 +5062,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.unsupported(
           "SC1090",
           call,
-          "chaining child.on(...) (the result is void here — register each listener as its own statement)",
+          `chaining child.${name}(...) (the result is void here — register each listener as its own statement)`,
         );
       }
       const receiver = L.lowerExpr(access.expression);
@@ -5178,7 +5178,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     L.noLowering(
       `ChildProcess.${name}`,
       call,
-      "on(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
+      "on/once(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
       L.checker.getSymbolAtLocation(access.name),
     );
   }

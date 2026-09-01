@@ -3827,13 +3827,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         const receiver = L.lowerExpr(expr.expression);
         return { kind: "libCall", fn: "child.killed", args: [receiver], type: BOOL, loc };
       }
-      if (name === "on" || name === "kill" || name === "unref") {
+      if (name === "on" || name === "once" || name === "kill" || name === "unref") {
         L.unsupported("SC1090", expr, `child methods as values (call '${name}' directly)`);
       }
       L.noLowering(
         `ChildProcess.${name}`,
         expr,
-        "on(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
+        "on/once(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
         L.checker.getSymbolAtLocation(expr.name),
       );
     }
