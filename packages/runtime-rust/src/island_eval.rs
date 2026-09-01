@@ -365,6 +365,9 @@ struct IslandState {
     context: Context,
     modules: HashMap<&'static str, Module>,
     evaluated: HashSet<&'static str>,
+    /// `node:` wrappers synthesized on demand for `import()`. Keyed by
+    /// specifier because builtin keys are not in the embedded table.
+    builtins: HashMap<String, Module>,
 }
 
 /// Evaluate JavaScript in the persistent island realm and return String(result).
@@ -403,6 +406,12 @@ fn island_module_namespace(
     key: &str,
 ) -> Result<JsValue, IslandImportFailure> {
     let Some((&module_key, module)) = state.modules.get_key_value(key) else {
+        // A `node:` specifier is never in the embedded table — the build
+        // embeds npm sources, not builtins — so it takes the same
+        // synthesized wrapper the ES loader hands the static graph.
+        if key.starts_with("node:") {
+            return island_builtin_namespace(state, key);
+        }
         return Err(IslandImportFailure::Coded(
             format!("Cannot find embedded module '{key}'"),
             "ERR_MODULE_NOT_FOUND",
@@ -410,25 +419,59 @@ fn island_module_namespace(
     };
     let module = module.clone();
     if state.evaluated.insert(module_key) {
-        let promise = module.load_link_evaluate(&mut state.context);
-        state
-            .context
-            .run_jobs()
-            .map_err(IslandImportFailure::Engine)?;
-        match promise.state() {
-            BoaPromiseState::Fulfilled(_) => {}
-            BoaPromiseState::Rejected(reason) => {
-                return Err(IslandImportFailure::Engine(BoaJsError::from_opaque(reason)));
-            }
-            BoaPromiseState::Pending => {
-                return Err(IslandImportFailure::Coded(
-                    format!("Embedded module '{key}' did not finish evaluating"),
-                    "ERR_MODULE_EVALUATION_PENDING",
-                ));
-            }
-        }
+        island_module_evaluate(state, &module, key)?;
     }
     Ok(module.namespace(&mut state.context).into())
+}
+
+/// A `node:` builtin reached through `import()`.
+///
+/// The wrapper is the loader's own (`island_builtin_wrapper`): it only
+/// calls `__scr_require`, so it links against nothing and can be parsed
+/// and evaluated standalone. Cached per realm, so repeated imports of the
+/// same builtin answer the same namespace, like Node's module cache.
+fn island_builtin_namespace(
+    state: &mut IslandState,
+    key: &str,
+) -> Result<JsValue, IslandImportFailure> {
+    if let Some(module) = state.builtins.get(key).cloned() {
+        return Ok(module.namespace(&mut state.context).into());
+    }
+    let source = island_builtin_wrapper(key);
+    let mut bytes = source.as_bytes();
+    let module = Module::parse(
+        Source::from_reader(&mut bytes, Some(Path::new(key))),
+        None,
+        &mut state.context,
+    )
+    .map_err(IslandImportFailure::Engine)?;
+    island_module_evaluate(state, &module, key)?;
+    state.builtins.insert(key.to_owned(), module.clone());
+    Ok(module.namespace(&mut state.context).into())
+}
+
+/// Load, link and evaluate one module, draining the jobs its evaluation
+/// queues so a rejection is visible now rather than at the next turn.
+fn island_module_evaluate(
+    state: &mut IslandState,
+    module: &Module,
+    key: &str,
+) -> Result<(), IslandImportFailure> {
+    let promise = module.load_link_evaluate(&mut state.context);
+    state
+        .context
+        .run_jobs()
+        .map_err(IslandImportFailure::Engine)?;
+    match promise.state() {
+        BoaPromiseState::Fulfilled(_) => Ok(()),
+        BoaPromiseState::Rejected(reason) => {
+            Err(IslandImportFailure::Engine(BoaJsError::from_opaque(reason)))
+        }
+        BoaPromiseState::Pending => Err(IslandImportFailure::Coded(
+            format!("Embedded module '{key}' did not finish evaluating"),
+            "ERR_MODULE_EVALUATION_PENDING",
+        )),
+    }
 }
 
 /// Raise an import failure as a static scriptc throw.
@@ -665,6 +708,7 @@ fn island_state() -> IslandState {
         context,
         modules,
         evaluated: HashSet::new(),
+        builtins: HashMap::new(),
     }
 }
 
