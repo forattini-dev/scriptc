@@ -162,7 +162,8 @@ export class RustAsyncControlEmitter {
         this.emitAsyncWhile(stmt, statements.slice(index + 1), onComplete);
         return;
       }
-      if (stmt.kind === "forOf" && this.containsAsyncSuspension(stmt.body)) {
+      if (stmt.kind === "forOf" &&
+        (this.containsAsyncSuspension(stmt.iterable) || this.containsAsyncSuspension(stmt.body))) {
         this.emitAsyncForOf(stmt, statements.slice(index + 1), onComplete);
         return;
       }
@@ -491,14 +492,17 @@ export class RustAsyncControlEmitter {
     stmt: Extract<IrStmt, { kind: "forOf" }>,
     remaining: readonly IrStmt[],
     onComplete: (() => void) | null,
+    arrayValue?: string,
   ): void {
     const result = this.context.currentAsyncResult();
     const fn = this.context.currentFunction();
     if (result === null || fn?.async !== true) this.context.unsupported("async for-of outside an async function", stmt.loc);
     if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled async for-of", stmt.loc);
     if (stmt.iterable.type.kind !== "array") this.context.unsupported("async for-of over a non-array", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.iterable)) {
-      this.context.unsupported("async suspension in a for-of iterable", stmt.loc);
+    if (arrayValue === undefined && this.containsAsyncSuspension(stmt.iterable)) {
+      this.context.emitAsyncValue(stmt.iterable, (value) =>
+        this.emitAsyncForOf(stmt, remaining, onComplete, value));
+      return;
     }
     if (this.containsLoopControl(stmt.body)) {
       this.context.unsupported("break or continue in a suspended async for-of", stmt.loc);
@@ -525,7 +529,7 @@ export class RustAsyncControlEmitter {
       ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
     ]);
 
-    this.context.line(`let ${array} = ${this.context.emitExpr(stmt.iterable)};`);
+    this.context.line(`let ${array} = ${arrayValue ?? this.context.emitExpr(stmt.iterable)};`);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
     this.withAsyncLocals(new Set(loopLocals), () => {
@@ -618,7 +622,8 @@ export class RustAsyncControlEmitter {
           terminal = "await";
           break;
         }
-        if (current.kind === "forOf" && this.containsAsyncSuspension(current.body)) {
+        if (current.kind === "forOf" &&
+          (this.containsAsyncSuspension(current.iterable) || this.containsAsyncSuspension(current.body))) {
           this.emitAsyncProtectedForOf(
             current,
             statements.slice(index + 1),
@@ -954,6 +959,7 @@ export class RustAsyncControlEmitter {
     exitLocals: ReadonlySet<string>,
     handlers: RustAsyncHandlers,
     loc: SrcLoc,
+    arrayValue?: string,
   ): void {
     const result = this.context.currentAsyncResult();
     const fn = this.context.currentFunction();
@@ -962,8 +968,10 @@ export class RustAsyncControlEmitter {
     }
     if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled protected async for-of", stmt.loc);
     if (stmt.iterable.type.kind !== "array") this.context.unsupported("protected async for-of over a non-array", stmt.loc);
-    if (this.containsAsyncSuspension(stmt.iterable)) {
-      this.context.unsupported("async suspension in a protected for-of iterable", stmt.loc);
+    if (arrayValue === undefined && this.containsAsyncSuspension(stmt.iterable)) {
+      this.emitAsyncProtectedValue(stmt.iterable, exitLocals, handlers, (value) =>
+        this.emitAsyncProtectedForOf(stmt, remaining, exitLocals, handlers, loc, value));
+      return;
     }
     if (this.containsLoopControl(stmt.body)) {
       this.context.unsupported("break or continue in a protected suspended async for-of", stmt.loc);
@@ -991,7 +999,7 @@ export class RustAsyncControlEmitter {
       ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
     ].join(", ")});`;
 
-    this.context.line(`let ${array} = ${this.context.emitExpr(stmt.iterable)};`);
+    this.context.line(`let ${array} = ${arrayValue ?? this.context.emitExpr(stmt.iterable)};`);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
     this.withAsyncLocals(new Set(loopLocals), () => {
