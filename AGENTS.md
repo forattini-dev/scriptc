@@ -45,6 +45,13 @@ capacity.
 
 Corpus programs are differential tests against Node: every program runs under Node and as a compiled native binary, and stdout, stderr, and exit codes must match byte-for-byte. A new feature lands with corpus programs that pin its behavior both ways.
 
+## Collaboration checkpoints
+
+After completing and checkpointing an implementation step, fetch `origin/main`
+and reconcile it before starting the next step. Preserve concurrent agents' WIP:
+inspect divergent work and integrate it deliberately instead of overwriting or
+resetting another worktree.
+
 Test location follows scope:
 
 - Co-locate white-box unit tests with implementation files under
