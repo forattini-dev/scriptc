@@ -28,6 +28,15 @@ const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+/* SCRIPTC_TEST_BACKEND pins the lane. Unset — the normal run, and what CI
+ * gates on — this suite rides the RELEASE DEFAULT, because embedded npm
+ * tables are production surface and this differential is what keeps
+ * package resolution, compressed source storage and the island boundary
+ * honest through the backend that actually ships. Setting it to "rust"
+ * re-runs the identical case table against the Rust island instead, which
+ * is how the Node-compat program measures that lane's baseline; it is a
+ * measurement, not a gate, so nothing below relaxes when it is set. */
+const backend = process.env["SCRIPTC_TEST_BACKEND"] as "c" | "llvm" | "rust" | undefined;
 
 // The case table lives in npm-cases.ts: the Linux lane runs the identical
 // cases (same entries, same argv lists) inside its container. The shard
@@ -66,18 +75,19 @@ async function build(entry: string): Promise<string> {
     ...globSync(join(fixtureDir, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts,node}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
-  const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+  const key = hash
+    .update(sanitize ? "san" : "plain")
+    .update(backend ?? "default")
+    .digest("hex")
+    .slice(0, 16);
   const outDir = join(cacheDir, `npm-${key}`);
   mkdirSync(outDir, { recursive: true });
-  // Deliberately NO backend pin: this suite rides the release default.
-  // Embedded npm tables are production LLVM surface; this differential
-  // keeps package resolution, compressed source storage, and island/runtime
-  // boundaries covered through the backend that ships.
   const result = await compile(entry, {
     outPath: join(outDir, "program"),
     outDir,
     sanitize,
     dynamic: true,
+    ...(backend === undefined ? {} : { backend }),
   });
   if (!result.ok) {
     throw new Error(

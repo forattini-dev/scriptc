@@ -3,15 +3,16 @@ use boa_engine::{
     NativeFunction, Source,
     builtins::promise::PromiseState as BoaPromiseState,
     js_string,
-    module::MapModuleLoader,
-    object::builtins::{JsArray as BoaJsArray, JsPromise as BoaJsPromise},
+    module::{ModuleRequest, Referrer},
+    object::builtins::{
+        JsArray as BoaJsArray, JsPromise as BoaJsPromise, JsUint8Array as BoaJsUint8Array,
+    },
     object::{FunctionObjectBuilder, ObjectInitializer},
     property::Attribute,
 };
 use std::path::Path;
 
 thread_local! {
-    static ISLAND_MODULES: RefCell<&'static [IslandModule]> = const { RefCell::new(&[]) };
     static ISLAND_STATE: RefCell<Option<IslandState>> = const { RefCell::new(None) };
     static ISLAND_HOST_CALLBACKS: RefCell<HashMap<u64, IslandHostCallback>> = RefCell::new(HashMap::new());
     static ISLAND_HOST_CALLBACK_ID: Cell<u64> = const { Cell::new(0) };
@@ -19,27 +20,36 @@ thread_local! {
 
 const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
 
-#[derive(Clone, Copy)]
-pub enum IslandModuleFormat {
-    Esm,
-    Json,
-}
-
-#[derive(Clone, Copy)]
-pub struct IslandModule {
-    pub key: &'static str,
-    pub source: &'static str,
-    pub format: IslandModuleFormat,
-}
-
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
 
+/// One engine argument as the host closure sees it.
+///
+/// The raw value covers every primitive extraction. `bytes` is copied out
+/// eagerly at the boundary because a Uint8Array cannot be read without
+/// the engine context, and the context is only borrowable inside the
+/// engine's own call — by the time the generated closure body runs, the
+/// island state is already borrowed by the call that reached it.
 #[derive(Clone)]
-pub struct IslandHostArgument(IslandValue);
+pub struct IslandHostArgument {
+    value: IslandValue,
+    bytes: Option<Rc<Vec<u8>>>,
+}
 
+/// What a marshaled scriptc closure hands back to the engine.
+///
+/// This mirrors the C island's host-call adapter returns (emit-island.ts's
+/// `islandAdapter` tags): primitives by value, `Bytes` as a Uint8Array,
+/// and `Json` as text the realm parses — the deep-copy stance the rest of
+/// the boundary already takes for composites.
 pub enum IslandHostResult {
+    Undefined,
+    Null,
+    Bool(bool),
+    Number(f64),
     String(JsString),
+    Bytes(Vec<u8>),
+    Json(JsString),
 }
 
 type IslandHostCallback = Rc<dyn Fn(&[IslandHostArgument]) -> IslandHostResult>;
@@ -64,17 +74,74 @@ pub fn island_value_string(value: &JsString) -> IslandValue {
     IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
 }
 
+/* ── engine argument → native value ────────────────────────────────────
+ * Strict, like the C adapters' `scr_jsval_exit_*`: a lying engine
+ * argument throws a TypeError at the boundary instead of coercing. An
+ * absent argument is `undefined` and fails the same way, matching the
+ * wrapper's pad-with-undefined call semantics. */
+
 pub fn island_host_argument_string(arguments: &[IslandHostArgument], index: usize) -> JsString {
     let Some(value) = arguments
         .get(index)
-        .and_then(|argument| argument.0.0.as_string())
+        .and_then(|argument| argument.value.0.as_string())
     else {
         throw_type_error(format!("expected string at argument {index}"));
     };
     string(&value.to_std_string_lossy())
 }
 
-pub fn island_value_host_function(arity: usize, callback: IslandHostCallback) -> IslandValue {
+pub fn island_host_argument_number(arguments: &[IslandHostArgument], index: usize) -> f64 {
+    let Some(value) = arguments
+        .get(index)
+        .and_then(|argument| argument.value.0.as_number())
+    else {
+        throw_type_error(format!("expected number at argument {index}"));
+    };
+    value
+}
+
+pub fn island_host_argument_bool(arguments: &[IslandHostArgument], index: usize) -> bool {
+    let Some(value) = arguments
+        .get(index)
+        .and_then(|argument| argument.value.0.as_boolean())
+    else {
+        throw_type_error(format!("expected boolean at argument {index}"));
+    };
+    value
+}
+
+pub fn island_host_argument_bytes(
+    arguments: &[IslandHostArgument],
+    index: usize,
+) -> JsBytes<u8> {
+    let Some(value) = arguments
+        .get(index)
+        .and_then(|argument| argument.bytes.as_ref())
+    else {
+        throw_type_error(format!("expected Uint8Array at argument {index}"));
+    };
+    bytes_from_vec(value.as_ref().clone())
+}
+
+/// Copy a runtime byte array out for an `IslandHostResult::Bytes`.
+pub fn island_bytes_values(bytes: &JsBytes<u8>) -> Vec<u8> {
+    bytes_values(bytes)
+}
+
+/// A `jsval` parameter: the engine handle passes straight through.
+pub fn island_host_argument_value(
+    arguments: &[IslandHostArgument],
+    index: usize,
+) -> IslandValue {
+    arguments
+        .get(index)
+        .map_or_else(island_value_undefined, |argument| argument.value.clone())
+}
+
+pub fn island_value_host_function(
+    arity: usize,
+    callback: IslandHostCallback,
+) -> IslandValue {
     let id = ISLAND_HOST_CALLBACK_ID.with(|next| {
         let id = next.get();
         next.set(id.wrapping_add(1));
@@ -82,12 +149,12 @@ pub fn island_value_host_function(arity: usize, callback: IslandHostCallback) ->
     });
     ISLAND_HOST_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, callback));
     with_island_state(|state| {
-        let native = NativeFunction::from_copy_closure(move |_this, arguments, _context| {
+        let native = NativeFunction::from_copy_closure(move |_this, arguments, context| {
             let arguments = arguments
                 .iter()
                 .cloned()
-                .map(|value| IslandHostArgument(IslandValue(value)))
-                .collect::<Vec<_>>();
+                .map(|value| island_host_argument(value, context))
+                .collect::<JsResult<Vec<_>>>()?;
             let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
                 let callbacks = callbacks.borrow();
                 let callback = callbacks
@@ -95,16 +162,39 @@ pub fn island_value_host_function(arity: usize, callback: IslandHostCallback) ->
                     .expect("scriptc: missing island host callback");
                 callback(&arguments)
             });
-            Ok(match result {
-                IslandHostResult::String(value) => {
-                    JsValue::from(boa_engine::JsString::from(value.as_ref()))
-                }
-            })
+            island_host_result_value(result, context)
         });
         let function = FunctionObjectBuilder::new(state.context.realm(), native)
             .length(arity)
             .build();
         IslandValue(function.into())
+    })
+}
+
+/// Wrap one borrowed engine argument, copying a Uint8Array out while the
+/// engine context is still reachable.
+fn island_host_argument(value: JsValue, context: &mut Context) -> JsResult<IslandHostArgument> {
+    let bytes = value
+        .as_object()
+        .and_then(|object| BoaJsUint8Array::from_object(object).ok())
+        .map(|array| array.to_vec(context))
+        .transpose()?
+        .map(Rc::new);
+    Ok(IslandHostArgument { value: IslandValue(value), bytes })
+}
+
+/// Marshal a closure result back into the realm.
+fn island_host_result_value(result: IslandHostResult, context: &mut Context) -> JsResult<JsValue> {
+    Ok(match result {
+        IslandHostResult::Undefined => JsValue::undefined(),
+        IslandHostResult::Null => JsValue::null(),
+        IslandHostResult::Bool(value) => JsValue::from(value),
+        IslandHostResult::Number(value) => JsValue::from(value),
+        IslandHostResult::String(value) => {
+            JsValue::from(boa_engine::JsString::from(value.as_ref()))
+        }
+        IslandHostResult::Bytes(value) => BoaJsUint8Array::from_iter(value, context)?.into(),
+        IslandHostResult::Json(value) => island_parse_json(&value, context)?,
     })
 }
 
@@ -139,25 +229,25 @@ pub fn island_value_array(values: Vec<IslandValue>) -> IslandValue {
 pub fn island_value_json(value: &JsString) -> IslandValue {
     with_island_state(|state| {
         let context = &mut state.context;
-        let global = context.global_object();
-        let json = global
-            .get(js_string!("JSON"), context)
-            .unwrap_or_else(|error| island_eval_error(error, context));
-        let json = json
-            .to_object(context)
-            .unwrap_or_else(|error| island_eval_error(error, context));
-        let parse = json
-            .get(js_string!("parse"), context)
-            .unwrap_or_else(|error| island_eval_error(error, context));
-        let Some(parse) = parse.as_callable() else {
-            throw_type_error("Embedded JSON.parse is not callable".to_owned());
-        };
-        let input = JsValue::from(boa_engine::JsString::from(value.as_ref()));
-        let parsed = parse
-            .call(&JsValue::from(json), &[input], context)
+        let parsed = island_parse_json(value, context)
             .unwrap_or_else(|error| island_eval_error(error, context));
         IslandValue(parsed)
     })
+}
+
+/// Run the realm's own `JSON.parse` over host-produced text.
+fn island_parse_json(value: &JsString, context: &mut Context) -> JsResult<JsValue> {
+    let global = context.global_object();
+    let json = global.get(js_string!("JSON"), context)?;
+    let json = json.to_object(context)?;
+    let parse = json.get(js_string!("parse"), context)?;
+    let Some(parse) = parse.as_callable() else {
+        return Err(boa_engine::JsNativeError::typ()
+            .with_message("Embedded JSON.parse is not callable")
+            .into());
+    };
+    let input = JsValue::from(boa_engine::JsString::from(value.as_ref()));
+    parse.call(&JsValue::from(json), &[input], context)
 }
 
 pub fn island_is_nullish(value: &IslandValue) -> bool {
@@ -277,10 +367,6 @@ struct IslandState {
     evaluated: HashSet<&'static str>,
 }
 
-pub fn island_register_modules(modules: &'static [IslandModule]) {
-    ISLAND_MODULES.with(|slot| *slot.borrow_mut() = modules);
-}
-
 /// Evaluate JavaScript in the persistent island realm and return String(result).
 ///
 /// The context is thread-local because Boa values are deliberately single-threaded;
@@ -397,7 +483,7 @@ fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {
 }
 
 fn island_state() -> IslandState {
-    let loader = Rc::new(MapModuleLoader::new());
+    let loader = Rc::new(IslandModuleLoader::default());
     let mut context = Context::builder()
         .module_loader(loader.clone())
         .build()
@@ -419,27 +505,32 @@ fn island_state() -> IslandState {
     context
         .eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))
         .unwrap_or_else(|error| island_eval_error(error, &mut context));
-    let mut modules = HashMap::new();
-    ISLAND_MODULES.with(|slot| {
-        for embedded in slot.borrow().iter() {
-            let module = match embedded.format {
-                IslandModuleFormat::Esm => {
-                    let mut bytes = embedded.source.as_bytes();
-                    Module::parse(
-                        Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
-                        None,
-                        &mut context,
-                    )
-                }
-                IslandModuleFormat::Json => {
-                    Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
-                }
-            }
+    let embedded_modules = island_registered_modules();
+    if !embedded_modules.is_empty() {
+        // __scr_require must exist before any module is PARSED, because a
+        // CJS facade's first statement calls it.
+        island_modules_boot(&mut context)
             .unwrap_or_else(|error| island_eval_error(error, &mut context));
-            loader.insert(embedded.key, module.clone());
-            modules.insert(embedded.key, module);
+    }
+    let mut modules = HashMap::new();
+    for embedded in embedded_modules {
+        // A JSON module keeps its native parse for the ES graph; CJS
+        // files enter through their build-time facade over __scr_require.
+        let module = if embedded.format == IslandModuleFormat::Json {
+            Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
+        } else {
+            let source = island_module_esm_source(embedded);
+            let mut bytes = source.as_bytes();
+            Module::parse(
+                Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
+                None,
+                &mut context,
+            )
         }
-    });
+        .unwrap_or_else(|error| island_eval_error(error, &mut context));
+        loader.insert(embedded.key, module.clone());
+        modules.insert(embedded.key, module);
+    }
     IslandState {
         context,
         modules,
@@ -510,7 +601,7 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 
 fn island_eval_finish() {
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
-    ISLAND_MODULES.with(|slot| *slot.borrow_mut() = &[]);
+    island_modules_reset();
     ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());
     ISLAND_HOST_CALLBACK_ID.with(|slot| slot.set(0));
 }

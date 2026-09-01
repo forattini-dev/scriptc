@@ -21,7 +21,10 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
     "fn main() {",
     "    runtime::init();",
     ...(options.usesEmbeddedModules
-      ? ["    runtime::island_register_modules(&SC_ISLAND_MODULES);"]
+      ? [
+        "    runtime::island_register_modules(&SC_ISLAND_MODULES);",
+        "    runtime::island_register_edges(&SC_ISLAND_EDGES);",
+      ]
       : []),
     "    let _sc_execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {",
     options.entryAsync
