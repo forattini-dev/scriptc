@@ -196,12 +196,29 @@ impl boa_engine::module::ModuleLoader for IslandModuleLoader {
     }
 }
 
-/// `const m = __scr_require("node:x"); export default m;`
+/// Named export lists for the builtin ESM wrappers, mirroring the C
+/// island's `isl_builtins`.
+///
+/// A builtin the island shims registers its name and the export list its
+/// wrapper destructures; the shims themselves live in the require
+/// bootstrap. The island provides none yet, so the table is empty and
+/// every `node:*` wrapper is default-only — the import still LINKS, and
+/// the does-not-provide throw surfaces at evaluation.
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 0] = [];
+
+/// `const m = __scr_require("node:x"); export default m; export const {…} = m;`
 pub(crate) fn island_builtin_wrapper(key: &str) -> String {
-    format!(
+    let mut wrapper = format!(
         "const m=globalThis.__scr_require({});export default m;",
         island_js_quote(key),
-    )
+    );
+    if let Some((_, exports)) = ISLAND_BUILTIN_EXPORTS
+        .iter()
+        .find(|(name, _)| *name == key)
+    {
+        wrapper.push_str(&format!("export const{{{exports}}}=m;"));
+    }
+    wrapper
 }
 
 /// The ES source an embedded module contributes to the module graph.
