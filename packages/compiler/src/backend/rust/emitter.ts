@@ -671,7 +671,7 @@ class RustEmitter {
         if (node.fn.endsWith("Warning")) this.usesProcessWarningEvents = true;
         else this.usesProcessRejectionEvents = true;
       }
-      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && node.op === "callMethod") ||
+      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }

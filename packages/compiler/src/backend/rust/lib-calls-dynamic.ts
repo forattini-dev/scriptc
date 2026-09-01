@@ -31,6 +31,14 @@ export function emitRustDynamicLibCall(
     const member = context.nextTemporary();
     return `{ let ${key} = ${context.emitExpr(arg)}; let ${member} = ${context.emitExpr(secondArg)}; ${context.dynTypeName()}::Island(runtime::island_import(&${key}, &${member})) }`;
   }
+  if (expr.fn === "island.importDyn" && expr.args.length === 1 &&
+    arg?.type.kind === "string" && expr.type.kind === "jsval") {
+    // Dynamic import(): the realm answers a PROMISE of the namespace, so
+    // a load or evaluation failure rejects instead of throwing here —
+    // Node's shape. The frontend's jsBridgePromise adopts the settlement.
+    const key = context.nextTemporary();
+    return `{ let ${key} = ${context.emitExpr(arg)}; ${context.dynTypeName()}::Island(runtime::island_import_dyn(&${key})) }`;
+  }
   if (expr.fn === "util.parseArgs" && expr.args.length === 1 &&
     arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     return `runtime::util_parse_args(${context.emitExpr(arg)})`;

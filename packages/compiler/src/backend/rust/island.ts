@@ -313,7 +313,105 @@ function emitOperation(
     }
     return `{ let ${receiver} = ${emitExpr(receiverExpr)}; let ${args} = [${values}]; sc_dyn_invoke(&${receiver}, "${context.rustString(expr.name)}", &${args}, "${context.rustString(expr.name)}") }`;
   }
+  if (expr.op === "optCallMethod" && expr.name !== undefined && expr.args.length > 0) {
+    return emitOptionalMethodCall(expr, context, emitExpr);
+  }
+  if (expr.op === "construct" && expr.args.length > 0) {
+    return emitConstruct(expr, context, emitExpr);
+  }
+  if (expr.op === "instanceOf" && expr.args.length === 2) {
+    return emitInstanceOf(expr, context, emitExpr);
+  }
   context.unsupported(`island operation '${expr.op}'`, expr.loc);
+}
+
+/** `o.name?.(...)` — the optional METHOD call.
+ *
+ * A nullish member answers undefined without calling; anything else calls
+ * with `this = o`, so a non-callable member still throws. The realm's
+ * receivers read the member exactly once (island_opt_call_method owns the
+ * whole operation); a NATIVE receiver reads it twice — once for the
+ * nullish guard, once inside sc_dyn_invoke — which is observable only
+ * through a dyn accessor property, and never on the island receivers this
+ * operation is lowered for.
+ *
+ * Because that arm calls sc_dyn_invoke, this op MUST stay listed in the
+ * emitter's usesDynamicInvoke scan; otherwise the helper is never emitted
+ * and the generated program does not compile. */
+function emitOptionalMethodCall(
+  expr: Extract<IrExpr, { kind: "jsOp" }>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string {
+  const receiverExpr = argOf(expr, 0, context);
+  const name = context.rustString(expr.name ?? "");
+  const dyn = context.dynTypeName();
+  const receiver = context.nextName("sc_island_receiver");
+  const args = context.nextName("sc_island_args");
+  const member = context.nextName("sc_island_member");
+  const values = expr.args.slice(1).map((arg) => emitExpr(arg)).join(", ");
+  const bind = `let ${receiver} = ${emitExpr(receiverExpr)}; let ${args} = [${values}];`;
+  const native = `{ let ${member} = sc_dyn_key_get(&${receiver}, &runtime::string("${name}"), false); ` +
+    `if matches!(&${member}, ${dyn}::Undefined | ${dyn}::Null) { ${dyn}::Undefined } ` +
+    `else { sc_dyn_invoke(&${receiver}, "${name}", &${args}, "${name}") } }`;
+  if (!context.hasEmbeddedModules()) return `{ ${bind} ${native} }`;
+  const islandArgs = context.nextName("sc_island_method_args");
+  return `{ ${bind} match &${receiver} { ` +
+    `${dyn}::Island(sc_value) => { let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+    `${dyn}::Island(runtime::island_opt_call_method(sc_value, "${name}", &${islandArgs})) }, ` +
+    `_ => ${native}, } }`;
+}
+
+/** `new X(...)` on a jsval callee.
+ *
+ * Only the realm has constructors; a native dyn callee reaching here is
+ * exactly JavaScript's "not a constructor", so it takes that TypeError at
+ * RUNTIME rather than an SC3001 at build time — the argument expressions
+ * still evaluate first, left to right, like every other call form. */
+function emitConstruct(
+  expr: Extract<IrExpr, { kind: "jsOp" }>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string {
+  const dyn = context.dynTypeName();
+  const callee = context.nextName("sc_island_callee");
+  const args = context.nextName("sc_island_args");
+  const values = expr.args.slice(1).map((arg) => emitExpr(arg)).join(", ");
+  const bind = `let ${callee} = ${emitExpr(argOf(expr, 0, context))}; let ${args} = [${values}];`;
+  const refuse = (value: string): string =>
+    `runtime::throw_type_error(format!("{} is not a constructor", sc_dyn_kind(&${value})))`;
+  if (!context.hasEmbeddedModules()) return `{ ${bind} let _ = &${args}; ${refuse(callee)} }`;
+  const islandArgs = context.nextName("sc_island_call_args");
+  return `{ ${bind} match &${callee} { ` +
+    `${dyn}::Island(sc_value) => { let ${islandArgs} = ${emitIslandArguments(args, context)}; ` +
+    `${dyn}::Island(runtime::island_construct(sc_value, &${islandArgs})) }, ` +
+    `sc_value => ${refuse("sc_value")}, } }`;
+}
+
+/** `v instanceof C` — the spec's InstanceofOperator in the realm.
+ *
+ * Both operands cross INTO the realm first, so a native dyn left-hand
+ * side answers false (a fresh realm object is not an instance of an
+ * embedded class) instead of forcing a second, divergent implementation;
+ * a non-object right-hand side throws the engine's own TypeError. Without
+ * an embedded realm there is nothing to ask, so the refusal stands. */
+function emitInstanceOf(
+  expr: Extract<IrExpr, { kind: "jsOp" }>,
+  context: RustIslandContext,
+  emitExpr: (expr: IrExpr) => string,
+): string {
+  if (!context.hasEmbeddedModules()) {
+    context.unsupported("island 'instanceof' without an embedded module realm", expr.loc);
+  }
+  const left = context.nextName("sc_island_left");
+  const right = context.nextName("sc_island_right");
+  const target = context.nextName("sc_island_target");
+  const value = context.nextName("sc_island_value");
+  return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; ` +
+    `let ${right} = ${emitExpr(argOf(expr, 1, context))}; ` +
+    `let ${value} = ${emitIslandValue(`&${left}`, context)}; ` +
+    `let ${target} = ${emitIslandValue(`&${right}`, context)}; ` +
+    `runtime::island_instance_of(&${value}, &${target}) }`;
 }
 
 function numericOperator(op: "sub" | "mul" | "div" | "mod"): string {

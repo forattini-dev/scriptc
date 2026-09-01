@@ -82,4 +82,52 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("2:3|3.5:0\n");
   });
+
+  // The four island operations the Rust backend used to refuse outright
+  // (SC3001), each against the Node oracle that defines them.
+
+  test("`new` on a package class constructs inside the realm", async () => {
+    // The instance never leaves the realm, so the method calls and the
+    // field read after it all ride the same handle.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "class-construct.ts")]),
+      await run(await build("class-construct.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("5:9:9\n");
+  });
+
+  test("`instanceof` answers across the boundary", async () => {
+    // True for the realm's own instance, false for an unrelated one —
+    // and the false arm proves the operands cross INTO the realm rather
+    // than being compared by some second, native rule.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "class-instanceof.ts")]),
+      await run(await build("class-instanceof.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("true:false\n");
+  });
+
+  test("an optional method call skips the absent member", async () => {
+    // `o.m?.()` — the present method calls with `this = o`, the missing
+    // one answers undefined instead of throwing.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "opt-call-method.ts")]),
+      await run(await build("opt-call-method.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("go:undefined\n");
+  });
+
+  test("dynamic import() answers the embedded module's namespace", async () => {
+    // The realm's promise of the whole namespace, bridged to the static
+    // promise the await parks on.
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "dynamic-import.ts")]),
+      await run(await build("dynamic-import.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("armed:idle\n");
+  });
 });
