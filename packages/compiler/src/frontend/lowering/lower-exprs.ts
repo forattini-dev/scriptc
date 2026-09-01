@@ -610,7 +610,9 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const argsWithout: IrExpr[] = [];
         const argsWith: IrExpr[] = [];
         const getters: { name: string; fn: IrExpr; loc: SrcLoc }[] = [];
-        let spread: { cond: IrExpr; whenTrue: boolean } | null = null;
+        let spread: { cond: IrExpr; whenTrue: boolean; args: IrExpr[] } | null = null;
+        const conditionalSpreads: { cond: IrExpr; whenTrue: boolean; args: IrExpr[] }[] = [];
+        let sawPlainPropAfterConditional = false;
         // A MEMBER a JS file cannot lower or marshal: defer like a
         // statement fence, shaped by what the member IS. A FUNCTION-shaped
         // member (a generic function as a value, a signature with
@@ -708,10 +710,39 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
                   "conditional spreads with effectful conditions in an 'any'-typed object literal (bind the condition to a const first)",
                 );
               }
-              spread = { cond, whenTrue: cs.whenTrue };
+              spread = { cond, whenTrue: cs.whenTrue, args: [] };
+              conditionalSpreads.push(spread);
               for (const p of cs.props) {
                 const v = ts.isPropertyAssignment(p) ? L.lowerExpr(p.initializer) : L.lowerShorthandValue(p);
-                pushProp(p.name, v, p, [argsWith]);
+                pushProp(p.name, v, p, [argsWith, spread.args]);
+              }
+              continue;
+            }
+            // Several trailing conditional spreads compose left-to-right
+            // as object copies (`base -> spread 1 -> spread 2`). This is
+            // the schema-builder idiom with independent optional members.
+            // Keep the supported slice honest: no plain spread, getter, or
+            // explicit property may split the conditional suffix, because
+            // those forms need a general source-order segment planner.
+            if (cs && cs !== "unsupported" && spread) {
+              if (spreadSrcs.length > 0 || getters.length > 0 || sawPlainPropAfterConditional) {
+                L.unsupported(
+                  "SC1090",
+                  prop,
+                  "conditional spread sequences mixed with other property forms in an 'any'-typed object literal",
+                );
+              }
+              const cond = L.lowerCondition(cs.cond);
+              // Unlike the original one-spread expansion, the sequential
+              // suffix below does not hoist this condition: objSpread
+              // evaluates the accumulated left object before this ternary,
+              // at the spread's source position. Calls/reads here therefore
+              // keep their observable order and need no purity claim.
+              const next = { cond, whenTrue: cs.whenTrue, args: [] as IrExpr[] };
+              conditionalSpreads.push(next);
+              for (const p of cs.props) {
+                const v = ts.isPropertyAssignment(p) ? L.lowerExpr(p.initializer) : L.lowerShorthandValue(p);
+                pushProp(p.name, v, p, [next.args]);
               }
               continue;
             }
@@ -739,6 +770,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               "this spread form in an 'any'-typed object literal (one `...(c ? { k: v } : {})` conditional spread is supported — bind other shapes to a const and set keys explicitly)",
             );
           }
+          if (spread) sawPlainPropAfterConditional = true;
           sawPlainProp = true;
           // `name: value`, the shorthand `{ name }` (the value is the
           // identifier itself, resolved through the shorthand VALUE symbol
@@ -831,6 +863,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         }
         if (getters.length > 0) {
           L.unsupported("SC1090", expr, "get accessors combined with conditional spreads in an 'any'-typed object literal");
+        }
+        if (conditionalSpreads.length > 1) {
+          if (sawPlainPropAfterConditional || spreadSrcs.length > 0) {
+            L.unsupported(
+              "SC1090",
+              expr,
+              "conditional spread sequences mixed with other property forms in an 'any'-typed object literal",
+            );
+          }
+          let acc: IrExpr = { kind: "jsOp", op: "objLit", args: argsWithout, type: JSVAL, loc };
+          for (const conditional of conditionalSpreads) {
+            const populated: IrExpr = { kind: "jsOp", op: "objLit", args: conditional.args, type: JSVAL, loc };
+            const empty: IrExpr = { kind: "jsOp", op: "objLit", args: [], type: JSVAL, loc };
+            const selected: IrExpr = {
+              kind: "ternary",
+              cond: conditional.cond,
+              then: conditional.whenTrue ? populated : empty,
+              else_: conditional.whenTrue ? empty : populated,
+              type: JSVAL,
+              loc,
+            };
+            acc = { kind: "jsOp", op: "objSpread", args: [acc, selected], type: JSVAL, loc };
+          }
+          return acc;
         }
         const withLit: IrExpr = { kind: "jsOp", op: "objLit", args: argsWith, type: JSVAL, loc };
         const withoutLit: IrExpr = { kind: "jsOp", op: "objLit", args: argsWithout, type: JSVAL, loc };
@@ -3099,6 +3155,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         return droppableStatic(e.left) && droppableStatic(e.right);
       case "toBool":
         return droppableStatic(e.operand);
+      // Reading `.length` from an already-lowered string is a pure scalar
+      // observation: it cannot call user code, throw, or mutate state.
+      // This lets comparisons such as `name.length === 1` participate in
+      // the conditional-spread reorder proof below.
+      case "strIntrinsic":
+        return e.method === "length" && droppableStatic(e.receiver) && e.args.every(droppableStatic);
       case "unionIsTag":
         return droppableStatic(e.value);
       case "unionWrap":
@@ -3135,6 +3197,8 @@ export function pureReemittable(e: IrExpr): boolean {
    * desugar hoists the condition ahead of the properties. */
   function pureCondExpr(e: IrExpr): boolean {
     if (e.kind === "boolLit") return true;
+    if (e.kind === "bin") return droppableStatic(e);
+    if (e.kind === "strEq") return droppableStatic(e.left) && droppableStatic(e.right);
     if (e.kind === "toBool") return pureReemittable(e.operand);
     if (e.kind === "unionIsTag" || e.kind === "dynTest") return pureReemittable(e.value);
     if (e.kind === "unary" && e.op === "!") return pureCondExpr(e.operand);
