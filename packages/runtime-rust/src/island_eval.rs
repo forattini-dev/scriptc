@@ -381,42 +381,118 @@ pub fn island_eval(code: &JsString) -> JsString {
     })
 }
 
-pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
-    with_island_state(|state| {
-        let key = key.as_ref();
-        let Some((&module_key, module)) = state.modules.get_key_value(key) else {
-            throw_error_code(
-                format!("Cannot find embedded module '{key}'"),
-                "ERR_MODULE_NOT_FOUND",
-            );
-        };
-        if state.evaluated.insert(module_key) {
-            let promise = module.load_link_evaluate(&mut state.context);
-            state
-                .context
-                .run_jobs()
-                .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-            match promise.state() {
-                BoaPromiseState::Fulfilled(_) => {}
-                BoaPromiseState::Rejected(reason) => {
-                    island_eval_error(BoaJsError::from_opaque(reason), &mut state.context);
-                }
-                BoaPromiseState::Pending => {
-                    throw_error_code(
-                        format!("Embedded module '{key}' did not finish evaluating"),
-                        "ERR_MODULE_EVALUATION_PENDING",
-                    );
-                }
+/// Why an embedded module could not be made available.
+///
+/// `Coded` is a scriptc-level refusal carrying a Node error code (the key
+/// is not in the build's table, or the module never finished evaluating);
+/// `Engine` is the module's own thrown value. Static `island_import`
+/// raises either as a throw at the import site; dynamic
+/// `island_import_dyn` turns either into a rejection, which is where Node
+/// puts a dynamic import's failure.
+enum IslandImportFailure {
+    Coded(String, &'static str),
+    Engine(BoaJsError),
+}
+
+/// Evaluate one embedded module (once per realm) and answer its namespace.
+///
+/// Both import paths share this: the static form reads one export off the
+/// namespace, the dynamic form hands the whole object across.
+fn island_module_namespace(
+    state: &mut IslandState,
+    key: &str,
+) -> Result<JsValue, IslandImportFailure> {
+    let Some((&module_key, module)) = state.modules.get_key_value(key) else {
+        return Err(IslandImportFailure::Coded(
+            format!("Cannot find embedded module '{key}'"),
+            "ERR_MODULE_NOT_FOUND",
+        ));
+    };
+    let module = module.clone();
+    if state.evaluated.insert(module_key) {
+        let promise = module.load_link_evaluate(&mut state.context);
+        state
+            .context
+            .run_jobs()
+            .map_err(IslandImportFailure::Engine)?;
+        match promise.state() {
+            BoaPromiseState::Fulfilled(_) => {}
+            BoaPromiseState::Rejected(reason) => {
+                return Err(IslandImportFailure::Engine(BoaJsError::from_opaque(reason)));
+            }
+            BoaPromiseState::Pending => {
+                return Err(IslandImportFailure::Coded(
+                    format!("Embedded module '{key}' did not finish evaluating"),
+                    "ERR_MODULE_EVALUATION_PENDING",
+                ));
             }
         }
-        let value = module
-            .namespace(&mut state.context)
+    }
+    Ok(module.namespace(&mut state.context).into())
+}
+
+/// Raise an import failure as a static scriptc throw.
+fn island_import_throw(failure: IslandImportFailure, context: &mut Context) -> ! {
+    match failure {
+        IslandImportFailure::Coded(message, code) => throw_error_code(message, code),
+        IslandImportFailure::Engine(error) => island_eval_error(error, context),
+    }
+}
+
+/// The rejection reason the same failure carries into the realm.
+fn island_import_reason(failure: IslandImportFailure, context: &mut Context) -> BoaJsError {
+    match failure {
+        IslandImportFailure::Coded(message, code) => {
+            let error = boa_engine::JsNativeError::error()
+                .with_message(message)
+                .into_opaque(context);
+            // Node's module errors are recognised by `.code`, so the
+            // rejection reason carries it like the static throw does.
+            let _ = error.set(
+                js_string!("code"),
+                boa_engine::JsString::from(code),
+                false,
+                context,
+            );
+            BoaJsError::from_opaque(error.into())
+        }
+        IslandImportFailure::Engine(error) => error,
+    }
+}
+
+pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
+    with_island_state(|state| {
+        let namespace = island_module_namespace(state, key.as_ref())
+            .unwrap_or_else(|failure| island_import_throw(failure, &mut state.context));
+        let value = namespace
+            .to_object(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context))
             .get(
                 boa_engine::JsString::from(export.as_ref()),
                 &mut state.context,
             )
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
         IslandValue(value)
+    })
+}
+
+/// Dynamic `import(key)` — the embedded module's whole namespace object.
+///
+/// Node's dynamic import never throws at the call site: a load or
+/// evaluation failure REJECTS the answered promise. So this answers the
+/// realm's own promise and the static bridge (`jsBridgePromise`) adopts
+/// the settlement exactly where `await import(...)` puts it.
+pub fn island_import_dyn(key: &JsString) -> IslandValue {
+    with_island_state(|state| {
+        let promise = match island_module_namespace(state, key.as_ref()) {
+            Ok(namespace) => BoaJsPromise::resolve(namespace, &mut state.context),
+            Err(failure) => {
+                let reason = island_import_reason(failure, &mut state.context);
+                BoaJsPromise::reject(reason, &mut state.context)
+            }
+        };
+        let promise = promise.unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(promise.into())
     })
 }
 
@@ -433,24 +509,78 @@ pub fn island_call(callee: &IslandValue, args: &[IslandValue]) -> IslandValue {
     })
 }
 
-pub fn island_call_method(receiver: &IslandValue, name: &str, args: &[IslandValue]) -> IslandValue {
+/// `new Callee(...)` inside the realm — the spec's Construct.
+///
+/// A non-constructor RHS raises the engine's own refusal shape, and the
+/// constructor's own throw crosses catchably like every other island op.
+pub fn island_construct(callee: &IslandValue, args: &[IslandValue]) -> IslandValue {
     with_island_state(|state| {
-        let object = receiver
+        let Some(constructor) = callee.0.as_constructor() else {
+            throw_type_error("Embedded module export is not a constructor".to_owned());
+        };
+        let args = args.iter().map(|value| value.0.clone()).collect::<Vec<_>>();
+        let value = constructor
+            .construct(&args, None, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(value.into())
+    })
+}
+
+/// `value instanceof target` inside the realm — the spec's
+/// InstanceofOperator, `Symbol.hasInstance` included. A non-object target
+/// throws the engine's own TypeError, bridged catchably.
+pub fn island_instance_of(value: &IslandValue, target: &IslandValue) -> bool {
+    with_island_state(|state| {
+        value
             .0
-            .to_object(&mut state.context)
-            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        let member = object
-            .get(boa_engine::JsString::from(name), &mut state.context)
-            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        let Some(function) = member.as_callable() else {
+            .instance_of(&target.0, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context))
+    })
+}
+
+/// Call an already-read member with an explicit `this`.
+///
+/// `name` is only the spelling the non-callable TypeError uses; both the
+/// plain and the optional method call reach the realm through here, so
+/// the property is read exactly ONCE per call site.
+fn island_call_with_this(
+    callee: &IslandValue,
+    this: &IslandValue,
+    name: &str,
+    args: &[IslandValue],
+) -> IslandValue {
+    with_island_state(|state| {
+        let Some(function) = callee.0.as_callable() else {
             throw_type_error(format!("{name} is not a function"));
         };
         let args = args.iter().map(|value| value.0.clone()).collect::<Vec<_>>();
         let value = function
-            .call(&receiver.0, &args, &mut state.context)
+            .call(&this.0, &args, &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
         IslandValue(value)
     })
+}
+
+pub fn island_call_method(receiver: &IslandValue, name: &str, args: &[IslandValue]) -> IslandValue {
+    let member = island_get_property(receiver, name);
+    island_call_with_this(&member, receiver, name, args)
+}
+
+/// `receiver.name?.(...)` — the optional METHOD call.
+///
+/// A nullish member answers the realm's `undefined` without calling;
+/// anything else calls with `this = receiver`, so a non-callable member
+/// still raises the TypeError `island_call_method` would.
+pub fn island_opt_call_method(
+    receiver: &IslandValue,
+    name: &str,
+    args: &[IslandValue],
+) -> IslandValue {
+    let member = island_get_property(receiver, name);
+    if member.0.is_null_or_undefined() {
+        return island_value_undefined();
+    }
+    island_call_with_this(&member, receiver, name, args)
 }
 
 pub fn island_json(value: &IslandValue) -> JsString {
