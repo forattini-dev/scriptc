@@ -9,26 +9,12 @@ use boa_engine::{
 use std::path::Path;
 
 thread_local! {
-    static ISLAND_MODULES: RefCell<&'static [IslandModule]> = const { RefCell::new(&[]) };
     static ISLAND_STATE: RefCell<Option<IslandState>> = const { RefCell::new(None) };
     static ISLAND_HOST_CALLBACKS: RefCell<HashMap<u64, IslandHostCallback>> = RefCell::new(HashMap::new());
     static ISLAND_HOST_CALLBACK_ID: Cell<u64> = const { Cell::new(0) };
 }
 
 const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
-
-#[derive(Clone, Copy)]
-pub enum IslandModuleFormat {
-    Esm,
-    Json,
-}
-
-#[derive(Clone, Copy)]
-pub struct IslandModule {
-    pub key: &'static str,
-    pub source: &'static str,
-    pub format: IslandModuleFormat,
-}
 
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
@@ -216,10 +202,6 @@ struct IslandState {
     evaluated: HashSet<&'static str>,
 }
 
-pub fn island_register_modules(modules: &'static [IslandModule]) {
-    ISLAND_MODULES.with(|slot| *slot.borrow_mut() = modules);
-}
-
 /// Evaluate JavaScript in the persistent island realm and return String(result).
 ///
 /// The context is thread-local because Boa values are deliberately single-threaded;
@@ -351,26 +333,24 @@ fn island_state() -> IslandState {
         .eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))
         .unwrap_or_else(|error| island_eval_error(error, &mut context));
     let mut modules = HashMap::new();
-    ISLAND_MODULES.with(|slot| {
-        for embedded in slot.borrow().iter() {
-            let module = match embedded.format {
-                IslandModuleFormat::Esm => {
-                    let mut bytes = embedded.source.as_bytes();
-                    Module::parse(
-                        Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
-                        None,
-                        &mut context,
-                    )
-                }
-                IslandModuleFormat::Json => {
-                    Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
-                }
+    for embedded in island_registered_modules() {
+        let module = match embedded.format {
+            IslandModuleFormat::Esm | IslandModuleFormat::Cjs => {
+                let mut bytes = embedded.source.as_bytes();
+                Module::parse(
+                    Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
+                    None,
+                    &mut context,
+                )
             }
-            .unwrap_or_else(|error| island_eval_error(error, &mut context));
-            loader.insert(embedded.key, module.clone());
-            modules.insert(embedded.key, module);
+            IslandModuleFormat::Json => {
+                Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
+            }
         }
-    });
+        .unwrap_or_else(|error| island_eval_error(error, &mut context));
+        loader.insert(embedded.key, module.clone());
+        modules.insert(embedded.key, module);
+    }
     IslandState { context, modules, evaluated: HashSet::new() }
 }
 
@@ -437,7 +417,7 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 
 fn island_eval_finish() {
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
-    ISLAND_MODULES.with(|slot| *slot.borrow_mut() = &[]);
+    island_modules_reset();
     ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());
     ISLAND_HOST_CALLBACK_ID.with(|slot| slot.set(0));
 }

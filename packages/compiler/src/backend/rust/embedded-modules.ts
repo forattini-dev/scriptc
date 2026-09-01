@@ -46,7 +46,35 @@ export function emitRustEmbeddedModules(
       "    runtime::IslandModule { " +
         `key: "${rustString(module.key)}", ` +
         `source: "${rustString(source)}", ` +
-        `format: runtime::IslandModuleFormat::${format} },`,
+        `format: runtime::IslandModuleFormat::${format}, ` +
+        `esm: ${module.esm === undefined ? "None" : `Some("${rustString(module.esm)}")`} },`,
+    );
+  }
+  lines.push("];", "");
+  lines.push(...emitRustEmbeddedEdges(mod, rustString));
+  return lines;
+}
+
+/** kind: the CALL FORM an edge resolved for — `Any` (relative files,
+ * builtins) serves both lookups, while a dual package's "exports" map can
+ * split one (from, specifier) into an `Import` and a `Require` edge. */
+const EDGE_KIND = { any: "Any", import: "Import", require: "Require" } as const;
+
+function emitRustEmbeddedEdges(
+  mod: IrModule,
+  rustString: (value: string) => string,
+): string[] {
+  const edges = mod.embedded?.edges ?? [];
+  const lines = [
+    `static SC_ISLAND_EDGES: [runtime::IslandEdge; ${edges.length}] = [`,
+  ];
+  for (const edge of edges) {
+    lines.push(
+      "    runtime::IslandEdge { " +
+        `from: "${rustString(edge.from)}", ` +
+        `specifier: "${rustString(edge.specifier)}", ` +
+        `to: "${rustString(edge.to)}", ` +
+        `kind: runtime::IslandEdgeKind::${EDGE_KIND[edge.kind]} },`,
     );
   }
   lines.push("];", "");
