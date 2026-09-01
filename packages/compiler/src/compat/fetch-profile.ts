@@ -19,6 +19,7 @@ import {
   compatEntries,
   compatFixture,
   compatGenerated,
+  compatOnTargets,
   compatTargetLabel,
   type CompatEvidence,
   type CompatInventory,
@@ -29,7 +30,16 @@ import {
   type CompatOperation,
   type CompatOption,
   type CompatProfileProjection,
+  type CompatTargets,
 } from "./profile-schema.js";
+import {
+  NODE24_TARGET_ID,
+  NODE24_UNDICI_VERSION,
+  NODE24_VERSION,
+  NODE26_TARGET_ID,
+  NODE26_UNDICI_VERSION,
+  NODE26_VERSION,
+} from "./node-matrix.js";
 
 export type FetchCompatFacet =
   | "argument-evaluation"
@@ -62,10 +72,7 @@ export type FetchCompatInventory = CompatInventory;
 
 export interface FetchCompatProfile {
   schemaVersion: 1;
-  target: {
-    node: string;
-    undici: string;
-  };
+  targets: CompatTargets;
   requestInit: readonly FetchCompatOption[];
   responseInit: readonly FetchCompatOption[];
   members: {
@@ -95,9 +102,24 @@ const metadataExclusion = COMPAT_METADATA_EXCLUSION;
 
 export const NODE24_FETCH_COMPAT_PROFILE = {
   schemaVersion: 1,
-  target: {
-    node: "24.15.0",
-    undici: "7.24.4",
+  targets: {
+    // Both runtimes were reflected. Unlike URL and EventEmitter, this
+    // slice is NOT identical across the matrix: Node 26 ships a newer
+    // Undici, and its body mixin grew textStream() on Request and
+    // Response. Those two rows carry a `node26` qualifier below; every
+    // other row is shared because the reflection said so.
+    primary: {
+      id: NODE24_TARGET_ID,
+      node: NODE24_VERSION,
+      components: { undici: NODE24_UNDICI_VERSION },
+    },
+    candidates: [
+      {
+        id: NODE26_TARGET_ID,
+        node: NODE26_VERSION,
+        components: { undici: NODE26_UNDICI_VERSION },
+      },
+    ],
   },
   requestInit: [
     {
@@ -592,6 +614,19 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
           typedInterfaceUnsupported,
         )
       ),
+      // Node 26's body mixin only. Reflected, not read off a changelog:
+      // the census probe found textStream on Request.prototype and
+      // Response.prototype under 26.8.1 and not under 24.15.0.
+      ...compatOnTargets(
+        [NODE26_TARGET_ID],
+        unsupportedEntry(
+          "stdlib.request.textStream",
+          "Request",
+          "textStream",
+          "prototype",
+          typedInterfaceUnsupported,
+        ),
+      ),
       outOfScopeEntry(
         "stdlib.request.symbol.toStringTag",
         "Request",
@@ -645,6 +680,19 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         staticEntry(`stdlib.response.${member}`, "Response", member, "prototype")
       ),
       staticEntry("stdlib.response.bytes", "Response", "bytes", "prototype"),
+      // Node 26's body mixin only — the Response half of the same delta.
+      // A decoded-text ReadableStream, so it fences for the same reason
+      // the other stream-shaped Response members do.
+      ...compatOnTargets(
+        [NODE26_TARGET_ID],
+        unsupportedEntry(
+          "stdlib.response.textStream",
+          "Response",
+          "textStream",
+          "prototype",
+          "the dynamic fetch bridge does not implement this Response operation",
+        ),
+      ),
       outOfScopeEntry(
         "stdlib.response.symbol.toStringTag",
         "Response",
@@ -847,18 +895,10 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
   },
 } satisfies FetchCompatProfile;
 
-/** The registry view of this profile. The version axis is derived from the
- * single pinned tuple this profile already carries — Node plus the
- * bundled Undici build — with no candidate runtime censused yet. */
+/** The registry view of this profile. */
 export const FETCH_COMPAT_PROJECTION: CompatProfileProjection = {
   id: "fetch",
-  targets: {
-    primary: {
-      node: NODE24_FETCH_COMPAT_PROFILE.target.node,
-      components: { undici: NODE24_FETCH_COMPAT_PROFILE.target.undici },
-    },
-    candidates: [],
-  },
+  targets: NODE24_FETCH_COMPAT_PROFILE.targets,
   operations: NODE24_FETCH_COMPAT_PROFILE.operations,
   options: [
     ...NODE24_FETCH_COMPAT_PROFILE.requestInit,

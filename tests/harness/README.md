@@ -34,8 +34,9 @@ Each engine-free builtin-class slice has one versioned, data-only profile under
 `profile-schema.ts` — statuses, placements, entry constructors, evidence keys,
 the version axis — and are listed in `registry.ts`, which is what the surface
 manifest iterates: adding a profile is one registry line plus its data module
-and its conformance suite. Notes in the manifest are stamped with the runtime
-the profile was censused under, so two profiles can pin different targets.
+and its conformance suite. Notes in the manifest are stamped with the runtimes
+whose reflected census contains the row, so a row stamped with one major exists
+on that major alone.
 
 Schema pieces worth knowing before adding rows:
 
@@ -49,11 +50,59 @@ Schema pieces worth knowing before adding rows:
 - `inventory.sources` names how to reach an interface that is not a global
   constructor (a module export, or a prototype with no constructor object at
   all, such as an iterator result);
-- `targets` is `{ primary, candidates }`: `primary` is the runtime the census
-  was reflected under, and a candidate runtime is added only with its own
-  reflected census.
+- `targets` is `{ primary, candidates }` — a **matrix**, not a pin (see below);
+  `primary` is the runtime `.node-version` pins and whose label stamps shared
+  manifest rows, and a candidate is added only with its own reflected census.
+- an inventory row may carry `targets: ["node26"]`, the **version qualifier**,
+  naming the target ids whose census contains that member. Omitting it means
+  *every* target, so a shared row cannot be narrowed by forgetting an id.
 
 The shared reflection probes live in `compat-census.ts`.
+
+### The Node matrix gate
+
+scriptc targets **Node 24 and Node 26 as first-class runtimes**. The matrix
+lives in `packages/compiler/src/compat/node-matrix.ts` — one module the
+profiles, the conformance suites, and the gate runner all read, so a runtime
+cannot be in the gate without being in the contract.
+
+```
+pnpm gate:node-matrix          # every declared runtime, in sequence
+pnpm test:conformance:node24   # one runtime by target id
+pnpm test:conformance:node26
+pnpm test:conformance          # the three suites under whatever `node` resolves
+```
+
+**This local gate IS the enforcement.** CI does not run on the fork, so
+`pnpm gate:node-matrix` green under both runtimes is the evidence that the
+dual-target claim holds; run it before committing anything that touches a
+compat profile, the census probes, or the conformance suites. The runner
+resolves each interpreter explicitly (an `SCRIPTC_NODE_NODE24` /
+`SCRIPTC_NODE_NODE26` override, else the running interpreter, else the mise
+install tree, else `mise which`) and asks each candidate its `--version`,
+rejecting a mismatch — a moved symlink must not let the "Node 26 lane" run
+Node 24 and report success.
+
+Two rules keep the lanes meaningful, and they pull in opposite directions:
+
+- **The census follows the HOST.** "What members does `URL` expose?" is a
+  question about the runtime the suite runs on. The suites *select* their
+  target from `process.versions.node` rather than asserting equality with one
+  pin, so they are green under any declared runtime and red only when the host
+  is in **no** declared target — which is the one thing that is genuinely a
+  contract violation.
+- **The semantic oracle stays PINNED to the primary.** A compiled binary
+  reproduces one Node's observable behavior, error-message text included, and
+  cannot reproduce two: Node 26 rewords messages Node 24 emits (AbortSignal.any's
+  `ERR_INVALID_ARG_TYPE` is "signals cannot be converted to sequence." there and
+  "signals can not be converted to sequence." here). So differential checks call
+  `primaryOracleExecutable` from `node-matrix.ts` rather than using
+  `process.execPath`, and `SCRIPTC_NODE_ORACLE` is how you deliberately go
+  looking for divergences instead of tripping over them.
+
+Adding a runtime to the matrix means **running the reflection under it** and
+writing every disagreement down as a version-qualified row. Nothing in the
+matrix may be filled in from a changelog.
 
 ### Fetch compatibility profile
 

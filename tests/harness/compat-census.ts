@@ -9,7 +9,54 @@
  * makes a member writable fails loudly instead of widening an unaudited
  * surface.
  */
-import type { CompatInterfaceSource } from "@scriptc/compiler";
+import {
+  compatRowOnTarget,
+  compatTargetFor,
+  compatTargetList,
+  type CompatInterfaceSource,
+  type CompatInventoryEntry,
+  type CompatRuntimeTarget,
+  type CompatTargets,
+} from "@scriptc/compiler";
+
+/**
+ * The matrix target the RUNNING runtime is, selected by asking the runtime
+ * its version rather than by demanding it be one particular pin.
+ *
+ * This is the structural fix for a whole class of false red: a conformance
+ * suite that asserts `process.versions.node === <the one pinned version>`
+ * fails on every host that is not that exact build, including the other
+ * first-class target. Selecting instead means the suite reflects under
+ * whichever declared runtime it finds itself on, compares against that
+ * target's rows, and reds only when the host is in NO declared target —
+ * which is the one thing that genuinely is a contract violation.
+ *
+ * Returns null for an undeclared host; callers name that in their own
+ * assertion so the failure message says which runtime was unexpected.
+ */
+export function activeCompatTarget(
+  targets: CompatTargets,
+  nodeVersion: string = process.versions.node,
+): CompatRuntimeTarget | null {
+  return compatTargetFor(targets, nodeVersion);
+}
+
+/** The declared targets, as the human-readable list a failure message
+ * needs ("24.15.0, 26.8.1"). */
+export function compatTargetVersions(targets: CompatTargets): string {
+  return compatTargetList(targets).map((target) => target.node).join(", ");
+}
+
+/** The census rows that exist on one target: unqualified rows plus the
+ * rows that name it. A suite compares the reflection against THIS, never
+ * against the whole inventory, or a member that exists on one major only
+ * would look like a mismatch on the other. */
+export function rowsForTarget(
+  entries: readonly CompatInventoryEntry[],
+  target: CompatRuntimeTarget,
+): CompatInventoryEntry[] {
+  return entries.filter((entry) => compatRowOnTarget(entry, target.id));
+}
 
 export interface InterfaceCensus {
   /** Own properties of the interface object, minus length/name/prototype. */

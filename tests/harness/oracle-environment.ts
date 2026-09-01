@@ -3,7 +3,16 @@ import { createHash } from "node:crypto";
 
 const nativeTransformTypes = new Map<string, boolean>();
 
-/** The Node executable used as the differential oracle. */
+/**
+ * The Node executable used as the differential oracle, defaulting to the
+ * host.
+ *
+ * A check whose answer is version-dependent — anything that compares
+ * compiled output against Node's, message text included — should call
+ * `primaryOracleExecutable` in node-matrix.ts instead, which pins the
+ * oracle to the compat matrix's primary. This function's host default is
+ * correct only where the host IS the intended oracle.
+ */
 export function nodeOracleExecutable(
   env: NodeJS.ProcessEnv = process.env,
   hostExecutable: string = process.execPath,

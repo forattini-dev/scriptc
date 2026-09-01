@@ -8,9 +8,10 @@
     "stdlib and node-builtin member entries name surface whose LOWERED call forms are constrained (arity, argument shapes); declared call forms outside the lowered set are refused per site, with code SC2020 for standard-library and node-builtin surface.",
     "Entries with status 'unsupported' or 'dynamic-only' describe where the named code is raised: forms of the construct outside the supported subset are refused with that code — not that every form of the named feature is refused. Supported forms appear as their own static entries where a table projects them.",
     "Entries with status 'dynamic-only' compile when the build embeds the dynamic engine (--dynamic); without the flag each use site is refused with the entry's code.",
-    "The engine-free fetch projection targets Node 24.15.0 with bundled Undici 7.24.4. Each projected row names the differential evidence that guards it; changing the pinned Node or Undici version is an explicit profile update.",
+    "The builtin-class compat profiles are censused against a MATRIX of Node runtimes, not one pin: Node 24.15.0 and Node 26.8.1, each reflected in its own right. A row's note names the runtimes whose reflected census contains it, so a row stamped with only one of them exists on that major alone. Adding a runtime to the matrix means running the reflection under it, never reading a changelog.",
+    "The engine-free fetch projection targets Node 24.15.0 / Undici 7.24.4 and Node 26.8.1 / Undici 8.10.0. Each projected row names the differential evidence that guards it; changing a pinned Node or Undici version is an explicit profile update.",
     "The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static, dynamic-only, and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.",
-    "The WHATWG URL projection targets Node 24.15.0. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS and query operations are projected as static rows with their differential corpus evidence, while component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.",
+    "The WHATWG URL projection targets Node 24.15.0 and Node 26.8.1, whose reflections of these interfaces are identical. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS, query operations, and the one writable component (the pathname setter) are projected as static rows with their differential corpus evidence, while the other nine component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.",
     "Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.",
     "Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.",
     "No scheduling metadata is published; entry ids are the stable diff keys across releases."
@@ -3431,6 +3432,14 @@
       "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
     },
     {
+      "id": "stdlib.request.textStream",
+      "kind": "stdlib",
+      "name": "Request.textStream",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 26.8.1 / Undici 8.10.0; typed source has no compiler bridge for this interface in either tier"
+    },
+    {
       "id": "stdlib.request.url",
       "kind": "stdlib",
       "name": "Request.url",
@@ -3591,6 +3600,14 @@
       "name": "Response.text",
       "status": "static",
       "note": "Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static, fixture:static-stream"
+    },
+    {
+      "id": "stdlib.response.textStream",
+      "kind": "stdlib",
+      "name": "Response.textStream",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "Node 26.8.1 / Undici 8.10.0; the dynamic fetch bridge does not implement this Response operation"
     },
     {
       "id": "stdlib.response.type",
@@ -4199,9 +4216,8 @@
       "id": "stdlib.url.setter.pathname",
       "kind": "stdlib",
       "name": "URL.pathname (setter)",
-      "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "status": "static",
+      "note": "Node 24.15.0; facets: mutation, parsing, serialization; supported scope: assignment of a string to url.pathname, re-running the WHATWG path parse (percent-encoding, '.'/'..' segment resolution) and re-serializing href; compound assignment and destructuring writes are refused, and the component stays read-only on every other URL member; differential evidence: corpus:2854-url-pathname-setter"
     },
     {
       "id": "stdlib.url.setter.port",

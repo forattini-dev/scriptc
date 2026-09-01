@@ -16,8 +16,10 @@
  *    class for island/npm JS, but a compiled URL value never exposes the
  *    extra members through it — so members without a lowering are
  *    `unsupported`, not `dynamic-only`.
- *  - URL components are read-only here. Reads and writes are separate
- *    claims, so each writable component carries its own setter row.
+ *  - Reads and writes are separate claims, so each writable component
+ *    carries its own setter row. Exactly one of them — pathname — has a
+ *    mutation lowering; the other nine are refused. That split is probed
+ *    by compilation, not asserted: one assignment per component, compiled.
  */
 
 import {
@@ -32,6 +34,7 @@ import {
   type CompatProfileProjection,
   type CompatTargets,
 } from "./profile-schema.js";
+import { NODE_COMPAT_MATRIX } from "./node-matrix.js";
 
 export type UrlCompatFacet =
   | "argument-evaluation"
@@ -76,7 +79,8 @@ const iteratorHelpers =
   "the ECMAScript iterator-helper protocol has no static lowering, and the search-params iterator object it would operate on is not a first-class handle either";
 
 /** Every writable URL component under the pinned runtime. Reflected as
- * accessor set functions by the conformance census. */
+ * accessor set functions by the conformance census. `pathname` is the one
+ * with a mutation lowering; the rest carry refusal rows. */
 const URL_SETTERS = [
   "href",
   "protocol",
@@ -151,10 +155,13 @@ const paramsStatic = (member: string): CompatInventoryEntry =>
 export const NODE24_URL_COMPAT_PROFILE = {
   schemaVersion: 1,
   targets: {
-    // The census below was reflected under this runtime. A second entry
-    // arrives only with its own reflected census, never as an assumption.
-    primary: { node: "24.15.0" },
-    candidates: [],
+    // The census below was reflected under BOTH runtimes, and the two
+    // reflections were identical: URL, URLSearchParams, and the
+    // search-params iterator expose the same members, the same setters,
+    // and the same symbols on Node 24 and Node 26. So no row here carries
+    // a version qualifier — the shared census IS the Node 26 census, not
+    // an assumption that it carries over.
+    ...NODE_COMPAT_MATRIX,
   },
   operations: [
     urlOperation(
@@ -251,6 +258,18 @@ export const NODE24_URL_COMPAT_PROFILE = {
       [corpus("1355-url-parse")],
       "the zero-argument call, equal to href; the method value itself is not a first-class handle",
     ),
+    {
+      // The one writable component. Every other setter is still refused,
+      // verified by COMPILING one assignment per component rather than by
+      // reading the lowering (see URL_SETTERS below).
+      id: "stdlib.url.setter.pathname",
+      name: "URL.pathname (setter)",
+      kind: "property",
+      facets: ["mutation", "parsing", "serialization"],
+      scope:
+        "assignment of a string to url.pathname, re-running the WHATWG path parse (percent-encoding, '.'/'..' segment resolution) and re-serializing href; compound assignment and destructuring writes are refused, and the component stays read-only on every other URL member",
+      evidence: [corpus("2854-url-pathname-setter")],
+    },
     {
       id: "stdlib.url.static.canParse",
       name: "URL.canParse",

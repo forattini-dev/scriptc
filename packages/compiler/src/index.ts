@@ -98,9 +98,21 @@ export {
   type UrlCompatProfile,
 } from "./compat/url-profile.js";
 export {
+  NODE_COMPAT_MATRIX,
+  NODE24_TARGET_ID,
+  NODE24_VERSION,
+  NODE26_TARGET_ID,
+  NODE26_VERSION,
+} from "./compat/node-matrix.js";
+export {
   compatEvidenceKey,
+  compatOnTargets,
   compatRowName,
+  compatRowOnTarget,
+  compatRowTargetLabel,
+  compatTargetFor,
   compatTargetLabel,
+  compatTargetList,
   type CompatEvidence,
   type CompatFenceCode,
   type CompatInterfaceSource,

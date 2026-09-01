@@ -39,12 +39,15 @@ import { InternalCompilerError } from "../errors.js";
  * byte-deterministic: entries sort by id, keys are emitted in one fixed
  * order, and the output carries no timestamps or absolute paths. */
 import { FENCE_CODES, UNSUPPORTED } from "../diagnostics/diagnostic.js";
-import { NODE24_FETCH_COMPAT_PROFILE } from "../compat/fetch-profile.js";
+import { FETCH_COMPAT_PROJECTION } from "../compat/fetch-profile.js";
+import { NODE_COMPAT_MATRIX } from "../compat/node-matrix.js";
 import { COMPAT_PROFILES } from "../compat/registry.js";
 import {
   compatEvidenceKey,
   compatRowName,
+  compatRowTargetLabel,
   compatTargetLabel,
+  compatTargetList,
 } from "../compat/profile-schema.js";
 import { NODE24_URL_COMPAT_PROFILE } from "../compat/url-profile.js";
 import { SUPPORTED_BUILTIN_MODULES, SUPPORTED_NODE_MODULES } from "../frontend/shared.js";
@@ -99,9 +102,10 @@ const COVERAGE_NOTES: string[] = [
   "stdlib and node-builtin member entries name surface whose LOWERED call forms are constrained (arity, argument shapes); declared call forms outside the lowered set are refused per site, with code SC2020 for standard-library and node-builtin surface.",
   "Entries with status 'unsupported' or 'dynamic-only' describe where the named code is raised: forms of the construct outside the supported subset are refused with that code — not that every form of the named feature is refused. Supported forms appear as their own static entries where a table projects them.",
   "Entries with status 'dynamic-only' compile when the build embeds the dynamic engine (--dynamic); without the flag each use site is refused with the entry's code.",
-  `The engine-free fetch projection targets Node ${NODE24_FETCH_COMPAT_PROFILE.target.node} with bundled Undici ${NODE24_FETCH_COMPAT_PROFILE.target.undici}. Each projected row names the differential evidence that guards it; changing the pinned Node or Undici version is an explicit profile update.`,
+  `The builtin-class compat profiles are censused against a MATRIX of Node runtimes, not one pin: ${compatTargetList(NODE_COMPAT_MATRIX).map((target) => `Node ${target.node}`).join(" and ")}, each reflected in its own right. A row's note names the runtimes whose reflected census contains it, so a row stamped with only one of them exists on that major alone. Adding a runtime to the matrix means running the reflection under it, never reading a changelog.`,
+  `The engine-free fetch projection targets ${compatTargetList(FETCH_COMPAT_PROJECTION.targets).map(compatTargetLabel).join(" and ")}. Each projected row names the differential evidence that guards it; changing a pinned Node or Undici version is an explicit profile update.`,
   "The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static, dynamic-only, and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.",
-  `The WHATWG URL projection targets Node ${NODE24_URL_COMPAT_PROFILE.targets.primary.node}. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS and query operations are projected as static rows with their differential corpus evidence, while component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.`,
+  `The WHATWG URL projection targets ${compatTargetList(NODE24_URL_COMPAT_PROFILE.targets).map((target) => `Node ${target.node}`).join(" and ")}, whose reflections of these interfaces are identical. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS, query operations, and the one writable component (the pathname setter) are projected as static rows with their differential corpus evidence, while the other nine component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.`,
   "Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.",
   "Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.",
   "No scheduling metadata is published; entry ids are the stable diff keys across releases.",
@@ -384,7 +388,10 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
         name: compatRowName(row),
         status: row.status,
         code: row.code,
-        note: `${target}; ${row.reason}`,
+        // Shared rows stamp the primary; a row the matrix disagrees on
+        // stamps exactly the runtimes whose census contains it, so
+        // "Node 26 only" is readable off the manifest itself.
+        note: `${compatRowTargetLabel(profile.targets, row)}; ${row.reason}`,
       });
     }
   }
