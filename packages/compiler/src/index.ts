@@ -36,7 +36,7 @@ import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, l
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches, resolveBareModule } from "./frontend/resolve.js";
-import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
+import { isRelativeSpecifier, isRuntimeSourceFileName } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
@@ -530,7 +530,7 @@ function detectAutoPackages(
     const reason = npmStaticIneligibleReason(
       pkg,
       typesFile,
-      jsEntry !== null && isJsSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
+      jsEntry !== null && isRuntimeSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
     );
     if (reason === null) chosen.push(pkg);
     else statuses.push({ package: pkg, status: "fallback", detail: mode === "lib" ? reason : `auto: ${reason}` });

@@ -128,6 +128,15 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.stats.statementsFailed).toBe(0);
   }, 120_000);
 
+  test("--npm-static=auto admits an executable TypeScript package surface", () => {
+    const { coverage } = analyze(join(pilotRoot, "ts-source-cli.ts"), { npmStatic: "auto" });
+    expect(coverage.npmStatic).toEqual([
+      { package: "ts-source", status: "static" },
+    ]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.stats.statementsFailed).toBe(0);
+  }, 120_000);
+
   // Auto's runtime-JS probe anchors at the IMPORTING file, not the entry:
   // shouty is installed only in inner/'s node_modules (the pnpm-monorepo
   // shape — vercel's CLI deps live in packages/cli/node_modules while the

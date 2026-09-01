@@ -1,13 +1,13 @@
-/* The --npm-static opt-in: compile a named npm package's shipped JS
+/* The --npm-static opt-in: compile a named npm package's runtime source
  * STATICALLY, as ordinary program modules, instead of island-running it
  * under --dynamic.
  *
  * The doctrine (slice 2 of the npm story): a package that ships readable,
- * unminified JS alongside its .d.ts can compile through the same
- * JS/CommonJS frontend the program's own JS files use — inference (JSDoc
- * included) types the bodies, and every statement the lowering cannot
- * honor becomes the standard JS runtime fence (the trap throws AT the
- * statement if the program ever drives it — trust-but-verify, never
+ * unminified JS alongside its .d.ts, or executable TypeScript as both its
+ * runtime and type surface, can compile through the same frontend the
+ * program's own sources use. Inference types the bodies, and every
+ * statement the lowering cannot honor becomes the standard runtime fence
+ * (the trap throws AT the statement if the program ever drives it — never
  * silent trust). The .d.ts is deliberately DROPPED from the opted-in
  * package's resolution: a declaration is a CLAIM about the body, and the
  * compiled artifact must be built from what the body provably is, not
@@ -56,7 +56,7 @@
 
 import { dirname } from "node:path";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
-import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./shared.js";
+import { isTsSourceFileName, npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./shared.js";
 import { trackedExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 let activePackages: ReadonlySet<string> = new Set();
@@ -441,8 +441,8 @@ function hasTransformMarkers(source: string): boolean {
 
 /** Auto-mode eligibility for one candidate package: `typesFile` is what
  * the ordinary (types-first) resolution answered for the import,
- * `jsEntry` what the js-only resolution answers. Returns null when
- * eligible, else the human-readable reason it is not. */
+ * `jsEntry` is the runtime-source resolution (JS or executable TS).
+ * Returns null when eligible, else the human-readable reason it is not. */
 export function npmStaticIneligibleReason(
   pkgName: string,
   typesFile: string,
@@ -451,7 +451,7 @@ export function npmStaticIneligibleReason(
   if (npmPackageNameOf(typesFile) !== pkgName) {
     return "its declared types come from a third-party @types package, not the package itself";
   }
-  if (!/\.d\.(ts|mts|cts)$/.test(typesFile)) {
+  if (!/\.d\.(ts|mts|cts)$/.test(typesFile) && !isTsSourceFileName(typesFile)) {
     return "it ships no own .d.ts declaration surface";
   }
   if (jsEntry === null) return "no runtime JS entry resolves";
