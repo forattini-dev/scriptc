@@ -667,6 +667,25 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
       // story yet).
       L.badType(call, L.typeOf(call));
     }
+    // `unknown[]` maps to one checked-dynamic array value rather than a
+    // static ScrArr with dyn elements (that ABI deliberately does not
+    // exist). For the common one-argument callback, box the typed source
+    // array and callback at the dyn boundary and let the native dyn Array
+    // implementation build the fresh result. The function adapter checks
+    // each dyn item back into the callback's typed parameter and preserves
+    // its dyn return, so this is the same checked boundary as an ordinary
+    // unknown value—not an island fallback.
+    if (method === "map" && fnRet.kind === "dyn" && arity === 1) {
+      return {
+        kind: "dynInvoke",
+        recv: { kind: "dynFrom", value: receiver, type: DYN, loc },
+        method: "map",
+        calleeName: access.getText(),
+        args: [{ kind: "dynFrom", value: fnArg, type: DYN, loc }],
+        type: DYN,
+        loc,
+      };
+    }
     if (method === "map") fenceProducedArrayElem(L, call, "'.map()'", fnRet);
     // JS applies ToBoolean to whatever the predicate answers, so a non-bool
     // result is not an error — the filter loop wraps the call in the same
