@@ -657,6 +657,17 @@ ScrStr *scr_url_protocol(ScrUrl *u) {
 
 ScrStr *scr_url_pathname(ScrUrl *u) { return scr_str_retain(u->path); }
 
+void scr_url_set_pathname(ScrUrl *u, ScrStr *pathname) {
+  bool special = is_special_scheme(u->scheme->data, u->scheme->len);
+  ScrStr *path = parse_rooted_path(pathname->data, pathname->len, special);
+  if (special && path->len == 0) {
+    scr_str_release(path);
+    path = scr_str_new("/", 1);
+  }
+  scr_str_release(u->path);
+  u->path = path;
+}
+
 /* WHATWG host getter: host[:port] — the port only when non-default (the
  * parser already stripped defaults), "" for authority-less URLs. The
  * normalized form findRoute-style authority compares want (lowercased

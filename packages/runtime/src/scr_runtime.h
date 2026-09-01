@@ -2777,6 +2777,7 @@ ScrStr *scr_url_password(ScrUrl *u); /* +1 "" when absent */
  * throws — the one URL entry point that answers instead of trapping. */
 bool scr_url_can_parse(ScrStr *input);
 ScrStr *scr_url_pathname(ScrUrl *u); /* +1 */
+void scr_url_set_pathname(ScrUrl *u, ScrStr *pathname);
 ScrStr *scr_url_href(ScrUrl *u);     /* +1; also toString() */
 ScrStr *scr_url_to_path(ScrUrl *u);      /* +1, or throws */
 ScrStr *scr_url_str_to_path(ScrStr *s);  /* +1, or throws */

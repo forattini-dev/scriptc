@@ -4599,6 +4599,16 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
             const viaStream = lowerStreamUnderscoreAssign(L, expr);
             if (viaStream) return viaStream;
           }
+          // WHATWG URL component setter used by generated/bundled entry
+          // points to retarget a sibling asset. URL is an opaque runtime
+          // value rather than a class field target, so the mutation is a
+          // dedicated borrowed-receiver libCall.
+          if (expr.left.name.text === "pathname" && L.mapTypeOf(L.typeOf(expr.left.expression))?.kind === "url") {
+            const loc = locOf(expr);
+            const receiver = L.lowerExpr(expr.left.expression);
+            const value = L.lowerExprExpecting(expr.right, STRING);
+            return { kind: "exprStmt", expr: { kind: "libCall", fn: "url.setPathname", args: [receiver, value], type: VOID, loc }, loc };
+          }
           const target = L.fieldTarget(expr.left);
           if (target) {
             const value = L.lowerExprExpecting(expr.right, target.fieldType);

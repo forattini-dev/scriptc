@@ -663,6 +663,9 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "url.new" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::url_new(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "url.setPathname" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+    return `runtime::url_set_pathname(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   // The WHATWG component getters, plus URL.canParse — one borrowed argument
   // (a URL value for the getters, the input STRING for canParse) and a
   // runtime name that is just the member in snake_case, so the set alone

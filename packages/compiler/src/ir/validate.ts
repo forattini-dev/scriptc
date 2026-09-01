@@ -270,6 +270,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "url.host": { argTypes: [URL_T], result: STRING },
   "url.hostname": { argTypes: [URL_T], result: STRING },
   "url.pathname": { argTypes: [URL_T], result: STRING },
+  "url.setPathname": { argTypes: [URL_T, STRING], result: VOID },
   "url.href": { argTypes: [URL_T], result: STRING },
   "url.port": { argTypes: [URL_T], result: STRING },
   "url.origin": { argTypes: [URL_T], result: STRING },

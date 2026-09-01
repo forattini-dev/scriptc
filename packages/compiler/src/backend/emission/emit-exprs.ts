@@ -3682,6 +3682,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_url_hostname(${arg(0)})`);
           case "url.pathname":
             return finish(`scr_url_pathname(${arg(0)})`);
+          case "url.setPathname":
+            return finish(`scr_url_set_pathname(${arg(0)}, ${arg(1)})`);
           case "url.href":
             return finish(`scr_url_href(${arg(0)})`);
           case "url.port":

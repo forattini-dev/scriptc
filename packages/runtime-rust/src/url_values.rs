@@ -2,7 +2,7 @@ use crate::{
     JsArray, JsString, array_get, array_len, array_new, empty_string, path_resolve, string,
     throw_type_error, throw_type_error_code,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /// Shared, identity-bearing WHATWG URL value.
@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 /// URL while ordinary URL getters remain pure reads.
 pub struct UrlData {
     value: RefCell<url::Url>,
-    extra_file_slashes: usize,
+    extra_file_slashes: Cell<usize>,
     search_params: RefCell<Option<Weak<SearchParamsData>>>,
 }
 
@@ -20,7 +20,7 @@ pub type JsUrl = Rc<UrlData>;
 fn url_from_parsed(value: url::Url, extra_file_slashes: usize) -> JsUrl {
     Rc::new(UrlData {
         value: RefCell::new(value),
-        extra_file_slashes,
+        extra_file_slashes: Cell::new(extra_file_slashes),
         search_params: RefCell::new(None),
     })
 }
@@ -120,19 +120,19 @@ pub fn url_can_parse(input: &JsString) -> bool {
 
 pub fn url_pathname(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
-    if value.extra_file_slashes == 0 {
+    if value.extra_file_slashes.get() == 0 {
         return string(parsed.path());
     }
     string(&format!(
         "{}{}",
-        "/".repeat(value.extra_file_slashes),
+        "/".repeat(value.extra_file_slashes.get()),
         parsed.path()
     ))
 }
 
 pub fn url_href(value: &JsUrl) -> JsString {
     let parsed = value.value.borrow();
-    if value.extra_file_slashes == 0 {
+    if value.extra_file_slashes.get() == 0 {
         return string(parsed.as_str());
     }
     let href = parsed.as_str();
@@ -140,9 +140,14 @@ pub fn url_href(value: &JsUrl) -> JsString {
     string(&format!(
         "{}{}{}",
         &href[..7],
-        "/".repeat(value.extra_file_slashes),
+        "/".repeat(value.extra_file_slashes.get()),
         &href[7..]
     ))
+}
+
+pub fn url_set_pathname(value: &JsUrl, pathname: &JsString) {
+    value.value.borrow_mut().set_path(pathname);
+    value.extra_file_slashes.set(0);
 }
 
 fn percent_hex(byte: u8) -> Option<u8> {

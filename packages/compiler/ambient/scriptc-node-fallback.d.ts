@@ -1326,7 +1326,7 @@ declare module "node:os" {
  * documented in SEMANTICS.md. */
 interface URL {
   readonly protocol: string;
-  readonly pathname: string;
+  pathname: string;
   readonly href: string;
   readonly host: string;
   readonly hostname: string;

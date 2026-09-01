@@ -2230,6 +2230,7 @@ export type IrLibFn =
   | "url.host"
   | "url.hostname"
   | "url.pathname"
+  | "url.setPathname"
   | "url.href"
   /** The remaining WHATWG component getters, all pure reads of fields the
    * parser already normalized: url.port answers "" when the port is absent

@@ -407,10 +407,11 @@ export const NODE24_URL_COMPAT_PROFILE = {
       staticEntry("stdlib.url.host", "URL", "host", "prototype"),
       staticEntry("stdlib.url.hostname", "URL", "hostname", "prototype"),
       staticEntry("stdlib.url.pathname", "URL", "pathname", "prototype"),
+      staticEntry("stdlib.url.setter.pathname", "URL", "pathname", "prototype-setter"),
       staticEntry("stdlib.url.search", "URL", "search", "prototype"),
       staticEntry("stdlib.url.searchParams", "URL", "searchParams", "prototype"),
       unsupportedEntry("stdlib.url.toJSON", "URL", "toJSON", "prototype", islandOnly),
-      ...URL_SETTERS.map((member) =>
+      ...URL_SETTERS.filter((member) => member !== "pathname").map((member) =>
         unsupportedShapeEntry(
           `stdlib.url.setter.${member}`,
           "URL",
