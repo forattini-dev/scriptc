@@ -185,10 +185,12 @@ function emitOperation(
     const keyExpr = argOf(expr, 1, context);
     if (context.hasEmbeddedModules()) {
       const dyn = context.dynTypeName();
+      const islandKey = context.nextName("sc_island_property_key");
       return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; ` +
-        `let ${key} = ${emitExpr(keyExpr)}; match (&${receiver}, &${key}) { ` +
-        `(${dyn}::Island(sc_receiver), ${dyn}::Island(sc_key)) => ` +
-        `${dyn}::Island(runtime::island_get_index(sc_receiver, sc_key)), ` +
+        `let ${key} = ${emitExpr(keyExpr)}; match &${receiver} { ` +
+        `${dyn}::Island(sc_receiver) => { ` +
+        `let ${islandKey} = ${emitIslandValue(`&${key}`, context)}; ` +
+        `${dyn}::Island(runtime::island_get_index(sc_receiver, &${islandKey})) }, ` +
         `_ => sc_dyn_key_get(&${receiver}, &sc_dyn_to_string(&${key}), false), } }`;
     }
     if (keyExpr.kind !== "jsMarshal" || !["f64", "string", "bool"].includes(keyExpr.value.type.kind)) {

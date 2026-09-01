@@ -662,7 +662,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             L.lowerScopedBlock(stmt.elseStatement!),
           )
         : null;
-      const narrowedAfter = falsyExitRuntimeOptionalLocal(L, stmt);
+      const narrowedAfter = guardedExitRuntimeOptionalLocal(L, stmt);
       if (narrowedAfter !== null) L.runtimeOptionalLocals.delete(L.runtimeOptionalRootOf(narrowedAfter));
       return { kind: "if", cond, then, else_, loc: locOf(stmt) };
     }
@@ -3547,27 +3547,54 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (!next || !ts.isIfStatement(next)) return false;
     let condition = next.expression;
     while (ts.isParenthesizedExpression(condition)) condition = condition.expression;
-    if (!ts.isPrefixUnaryExpression(condition) || condition.operator !== ts.SyntaxKind.ExclamationToken) return false;
-    let operand = condition.operand;
-    while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
-    return ts.isIdentifier(operand) && L.resolveValueSymbol(operand) === L.resolveValueSymbol(decl.name);
+    if (ts.isPrefixUnaryExpression(condition) && condition.operator === ts.SyntaxKind.ExclamationToken) {
+      let operand = condition.operand;
+      while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
+      return ts.isIdentifier(operand) && L.resolveValueSymbol(operand) === L.resolveValueSymbol(decl.name);
+    }
+    const guarded = strictUndefinedEqualityIdentifier(L, condition);
+    return guarded !== null && L.resolveValueSymbol(guarded) === L.resolveValueSymbol(decl.name);
   }
 
-  function falsyExitRuntimeOptionalLocal(L: Lowerer, stmt: ts.IfStatement): IrLocal | null {
+  function guardedExitRuntimeOptionalLocal(L: Lowerer, stmt: ts.IfStatement): IrLocal | null {
     if (stmt.elseStatement) return null;
     let condition = stmt.expression;
     while (ts.isParenthesizedExpression(condition)) condition = condition.expression;
-    if (!ts.isPrefixUnaryExpression(condition) || condition.operator !== ts.SyntaxKind.ExclamationToken) return null;
-    let operand = condition.operand;
-    while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
-    if (!ts.isIdentifier(operand)) return null;
-    const local = L.resolveLocal(operand);
+    let guarded: ts.Identifier | null = null;
+    if (ts.isPrefixUnaryExpression(condition) && condition.operator === ts.SyntaxKind.ExclamationToken) {
+      let operand = condition.operand;
+      while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
+      if (ts.isIdentifier(operand)) guarded = operand;
+    } else {
+      guarded = strictUndefinedEqualityIdentifier(L, condition);
+    }
+    if (guarded === null) return null;
+    const local = L.resolveLocal(guarded);
     if (!local || !L.runtimeOptionalLocals.has(L.runtimeOptionalRootOf(local))) return null;
-    const exits = ts.isReturnStatement(stmt.thenStatement) || ts.isThrowStatement(stmt.thenStatement) ||
+    const exitsImmediately = (statement: ts.Statement): boolean =>
+      ts.isReturnStatement(statement) || ts.isThrowStatement(statement) ||
+      ts.isContinueStatement(statement) || ts.isBreakStatement(statement);
+    const exits = exitsImmediately(stmt.thenStatement) ||
       (ts.isBlock(stmt.thenStatement) && stmt.thenStatement.statements.length > 0 &&
-        (ts.isReturnStatement(stmt.thenStatement.statements[stmt.thenStatement.statements.length - 1]!) ||
-          ts.isThrowStatement(stmt.thenStatement.statements[stmt.thenStatement.statements.length - 1]!)));
+        exitsImmediately(stmt.thenStatement.statements[stmt.thenStatement.statements.length - 1]!));
     return exits ? local : null;
+  }
+
+  function strictUndefinedEqualityIdentifier(L: Lowerer, node: ts.Expression): ts.Identifier | null {
+    let expr = node;
+    while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    if (
+      !ts.isBinaryExpression(expr) ||
+      expr.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken
+    ) {
+      return null;
+    }
+    const isUndefined = (value: ts.Expression): boolean =>
+      ts.isIdentifier(value) && value.text === "undefined" &&
+      (L.typeOf(value).flags & ts.TypeFlags.Undefined) !== 0;
+    if (ts.isIdentifier(expr.left) && isUndefined(expr.right)) return expr.left;
+    if (ts.isIdentifier(expr.right) && isUndefined(expr.left)) return expr.right;
+    return null;
   }
 
 /** JS-exact switch (see docs/ir.md): one shared lexical scope for all case

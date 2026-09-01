@@ -7104,21 +7104,28 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
    * handle. The key marshals in (any JS key kind — the engine does its
    * own ToPropertyKey) and the result stays island, EXCEPT when the
    * checker declares the element a primitive (`parts()[0]` on a declared
-   * `string[]`): those exit eagerly to the static type, exactly the
+   * `string[]`) or an enclosing absence guard explicitly needs the hidden
+   * undefined arm: those exit eagerly to the static type, exactly the
    * island property-read rule (trust-but-verify — a lying declaration
    * throws the catchable TypeError; tsc puts the `| undefined` of a
    * short-circuiting chain on the OUTERMOST expression, so chain tails
    * never map primitive here). Chain-handled reads (`v?.[0]`) stay jsval
    * — the chain's unit path is the engine's undefined. */
-  function islandElementRead(L: Lowerer, expr: ts.ElementAccessExpression, obj: IrExpr): IrExpr {
+  function islandElementRead(
+    L: Lowerer,
+    expr: ts.ElementAccessExpression,
+    obj: IrExpr,
+    includeUndefined = false,
+  ): IrExpr {
     const loc = locOf(expr);
     const key = L.jsvalIn(L.lowerExpr(expr.argumentExpression), expr.argumentExpression);
     const read: IrExpr = { kind: "jsOp", op: "getIdx", args: [obj, key], type: JSVAL, loc };
     if (!expr.questionDotToken) {
-      const declared = L.mapTypeOf(L.typeOf(expr));
+      let declared = L.mapTypeOf(L.typeOf(expr));
+      if (includeUndefined && declared) declared = L.withUndefinedArmOf(declared);
       if (
         declared &&
-        (declared.kind === "f64" || declared.kind === "bool" || declared.kind === "string" ||
+        (includeUndefined || declared.kind === "f64" || declared.kind === "bool" || declared.kind === "string" ||
           (declared.kind === "bytes" && declared.elem === "u8"))
       ) {
         return { kind: "jsExit", value: read, type: declared, loc };
@@ -7162,6 +7169,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // The receiver lowers FIRST (both branches below read it, and JS
     // evaluates the receiver before the key).
     const obj = L.lowerExpr(expr.expression);
+    if (obj.type.kind === "jsval") {
+      return islandElementRead(L, expr, obj, includeUndefined);
+    }
     // A record-mapped CHECKER type over a VALUE living in the checked-dynamic tree (a JS
     // file-scope object-literal global): the checked-dynamic keyed read —
     // dynKeyGet against the runtime keys (a missing key answers the checked-dynamic tree

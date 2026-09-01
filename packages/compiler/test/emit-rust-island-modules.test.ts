@@ -211,4 +211,14 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("true\n");
   });
+
+  test("an immediately guarded package index can observe an absent key", async () => {
+    const fixture = join(fixtures, "unchecked-index-absence.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("unchecked-index-absence.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("alpha:one\nbeta:true\n");
+  });
 });
