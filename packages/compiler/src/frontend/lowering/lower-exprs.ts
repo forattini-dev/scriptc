@@ -7715,6 +7715,24 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       if (stringable) {
         return { kind: "toString", operand: e, type: STRING, loc: e.loc };
       }
+      // JSON-like aggregate arms already have a JS-exact ToString walker
+      // in the checked-dynamic runtime: arrays recurse through join(",")
+      // and plain objects print "[object Object]". Marshal the whole union
+      // once and dispatch there instead of requiring every backend's
+      // monomorphic union walker to grow an aggregate ABI. Function/class
+      // arms stay fenced; records with a callable own `toString` are not
+      // dyn-convertible, so this cannot erase user-defined behaviour.
+      const aggregateStringable =
+        def?.arms.every(
+          (a) =>
+            a.kind === "undefinedT" || a.kind === "nullT" ||
+            a.kind === "string" || a.kind === "f64" || a.kind === "bool" ||
+            a.kind === "array" || a.kind === "record",
+        ) === true && L.dynConvertible(e.type);
+      if (aggregateStringable) {
+        const value: IrExpr = { kind: "dynFrom", value: e, type: DYN, loc: e.loc };
+        return { kind: "toString", operand: value, type: STRING, loc: e.loc };
+      }
       L.unsupported(
         "SC1090",
         node,
