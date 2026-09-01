@@ -5157,6 +5157,11 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if ((entry.method === "padStart" || entry.method === "padEnd") && args.length === 1) {
       args.push({ kind: "strLit", value: " ", type: STRING, loc: locOf(call) });
     }
+    // JavaScript permits the search argument to be omitted and coerces
+    // that missing value exactly like `undefined`.
+    if ((entry.method === "startsWith" || entry.method === "endsWith") && args.length === 0) {
+      args.push({ kind: "strLit", value: "undefined", type: STRING, loc: locOf(call) });
+    }
     return {
       kind: "strIntrinsic",
       method: entry.method,
