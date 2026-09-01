@@ -2370,7 +2370,8 @@ export type IrLibFn =
    * cmd/args borrowed; result an owned (+1) child handle. The loop will
    * not exhaust while any spawned child is unreaped — Node's keep-alive.
    *
-   * child.onExit / child.onError — `child.on("exit"|"error", cb)`: the
+   * child.onExit / child.onClose / child.onError — terminal child
+   * listeners. `close` is a distinct event and always follows `exit`.
    * receiver is borrowed, the CALLBACK MOVES into the child's listener
    * registry (released after the terminal event fires, or at reap for
    * the event that never fires). Both are void (chaining is fenced).
@@ -2384,6 +2385,7 @@ export type IrLibFn =
    * for spawn failure, exactly Node's split. */
   | "cp.spawn"
   | "child.onExit"
+  | "child.onClose"
   | "child.onError"
   /** The ChildProcess lifecycle members (scr_child.c), Node's shapes
    * exactly (SEMANTICS.md has the pinned matrix). child.pid is the

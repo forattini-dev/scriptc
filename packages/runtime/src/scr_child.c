@@ -1124,6 +1124,8 @@ struct ScrChild {
   ScrStr *err_msg;         /* spawn failure only: "spawn <cmd> <ERRNAME>" */
   ScrChildExitEntry *exit_cbs;
   size_t n_exit, cap_exit;
+  ScrChildExitEntry *close_cbs;
+  size_t n_close, cap_close;
   ScrChildErrEntry *err_cbs;
   size_t n_err, cap_err;
   ScrChildStream *out_stream;
@@ -1141,12 +1143,16 @@ static size_t scr_children_unwatched = 0;
 
 static void scr_child_drop_listeners(ScrChild *c) {
   for (size_t i = 0; i < c->n_exit; i++) scr_closure_release(c->exit_cbs[i].cb);
+  for (size_t i = 0; i < c->n_close; i++) scr_closure_release(c->close_cbs[i].cb);
   for (size_t i = 0; i < c->n_err; i++) scr_closure_release(c->err_cbs[i].cb);
   free(c->exit_cbs);
+  free(c->close_cbs);
   free(c->err_cbs);
   c->exit_cbs = NULL;
+  c->close_cbs = NULL;
   c->err_cbs = NULL;
-  c->n_exit = c->n_err = c->cap_exit = c->cap_err = 0;
+  c->n_exit = c->n_close = c->n_err = 0;
+  c->cap_exit = c->cap_close = c->cap_err = 0;
 }
 
 ScrChild *scr_child_retain(ScrChild *c) {
@@ -1573,6 +1579,21 @@ void scr_child_on_exit(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn)
   c->n_exit++;
 }
 
+void scr_child_on_close(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn) {
+  if (c->settled) {
+    scr_closure_release(cb);
+    return;
+  }
+  if (c->n_close == c->cap_close) {
+    c->cap_close = c->cap_close ? c->cap_close * 2 : 2;
+    c->close_cbs = realloc(c->close_cbs, c->cap_close * sizeof(*c->close_cbs));
+    if (!c->close_cbs) scr_child_oom();
+  }
+  c->close_cbs[c->n_close].cb = cb;
+  c->close_cbs[c->n_close].fn = fn;
+  c->n_close++;
+}
+
 void scr_child_on_error(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn) {
   if (c->settled) {
     scr_closure_release(cb);
@@ -1709,6 +1730,15 @@ static void scr_child_settle(ScrChild *c) {
   } else {
     for (size_t i = 0; i < c->n_exit; i++) {
       c->exit_cbs[i].fn(c->exit_cbs[i].cb, c->has_code, c->code, c->exit_signal);
+      if (scr_exc_pending()) break;
+    }
+  }
+  if (!scr_exc_pending()) {
+    bool close_has_code = c->state == SCR_CHILD_SPAWN_FAILED ? true : c->has_code;
+    double close_code = c->state == SCR_CHILD_SPAWN_FAILED ? (double)c->spawn_uv_errno : c->code;
+    const char *close_signal = c->state == SCR_CHILD_SPAWN_FAILED ? NULL : c->exit_signal;
+    for (size_t i = 0; i < c->n_close; i++) {
+      c->close_cbs[i].fn(c->close_cbs[i].cb, close_has_code, close_code, close_signal);
       if (scr_exc_pending()) break;
     }
   }
@@ -2662,6 +2692,8 @@ struct ScrChild {
   ScrStr *err_msg; /* spawn failure only: "spawn <cmd> <ERRNAME>" */
   ScrChildExitEntry *exit_cbs;
   size_t n_exit, cap_exit;
+  ScrChildExitEntry *close_cbs;
+  size_t n_close, cap_close;
   ScrChildErrEntry *err_cbs;
   size_t n_err, cap_err;
   /* Piped stdio (stdio mode 3): the stream handles child.stdout /
@@ -2816,12 +2848,16 @@ bool scr_children_wait(double max_wait_ms) {
 
 static void scr_child_drop_listeners(ScrChild *c) {
   for (size_t i = 0; i < c->n_exit; i++) scr_closure_release(c->exit_cbs[i].cb);
+  for (size_t i = 0; i < c->n_close; i++) scr_closure_release(c->close_cbs[i].cb);
   for (size_t i = 0; i < c->n_err; i++) scr_closure_release(c->err_cbs[i].cb);
   free(c->exit_cbs);
+  free(c->close_cbs);
   free(c->err_cbs);
   c->exit_cbs = NULL;
+  c->close_cbs = NULL;
   c->err_cbs = NULL;
-  c->n_exit = c->n_err = c->cap_exit = c->cap_err = 0;
+  c->n_exit = c->n_close = c->n_err = 0;
+  c->cap_exit = c->cap_close = c->cap_err = 0;
 }
 
 ScrChild *scr_child_retain(ScrChild *c) {
@@ -3423,6 +3459,21 @@ void scr_child_on_exit(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn)
   c->n_exit++;
 }
 
+void scr_child_on_close(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn) {
+  if (c->settled) {
+    scr_closure_release(cb);
+    return;
+  }
+  if (c->n_close == c->cap_close) {
+    c->cap_close = c->cap_close ? c->cap_close * 2 : 2;
+    c->close_cbs = realloc(c->close_cbs, c->cap_close * sizeof(*c->close_cbs));
+    if (!c->close_cbs) scr_child_oom();
+  }
+  c->close_cbs[c->n_close].cb = cb;
+  c->close_cbs[c->n_close].fn = fn;
+  c->n_close++;
+}
+
 void scr_child_on_error(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn) {
   if (c->settled) {
     scr_closure_release(cb);
@@ -3576,6 +3627,15 @@ static void scr_child_settle(ScrChild *c) {
   } else {
     for (size_t i = 0; i < c->n_exit; i++) {
       c->exit_cbs[i].fn(c->exit_cbs[i].cb, c->has_code, c->code, c->exit_signal);
+      if (scr_exc_pending()) break;
+    }
+  }
+  if (!scr_exc_pending()) {
+    bool close_has_code = c->state == SCR_CHILD_SPAWN_FAILED ? true : c->has_code;
+    double close_code = c->state == SCR_CHILD_SPAWN_FAILED ? -(double)c->spawn_errno : c->code;
+    const char *close_signal = c->state == SCR_CHILD_SPAWN_FAILED ? NULL : c->exit_signal;
+    for (size_t i = 0; i < c->n_close; i++) {
+      c->close_cbs[i].fn(c->close_cbs[i].cb, close_has_code, close_code, close_signal);
       if (scr_exc_pending()) break;
     }
   }

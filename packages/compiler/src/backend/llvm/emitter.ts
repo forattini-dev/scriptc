@@ -12550,13 +12550,13 @@ class LlEmitter {
       B.line(`${t} = call ptr @${sym}(${args.map((a) => `${this.llType(a.type)} ${a.name}`).join(", ")})`);
       return this.own({ name: t, type: e.type });
     }
-    if (e.fn === "child.onExit") {
+    if (e.fn === "child.onExit" || e.fn === "child.onClose") {
       // The callback MOVES into the child's registry; the third
       // ingredient is the ADAPTER — emitted per callback shape, because
       // the `number | null` union's tags are program data (a zero-param
       // listener gets the runtime's ignoring thunk).
       const cbT = e.args[1]!.type;
-      if (cbT.kind !== "func") throw new InternalCompilerError("llvm emitter bug: child.onExit callback not a func");
+      if (cbT.kind !== "func") throw new InternalCompilerError(`llvm emitter bug: ${e.fn} callback not a func`);
       const child = this.emitExpr(e.args[0]!);
       const cb = this.emitExpr(e.args[1]!);
       this.moveTemp(cb);
@@ -12569,8 +12569,9 @@ class LlEmitter {
       } else {
         adapter = this.childExitThunkFor2(cbT.params[0]!, cbT.params[1]!);
       }
-      this.declare(`declare void @scr_child_on_exit(ptr, ptr, ptr)`);
-      B.line(`call void @scr_child_on_exit(ptr ${child.name}, ptr ${cb.name}, ptr @${adapter})`);
+      const register = e.fn === "child.onClose" ? "scr_child_on_close" : "scr_child_on_exit";
+      this.declare(`declare void @${register}(ptr, ptr, ptr)`);
+      B.line(`call void @${register}(ptr ${child.name}, ptr ${cb.name}, ptr @${adapter})`);
       return { name: "", type: e.type };
     }
     if (e.fn === "child.onError") {

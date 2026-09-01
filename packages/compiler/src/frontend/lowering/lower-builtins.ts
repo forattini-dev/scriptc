@@ -5030,11 +5030,10 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return null;
   }
 
-/** Method calls on ChildProcess receivers: `child.on/once("exit"|"error", cb)`
+/** Method calls on ChildProcess receivers: `child.on/once("exit"|"close"|"error", cb)`
    * registers a listener with the event loop's child registry. The event
-   * name must be one of the two terminal-event LITERALS; the callback
-   * takes at most one parameter — `(code: number | null)` for exit (the
-   * signal parameter has no lowering), `(err: Error)` for error — or none.
+   * name must be one of the three terminal-event LITERALS. Status
+   * callbacks take `(code, signal)`; error takes `(err: Error)`.
    * Both methods are statement-only (Node returns the child for chaining; here the
    * result is void and chaining is fenced). kill(signal?) and unref()
    * lower too (the property reads — pid/exitCode/killed — live in
@@ -5051,11 +5050,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if ((name === "on" || name === "once") && call.arguments.length === 2) {
       const evT = L.typeOf(call.arguments[0]!);
       const event = evT.isStringLiteralType() ? evT.value : null;
-      if (event !== "exit" && event !== "error") {
+      if (event !== "exit" && event !== "close" && event !== "error") {
         L.noLowering(
           `child.${name}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
-          '"exit" and "error" are the supported child events (as literals)',
+          '"exit", "close", and "error" are the supported child events (as literals)',
         );
       }
       if (!ts.isExpressionStatement(call.parent)) {
@@ -5067,12 +5066,13 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       const receiver = L.lowerExpr(access.expression);
       const cb = L.lowerExpr(call.arguments[1]!);
-      if (cb.type.kind !== "func" || cb.type.params.length > (event === "exit" ? 2 : 1)) {
+      const hasStatus = event === "exit" || event === "close";
+      if (cb.type.kind !== "func" || cb.type.params.length > (hasStatus ? 2 : 1)) {
         L.unsupported(
           "SC1090",
           call.arguments[1]!,
-          event === "exit"
-            ? "exit listeners with more than two parameters (use (code, signal), (code), or ())"
+          hasStatus
+            ? `${event} listeners with more than two parameters (use (code, signal), (code), or ())`
             : "error listeners with more than one parameter (use (err) or ())",
         );
       }
@@ -5087,7 +5087,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         );
       }
       const param = cb.type.params[0];
-      if (event === "exit") {
+      if (hasStatus) {
         const armsOk =
           param === undefined ||
           (param.kind === "union" &&
@@ -5103,7 +5103,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           L.unsupported(
             "SC1090",
             call.arguments[1]!,
-            `exit listeners whose parameter is not 'number | null' (got '${L.fmt(param!)}')`,
+            `${event} listeners whose parameter is not 'number | null' (got '${L.fmt(param!)}')`,
           );
         }
         // The optional SECOND parameter is Node's signal: the terminating
@@ -5125,10 +5125,16 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           L.unsupported(
             "SC1090",
             call.arguments[1]!,
-            `exit listeners whose signal parameter is not 'Signals | null' (got '${L.fmt(sigParam!)}')`,
+            `${event} listeners whose signal parameter is not 'Signals | null' (got '${L.fmt(sigParam!)}')`,
           );
         }
-        return { kind: "libCall", fn: "child.onExit", args: [receiver, cb], type: VOID, loc };
+        return {
+          kind: "libCall",
+          fn: event === "close" ? "child.onClose" : "child.onExit",
+          args: [receiver, cb],
+          type: VOID,
+          loc,
+        };
       }
       if (param !== undefined && !(param.kind === "object" && param.className === "%Error")) {
         L.unsupported(
@@ -5178,7 +5184,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     L.noLowering(
       `ChildProcess.${name}`,
       call,
-      "on/once(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
+      "on/once(\"exit\" | \"close\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
       L.checker.getSymbolAtLocation(access.name),
     );
   }

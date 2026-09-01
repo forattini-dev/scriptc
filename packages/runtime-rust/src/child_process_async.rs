@@ -22,12 +22,16 @@ pub struct ChildData {
     stdout: Option<JsChildStream>,
     stderr: Option<JsChildStream>,
     exit_listeners: Vec<ChildExitListener>,
+    close_listeners: Vec<ChildExitListener>,
     error_listeners: Vec<ChildErrorListener>,
 }
 
 impl Trace for ChildData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         for listener in &self.exit_listeners {
+            (listener.trace)(tracer);
+        }
+        for listener in &self.close_listeners {
             (listener.trace)(tracer);
         }
         for listener in &self.error_listeners {
@@ -45,6 +49,7 @@ impl Trace for ChildData {
 impl ClearEdges for ChildData {
     fn clear_edges(&mut self) {
         self.exit_listeners.clear();
+        self.close_listeners.clear();
         self.error_listeners.clear();
         self.spawn_error = None;
         self.spawn_errno = None;
@@ -215,6 +220,7 @@ fn child_register(
         stdout,
         stderr,
         exit_listeners: Vec::new(),
+        close_listeners: Vec::new(),
         error_listeners: Vec::new(),
     });
     ASYNC_CHILDREN.with(|children| children.borrow_mut().push(child.clone()));
@@ -483,6 +489,21 @@ pub fn child_on_exit(
     });
 }
 
+pub fn child_on_close(
+    child: &JsChild,
+    callback: Box<dyn Fn(Option<f64>, Option<JsString>)>,
+    trace: ChildTrace,
+) {
+    child.with_mut(|child| {
+        if !child.settled {
+            child.close_listeners.push(ChildExitListener {
+                invoke: callback,
+                trace,
+            });
+        }
+    });
+}
+
 pub fn child_on_error(
     child: &JsChild,
     callback: Box<dyn Fn(JsError)>,
@@ -549,11 +570,12 @@ fn children_dispatch_one() -> bool {
         }
     }
     let child = ASYNC_CHILDREN.with(|children| children.borrow_mut().remove(index));
-    let (exit_listeners, error_listeners) = child.with_mut(|child| {
+    let (exit_listeners, close_listeners, error_listeners) = child.with_mut(|child| {
         child.settled = true;
         child.referenced = false;
         (
             std::mem::take(&mut child.exit_listeners),
+            std::mem::take(&mut child.close_listeners),
             std::mem::take(&mut child.error_listeners),
         )
     });
@@ -561,6 +583,9 @@ fn children_dispatch_one() -> bool {
         ChildOutcome::Exit(code, signal) => {
             drop(error_listeners);
             for listener in exit_listeners {
+                (listener.invoke)(code, signal.clone());
+            }
+            for listener in close_listeners {
                 (listener.invoke)(code, signal.clone());
             }
         }
@@ -577,6 +602,10 @@ fn children_dispatch_one() -> bool {
             }
             if let Some(stream) = stderr {
                 child_stream_fail(&stream);
+            }
+            let code = child.with(|child| child.exit_code);
+            for listener in close_listeners {
+                (listener.invoke)(code, None);
             }
         }
     }

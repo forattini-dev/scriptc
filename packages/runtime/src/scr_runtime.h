@@ -2558,6 +2558,7 @@ void scr_child_release(ScrChild *c);
 void *scr_child_retain_v(void *p);
 void scr_child_release_v(void *p);
 void scr_child_on_exit(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn);
+void scr_child_on_close(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildExitFn fn);
 void scr_child_on_error(ScrChild *c, ScrClosure *cb /*moves*/, ScrChildErrFn fn);
 void scr_child_exit_thunk0(ScrClosure *cb, bool has_code, double code,
                             const char *signal_name);

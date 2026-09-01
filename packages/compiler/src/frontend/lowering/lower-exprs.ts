@@ -3833,7 +3833,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       L.noLowering(
         `ChildProcess.${name}`,
         expr,
-        "on/once(\"exit\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
+        "on/once(\"exit\" | \"close\" | \"error\", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members",
         L.checker.getSymbolAtLocation(expr.name),
       );
     }

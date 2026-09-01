@@ -61,7 +61,8 @@ function emitExitListener(
   const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
   const codeName = codeType === undefined ? "_sc_code" : "sc_code";
   const signalName = signalType === undefined ? "_sc_signal" : "sc_signal";
-  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::child_on_exit(&${child}, Box::new(move |${codeName}, ${signalName}| { ${bindings.join(" ")} let _ = ${dispatch}; }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+  const register = expr.fn === "child.onClose" ? "child_on_close" : "child_on_exit";
+  return `{ let ${child} = ${context.emitExpr(receiverExpr)}; let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::${register}(&${child}, Box::new(move |${codeName}, ${signalName}| { ${bindings.join(" ")} let _ = ${dispatch}; }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
 function emitErrorListener(
@@ -195,12 +196,12 @@ export function emitRustChildProcessCall(
   if (expr.fn === "child.unref" && expr.args.length === 1 && expr.args[0]?.type.kind === "child") {
     return `runtime::child_unref(&(${context.emitExpr(expr.args[0])}))`;
   }
-  if ((expr.fn === "child.onExit" || expr.fn === "child.onError") && expr.args.length === 2) {
+  if ((expr.fn === "child.onExit" || expr.fn === "child.onClose" || expr.fn === "child.onError") && expr.args.length === 2) {
     const callbackType = expr.args[1]?.type;
     if (expr.args[0]?.type.kind !== "child" || callbackType?.kind !== "func") {
       context.unsupported(`${expr.fn} argument shape`, expr.loc);
     }
-    return expr.fn === "child.onExit"
+    return expr.fn !== "child.onError"
       ? emitExitListener(expr, callbackType, context)
       : emitErrorListener(expr, callbackType, context);
   }

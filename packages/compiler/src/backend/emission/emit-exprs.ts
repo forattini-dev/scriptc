@@ -4068,13 +4068,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `scr_spawn_opts(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)}, ${arg(7)}, ${arg(8)}, ${arg(9)}, ${arg(10)})`,
             );
-          case "child.onExit": {
+          case "child.onExit":
+          case "child.onClose": {
             // The callback MOVES into the child's registry; the third
             // ingredient is the ADAPTER — emitted per callback shape,
             // because the `number | null` union's tags are program data
             // (a zero-param listener gets the runtime's ignoring thunk).
             const cbT = e.args[1]!.type;
-            if (cbT.kind !== "func") throw new InternalCompilerError("emitter bug: child.onExit callback not a func");
+            if (cbT.kind !== "func") throw new InternalCompilerError(`emitter bug: ${e.fn} callback not a func`);
             const cb = args[1]!;
             E.moveTemp(cb);
             const adapter =
@@ -4084,7 +4085,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                   ? E.childExitThunkFor(cbT.params[0]!)
                   : E.childExitThunkFor2(cbT.params[0]!, cbT.params[1]!);
             E.line(
-              `scr_child_on_exit(${arg(0)}, ${cb.name}, &${adapter});${E.srcComment(e.loc)}`,
+              `scr_child_on_${e.fn === "child.onClose" ? "close" : "exit"}(${arg(0)}, ${cb.name}, &${adapter});${E.srcComment(e.loc)}`,
             );
             return { name: "", type: e.type };
           }

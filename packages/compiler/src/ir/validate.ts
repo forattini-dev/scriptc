@@ -720,6 +720,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `number | null` union / the %Error class) — the libCall case checks
   // the shape; the slot here only pins arity and the child receiver.
   "child.onExit": { argTypes: [CHILD_T, null], result: VOID },
+  "child.onClose": { argTypes: [CHILD_T, null], result: VOID },
   "child.onError": { argTypes: [CHILD_T, null], result: VOID },
   // Like process.envGet, spawnRes.status's result type is program-dependent
   // (the interned `number | null` union) — the libCall case checks the arms.
@@ -4318,18 +4319,19 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "child.onExit" || e.fn === "child.onError") {
+        if (e.fn === "child.onExit" || e.fn === "child.onClose" || e.fn === "child.onError") {
           // The listener: a closure with no params, or exactly the
-          // supported parameter shapes per event — exit takes (code:
-          // number | null) with an optional (signal: string | null)
-          // second parameter, error exactly (err: %Error).
+          // supported parameter shapes per event — exit/close take
+          // (code: number | null) with an optional (signal: string |
+          // null) second parameter, error exactly (err: %Error).
           const cb = e.args[1];
           const cbT = cb?.type;
-          const maxParams = e.fn === "child.onExit" ? 2 : 1;
+          const hasStatus = e.fn === "child.onExit" || e.fn === "child.onClose";
+          const maxParams = hasStatus ? 2 : 1;
           let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= maxParams;
           if (ok && cbT?.kind === "func" && cbT.params.length >= 1) {
             const p = cbT.params[0]!;
-            if (e.fn === "child.onExit") {
+            if (hasStatus) {
               const def = p.kind === "union" ? unions.get(p.unionId) : undefined;
               ok =
                 def !== undefined &&

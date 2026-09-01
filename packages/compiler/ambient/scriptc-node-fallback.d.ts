@@ -1572,8 +1572,10 @@ declare module "child_process" {
      * terminating signal's name, null for a normal exit. */
     on(event: "exit", listener: (code: number | null, signal: string | null) => void): void;
     on(event: "error", listener: (err: Error) => void): void;
+    on(event: "close", listener: (code: number | null, signal: string | null) => void): void;
     once(event: "exit", listener: (code: number | null, signal: string | null) => void): void;
     once(event: "error", listener: (err: Error) => void): void;
+    once(event: "close", listener: (code: number | null, signal: string | null) => void): void;
     /* The lifecycle members, Node's exact shapes: pid is undefined exactly
      * when the spawn failed; exitCode is null while running, the code
      * after a normal exit, null for a signal death, and -errno once a
