@@ -8,7 +8,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -492,39 +492,77 @@ export interface FileParts {
     visit(sf);
   }
 
-/** JSON module default imports (`import pkg from "../package.json"`):
-   * the document is DATA known at build time, so the binding bakes into a
-   * record global — the checker's structural type for the module (thanks
-   * to resolveJsonModule) maps to a record shape, the JSON text parses in
-   * the compiler, and comptimeValueToIr turns the value into literal IR
-   * assigned in the importing module's %init prelude (evaluation order:
-   * imports before the importer's body, like npm bindings). Two importers
-   * of the same document share one global (keyed by the ALIASED symbol).
-   * Shapes outside the bakeable surface (null-valued fields, mixed
-   * arrays, ...) report the standard unsupported-type diagnostic at the
-   * import site. Preflight already fenced named/namespace JSON imports
-   * and kept .json files out of the module order. */
-  export function collectJsonImports(L: Lowerer, parts: FileParts[]): void {
-    for (const fp of parts) {
-      for (const stmt of fp.sf.statements) {
-        if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+/** The JSON-module BINDING SITES of one file: the ESM default import
+   * (`import pkg from "../package.json"`) and its CommonJS twin
+   * (`const pkg = require("./codes.json")`). Both are alias declarations
+   * over a .json source file, so both bake identically — the shapes below
+   * are the only two spellings preflight admits (named/namespace imports
+   * and the destructuring/bare require forms keep their fences). */
+  function jsonBindingSitesOf(sf: ts.SourceFile): { name: ts.Identifier; site: ts.Node; spec: string | null }[] {
+    const out: { name: ts.Identifier; site: ts.Node; spec: string | null }[] = [];
+    for (const stmt of sf.statements) {
+      if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
         const clause = stmt.importClause;
-        if (!clause?.name || clause.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
-        const nameSym = L.checker.getSymbolAtLocation(clause.name);
-        if (!nameSym || !(nameSym.flags & ts.SymbolFlags.Alias)) continue;
-        const target = L.checker.getAliasedSymbol(nameSym);
-        const jsonSf = L.checker.declarationsOf(target)[0]?.getSourceFile();
+        if (clause?.name && clause.phaseModifier !== ts.SyntaxKind.TypeKeyword) {
+          out.push({ name: clause.name, site: stmt, spec: stmt.moduleSpecifier.text });
+        }
+        continue;
+      }
+      // `const data = require("./x.json")` — preflight (the require-of-JSON
+      // branch) admits exactly the identifier-bound form; the .json file
+      // carries no init, so this declaration IS the whole module edge.
+      if (!isRequireStatement(stmt) || !ts.isVariableStatement(stmt)) continue;
+      for (const decl of stmt.declarationList.declarations) {
+        const spec = decl.initializer !== undefined ? requireSpecOf(decl.initializer) : null;
+        if (spec !== null && ts.isIdentifier(decl.name)) out.push({ name: decl.name, site: decl, spec });
+      }
+    }
+    return out;
+  }
+
+/** JSON module bindings (`import pkg from "../package.json"`, and the
+   * CommonJS `const pkg = require("./codes.json")`): the document is DATA
+   * known at build time, so the binding bakes into a record global — the
+   * checker's structural type for the module (thanks to resolveJsonModule)
+   * maps to a record shape, the JSON text parses in the compiler, and
+   * comptimeValueToIr turns the value into literal IR assigned in the
+   * importing module's %init prelude (evaluation order: imports before the
+   * importer's body, like npm bindings). Two importers of the same
+   * document share one global (keyed by the ALIASED symbol) — Node's
+   * module cache in miniature. Shapes outside the bakeable surface
+   * (null-valued fields, mixed arrays, ...) report the standard
+   * unsupported-type diagnostic at the binding site. Preflight already
+   * fenced named/namespace JSON imports plus the destructuring and bare
+   * require spellings, and kept .json files out of the module order. */
+  export function collectJsonImports(L: Lowerer, parts: FileParts[]): void {
+    // The module cache in miniature: one global per DOCUMENT, whatever the
+    // spelling that reached it. The ESM form's alias symbol is the natural
+    // key (importers of the same document alias one symbol); the CommonJS
+    // require binding may be a plain variable, so the document's path keys
+    // the sharing and BOTH symbols route reads to the one global.
+    const byDocument = new Map<string, IrGlobal>();
+    for (const fp of parts) {
+      for (const { name, site, spec } of jsonBindingSitesOf(fp.sf)) {
+        const nameSym = L.checker.getSymbolAtLocation(name);
+        if (!nameSym) continue;
+        const target = (nameSym.flags & ts.SymbolFlags.Alias) ? L.checker.getAliasedSymbol(nameSym) : null;
+        let jsonSf = target ? L.checker.declarationsOf(target)[0]?.getSourceFile() : undefined;
+        if ((!jsonSf || !jsonSf.fileName.endsWith(".json")) && spec !== null) {
+          // The require form: tsgo need not model the binding as an alias
+          // onto the JSON module, so the specifier resolves directly.
+          jsonSf = resolveImport(L.program, fp.sf, spec) ?? undefined;
+        }
         if (!jsonSf || !jsonSf.fileName.endsWith(".json")) continue;
         try {
-          const tsType = L.typeOf(clause.name);
+          const tsType = L.typeOf(name);
           const mapped = L.mapTypeOf(tsType);
           if (!mapped || !L.comptimeBakeable(mapped)) {
-            L.badType(clause.name, tsType);
+            L.badType(name, tsType);
           }
           // tsgo tolerates JSON shapes strict JSON.parse rejects (a leading
           // `//` comment — importAttributes11), so no SC0001 guarantees a
-          // clean document: a failing parse gates at the import statement
-          // (Node refuses to import the module at runtime too).
+          // clean document: a failing parse gates at the binding site
+          // (Node refuses to load the module at runtime too).
           let parsed: unknown;
           try {
             parsed = JSON.parse(jsonSf.text);
@@ -532,25 +570,30 @@ export interface FileParts {
             L.pushDiag(invalidJsonModuleDiag(
               jsonSf.fileName,
               e instanceof Error ? e.message : String(e),
-              locOf(stmt),
+              locOf(site),
             ));
             throw new PoisonError();
           }
-          const value = L.comptimeValueToIr(parsed, mapped, "$", clause.name);
-          let g = L.globalsBySymbol.get(target);
+          const value = L.comptimeValueToIr(parsed, mapped, "$", name);
+          let g = (target !== null ? L.globalsBySymbol.get(target) : undefined) ??
+            byDocument.get(jsonSf.fileName);
           if (!g) {
             g = {
               id: `%g.json.${L.globalsList.length}`,
-              name: clause.name.text,
+              name: name.text,
               type: mapped,
               mutable: false,
             };
-            L.globalsBySymbol.set(target, g);
+            byDocument.set(jsonSf.fileName, g);
             L.globalsList.push(g);
           }
+          if (target !== null) L.globalsBySymbol.set(target, g);
+          // The BINDING's own symbol too: a require declaration tsgo does
+          // not alias onto the module has nothing else for reads to find.
+          L.globalsBySymbol.set(nameSym, g);
           const actions = L.jsonInitActions.get(fp.sf) ?? [];
           L.jsonInitActions.set(fp.sf, actions);
-          actions.push({ kind: "assign", localId: g.id, value, loc: locOf(stmt) });
+          actions.push({ kind: "assign", localId: g.id, value, loc: locOf(site) });
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;
           // diagnostic already recorded; uses of the binding poison too

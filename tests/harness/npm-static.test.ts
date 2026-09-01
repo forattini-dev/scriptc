@@ -57,6 +57,8 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     ...globSync(join(pilotRoot, "**/node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
     // the bundler-emitted-CJS mini packages (cases 2465-2469, 2556-2557)
     ...globSync(join(fixturesRoot, "npm/node_modules/gt*/**/*.{js,json}")).sort(),
+    // the require()-of-JSON mini package (the json-require case)
+    ...globSync(join(fixturesRoot, "npm/node_modules/jsonzoo/**/*.{js,json}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash
@@ -463,4 +465,29 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(all).not.toContain("nothing installed resolves");
     expect(all).not.toContain("implicitly has an 'any' type");
   }, 120_000);
+
+  /* ── require() of JSON modules ─────────────────────────────────────────
+   * The idiom statuses (`require('./codes.json')`) and mime-db
+   * (`module.exports = require('./db.json')`) ship. The document is DATA
+   * known at build time, so the CJS binding bakes into the same comptime
+   * global the ESM default import of a .json file already bakes into,
+   * keyed by the JSON module symbol — one value per document, however
+   * many files of the package require it (Node's module cache). */
+  test("a package requiring relative JSON documents compiles statically and byte-matches Node", async () => {
+    const entry = join(fixturesRoot, "npm/cases/json-require/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["jsonzoo"] });
+    expect(coverage.npmStatic).toEqual([{ package: "jsonzoo", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    // Baked, not deferred: the documents leave no runtime fence behind —
+    // reads through the binding are ordinary record/array field reads.
+    expect(coverage.runtimeFences ?? []).toHaveLength(0);
+    const binary = await buildStatic(entry, ["jsonzoo"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+  }, 180_000);
 });

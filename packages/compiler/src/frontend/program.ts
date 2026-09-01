@@ -2332,8 +2332,26 @@ function preflight7(load: LoadResult): {
           } else {
             dep = resolveImport7(program, sf, req.spec);
           }
-          if (dep && dep.fileName.endsWith(".json")) {
-            diags.push(unsupportedDiag("SC1012", loc, "require() of JSON modules"));
+          // `const data = require("./x.json")`: the document is DATA known
+          // at build time, exactly like the ESM default import of the same
+          // file — the binding bakes into a comptime global
+          // (collectJsonImports's require arm) and the .json file carries
+          // no init, so no module edge joins the order. Two spellings keep
+          // the fence: the destructuring form (the named-import twin above
+          // fences too — a JSON namespace has no static story) and the bare
+          // side-effect call, where Node PARSES the document and can throw,
+          // which a lowering to nothing would not reproduce.
+          const isJsonDep = dep !== null && dep.fileName.endsWith(".json");
+          if (isJsonDep && (req.decl === null || !ts.isIdentifier(req.decl.name))) {
+            diags.push(
+              unsupportedDiag(
+                "SC1012",
+                loc,
+                req.decl === null
+                  ? "bare require() of JSON modules"
+                  : "destructuring require() of JSON modules",
+              ),
+            );
             continue;
           }
           const tdzName =
@@ -2350,7 +2368,8 @@ function preflight7(load: LoadResult): {
             );
             continue;
           }
-          if (dep) deps.push({ dep });
+          // The baked JSON binding is not a module edge: nothing to init.
+          if (dep && !isJsonDep) deps.push({ dep });
         }
       }
       const nestedBareRequires = nestedBareRequiresOf7(sf);

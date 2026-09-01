@@ -2045,10 +2045,15 @@ export class Lowerer {
       }
       const spec = requireSpecOf(decl.initializer);
       if (spec === null) return false;
-      if (
-        !isRelativeSpecifier(spec) &&
-        npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null
-      ) {
+      if (isRelativeSpecifier(spec)) {
+        // `const codes = require("./codes.json")`: a JSON document is a
+        // VALUE, not an export table — the binding is the baked comptime
+        // global (collectJsonImports) and `codes.label` is an ordinary
+        // record field read, never a member-name delegation.
+        if (resolveImport(this.program, decl.getSourceFile(), spec)?.fileName.endsWith(".json") === true) {
+          return false;
+        }
+      } else if (npmStaticDepSf7(this.program, decl.getSourceFile(), spec) === null) {
         return false;
       }
     }
