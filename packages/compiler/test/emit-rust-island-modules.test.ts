@@ -1,6 +1,6 @@
 /* The Rust island's embedded module system: the edge table, the CommonJS
  * require shim over it, the synthetic ESM wrapper an unshimmed Node
- * builtin takes.
+ * builtin takes, and the widened host-call marshaling.
  *
  * The fixture node_modules under tests/fixtures/island-modules are
  * COMMITTED TEST DATA — minimal hand-made packages; the binaries embed
@@ -70,4 +70,12 @@ describe.sequential("Rust island module system", () => {
     );
   });
 
+  test("a closure with mixed primitive parameters crosses as a host function", async () => {
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "closure-mixed.ts")]),
+      await run(await build("closure-mixed.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("2:3|3.5:0\n");
+  });
 });

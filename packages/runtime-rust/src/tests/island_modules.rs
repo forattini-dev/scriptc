@@ -236,6 +236,103 @@ fn island_require_forgets_a_module_whose_evaluation_threw() {
     });
 }
 
+/* ── the host-call marshaling surfaces ─────────────────────────────── */
+
+fn host_function(arity: usize, result: IslandHostResult) -> IslandValue {
+    let slot = RefCell::new(Some(result));
+    island_value_host_function(
+        arity,
+        Rc::new(move |_arguments| {
+            slot.borrow_mut()
+                .take()
+                .expect("scriptc: host result taken twice")
+        }),
+    )
+}
+
+#[test]
+fn island_host_results_marshal_by_kind() {
+    let cases: Vec<(IslandHostResult, &str)> = vec![
+        (IslandHostResult::Number(4.5), "4.5"),
+        (IslandHostResult::Bool(true), "true"),
+        (IslandHostResult::String(string("hi")), "hi"),
+        (IslandHostResult::Undefined, "undefined"),
+        (IslandHostResult::Null, "null"),
+        (IslandHostResult::Bytes(vec![1, 2, 3]), "1,2,3"),
+        (IslandHostResult::Json(string("{\"a\":[1,2]}")), "[object Object]"),
+    ];
+    for (result, rendered) in cases {
+        let value = island_call(&host_function(0, result), &[]);
+        assert_eq!(island_to_string(&value).as_ref(), rendered);
+    }
+    island_eval_finish();
+}
+
+#[test]
+fn island_bytes_results_arrive_as_a_typed_array() {
+    let value = island_call(&host_function(0, IslandHostResult::Bytes(vec![9, 8])), &[]);
+    assert_eq!(island_to_string(&value).as_ref(), "9,8");
+    assert_eq!(
+        island_to_string(&island_get_property(&value, "length")).as_ref(),
+        "2",
+    );
+    let constructor = island_get_property(&value, "constructor");
+    assert_eq!(
+        island_to_string(&island_get_property(&constructor, "name")).as_ref(),
+        "Uint8Array",
+    );
+    island_eval_finish();
+}
+
+#[test]
+fn island_json_results_deep_copy_into_the_realm() {
+    let value = island_call(
+        &host_function(0, IslandHostResult::Json(string("{\"a\":[1,2]}"))),
+        &[],
+    );
+    assert_eq!(island_json(&value).as_ref(), "{\"a\":[1,2]}");
+    island_eval_finish();
+}
+
+#[test]
+fn island_host_arguments_exit_strictly_by_kind() {
+    let echo = island_value_host_function(
+        3,
+        Rc::new(|arguments| {
+            let count = island_host_argument_number(arguments, 0);
+            let text = island_host_argument_string(arguments, 1);
+            let flag = island_host_argument_bool(arguments, 2);
+            IslandHostResult::String(string(&format!("{count}:{text}:{flag}")))
+        }),
+    );
+    let value = island_call(
+        &echo,
+        &[
+            island_value_number(2.5),
+            island_value_string(&string("ab")),
+            island_value_boolean(false),
+        ],
+    );
+    assert_eq!(island_to_string(&value).as_ref(), "2.5:ab:false");
+    island_eval_finish();
+}
+
+#[test]
+fn island_bytes_arguments_copy_out_of_the_realm() {
+    let produce = host_function(0, IslandHostResult::Bytes(vec![4, 5, 6]));
+    let consume = island_value_host_function(
+        1,
+        Rc::new(|arguments| {
+            let bytes = island_host_argument_bytes(arguments, 0);
+            IslandHostResult::Number(bytes_len(&bytes) + bytes_get(&bytes, 0.0))
+        }),
+    );
+    let produced = island_call(&produce, &[]);
+    let value = island_call(&consume, &[produced]);
+    assert_eq!(island_to_string(&value).as_ref(), "7");
+    island_eval_finish();
+}
+
 #[test]
 fn island_edge_lookup_misses_are_none() {
     with_tables(|| {
