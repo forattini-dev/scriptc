@@ -387,7 +387,10 @@ function emitGenericPromiseBridge(
   const dyn = context.dynTypeName();
   const value = context.nextName("sc_island_promise_value");
   const source = context.nextName("sc_island_promise_source");
-  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), ${dyn}::Island(sc_handle) => runtime::promise_resolved(${dyn}::Island(runtime::island_await(&sc_handle))), sc_value => runtime::promise_resolved(sc_value), }`;
+  const island = context.hasEmbeddedModules()
+    ? `${dyn}::Island(sc_handle) => runtime::promise_resolved(${dyn}::Island(runtime::island_await(&sc_handle))), `
+    : "";
+  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), ${island}sc_value => runtime::promise_resolved(sc_value), }`;
   if (expr.type.inner.kind === "jsval") {
     return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; ${source} }`;
   }

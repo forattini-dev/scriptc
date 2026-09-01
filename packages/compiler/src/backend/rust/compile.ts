@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -168,11 +169,13 @@ async function prepareRustBuild(
     join(process.env["XDG_CACHE_HOME"] ?? join(homedir(), ".cache"), "scriptc");
   const profile = options.optimization === "dev" ? "debug" : "release";
   const preserveLibraryObjects = options.library === true && profile === "release";
-  const targetDir = join(
-    cacheBase,
-    preserveLibraryObjects ? "rust-runtime-v1-library" : "rust-runtime-v1",
-  );
   const runtimeFeatures = [...new Set(options.runtimeFeatures ?? [])].sort();
+  const targetDir = rustRuntimeTargetDir(
+    cacheBase,
+    await realpath(runtimeRoot),
+    runtimeFeatures,
+    preserveLibraryObjects,
+  );
   const cargoArgs = [
     "build",
     "--manifest-path", manifestPath,
@@ -198,6 +201,31 @@ async function prepareRustBuild(
     targetDir,
     profile,
   };
+}
+
+/**
+ * Cargo's top-level `libscriptc_runtime.rlib` is not content-addressed. A
+ * shared target directory therefore lets a different worktree or feature
+ * build replace the artifact after our Cargo process exits but before rustc
+ * links it. Keep only ABI-compatible runtime builds in one target directory.
+ */
+export function rustRuntimeTargetDir(
+  cacheBase: string,
+  canonicalRuntimeRoot: string,
+  runtimeFeatures: readonly RustRuntimeFeature[],
+  preserveLibraryObjects: boolean,
+): string {
+  const identity = createHash("sha256")
+    .update(canonicalRuntimeRoot)
+    .update("\0")
+    .update([...new Set(runtimeFeatures)].sort().join("\0"))
+    .digest("hex")
+    .slice(0, 16);
+  return join(
+    cacheBase,
+    preserveLibraryObjects ? "rust-runtime-v2-library" : "rust-runtime-v2",
+    identity,
+  );
 }
 
 function rustcBaseArgs(
