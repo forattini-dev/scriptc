@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "from": "24.15.0",
+  "to": "26.8.1",
+  "note": "The mechanical delta between the two matrix runtimes' documented class surfaces, derived from Node's own all.json. It is a DENOMINATOR artifact: nothing here is classified, and an added class is not a support claim in either direction. A class that moved modules appears once in each list.",
+  "counts": {
+    "24.15.0": 262,
+    "26.8.1": 279,
+    "added": 20,
+    "removed": 3
+  },
+  "added": [
+    "async_context.RunScope",
+    "diagnostics_channel.BoundedChannel",
+    "diagnostics_channel.BoundedChannelScope",
+    "diagnostics_channel.RunStoresScope",
+    "ffi.DynamicLibrary",
+    "globals.QuotaExceededError",
+    "net.BoundSocket",
+    "perf_hooks.ELDHistogram",
+    "stream_iter.Share",
+    "stream_iter.SyncShare",
+    "v8.SyncHeapProfileHandle",
+    "vfs.MemoryProvider",
+    "vfs.RealFSProvider",
+    "vfs.VirtualFileSystem",
+    "vfs.VirtualProvider",
+    "webcrypto.KangarooTwelveParams",
+    "webcrypto.TurboShakeParams",
+    "zlib.ZipBuffer",
+    "zlib.ZipEntry",
+    "zlib.ZipFile"
+  ],
+  "removed": [
+    "assert.CallTracker",
+    "buffer.SlowBuffer",
+    "perf_hooks.IntervalHistogram"
+  ]
+}

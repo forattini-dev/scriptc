@@ -15,6 +15,8 @@
     "test:conformance:node24": "tsx scripts/node-matrix.mjs --target node24",
     "test:conformance:node26": "tsx scripts/node-matrix.mjs --target node26",
     "gate:node-matrix": "tsx scripts/node-matrix.mjs",
+    "inventory:node": "node scripts/node-surface-inventory.mjs",
+    "inventory:node:check": "node scripts/node-surface-inventory.mjs --check --offline",
     "test:cache-identity": "node tests/harness/cache-identity.mjs",
     "test:sandbox": "node scripts/sandbox-test.mjs",
     "test:sandbox:image": "node scripts/sandbox-image.mjs",
