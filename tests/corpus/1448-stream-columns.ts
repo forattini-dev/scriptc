@@ -24,3 +24,12 @@ function getColumns(): number {
   );
 }
 console.log(getColumns());
+
+const onResize = (): void => console.log("resized");
+process.stdout.on("resize", onResize);
+process.stdout.off("resize", onResize);
+process.stderr.once("resize", onResize);
+process.stderr.removeListener("resize", onResize);
+process.on("SIGWINCH", onResize);
+process.off("SIGWINCH", onResize);
+console.log("resize-listeners-ok");

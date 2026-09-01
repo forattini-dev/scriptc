@@ -6185,6 +6185,54 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   export function lowerProcessMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
+    // tty.WriteStream resize events are SIGWINCH-backed in Node. Lower the
+    // stdout/stderr on/once/off spelling onto the existing signal registry so
+    // terminal libraries do not need a scriptc-specific process-event shim.
+    if (
+      (access.name.text === "on" || access.name.text === "once" ||
+        access.name.text === "off" || access.name.text === "removeListener") &&
+      ts.isPropertyAccessExpression(access.expression)
+    ) {
+      const stream = L.stdlibGlobalMember(access.expression, "process");
+      if (stream === "stdout" || stream === "stderr") {
+        const eventArg = call.arguments[0];
+        const callbackArg = call.arguments[1];
+        if (call.arguments.length !== 2 || eventArg === undefined || callbackArg === undefined) {
+          L.noLowering(`process.${stream}.${access.name.text} with ${call.arguments.length} arguments`, call);
+        }
+        const eventType = L.typeOf(eventArg);
+        const event = eventType.isStringLiteralType() ? eventType.value : null;
+        if (event !== "resize") {
+          L.noLowering(
+            `process.${stream}.${access.name.text}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
+            eventArg,
+            '"resize" is the supported process output-stream event',
+          );
+        }
+        if (!ts.isExpressionStatement(call.parent)) {
+          L.unsupported(
+            "SC1090",
+            call,
+            "chaining output-stream listener registration (register it as its own statement)",
+          );
+        }
+        const cb = L.lowerExpr(callbackArg);
+        if (cb.type.kind !== "func" || cb.type.params.length !== 0 || cb.type.ret.kind !== "void") {
+          L.unsupported("SC1090", callbackArg, "resize listeners must have the shape () => void");
+        }
+        const sig: IrExpr = { kind: "numLit", value: 28, type: F64, loc: locOf(call) };
+        if (access.name.text === "off" || access.name.text === "removeListener") {
+          return { kind: "libCall", fn: "process.offSignal", args: [sig, cb], type: VOID, loc: locOf(call) };
+        }
+        const onceArg: IrExpr = {
+          kind: "boolLit",
+          value: access.name.text === "once",
+          type: BOOL,
+          loc: locOf(call),
+        };
+        return { kind: "libCall", fn: "process.onSignal", args: [sig, cb, onceArg], type: VOID, loc: locOf(call) };
+      }
+    }
     // process.stdout.write(s[, encoding][, callback]) and stderr's twin:
     // raw bytes, no newline or formatting. stdout shares console.log's
     // promptly-submitted stream, preserving source order. Node's boolean
@@ -6507,7 +6555,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       // and `{ SIGINT: 2 }["__proto__"]` answers Object.prototype — an
       // object flowed into a numLit and emitted itself into the C
       // (test-event-emitter-special-event-names.js's process.on).
-      const SIGNALS: Record<string, number | undefined> = { SIGINT: 2, SIGTERM: 15 };
+      const SIGNALS: Record<string, number | undefined> = { SIGINT: 2, SIGTERM: 15, SIGWINCH: 28 };
       const signo = event !== null ? own(SIGNALS, event) : undefined;
       // 'unhandledRejection': the listener crosses as a dyn function and
       // the completed-checkpoint report dispatches it (reason, promise) per
@@ -6556,7 +6604,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           `process.${member}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
-          '"SIGINT", "SIGTERM", "exit", "warning", "unhandledRejection", and "rejectionHandled" are the supported process events (as literals)',
+          '"SIGINT", "SIGTERM", "SIGWINCH", "exit", "warning", "unhandledRejection", and "rejectionHandled" are the supported process events (as literals)',
         );
       }
       if (!ts.isExpressionStatement(call.parent)) {

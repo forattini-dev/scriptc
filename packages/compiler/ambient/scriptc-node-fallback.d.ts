@@ -215,6 +215,10 @@ declare var process: {
     readonly isTTY: boolean;
     readonly columns?: number;
     readonly rows?: number;
+    on(event: "resize", listener: () => void): void;
+    once(event: "resize", listener: () => void): void;
+    off(event: "resize", listener: () => void): void;
+    removeListener(event: "resize", listener: () => void): void;
   };
   stderr: {
     write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean;
@@ -222,6 +226,10 @@ declare var process: {
     readonly isTTY: boolean;
     readonly columns?: number;
     readonly rows?: number;
+    on(event: "resize", listener: () => void): void;
+    once(event: "resize", listener: () => void): void;
+    off(event: "resize", listener: () => void): void;
+    removeListener(event: "resize", listener: () => void): void;
   };
   /* The stdin stream, the piped-input slice: the TTY probe, the
    * data/end/error events (on and once — a 'data' listener keeps the
@@ -255,7 +263,7 @@ declare var process: {
    * `once` auto-removes after the first delivery; `off` removes by
    * listener identity — bind the listener to a const so registration and
    * removal see the same value. */
-  on(event: "SIGINT" | "SIGTERM", listener: () => void): void;
+  on(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   on(event: "exit", listener: (code: number) => void): void;
   /* 'warning' — Node's process-warning channel: listeners receive the
    * warning Error (as a dyn value); emitWarning and the runtime's
@@ -268,17 +276,17 @@ declare var process: {
    * (promise payload, Node's shape). */
   on(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
   on(event: "rejectionHandled", listener: (promise: unknown) => void): void;
-  once(event: "SIGINT" | "SIGTERM", listener: () => void): void;
+  once(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   once(event: "exit", listener: (code: number) => void): void;
   once(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
   once(event: "rejectionHandled", listener: (promise: unknown) => void): void;
-  off(event: "SIGINT" | "SIGTERM", listener: () => void): void;
+  off(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   off(event: "exit", listener: (code: number) => void): void;
   off(event: "warning", listener: (warning: Error & { code?: string }) => void): void;
   off(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
   off(event: "rejectionHandled", listener: (promise: unknown) => void): void;
   /* removeListener IS off — Node aliases them; both lower identically. */
-  removeListener(event: "SIGINT" | "SIGTERM", listener: () => void): void;
+  removeListener(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   removeListener(event: "exit", listener: (code: number) => void): void;
   removeListener(event: "warning", listener: (warning: Error & { code?: string }) => void): void;
   removeListener(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
