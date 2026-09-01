@@ -114,7 +114,12 @@ pub(crate) fn island_modules_reset() {
 
 /* ── the ES module loader ──────────────────────────────────────────── */
 
-const ISLAND_MODULE_BOOTSTRAP: &str = include_str!("island_modules.js");
+/// The island's JavaScript bootstrap: the CommonJS require shim plus the
+/// Node builtin shims, generated from the shared parts in
+/// packages/runtime/src/island-js/ (the "rust" manifest —
+/// scripts/gen-island-bootstrap.mjs). The C island embeds the very same
+/// parts, so the two islands cannot drift.
+const ISLAND_MODULE_BOOTSTRAP: &str = include_str!("island_bootstrap.js");
 
 /// Resolves imports against the embedded edge table instead of the
 /// filesystem, and synthesizes the `node:*` wrappers on demand.
@@ -166,9 +171,10 @@ impl IslandModuleLoader {
                 .into());
         }
         // A builtin entering the ES graph takes the synthetic wrapper the
-        // C island synthesizes (isl_module_load): the named-export list
-        // arrives with the shims, so for now the wrapper is default-only
-        // and its __scr_require call raises the does-not-provide throw at
+        // C island synthesizes (isl_module_load), destructuring the named
+        // exports of every builtin the bootstrap shims. One the bootstrap
+        // does not register takes the default-only wrapper, and its
+        // __scr_require call raises the does-not-provide throw at
         // EVALUATION, not at link.
         let source = island_builtin_wrapper(key);
         let mut bytes = source.as_bytes();
@@ -196,15 +202,7 @@ impl boa_engine::module::ModuleLoader for IslandModuleLoader {
     }
 }
 
-/// Named export lists for the builtin ESM wrappers, mirroring the C
-/// island's `isl_builtins`.
-///
-/// A builtin the island shims registers its name and the export list its
-/// wrapper destructures; the shims themselves live in the require
-/// bootstrap. The island provides none yet, so the table is empty and
-/// every `node:*` wrapper is default-only — the import still LINKS, and
-/// the does-not-provide throw surfaces at evaluation.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 0] = [];
+include!("island_builtin_exports.rs");
 
 /// `const m = __scr_require("node:x"); export default m; export const {…} = m;`
 pub(crate) fn island_builtin_wrapper(key: &str) -> String {
@@ -320,23 +318,14 @@ fn island_host_resolve(
     )
 }
 
-/// Install `globalThis.__scr_require` over the embedded tables.
+/// Run the shared bootstrap: `globalThis.__scr_require` over the embedded
+/// tables, the Node builtin shims behind it, and the globals they install
+/// (`process`, `Buffer`, the formatting `console`).
 ///
 /// Called once per realm, before any embedded module is parsed: the CJS
-/// facades the ES graph evaluates call straight into it.
+/// facades the ES graph evaluates call straight into `__scr_require`.
 pub(crate) fn island_modules_boot(context: &mut Context) -> JsResult<()> {
-    let host = ObjectInitializer::new(context)
-        .function(
-            NativeFunction::from_fn_ptr(island_host_source),
-            js_string!("source"),
-            1,
-        )
-        .function(
-            NativeFunction::from_fn_ptr(island_host_resolve),
-            js_string!("resolve"),
-            2,
-        )
-        .build();
+    let host = island_host_object(context);
     let boot = context.eval(Source::from_bytes(ISLAND_MODULE_BOOTSTRAP))?;
     let Some(boot) = boot.as_callable() else {
         return Err(boa_engine::JsNativeError::typ()

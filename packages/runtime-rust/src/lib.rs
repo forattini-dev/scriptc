@@ -41,6 +41,8 @@ include!("ffi_foreign.rs");
 #[cfg(feature = "island-eval")]
 include!("island_modules.rs");
 #[cfg(feature = "island-eval")]
+include!("island_host.rs");
+#[cfg(feature = "island-eval")]
 include!("island_eval.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");

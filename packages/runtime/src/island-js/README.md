@@ -13,15 +13,28 @@ Two consumers read the very same bytes:
   `scr_island.c` includes. Run the generator after editing any part;
   `node scripts/gen-island-bootstrap.mjs --check` fails when the committed
   header is stale.
-- **The Rust island.** `packages/runtime-rust/src/island_modules.rs`
-  `include_str!`s the parts it can honestly serve and concatenates them
-  against its own host bridge.
+- **The Rust island.** The same generator concatenates the `rust`
+  manifest's parts into `packages/runtime-rust/src/island_bootstrap.js`,
+  which that crate `include_str!`s and calls with the host bridge in
+  `packages/runtime-rust/src/island_host.rs`. It is generated INTO the
+  crate rather than reached across packages because the crate publishes
+  on its own, so a cross-package `include_str!` would resolve only by
+  node_modules layout accident.
+
+The named export lists the builtin ESM wrappers destructure are shared the
+same way, from `builtin-exports.json` into `../scr_island_builtins.h` and
+`packages/runtime-rust/src/island_builtin_exports.rs` — each island getting
+the slice its own manifest registers.
 
 ## Rules
 
 - **Order is the contract.** `manifest.json` lists the parts in the order
   the C literal had them; the shims capture each other's closures, so
-  reordering is a behavior change, not a cosmetic one.
+  reordering is a behavior change, not a cosmetic one. Its `c` list is
+  every part; its `rust` list is the subset whose host surface
+  `island_host.rs` implements. A part missing from `rust` leaves its
+  builtin unregistered, which is the island's does-not-provide throw — a
+  fence, not a silently wrong answer.
 - **Every part is a statement fragment**, not a module. `01-prelude.js`
   opens the `(host) => {` arrow and `31-epilogue.js` closes it; everything
   between is statements in that one scope. A part is not independently

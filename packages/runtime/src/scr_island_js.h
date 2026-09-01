@@ -5,8 +5,7 @@
  * embedded module map, the Node builtin shims, and the process bridge.
  * Evaluated once at module boot; returns the CJS import helper the
  * island's boundary pins. Everything JS about the module system lives in
- * the parts — the C side only serves tables and I/O. The Rust island
- * shares the same parts through include_str!. */
+ * the parts — the C side only serves tables and I/O. */
 #ifndef SCR_ISLAND_JS_H
 #define SCR_ISLAND_JS_H
 

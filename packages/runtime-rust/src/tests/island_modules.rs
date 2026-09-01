@@ -185,15 +185,30 @@ fn island_require_walks_relative_edges_and_caches() {
 
 #[test]
 fn island_require_of_an_unshimmed_builtin_reports_the_island_message() {
+    // node:os is outside the island-js "rust" manifest — it needs a host
+    // surface this island has not grown yet — so it is the fence the
+    // shims deliberately do NOT remove. A builtin the manifest does list
+    // (node:events) answers its shim instead; that is pinned end-to-end
+    // in packages/compiler/test/emit-rust-island-shims.test.ts.
     with_require_realm(|| {
         let rendered = island_eval(&string(
-            "(() => { try { globalThis.__scr_require('node:events'); } \
+            "(() => { try { globalThis.__scr_require('node:os'); } \
              catch (e) { return e.message; } return 'no throw'; })()",
         ));
         assert_eq!(
             rendered.as_ref(),
-            "the island does not provide the 'node:events' builtin",
+            "the island does not provide the 'node:os' builtin",
         );
+    });
+}
+
+#[test]
+fn island_require_of_a_shimmed_builtin_answers_the_shim() {
+    with_require_realm(|| {
+        let rendered = island_eval(&string(
+            "globalThis.__scr_require('node:events').EventEmitter.name",
+        ));
+        assert_eq!(rendered.as_ref(), "EventEmitter");
     });
 }
 
