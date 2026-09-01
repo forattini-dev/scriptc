@@ -49,6 +49,11 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
     case "call":
     case "intrinsic":
       return expr.args;
+    case "callValue":
+      return [expr.callee, ...expr.args];
+    case "fieldGet":
+    case "recordGet":
+      return [expr.obj];
     case "jsOp":
       return expr.args;
     case "arrayLit":
@@ -74,6 +79,16 @@ export class RustAsyncValueEmitter {
   emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
     const awaited = this.context.awaitExpression(expr);
     if (awaited !== null) {
+      // `await (await load()).method()` first has to construct the OUTER
+      // promise dependency, and constructing it can itself suspend. Split
+      // those two continuations explicitly: evaluate the dependency value
+      // through this recursive emitter, then await the resulting promise.
+      if (awaited.kind === "awaitExpr" && this.context.containsAsyncSuspension(awaited.value)) {
+        this.emitAsyncValue(awaited.value, (dependency) => {
+          this.emitAsyncContinuation(dependency, consume, null);
+        });
+        return;
+      }
       this.emitAsyncContinuation(this.context.emitAwaitDependency(awaited), consume, null);
       return;
     }

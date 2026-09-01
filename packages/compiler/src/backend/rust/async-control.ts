@@ -297,8 +297,8 @@ export class RustAsyncControlEmitter {
         continue;
       }
 
-      this.context.emitAsyncContinuation(
-        this.emitAwaitDependency(awaited.awaited),
+      const continueAwait = (dependency: string): void => this.context.emitAsyncContinuation(
+        dependency,
         (rawValue) => {
           const value = awaited.wrap(rawValue);
           if (stmt.kind === "assign") {
@@ -317,6 +317,14 @@ export class RustAsyncControlEmitter {
         stmt.kind === "return" ? null : statements.slice(index + 1),
         onComplete,
       );
+      if (
+        awaited.awaited.kind === "awaitExpr" &&
+        this.containsAsyncSuspension(awaited.awaited.value)
+      ) {
+        this.context.emitAsyncValue(awaited.awaited.value, continueAwait);
+      } else {
+        continueAwait(this.emitAwaitDependency(awaited.awaited));
+      }
       return;
     }
 
