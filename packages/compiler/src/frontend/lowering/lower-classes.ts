@@ -3608,6 +3608,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const classOfNew = (n: ts.Expression): ClassInfo | null => {
       if (!ts.isNewExpression(n)) return null;
       const exact = exactClassOfReceiver(L, n.expression);
+      // Ordinary and once-created class values name their concrete runtime
+      // class more precisely than the checker result (an Error subclass can
+      // otherwise widen to Error). A generic constructor names only its
+      // family, so defer that one case to the constructed instance below.
+      if (exact && !exact.generic) return exact;
+      // The constructed value's type is more precise than the constructor
+      // value for generic classes: `new Box(1)` maps to the concrete
+      // `Box<number>` instance, while the callee itself names only the
+      // generic family. Keep that instance-first rule; the constructor
+      // probes below are fallbacks for once-created/optional class values
+      // whose checker result has no independently mappable instance type.
+      const constructed = L.mapTypeOf(L.typeOf(n));
+      if (constructed?.kind === "object") {
+        const info = L.classes.get(constructed.className);
+        if (info) return info;
+      }
       if (exact) return exact;
       if (ts.isIdentifier(n.expression)) {
         // This helper is a read-only inference probe and also runs during
@@ -3627,8 +3643,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           }
         }
       }
-      const t = L.mapTypeOf(L.typeOf(n));
-      return t?.kind === "object" ? (L.classes.get(t.className) ?? null) : null;
+      return null;
     };
     const direct = classOfNew(e);
     if (direct) return direct;

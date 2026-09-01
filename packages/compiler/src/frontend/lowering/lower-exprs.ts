@@ -6949,6 +6949,28 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // can validate, and fences by name when it is not — an arrayGet over a
     // dyn receiver is never emitted (the validator ICE).
     if (arr.type.kind === "dyn") {
+      // `any[]` (notably a rest parameter in a dynamic tagged-template
+      // callback) is already represented by the checked-dynamic tree and
+      // its element is dynamic too. Reading one slot does not require
+      // validating/copying the whole array: use the same ToPropertyKey +
+      // dynKeyGet path as an `any` receiver and let the consumer validate
+      // the returned value, if it needs a static type.
+      if ((L.typeOf(expr).flags & ts.TypeFlags.Any) !== 0) {
+        const rawKey = L.lowerExpr(expr.argumentExpression);
+        const key: IrExpr | null =
+          rawKey.type.kind === "string"
+            ? rawKey
+            : rawKey.type.kind === "f64" || rawKey.type.kind === "bool" || rawKey.type.kind === "dyn"
+              ? { kind: "toString", operand: rawKey, type: STRING, loc: rawKey.loc }
+              : null;
+        if (key) {
+          const opt = chainGuardedByQuestionDot(expr.expression);
+          return L.maybeNarrow(
+            { kind: "dynKeyGet", key, ...(opt ? { optional: true as const } : {}), value: arr, type: DYN, loc: locOf(expr) },
+            expr,
+          );
+        }
+      }
       if (isJsonSafeType(receiverIr, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
         arr = { kind: "dynCheck", value: arr, type: receiverIr, loc: locOf(expr) };
       } else {
@@ -8512,6 +8534,32 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
     const left = strictEquality ? lowerAbsenceProbe(L, expr.left) ?? L.lowerExpr(expr.left) : L.lowerExpr(expr.left);
     const right = strictEquality ? lowerAbsenceProbe(L, expr.right) ?? L.lowerExpr(expr.right) : L.lowerExpr(expr.right);
+    const lowerIslandBinary = (): IrExpr => {
+      const JS_BIN: Partial<Record<ts.SyntaxKind, IrJsOp>> = {
+        [ts.SyntaxKind.PlusToken]: "add",
+        [ts.SyntaxKind.MinusToken]: "sub",
+        [ts.SyntaxKind.AsteriskToken]: "mul",
+        [ts.SyntaxKind.SlashToken]: "div",
+        [ts.SyntaxKind.PercentToken]: "mod",
+        [ts.SyntaxKind.AsteriskAsteriskToken]: "pow",
+        [ts.SyntaxKind.LessThanToken]: "lt",
+        [ts.SyntaxKind.LessThanEqualsToken]: "le",
+        [ts.SyntaxKind.GreaterThanToken]: "gt",
+        [ts.SyntaxKind.GreaterThanEqualsToken]: "ge",
+        [ts.SyntaxKind.EqualsEqualsEqualsToken]: "eq",
+        [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "neq",
+      };
+      const jop = JS_BIN[op];
+      if (jop === undefined) {
+        L.unsupported("SC1090", expr, `operator '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' on 'any' values`);
+      }
+      const type = jsOpResultKind(jop) === "bool" ? BOOL : JSVAL;
+      return {
+        kind: "jsOp", op: jop,
+        args: [L.jsvalIn(left, expr.left), L.jsvalIn(right, expr.right)],
+        type, loc,
+      };
+    };
     if (left.type.kind === "dyn" || right.type.kind === "dyn") {
       // The narrowing unit comparisons ARE answerable on unknown: `v ===
       // undefined` / `v !== null` test the dyn node's kind directly, and
@@ -8614,11 +8662,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // here): JS's full coercion semantics (ToPrimitive, NaN, string +)
       // live in the engine — the dynamic-family fence, so the island
       // retry lifts the site. Genuine unknown keeps the SC1100 story.
-      if (
+      const dynAnyOperand =
         (left.type.kind === "dyn" && L.anyOrigin(expr.left)) ||
-        (right.type.kind === "dyn" && L.anyOrigin(expr.right))
-      ) {
-        L.anyOpFence(`the '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' operator`, expr);
+        (right.type.kind === "dyn" && L.anyOrigin(expr.right));
+      if (dynAnyOperand) {
+        if (!L.dynamic) {
+          L.anyOpFence(`the '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' operator`, expr);
+        }
+        return lowerIslandBinary();
       }
       // tsc allows ===/!== on unknown (arithmetic/comparisons it rejects
       // itself); a dynamic equality would need a dyn walk — validate first.
@@ -8628,32 +8679,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // (ToPrimitive, NaN, string +): both operands marshal in, the engine
     // computes. Comparisons come back as static bools; arithmetic stays
     // an island value ('1 as any + "x"' is a string over there).
-    if (left.type.kind === "jsval" || right.type.kind === "jsval") {
-      const JS_BIN: Partial<Record<ts.SyntaxKind, IrJsOp>> = {
-        [ts.SyntaxKind.PlusToken]: "add",
-        [ts.SyntaxKind.MinusToken]: "sub",
-        [ts.SyntaxKind.AsteriskToken]: "mul",
-        [ts.SyntaxKind.SlashToken]: "div",
-        [ts.SyntaxKind.PercentToken]: "mod",
-        [ts.SyntaxKind.AsteriskAsteriskToken]: "pow",
-        [ts.SyntaxKind.LessThanToken]: "lt",
-        [ts.SyntaxKind.LessThanEqualsToken]: "le",
-        [ts.SyntaxKind.GreaterThanToken]: "gt",
-        [ts.SyntaxKind.GreaterThanEqualsToken]: "ge",
-        [ts.SyntaxKind.EqualsEqualsEqualsToken]: "eq",
-        [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "neq",
-      };
-      const jop = JS_BIN[op];
-      if (jop === undefined) {
-        L.unsupported("SC1090", expr, `operator '${ts.tokenToString(op) ?? ts.SyntaxKind[op]}' on 'any' values`);
-      }
-      const type = jsOpResultKind(jop) === "bool" ? BOOL : JSVAL;
-      return {
-        kind: "jsOp", op: jop,
-        args: [L.jsvalIn(left, expr.left), L.jsvalIn(right, expr.right)],
-        type, loc,
-      };
-    }
+    if (left.type.kind === "jsval" || right.type.kind === "jsval") return lowerIslandBinary();
     const bothNum = left.type.kind === "f64" && right.type.kind === "f64";
     const bothStr = left.type.kind === "string" && right.type.kind === "string";
 
@@ -11095,15 +11121,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // losing declared and inherited fields at assignments such as
     // `this.name = ...` in an Error-subclass expression.
     const mappedReceiver = L.mapTypeOf(L.typeOf(access.expression));
-    // Exact-new provenance refines one NOMINAL class receiver to a more
-    // specific nominal class (`const b: Base = new Derived()`). It must not
-    // undo a real representation boundary: an annotated record initialized
-    // from a class has already been copy-projected into that record, so its
+    // Exact-new provenance refines a nominal or checker-erased (`any` in
+    // JavaScript) class receiver to its concrete class. It must not undo a
+    // real representation boundary: an annotated record initialized from
+    // a class has already been copy-projected into that record, so its
     // later fields are recordGet targets rather than reads through the
     // initializer's discarded class identity.
-    const exactInstance = mappedReceiver?.kind === "object"
-      ? exactInstanceClassOf(L, access.expression)
-      : null;
+    const exactInstance = mappedReceiver?.kind === "record"
+      ? null
+      : exactInstanceClassOf(L, access.expression);
     const receiverIr: IrType | null =
       access.expression.kind === ts.SyntaxKind.ThisKeyword && L.currentClass
         ? { kind: "object", className: L.currentClass.def.name }
