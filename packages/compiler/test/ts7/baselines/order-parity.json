@@ -5569,11 +5569,11 @@
    "diags": []
   },
   "<repo>/tests/corpus/2682-fs-rename.ts": {
-    "order": [
-     "<repo>/tests/corpus/2682-fs-rename.ts"
-    ],
-    "diags": []
-   },
+   "order": [
+    "<repo>/tests/corpus/2682-fs-rename.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2683-filter-truthy-predicate.ts": {
    "order": [
     "<repo>/tests/corpus/2683-filter-truthy-predicate.ts"
@@ -5653,9 +5653,27 @@
    "diags": []
   },
   "<repo>/tests/corpus/2700-wasi-core.ts": {
-    "order": [
-     "<repo>/tests/corpus/2700-wasi-core.ts"
-    ],
+   "order": [
+    "<repo>/tests/corpus/2700-wasi-core.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2820-crypto-sha512-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/2820-crypto-sha512-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2821-crypto-hmac-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/2821-crypto-hmac-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts": {
+   "order": [
+    "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts"
+   ],
    "diags": []
   },
   "<repo>/tests/corpus/300-if-else.ts": {

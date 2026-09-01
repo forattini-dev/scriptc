@@ -3931,7 +3931,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
   export function lowerCryptoComposedCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
-    if (access.name.text === "digest") return lowerHashDigestChain(L, call, access);
+    if (access.name.text === "digest") {
+      return lowerHashDigestChain(L, call, access) ?? lowerHmacDigestChain(L, call, access);
+    }
     if (access.name.text !== "toString") return null;
     const recv = access.expression;
     if (!ts.isCallExpression(recv) || recv.questionDotToken) return null;
@@ -3957,6 +3959,20 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     const enc = L.lowerExprExpecting(encNode!, STRING);
     return { kind: "libCall", fn: "crypto.randomBytesToString", args: [size, enc], type: STRING, loc };
   }
+
+/** The SHA family the runtimes carry, for BOTH fused chains (createHash
+   * and createHmac) and the crypto.hash one-shot. sha1 exists for the RFC
+   * 6455 Sec-WebSocket-Accept hash; sha384/sha512 are the wider digests
+   * the token/signature idioms want. Every other name fences. */
+  const LOWERED_DIGEST_ALGORITHMS = ["sha1", "sha256", "sha384", "sha512"] as const;
+
+  function isLoweredDigestAlgorithm(value: string): boolean {
+    return (LOWERED_DIGEST_ALGORITHMS as readonly string[]).includes(value);
+  }
+
+  const DIGEST_ALGORITHM_HINT =
+    'sha1, sha256, sha384, and sha512 are the lowered algorithms: createHash("sha256") ' +
+    "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash)";
 
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
@@ -3991,13 +4007,8 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (!bi || bi.module !== "crypto" || bi.member !== "createHash") return null;
     const loc = locOf(call);
     const algT = chCall.arguments.length === 1 ? L.typeOf(chCall.arguments[0]!) : undefined;
-    if (!algT?.isStringLiteralType() || (algT.value !== "sha256" && algT.value !== "sha1")) {
-      L.noLowering(
-        "createHash with this algorithm",
-        chCall,
-        'sha256 and sha1 are the lowered algorithms: createHash("sha256") ' +
-          "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash)",
-      );
+    if (!algT?.isStringLiteralType() || !isLoweredDigestAlgorithm(algT.value)) {
+      L.noLowering("createHash with this algorithm", chCall, DIGEST_ALGORITHM_HINT);
     }
     if (updateCall.arguments.length !== 1) {
       L.noLowering(
@@ -4040,6 +4051,110 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     );
   }
 
+/** The composed HMAC chain —
+   * `createHmac("sha256", key).update(data).digest("hex")` — fused into
+   * ONE libCall, exactly the createHash stance: no Hmac handle exists in
+   * the value model, so the chain IS the surface. The key lowers to bytes
+   * either way (a string key decodes its UTF-8 through Buffer.from, which
+   * is what Node does), keeping ONE runtime signature per data kind.
+   * Null when the callee isn't this chain (other Hmac-typed code lands on
+   * the ordinary member fences). */
+  function lowerHmacDigestChain(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    const updateCall = access.expression;
+    if (!ts.isCallExpression(updateCall) || updateCall.questionDotToken) return null;
+    const updAccess = updateCall.expression;
+    if (
+      !ts.isPropertyAccessExpression(updAccess) ||
+      updAccess.questionDotToken ||
+      updAccess.name.text !== "update"
+    ) {
+      return null;
+    }
+    const chCall = updAccess.expression;
+    if (!ts.isCallExpression(chCall) || chCall.questionDotToken) return null;
+    const callee = chCall.expression;
+    const bi = ts.isIdentifier(callee)
+      ? L.builtinImportOf(callee)
+      : ts.isPropertyAccessExpression(callee)
+        ? L.builtinMemberOf(callee)
+        : null;
+    if (!bi || bi.module !== "crypto" || bi.member !== "createHmac") return null;
+    const loc = locOf(call);
+    const algT = chCall.arguments.length === 2 ? L.typeOf(chCall.arguments[0]!) : undefined;
+    if (!algT?.isStringLiteralType() || !isLoweredDigestAlgorithm(algT.value)) {
+      L.noLowering(
+        "createHmac with this algorithm",
+        chCall,
+        'the lowered shape is createHmac("sha256", key) — two arguments, a literal ' +
+          "algorithm (sha1, sha256, sha384, or sha512) and a string or Buffer key " +
+          "(KeyObjects have no lowering)",
+      );
+    }
+    if (updateCall.arguments.length !== 1) {
+      L.noLowering(
+        `Hmac.update with ${updateCall.arguments.length} arguments`,
+        updateCall,
+        "one string or Buffer argument is the lowered update (input encodings have no lowering)",
+      );
+    }
+    const encT = call.arguments.length === 1 ? L.typeOf(call.arguments[0]!) : undefined;
+    if (!encT?.isStringLiteralType() || (encT.value !== "hex" && encT.value !== "base64")) {
+      L.noLowering(
+        "Hmac.digest with this encoding",
+        call,
+        'hex and base64 are the lowered digests: .digest("hex") (the bare Buffer digest has no lowering)',
+      );
+    }
+    // Source order: algorithm, key, data, encoding. The algorithm and
+    // encoding are proven literals (fenced above), so their position is
+    // unobservable; the key and data lower between them in order.
+    const alg = L.lowerExprExpecting(chCall.arguments[0]!, STRING);
+    const keyNode = chCall.arguments[1]!;
+    const keyIr = L.mapTypeOf(L.typeOf(keyNode));
+    let key: IrExpr;
+    if (keyIr?.kind === "bytes" && keyIr.elem === "u8") {
+      key = L.lowerExprExpecting(keyNode, BYTES_U8);
+    } else if (keyIr?.kind === "string") {
+      // Node's own contract for a string key: its UTF-8 bytes.
+      key = {
+        kind: "libCall",
+        fn: "buffer.fromStr",
+        args: [L.lowerExprExpecting(keyNode, STRING), strLit("utf8", loc)],
+        type: BYTES_U8,
+        loc,
+      };
+    } else {
+      L.noLowering(
+        `createHmac key of '${keyIr ? L.fmt(keyIr) : L.checker.typeToString(L.typeOf(keyNode))}' values`,
+        keyNode,
+        "string and Buffer/Uint8Array keys are the lowered forms (KeyObjects have no lowering)",
+      );
+    }
+    const dataNode = updateCall.arguments[0]!;
+    const dataIr = L.mapTypeOf(L.typeOf(dataNode));
+    // u8 views only: the runtime signature is a byte view, so a wider
+    // element type fences rather than reaching IR validation.
+    if ((dataIr?.kind === "bytes" && dataIr.elem === "u8") || dataIr?.kind === "string") {
+      const data = dataIr.kind === "bytes"
+        ? L.lowerExprExpecting(dataNode, BYTES_U8)
+        : L.lowerExprExpecting(dataNode, STRING);
+      const enc = L.lowerExprExpecting(call.arguments[0]!, STRING);
+      return {
+        kind: "libCall",
+        fn: dataIr.kind === "bytes" ? "crypto.hmacDigestBytes" : "crypto.hmacDigestStr",
+        args: [alg, key, data, enc],
+        type: STRING,
+        loc,
+      };
+    }
+    L.noLowering(
+      `Hmac.update of '${dataIr ? L.fmt(dataIr) : L.checker.typeToString(L.typeOf(dataNode))}' values`,
+      dataNode,
+      "string and Buffer/Uint8Array inputs are the lowered update forms",
+    );
+  }
+
 /** The node:crypto introspection statics — build-time constants of the
    * compiled runtime, baked at the call site (the http2.constants stance
    * extended to calls): getFips() answers 0 (no FIPS provider can ever
@@ -4055,6 +4170,36 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     bi: { module: string; member: string },
     loc: SrcLoc,): IrExpr | null {
     if (bi.module !== "crypto") return null;
+    if (bi.member === "timingSafeEqual") {
+      // Node's own contract: two ArrayBufferViews of EQUAL byte length,
+      // compared in constant time; unequal lengths throw a RangeError
+      // coded ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH (from the runtime — the
+      // length is a runtime property, not a static one).
+      const views = expr.arguments.length === 2
+        ? expr.arguments.map((argument) => L.mapTypeOf(L.typeOf(argument)))
+        : undefined;
+      if (
+        views === undefined ||
+        views.some((view) => view?.kind !== "bytes" || view.elem !== "u8")
+      ) {
+        L.noLowering(
+          "crypto.timingSafeEqual with these arguments",
+          expr,
+          "the lowered shape is timingSafeEqual(a, b) over two Buffer/Uint8Array values " +
+            "(Node's own signature rejects strings)",
+        );
+      }
+      return {
+        kind: "libCall",
+        fn: "crypto.timingSafeEqual",
+        // Expecting the byte type (rather than lowering bare) keeps an
+        // `as`-asserted string out of the bytes slot: the mismatch fences
+        // where the assertion is, instead of reaching IR validation.
+        args: expr.arguments.map((argument) => L.lowerExprExpecting(argument, BYTES_U8)),
+        type: BOOL,
+        loc,
+      };
+    }
     if (bi.member === "hash") {
       if (expr.arguments.length < 2 || expr.arguments.length > 3) {
         L.noLowering(
@@ -4066,11 +4211,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       const algorithmNode = expr.arguments[0]!;
       const algorithmType = L.typeOf(algorithmNode);
       if (!algorithmType.isStringLiteralType() ||
-          (algorithmType.value !== "sha256" && algorithmType.value !== "sha1")) {
+          !isLoweredDigestAlgorithm(algorithmType.value)) {
         L.noLowering(
           "crypto.hash with this algorithm",
           algorithmNode,
-          "sha256 and sha1 are the lowered one-shot algorithms",
+          "sha1, sha256, sha384, and sha512 are the lowered one-shot algorithms",
         );
       }
       const dataNode = expr.arguments[1]!;

@@ -3060,6 +3060,19 @@ export type IrLibFn =
    * Buffer/typed array's bytes. Pure; never throw. */
   | "crypto.hashDigestStr"
   | "crypto.hashDigestBytes"
+  /** The COMPOSED HMAC chain createHmac(alg, key).update(data).digest(enc)
+   * fused into one call — no Hmac handle materializes. Args are (alg,
+   * key, data, enc). The key is ALWAYS bytes: a string key lowers through
+   * Buffer.from(key, "utf8") first (Node's own contract), so one
+   * signature per data kind covers both spellings. Same algorithm and
+   * encoding literal sets as the hash chain. Pure; never throw. */
+  | "crypto.hmacDigestStr"
+  | "crypto.hmacDigestBytes"
+  /** crypto.timingSafeEqual(a, b) over two u8 byte views: a constant-time
+   * compare. THROWS Node's RangeError coded
+   * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the byte lengths differ (the
+   * length is not secret, so that check is not constant time). */
+  | "crypto.timingSafeEqual"
   /** crypto.randomBytes(n) → a real u8 Buffer (+1). THROWS Node's
    * RangeError on out-of-range sizes, exactly like the composed
    * randomBytesToString (which keeps its one-libCall lowering — the two
@@ -7132,6 +7145,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "num.toPrecision",
   "num.toRadixString",
   "insp.jsonDyn",
+  // crypto.timingSafeEqual throws Node's RangeError coded
+  // ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH on unequal byte lengths.
+  "crypto.timingSafeEqual",
   // diagnostics_channel: publish runs subscribers synchronously (a throw
   // propagates — the documented divergence from triggerUncaughtException);
   // the subscribe/unsubscribe forms throw Node's ERR_INVALID_ARG_TYPE for

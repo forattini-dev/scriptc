@@ -2627,22 +2627,33 @@ bool scr_children_wait(double max_wait_ms);
 ScrStr *scr_crypto_random_uuid(void);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
- * the compiler (no Hash handle exists). alg is "sha256" | "sha1" and enc
- * "hex" | "base64" — compile-time literals, frontend-fenced (sha1 exists
- * for the RFC 6455 Sec-WebSocket-Accept hash). Strings hash their UTF-8
- * bytes (Node's default input encoding; ScrStr storage IS utf8), the
- * bytes form a Buffer/typed array's raw bytes. Borrowed; +1 string.
- * Never throw. */
+ * the compiler (no Hash handle exists). alg is "sha1" | "sha256" |
+ * "sha384" | "sha512" and enc "hex" | "base64" — compile-time literals,
+ * frontend-fenced (sha1 exists for the RFC 6455 Sec-WebSocket-Accept
+ * hash). Strings hash their UTF-8 bytes (Node's default input encoding;
+ * ScrStr storage IS utf8), the bytes form a Buffer/typed array's raw
+ * bytes. Borrowed; +1 string. Never throw. */
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc);
 ScrStr *scr_crypto_hash_digest_bytes(ScrStr *alg, ScrBytes *data, ScrStr *enc);
-/* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256")
- * — the island crypto shim's bridge (scr_island.c host hooks). Digest
- * bytes into out (≥32); returns the digest length, 0 for an unknown
- * algorithm. */
+/* The composed createHmac(alg, key).update(data).digest(enc) chain, same
+ * algorithm and encoding sets. The key is ALWAYS bytes — the compiler
+ * decodes a string key's UTF-8 into a Buffer first, so one runtime
+ * signature covers both key spellings. Borrowed; +1 string. Never
+ * throw. */
+ScrStr *scr_crypto_hmac_digest_str(ScrStr *alg, ScrBytes *key, ScrStr *data, ScrStr *enc);
+ScrStr *scr_crypto_hmac_digest_bytes(ScrStr *alg, ScrBytes *key, ScrBytes *data, ScrStr *enc);
+/* crypto.timingSafeEqual over two byte views: a constant-time compare of
+ * equal-length inputs. THROWS Node's RangeError coded
+ * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the byte lengths differ. */
+bool scr_crypto_timing_safe_equal(ScrBytes *a, ScrBytes *b);
+/* One-shot raw digest/HMAC by algorithm name ("md5" | "sha1" | "sha256"
+ * | "sha384" | "sha512") — the island crypto shim's bridge (scr_island.c
+ * host hooks) and the fused chains' own dispatch. Digest bytes into out
+ * (≥64); returns the digest length, 0 for an unknown algorithm. */
 size_t scr_crypto_digest_raw(const char *alg, const unsigned char *data, size_t len,
-                             unsigned char out[32]);
+                             unsigned char out[64]);
 size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t keylen,
-                           const unsigned char *data, size_t len, unsigned char out[32]);
+                           const unsigned char *data, size_t len, unsigned char out[64]);
 /* The composed `new crypto.X509Certificate(data).fingerprint` read (the
  * handle never materializes): the SHA-1 of the DER, uppercase
  * colon-separated — PEM or raw-DER input; anything else throws Node's

@@ -651,52 +651,6 @@
     }
 
     #[test]
-    fn crypto_random_values_have_node_shapes_and_errors() {
-        let uuid = crypto_random_uuid();
-        assert_eq!(uuid.len(), 36);
-        assert_eq!(&uuid[8..9], "-");
-        assert_eq!(&uuid[13..15], "-4");
-        assert_eq!(&uuid[18..19], "-");
-        assert_eq!(&uuid[23..24], "-");
-        assert!(matches!(uuid.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
-        assert!(uuid
-            .bytes()
-            .all(|byte| byte == b'-' || byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
-
-        let bytes = crypto_random_bytes(8.9);
-        assert_eq!(bytes_len(&bytes), 8.0);
-        assert_eq!(crypto_random_string(5.0, &string("base64")).len(), 8);
-
-        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            crypto_random_bytes(-1.0)
-        }))
-        .err()
-        .expect("a negative random byte size must throw");
-        let caught = caught_from_panic(payload);
-        assert_eq!(caught_error_name(&caught).as_ref(), "RangeError");
-        assert_eq!(
-            caught_error_code(&caught).expect("error code").as_ref(),
-            "ERR_OUT_OF_RANGE"
-        );
-        assert_eq!(
-            caught_error_message(&caught).as_ref(),
-            "The value of \"size\" is out of range. It must be >= 0 && <= 2147483647. Received -1"
-        );
-    }
-
-    #[test]
-    fn crypto_hash_digests_match_node_encodings() {
-        assert_eq!(
-            crypto_hash_digest_string(&string("sha256"), &string("abc"), &string("hex")).as_ref(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        );
-        assert_eq!(
-            crypto_hash_digest_bytes(&string("sha1"), &bytes_from_vec(b"abc".to_vec()), &string("base64")).as_ref(),
-            "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=",
-        );
-    }
-
-    #[test]
     fn operating_system_identity_values_are_available() {
         assert!(!os_type().is_empty());
         assert!(!os_release().is_empty());

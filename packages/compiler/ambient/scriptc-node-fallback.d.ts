@@ -1373,7 +1373,8 @@ declare module "crypto" {
   export function randomUUID(): string;
   export function randomBytes(size: number): Buffer;
   /* The lowered Hash surface is exactly the COMPOSED chain
-   * createHash("sha256" | "sha1").update(data).digest("hex" | "base64")
+   * createHash("sha1" | "sha256" | "sha384" | "sha512")
+   *   .update(data).digest("hex" | "base64")
    * — fused into one call, the Hash handle never materializes (holding
    * one fences). sha1 exists for the RFC 6455 Sec-WebSocket-Accept
    * hash. */
@@ -1382,6 +1383,19 @@ declare module "crypto" {
     digest(encoding: "hex" | "base64"): string;
   }
   export function createHash(algorithm: string): Hash;
+  /* The lowered Hmac surface is the same COMPOSED shape over the same
+   * algorithms: createHmac(algorithm, key).update(data).digest(enc). A
+   * string key hashes its UTF-8 bytes, exactly like Node's; KeyObject
+   * keys have no lowering. */
+  export interface Hmac {
+    update(data: string | Uint8Array): Hmac;
+    digest(encoding: "hex" | "base64"): string;
+  }
+  export function createHmac(algorithm: string, key: string | Uint8Array): Hmac;
+  /* Constant-time comparison of two equally long byte views. Throws
+   * Node's RangeError (ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH) when the
+   * byte lengths differ. */
+  export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   /* Node 24/26 one-shot digest. The lowered static slice accepts the same
    * string/byte inputs as the fused Hash chain and returns text: omitted
    * outputEncoding means hex, with explicit hex/base64 also supported. */

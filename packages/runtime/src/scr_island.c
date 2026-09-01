@@ -3312,7 +3312,7 @@ static JSValue isl_host_digest(JSContext *ctx, JSValueConst this_val, int argc,
     JS_FreeCString(ctx, alg);
     return JS_EXCEPTION;
   }
-  unsigned char out[32];
+  unsigned char out[64];
   size_t n = scr_crypto_digest_raw(alg, data, len, out);
   JS_FreeCString(ctx, alg);
   return n == 0 ? JS_UNDEFINED : JS_NewUint8ArrayCopy(ctx, out, n);
@@ -3332,7 +3332,7 @@ static JSValue isl_host_hmac(JSContext *ctx, JSValueConst this_val, int argc,
     JS_FreeCString(ctx, alg);
     return JS_EXCEPTION;
   }
-  unsigned char out[32];
+  unsigned char out[64];
   size_t n = scr_crypto_hmac_raw(alg, key, keylen, data, len, out);
   JS_FreeCString(ctx, alg);
   return n == 0 ? JS_UNDEFINED : JS_NewUint8ArrayCopy(ctx, out, n);
@@ -5716,7 +5716,7 @@ static const char isl_modules_bootstrap[] =
     "    randomBytes, randomFillSync, randomFill, randomInt, randomUUID,\n"
     "    getRandomValues: (ta) => webcrypto.getRandomValues(ta),\n"
     "    timingSafeEqual, pbkdf2, pbkdf2Sync,\n"
-    "    getHashes: () => [\"md5\", \"sha1\", \"sha256\"],\n"
+    "    getHashes: () => [\"md5\", \"sha1\", \"sha256\", \"sha384\", \"sha512\"],\n"
     "    getCiphers: () => [],\n"
     "    getCurves: () => [],\n"
     "    webcrypto,\n"

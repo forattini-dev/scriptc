@@ -13,6 +13,9 @@ test.each([
   "1534-crypto-hash-chain.ts",
   "2280-builtin-namespace-destructure.cjs",
   "2789-crypto-hash-one-shot.ts",
+  "2820-crypto-sha512-chain.ts",
+  "2821-crypto-hmac-chain.ts",
+  "2822-crypto-timing-safe-equal.ts",
 ])("Rust fused crypto hashes match the differential corpus: %s", async (fixtureName) => {
   const fixture = resolve("tests/corpus", fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-crypto-hash-"));

@@ -5630,6 +5630,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_crypto_hash_digest_str(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "crypto.hashDigestBytes":
             return finish(`scr_crypto_hash_digest_bytes(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          // The fused HMAC chain: (alg, keyBytes, data, enc). Never throws.
+          case "crypto.hmacDigestStr":
+            return finish(`scr_crypto_hmac_digest_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "crypto.hmacDigestBytes":
+            return finish(`scr_crypto_hmac_digest_bytes(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          // Throws Node's ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH RangeError
+          // on unequal byte lengths (may-throw seed set).
+          case "crypto.timingSafeEqual":
+            return finish(`scr_crypto_timing_safe_equal(${arg(0)}, ${arg(1)})`);
           // The Buffer statics (scr_bytes.c): fromStr decodes Node-
           // leniently (never throws), concat copies its borrowed list.
           case "buffer.fromStr":

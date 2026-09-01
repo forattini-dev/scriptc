@@ -756,6 +756,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "crypto.randomBytes": { argTypes: [F64], result: BYTES_U8 },
   "crypto.hashDigestStr": { argTypes: [STRING, STRING, STRING], result: STRING },
   "crypto.hashDigestBytes": { argTypes: [STRING, BYTES_U8, STRING], result: STRING },
+  "crypto.hmacDigestStr": { argTypes: [STRING, BYTES_U8, STRING, STRING], result: STRING },
+  "crypto.hmacDigestBytes": { argTypes: [STRING, BYTES_U8, BYTES_U8, STRING], result: STRING },
+  "crypto.timingSafeEqual": { argTypes: [BYTES_U8, BYTES_U8], result: BOOL },
   // The Buffer statics and the fs/zlib Buffer forms: fixed always-u8
   // signatures (Buffer IS a Uint8Array — one bytes kind).
   "buffer.fromStr": { argTypes: [STRING, STRING], result: BYTES_U8 },

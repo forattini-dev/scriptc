@@ -1352,13 +1352,15 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
   crypto: {
     createHash:
       "the one lowered shape is the composed chain " +
-      'createHash("sha256").update(data).digest("hex") — the Hash handle itself has no lowering',
+      'createHash("sha256").update(data).digest("hex") — the Hash handle itself has no lowering ' +
+      "(sha1, sha256, sha384, and sha512 are the lowered algorithms)",
     hash:
-      "the lowered one-shot shapes hash SHA-256/SHA-1 strings or Buffer/Uint8Array inputs to default hex, " +
+      "the lowered one-shot shapes hash SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, " +
       'with explicit base64 also supported for strings; other algorithms and output options have no lowering yet',
     createHmac:
-      "HMAC has no lowering yet — the lowered crypto surface is randomUUID, randomBytes, " +
-      'the createHash("sha256"|"sha1") chain, and the introspection statics',
+      "the one lowered shape is the composed chain " +
+      'createHmac("sha256", key).update(data).digest("hex") — the Hmac handle itself has no lowering ' +
+      "(sha1, sha256, sha384, and sha512 over string or Buffer keys; KeyObject keys have none)",
     ...Object.fromEntries(
       [
         "generateKeyPair", "generateKeyPairSync", "generateKey", "generateKeySync",

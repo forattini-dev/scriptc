@@ -47,14 +47,101 @@ pub fn crypto_random_uuid() -> JsString {
     string(&output)
 }
 
-fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
-    let algorithm = match algorithm.as_ref() {
+/// The four lowered digest algorithms. The frontend fences every other
+/// literal, so an unknown name here is a compiler invariant break.
+fn crypto_digest_algorithm(algorithm: &JsString) -> &'static ring::digest::Algorithm {
+    match algorithm.as_ref() {
         "sha1" => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
         "sha256" => &ring::digest::SHA256,
+        "sha384" => &ring::digest::SHA384,
+        "sha512" => &ring::digest::SHA512,
         _ => unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"),
-    };
-    let digest = ring::digest::digest(algorithm, data);
+    }
+}
+
+fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
+    let digest = ring::digest::digest(crypto_digest_algorithm(algorithm), data);
     decode_bytes(digest.as_ref(), encoding.as_ref())
+}
+
+/// Reads a Buffer/typed-array handle's bytes. Two handles can be read at
+/// once (both borrows are shared) even when they alias one storage.
+fn crypto_with_bytes<T>(data: &JsBytes<u8>, body: impl FnOnce(&[u8]) -> T) -> T {
+    data.with(|bytes| {
+        let storage = bytes.storage.borrow();
+        body(&storage[bytes.offset..bytes.offset + bytes.length])
+    })
+}
+
+fn crypto_hmac_algorithm(algorithm: &JsString) -> ring::hmac::Algorithm {
+    match algorithm.as_ref() {
+        "sha1" => ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        "sha256" => ring::hmac::HMAC_SHA256,
+        "sha384" => ring::hmac::HMAC_SHA384,
+        "sha512" => ring::hmac::HMAC_SHA512,
+        _ => unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"),
+    }
+}
+
+/// The composed createHmac(alg, key).update(data).digest(enc) chain. The
+/// key always arrives as bytes (the frontend decodes a string key's UTF-8
+/// first), the data keeps the fused chain's string/bytes split.
+fn crypto_hmac_digest(
+    algorithm: &JsString,
+    key: &JsBytes<u8>,
+    data: &[u8],
+    encoding: &JsString,
+) -> JsString {
+    let tag = crypto_with_bytes(key, |key| {
+        ring::hmac::sign(&ring::hmac::Key::new(crypto_hmac_algorithm(algorithm), key), data)
+    });
+    decode_bytes(tag.as_ref(), encoding.as_ref())
+}
+
+pub fn crypto_hmac_digest_string(
+    algorithm: &JsString,
+    key: &JsBytes<u8>,
+    data: &JsString,
+    encoding: &JsString,
+) -> JsString {
+    crypto_hmac_digest(algorithm, key, data.as_bytes(), encoding)
+}
+
+pub fn crypto_hmac_digest_bytes(
+    algorithm: &JsString,
+    key: &JsBytes<u8>,
+    data: &JsBytes<u8>,
+    encoding: &JsString,
+) -> JsString {
+    crypto_with_bytes(data, |data| crypto_hmac_digest(algorithm, key, data, encoding))
+}
+
+/// crypto.timingSafeEqual: a constant-time comparison of two equally long
+/// byte views. Node throws a RangeError with
+/// ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH when the lengths differ — the
+/// length itself is not secret, so the check is not constant time there.
+///
+/// The compare is the classic difference-accumulating fold — the same one
+/// the C runtime uses, so both lanes have identical timing behaviour. It
+/// deliberately does not short-circuit: every byte is read and folded
+/// whatever the earlier bytes were. (ring's `constant_time` equivalent is
+/// deprecated as of 0.17.14 and would fail the `-D warnings` gate.)
+pub fn crypto_timing_safe_equal(first: &JsBytes<u8>, second: &JsBytes<u8>) -> bool {
+    crypto_with_bytes(first, |first| {
+        crypto_with_bytes(second, |second| {
+            if first.len() != second.len() {
+                throw_range_error_code(
+                    "Input buffers must have the same byte length".to_owned(),
+                    "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH",
+                );
+            }
+            first
+                .iter()
+                .zip(second.iter())
+                .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+                == 0
+        })
+    })
 }
 
 pub fn crypto_hash_digest_string(
@@ -70,14 +157,7 @@ pub fn crypto_hash_digest_bytes(
     data: &JsBytes<u8>,
     encoding: &JsString,
 ) -> JsString {
-    data.with(|bytes| {
-        let storage = bytes.storage.borrow();
-        crypto_hash_digest(
-            algorithm,
-            &storage[bytes.offset..bytes.offset + bytes.length],
-            encoding,
-        )
-    })
+    crypto_with_bytes(data, |data| crypto_hash_digest(algorithm, data, encoding))
 }
 
 fn crypto_x509_der(input: &[u8]) -> Vec<u8> {

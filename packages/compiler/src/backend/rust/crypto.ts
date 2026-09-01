@@ -14,6 +14,29 @@ export function emitRustCryptoCall(
     }
     return `runtime::${x509.helper}(&(${context.emitExpr(data)}))`;
   }
+  if (expr.fn === "crypto.timingSafeEqual") {
+    const [first, second] = expr.args;
+    if (expr.args.length !== 2 || expr.type.kind !== "bool" ||
+        first?.type.kind !== "bytes" || first.type.elem !== "u8" ||
+        second?.type.kind !== "bytes" || second.type.elem !== "u8") {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    return `runtime::crypto_timing_safe_equal(&(${context.emitExpr(first)}), &(${context.emitExpr(second)}))`;
+  }
+  if (expr.fn === "crypto.hmacDigestStr" || expr.fn === "crypto.hmacDigestBytes") {
+    const [algorithm, key, data, encoding] = expr.args;
+    const stringData = expr.fn === "crypto.hmacDigestStr";
+    if (expr.args.length !== 4 || algorithm?.type.kind !== "string" ||
+        encoding?.type.kind !== "string" || expr.type.kind !== "string" ||
+        key?.type.kind !== "bytes" || key.type.elem !== "u8" || data === undefined ||
+        (stringData ? data.type.kind !== "string" :
+          data.type.kind !== "bytes" || data.type.elem !== "u8")) {
+      context.unsupported(`${expr.fn} shape`, expr.loc);
+    }
+    const helper = stringData ? "crypto_hmac_digest_string" : "crypto_hmac_digest_bytes";
+    return `runtime::${helper}(&(${context.emitExpr(algorithm)}), &(${context.emitExpr(key)}), ` +
+      `&(${context.emitExpr(data)}), &(${context.emitExpr(encoding)}))`;
+  }
   if (expr.fn !== "crypto.hashDigestStr" && expr.fn !== "crypto.hashDigestBytes") return null;
   const [algorithm, data, encoding] = expr.args;
   const stringData = expr.fn === "crypto.hashDigestStr";
