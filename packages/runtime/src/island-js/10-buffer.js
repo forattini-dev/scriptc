@@ -60,13 +60,18 @@ function makeBuffer() {
     for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
     return out;
   };
+    /* slice, not substr: substr is Annex B, which the shared bootstrap
+     * cannot assume — the Rust island's engine does not implement it, and
+     * this is the only place the shims reached for it. For a non-negative
+     * start the two are the same function. */
   const encHex = (s) => {
     const n = s.length >>> 1;
     const out = new Uint8Array(n);
     let i = 0;
     for (; i < n; i++) {
-      const b = parseInt(s.substr(i * 2, 2), 16);
-      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(s.substr(i * 2, 2))) break;
+      const pair = s.slice(i * 2, i * 2 + 2);
+      const b = parseInt(pair, 16);
+      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(pair)) break;
       out[i] = b;
     }
     return i === n ? out : out.subarray(0, i);

@@ -1139,13 +1139,18 @@ static const char isl_modules_bootstrap[] =
     "    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;\n"
     "    return out;\n"
     "  };\n"
+    /* slice, not substr: substr is Annex B, which the shared bootstrap
+     * cannot assume — the Rust island's engine does not implement it, and
+     * this is the only place the shims reached for it. For a non-negative
+     * start the two are the same function. */
     "  const encHex = (s) => {\n"
     "    const n = s.length >>> 1;\n"
     "    const out = new Uint8Array(n);\n"
     "    let i = 0;\n"
     "    for (; i < n; i++) {\n"
-    "      const b = parseInt(s.substr(i * 2, 2), 16);\n"
-    "      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(s.substr(i * 2, 2))) break;\n"
+    "      const pair = s.slice(i * 2, i * 2 + 2);\n"
+    "      const b = parseInt(pair, 16);\n"
+    "      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(pair)) break;\n"
     "      out[i] = b;\n"
     "    }\n"
     "    return i === n ? out : out.subarray(0, i);\n"

@@ -597,8 +597,9 @@ function makeBuffer() {
     const out = new Uint8Array(n);
     let i = 0;
     for (; i < n; i++) {
-      const b = parseInt(s.substr(i * 2, 2), 16);
-      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(s.substr(i * 2, 2))) break;
+      const pair = s.slice(i * 2, i * 2 + 2);
+      const b = parseInt(pair, 16);
+      if (Number.isNaN(b) || !/^[0-9a-fA-F]{2}$/.test(pair)) break;
       out[i] = b;
     }
     return i === n ? out : out.subarray(0, i);
