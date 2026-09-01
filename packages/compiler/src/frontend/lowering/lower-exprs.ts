@@ -9494,7 +9494,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * un-narrowed uses have nothing sound to lower to. */
   export function caughtRead(L: Lowerer, node: ts.Identifier, local: IrLocal, loc: SrcLoc): IrExpr {
     const ref: IrExpr = { kind: "varRef", localId: local.id, type: CAUGHT, loc };
-    const narrowed = L.mapTypeOf(L.typeOf(node));
+    const checkerType = L.typeOf(node);
+    const narrowed = L.mapTypeOf(checkerType);
     if (
       narrowed &&
       (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
@@ -9507,14 +9508,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         return { kind: "caughtNarrow", value: ref, type: narrowed, loc };
       }
     }
-    // An UN-narrowed use — the occurrence still types `unknown` — converts
-    // to a dyn value (`options.onError?.(error)` — the caught snapshot
-    // flowing into an unknown slot): the typed→unknown deep-copy stance
-    // extended to exception payloads. Error payloads keep their
+    // An UN-narrowed use — the occurrence still types `unknown`, or is the
+    // implicit `any` parameter supplied by Promise's onRejected signature
+    // — converts to a dyn value (`options.onError?.(error)` — the caught
+    // snapshot flowing into an unknown slot): the typed→unknown deep-copy
+    // stance extended to exception payloads. Error payloads keep their
     // observability (instanceof Error / .message / String() — the checked-dynamic tree's
     // error encoding); other object payloads are type-erased at runtime and
     // convert to the "[object Object]" approximation — SEMANTICS.md 67.
-    if (narrowed?.kind === "dyn") {
+    if (narrowed?.kind === "dyn" || (checkerType.flags & ts.TypeFlags.Any) !== 0) {
       return { kind: "caughtToDyn", value: ref, type: DYN, loc };
     }
     L.unsupported("SC1063", node);
