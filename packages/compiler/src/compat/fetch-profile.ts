@@ -7,7 +7,29 @@
  * unsupported work cannot hide outside the positive allowlists. A Node upgrade
  * is deliberate because Node's bundled Undici version is observable in
  * coercion, error, stream, and transport behavior.
+ *
+ * The row algebra — statuses, placements, entry constructors, evidence —
+ * lives in profile-schema.ts and is shared with every other builtin-class
+ * profile; only the fetch-specific facets, dictionaries, and member
+ * allowlists are declared here.
  */
+
+import {
+  COMPAT_METADATA_EXCLUSION,
+  compatEntries,
+  compatFixture,
+  compatGenerated,
+  compatTargetLabel,
+  type CompatEvidence,
+  type CompatInventory,
+  type CompatInventoryEntry,
+  type CompatInventoryExclusion,
+  type CompatInventoryPlacement,
+  type CompatInventoryStatus,
+  type CompatOperation,
+  type CompatOption,
+  type CompatProfileProjection,
+} from "./profile-schema.js";
 
 export type FetchCompatFacet =
   | "argument-evaluation"
@@ -26,74 +48,17 @@ export type FetchCompatFacet =
   | "transport"
   | "webidl-conversion";
 
-export interface FetchCompatEvidence {
-  /** Stable scenario id interpreted by the generated differential harness. */
-  generated?: string;
-  /** Fixture directory below tests/fixtures/fetch. */
-  fixture?: string;
-}
-
-export interface FetchCompatOperation {
-  id: string;
-  name: string;
-  kind: "constructor" | "function" | "method" | "property" | "static-method";
-  facets: readonly FetchCompatFacet[];
-  /** The supported call/input subset when the operation is not an entire
-   * WebIDL overload family. The manifest publishes this verbatim. */
-  scope?: string;
-  evidence: readonly FetchCompatEvidence[];
-}
-
-export interface FetchCompatOption {
-  id: string;
-  name: string;
-  conversion: string;
-  evidence: readonly FetchCompatEvidence[];
-}
-
-export type FetchCompatInventoryStatus =
-  | "static"
-  | "dynamic-only"
-  | "unsupported"
-  | "out-of-scope";
-
-export type FetchCompatInventoryPlacement =
-  | "global"
-  | "constructor"
-  | "static"
-  | "prototype"
-  | "prototype-inherited"
-  | "prototype-symbol"
-  | "dictionary";
-
-/** One public property in the pinned runtime census, or one WebIDL
- * dictionary member observed through its conversion reads. Static rows
- * must resolve to an operation/option above; dynamic-only rows are the
- * implementation queue; out-of-scope rows make intentional omissions
- * explicit instead of letting absence masquerade as a support claim. */
-export interface FetchCompatInventoryEntry {
-  id: string;
-  owner: string;
-  member: string;
-  placement: FetchCompatInventoryPlacement;
-  status: FetchCompatInventoryStatus;
-  code?: "SC2020";
-  reason?: string;
-}
-
-export interface FetchCompatInventoryExclusion {
-  name: string;
-  reason: string;
-}
-
-export interface FetchCompatInventory {
-  /** Globals whose own/public inherited surface is reflected under Node. */
-  interfaces: readonly string[];
-  /** Public member and WebIDL dictionary census, in oracle order. */
-  entries: readonly FetchCompatInventoryEntry[];
-  /** Adjacent Web APIs deliberately outside this engine-free slice. */
-  excludedInterfaces: readonly FetchCompatInventoryExclusion[];
-}
+/** The fetch profile's rows use the shared compat algebra verbatim; these
+ * aliases keep the published names stable for the conformance harness and
+ * the compiler's public exports. */
+export type FetchCompatEvidence = CompatEvidence;
+export type FetchCompatOperation = CompatOperation<FetchCompatFacet>;
+export type FetchCompatOption = CompatOption;
+export type FetchCompatInventoryStatus = CompatInventoryStatus;
+export type FetchCompatInventoryPlacement = CompatInventoryPlacement;
+export type FetchCompatInventoryEntry = CompatInventoryEntry;
+export type FetchCompatInventoryExclusion = CompatInventoryExclusion;
+export type FetchCompatInventory = CompatInventory;
 
 export interface FetchCompatProfile {
   schemaVersion: 1;
@@ -113,62 +78,12 @@ export interface FetchCompatProfile {
   inventory: FetchCompatInventory;
 }
 
-const generated = (scenario: string): FetchCompatEvidence => ({ generated: scenario });
-const fixture = (name: string): FetchCompatEvidence => ({ fixture: name });
+const generated = compatGenerated;
+const fixture = compatFixture;
 
-const staticEntry = (
-  id: string,
-  owner: string,
-  member: string,
-  placement: FetchCompatInventoryPlacement,
-): FetchCompatInventoryEntry => ({ id, owner, member, placement, status: "static" });
-
-const dynamicEntry = (
-  id: string,
-  owner: string,
-  member: string,
-  placement: FetchCompatInventoryPlacement,
-  reason: string,
-): FetchCompatInventoryEntry => ({
-  id,
-  owner,
-  member,
-  placement,
-  status: "dynamic-only",
-  code: "SC2020",
-  reason,
-});
-
-const unsupportedEntry = (
-  id: string,
-  owner: string,
-  member: string,
-  placement: FetchCompatInventoryPlacement,
-  reason: string,
-): FetchCompatInventoryEntry => ({
-  id,
-  owner,
-  member,
-  placement,
-  status: "unsupported",
-  code: "SC2020",
-  reason,
-});
-
-const outOfScopeEntry = (
-  id: string,
-  owner: string,
-  member: string,
-  placement: FetchCompatInventoryPlacement,
-  reason: string,
-): FetchCompatInventoryEntry => ({
-  id,
-  owner,
-  member,
-  placement,
-  status: "out-of-scope",
-  reason,
-});
+/** Every fetch refusal is fenced with the stdlib code. */
+const { staticEntry, dynamicEntry, unsupportedEntry, outOfScopeEntry } =
+  compatEntries("SC2020");
 
 const constructorUnsupported =
   "the interface constructor has no compiler bridge in either tier";
@@ -176,8 +91,7 @@ const widerMemberFence =
   "the member is outside the native static handle projection";
 const typedInterfaceUnsupported =
   "typed source has no compiler bridge for this interface in either tier";
-const metadataExclusion =
-  "WebIDL brand metadata is observable reflection, not an executable compatibility operation";
+const metadataExclusion = COMPAT_METADATA_EXCLUSION;
 
 export const NODE24_FETCH_COMPAT_PROFILE = {
   schemaVersion: 1,
@@ -932,6 +846,31 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
     ],
   },
 } satisfies FetchCompatProfile;
+
+/** The registry view of this profile. The version axis is derived from the
+ * single pinned tuple this profile already carries — Node plus the
+ * bundled Undici build — with no candidate runtime censused yet. */
+export const FETCH_COMPAT_PROJECTION: CompatProfileProjection = {
+  id: "fetch",
+  targets: {
+    primary: {
+      node: NODE24_FETCH_COMPAT_PROFILE.target.node,
+      components: { undici: NODE24_FETCH_COMPAT_PROFILE.target.undici },
+    },
+    candidates: [],
+  },
+  operations: NODE24_FETCH_COMPAT_PROFILE.operations,
+  options: [
+    ...NODE24_FETCH_COMPAT_PROFILE.requestInit,
+    ...NODE24_FETCH_COMPAT_PROFILE.responseInit,
+  ],
+  inventory: NODE24_FETCH_COMPAT_PROFILE.inventory,
+};
+
+/** "Node 24.15.0 / Undici 7.24.4" — the stamp on every projected row. */
+export const FETCH_COMPAT_TARGET_LABEL = compatTargetLabel(
+  FETCH_COMPAT_PROJECTION.targets.primary,
+);
 
 export const STATIC_RESPONSE_READS = new Set(
   NODE24_FETCH_COMPAT_PROFILE.members.responseReads,
