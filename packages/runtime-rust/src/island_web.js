@@ -657,10 +657,12 @@
         : init.signal);
     }
     async text() {
+      return new TextDecoder().decode(await this.bytes());
+    }
+    async bytes() {
       if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
       this.bodyUsed = true;
-      const bytes = await fetchBody(this._body, this.headers);
-      return new TextDecoder().decode(bytes);
+      return fetchBody(this._body, this.headers);
     }
   }
 
