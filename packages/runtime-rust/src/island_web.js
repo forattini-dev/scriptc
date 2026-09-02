@@ -651,9 +651,16 @@
       this._body = init.body === undefined
         ? source === null ? undefined : source._body
         : init.body;
+      this.bodyUsed = false;
       this.signal = dependentAbortSignal(init.signal === undefined
         ? source === null ? undefined : source.signal
         : init.signal);
+    }
+    async text() {
+      if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
+      this.bodyUsed = true;
+      const bytes = await fetchBody(this._body, this.headers);
+      return new TextDecoder().decode(bytes);
     }
   }
 
