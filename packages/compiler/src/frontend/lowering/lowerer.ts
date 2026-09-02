@@ -3343,15 +3343,16 @@ export class Lowerer {
     // the supported-types recitation — proved by re-running mapType with
     // `dynamic: true`, never guessed from the type text. Probing is safe
     // here: a diagnostic means this build already failed, so anything the
-    // probe interns or registers on the way is never emitted. Checked LAST
-    // so every more specific story above (island ambients, index
-    // signatures, per-package attribution, generic signatures) keeps its
-    // own fence class. Bare `any` is excepted: unsupportedTypeDiag's own
+    // probe interns or registers on the way is never emitted. Return-only
+    // island carriers such as ArrayBuffer are excluded: their constructors
+    // keep SC2020. Checked LAST so the more-specific stories above keep
+    // their own fence class. Bare `any` is excepted: unsupportedTypeDiag's own
     // SC2011 arm tells that story with the stronger stay-static remedy
     // ('unknown' + a checked cast).
     if (
       !this.dynamic &&
       !(widened.flags & ts.TypeFlags.Any) &&
+      !(typeSym?.name === "ArrayBuffer" && this.isStdlibSymbol(typeSym)) &&
       mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
     ) {
       this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
@@ -3444,7 +3445,6 @@ export class Lowerer {
     this.pushDiag(unsupportedTypeDiag(this.checker.typeToString(type), locOf(node)));
     throw new PoisonError();
   }
-
   /** The lib fence (SC2020): a reached use of standard-library surface
    * nothing lowers. Poisons the statement like every other rejection.
    * `sym`, when given, picks the wording: surface declared only by the

@@ -5,8 +5,8 @@ async function main(): Promise<void> {
     method: "POST",
     body: "hé",
   });
-  const buffer = await (request as any).arrayBuffer();
-  console.log(request.bodyUsed, buffer.byteLength as number);
+  const buffer = await request.arrayBuffer();
+  console.log(request.bodyUsed, buffer.byteLength);
 }
 
 main().catch((error: unknown) => {

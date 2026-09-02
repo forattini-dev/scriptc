@@ -81,6 +81,7 @@ const cases = [
   ["Request.bytes returns exact UTF-8 bytes", "fetch-request-bytes/main.ts"],
   ["Request.json parses a textual body", "fetch-request-json/main.ts"],
   ["Request.arrayBuffer exposes the body byte length", "fetch-request-array-buffer/main.ts"],
+  ["Request.arrayBuffer keeps its typed top-level value", "fetch-request-array-buffer-top-level/main.ts"],
   ["Request.body exposes a lazy readable stream", "fetch-request-body/main.ts"],
   ["Request.body reads disturb the Body state", "fetch-request-body-read/main.ts"],
   ["Request.clone keeps Body consumption independent", "fetch-request-clone/main.ts"],
