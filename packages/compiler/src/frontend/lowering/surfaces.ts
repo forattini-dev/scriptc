@@ -921,8 +921,8 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // The Buffer form (no encoding), the fd forms (readFileSync(fd[,
     // "utf8"])), and the checked-dynamic encoding form.
     readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes"],
-    // The bytes-data form and the { mode } options form.
-    writeFileSync: ["fs.writeFileSyncBytes", "fs.writeFileModeSync"],
+    // The bytes-data form and both options forms ({ mode }, { flag: "wx", mode }).
+    writeFileSync: ["fs.writeFileSyncBytes", "fs.writeFileModeSync", "fs.writeFileExclusiveModeSync"],
     // The utf8 string overload; the table row is the Buffer-window form.
     writeSync: ["fs.writeStrSync"],
     // The { recursive, mode } option lowerings.
@@ -945,8 +945,8 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
   "fs/promises": {
     // The Buffer form (no encoding).
     readFile: ["fsp.readFileBytes"],
-    // The string-data { mode } options form.
-    writeFile: ["fsp.writeFileMode"],
+    // The string-data { mode } and { flag: "wx", mode } options forms.
+    writeFile: ["fsp.writeFileMode", "fsp.writeFileExclusiveMode"],
   },
   crypto: {
     // The composed randomBytes(n).toString(enc) chain keeps its one-libCall

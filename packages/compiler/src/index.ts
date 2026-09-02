@@ -68,8 +68,8 @@ export {
   generateSurfaceManifest,
   renderSurfaceManifest,
   MANIFEST_SCHEMA_VERSION,
-  type SurfaceManifest,
-  type SurfaceManifestEntry,
+  type SurfaceManifest, type SurfaceManifestEntry, type SurfaceEntryBackends,
+  BACKEND_IDS, BACKEND_LIB_CALLS, type BackendId,
 } from "./coverage/surface-manifest.js";
 export {
   NODE24_FETCH_COMPAT_PROFILE,

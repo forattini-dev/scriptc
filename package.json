@@ -22,9 +22,11 @@
     "test:sandbox:image": "node scripts/sandbox-image.mjs",
     "test:watch": "vitest",
     "limit": "node scripts/run-resource-limited.mjs",
-    "lint": "node scripts/check-rust-file-lines.mjs && node scripts/gen-island-bootstrap.mjs --check && eslint packages/compiler/src packages/cli/src",
+    "lint": "node scripts/check-rust-file-lines.mjs && node scripts/gen-island-bootstrap.mjs --check && tsx scripts/gen-backend-libcalls.mjs --check && eslint packages/compiler/src packages/cli/src",
     "lint:rust-lines": "node scripts/check-rust-file-lines.mjs",
+    "gen:backend-libcalls": "tsx scripts/gen-backend-libcalls.mjs",
     "manifest": "tsx scripts/surface-manifest.mjs",
+    "manifest:parity": "tsx scripts/manifest-parity.mjs",
     "scriptc": "tsx packages/cli/src/main.ts"
   },
   "devDependencies": {
