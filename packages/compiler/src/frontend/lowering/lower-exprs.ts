@@ -37,9 +37,9 @@ import {
 } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
+import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
 import { templateRawTextOf } from "./lower-templates.js";
-
 export {
   type FieldTarget,
   fieldGetExpr,
@@ -9645,8 +9645,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
-    const sockTest = lowerSocketInstanceOf(L, expr, loc);
-    if (sockTest !== null) return sockTest;
+    const specialTest = lowerSocketInstanceOf(L, expr, loc) ?? lowerDynamicRequestInstanceOf(L, expr, loc);
+    if (specialTest !== null) return specialTest;
     // An ISLAND class as the RHS (`v instanceof Boom` on a package-
     // exported class — the safeParse-style error narrowing): the spec's
     // InstanceofOperator runs in the engine (Symbol.hasInstance included;
