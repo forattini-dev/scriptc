@@ -33,6 +33,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line(`"readable" => ${dyn}::Boolean(runtime::http_request_readable(request)),`);
   line(`"readableEnded" | "complete" => ${dyn}::Boolean(!runtime::http_request_readable(request)),`);
   line(`"destroyed" => ${dyn}::Boolean(runtime::http_request_destroyed(request)),`);
+  line(`"headers" if runtime::http_request_is_fetch_response(request) => ${dyn}::HttpHeaders(request.clone()),`);
   line('"headers" => {');
   context.pushIndent();
   line(`let output: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new();`);
@@ -66,6 +67,13 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
 
   if (!context.usesDynamicInvoke()) return;
+
+  open(`fn sc_dyn_http_headers_invoke(headers: &runtime::JsHttpRequest, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
+  open("match method {");
+  line(`"get" => { let name = sc_dyn_to_string(args.first().unwrap_or(&${dyn}::Undefined)); runtime::fetch_response_header(headers, &name).map(${dyn}::String).unwrap_or(${dyn}::Null) },`);
+  line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+  close("}");
+  close("}");
 
   open(`fn sc_dyn_http_request_invoke(request: &runtime::JsHttpRequest, recv: &${dyn}, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
   open("match method {");

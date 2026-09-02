@@ -345,7 +345,7 @@ export class RustExpressionEmitter {
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
           case "function": test = `matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`})`; break;
-          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..))`; break;
+          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
           case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;

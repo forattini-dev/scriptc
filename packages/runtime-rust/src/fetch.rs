@@ -122,3 +122,11 @@ pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
     let bytes = fetch_response_bytes(response);
     promise_map(&bytes, |bytes| bytes_to_string(&bytes, &string("utf8")))
 }
+
+pub fn fetch_response_header(response: &JsHttpRequest, name: &JsString) -> Option<JsString> {
+    let lower = name.to_ascii_lowercase();
+    http_request_headers(response)
+        .into_iter()
+        .find(|(header, _)| header.as_ref() == lower)
+        .map(|(_, value)| value)
+}

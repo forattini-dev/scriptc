@@ -75,6 +75,7 @@ export function emitRustDynamicInspect(
   context.line(`${name}::NetSocket(..) => runtime::string("Socket {}"),`);
   context.line(`${name}::NetServer(..) => runtime::string("Server {}"),`);
   context.line(`${name}::HttpRequest(..) => runtime::string("IncomingMessage {}"),`);
+  context.line(`${name}::HttpHeaders(..) => runtime::string("Headers {}"),`);
   context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
   context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
   context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("[Function: {name}]")),`);

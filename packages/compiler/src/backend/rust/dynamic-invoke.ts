@@ -375,6 +375,7 @@ class RustDynamicInvokeEmitter {
     this.emitPromiseArm();
     this.emitNetSocketArm();
     this.emitHttpRequestArm();
+    this.emitHttpHeadersArm();
     this.emitHttpResponseArm();
     this.emitHttpAgentArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
@@ -582,6 +583,10 @@ class RustDynamicInvokeEmitter {
 
   private emitHttpRequestArm(): void {
     this.context.line(`${this.dyn}::HttpRequest(request) => sc_dyn_http_request_invoke(request, recv, method, args, callee_name),`);
+  }
+
+  private emitHttpHeadersArm(): void {
+    this.context.line(`${this.dyn}::HttpHeaders(headers) => sc_dyn_http_headers_invoke(headers, method, args, callee_name),`);
   }
 
   private emitHttpResponseArm(): void {
