@@ -665,6 +665,10 @@
       this.bodyUsed = true;
       return fetchBody(this._body, this.headers);
     }
+    async arrayBuffer() {
+      const bytes = await this.bytes();
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
   }
 
   class Response {
