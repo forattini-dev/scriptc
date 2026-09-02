@@ -433,6 +433,11 @@
         this._listeners.push(listener);
       }
     }
+    removeEventListener(type, listener) {
+      if (String(type) !== "abort") return;
+      const index = this._listeners.indexOf(listener);
+      if (index >= 0) this._listeners.splice(index, 1);
+    }
     static abort(reason) {
       const signal = new AbortSignal(abortSignalToken);
       abortSignal(signal, reason);
@@ -746,6 +751,24 @@
   global.Headers = Headers;
   global.Request = Request;
   global.Response = Response;
+  const withAbortSignal = (promise, signal) => {
+    if (signal === undefined || signal === null) return promise;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        callback(value);
+      };
+      const onAbort = () => finish(reject, signal.reason);
+      signal.addEventListener("abort", onAbort);
+      promise.then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error),
+      );
+    });
+  };
   global.fetch = function fetch(input, init = {}) {
     const source = input instanceof Request ? input : null;
     const signal = init.signal;
@@ -795,7 +818,8 @@
       return hop(url, method, headers, bytes, 0, false);
     };
     const request = body instanceof Promise ? body.then(send) : send(body);
-    return request.catch((cause) => {
+    return withAbortSignal(request, signal).catch((cause) => {
+      if (signal !== undefined && signal !== null && cause === signal.reason) throw cause;
       if (cause instanceof TypeError && cause.message === "fetch failed") throw cause;
       const error = new TypeError("fetch failed");
       error.cause = cause;
