@@ -1044,7 +1044,10 @@ fn island_state() -> IslandState {
         // A JSON module keeps its native parse for the ES graph; CJS
         // files enter through their build-time facade over __scr_require.
         let module = if embedded.format == IslandModuleFormat::Json {
-            Module::parse_json(boa_engine::JsString::from(embedded.source), &mut context)
+            Module::parse_json(
+                boa_engine::JsString::from(island_module_source(embedded)),
+                &mut context,
+            )
         } else {
             let source = island_module_esm_source(embedded);
             let mut bytes = source.as_bytes();
