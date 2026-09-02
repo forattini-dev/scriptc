@@ -64,7 +64,8 @@ the slice its own manifest registers.
 | `15-util` | `host.pid`, `host.promiseState`, `host.write` |
 | `26-constants` | `host.fsConstants`, `host.signals` |
 | `29-zlib` | `host.zlib` |
-| `30-net-http-tls` | the socket and server bridges, behind `host.httpStart` |
+| `30-net-http-tls` | `host.httpStart`/`httpWrite`/`httpEnd`/`httpDestroy`/`httpSetTimeout` (the client leg) and `host.srvCreate`/`srvListen`/`srvAddress`/`srvPort`/`srvClose`/`srvRes*` (the server leg) — gated INDEPENDENTLY, so a host may bridge one and fence the other |
+| `30b-net-sockets` | `host.netConnect`/`netWrite`/`netEnd`/`netDestroy`/`netFlow`/`netOption`/`netPeer`/`netLocal` and `host.netServer*` — replaces `30a`'s fenced `node:net` when the host has real sockets |
 | `31-process` | the process bridge |
 | `32-epilogue` | `host.write` (the console wiring) |
 

@@ -14,6 +14,18 @@
  * The two legs are registered INDEPENDENTLY on the host object, and the
  * shim gates on each separately: a host that bridges one and not the
  * other fences the missing half loudly instead of half-working.
+ *
+ * THE TLS FENCE (what the next leg owes). `httpStart` refuses `secure`,
+ * so node:https loads with Node's shape and throws at the call rather
+ * than pretending. Closing it needs three things this file does not
+ * have: a client that dials through `tls_client.rs` instead of
+ * `net_socket_connect` (the static lane reaches it through
+ * `https_client_request`, whose transport `http_client_new` deliberately
+ * leaves unbuilt for `secure`); a `srvCreate` variant that installs a
+ * `tls_config` on the server, which needs cert/key material plumbed in
+ * from the shim — a separate seam the C island fences too; and the
+ * `rejectUnauthorized`/`ca` options carried down from the shim's request
+ * options, which today are hard-wired to the runtime's defaults.
  */
 
 /// Drop both http registries before the realm goes down (called from
