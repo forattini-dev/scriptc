@@ -12,12 +12,18 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/console-io");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header): the probes must match ONE Node's fixed byte behavior, so this
+// pins to the compat matrix primary rather than whichever `node` the
+// PATH happens to resolve.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 interface ClosedChild {
   stdout: Buffer;
@@ -131,7 +137,7 @@ describe(`console/process output visibility${sanitize ? " (sanitized)" : ""}`, (
     const probe = await build("live-stdout");
 
     const [nodeOut, nativeOut] = await Promise.all([
-      observeLiveStdout("node", [probe.sourceFile], expected),
+      observeLiveStdout(oracleExecutable, [probe.sourceFile], expected),
       observeLiveStdout(probe.binary, [], expected),
     ]);
     expect(nodeOut.subarray(0, expected.length)).toEqual(expected);
@@ -143,7 +149,7 @@ describe(`console/process output visibility${sanitize ? " (sanitized)" : ""}`, (
     const probe = await build("sigkill-stdout");
 
     const [nodeRes, nativeRes] = await Promise.all([
-      runToClose("node", [probe.sourceFile]),
+      runToClose(oracleExecutable, [probe.sourceFile]),
       runToClose(probe.binary, []),
     ]);
     expect(nodeRes.stdout).toEqual(expected);
