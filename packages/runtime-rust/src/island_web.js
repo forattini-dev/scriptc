@@ -411,7 +411,28 @@
     }
 
     get code() {
-      return this.name === "InvalidCharacterError" ? 5 : 0;
+      if (this.name === "InvalidCharacterError") return 5;
+      if (this.name === "AbortError") return 20;
+      return 0;
+    }
+  }
+
+  const abortSignalToken = {};
+  class AbortSignal {
+    constructor(token) {
+      if (token !== abortSignalToken) throw new TypeError("Illegal constructor");
+      this._aborted = false;
+      this._reason = undefined;
+    }
+    get aborted() { return this._aborted; }
+    get reason() { return this._reason; }
+    static abort(reason) {
+      const signal = new AbortSignal(abortSignalToken);
+      signal._aborted = true;
+      signal._reason = reason === undefined
+        ? new DOMException("This operation was aborted", "AbortError")
+        : reason;
+      return signal;
     }
   }
 
@@ -458,6 +479,7 @@
   global.TextDecoderStream = TextDecoderStream;
   global.URLSearchParams = URLSearchParams;
   global.DOMException = DOMException;
+  global.AbortSignal = AbortSignal;
   global.btoa = btoa;
   global.atob = atob;
 
@@ -690,6 +712,10 @@
   global.Response = Response;
   global.fetch = function fetch(input, init = {}) {
     const source = input instanceof Request ? input : null;
+    const signal = init.signal;
+    if (signal !== undefined && signal !== null && signal.aborted) {
+      return Promise.reject(signal.reason);
+    }
     const url = source === null ? String(input) : source.url;
     const method = String(init.method === undefined
       ? source === null ? "GET" : source.method
