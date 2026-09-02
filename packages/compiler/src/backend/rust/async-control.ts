@@ -2,7 +2,7 @@ import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, Src
 import { mangleLocal } from "../mangle.js";
 import { emitAwaitDependency } from "./async-await.js";
 import { asyncTrampolineCall } from "./async-trampoline.js";
-import type { IrAwaitExpr } from "./model.js";
+import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncProtectedWhile } from "./async-protected-loop.js";
 
@@ -96,15 +96,15 @@ export class RustAsyncControlEmitter {
   containsAsyncSuspension(value: unknown): boolean {
     if (value === null || typeof value !== "object") return false;
     if (Array.isArray(value)) return value.some((item) => this.containsAsyncSuspension(item));
+    if (isRustAwaitExpr(value)) return true;
     const node = value as { kind?: unknown; fn?: unknown; name?: unknown };
-    if (node.kind === "awaitExpr" || node.kind === "awaitUnionExpr") return true;
     if (node.kind === "libCall" && node.fn === "async.hop") return true;
     if (node.kind === "intrinsic" && node.name === "module.await") return true;
     return Object.values(value).some((item) => this.containsAsyncSuspension(item));
   }
 
   awaitExpression(expr: IrExpr | null): IrAwaitExpr | null {
-    return expr?.kind === "awaitExpr" || expr?.kind === "awaitUnionExpr" ? expr : null;
+    return isRustAwaitExpr(expr) ? expr : null;
   }
 
   asyncHopSequence(expr: IrExpr | null): {

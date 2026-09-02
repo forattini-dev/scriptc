@@ -27,8 +27,7 @@ import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
 import { rustRuntimeFeatures } from "./runtime-features.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
-import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
-type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
+import type { IrAwaitExpr, IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
 export class RustUnsupportedError extends Error {
   constructor(

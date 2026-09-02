@@ -60,7 +60,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "assert.throwsNone": ["c", "llvm", "rust"],
   "assert.throwsRegex": ["c", "llvm", "rust"],
   "assert.unwantedRejection": ["c", "llvm", "rust"],
-  "async.awaitDyn": ["c", "llvm"],
+  "async.awaitDyn": ["c", "llvm", "rust"],
   "async.hop": ["c", "llvm", "rust"],
   "atomics.wait": ["c", "llvm", "rust"],
   "buffer.byteLenStr": ["c", "llvm", "rust"],

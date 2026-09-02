@@ -1,7 +1,17 @@
 import type { IrClassDef, IrExpr, IrFunction, IrType } from "../../ir/nodes.js";
 
 export type IrFuncType = Extract<IrType, { kind: "func" }>;
-export type IrAwaitExpr = Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>;
+type IrLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
+export type IrAwaitExpr =
+  | Extract<IrExpr, { kind: "awaitExpr" | "awaitUnionExpr" }>
+  | (IrLibCallExpr & { readonly fn: "async.awaitDyn" });
+
+export function isRustAwaitExpr(value: unknown): value is IrAwaitExpr {
+  if (value === null || typeof value !== "object") return false;
+  const expr = value as { kind?: unknown; fn?: unknown };
+  return expr.kind === "awaitExpr" || expr.kind === "awaitUnionExpr" ||
+    (expr.kind === "libCall" && expr.fn === "async.awaitDyn");
+}
 
 export interface RustClosureShape {
   readonly index: number;

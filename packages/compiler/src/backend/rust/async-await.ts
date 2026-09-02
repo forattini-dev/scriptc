@@ -10,6 +10,16 @@ export function emitAwaitDependency(
   context: RustAsyncControlContext,
   expr: IrAwaitExpr,
 ): string {
+  if (expr.kind === "libCall") {
+    const [value] = expr.args;
+    if (expr.fn !== "async.awaitDyn" || expr.args.length !== 1 ||
+        value?.type.kind !== "dyn" || expr.type.kind !== "dyn") {
+      context.unsupported("dynamic await shape", expr.loc);
+    }
+    const dynamic = context.rustType(expr.type, expr.loc);
+    const awaited = context.nextName("sc_async_await_dyn");
+    return `{ let ${awaited} = ${context.emitExpr(value)}; match ${awaited} { ${dynamic}::Promise(handle) => runtime::promise_from_handle::<${dynamic}>(&handle), value => runtime::promise_resolved(value), } }`;
+  }
   if (expr.kind === "awaitExpr") return context.emitExpr(expr.value);
   if (expr.value.type.kind !== "union") {
     context.unsupported("await union with a non-union operand", expr.loc);
