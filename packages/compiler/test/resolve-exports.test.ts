@@ -128,4 +128,38 @@ describe("npm-static export conditions", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("resolves JS-suffixed wildcard subpaths to their declaration twins", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scriptc-export-wildcard-types-"));
+    try {
+      const importer = join(root, "packages", "consumer", "src", "index.ts");
+      const packageDir = join(root, "packages", "consumer", "node_modules", "typed-sdk");
+      const clientDir = join(packageDir, "dist", "esm", "client");
+      await mkdir(clientDir, { recursive: true });
+      await mkdir(join(root, "packages", "consumer", "src"), { recursive: true });
+      await writeFile(importer, 'import { Client } from "typed-sdk/client/index.js";\n');
+      await writeFile(join(clientDir, "index.d.ts"), "export declare class Client {}\n");
+      await writeFile(join(clientDir, "index.js"), "export class Client {}\n");
+      await writeFile(
+        join(packageDir, "package.json"),
+        JSON.stringify({
+          name: "typed-sdk",
+          version: "1.0.0",
+          exports: {
+            "./*": {
+              types: "./dist/esm/*.d.ts",
+              import: "./dist/esm/*",
+            },
+          },
+        }),
+      );
+      clearResolveCaches();
+
+      expect(resolveBareModule(importer, "typed-sdk/client/index.js")?.typesFile)
+        .toBe(join(clientDir, "index.d.ts"));
+    } finally {
+      clearResolveCaches();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

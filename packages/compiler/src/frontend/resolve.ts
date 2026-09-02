@@ -345,45 +345,43 @@ const EXPORT_CONDITIONS = new Set(["types", "import", "default"]);
 export const NPM_STATIC_EXPORT_CONDITIONS: ReadonlySet<string> =
   new Set(["scriptc", "import", "default"]);
 
-/** package.json "exports" lookup: exact subpath keys, then '*' patterns
- * (longest literal prefix wins), condition objects matched against the
- * supplied set in object-key order, arrays first-resolvable. Returns the
- * target path relative to the package directory, or null. */
-export function resolveExports(
+/** Ordered package.json "exports" targets for one subpath. TypeScript keeps
+ * walking matching conditions when a target does not exist: a `types`
+ * wildcard may produce `index.js.d.ts`, then the `import` target's `.js`
+ * extension substitution finds the real `index.d.ts`. Keep every textual
+ * candidate here so the filesystem-aware resolver can make that choice. */
+function resolveExportCandidates(
   exports: unknown,
   subpath: string,
   conditions: ReadonlySet<string>,
-): string | null {
-  const resolveTarget = (target: unknown, wildcard: string | null): string | null => {
+): string[] {
+  const resolveTarget = (target: unknown, wildcard: string | null): string[] => {
     if (typeof target === "string") {
-      return wildcard === null ? target : target.split("*").join(wildcard);
+      return [wildcard === null ? target : target.split("*").join(wildcard)];
     }
     if (Array.isArray(target)) {
-      for (const t of target) {
-        const r = resolveTarget(t, wildcard);
-        if (r) return r;
-      }
-      return null;
+      return target.flatMap((candidate) => resolveTarget(candidate, wildcard));
     }
     if (target && typeof target === "object") {
+      const candidates: string[] = [];
       for (const [key, value] of Object.entries(target)) {
         if (key.startsWith(".")) continue;
         if (conditions.has(key)) {
-          const r = resolveTarget(value, wildcard);
-          if (r) return r;
+          candidates.push(...resolveTarget(value, wildcard));
         }
       }
+      return candidates;
     }
-    return null;
+    return [];
   };
   if (typeof exports === "string" || Array.isArray(exports)) {
-    return subpath === "." ? resolveTarget(exports, null) : null;
+    return subpath === "." ? resolveTarget(exports, null) : [];
   }
   if (exports && typeof exports === "object") {
     const map = exports as Record<string, unknown>;
     const keys = Object.keys(map);
     if (!keys.every((k) => k.startsWith("."))) {
-      return subpath === "." ? resolveTarget(exports, null) : null;
+      return subpath === "." ? resolveTarget(exports, null) : [];
     }
     if (Object.prototype.hasOwnProperty.call(map, subpath)) {
       return resolveTarget(map[subpath], null);
@@ -403,11 +401,23 @@ export function resolveExports(
         best = { key, prefix, suffix };
       }
     }
-    if (!best) return null;
+    if (!best) return [];
     const wildcard = subpath.slice(best.prefix.length, subpath.length - best.suffix.length);
     return resolveTarget(map[best.key], wildcard);
   }
-  return null;
+  return [];
+}
+
+/** package.json "exports" lookup: exact subpath keys, then '*' patterns
+ * (longest literal prefix wins), condition objects matched against the
+ * supplied set in object-key order, arrays first-resolvable. Returns the
+ * first target path relative to the package directory, or null. */
+export function resolveExports(
+  exports: unknown,
+  subpath: string,
+  conditions: ReadonlySet<string>,
+): string | null {
+  return resolveExportCandidates(exports, subpath, conditions)[0] ?? null;
 }
 
 /* ── project imports (package.json "imports" / self-name "exports") ─────
@@ -758,8 +768,7 @@ export function resolveBareModule(
           })()
         : rawPkg;
     if (pkg?.exports !== undefined) {
-      const target = resolveExports(pkg.exports, subpath, conditions);
-      if (target !== null) {
+      for (const target of resolveExportCandidates(pkg.exports, subpath, conditions)) {
         const file = loadTargetInPass(nmPkgDir, target, pass);
         if (file) return withWorkspace(packageAnswer(nmPkgDir, name, file));
       }
