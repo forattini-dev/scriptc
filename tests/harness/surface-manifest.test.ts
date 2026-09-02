@@ -94,6 +94,19 @@ describe("surface manifest generation", () => {
       expect(manifest.entries.some((e) => e.status === status), `no ${status} entries`).toBe(true);
     }
   });
+
+  test("the implemented Request island surface is classified dynamic-only", () => {
+    const implemented = [
+      "constructor", "method", "url", "headers", "signal",
+      "body", "bodyUsed", "text", "json", "bytes",
+    ];
+    for (const member of implemented) {
+      expect(entryById.get(`stdlib.request.${member}`)?.status, member)
+        .toBe("dynamic-only");
+    }
+    expect(entryById.get("stdlib.request.arrayBuffer")?.status).toBe("unsupported");
+    expect(entryById.get("stdlib.request.clone")?.status).toBe("unsupported");
+  });
 });
 
 /* ── the sampling harness ────────────────────────────────────────────────

@@ -98,6 +98,8 @@ const widerMemberFence =
   "the member is outside the native static handle projection";
 const typedInterfaceUnsupported =
   "typed source has no compiler bridge for this interface in either tier";
+const requestIslandOnly =
+  "the member is available only on Request values hosted by the dynamic JavaScript island";
 const metadataExclusion = COMPAT_METADATA_EXCLUSION;
 
 export const NODE24_FETCH_COMPAT_PROFILE = {
@@ -571,17 +573,33 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         metadataExclusion,
       ),
 
-      unsupportedEntry(
+      dynamicEntry(
         "stdlib.request.constructor",
         "Request",
         "constructor",
         "constructor",
-        typedInterfaceUnsupported,
+        requestIslandOnly,
       ),
       ...[
         "method",
         "url",
         "headers",
+        "signal",
+        "body",
+        "bodyUsed",
+        "text",
+        "json",
+        "bytes",
+      ].map((member) =>
+        dynamicEntry(
+          `stdlib.request.${member}`,
+          "Request",
+          member,
+          "prototype",
+          requestIslandOnly,
+        )
+      ),
+      ...[
         "destination",
         "referrer",
         "referrerPolicy",
@@ -593,17 +611,11 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "keepalive",
         "isReloadNavigation",
         "isHistoryNavigation",
-        "signal",
-        "body",
-        "bodyUsed",
         "duplex",
         "clone",
         "blob",
         "arrayBuffer",
-        "text",
-        "json",
         "formData",
-        "bytes",
         "attribute",
       ].map((member) =>
         unsupportedEntry(

@@ -3251,25 +3251,25 @@
       "id": "stdlib.request.body",
       "kind": "stdlib",
       "name": "Request.body",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.bodyUsed",
       "kind": "stdlib",
       "name": "Request.bodyUsed",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.bytes",
       "kind": "stdlib",
       "name": "Request.bytes",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.cache",
@@ -3291,9 +3291,9 @@
       "id": "stdlib.request.constructor",
       "kind": "stdlib",
       "name": "Request constructor",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.credentials",
@@ -3331,9 +3331,9 @@
       "id": "stdlib.request.headers",
       "kind": "stdlib",
       "name": "Request.headers",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.integrity",
@@ -3363,9 +3363,9 @@
       "id": "stdlib.request.json",
       "kind": "stdlib",
       "name": "Request.json",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.keepalive",
@@ -3379,9 +3379,9 @@
       "id": "stdlib.request.method",
       "kind": "stdlib",
       "name": "Request.method",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.mode",
@@ -3419,17 +3419,17 @@
       "id": "stdlib.request.signal",
       "kind": "stdlib",
       "name": "Request.signal",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.text",
       "kind": "stdlib",
       "name": "Request.text",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.textStream",
@@ -3443,9 +3443,9 @@
       "id": "stdlib.request.url",
       "kind": "stdlib",
       "name": "Request.url",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.response-init.headers",
