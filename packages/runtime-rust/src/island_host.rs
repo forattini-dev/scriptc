@@ -343,7 +343,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 40] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 52] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -392,6 +392,21 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 40] = [
     ("tmpdir", island_host_tmpdir, 0),
     ("ids", island_host_ids, 0),
     ("signals", island_host_signals, 0),
+    // The SOCKET bridge (island_host_net.rs). Its presence is what opens
+    // the shared bootstrap's real node:net — a build without it keeps the
+    // load-but-fence shim, which is the honest answer, not a silent one.
+    ("netConnect", island_host_net_connect, 3),
+    ("netWrite", island_host_net_write, 2),
+    ("netEnd", island_host_net_end, 2),
+    ("netDestroy", island_host_net_destroy, 1),
+    ("netFlow", island_host_net_flow, 2),
+    ("netOption", island_host_net_option, 3),
+    ("netPeer", island_host_net_peer, 1),
+    ("netLocal", island_host_net_local, 1),
+    ("netServerCreate", island_host_net_server_create, 1),
+    ("netServerListen", island_host_net_server_listen, 3),
+    ("netServerAddress", island_host_net_server_address, 1),
+    ("netServerClose", island_host_net_server_close, 1),
 ];
 
 /// Build the `host` object the bootstrap arrow is called with.

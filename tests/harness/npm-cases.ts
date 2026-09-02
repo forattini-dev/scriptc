@@ -6,15 +6,34 @@
 import { globSync } from "node:fs";
 import { join } from "node:path";
 
+export type NpmLane = "c" | "llvm" | "rust";
+
 export interface NpmCase {
   name: string;
   entry: string;
   /** Every argv list runs both sides; default: one run with no args. */
   argvs?: string[][];
+  /** Lanes the case is valid on; absent means every lane. */
+  lanes?: readonly NpmLane[];
 }
 
-export function npmCases(fixturesRoot: string): NpmCase[] {
-  return [
+/* Cases whose HOST SURFACE only one island answers today. A case listed
+ * here is skipped everywhere else rather than made tolerant: a program
+ * that prints a fence on one lane and real output on another cannot be
+ * byte-diffed against Node at all, and softening it would retire the very
+ * differential that makes the lane's number mean something.
+ *
+ * net-echo-island: raw node:net sockets. The Rust island has the socket
+ * bridge (island_host_net.rs); the C island still answers node:net with
+ * 30a-net-tls-load.js's loud fence, so the case would refuse there. */
+const LANE_ONLY: Readonly<Record<string, readonly NpmLane[]>> = {
+  "net-echo-island": ["rust"],
+};
+
+/** `backend` is the lane being measured; unset is the release default, C. */
+export function npmCases(fixturesRoot: string, backend?: NpmLane): NpmCase[] {
+  const lane: NpmLane = backend ?? "c";
+  const table: NpmCase[] = [
     ...globSync(join(fixturesRoot, "npm/cases/*/main.ts"))
       .sort()
       // 2465-2469 and 2556-2557 are the --npm-static bundler-emitted-CJS
@@ -23,7 +42,11 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // names the shipped .d.ts never declares, the __toESM interop
       // family), so they stay out of the flagless island lane by design.
       .filter((entry) => !/\/(246[5-9]|255[67])-[^/]+\/main\.ts$/.test(entry))
-      .map((entry) => ({ name: entry.split("/").at(-2)!, entry })),
+      .map((entry) => {
+        const name = entry.split("/").at(-2)!;
+        const lanes = LANE_ONLY[name];
+        return lanes === undefined ? { name, entry } : { name, entry, lanes };
+      }),
     {
       // THE acceptance test: a calculator CLI on the real commander package
       // (pinned in the fixture; see its README), across the happy paths,
@@ -73,4 +96,5 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       ],
     },
   ];
+  return table.filter((c) => c.lanes === undefined || c.lanes.includes(lane));
 }

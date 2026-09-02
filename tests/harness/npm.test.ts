@@ -49,7 +49,7 @@ const backend = process.env["SCRIPTC_TEST_BACKEND"] as "c" | "llvm" | "rust" | u
 // cases (same entries, same argv lists) inside its container. The shard
 // split (SCRIPTC_TEST_SHARD, CI's matrix) is applied HERE, not in the
 // table, so that lane keeps its full list.
-const cases = shardSelect(npmCases(fixturesRoot), (c) => c.name);
+const cases = shardSelect(npmCases(fixturesRoot, backend), (c) => c.name);
 
 interface RunResult {
   stdout: Buffer;
