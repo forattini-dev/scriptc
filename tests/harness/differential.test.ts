@@ -16,8 +16,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
-import { compile } from "@scriptc/compiler";
-import { nodeOracleExecutable, nodeTransformTypesArgs, oracleCacheKeyBase } from "./oracle-environment.js";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
+import { nodeTransformTypesArgs, oracleCacheKeyBase } from "./oracle-environment.js";
+import { primaryOracleExecutable } from "./node-matrix.js";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { DRIVER_FIXTURES } from "./driver-fixtures.js";
 
@@ -25,7 +26,16 @@ const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
-const oracleExecutable = nodeOracleExecutable();
+// This is a SEMANTIC oracle, so it pins to the compat matrix's primary
+// rather than following the host (node-matrix.ts): a compiled binary
+// reproduces ONE Node's observable behavior and cannot reproduce two, so
+// a corpus program compared against whichever major happens to be running
+// reds on things that say nothing about the compiler — v26 reworded
+// errors, dropped read()'s buffer concatenation (nodejs/node#60441), moved
+// builtinModules' length, and removed the native type-transform this
+// harness feeds @transform-types programs through. SCRIPTC_NODE_ORACLE
+// still overrides, which is how you go LOOKING for those divergences.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 // Flat single-file tests plus directory tests (<name>/main.<ext> as the
 // entry with sibling modules). JavaScript entries (.js/.mjs/.cjs) are
