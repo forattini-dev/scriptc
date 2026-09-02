@@ -490,6 +490,7 @@ export class RustEventEmitterEmitter {
     this.context.line("}");
     this.context.line("fn sc_process_run_exit(sc_code: f64) {");
     this.context.pushIndent();
+    this.context.line("runtime::process_exit_begin();");
     this.context.line("let sc_listeners = SC_PROCESS_EXIT_LISTENERS.with(|listeners| std::mem::take(&mut *listeners.borrow_mut()));");
     this.context.line("for (sc_callback, _, _) in sc_listeners {");
     this.context.pushIndent();

@@ -725,6 +725,7 @@ pub fn process_warning_report(
 
 pub fn process_exit(code: f64) -> ! {
     use std::io::Write;
+    process_exit_begin();
     terminal_finish();
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
@@ -733,6 +734,15 @@ pub fn process_exit(code: f64) -> ! {
 
 thread_local! {
     static PROCESS_EXIT_CODE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    static PROCESS_EXITING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn process_exit_begin() {
+    PROCESS_EXITING.with(|slot| slot.set(true));
+}
+
+pub fn process_exiting() -> bool {
+    PROCESS_EXITING.with(std::cell::Cell::get)
 }
 
 pub fn process_exit_code_set(code: f64) {

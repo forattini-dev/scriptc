@@ -2147,7 +2147,8 @@
       "status": "static",
       "backends": [
         "c",
-        "llvm"
+        "llvm",
+        "rust"
       ],
       "note": "process.exit, process.exitCode, and the process._exiting flag read are one surface"
     },

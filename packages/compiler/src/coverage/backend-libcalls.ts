@@ -670,7 +670,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "process.execPath": ["c", "llvm", "rust"],
   "process.exit": ["c", "llvm", "rust"],
   "process.exitCodeSet": ["c", "llvm", "rust"],
-  "process.exiting": ["c", "llvm"],
+  "process.exiting": ["c", "llvm", "rust"],
   "process.getgid": ["c", "llvm", "rust"],
   "process.getuid": ["c", "llvm", "rust"],
   "process.isTTY": ["c", "llvm", "rust"],
