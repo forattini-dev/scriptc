@@ -11,9 +11,6 @@
  * serializer, and an island request and a compiled request are the same
  * bytes on the wire.
  *
- * The CLIENT leg is not here yet: this file lands the server first, so
- * `host.httpStart` is absent and the shim's `http.request` fences.
- *
  * The two legs are registered INDEPENDENTLY on the host object, and the
  * shim gates on each separately: a host that bridges one and not the
  * other fences the missing half loudly instead of half-working.
@@ -23,6 +20,7 @@
 /// `island_net_reset`, which runs ahead of the heap audit).
 fn island_http_reset() {
     island_http_exchanges_reset();
+    island_http_clients_reset();
 }
 /* ── the node:http SERVER leg ──────────────────────────────────────────
  *
@@ -317,4 +315,268 @@ fn island_host_srv_res_destroy(
     }
     Ok(JsValue::undefined())
 }
+/* ── the node:http CLIENT leg ──────────────────────────────────────────
+ *
+ * `http.request`/`http.get` in the shared bootstrap run ONE
+ * `http_client_*` exchange per request — the same client the static lane
+ * lowers to, so an island request and a compiled one put the same bytes
+ * on the wire. The shim owns node:http's semantics (no redirects, no
+ * decompression, no default accept-* headers); this bridge owns the
+ * transport and the event relay.
+ *
+ * Lifetime: the registry holds the exchange while it is live, and it is
+ * dropped on the FIRST of close, error or teardown. The `settled` flag is
+ * shared with the timeout timer so a late fire cannot resurrect a
+ * finished exchange.
+ */
 
+/// One in-flight client exchange.
+struct IslandHttpClientEntry {
+    request: JsHttpClientRequest,
+    /// Set once a close, an error or teardown has retired the exchange —
+    /// shared with the timeout timer so a late fire cannot resurrect it.
+    settled: Rc<Cell<bool>>,
+    /// Kept so `httpSetTimeout` after the start can re-arm.
+    callbacks: boa_engine::JsObject,
+}
+
+thread_local! {
+    static ISLAND_HTTP_CLIENTS: RefCell<HashMap<u64, IslandHttpClientEntry>> =
+        RefCell::new(HashMap::new());
+}
+
+fn island_http_client(id: u64) -> Option<JsHttpClientRequest> {
+    ISLAND_HTTP_CLIENTS.with(|clients| {
+        clients.borrow().get(&id).map(|entry| entry.request.clone())
+    })
+}
+
+fn island_http_client_settle(id: u64) {
+    if let Some(entry) = ISLAND_HTTP_CLIENTS.with(|clients| clients.borrow_mut().remove(&id)) {
+        entry.settled.set(true);
+    }
+}
+
+fn island_http_clients_reset() {
+    let clients = ISLAND_HTTP_CLIENTS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    for entry in clients.into_values() {
+        entry.settled.set(true);
+        http_client_destroy(&entry.request);
+    }
+}
+
+/// Arm the shim's `request.setTimeout`.
+///
+/// Node's is an IDLE socket timeout; this fires once if the exchange has
+/// not settled by then, which is the same observable for the shape the
+/// shim exposes (`'timeout'` is emitted, the request is NOT destroyed —
+/// Node leaves that decision to the handler). The divergence is the idle
+/// reset, and it is recorded in the lane report rather than papered over.
+fn island_http_client_arm_timeout(
+    callbacks: &boa_engine::JsObject,
+    settled: &Rc<Cell<bool>>,
+    timeout: f64,
+) {
+    if !timeout.is_finite() || timeout <= 0.0 {
+        return;
+    }
+    let callbacks = callbacks.clone();
+    let settled = settled.clone();
+    let mut armed = true;
+    let fire: Box<dyn FnMut()> = Box::new(move || {
+        if !armed || settled.get() {
+            return;
+        }
+        armed = false;
+        island_net_call(&callbacks, "onTimeout", |_| Vec::new());
+    });
+    timer_set_timeout_handle(fire, timeout);
+}
+
+/// `host.httpStart(secure, host, port, path, method, timeoutMs, headers,
+/// callbacks)` → an exchange id.
+fn island_host_http_start(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let secure = island_host_arg(arguments, 0).to_boolean();
+    if secure {
+        return Err(boa_engine::JsNativeError::error()
+            .with_message(
+                "node:https requests are not supported in the scriptc Rust island yet (node:http is)",
+            )
+            .into());
+    }
+    let hostname: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let port = island_host_arg_number(arguments, 2, context)?;
+    let path: JsString = Rc::from(island_host_arg_string(arguments, 3, context)?.as_str());
+    let method: JsString = Rc::from(island_host_arg_string(arguments, 4, context)?.as_str());
+    let timeout = island_host_arg_number(arguments, 5, context)?;
+    let headers = island_fetch_string_list(island_host_arg(arguments, 6), context)?;
+    let callbacks = island_net_arg_callbacks(arguments, 7)?;
+    let id = island_net_next_id();
+    let settled = Rc::new(Cell::new(false));
+
+    let response_callbacks = callbacks.clone();
+    let response_callback = Rc::new(move |response: JsHttpRequest| {
+        let status = http_request_status_code(&response).unwrap_or(0.0);
+        let status_text = http_request_status_message(&response).unwrap_or_else(empty_string);
+        let head_response = response.clone();
+        island_net_call(&response_callbacks, "onResponse", |context| {
+            vec![
+                JsValue::from(status),
+                island_host_string(&status_text),
+                island_http_raw_headers(&head_response, context),
+            ]
+        });
+        let end_callbacks = response_callbacks.clone();
+        http_request_on_end(
+            &response,
+            Rc::new(move || {
+                island_net_call(&end_callbacks, "onEnd", |_| Vec::new());
+            }),
+            Rc::new(|_| {}),
+            true,
+        );
+        // Last, so `onEnd` is reachable before the buffered body that
+        // completes it is flushed (the server leg's rule, same reason).
+        let data_callbacks = response_callbacks.clone();
+        http_request_on_data(
+            &response,
+            Rc::new(move |chunk| {
+                island_net_call(&data_callbacks, "onData", |context| {
+                    let bytes = BoaJsUint8Array::from_iter(bytes_u8_values(&chunk), context)
+                        .map(JsValue::from)
+                        .unwrap_or_else(|error| island_eval_error(error, context));
+                    vec![bytes]
+                });
+            }),
+            Rc::new(|_| {}),
+            false,
+        );
+    });
+
+    let request = island_host_run(
+        || {
+            http_client_new(
+                &hostname,
+                port,
+                &path,
+                &method,
+                false,
+                timeout,
+                &headers,
+                false,
+                true,
+                &empty_string(),
+                Some((response_callback, Rc::new(|_| {}))),
+            )
+        },
+        context,
+    )?;
+
+    let error_callbacks = callbacks.clone();
+    http_client_on_error(
+        &request,
+        Rc::new(move |error| {
+            let text = island_net_error_text(&error);
+            island_net_call(&error_callbacks, "onError", |_| {
+                vec![JsValue::from(boa_engine::JsString::from(text.as_str()))]
+            });
+        }),
+        Rc::new(|_| {}),
+        true,
+    );
+
+    let close_callbacks = callbacks.clone();
+    http_client_on_close(
+        &request,
+        Rc::new(move || {
+            island_http_client_settle(id);
+            island_net_call(&close_callbacks, "onClose", |_| Vec::new());
+        }),
+        Rc::new(|_| {}),
+        true,
+    );
+
+    island_http_client_arm_timeout(&callbacks, &settled, timeout);
+    ISLAND_HTTP_CLIENTS.with(move |clients| {
+        clients.borrow_mut().insert(
+            id,
+            IslandHttpClientEntry {
+                request,
+                settled,
+                callbacks,
+            },
+        );
+    });
+    Ok(JsValue::from(id as f64))
+}
+
+fn island_host_http_write(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(request) = island_http_client(island_net_arg_id(arguments, 0)) else {
+        return Ok(JsValue::from(false));
+    };
+    let bytes = island_host_arg_bytes(arguments, 1, context)?;
+    island_host_run(|| http_client_write_bytes(&request, &bytes), context)?;
+    Ok(JsValue::from(true))
+}
+
+fn island_host_http_end(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(request) = island_http_client(island_net_arg_id(arguments, 0)) else {
+        return Ok(JsValue::undefined());
+    };
+    if island_host_arg(arguments, 1).is_null_or_undefined() {
+        island_host_run(|| http_client_end(&request), context)?;
+    } else {
+        let bytes = island_host_arg_bytes(arguments, 1, context)?;
+        island_host_run(|| http_client_end_bytes(&request, &bytes), context)?;
+    }
+    Ok(JsValue::undefined())
+}
+
+fn island_host_http_destroy(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    if let Some(request) = island_http_client(island_net_arg_id(arguments, 0)) {
+        http_client_destroy(&request);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `host.httpSetTimeout(id, ms)` — a re-arm, so `setTimeout` after the
+/// exchange started behaves like `setTimeout` before it.
+fn island_host_http_set_timeout(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = island_net_arg_id(arguments, 0);
+    let timeout = island_host_arg_number(arguments, 1, context)?;
+    let entry = ISLAND_HTTP_CLIENTS.with(|clients| {
+        clients.borrow().get(&id).map(|entry| {
+            (
+                entry.request.clone(),
+                entry.settled.clone(),
+                entry.callbacks.clone(),
+            )
+        })
+    });
+    let Some((request, settled, callbacks)) = entry else {
+        return Ok(JsValue::undefined());
+    };
+    request.with_mut(|request| request.timeout = timeout);
+    island_http_client_arm_timeout(&callbacks, &settled, timeout);
+    Ok(JsValue::undefined())
+}

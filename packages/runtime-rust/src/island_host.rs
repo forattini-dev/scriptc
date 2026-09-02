@@ -343,7 +343,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 61] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 66] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -419,6 +419,14 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 61] = [
     ("srvResWrite", island_host_srv_res_write, 2),
     ("srvResEnd", island_host_srv_res_end, 2),
     ("srvResDestroy", island_host_srv_res_destroy, 1),
+    // The node:http CLIENT leg. Its presence is what opens the shim's
+    // `request`/`get` (and registers node:https, whose own requests still
+    // fence — TLS is the leg after this one).
+    ("httpStart", island_host_http_start, 8),
+    ("httpWrite", island_host_http_write, 2),
+    ("httpEnd", island_host_http_end, 2),
+    ("httpDestroy", island_host_http_destroy, 1),
+    ("httpSetTimeout", island_host_http_set_timeout, 2),
 ];
 
 /// Build the `host` object the bootstrap arrow is called with.
