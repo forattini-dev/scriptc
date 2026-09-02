@@ -91,6 +91,7 @@ afterAll(async () => {
 
 interface RunResult {
   stdout: Buffer;
+  stderr: Buffer;
   exitCode: number;
 }
 
@@ -101,16 +102,18 @@ async function runBinary(
   timeout?: number,
 ): Promise<RunResult> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, {
+    const { stdout, stderr } = await execFileAsync(cmd, args, {
       encoding: "buffer",
       env,
       timeout,
     });
-    return { stdout, exitCode: 0 };
+    return { stdout, stderr, exitCode: 0 };
   } catch (err) {
-    const e = err as { code?: unknown; stdout?: Buffer };
-    if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout)) throw err;
-    return { stdout: e.stdout, exitCode: e.code };
+    const e = err as { code?: unknown; stdout?: Buffer; stderr?: Buffer };
+    if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout) || !Buffer.isBuffer(e.stderr)) {
+      throw err;
+    }
+    return { stdout: e.stdout, stderr: e.stderr, exitCode: e.code };
   }
 }
 
@@ -165,6 +168,22 @@ test.skipIf(sanitize)("Rust dynamic fetch remains callable when injected as a va
   ]);
   expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
   expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+}, 120_000);
+
+test.skipIf(sanitize)("Rust dynamic fetch matches the package fetch suite", async () => {
+  const entry = join(fixturesRoot, "cases/fetch-suite/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const argv = [baseUrl, refusedUrl];
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, ...argv]),
+    runBinary(binary, argv, {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
 }, 120_000);
 
 async function buildStatic(

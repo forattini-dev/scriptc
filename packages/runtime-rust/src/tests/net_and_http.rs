@@ -319,6 +319,17 @@ fn http_roundtrip_server_and_client() {
 }
 
 #[test]
+fn http_client_parses_latin1_response_header_values() {
+    let (_, _, headers, _, _) =
+        http_parse_response_head(b"HTTP/1.1 200 OK\r\nX-Latin: \xe9\r\n\r\n")
+            .expect("HTTP header fields use the byte-oriented Latin-1 surface");
+
+    assert_eq!(headers[0].0.as_ref(), "X-Latin");
+    assert_eq!(headers[0].1.as_ref(), "x-latin");
+    assert_eq!(headers[0].2.as_ref(), "é");
+}
+
+#[test]
 fn http_client_error_on_refused() {
     let _guard = loop_deadline(DEADLINE_MS);
     let log = transcript();

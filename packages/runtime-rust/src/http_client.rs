@@ -25,7 +25,11 @@ type ParsedHttpResponse = (
 );
 
 fn http_parse_response_head(bytes: &[u8]) -> Option<ParsedHttpResponse> {
-    let text = std::str::from_utf8(bytes).ok()?;
+    // HTTP/1 field values are a byte-oriented surface. Node exposes each
+    // octet through its matching U+0000..U+00FF code point, so requiring a
+    // UTF-8-valid whole head incorrectly rejects ordinary obs-text such as
+    // a raw E9 in a response header.
+    let text: String = bytes.iter().copied().map(char::from).collect();
     let mut lines = text[..text.len().saturating_sub(4)].split("\r\n");
     let status_line = lines.next()?;
     let mut parts = status_line.splitn(3, ' ');
@@ -147,6 +151,9 @@ fn http_client_drain(connection: &Rc<RefCell<HttpClientConnection>>) -> bool {
         }
         if finish {
             http_request_finish(&response);
+            if let Some(socket) = response.with(|response| response.socket.clone()) {
+                net_socket_destroy(&socket);
+            }
             return true;
         }
     }
@@ -264,6 +271,7 @@ fn http_client_new_with_socket(
         ca: ca.clone(),
         headers: http_client_headers(headers),
         body: Vec::new(),
+        half_close_after_write: true,
         sent: false,
         destroyed: false,
         response_listeners: Vec::new(),
@@ -589,12 +597,23 @@ fn http_client_serialize(request: &mut HttpClientRequestData) -> Vec<u8> {
     if http_header_index(&request.headers, "connection").is_none() {
         head.push_str("Connection: keep-alive\r\n");
     }
-    if !request.body.is_empty() && http_header_index(&request.headers, "content-length").is_none() {
+    let chunked = http_header_index(&request.headers, "transfer-encoding")
+        .is_some_and(|index| http_token_present(&request.headers[index].1, "chunked"));
+    if !chunked &&
+        !request.body.is_empty() &&
+        http_header_index(&request.headers, "content-length").is_none()
+    {
         head.push_str(&format!("Content-Length: {}\r\n", request.body.len()));
     }
     head.push_str("\r\n");
     let mut output = head.into_bytes();
-    output.append(&mut request.body);
+    if chunked {
+        output.extend(http_chunk(&request.body));
+        output.extend_from_slice(b"0\r\n\r\n");
+        request.body.clear();
+    } else {
+        output.append(&mut request.body);
+    }
     output
 }
 
@@ -605,19 +624,22 @@ pub fn http_client_end(request: &JsHttpClientRequest) {
         }
         request_data.sent = true;
         let output = http_client_serialize(request_data);
+        let half_close = request_data.half_close_after_write;
         if request_data.secure {
             let connection = request_data.connection.clone()?;
-            Some((None, Some(connection), output))
+            Some((None, Some(connection), output, half_close))
         } else {
-            Some((request_data.socket.clone(), None, output))
+            Some((request_data.socket.clone(), None, output, half_close))
         }
     });
-    let Some((socket, connection, output)) = dispatch else {
+    let Some((socket, connection, output, half_close)) = dispatch else {
         return;
     };
     if let Some(socket) = socket {
         net_socket_queue(&socket, output);
-        net_socket_end(&socket);
+        if half_close {
+            net_socket_end(&socket);
+        }
     } else if let Some(connection) = connection {
         http_tls_start(request, connection, output);
     }

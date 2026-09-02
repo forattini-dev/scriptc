@@ -19,6 +19,7 @@ thread_local! {
 }
 
 const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
+const ISLAND_STREAM_BOOTSTRAP: &str = include_str!("island_streams.js");
 
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
@@ -266,13 +267,15 @@ pub fn island_value_json(value: &JsString) -> IslandValue {
 /// the C island's scr_island_web_boot has exactly this shape.
 fn island_web_boot(context: &mut Context) -> JsResult<()> {
     let host = island_host_object(context);
-    let boot = context.eval(Source::from_bytes(ISLAND_WEB_BOOTSTRAP))?;
-    let Some(boot) = boot.as_callable() else {
-        return Err(boa_engine::JsNativeError::typ()
-            .with_message("scriptc: island web bootstrap is not callable")
-            .into());
-    };
-    boot.call(&JsValue::undefined(), &[host.into()], context)?;
+    for source in [ISLAND_STREAM_BOOTSTRAP, ISLAND_WEB_BOOTSTRAP] {
+        let boot = context.eval(Source::from_bytes(source))?;
+        let Some(boot) = boot.as_callable() else {
+            return Err(boa_engine::JsNativeError::typ()
+                .with_message("scriptc: island web bootstrap is not callable")
+                .into());
+        };
+        boot.call(&JsValue::undefined(), &[host.clone().into()], context)?;
+    }
     Ok(())
 }
 

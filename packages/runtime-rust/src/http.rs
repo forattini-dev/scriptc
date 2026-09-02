@@ -170,6 +170,7 @@ pub struct HttpClientRequestData {
     ca: JsString,
     headers: Vec<(JsString, JsString)>,
     body: Vec<u8>,
+    half_close_after_write: bool,
     sent: bool,
     destroyed: bool,
     response_listeners: Vec<HttpResponseListener>,
@@ -323,7 +324,12 @@ pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)
     request.with(|request| {
         let mut output = Vec::new();
         for (_, lower, value) in &request.headers {
-            if output.iter().all(|(name, _): &(JsString, JsString)| name.as_ref() != lower.as_ref()) {
+            if let Some((_, combined)) = output
+                .iter_mut()
+                .find(|(name, _): &&mut (JsString, JsString)| name.as_ref() == lower.as_ref())
+            {
+                *combined = string(&format!("{combined}, {value}"));
+            } else {
                 output.push((lower.clone(), value.clone()));
             }
         }

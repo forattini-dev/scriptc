@@ -173,6 +173,26 @@
     }
   }
 
+  class TextDecoderStream extends global.TransformStream {
+    constructor(label, options) {
+      const decoder = new TextDecoder(label, options);
+      super({
+        transform(chunk, controller) {
+          const text = decoder.decode(chunk, { stream: true });
+          if (text !== "") controller.enqueue(text);
+        },
+        flush(controller) {
+          const text = decoder.decode();
+          if (text !== "") controller.enqueue(text);
+        },
+      });
+      this._decoder = decoder;
+    }
+    get encoding() { return this._decoder.encoding; }
+    get fatal() { return this._decoder.fatal; }
+    get ignoreBOM() { return this._decoder.ignoreBOM; }
+  }
+
   const formSafe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789*-._";
   const formEncode = (value) => {
     const bytes = new TextEncoder().encode(value);
@@ -435,6 +455,7 @@
 
   global.TextEncoder = TextEncoder;
   global.TextDecoder = TextDecoder;
+  global.TextDecoderStream = TextDecoderStream;
   global.URLSearchParams = URLSearchParams;
   global.DOMException = DOMException;
   global.btoa = btoa;
@@ -483,6 +504,38 @@
     _flat() { return this._pairs.flat(); }
   }
 
+  const consumeBody = async (response) => {
+    if (response.bodyUsed) {
+      throw new TypeError("Body is unusable: Body has already been read");
+    }
+    response.bodyUsed = true;
+    const body = response._body;
+    if (body === null) return new Uint8Array(0);
+    if (body instanceof Uint8Array) return body;
+    const reader = body.getReader();
+    const chunks = [];
+    let length = 0;
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      const chunk = typeof result.value === "string"
+        ? new TextEncoder().encode(result.value)
+        : result.value;
+      if (!(chunk instanceof Uint8Array)) {
+        throw new TypeError("body stream produced a non-byte chunk");
+      }
+      chunks.push(chunk);
+      length += chunk.length;
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return bytes;
+  };
+
   class Response {
     constructor(body = null, init = {}) {
       this.status = init.status === undefined ? 200 : Number(init.status);
@@ -493,16 +546,27 @@
       this.type = "default";
       this.bodyUsed = false;
       this._body = body === null
-        ? new Uint8Array(0)
+        ? null
         : body instanceof Uint8Array
           ? body
           : new TextEncoder().encode(String(body));
     }
     get ok() { return this.status >= 200 && this.status <= 299; }
+    get body() {
+      if (this._body === null) return null;
+      if (this._body instanceof Uint8Array) {
+        const bytes = this._body;
+        this._body = new global.ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        });
+      }
+      return this._body;
+    }
     async bytes() {
-      if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
-      this.bodyUsed = true;
-      return new Uint8Array(this._body);
+      return consumeBody(this);
     }
     async arrayBuffer() {
       const bytes = await this.bytes();
@@ -512,6 +576,9 @@
     async json() { return JSON.parse(await this.text()); }
     clone() {
       if (this.bodyUsed) throw new TypeError("Response.clone: Body has already been consumed.");
+      if (!(this._body instanceof Uint8Array) && this._body !== null) {
+        throw new Error("Response.clone is not supported for a streamed body in the scriptc island");
+      }
       return new Response(new Uint8Array(this._body), {
         status: this.status,
         statusText: this.statusText,
@@ -520,16 +587,25 @@
         redirected: this.redirected,
       });
     }
-    static _native(row) {
+    static _native(row, redirected = false) {
       const headers = [];
       for (let index = 0; index < row[3].length; index += 2) {
         headers.push([row[3][index], row[3][index + 1]]);
       }
-      return new Response(row[4], {
+      const responseHeaders = new Headers(headers);
+      const encoding = responseHeaders.get("content-encoding");
+      let body = row[4];
+      if (encoding === "gzip" || encoding === "x-gzip") {
+        body = host.zlib(0, body, 2, 0);
+      } else if (encoding === "deflate") {
+        body = host.zlib(0, body, 0, 0);
+      }
+      return new Response(body, {
         status: row[0],
         statusText: row[1],
         url: row[2],
-        headers,
+        headers: responseHeaders,
+        redirected,
       });
     }
   }
@@ -541,9 +617,44 @@
     if (ArrayBuffer.isView(body)) {
       return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     }
+    if (body instanceof URLSearchParams) {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8");
+      }
+      return new TextEncoder().encode(String(body));
+    }
     if (typeof body === "string") {
       if (!headers.has("content-type")) headers.set("content-type", "text/plain;charset=UTF-8");
       return new TextEncoder().encode(body);
+    }
+    if (body instanceof global.ReadableStream) {
+      if (!headers.has("content-length") && !headers.has("transfer-encoding")) {
+        headers.set("transfer-encoding", "chunked");
+      }
+      return (async () => {
+        const reader = body.getReader();
+        const chunks = [];
+        let length = 0;
+        for (;;) {
+          const result = await reader.read();
+          if (result.done) break;
+          const chunk = typeof result.value === "string"
+            ? new TextEncoder().encode(result.value)
+            : result.value;
+          if (!(chunk instanceof Uint8Array)) {
+            throw new TypeError("body stream produced a non-byte chunk");
+          }
+          chunks.push(chunk);
+          length += chunk.length;
+        }
+        const bytes = new Uint8Array(length);
+        let offset = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return bytes;
+      })();
     }
     throw new TypeError("fetch body is outside the supported byte/string subset");
   };
@@ -555,14 +666,46 @@
       : String(input);
     const method = String(init.method === undefined ? "GET" : init.method).toUpperCase();
     const headers = new Headers(init.headers);
+    if (!headers.has("connection")) headers.set("connection", "close");
     const body = fetchBody(init.body, headers);
-    return host.fetch(url, method, headers._flat(), body)
-      .then((row) => Response._native(row))
-      .catch((cause) => {
-        const error = new TypeError("fetch failed");
-        error.cause = cause;
-        throw error;
-      });
+    const redirect = init.redirect === undefined ? "follow" : String(init.redirect);
+    if (redirect !== "follow" && redirect !== "error" && redirect !== "manual") {
+      throw new TypeError(`undefined: ${redirect} is not an accepted type. Expected one of follow, manual, error.`);
+    }
+    const send = (bytes) => {
+      const hop = (hopUrl, hopMethod, hopHeaders, hopBody, count, redirected) =>
+        host.fetch(hopUrl, hopMethod, hopHeaders._flat(), hopBody).then((row) => {
+          const response = Response._native(row, redirected);
+          const location = response.headers.get("location");
+          const redirectStatus = response.status === 301 || response.status === 302 ||
+            response.status === 303 || response.status === 307 || response.status === 308;
+          if (!redirectStatus || location === null || redirect === "manual") return response;
+          if (redirect === "error" || count >= 20) {
+            throw new TypeError("fetch failed");
+          }
+          const nextUrl = host.urlResolve(hopUrl, location);
+          let nextMethod = hopMethod;
+          let nextBody = hopBody;
+          const nextHeaders = new Headers(hopHeaders);
+          if (response.status === 303 ||
+              ((response.status === 301 || response.status === 302) && hopMethod === "POST")) {
+            nextMethod = "GET";
+            nextBody = new Uint8Array(0);
+            nextHeaders.delete("content-length");
+            nextHeaders.delete("transfer-encoding");
+            nextHeaders.delete("content-type");
+          }
+          return hop(nextUrl, nextMethod, nextHeaders, nextBody, count + 1, true);
+        });
+      return hop(url, method, headers, bytes, 0, false);
+    };
+    const request = body instanceof Promise ? body.then(send) : send(body);
+    return request.catch((cause) => {
+      if (cause instanceof TypeError && cause.message === "fetch failed") throw cause;
+      const error = new TypeError("fetch failed");
+      error.cause = cause;
+      throw error;
+    });
   };
   /* queueMicrotask: the engine ships the job queue but not this spelling,
    * and the shared island bootstrap's process.nextTick and stream

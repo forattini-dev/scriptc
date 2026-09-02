@@ -9,6 +9,25 @@
 
 type IslandFetchResolvers = boa_engine::builtins::promise::ResolvingFunctions;
 
+/// `host.urlResolve(base, reference)` — the WHATWG resolution step used by
+/// redirect following. Keeping it native reuses the same URL parser as the
+/// statically compiled runtime instead of growing a second JS URL parser.
+fn island_host_url_resolve(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let base = island_host_arg_string(arguments, 0, context)?;
+    let reference = island_host_arg_string(arguments, 1, context)?;
+    let base = url::Url::parse(&base).map_err(|_| {
+        boa_engine::JsNativeError::typ().with_message("fetch received an invalid base URL")
+    })?;
+    let resolved = base.join(&reference).map_err(|_| {
+        boa_engine::JsNativeError::typ().with_message("fetch received an invalid redirect URL")
+    })?;
+    Ok(island_host_string(&string(resolved.as_str())))
+}
+
 fn island_fetch_string_list(value: JsValue, context: &mut Context) -> JsResult<JsArray<JsString>> {
     let Some(object) = value.as_object() else {
         return Err(boa_engine::JsNativeError::typ()
@@ -170,6 +189,7 @@ fn island_host_fetch(
         },
         context,
     )?;
+    request.with_mut(|request| request.half_close_after_write = false);
     let error_resolvers = resolvers;
     http_client_on_error(
         &request,
