@@ -69,14 +69,23 @@ where
     with_island_state(|state| {
         let promise = BoaJsPromise::resolve(value.0.clone(), &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        let fulfilled = NativeFunction::from_copy_closure(move |_this, arguments, _context| {
-            island_promise_fulfill(id, arguments.first().cloned().unwrap_or_default());
-            Ok(JsValue::undefined())
+        // Both reactions run as engine jobs, so boa's frames are on the
+        // stack under them — and each one calls the settlement closure,
+        // which runs the caller's `map` and the native promise's own
+        // continuations. Any of that can `throw`, so both reactions are
+        // boundaries.
+        let fulfilled = NativeFunction::from_copy_closure(move |_this, arguments, context| {
+            island_boundary(context, |_context| {
+                island_promise_fulfill(id, arguments.first().cloned().unwrap_or_default());
+                Ok(JsValue::undefined())
+            })
         });
         let rejected = NativeFunction::from_copy_closure(move |_this, arguments, context| {
-            let error = BoaJsError::from_opaque(arguments.first().cloned().unwrap_or_default());
-            island_promise_reject(id, island_error_caught(error, context));
-            Ok(JsValue::undefined())
+            island_boundary(context, |context| {
+                let error = BoaJsError::from_opaque(arguments.first().cloned().unwrap_or_default());
+                island_promise_reject(id, island_error_caught(error, context));
+                Ok(JsValue::undefined())
+            })
         });
         promise.then(
             Some(fulfilled.to_js_function(state.context.realm())),

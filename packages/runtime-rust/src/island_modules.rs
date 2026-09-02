@@ -300,9 +300,14 @@ impl boa_engine::module::ModuleLoader for IslandModuleLoader {
         request: ModuleRequest,
         context: &RefCell<&mut Context>,
     ) -> impl std::future::Future<Output = JsResult<Module>> {
-        let result = self
-            .resolve(&referrer, &request.specifier().to_std_string_lossy())
-            .and_then(|key| self.load(&key, &mut context.borrow_mut()));
+        // boa drives module linking, so this runs with the engine's
+        // frames beneath it — and `load` parses, which reaches the
+        // inflate path and the module tables, all of which signal by
+        // unwinding.
+        let result = island_boundary(&mut context.borrow_mut(), |context| {
+            let key = self.resolve(&referrer, &request.specifier().to_std_string_lossy())?;
+            self.load(&key, context)
+        });
         async { result }
     }
 
@@ -312,19 +317,27 @@ impl boa_engine::module::ModuleLoader for IslandModuleLoader {
         module: &Module,
         context: &mut Context,
     ) {
-        let Some(path) = module.path() else {
-            return;
-        };
-        let Ok(url) = url::Url::from_file_path(path) else {
-            return;
-        };
-        if let Err(error) = import_meta.create_data_property_or_throw(
-            js_string!("url"),
-            boa_engine::JsString::from(url.as_str()),
-            context,
-        ) {
-            island_eval_error(error, context);
-        }
+        // This hook returns nothing, so there is nowhere to raise an
+        // error TO. The body's own early returns already say that a
+        // module without a usable file path simply gets no
+        // `import.meta.url`; a failed define is the same answer. What
+        // must not happen is an unwind, which is why the body is a
+        // boundary — a genuine panic is parked and re-raised by
+        // `with_island_state`.
+        let _ = island_boundary(context, |context| {
+            let Some(path) = module.path() else {
+                return Ok(());
+            };
+            let Ok(url) = url::Url::from_file_path(path) else {
+                return Ok(());
+            };
+            import_meta.create_data_property_or_throw(
+                js_string!("url"),
+                boa_engine::JsString::from(url.as_str()),
+                context,
+            )?;
+            Ok(())
+        });
     }
 }
 

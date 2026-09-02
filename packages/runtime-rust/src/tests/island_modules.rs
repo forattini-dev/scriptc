@@ -415,12 +415,12 @@ fn island_json_results_deep_copy_into_the_realm() {
  * divergence is written up for upstream in
  * docs/upstream/boa-to-json-drops-typed-array-elements.md.
  *
- * Run them with `--ignored` today and the process ABORTS rather than
- * printing an assertion diff. That is not these tests misbehaving: any
- * panic unwinding out of a live island corrupts the heap, which is a
- * separate scriptc-side defect isolated in
- * docs/upstream/boa-suspected-aborts-are-not-upstream.md. Once the engine
- * is fixed these assertions hold, nothing panics, and the abort is moot. */
+ * Run them with `--ignored` and they now print an assertion diff, which
+ * is all a failing test should ever do. They used to ABORT the binary
+ * instead — a scriptc-side defect, not these tests misbehaving, isolated
+ * in docs/upstream/boa-suspected-aborts-are-not-upstream.md and fixed by
+ * `IslandSlot` in island_boundary.rs, which tests/island_boundary.rs
+ * holds fixed. */
 
 #[test]
 #[ignore = "boa 0.22.0 serializes every typed array as {} — JsValue::to_json \

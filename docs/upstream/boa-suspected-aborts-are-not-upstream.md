@@ -33,7 +33,7 @@ five-parameter CommonJS wrapper
 `packages/runtime-rust/src/island_bootstrap.js:164` emits, including nested
 instances of it.
 
-## What actually aborts: a panic unwinding out of a live island
+## What actually aborts: an island realm dropped at thread exit
 
 Both reports share one cause, and it is on our side. Reduced to a minimal case
 with no typed array and no `new Function` involved:
@@ -59,26 +59,59 @@ Caused by:
 ```
 
 The same body WITHOUT the failing assertion (evaluate, `island_json`, print,
-`island_eval_finish`) passes cleanly and prints `{}`. So the trigger is the
-unwind, not the value, not the engine call, and not thread contention.
+`island_eval_finish`) passes cleanly and prints `{}`.
 
-That matches what the code already says about itself: every scriptc `throw`
-inside the island is a Rust `panic!` (`island_eval_error` is `-> !` at
-`island_eval.rs:1089`; `throw_type_error`/`throw_syntax_error` at
-`errors.rs:292`/`errors.rs:322`), the unwind crosses boa's VM frames, and
-`with_island_state` (`island_eval.rs:985-1002`) deliberately does not tear down
-`ISLAND_STATE` when `is_scriptc_unwind` is true (`errors.rs:196`) — the comment
-at `island_eval.rs:1120-1128` records that the alternative "turned into a glibc
-heap-corruption abort". The abort has not been removed, only moved to thread
-shutdown: the island state survives the unwind with boa's VM frame stack
-abandoned mid-call, and the corruption surfaces when the thread's allocator
-tears down.
+### Correction: the panic was a red herring — FIXED
+
+The first pass of this note concluded the trigger was "the unwind, not the
+value, not the engine call", and that the abort was the island state
+surviving an unwind with boa's VM frame stack abandoned mid-call. That is
+one step off the mark, and the isolating probe is a third variant of the
+body above: evaluate, `island_json`, print, and then **do not call
+`island_eval_finish`** — no panic anywhere.
+
+```
+test tests::probe_no_panic_no_finish ... json={"a":1}
+tcache_thread_shutdown(): unaligned tcache chunk detected
+... (signal: 6, SIGABRT: process abort signal)
+```
+
+It aborts identically. So the panic was never the cause: it was only what
+made the test skip `island_eval_finish`.
+
+The cause is destructor ORDER. boa keeps its garbage-collected arena in a
+`thread_local`, and glibc runs TLS destructors in the reverse of
+registration order. `ISLAND_STATE` registers FIRST — it is borrowed before
+the `Context` inside it makes boa touch its arena — so at thread exit the
+arena is torn down first, and dropping `IslandState` afterwards walks freed
+GC storage. Any island left un-finished when its thread ends hits this,
+panic or no panic.
+
+The fix is `IslandSlot` in `packages/runtime-rust/src/island_boundary.rs`: the
+realm is process-scoped, so at thread exit it is LEAKED rather than dropped
+against an arena that is already gone. `island_eval_finish` still drops it
+properly, while the arena is live, and that is the path every ordinary run
+takes. `packages/runtime-rust/src/tests/island_boundary.rs` holds both
+variants fixed as subprocess tests, since what is under test is how the
+process ends.
 
 Why the two original reports looked like separate engine bugs: both were
 reached through a path that panics — a `to_json` result that failed a check, and
 a CJS module whose top level calls a host bridge that throws
 (`island_bootstrap.js:169` wraps `fn.call(...)` in a `try`/`catch` that
-rethrows). The panic, not the operation, is the common factor.
+rethrows). Panicking is what skips the teardown, which is what made the
+panic look causal.
+
+### The unwind hazard was real, and is closed separately
+
+Unwinding out of a callback boa invoked is still not something to do — it
+abandons the VM's frame stack and whatever `GcRefCell` borrows it held —
+even though it is not what produced this abort. Every Rust→boa→Rust
+boundary now runs its body inside `island_boundary`
+(`packages/runtime-rust/src/island_boundary.rs`), which converts a scriptc
+`throw` into a catchable engine exception and a genuine panic into boa's
+uncatchable `PanicError`, parking the payload so `with_island_state` can
+re-raise it once the engine has unwound its own frames.
 
 Note this was probed in pure boa and did NOT reproduce there: a Rust `panic!`
 raised from a `NativeFunction`, unwound through boa's VM and caught outside,
