@@ -328,6 +328,7 @@ function emitOperation(
       ? `match (&${left}, &${right}) { ` +
         `(${dyn}::Island(sc_value), ${dyn}::Undefined) | (${dyn}::Undefined, ${dyn}::Island(sc_value)) => runtime::island_is_undefined(sc_value), ` +
         `(${dyn}::Island(sc_value), ${dyn}::Null) | (${dyn}::Null, ${dyn}::Island(sc_value)) => runtime::island_is_null(sc_value), ` +
+        `(${dyn}::Island(sc_value), ${dyn}::Boolean(sc_other)) | (${dyn}::Boolean(sc_other), ${dyn}::Island(sc_value)) => runtime::island_strict_equal_boolean(sc_value, *sc_other), ` +
         `_ => sc_dyn_strict_equal(&${left}, &${right}), }`
       : `sc_dyn_strict_equal(&${left}, &${right})`;
     return `{ let ${left} = ${emitExpr(argOf(expr, 0, context))}; let ${right} = ${emitExpr(argOf(expr, 1, context))}; ${expr.op === "neq" ? `!(${equal})` : equal} }`;

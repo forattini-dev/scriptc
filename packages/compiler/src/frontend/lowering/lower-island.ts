@@ -20,19 +20,19 @@ import {
   STATIC_RESPONSE_READS,
 } from "../../compat/fetch-profile.js";
 
-/** True iff the checker's type for this node maps to jsval ('any') —
-   * the island test in front of every engine-op lowering (receivers,
-   * callees, assignment targets). ALSO true for an identifier bound to an
-   * island-HANDLE local whose declared type says otherwise (`const {
-   * readFileSync } = await import("fs")` — the binding's declared
-   * function/Buffer type never held the value; the handle is the value's
-   * only story), so its uses dispatch to engine ops instead of
-   * re-reporting the declared type. The one exclusion is promise-mapped
-   * declared types: a package promise held as a handle keeps its existing
-   * checker-driven dispatch (the await/.catch bridge lowerings own it). */
+/** Whether this expression's runtime value is an island handle. Besides
+   * checker `any`, bindings and package-call results can retain a declared
+   * static type while their only runtime representation remains jsval.
+   * Promise declarations keep their checker-driven await/catch bridge. */
   export function isIslandExpr(L: Lowerer, node: ts.Expression): boolean {
     const mapped = L.mapTypeOf(L.typeOf(node));
     if (mapped?.kind === "jsval") return true;
+    if (
+      mapped?.kind !== "promise" &&
+      mapped?.kind !== "f64" && mapped?.kind !== "bool" && mapped?.kind !== "string" &&
+      ((ts.isCallExpression(node) && ts.isIdentifier(node.expression) && isIslandExpr(L, node.expression)) ||
+        (ts.isPropertyAccessExpression(node) && isIslandExpr(L, node.expression)))
+    ) return true;
     if (mapped?.kind !== "promise" && ts.isIdentifier(node)) {
       const local = L.peekLocal(node);
       if (local?.type.kind === "jsval") return true;

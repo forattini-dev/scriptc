@@ -337,6 +337,10 @@ pub fn island_is_null(value: &IslandValue) -> bool {
     value.0.is_null()
 }
 
+pub fn island_strict_equal_boolean(value: &IslandValue, other: bool) -> bool {
+    value.0.strict_equals(&JsValue::from(other))
+}
+
 pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
     with_island_state(|state| {
         let object = value
