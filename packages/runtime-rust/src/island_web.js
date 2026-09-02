@@ -783,13 +783,15 @@
       if (!(this._body instanceof Uint8Array) && this._body !== null) {
         throw new Error("Response.clone is not supported for a streamed body in the scriptc island");
       }
-      return new Response(new Uint8Array(this._body), {
+      const clone = new Response(this._body === null ? null : new Uint8Array(this._body), {
         status: this.status,
         statusText: this.statusText,
         headers: this.headers,
         url: this.url,
         redirected: this.redirected,
       });
+      clone.type = this.type;
+      return clone;
     }
     static _native(row, redirected = false) {
       const headers = [];

@@ -9,7 +9,8 @@
  * TextDecoder — the WHATWG utf-8 state machine exactly, other labels
  * fenced — and TextDecoderStream), URLSearchParams, btoa/atob, Headers,
  * the fetch value classes (Request/Response with stream-or-bytes bodies,
- * consumed through text/json/bytes/arrayBuffer; clone() fenced; plus the
+ * consumed through text/json/bytes/arrayBuffer; materialized Response
+ * clone(); plus the
  * __scr_mk_response seam scr_fetch.c's glue builds wire responses
  * through), DOMException and AbortController/AbortSignal (pure JS state;
  * AbortSignal.timeout arms an unref'd island timer through host.timer —
@@ -1527,6 +1528,21 @@ static const char web_prelude[] =
     "    }\n"
     "  }\n"
     "  bodyMixin(Response);\n"
+    "  Response.prototype.clone = function () {\n"
+    "    if (this._bodyUsed) throw new TypeError('Response.clone: Body has already been consumed.');\n"
+    "    if (!(this._body instanceof Uint8Array) && this._body !== null) {\n"
+    "      throw new Error('Response.clone is not supported for a streamed body in the scriptc island');\n"
+    "    }\n"
+    "    const clone = new Response(this._body === null ? null : new Uint8Array(this._body), {\n"
+    "      status: this._status,\n"
+    "      statusText: this._statusText,\n"
+    "      headers: this._headers,\n"
+    "    });\n"
+    "    clone._url = this._url;\n"
+    "    clone._redirected = this._redirected;\n"
+    "    clone._type = this._type;\n"
+    "    return clone;\n"
+    "  };\n"
     "\n"
     "  g.Request = Request;\n"
     "  g.Response = Response;\n"

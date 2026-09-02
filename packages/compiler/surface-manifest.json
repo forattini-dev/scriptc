@@ -4405,10 +4405,10 @@
       "id": "stdlib.request.arrayBuffer",
       "kind": "stdlib",
       "name": "Request.arrayBuffer",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "backends": "unknown",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.attribute",
@@ -4723,10 +4723,10 @@
       "id": "stdlib.response.clone",
       "kind": "stdlib",
       "name": "Response.clone",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "backends": "unknown",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; the dynamic fetch bridge does not implement this Response operation"
+      "note": "Node 24.15.0 / Undici 7.24.4; the dynamic islands clone unconsumed materialized bodies; streamed bodies remain fenced at runtime"
     },
     {
       "id": "stdlib.response.constructor",

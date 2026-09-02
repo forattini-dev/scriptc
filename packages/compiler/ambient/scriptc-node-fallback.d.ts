@@ -719,11 +719,11 @@ interface Response {
   json(): Promise<unknown>;
   text(): Promise<string>;
   /* The whole body as bytes: bytes() answers a Uint8Array in both tiers.
-   * arrayBuffer() remains dynamic-only because static programs have no
-   * free-standing ArrayBuffer representation; the compiler diagnoses its
-   * direct use and points at bytes(). */
+   * arrayBuffer() and clone() remain dynamic-only; the static compiler
+   * diagnoses their direct use and points at the native body surface. */
   arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
+  clone(): Response;
 }
 interface ResponseInit {
   headers?:

@@ -100,6 +100,8 @@ const typedInterfaceUnsupported =
   "typed source has no compiler bridge for this interface in either tier";
 const requestIslandOnly =
   "the member is available only on Request values hosted by the dynamic JavaScript island";
+const materializedResponseCloneOnly =
+  "the dynamic islands clone unconsumed materialized bodies; streamed bodies remain fenced at runtime";
 const metadataExclusion = COMPAT_METADATA_EXCLUSION;
 
 export const NODE24_FETCH_COMPAT_PROFILE = {
@@ -590,6 +592,7 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "text",
         "json",
         "bytes",
+        "arrayBuffer",
         "clone",
       ].map((member) =>
         dynamicEntry(
@@ -614,7 +617,6 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "isHistoryNavigation",
         "duplex",
         "blob",
-        "arrayBuffer",
         "formData",
         "attribute",
       ].map((member) =>
@@ -679,7 +681,14 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "prototype",
         "free-standing ArrayBuffer values have no static representation; use Response.bytes()",
       ),
-      ...["clone", "blob", "formData"].map((member) =>
+      dynamicEntry(
+        "stdlib.response.clone",
+        "Response",
+        "clone",
+        "prototype",
+        materializedResponseCloneOnly,
+      ),
+      ...["blob", "formData"].map((member) =>
         unsupportedEntry(
           `stdlib.response.${member}`,
           "Response",

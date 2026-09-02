@@ -97,16 +97,16 @@ describe("surface manifest generation", () => {
     }
   });
 
-  test("the implemented Request island surface is classified dynamic-only", () => {
+  test("the implemented Request and Response island surface is classified dynamic-only", () => {
     const implemented = [
       "constructor", "method", "url", "headers", "signal",
-      "body", "bodyUsed", "text", "json", "bytes", "clone",
+      "body", "bodyUsed", "text", "json", "bytes", "arrayBuffer", "clone",
     ];
     for (const member of implemented) {
       expect(entryById.get(`stdlib.request.${member}`)?.status, member)
         .toBe("dynamic-only");
     }
-    expect(entryById.get("stdlib.request.arrayBuffer")?.status).toBe("unsupported");
+    expect(entryById.get("stdlib.response.clone")?.status).toBe("dynamic-only");
   });
 });
 
@@ -255,6 +255,10 @@ const PROBES: Probe[] = [
     id: "stdlib.headers.symbol.iterator",
     source: '/// <reference types="node" />\nfunction f([first]: Headers): void {\n  void first;\n}\nvoid f;\n',
   },
+  {
+    id: "stdlib.response.clone",
+    source: '/// <reference types="node" />\nasync function f(): Promise<void> {\n  const r = await fetch("http://127.0.0.1");\n  void r.clone();\n}\nvoid f();\n',
+  },
   { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst z = y * 2;\nconsole.log(0);\n" },
   // status unsupported — refused with the entry's code
   {
@@ -268,10 +272,6 @@ const PROBES: Probe[] = [
   {
     id: "stdlib.response.static.json",
     source: '/// <reference types="node" />\nvoid Response.json(1);\n',
-  },
-  {
-    id: "stdlib.response.clone",
-    source: '/// <reference types="node" />\nasync function f(): Promise<void> {\n  const r = await fetch("http://127.0.0.1");\n  void r.clone();\n}\nvoid f();\n',
   },
   {
     id: "stdlib.readable-stream.tee",
