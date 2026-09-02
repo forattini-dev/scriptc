@@ -84,6 +84,7 @@ const cases = [
   ["Request.body exposes a lazy readable stream", "fetch-request-body/main.ts"],
   ["Request.body reads disturb the Body state", "fetch-request-body-read/main.ts"],
   ["Request.clone keeps Body consumption independent", "fetch-request-clone/main.ts"],
+  ["Request.clone tees a materialized Body", "fetch-request-clone-materialized/main.ts"],
   ["Request.clone rejects a consumed Body", "fetch-request-clone-used/main.ts"],
   ["Request body rejects a second read", "fetch-request-second-read/main.ts"],
 ] as const;

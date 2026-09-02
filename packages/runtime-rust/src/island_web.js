@@ -651,6 +651,7 @@
       this._body = init.body === undefined
         ? source === null ? undefined : source._body
         : init.body;
+      this._bodyStream = null;
       this._bodyReadObserved = false;
       this.bodyUsed = false;
       this.signal = dependentAbortSignal(init.signal === undefined
@@ -659,19 +660,21 @@
     }
     get body() {
       if (this._body === undefined || this._body === null) return null;
-      if (!(this._body instanceof global.ReadableStream)) {
+      if (this._bodyStream === null) {
         const source = this._body;
         const headers = this.headers;
-        this._body = new global.ReadableStream({
-          async start(controller) {
-            controller.enqueue(await fetchBody(source, headers));
-            controller.close();
-          },
-        });
+        this._bodyStream = source instanceof global.ReadableStream
+          ? source
+          : new global.ReadableStream({
+              async start(controller) {
+                controller.enqueue(await fetchBody(source, headers));
+                controller.close();
+              },
+            });
       }
       if (!this._bodyReadObserved) {
         const request = this;
-        const stream = this._body;
+        const stream = this._bodyStream;
         const getReader = stream.getReader.bind(stream);
         Object.defineProperty(stream, "getReader", {
           configurable: true,
@@ -690,10 +693,15 @@
         });
         this._bodyReadObserved = true;
       }
-      return this._body;
+      return this._bodyStream;
     }
     clone() {
       if (this.bodyUsed) throw new TypeError("unusable");
+      if (this._bodyStream !== null) {
+        this._bodyStream.getReader();
+        this._bodyStream = null;
+        this._bodyReadObserved = false;
+      }
       return new Request(this);
     }
     async text() {
@@ -703,7 +711,7 @@
     async bytes() {
       if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
       this.bodyUsed = true;
-      return fetchBody(this._body, this.headers);
+      return fetchBody(this._bodyStream === null ? this._body : this._bodyStream, this.headers);
     }
     async arrayBuffer() {
       const bytes = await this.bytes();
@@ -874,7 +882,9 @@
       : init.headers);
     if (!headers.has("connection")) headers.set("connection", "close");
     const body = fetchBody(init.body === undefined
-      ? source === null ? undefined : source._body
+      ? source === null
+        ? undefined
+        : source._bodyStream === null ? source._body : source._bodyStream
       : init.body, headers);
     const redirect = init.redirect === undefined ? "follow" : String(init.redirect);
     if (redirect !== "follow" && redirect !== "error" && redirect !== "manual") {
