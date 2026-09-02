@@ -10996,7 +10996,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const probed = probeLower(L, expr.expression);
       if (probed?.type.kind === "record") {
         const concreteShape = L.shapes.get(probed.type.shapeId);
-        if (concreteShape && !concreteShape.fields.some((f) => f.name === expr.name.text)) {
+        const propertyName = expr.name.text;
+        if (
+          concreteShape &&
+          !concreteShape.indexValue &&
+          !concreteShape.fields.some((f) =>
+            f.name === propertyName ||
+            f.name === `%get:${propertyName}` ||
+            f.name === `%set:${propertyName}`
+          )
+        ) {
           const receiver = L.lowerExpr(expr.expression);
           return {
             kind: "seqExpr",
