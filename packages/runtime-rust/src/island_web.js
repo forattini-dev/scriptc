@@ -485,6 +485,11 @@
       const key = String(name).toLowerCase();
       return this._pairs.some(([entry]) => entry === key);
     }
+    getSetCookie() {
+      return this._pairs
+        .filter(([name]) => name === "set-cookie")
+        .map(([, value]) => value);
+    }
     set(name, value) {
       const key = String(name).toLowerCase();
       this.delete(key);
@@ -494,11 +499,17 @@
       const key = String(name).toLowerCase();
       this._pairs = this._pairs.filter(([entry]) => entry !== key);
     }
-    entries() { return this._pairs[Symbol.iterator](); }
+    _sortedPairs() {
+      return this._pairs.slice().sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0);
+    }
+    entries() {
+      return this._sortedPairs()[Symbol.iterator]();
+    }
     keys() { return this._pairs.map(([name]) => name)[Symbol.iterator](); }
     values() { return this._pairs.map(([, value]) => value)[Symbol.iterator](); }
     forEach(callback, thisArg) {
-      for (const [name, value] of this._pairs) callback.call(thisArg, value, name, this);
+      for (const [name, value] of this._sortedPairs()) callback.call(thisArg, value, name, this);
     }
     [Symbol.iterator]() { return this.entries(); }
     _flat() { return this._pairs.flat(); }

@@ -324,6 +324,13 @@ pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)
     request.with(|request| {
         let mut output = Vec::new();
         for (_, lower, value) in &request.headers {
+            // Fetch Headers.getSetCookie() exposes each cookie as its own
+            // item; unlike ordinary repeated fields, Set-Cookie is never a
+            // comma-joined field value.
+            if lower.as_ref() == "set-cookie" {
+                output.push((lower.clone(), value.clone()));
+                continue;
+            }
             if let Some((_, combined)) = output
                 .iter_mut()
                 .find(|(name, _): &&mut (JsString, JsString)| name.as_ref() == lower.as_ref())

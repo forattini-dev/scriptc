@@ -170,6 +170,51 @@ test.skipIf(sanitize)("Rust dynamic fetch remains callable when injected as a va
   expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
 }, 120_000);
 
+test.skipIf(sanitize)("Rust dynamic Headers.getSetCookie returns the response cookie list", async () => {
+  const entry = join(fixturesRoot, "fetch-headers-cookies/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, baseUrl]),
+    runBinary(binary, [baseUrl], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
+test.skipIf(sanitize)("Rust dynamic Headers.forEach normalizes response fields", async () => {
+  const entry = join(fixturesRoot, "fetch-headers-iteration/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, baseUrl]),
+    runBinary(binary, [baseUrl], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
+test.skipIf(sanitize)("Rust dynamic Headers iterator normalizes response fields", async () => {
+  const entry = join(fixturesRoot, "fetch-headers-iterator/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, baseUrl]),
+    runBinary(binary, [baseUrl], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
 test.skipIf(sanitize)("Rust dynamic fetch matches the package fetch suite", async () => {
   const entry = join(fixturesRoot, "cases/fetch-suite/main.ts");
   const binary = await build(entry, "rust", "dev");
