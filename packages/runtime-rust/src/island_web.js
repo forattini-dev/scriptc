@@ -651,10 +651,46 @@
       this._body = init.body === undefined
         ? source === null ? undefined : source._body
         : init.body;
+      this._bodyReadObserved = false;
       this.bodyUsed = false;
       this.signal = dependentAbortSignal(init.signal === undefined
         ? source === null ? undefined : source.signal
         : init.signal);
+    }
+    get body() {
+      if (this._body === undefined || this._body === null) return null;
+      if (!(this._body instanceof global.ReadableStream)) {
+        const source = this._body;
+        const headers = this.headers;
+        this._body = new global.ReadableStream({
+          async start(controller) {
+            controller.enqueue(await fetchBody(source, headers));
+            controller.close();
+          },
+        });
+      }
+      if (!this._bodyReadObserved) {
+        const request = this;
+        const stream = this._body;
+        const getReader = stream.getReader.bind(stream);
+        Object.defineProperty(stream, "getReader", {
+          configurable: true,
+          value(options) {
+            const reader = getReader(options);
+            const read = reader.read.bind(reader);
+            Object.defineProperty(reader, "read", {
+              configurable: true,
+              value() {
+                request.bodyUsed = true;
+                return read();
+              },
+            });
+            return reader;
+          },
+        });
+        this._bodyReadObserved = true;
+      }
+      return this._body;
     }
     async text() {
       return new TextDecoder().decode(await this.bytes());
