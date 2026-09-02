@@ -185,6 +185,14 @@ export function emitRustHttpCall(
     const dyn = context.dynTypeName();
     return `{ let ${response} = ${context.emitExpr(expr.args[0])}; match &${response} { ${dyn}::HttpRequest(sc_response) => runtime::fetch_response_text(sc_response), sc_value => sc_dyn_arg_type_fail("this", "an instance of Response", sc_value), } }`;
   }
+  if (expr.fn === "fetch.responseJson" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&
+      expr.type.inner.kind === "dyn") {
+    const response = context.nextTemporary();
+    const text = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; match &${response} { ${dyn}::HttpRequest(sc_response) => { let ${text} = runtime::fetch_response_text(sc_response); runtime::promise_map(&${text}, |sc_text| runtime::json_parse_typed::<${dyn}>(&sc_text)) }, sc_value => sc_dyn_arg_type_fail("this", "an instance of Response", sc_value), } }`;
+  }
   if (expr.fn === "http.agentNew" && expr.args.length === 7 &&
       expr.args[0]?.type.kind === "bool" && expr.args[1]?.type.kind === "bool" &&
       expr.args.slice(2).every((arg) => arg.type.kind === "f64")) {
