@@ -184,7 +184,7 @@ export function emitRustHttpCall(
     const init = context.nextTemporary();
     const promise = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${url} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; if !matches!(&${init}, ${dyn}::Undefined) { sc_dyn_arg_type_fail("init", "undefined in the native fetch GET path", &${init}); } let ${promise} = runtime::fetch_start(&${url}); runtime::promise_map(&${promise}, |sc_response| ${dyn}::HttpRequest(sc_response)) }`;
+    return `{ let ${url} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; let (sc_method, sc_body) = match &${init} { ${dyn}::Undefined | ${dyn}::Null => (runtime::string("GET"), None), ${dyn}::Object(..) => { let sc_method = sc_dyn_key_get(&${init}, &runtime::string("method"), false); let sc_method = match sc_method { ${dyn}::Undefined => runtime::string("GET"), ${dyn}::String(sc_value) => sc_value, sc_value => sc_dyn_arg_type_fail("init.method", "of type string", &sc_value), }; let sc_body = sc_dyn_key_get(&${init}, &runtime::string("body"), false); let sc_body = match sc_body { ${dyn}::Undefined | ${dyn}::Null => None, ${dyn}::String(sc_value) => Some(sc_value), sc_value => sc_dyn_arg_type_fail("init.body", "of type string", &sc_value), }; (sc_method, sc_body) }, sc_value => sc_dyn_arg_type_fail("init", "of type object", sc_value), }; let ${promise} = runtime::fetch_start(&${url}, &sc_method, sc_body.as_ref()); runtime::promise_map(&${promise}, |sc_response| ${dyn}::HttpRequest(sc_response)) }`;
   }
   if (expr.fn === "fetch.responseText" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&

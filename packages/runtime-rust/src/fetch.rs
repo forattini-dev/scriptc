@@ -20,13 +20,19 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
     })
 }
 
-pub fn fetch_start(url: &JsString) -> JsPromise<JsHttpRequest> {
+pub fn fetch_start(
+    url: &JsString,
+    method: &JsString,
+    body: Option<&JsString>,
+) -> JsPromise<JsHttpRequest> {
     let result = promise_new();
     let setup_guard = result.clone();
     let setup_target = result.clone();
     let url = url.clone();
+    let method = method.clone();
+    let body = body.cloned();
     promise_run_segment(&setup_guard, move || {
-        let request = http_client_request_url(&url, &string("GET"), false);
+        let request = http_client_request_url(&url, &method, false);
 
         let fulfilled = setup_target.clone();
         let fulfilled_trace = setup_target.clone();
@@ -49,6 +55,9 @@ pub fn fetch_start(url: &JsString) -> JsPromise<JsHttpRequest> {
             Rc::new(move |tracer| tracer.edge(&rejected_trace)),
             true,
         );
+        if let Some(body) = body {
+            http_client_write_str(&request, &body);
+        }
         http_client_end(&request);
     });
     result
