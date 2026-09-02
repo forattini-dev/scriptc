@@ -2,6 +2,24 @@
 // client. Responses reuse the incoming-message handle: it already owns the
 // response head, buffers unread bytes, and participates in heap tracing.
 
+pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
+    Gc::new(HttpRequestData {
+        socket: None,
+        method: empty_string(),
+        url: empty_string(),
+        status_code: Some(200.0),
+        status_message: Some(empty_string()),
+        headers: Vec::new(),
+        body: body.as_bytes().to_vec(),
+        ended: false,
+        finish_pending: true,
+        paused: false,
+        flowing: false,
+        data_listeners: Vec::new(),
+        end_listeners: Vec::new(),
+    })
+}
+
 pub fn fetch_start(url: &JsString) -> JsPromise<JsHttpRequest> {
     let result = promise_new();
     let setup_guard = result.clone();

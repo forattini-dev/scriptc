@@ -246,7 +246,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fetch.readerRead": ["c", "llvm"],
   "fetch.responseBytes": ["c", "llvm", "rust"],
   "fetch.responseJson": ["c", "llvm", "rust"],
-  "fetch.responseNew": ["c", "llvm"],
+  "fetch.responseNew": ["c", "llvm", "rust"],
   "fetch.responseText": ["c", "llvm", "rust"],
   "fetch.start": ["c", "llvm", "rust"],
   "fetch.streamFrom": ["c", "llvm"],

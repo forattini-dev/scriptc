@@ -169,6 +169,14 @@ export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "fetch.responseNew" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "dyn" && expr.args[1]?.type.kind === "dyn" &&
+      expr.type.kind === "dyn") {
+    const body = context.nextTemporary();
+    const init = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${body} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; if !matches!(&${init}, ${dyn}::Undefined) { sc_dyn_arg_type_fail("init", "undefined in the native Response text path", &${init}); } match &${body} { ${dyn}::String(sc_body) => ${dyn}::HttpRequest(runtime::fetch_response_new_text(sc_body)), sc_value => sc_dyn_arg_type_fail("body", "of type string", sc_value), } }`;
+  }
   if (expr.fn === "fetch.start" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "string" && expr.args[1]?.type.kind === "dyn" &&
       expr.type.kind === "promise" && expr.type.inner.kind === "dyn") {
