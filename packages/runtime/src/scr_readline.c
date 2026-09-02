@@ -1,4 +1,4 @@
-/* node:readline — the question/close slice over the stdin unit
+/* node:readline — the question/nextLine/close slice over the stdin unit
  * (scr_events.c), linked exactly when the program uses it (the events
  * gating; rl.* libCalls imply events).
  *
@@ -17,13 +17,29 @@
  *   listeners SYNCHRONOUSLY — Node's close() emits inline, which is why
  *   the portless prompt's close-listener resolve wins over the question
  *   callback's (oracle-pinned).
- * - stdin EOF closes every open interface the same way: the buffered
- *   partial line is DISCARDED (Node), then 'close' fires.
- * - question() after close() throws Node's ERR_USE_AFTER_CLOSE message.
+ * - nextLine() is `for await (const line of rl)`: it answers the next
+ *   line, or UNDEFINED once the interface is closed or stdin ended, and
+ *   goes on answering undefined at every later call so the loop ends
+ *   (Node's iterator keeps returning {done: true}). This is the one
+ *   consumer that OUTLIVES its lines: the moment a program asks for one,
+ *   a 'line' listener exists in Node's model, so an unclaimed line stops
+ *   dropping and QUEUES for the next ask.
+ * - stdin EOF closes every open interface: a held \r terminates its line
+ *   and answers a pending question; a leftover PARTIAL line reaches the
+ *   async iterator but never a question — Node's onend emits 'line'
+ *   directly rather than through [kOnLine], and only [kOnLine] answers a
+ *   question (probed against Node 24: `printf 'a\nb' | node` delivers "b"
+ *   to `for await` and nothing to a pending `question`). Then 'close'
+ *   fires.
+ * - question() after close() throws Node's ERR_USE_AFTER_CLOSE message;
+ *   nextLine() after close() answers undefined instead — a closed
+ *   iterator is done, not an error.
  * - An interface created AFTER stdin ended is DEAD (pinned against
  *   Node): a question still writes its prompt, but nothing ever answers
  *   and 'close' never fires — Node's process exits with the question
- *   pending, and the loop exhausts the same way here. */
+ *   pending, and the loop exhausts the same way here. A nextLine on a
+ *   dead interface answers undefined at once (Node's iterator over an
+ *   already-ended input is immediately done). */
 #include "scr_runtime.h"
 
 #include <stdio.h>
@@ -41,6 +57,13 @@ typedef struct ScrRl {
   bool dead; /* created after stdin ended: close fires at question() */
   ScrClosure *q_cb; /* pending question's callback (owned), or NULL */
   void (*q_fn)(ScrClosure *, ScrStr *);
+  ScrClosure *nl_cb; /* pending nextLine waiter (owned), or NULL */
+  void (*nl_fn)(ScrClosure *, ScrStr *); /* a NULL line means undefined */
+  bool iterating; /* a nextLine has been asked: a 'line' listener exists in
+                   * Node's model, so an unclaimed line QUEUES below rather
+                   * than dropping */
+  ScrStr **lines; /* queued lines (owned) waiting for the next nextLine */
+  size_t n_lines, cap_lines;
   ScrClosure **close_cbs; /* owned zero-arg listeners */
   size_t n_close, cap_close;
   char *buf; /* undelivered stdin bytes */
@@ -62,8 +85,47 @@ static ScrRl *scr_rl_find(double id) {
   return NULL;
 }
 
+/* ── the async iterator's line queue ──────────────────────────────────
+ * Node's `for await (const line of rl)` is an EventEmitter.on('line')
+ * iterator: it is a LISTENER, so a line parsed while the loop body is
+ * running (between one await settling and the next nextLine) is buffered
+ * rather than lost. A question has no such queue — nothing listens
+ * between two questions, which is why an unclaimed line still drops for
+ * a question-only interface. */
+
+/* Hands a parsed line to the pending nextLine waiter, or queues it.
+ * Takes the line's +1 either way. */
+static void scr_rl_deliver_line(ScrRl *rl, ScrStr *line) {
+  if (rl->nl_cb) {
+    ScrClosure *cb = rl->nl_cb;
+    void (*fn)(ScrClosure *, ScrStr *) = rl->nl_fn;
+    rl->nl_cb = NULL; /* consumed BEFORE the callback runs (once) */
+    fn(cb, line);     /* the adapter owns the +1 line */
+    scr_closure_release(cb);
+    return;
+  }
+  if (rl->n_lines == rl->cap_lines) {
+    rl->cap_lines = rl->cap_lines ? rl->cap_lines * 2 : 4;
+    rl->lines = realloc(rl->lines, rl->cap_lines * sizeof *rl->lines);
+    if (!rl->lines) scr_rl_oom();
+  }
+  rl->lines[rl->n_lines++] = line;
+}
+
+/* The oldest queued line (+1 moves out), or NULL when none is waiting. */
+static ScrStr *scr_rl_take_queued(ScrRl *rl) {
+  if (rl->n_lines == 0) return NULL;
+  ScrStr *line = rl->lines[0];
+  rl->n_lines--;
+  memmove(rl->lines, rl->lines + 1, rl->n_lines * sizeof *rl->lines);
+  return line;
+}
+
 /* Fires the close listeners (snapshot; synchronous, like Node's emit) and
- * releases everything the interface holds. */
+ * releases everything the interface holds. A pending nextLine answers
+ * UNDEFINED — the iterator is done, where a pending question simply never
+ * hears back. The queue survives: Node's iterator flushes the lines it
+ * already heard before reporting done. */
 static void scr_rl_settle_close(ScrRl *rl) {
   if (rl->closed) return;
   rl->closed = true;
@@ -92,6 +154,16 @@ static void scr_rl_settle_close(ScrRl *rl) {
   free(rl->buf);
   rl->buf = NULL;
   rl->len = rl->cap = 0;
+  /* The close listeners run first (Node emits 'close' inline), then the
+   * parked iterator learns it is done — the fulfillment is a microtask
+   * either way, so the listeners' output still comes first. */
+  if (rl->nl_cb) {
+    ScrClosure *cb = rl->nl_cb;
+    void (*fn)(ScrClosure *, ScrStr *) = rl->nl_fn;
+    rl->nl_cb = NULL;
+    fn(cb, NULL); /* undefined: the iterator is done */
+    scr_closure_release(cb);
+  }
 }
 
 /* One complete line off the front of the buffer: *adv is the byte count
@@ -122,7 +194,9 @@ static void scr_rl_drain(ScrRl *rl) {
     ScrStr *line = NULL;
     ScrClosure *cb = rl->q_cb;
     void (*fn)(ScrClosure *, ScrStr *) = rl->q_fn;
-    if (cb) line = scr_str_new(rl->buf, line_len);
+    /* A line is only built for a consumer: a question, the async
+     * iterator, or the iterator's queue. */
+    if (cb || rl->iterating) line = scr_str_new(rl->buf, line_len);
     memmove(rl->buf, rl->buf + adv, rl->len - adv);
     rl->len -= adv;
     if (cb) {
@@ -130,8 +204,14 @@ static void scr_rl_drain(ScrRl *rl) {
       fn(cb, line);    /* the adapter owns the +1 line */
       scr_closure_release(cb);
       if (scr_exc_pending()) return;
+      continue;
     }
-    /* No pending question: the line drops, exactly Node's unheard 'line'. */
+    if (rl->iterating) {
+      scr_rl_deliver_line(rl, line); /* the waiter, or the queue */
+      if (scr_exc_pending()) return;
+      continue;
+    }
+    /* No consumer at all: the line drops, exactly Node's unheard 'line'. */
   }
 }
 
@@ -153,24 +233,40 @@ static void scr_rl_data_adapter(ScrClosure *cb, ScrBytes *chunk) {
   }
 }
 
-/* stdin EOF: every open interface closes — the buffered partial line is
- * DISCARDED (Node; a trailing held \r still terminates its line first). */
+/* stdin EOF: every open interface closes. The leftover bytes are one
+ * last line — but for WHOM differs, and the split is Node's own: onend
+ * emits 'line' DIRECTLY, where the per-chunk path goes through
+ * [kOnLine], and only [kOnLine] answers a question. So the async
+ * iterator hears the partial line and a pending question does not.
+ * The one exception is a HELD \r ("a\r" then EOF): the \r is a real line
+ * terminator whose \r\n decision expired, so that line came through the
+ * ordinary path and a question does answer it. */
 static void scr_rl_end_thunk(ScrClosure *cb) {
   (void)cb;
   scr_rl_data_cb = NULL; /* the stdin unit dropped its listeners itself */
   for (ScrRl *rl = scr_rls; rl; rl = rl->next) {
     if (rl->closed || rl->dead) continue;
-    if (rl->len > 0 && rl->buf[rl->len - 1] == '\r' && rl->q_cb) {
-      /* "a\r" then EOF: the \r terminates the line (Node's crlfDelay
-       * expiry collapsed to EOF time). */
-      ScrStr *line = scr_str_new(rl->buf, rl->len - 1);
-      ScrClosure *qcb = rl->q_cb;
-      void (*fn)(ScrClosure *, ScrStr *) = rl->q_fn;
-      rl->q_cb = NULL;
-      rl->len = 0;
-      fn(qcb, line);
-      scr_closure_release(qcb);
-      if (scr_exc_pending()) return;
+    if (rl->len > 0) {
+      bool held_cr = rl->buf[rl->len - 1] == '\r';
+      size_t line_len = held_cr ? rl->len - 1 : rl->len;
+      if (held_cr && rl->q_cb) {
+        /* "a\r" then EOF: the \r terminates the line (Node's crlfDelay
+         * expiry collapsed to EOF time). */
+        ScrStr *line = scr_str_new(rl->buf, line_len);
+        ScrClosure *qcb = rl->q_cb;
+        void (*fn)(ScrClosure *, ScrStr *) = rl->q_fn;
+        rl->q_cb = NULL;
+        rl->len = 0;
+        fn(qcb, line);
+        scr_closure_release(qcb);
+        if (scr_exc_pending()) return;
+      } else if (rl->iterating) {
+        ScrStr *line = scr_str_new(rl->buf, line_len);
+        rl->len = 0;
+        scr_rl_deliver_line(rl, line);
+        if (scr_exc_pending()) return;
+      }
+      /* Neither: the partial line is DISCARDED, exactly Node. */
     }
     scr_rl_settle_close(rl);
     if (scr_exc_pending()) return;
@@ -186,6 +282,14 @@ static void scr_rl_cleanup_atexit(void) {
       scr_closure_release(rl->q_cb);
       rl->q_cb = NULL;
     }
+    if (rl->nl_cb) {
+      scr_closure_release(rl->nl_cb);
+      rl->nl_cb = NULL;
+    }
+    for (size_t i = 0; i < rl->n_lines; i++) scr_str_release(rl->lines[i]);
+    free(rl->lines);
+    rl->lines = NULL;
+    rl->n_lines = rl->cap_lines = 0;
     for (size_t i = 0; i < rl->n_close; i++) scr_closure_release(rl->close_cbs[i]);
     free(rl->close_cbs);
     rl->close_cbs = NULL;
@@ -250,6 +354,41 @@ void scr_rl_question(double id, const ScrStr *query, ScrClosure *cb /*moves*/,
   if (rl->q_cb) scr_closure_release(rl->q_cb); /* re-ask replaces (Node) */
   rl->q_cb = cb;
   rl->q_fn = fn;
+  scr_rl_drain(rl); /* an already-buffered line answers immediately */
+}
+
+/* `for await (const line of rl)`: the next line, or NULL for undefined.
+ *
+ * Unlike question, this NEVER throws on a closed interface — a done
+ * iterator answers undefined, and answers it again at every later call,
+ * which is what ends the loop. The three prompt answers, in order: a line
+ * the queue already holds, a line already buffered in the byte window
+ * (scr_rl_drain, exactly question's immediate answer), or undefined when
+ * nothing more can arrive. Otherwise the waiter parks and the loop keeps
+ * fd 0 alive, because the interface is still an open stdin consumer. */
+void scr_rl_next_line(double id, ScrClosure *cb /*moves*/,
+                      void (*fn)(ScrClosure *, ScrStr *)) {
+  ScrRl *rl = scr_rl_find(id);
+  if (!rl) {
+    fn(cb, NULL);
+    scr_closure_release(cb);
+    return;
+  }
+  rl->iterating = true; /* from here on, unclaimed lines queue */
+  ScrStr *queued = scr_rl_take_queued(rl);
+  if (queued) {
+    fn(cb, queued);
+    scr_closure_release(cb);
+    return;
+  }
+  if (rl->closed || rl->dead) {
+    fn(cb, NULL);
+    scr_closure_release(cb);
+    return;
+  }
+  if (rl->nl_cb) scr_closure_release(rl->nl_cb); /* re-ask replaces */
+  rl->nl_cb = cb;
+  rl->nl_fn = fn;
   scr_rl_drain(rl); /* an already-buffered line answers immediately */
 }
 

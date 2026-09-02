@@ -1393,11 +1393,11 @@ declare module "crypto" {
   export function randomUUID(): string;
   export function randomBytes(size: number): Buffer;
   /* The lowered Hash surface is exactly the COMPOSED chain
-   * createHash("sha1" | "sha256" | "sha384" | "sha512")
+   * createHash("md5" | "sha1" | "sha256" | "sha384" | "sha512")
    *   .update(data).digest("hex" | "base64")
    * — fused into one call, the Hash handle never materializes (holding
    * one fences). sha1 exists for the RFC 6455 Sec-WebSocket-Accept
-   * hash. */
+   * hash, md5 for ETags and cache keys. */
   export interface Hash {
     update(data: string | Uint8Array): Hash;
     digest(encoding: "hex" | "base64"): string;

@@ -47,27 +47,47 @@ pub fn crypto_random_uuid() -> JsString {
     string(&output)
 }
 
-/// The four lowered digest algorithms, as a LOOKUP: `None` is "this
+/// A digest this runtime carries, split by WHO computes it: `ring` for
+/// the SHA family, this crate's own `md5.rs` for MD5, which `ring`
+/// deliberately does not carry.
+#[derive(Clone, Copy)]
+enum CryptoDigest {
+    Md5,
+    Ring(&'static ring::digest::Algorithm),
+}
+
+impl CryptoDigest {
+    /// The raw digest bytes. ONE place decides which implementation runs,
+    /// so every entry point below — the fused static chain, the one-shot,
+    /// the island bridge — agrees on the table by construction.
+    fn digest(self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Md5 => md5_digest(data).to_vec(),
+            Self::Ring(algorithm) => ring::digest::digest(algorithm, data).as_ref().to_vec(),
+        }
+    }
+}
+
+/// The five lowered digest algorithms, as a LOOKUP: `None` is "this
 /// runtime has no such digest".
 ///
 /// The static lane never reaches the `None` arm — the frontend fences
 /// every other literal — but the island does: `createHash(alg)` takes a
-/// runtime string, so the island needs to ask rather than assert. Node's
-/// `md5` is deliberately absent (ring does not carry it), which is why
-/// asking has to be possible at all.
-fn crypto_digest_algorithm_opt(algorithm: &JsString) -> Option<&'static ring::digest::Algorithm> {
+/// runtime string, so the island needs to ask rather than assert.
+fn crypto_digest_algorithm_opt(algorithm: &JsString) -> Option<CryptoDigest> {
     match algorithm.as_ref() {
-        "sha1" => Some(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY),
-        "sha256" => Some(&ring::digest::SHA256),
-        "sha384" => Some(&ring::digest::SHA384),
-        "sha512" => Some(&ring::digest::SHA512),
+        "md5" => Some(CryptoDigest::Md5),
+        "sha1" => Some(CryptoDigest::Ring(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY)),
+        "sha256" => Some(CryptoDigest::Ring(&ring::digest::SHA256)),
+        "sha384" => Some(CryptoDigest::Ring(&ring::digest::SHA384)),
+        "sha512" => Some(CryptoDigest::Ring(&ring::digest::SHA512)),
         _ => None,
     }
 }
 
-/// The four lowered digest algorithms. The frontend fences every other
+/// The five lowered digest algorithms. The frontend fences every other
 /// literal, so an unknown name here is a compiler invariant break.
-fn crypto_digest_algorithm(algorithm: &JsString) -> &'static ring::digest::Algorithm {
+fn crypto_digest_algorithm(algorithm: &JsString) -> CryptoDigest {
     crypto_digest_algorithm_opt(algorithm)
         .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported hash algorithm reached the runtime"))
 }
@@ -78,8 +98,8 @@ fn crypto_digest_algorithm(algorithm: &JsString) -> &'static ring::digest::Algor
 /// an unknown name must ANSWER here, never throw.
 pub fn crypto_digest_raw(algorithm: &JsString, data: &JsBytes<u8>) -> Option<JsBytes<u8>> {
     let algorithm = crypto_digest_algorithm_opt(algorithm)?;
-    let digest = crypto_with_bytes(data, |data| ring::digest::digest(algorithm, data));
-    Some(bytes_from_vec(digest.as_ref().to_vec()))
+    let digest = crypto_with_bytes(data, |data| algorithm.digest(data));
+    Some(bytes_from_vec(digest))
 }
 
 /// `host.hmac(alg, key, bytes)`, with the same `None` fence as
@@ -91,15 +111,14 @@ pub fn crypto_hmac_raw(
 ) -> Option<JsBytes<u8>> {
     let algorithm = crypto_hmac_algorithm_opt(algorithm)?;
     let tag = crypto_with_bytes(key, |key| {
-        let key = ring::hmac::Key::new(algorithm, key);
-        crypto_with_bytes(data, |data| ring::hmac::sign(&key, data))
+        crypto_with_bytes(data, |data| algorithm.sign(key, data))
     });
-    Some(bytes_from_vec(tag.as_ref().to_vec()))
+    Some(bytes_from_vec(tag))
 }
 
 fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
-    let digest = ring::digest::digest(crypto_digest_algorithm(algorithm), data);
-    decode_bytes(digest.as_ref(), encoding.as_ref())
+    let digest = crypto_digest_algorithm(algorithm).digest(data);
+    decode_bytes(&digest, encoding.as_ref())
 }
 
 /// Reads a Buffer/typed-array handle's bytes. Two handles can be read at
@@ -111,18 +130,40 @@ fn crypto_with_bytes<T>(data: &JsBytes<u8>, body: impl FnOnce(&[u8]) -> T) -> T 
     })
 }
 
-/// The HMAC counterpart of `crypto_digest_algorithm_opt`.
-fn crypto_hmac_algorithm_opt(algorithm: &JsString) -> Option<ring::hmac::Algorithm> {
+/// The HMAC counterpart of `CryptoDigest`. `ring::hmac` picks the block
+/// size from its digest; the MD5 arm carries its own RFC 2104 wrapping
+/// (block 64, like sha1/sha256) because `ring` has no MD5 to hand it to.
+#[derive(Clone, Copy)]
+enum CryptoHmac {
+    Md5,
+    Ring(ring::hmac::Algorithm),
+}
+
+impl CryptoHmac {
+    fn sign(self, key: &[u8], data: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Md5 => md5_hmac(key, data).to_vec(),
+            Self::Ring(algorithm) => {
+                ring::hmac::sign(&ring::hmac::Key::new(algorithm, key), data).as_ref().to_vec()
+            }
+        }
+    }
+}
+
+/// The HMAC counterpart of `crypto_digest_algorithm_opt` — the two tables
+/// carry the same names.
+fn crypto_hmac_algorithm_opt(algorithm: &JsString) -> Option<CryptoHmac> {
     match algorithm.as_ref() {
-        "sha1" => Some(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY),
-        "sha256" => Some(ring::hmac::HMAC_SHA256),
-        "sha384" => Some(ring::hmac::HMAC_SHA384),
-        "sha512" => Some(ring::hmac::HMAC_SHA512),
+        "md5" => Some(CryptoHmac::Md5),
+        "sha1" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY)),
+        "sha256" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA256)),
+        "sha384" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA384)),
+        "sha512" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA512)),
         _ => None,
     }
 }
 
-fn crypto_hmac_algorithm(algorithm: &JsString) -> ring::hmac::Algorithm {
+fn crypto_hmac_algorithm(algorithm: &JsString) -> CryptoHmac {
     crypto_hmac_algorithm_opt(algorithm)
         .unwrap_or_else(|| unreachable!("scriptc invariant: unsupported HMAC algorithm reached the runtime"))
 }
@@ -136,10 +177,8 @@ fn crypto_hmac_digest(
     data: &[u8],
     encoding: &JsString,
 ) -> JsString {
-    let tag = crypto_with_bytes(key, |key| {
-        ring::hmac::sign(&ring::hmac::Key::new(crypto_hmac_algorithm(algorithm), key), data)
-    });
-    decode_bytes(tag.as_ref(), encoding.as_ref())
+    let tag = crypto_with_bytes(key, |key| crypto_hmac_algorithm(algorithm).sign(key, data));
+    decode_bytes(&tag, encoding.as_ref())
 }
 
 pub fn crypto_hmac_digest_string(

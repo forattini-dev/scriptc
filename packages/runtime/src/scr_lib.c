@@ -3689,9 +3689,11 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
   return scr_str_new(buf, o);
 }
 
-/* ── MD5 (RFC 1321) — island npm code only (the static frontend fences
- * every non-SHA algorithm literal; published packages hash cache keys and
- * etags with md5, so the island's createHash carries it). ─────────── */
+/* ── MD5 (RFC 1321) — the ETag/cache-key checksum the ecosystem still
+ * spells everywhere, reached from BOTH the island's createHash and the
+ * fused static chains. Broken for every security purpose, and nothing
+ * here is constant time: it is a checksum, never an authenticator. The
+ * Rust runtime spells the same digest out in md5.rs, byte for byte. ── */
 
 static const uint32_t scr_md5_k[64] = {
     0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a,
@@ -3923,7 +3925,7 @@ static ScrStr *scr_hash_digest_raw(const ScrStr *alg, const unsigned char *data,
   unsigned char d[64];
   char name[16];
   scr_digest_alg_name(alg, name);
-  /* sha1/sha256/sha384/sha512 — every other literal is frontend-fenced. */
+  /* md5/sha1/sha256/sha384/sha512 — every other literal is frontend-fenced. */
   size_t n = scr_crypto_digest_raw(name, data, len, d);
   return scr_digest_encode(d, n, enc);
 }

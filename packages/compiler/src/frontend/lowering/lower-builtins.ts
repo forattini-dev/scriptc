@@ -3986,19 +3986,19 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return { kind: "libCall", fn: "crypto.randomBytesToString", args: [size, enc], type: STRING, loc };
   }
 
-/** The SHA family the runtimes carry, for BOTH fused chains (createHash
-   * and createHmac) and the crypto.hash one-shot. sha1 exists for the RFC
-   * 6455 Sec-WebSocket-Accept hash; sha384/sha512 are the wider digests
-   * the token/signature idioms want. Every other name fences. */
-  const LOWERED_DIGEST_ALGORITHMS = ["sha1", "sha256", "sha384", "sha512"] as const;
+/** The digests the runtimes carry, for BOTH fused chains (createHash and
+   * createHmac) and the crypto.hash one-shot. sha1 is the RFC 6455
+   * Sec-WebSocket-Accept hash, sha384/sha512 the wider token digests, md5 the
+   * ETag/cache-key checksum both runtimes write out by hand. Others fence. */
+  const LOWERED_DIGEST_ALGORITHMS = ["md5", "sha1", "sha256", "sha384", "sha512"] as const;
 
   function isLoweredDigestAlgorithm(value: string): boolean {
     return (LOWERED_DIGEST_ALGORITHMS as readonly string[]).includes(value);
   }
 
   const DIGEST_ALGORITHM_HINT =
-    'sha1, sha256, sha384, and sha512 are the lowered algorithms: createHash("sha256") ' +
-    "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash)";
+    'md5, sha1, sha256, sha384, and sha512 are the lowered algorithms: createHash("sha256") ' +
+    "(sha1 exists for the RFC 6455 Sec-WebSocket-Accept hash, md5 for ETags and cache keys)";
 
 /** The composed hash chain — `createHash("sha256").update(data).digest("hex")`
    * — fused into ONE libCall: the Hash handle never materializes (no Hash
@@ -4113,7 +4113,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         "createHmac with this algorithm",
         chCall,
         'the lowered shape is createHmac("sha256", key) — two arguments, a literal ' +
-          "algorithm (sha1, sha256, sha384, or sha512) and a string or Buffer key " +
+          "algorithm (md5, sha1, sha256, sha384, or sha512) and a string or Buffer key " +
           "(KeyObjects have no lowering)",
       );
     }
@@ -4241,7 +4241,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           "crypto.hash with this algorithm",
           algorithmNode,
-          "sha1, sha256, sha384, and sha512 are the lowered one-shot algorithms",
+          "md5, sha1, sha256, sha384, and sha512 are the lowered one-shot algorithms",
         );
       }
       const dataNode = expr.arguments[1]!;

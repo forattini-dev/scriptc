@@ -576,7 +576,7 @@
       "name": "crypto.createHash",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the one lowered shape is the composed chain createHash(\"sha256\").update(data).digest(\"hex\") — the Hash handle itself has no lowering (sha1, sha256, sha384, and sha512 are the lowered algorithms)"
+      "note": "the one lowered shape is the composed chain createHash(\"sha256\").update(data).digest(\"hex\") — the Hash handle itself has no lowering (md5, sha1, sha256, sha384, and sha512 are the lowered algorithms)"
     },
     {
       "id": "node-builtin.crypto.createHmac",
@@ -584,7 +584,7 @@
       "name": "crypto.createHmac",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the one lowered shape is the composed chain createHmac(\"sha256\", key).update(data).digest(\"hex\") — the Hmac handle itself has no lowering (sha1, sha256, sha384, and sha512 over string or Buffer keys; KeyObject keys have none)"
+      "note": "the one lowered shape is the composed chain createHmac(\"sha256\", key).update(data).digest(\"hex\") — the Hmac handle itself has no lowering (md5, sha1, sha256, sha384, and sha512 over string or Buffer keys; KeyObject keys have none)"
     },
     {
       "id": "node-builtin.crypto.createPrivateKey",
@@ -688,7 +688,7 @@
       "name": "crypto.hash",
       "status": "unsupported",
       "code": "SC2020",
-      "note": "the lowered one-shot shapes hash SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, with explicit base64 also supported for strings; other algorithms and output options have no lowering yet"
+      "note": "the lowered one-shot shapes hash MD5/SHA-1/SHA-256/SHA-384/SHA-512 strings or Buffer/Uint8Array inputs to default hex, with explicit base64 also supported for strings; other algorithms and output options have no lowering yet"
     },
     {
       "id": "node-builtin.crypto.hkdf",
