@@ -2770,15 +2770,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     };
   }
 
-  /** A runtime-optional slot can be assigned while a truthy guard is in
-   * force. TypeScript then types a direct member receiver as the plain arm,
-   * even though an OOB-safe assignment may have restored undefined. Check
-   * that hidden arm and throw the member-read TypeError Node would produce. */
+  /** A runtime-optional member read checks its hidden undefined arm because
+   * TypeScript may have narrowed only the checker-visible type. */
   function runtimeOptionalReceiverRead(
     L: Lowerer,
     expr: ts.Identifier,
     local: IrLocal,
-    property: string | null,
+    property: string | null | undefined,
     loc: SrcLoc,
   ): IrExpr {
     if (local.type.kind !== "union") throw new InternalCompilerError("runtime-optional local is not union-typed");
@@ -2793,8 +2791,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (!def || def.arms.length !== 2) {
       L.unsupported("SC1090", expr, "a direct read from a runtime-optional capture with multiple value arms");
     }
-    const message = property === null
-      ? `${expr.text} is not a function`
+    const message = property === undefined ? `expected ${L.fmt(narrowed)}, got undefined`
+      : property === null ? `${expr.text} is not a function`
       : `Cannot read properties of undefined (reading '${property}')`;
     return {
       kind: "ternary",
@@ -2826,7 +2824,6 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       loc,
     };
   }
-
   type RuntimeOptionalUse =
     | { kind: "property"; access: ts.PropertyAccessExpression; optional: boolean; complex: boolean; comma: boolean }
     | { kind: "element"; access: ts.ElementAccessExpression; optional: boolean; complex: boolean; comma: boolean }
@@ -7101,11 +7098,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     );
   }
 
-  /** An inferred block-local `const/let value = array[index]` can retain
-   * JavaScript's hidden out-of-bounds undefined arm. lowerVarDecl adopts
-   * the safe read's union and tracks it until a guard proves the element
-   * present. Explicit annotations, globals, and hoisted vars keep their
-   * declared storage contract. */
+  /** An inferred block-local array read retains its hidden undefined arm;
+   * explicit annotations, globals, and hoisted vars keep their contract. */
   function isRuntimeOptionalArrayBinding(L: Lowerer, node: ts.Expression): boolean {
     let current = node;
     while (
@@ -8642,8 +8636,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
 
     const strictEquality = op === ts.SyntaxKind.EqualsEqualsEqualsToken ||
       op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
-    const left = strictEquality ? lowerAbsenceProbe(L, expr.left) ?? L.lowerExpr(expr.left) : L.lowerExpr(expr.left);
-    const right = strictEquality ? lowerAbsenceProbe(L, expr.right) ?? L.lowerExpr(expr.right) : L.lowerExpr(expr.right);
+    let left = strictEquality ? lowerAbsenceProbe(L, expr.left) ?? L.lowerExpr(expr.left) : L.lowerExpr(expr.left);
+    let right = strictEquality ? lowerAbsenceProbe(L, expr.right) ?? L.lowerExpr(expr.right) : L.lowerExpr(expr.right);
+    const checkedOperand = (node: ts.Expression, value: IrExpr): IrExpr => {
+      const local = ts.isIdentifier(node) && value.type.kind === "union" ? L.resolveLocal(node) : null;
+      return local && L.runtimeOptionalStorageLocals.has(L.runtimeOptionalRootOf(local))
+        ? runtimeOptionalReceiverRead(L, node as ts.Identifier, local, undefined, value.loc) : value;
+    };
+    if (!strictEquality) { left = checkedOperand(expr.left, left); right = checkedOperand(expr.right, right); }
     const lowerIslandBinary = (): IrExpr => {
       const JS_BIN: Partial<Record<ts.SyntaxKind, IrJsOp>> = {
         [ts.SyntaxKind.PlusToken]: "add",
