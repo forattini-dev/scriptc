@@ -713,16 +713,20 @@ static void *scr_stream_read_n(ScrStream *s, double size) {
     /* objectMode-style: one whole entry per read, whatever n says */
     want = st->r.length > 0 ? 1 : 0;
   } else if (absent) {
-    /* Node's howMuchToRead() answers a bare read() with the HEAD entry's
-     * remaining length rather than state.length, so exactly ONE queued
-     * chunk comes back and the boundaries push() and unshift() created
-     * survive the read. That holds in paused mode too, not just while
-     * flowing — the `flowing` gate this used to carry made a paused
-     * read() concatenate the whole queue. The ONE case that still
-     * collapses it is a PAUSED read() on a decoder-backed stream, which
-     * joins the queue into a single string; while flowing, an encoded
-     * stream keeps emitting its chunks one data event at a time. */
-    want = (st->r.flowing == 1 || !st->r.encoded) && st->r.n > 0
+    /* howMuchToRead(NaN). THE semantics of read() follow
+     * NODE_COMPAT_MATRIX.primary — a compiled binary reproduces ONE Node,
+     * and the two majors answer a bare read() differently:
+     *
+     *   Node 24 (primary today):  flowing && length ? head : state.length
+     *   Node 26 (nodejs#60441):   !decoder ? head : state.length
+     *
+     * So on 24 a PAUSED bare read() collapses the whole queue into one
+     * value and only a FLOWING one walks it chunk by chunk, while on 26 a
+     * raw Buffer stream hands back the head entry either way. Promoting
+     * the primary to 26 means widening this gate (and the matching one
+     * after the refill below) to `flowing == 1 || !st->r.encoded` — this
+     * expression is the single point of change; see nodejs#60441. */
+    want = st->r.flowing == 1 && st->r.n > 0
         ? scr_stream_entry_len(st, st->r.buf[0]) - st->r.head_off
         : st->r.length;
   } else {
@@ -744,8 +748,8 @@ static void *scr_stream_read_n(ScrStream *s, double size) {
       if (st->r.object_entries) {
         want = st->r.length > 0 ? 1 : 0;
       } else if (absent) {
-        /* same head-entry rule as above, re-derived after the refill */
-        want = (st->r.flowing == 1 || !st->r.encoded) && st->r.n > 0
+        /* the same primary-pinned rule as above, re-derived after the refill */
+        want = st->r.flowing == 1 && st->r.n > 0
             ? scr_stream_entry_len(st, st->r.buf[0]) - st->r.head_off
             : st->r.length;
       } else {

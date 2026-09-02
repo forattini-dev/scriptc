@@ -231,15 +231,19 @@ function makeStream(env) {
       }
       if (n === undefined || n === null || (typeof n === "number" && Number.isNaN(n))) {
         if (this._objectMode) return this._takeChunk();
-        /* Node's howMuchToRead() answers a bare read() with
-         * state.buffer.first().length, not state.length: raw Buffer mode
-         * hands back exactly ONE queued chunk, so the boundaries created by
-         * push() and unshift() survive the read. Only a stream with a
-         * decoder attached collapses the queue into a single string. */
-        if (this._decoder) return this._takeAll();
-        const c = this._takeChunk();
-        this._maybeEmitEnd();
-        return c;
+        /* howMuchToRead(NaN). THE semantics of read() follow
+         * NODE_COMPAT_MATRIX.primary: a compiled binary reproduces ONE
+         * Node, and the two majors disagree here.
+         *
+         *   Node 24 (primary today):  flowing && length ? head : length
+         *   Node 26 (nodejs#60441):   !decoder ? head : length
+         *
+         * read() is only ever the PAUSED path here — flowing delivers
+         * through _drainData()/_takeChunk() — so on 24 it always collapses
+         * the queue. Promoting the primary to 26 means returning the head
+         * entry (`this._takeChunk()`) whenever no decoder is attached;
+         * this branch is the single point of change. See nodejs#60441. */
+        return this._takeAll();
       }
       if (this._objectMode) return this._takeChunk();
       if (n <= 0) return null;

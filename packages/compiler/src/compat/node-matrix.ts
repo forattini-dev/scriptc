@@ -19,6 +19,27 @@
  * The primary is the runtime .node-version pins and the one whose label
  * stamps every shared manifest row; a candidate is equally supported, just
  * not the label the manifest prose is written against.
+ *
+ * ## Semantics the primary DECIDES (not just labels)
+ *
+ * Most of the matrix is a census: a member exists on one major and not the
+ * other, and both answers are recorded. A few rows are different in kind —
+ * the two majors give DIFFERENT ANSWERS to the same call, and a compiled
+ * binary can only reproduce one. Those follow the primary, and every one
+ * of them belongs in this list so a primary promotion is a checklist
+ * rather than an archaeology dig:
+ *
+ *  - `Readable.prototype.read()`, bare form (nodejs#60441, semver-major in
+ *    26.0.0). howMuchToRead(NaN) is `flowing && length ? head : length` on
+ *    24 and `!decoder ? head : length` on 26, so a PAUSED bare read()
+ *    collapses the whole queue on 24 and hands back one pushed chunk on
+ *    26. It is one rule, but it is observable through every paused reader:
+ *    read() itself, a 'readable'-handler drain, and the async iterator.
+ *    Implemented at one expression per runtime — scr_stream.c's
+ *    howMuchToRead, island-js/13-stream.js's read(), readable.rs's
+ *    readable_read — each carrying the 26 form in a comment beside it.
+ *    Pinned by tests/corpus/2845-readable-paused-read-boundaries.ts and
+ *    2846-readable-unshift-order.ts against the primary oracle.
  */
 
 import type { CompatTargets } from "./profile-schema.js";
