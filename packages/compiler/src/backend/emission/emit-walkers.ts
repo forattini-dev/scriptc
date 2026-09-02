@@ -1755,9 +1755,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const sig = `static ScrDyn *${name}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
     E.walkerProtos.push(`${sig}; /* dyn call thunk for ${key} */`);
     const d: string[] = [`${sig} { /* dyn call thunk for ${key} */`];
-    if (t.params.length === 0) d.push(`  (void)args;`);
+    // An ISLAND-REST signature (restAbi jsval) SPELLS its trailing
+    // engine-array param, so only the LEADING params fill positionally —
+    // the last slot IS the pack and there is no extra dyn rest argument.
+    // Filling it from args[params.length - 1] instead would hand the
+    // closure the first surplus ARGUMENT where it expects the array.
+    const islandRest = t.rest === true && t.restAbi === "jsval";
+    const fixed = islandRest ? t.params.slice(0, -1) : t.params;
+    if (fixed.length === 0 && !t.rest) d.push(`  (void)args;`);
     d.push(`  (void)argc;`);
-    t.params.forEach((p, i) => {
+    fixed.forEach((p, i) => {
       // JS arity: a missing argument IS the undefined dyn value; the
       // param's own check decides whether that flies (dyn params take
       // anything; a number param throws the catchable TypeError).
@@ -1772,14 +1779,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // functions cross through the host shim; a kind with no crossing
         // throws the catchable TypeError (NULL + pending).
         d.push(`    a${i} = scr_jsval_from_dyn(ad);`);
-        const undo = t.params
+        const undo = fixed
           .slice(0, i)
           .flatMap((q, j) => (isRefCounted(q) ? [`${releaseCallC(q, `a${j}`)};`] : []));
         d.push(`    if (!a${i}) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
       } else {
         d.push(`    ScrDynPath pp = { NULL, NULL, ${i} };`);
         d.push(`    a${i} = ${E.dynCheckHelper(p)}(ad, &pp);`);
-        const undo = t.params
+        const undo = fixed
           .slice(0, i)
           .flatMap((q, j) => (isRefCounted(q) ? [`${releaseCallC(q, `a${j}`)};`] : []));
         d.push(`    if (scr_exc_pending()) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
@@ -1790,7 +1797,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // param carries the call's arguments from index params.length on —
     // the mustCall wrapper's `arguments`, a JS `...args`. Built fresh per
     // call (+1, moved into the callee like every param).
-    if (t.rest) {
+    if (islandRest) {
+      // The trailing jsval slot: the surplus dyn arguments marshalled into
+      // one fresh ENGINE array (+1, moved into the callee) — the same pack
+      // the direct call builds inline and the host-call adapter builds for
+      // a closure entering the island.
+      const undo = fixed.flatMap((q, j) => (isRefCounted(q) ? [`${releaseCallC(q, `a${j}`)};`] : []));
+      d.push(`  ScrJsval *rest = scr_jsval_rest_from_dyn(args, ${fixed.length}, argc);`);
+      d.push(`  if (!rest) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
+    } else if (t.rest) {
       d.push(`  ScrDyn *rest = scr_dyn_new_arr();`);
       d.push(`  for (size_t ri = ${t.params.length}; ri < argc; ri++) {`);
       d.push(`    scr_dyn_arr_push(rest, scr_dyn_retain((ScrDyn *)args[ri]));`);
@@ -1798,8 +1813,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     }
     // The closure CONSUMES its params (+1 each moved in — exactly what the
     // builders above returned).
-    const castParams = ["ScrClosure *", ...t.params.map((p) => cType(p).trim()), ...(t.rest ? ["ScrDyn *"] : [])].join(", ");
-    const call = `((${cType(t.ret).trim()} (*)(${castParams}))c->fn)(${["c", ...t.params.map((_, i) => `a${i}`), ...(t.rest ? ["rest"] : [])].join(", ")})`;
+    const restCType = islandRest ? cType(t.params[t.params.length - 1]!).trim() : "ScrDyn *";
+    const castParams = ["ScrClosure *", ...fixed.map((p) => cType(p).trim()), ...(t.rest ? [restCType] : [])].join(", ");
+    const call = `((${cType(t.ret).trim()} (*)(${castParams}))c->fn)(${["c", ...fixed.map((_, i) => `a${i}`), ...(t.rest ? ["rest"] : [])].join(", ")})`;
     if (t.ret.kind === "void") {
       d.push(`  ${call};`);
       d.push(`  if (scr_exc_pending()) return NULL;`);
