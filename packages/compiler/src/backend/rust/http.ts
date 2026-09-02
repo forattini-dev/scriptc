@@ -169,6 +169,10 @@ export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "fetch.abortControllerNew" && expr.args.length === 0 &&
+      expr.type.kind === "dyn") {
+    return `${context.dynTypeName()}::AbortController(runtime::abort_controller_new())`;
+  }
   if (expr.fn === "fetch.responseNew" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "dyn" && expr.args[1]?.type.kind === "dyn" &&
       expr.type.kind === "dyn") {
