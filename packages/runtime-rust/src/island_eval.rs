@@ -504,10 +504,25 @@ pub fn island_spread_values(value: &IslandValue) -> Option<Vec<IslandValue>> {
     })
 }
 
-/// Apply JavaScript await adoption inside the embedded realm and return the
-/// fulfilled value. Engine jobs run on this thread, while host-backed
-/// promises may also require native timers or sockets; both are driven until
-/// this promise settles, never by holding the island-state borrow.
+/// BLOCKING adoption: drive the loop here until the realm's promise
+/// settles, then answer the fulfilled value — a rejection becomes a throw
+/// at THIS call, because a synchronous return has nowhere else to put it.
+///
+/// Engine jobs run on this thread, while host-backed promises may also
+/// require native timers or sockets; both are driven until this promise
+/// settles, never by holding the island-state borrow.
+///
+/// NO generated code reaches this. `jsBridgePromise` — the one place a
+/// realm promise becomes a static one — takes `island_promise_bridge`
+/// instead, and must keep taking it: blocking there costs JavaScript's
+/// ordering (statements after the call would run only once the promise
+/// settled), turns a rejection into a throw no downstream `.catch()` can
+/// observe, and has no answer at all for a promise nothing settles except
+/// ERR_MODULE_PROMISE_PENDING. Module evaluation does not need this either
+/// — `island_module_evaluate` diagnoses its own pending promise. What
+/// remains is a runtime primitive the tests exercise directly; any new
+/// caller must first show that a synchronous answer is semantically
+/// required at its site.
 pub fn island_await(value: &IslandValue) -> IslandValue {
     let promise = with_island_state(|state| {
         let promise = BoaJsPromise::resolve(value.0.clone(), &mut state.context)
