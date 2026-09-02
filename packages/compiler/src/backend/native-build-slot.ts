@@ -1,4 +1,4 @@
-import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,8 @@ interface NativeBuildLease {
   path: string;
   token: string;
 }
+
+const LEGACY_REAPER_STALE_MS = 30_000;
 
 /** Run one native build transaction inside the machine-wide compiler gate. */
 export async function withNativeBuildSlot<T>(action: () => Promise<T>): Promise<T> {
@@ -52,9 +54,17 @@ async function acquireNativeBuildSlot(): Promise<NativeBuildLease> {
 async function reclaimDeadLease(path: string): Promise<void> {
   const reaper = `${path}.reaping`;
   try {
-    await mkdir(reaper);
+    await writeFile(
+      reaper,
+      `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST" || code === "EISDIR") {
+      await reclaimAbandonedReaper(reaper);
+      return;
+    }
     throw error;
   }
   try {
@@ -67,7 +77,30 @@ async function reclaimDeadLease(path: string): Promise<void> {
     if (typeof pid !== "number" || !Number.isInteger(pid) || pid < 1 || processAlive(pid)) return;
     await rm(path, { force: true });
   } finally {
-    await rm(reaper, { recursive: true, force: true });
+    await rm(reaper, { force: true });
+  }
+}
+
+async function reclaimAbandonedReaper(path: string): Promise<void> {
+  try {
+    const record = JSON.parse(await readFile(path, "utf8")) as { pid?: unknown };
+    const pid = record.pid;
+    if (typeof pid === "number" && Number.isInteger(pid) && pid > 0 && processAlive(pid)) return;
+    await rm(path, { force: true });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      await rm(path, { force: true });
+      return;
+    }
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    if (code !== "EISDIR") throw error;
+    // Before reapers carried an owning pid they were directories. Keep a
+    // short grace period so a process running the old protocol can finish,
+    // then let upgrades recover a directory abandoned by a crash.
+    const metadata = await stat(path).catch(() => undefined);
+    if (metadata === undefined || Date.now() - metadata.mtimeMs < LEGACY_REAPER_STALE_MS) return;
+    await rm(path, { recursive: true, force: true });
   }
 }
 

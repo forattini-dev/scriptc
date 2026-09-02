@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -74,6 +74,66 @@ test("recovers a native build seat left by a dead process", async () => {
 
   await rm(lockDir, { recursive: true, force: true });
   await build.catch(() => undefined);
+  expect(recovered).toBe(true);
+  expect(ran).toBe(true);
+});
+
+test("recovers when a dead lease reaper was also abandoned", async () => {
+  const lockDir = await mkdtemp(join(tmpdir(), "scriptc-native-slot-test-"));
+  process.env["SCRIPTC_NATIVE_LOCK_DIR"] = lockDir;
+  process.env["SCRIPTC_NATIVE_HOST_WORKERS"] = "1";
+  process.env["SCRIPTC_NATIVE_LOCK_POLL_MS"] = "5";
+  await writeFile(
+    join(lockDir, "slot-0.json"),
+    `${JSON.stringify({ pid: 999_999_999, token: "abandoned", startedAt: "2026-01-01T00:00:00.000Z" })}\n`,
+  );
+  const reaper = join(lockDir, "slot-0.json.reaping");
+  await mkdir(reaper);
+  const old = new Date(Date.now() - 60_000);
+  await utimes(reaper, old, old);
+
+  let ran = false;
+  const build = withNativeBuildSlot(async () => {
+    ran = true;
+  });
+  const recovered = await Promise.race([
+    build.then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+
+  if (!recovered) {
+    await rm(join(lockDir, "slot-0.json.reaping"), { recursive: true, force: true });
+  }
+  await build;
+  await rm(lockDir, { recursive: true, force: true });
+  expect(recovered).toBe(true);
+  expect(ran).toBe(true);
+});
+
+test("recovers when a dead lease reaper file was truncated", async () => {
+  const lockDir = await mkdtemp(join(tmpdir(), "scriptc-native-slot-test-"));
+  process.env["SCRIPTC_NATIVE_LOCK_DIR"] = lockDir;
+  process.env["SCRIPTC_NATIVE_HOST_WORKERS"] = "1";
+  process.env["SCRIPTC_NATIVE_LOCK_POLL_MS"] = "5";
+  await writeFile(
+    join(lockDir, "slot-0.json"),
+    `${JSON.stringify({ pid: 999_999_999, token: "abandoned", startedAt: "2026-01-01T00:00:00.000Z" })}\n`,
+  );
+  const reaper = join(lockDir, "slot-0.json.reaping");
+  await writeFile(reaper, "{");
+
+  let ran = false;
+  const build = withNativeBuildSlot(async () => {
+    ran = true;
+  });
+  const recovered = await Promise.race([
+    build.then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+
+  if (!recovered) await rm(reaper, { force: true });
+  await build;
+  await rm(lockDir, { recursive: true, force: true });
   expect(recovered).toBe(true);
   expect(ran).toBe(true);
 });
