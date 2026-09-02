@@ -12,8 +12,12 @@ use boa_engine::{
 };
 use std::path::Path;
 
+// `ISLAND_STATE`, the slot that holds the realm, and `with_island_state`,
+// the funnel every island call passes through, live in
+// island_boundary.rs: both exist to make an unwind and a thread exit
+// survivable, which is that file's whole subject.
+
 thread_local! {
-    static ISLAND_STATE: RefCell<Option<IslandState>> = const { RefCell::new(None) };
     static ISLAND_HOST_CALLBACKS: RefCell<HashMap<u64, IslandHostCallback>> = RefCell::new(HashMap::new());
     static ISLAND_HOST_CALLBACK_ID: Cell<u64> = const { Cell::new(0) };
 }
@@ -174,20 +178,26 @@ pub fn island_value_host_function(
     });
     ISLAND_HOST_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, callback));
     with_island_state(|state| {
+        // The callback is arbitrary generated Rust, so a scriptc `throw`
+        // inside it is the EXPECTED case, not the exotic one: the
+        // boundary is what turns it into an exception the island's
+        // JavaScript can catch instead of an unwind through boa.
         let native = NativeFunction::from_copy_closure(move |_this, arguments, context| {
-            let arguments = arguments
-                .iter()
-                .cloned()
-                .map(|value| island_host_argument(value, context))
-                .collect::<JsResult<Vec<_>>>()?;
-            let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
-                let callbacks = callbacks.borrow();
-                let callback = callbacks
-                    .get(&id)
-                    .expect("scriptc: missing island host callback");
-                callback(&arguments)
-            });
-            island_host_result_value(result, context)
+            island_boundary(context, |context| {
+                let arguments = arguments
+                    .iter()
+                    .cloned()
+                    .map(|value| island_host_argument(value, context))
+                    .collect::<JsResult<Vec<_>>>()?;
+                let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
+                    let callbacks = callbacks.borrow();
+                    let callback = callbacks
+                        .get(&id)
+                        .expect("scriptc: missing island host callback");
+                    callback(&arguments)
+                });
+                island_host_result_value(result, context)
+            })
         });
         let function = FunctionObjectBuilder::new(state.context.realm(), native)
             .length(arity)
@@ -994,39 +1004,6 @@ fn island_timer_fire(callback: &boa_engine::JsObject) {
     });
 }
 
-/// The single funnel every island call passes through, so it is also the
-/// one place that can catch an unwind crossing the realm and decide what
-/// it means for `ISLAND_STATE`.
-///
-/// A scriptc `throw` reaching here (a `ScriptThrow`/`RuntimeTrap` marker)
-/// is ordinary control flow — it is resumed untouched, and the realm's
-/// globals stay live for a later `island_eval` call after the catch. Any
-/// OTHER panic (an `assert!`/`.unwrap()` failure, a boa-internal bug) may
-/// have left the engine's GC arena mid-mutation, so it gets `IslandState`
-/// torn down right here, deterministically, before the unwind continues.
-/// Previously that teardown never happened at all: the thread_local only
-/// drops at uncontrolled thread-exit, by which point the corrupted
-/// invariant had already turned into a glibc heap-corruption abort that
-/// buried the original panic message.
-fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ISLAND_STATE.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            let state = slot.get_or_insert_with(island_state);
-            f(state)
-        })
-    }));
-    match outcome {
-        Ok(value) => value,
-        Err(payload) => {
-            if !is_scriptc_unwind(payload.as_ref()) {
-                island_eval_finish();
-            }
-            std::panic::resume_unwind(payload)
-        }
-    }
-}
-
 fn island_state() -> IslandState {
     let loader = Rc::new(IslandModuleLoader::default());
     let mut context = Context::builder()
@@ -1035,7 +1012,11 @@ fn island_state() -> IslandState {
         .unwrap_or_else(|error| panic!("scriptc: cannot create island context: {error}"));
     let console = ObjectInitializer::new(&mut context)
         .function(
-            NativeFunction::from_fn_ptr(island_console_log),
+            NativeFunction::from_copy_closure(|this, arguments, context| {
+                island_boundary(context, |context| {
+                    island_console_log(this, arguments, context)
+                })
+            }),
             js_string!("log"),
             0,
         )
@@ -1160,6 +1141,7 @@ fn island_eval_finish() {
     island_net_reset();
     island_fetch_requests_reset();
     island_promise_bridges_reset();
+    island_parked_panic_reset();
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
     island_modules_reset();
     ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());

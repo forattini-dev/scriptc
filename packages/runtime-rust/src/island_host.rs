@@ -430,11 +430,22 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 66] = [
 ];
 
 /// Build the `host` object the bootstrap arrow is called with.
+///
+/// Registration is where the members meet `island_boundary`, so the
+/// guarantee is a property of the TABLE rather than of each body: no
+/// member can forget it, and a member added later inherits it. That
+/// matters because most of these call runtime primitives that signal by
+/// unwinding — `path_resolve`, `url_new`, the fs and zlib bridges — and
+/// an unwind escaping one of them would cross boa's frames on its way
+/// out. Inside the boundary a scriptc `throw` becomes the catchable
+/// engine exception the shared island JavaScript is written against.
 pub(crate) fn island_host_object(context: &mut Context) -> boa_engine::JsObject {
     let mut host = ObjectInitializer::new(context);
     for (name, function, arity) in ISLAND_HOST_MEMBERS {
         host.function(
-            NativeFunction::from_fn_ptr(function),
+            NativeFunction::from_copy_closure(move |this, arguments, context| {
+                island_boundary(context, |context| function(this, arguments, context))
+            }),
             boa_engine::JsString::from(name),
             arity,
         );
