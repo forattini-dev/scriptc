@@ -1577,6 +1577,11 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
         // traps — so a defaulted position carries its own bounds test.
         if (el.initializer) {
           value = arrayPositionDefault(L, el, value, srcRef, i, srcType.elem, out);
+        } else if (
+          ts.isIdentifier(el.name) &&
+          hostVariableDeclarationOf(el.name)?.type === undefined
+        ) {
+          value = arrayPositionOptionalValue(L, el.name, value, srcRef, i, srcType.elem);
         }
         L.bindPatternTarget(el.name, value, isLet, out);
       });
@@ -2275,6 +2280,50 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
     };
   }
 
+  /** A plain position in an inferred array pattern still observes the
+   * iterator's undefined when the source is shorter than the pattern.
+   * Keep that hidden runtime arm so an immediate guard can consume it;
+   * this is the no-default twin of arrayPositionDefaultValue. */
+  function arrayPositionOptionalValue(
+    L: Lowerer,
+    blame: ts.Node,
+    read: IrExpr,
+    srcRef: () => IrExpr,
+    index: number,
+    elemT: IrType,
+  ): IrExpr {
+    const loc = read.loc;
+    const optionalT = L.withUndefinedArmOf(elemT);
+    if (!optionalT || optionalT.kind !== "union") L.badType(blame, L.typeOf(blame));
+    const source = srcRef();
+    const length: IrExpr = {
+      kind: "arrIntrinsic",
+      method: "length",
+      receiver: source,
+      args: [],
+      type: F64,
+      loc,
+    };
+    const inRange: IrExpr = {
+      kind: "bin",
+      op: "<",
+      left: { kind: "numLit", value: index, type: F64, loc },
+      right: length,
+      type: BOOL,
+      loc,
+    };
+    const absent = L.wrappedUndefined(optionalT, loc);
+    if (!absent) L.badType(blame, L.typeOf(blame));
+    return {
+      kind: "ternary",
+      cond: inRange,
+      then: L.coerceInto(blame, read, optionalT),
+      else_: absent,
+      type: optionalT,
+      loc,
+    };
+  }
+
 /** The fresh tail for `[head, ...rest]` over a TUPLE source, packed under
    * the checker's own rest type: an ARRAY of the remaining positions (each
    * read coercing into the element type) or a tuple RECORD when the
@@ -2928,10 +2977,21 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
         L.typeParamBindings !== null &&
         ts.isBindingElement(name.parent) &&
         name.parent.dotDotDotToken !== undefined;
-      const type = dynStays ? DYN : genericRecordRest ? value.type : L.irTypeOf(name);
+      let type = dynStays ? DYN : genericRecordRest ? value.type : L.irTypeOf(name);
+      const runtimeOptional =
+        hostDecl?.type === undefined &&
+        value.type.kind === "union" &&
+        L.armTag(value.type.unionId, UNDEFINED_T) >= 0 &&
+        typeEquals(L.stripUndefinedArm(value.type), type);
+      if (runtimeOptional) type = value.type;
       if (type.kind === "void") L.badType(name, L.typeOf(name));
       const coerced = L.coerceInto(name, value, type);
       const local = L.declareLocal(name, name.text, type, isLet);
+      if (runtimeOptional) {
+        const root = L.runtimeOptionalRootOf(local);
+        L.runtimeOptionalLocals.add(root);
+        L.runtimeOptionalStorageLocals.add(root);
+      }
       out.push({ kind: "varDecl", localId: local.id, init: coerced, loc });
       return;
     }

@@ -3751,8 +3751,28 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     ) {
       return [...runtimeOptionalTrueIds(L, expr.left), ...runtimeOptionalTrueIds(L, expr.right)];
     }
-    const local = runtimeOptionalLocalOf(L, expr);
+    const local = runtimeOptionalLocalOf(L, expr) ?? runtimeOptionalDefinedLocalOf(L, expr);
     return local === null ? [] : [local];
+  }
+
+  function runtimeOptionalDefinedLocalOf(L: Lowerer, node: ts.Expression): IrLocal | null {
+    let expr = node;
+    while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    if (
+      !ts.isBinaryExpression(expr) ||
+      expr.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsEqualsToken
+    ) {
+      return null;
+    }
+    const isUndefined = (value: ts.Expression): boolean =>
+      ts.isIdentifier(value) && value.text === "undefined" &&
+      (L.typeOf(value).flags & ts.TypeFlags.Undefined) !== 0;
+    const binding = ts.isIdentifier(expr.left) && isUndefined(expr.right)
+      ? expr.left
+      : ts.isIdentifier(expr.right) && isUndefined(expr.left)
+        ? expr.right
+        : null;
+    return binding === null ? null : runtimeOptionalLocalOf(L, binding);
   }
 
   export function withRuntimeOptionalNarrowed<T>(L: Lowerer, locals: readonly IrLocal[], fn: () => T): T {
