@@ -754,6 +754,7 @@ interface Request {
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
+  clone(): Request;
 }
 interface RequestInit {
   method?: string;
@@ -771,7 +772,6 @@ declare var Request: {
   readonly prototype: Request;
 };
 declare function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-
 /* The repeating timer pair (setTimeout lives in scriptc.d.ts — always
  * shipped). The handle is the Timeout interface, like Node's — it maps to
  * the numeric timer id, so ReturnType<typeof setInterval> stays a

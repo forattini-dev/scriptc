@@ -692,6 +692,10 @@
       }
       return this._body;
     }
+    clone() {
+      if (this.bodyUsed) throw new TypeError("unusable");
+      return new Request(this);
+    }
     async text() {
       return new TextDecoder().decode(await this.bytes());
     }
