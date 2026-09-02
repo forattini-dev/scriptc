@@ -333,6 +333,21 @@ test.skipIf(sanitize)("Rust dynamic abort closes the in-flight host transport", 
     .toBe(nodeRes.stdout.toString("utf8"));
 }, 120_000);
 
+test.skipIf(sanitize)("Rust dynamic fetch inherits a Request dependent signal", async () => {
+  const entry = join(fixturesRoot, "fetch-request-signal/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, baseUrl]),
+    runBinary(binary, [baseUrl], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
 test.skipIf(sanitize)("Rust dynamic fetch matches the package fetch suite", async () => {
   const entry = join(fixturesRoot, "cases/fetch-suite/main.ts");
   const binary = await build(entry, "rust", "dev");

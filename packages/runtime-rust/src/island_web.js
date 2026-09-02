@@ -468,6 +468,14 @@
     for (const listener of signal._listeners.slice()) listener.call(signal);
   };
 
+  const dependentAbortSignal = (source) => {
+    const signal = new AbortSignal(abortSignalToken);
+    if (source === undefined || source === null) return signal;
+    if (source.aborted) abortSignal(signal, source.reason);
+    else source.addEventListener("abort", () => abortSignal(signal, source.reason));
+    return signal;
+  };
+
   class AbortController {
     constructor() {
       this._signal = new AbortSignal(abortSignalToken);
@@ -623,6 +631,9 @@
       this._body = init.body === undefined
         ? source === null ? undefined : source._body
         : init.body;
+      this.signal = dependentAbortSignal(init.signal === undefined
+        ? source === null ? undefined : source.signal
+        : init.signal);
     }
   }
 
@@ -774,7 +785,9 @@
   };
   global.fetch = function fetch(input, init = {}) {
     const source = input instanceof Request ? input : null;
-    const signal = init.signal;
+    const signal = init.signal === undefined
+      ? source === null ? undefined : source.signal
+      : init.signal;
     if (signal !== undefined && signal !== null && signal.aborted) {
       return Promise.reject(signal.reason);
     }

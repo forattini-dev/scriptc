@@ -836,6 +836,7 @@ fn island_call_with_this(
         let value = function
             .call(&this.0, &args, &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        island_run_jobs(state);
         IslandValue(value)
     })
 }
@@ -1096,19 +1097,23 @@ fn island_console_log(
     Ok(JsValue::undefined())
 }
 
-fn island_eval_error(error: boa_engine::JsError, context: &mut Context) -> ! {
+fn island_error_caught(error: boa_engine::JsError, context: &mut Context) -> Caught {
     if let Ok(native) = error.try_native(context) {
         let fallback = native.kind().to_string();
         let name = island_error_name(&error, context, &fallback);
-        throw_value(error_new(&name, string(native.message())));
+        return caught_value(error_new(&name, string(native.message())));
     }
     match error.into_opaque(context) {
         Ok(value) => match value.to_string(context) {
-            Ok(reason) => throw_value(string(&reason.to_std_string_lossy())),
-            Err(_) => throw_value(string("Error: unrepresentable island exception")),
+            Ok(reason) => caught_value(string(&reason.to_std_string_lossy())),
+            Err(_) => caught_value(string("Error: unrepresentable island exception")),
         },
-        Err(error) => throw_error(error.to_string()),
+        Err(error) => caught_value(error_new("Error", string(&error.to_string()))),
     }
+}
+
+fn island_eval_error(error: boa_engine::JsError, context: &mut Context) -> ! {
+    rethrow_caught(island_error_caught(error, context))
 }
 
 fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallback: &str) -> String {
@@ -1135,6 +1140,7 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 /// drop with the GC arena mid-mutation.
 fn island_eval_finish() {
     island_fetch_requests_reset();
+    island_promise_bridges_reset();
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
     island_modules_reset();
     ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());
