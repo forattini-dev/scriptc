@@ -3283,9 +3283,9 @@
       "id": "stdlib.request.clone",
       "kind": "stdlib",
       "name": "Request.clone",
-      "status": "unsupported",
+      "status": "dynamic-only",
       "code": "SC2020",
-      "note": "Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier"
+      "note": "Node 24.15.0 / Undici 7.24.4; the member is available only on Request values hosted by the dynamic JavaScript island"
     },
     {
       "id": "stdlib.request.constructor",

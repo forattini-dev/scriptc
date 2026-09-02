@@ -590,6 +590,7 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "text",
         "json",
         "bytes",
+        "clone",
       ].map((member) =>
         dynamicEntry(
           `stdlib.request.${member}`,
@@ -612,7 +613,6 @@ export const NODE24_FETCH_COMPAT_PROFILE = {
         "isReloadNavigation",
         "isHistoryNavigation",
         "duplex",
-        "clone",
         "blob",
         "arrayBuffer",
         "formData",

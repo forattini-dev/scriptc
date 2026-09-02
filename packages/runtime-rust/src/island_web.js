@@ -653,6 +653,7 @@
         : init.body;
       this._bodyStream = null;
       this._bodyReadObserved = false;
+      this._bodyOriginalGetReader = null;
       this.bodyUsed = false;
       this.signal = dependentAbortSignal(init.signal === undefined
         ? source === null ? undefined : source.signal
@@ -676,6 +677,7 @@
         const request = this;
         const stream = this._bodyStream;
         const getReader = stream.getReader.bind(stream);
+        this._bodyOriginalGetReader = getReader;
         Object.defineProperty(stream, "getReader", {
           configurable: true,
           value(options) {
@@ -697,10 +699,29 @@
     }
     clone() {
       if (this.bodyUsed) throw new TypeError("unusable");
+      const stream = this._bodyStream === null && this._body instanceof global.ReadableStream
+        ? this._body
+        : this._bodyStream;
+      if (stream !== null && stream.locked) throw new TypeError("unusable");
+      if (this._body instanceof global.ReadableStream) {
+        const [ownBody, cloneBody] = teeRequestBody(
+          this._bodyStream === null ? this._body : this._bodyStream,
+          this.headers,
+          this._bodyStream === null ? undefined : this._bodyOriginalGetReader,
+        );
+        this._body = ownBody;
+        this._bodyStream = null;
+        this._bodyReadObserved = false;
+        this._bodyOriginalGetReader = null;
+        const clone = new Request(this);
+        clone._body = cloneBody;
+        return clone;
+      }
       if (this._bodyStream !== null) {
         this._bodyStream.getReader();
         this._bodyStream = null;
         this._bodyReadObserved = false;
+        this._bodyOriginalGetReader = null;
       }
       return new Request(this);
     }
@@ -793,7 +814,7 @@
     }
   }
 
-  const fetchBody = (body, headers) => {
+  const fetchBody = (body, headers, getReader) => {
     if (body === undefined || body === null) return new Uint8Array(0);
     if (body instanceof Uint8Array) return body;
     if (body instanceof ArrayBuffer) return new Uint8Array(body);
@@ -815,7 +836,7 @@
         headers.set("transfer-encoding", "chunked");
       }
       return (async () => {
-        const reader = body.getReader();
+        const reader = getReader === undefined ? body.getReader() : getReader();
         const chunks = [];
         let length = 0;
         for (;;) {
@@ -840,6 +861,16 @@
       })();
     }
     throw new TypeError("fetch body is outside the supported byte/string subset");
+  };
+  const teeRequestBody = (body, headers, getReader) => {
+    const bytes = fetchBody(body, headers, getReader);
+    const branch = () => new global.ReadableStream({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await bytes));
+        controller.close();
+      },
+    });
+    return [branch(), branch()];
   };
   global.Headers = Headers;
   global.Request = Request;

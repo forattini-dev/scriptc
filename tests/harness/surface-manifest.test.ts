@@ -98,14 +98,13 @@ describe("surface manifest generation", () => {
   test("the implemented Request island surface is classified dynamic-only", () => {
     const implemented = [
       "constructor", "method", "url", "headers", "signal",
-      "body", "bodyUsed", "text", "json", "bytes",
+      "body", "bodyUsed", "text", "json", "bytes", "clone",
     ];
     for (const member of implemented) {
       expect(entryById.get(`stdlib.request.${member}`)?.status, member)
         .toBe("dynamic-only");
     }
     expect(entryById.get("stdlib.request.arrayBuffer")?.status).toBe("unsupported");
-    expect(entryById.get("stdlib.request.clone")?.status).toBe("unsupported");
   });
 });
 
