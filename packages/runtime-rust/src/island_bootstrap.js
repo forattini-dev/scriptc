@@ -2400,10 +2400,7 @@ function makeStream(env) {
       }
       if (n === undefined || n === null || (typeof n === "number" && Number.isNaN(n))) {
         if (this._objectMode) return this._takeChunk();
-        if (this._decoder) return this._takeAll();
-        const c = this._takeChunk();
-        this._maybeEmitEnd();
-        return c;
+        return this._takeAll();
       }
       if (this._objectMode) return this._takeChunk();
       if (n <= 0) return null;
