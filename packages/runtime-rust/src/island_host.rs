@@ -343,7 +343,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 52] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 61] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -407,6 +407,18 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 52] = [
     ("netServerListen", island_host_net_server_listen, 3),
     ("netServerAddress", island_host_net_server_address, 1),
     ("netServerClose", island_host_net_server_close, 1),
+    // The node:http SERVER leg, on the same registry: `srvListen`,
+    // `srvAddress` and `srvClose` ARE the net ones, because an http
+    // server is a net server that dispatches parsed requests.
+    ("srvCreate", island_host_srv_create, 1),
+    ("srvListen", island_host_net_server_listen, 3),
+    ("srvAddress", island_host_net_server_address, 1),
+    ("srvPort", island_host_srv_port, 1),
+    ("srvClose", island_host_net_server_close, 1),
+    ("srvResHead", island_host_srv_res_head, 4),
+    ("srvResWrite", island_host_srv_res_write, 2),
+    ("srvResEnd", island_host_srv_res_end, 2),
+    ("srvResDestroy", island_host_srv_res_destroy, 1),
 ];
 
 /// Build the `host` object the bootstrap arrow is called with.

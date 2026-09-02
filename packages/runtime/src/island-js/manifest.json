@@ -71,6 +71,7 @@
     "27-console.js",
     "28-timers.js",
     "29-zlib.js",
+    "30-net-http-tls.js",
     "30a-net-tls-load.js",
     "30b-net-sockets.js",
     "31-process.js",

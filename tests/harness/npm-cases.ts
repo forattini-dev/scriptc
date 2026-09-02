@@ -23,11 +23,15 @@ export interface NpmCase {
  * byte-diffed against Node at all, and softening it would retire the very
  * differential that makes the lane's number mean something.
  *
- * net-echo-island: raw node:net sockets. The Rust island has the socket
- * bridge (island_host_net.rs); the C island still answers node:net with
- * 30a-net-tls-load.js's loud fence, so the case would refuse there. */
+ * net-echo-island and http-server-raw-island: raw node:net sockets. The
+ * Rust island has the socket bridge (island_host_net.rs); the C island
+ * still answers node:net with 30a-net-tls-load.js's loud fence, so both
+ * cases would refuse there — the second one because its probe reads the
+ * served wire back over a raw socket, which is what makes it an
+ * assertion about BYTES rather than about a parser's reading of them. */
 const LANE_ONLY: Readonly<Record<string, readonly NpmLane[]>> = {
   "net-echo-island": ["rust"],
+  "http-server-raw-island": ["rust"],
 };
 
 /** `backend` is the lane being measured; unset is the release default, C. */

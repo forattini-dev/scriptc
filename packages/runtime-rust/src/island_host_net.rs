@@ -75,6 +75,7 @@ fn island_net_reset() {
         net_server_close_direct(&server);
     }
     ISLAND_NET_SERVER_CALLBACKS.with(|slot| slot.borrow_mut().clear());
+    island_http_reset();
     ISLAND_NET_NEXT_ID.with(|slot| slot.set(0));
 }
 

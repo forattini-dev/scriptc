@@ -5678,8 +5678,13 @@ static const char isl_modules_bootstrap[] =
      * construction; same events, later dial). Servers and raw sockets
      * are loud fences — node:net/node:tls below load (eval-time requires
      * succeed, Node's shape) and fence at the call. */
-    "  if (host.httpStart) {\n"
+    "  if (host.httpStart || host.srvCreate) {\n"
     "    const makeHttpMod = (secure) => {\n"
+    /* The two legs are gated INDEPENDENTLY, because a host may bridge one
+     * and not the other: the C island brings both, the Rust island's
+     * socket bridge lands the server first. Whichever is missing fences
+     * loudly at the call rather than half-working. */
+    "      const canRequest = typeof host.httpStart === 'function';\n"
     "      const { EventEmitter } = builtins.events();\n"
     "      const { Buffer } = builtins.buffer();\n"
     "      const toU8 = (chunk, enc) => {\n"
@@ -6178,12 +6183,13 @@ static const char isl_modules_bootstrap[] =
     "        return [o, cb];\n"
     "      };\n"
     "      const request = (input, options, cb) => {\n"
+    "        if (!canRequest) die('request')();\n"
     "        const [o, cb2] = normalize(input, options, cb);\n"
     "        return new ClientRequest(o, cb2);\n"
     "      };\n"
     "      const get = (input, options, cb) => { const r = request(input, options, cb); r.end(); return r; };\n"
     "      const die = (what) => () => {\n"
-    "        throw new Error(\"node:http\" + (secure ? 's' : '') + \" '\" + what + \"' is not supported in the scriptc island yet (the client — request/get — is)\");\n"
+    "        throw new Error(\"node:http\" + (secure ? 's' : '') + \" '\" + what + \"' is not supported in the scriptc island yet (\" + (canRequest ? 'the client — request/get — is' : 'the server — createServer — is') + \")\");\n"
     "      };\n"
     "      const STATUS_CODES = { 100: 'Continue', 101: 'Switching Protocols', 102: 'Processing', 103: 'Early Hints', 200: 'OK', 201: 'Created', 202: 'Accepted', 203: 'Non-Authoritative Information', 204: 'No Content', 205: 'Reset Content', 206: 'Partial Content', 207: 'Multi-Status', 208: 'Already Reported', 226: 'IM Used', 300: 'Multiple Choices', 301: 'Moved Permanently', 302: 'Found', 303: 'See Other', 304: 'Not Modified', 305: 'Use Proxy', 307: 'Temporary Redirect', 308: 'Permanent Redirect', 400: 'Bad Request', 401: 'Unauthorized', 402: 'Payment Required', 403: 'Forbidden', 404: 'Not Found', 405: 'Method Not Allowed', 406: 'Not Acceptable', 407: 'Proxy Authentication Required', 408: 'Request Timeout', 409: 'Conflict', 410: 'Gone', 411: 'Length Required', 412: 'Precondition Failed', 413: 'Payload Too Large', 414: 'URI Too Long', 415: 'Unsupported Media Type', 416: 'Range Not Satisfiable', 417: 'Expectation Failed', 418: \"I'm a Teapot\", 421: 'Misdirected Request', 422: 'Unprocessable Entity', 423: 'Locked', 424: 'Failed Dependency', 425: 'Too Early', 426: 'Upgrade Required', 428: 'Precondition Required', 429: 'Too Many Requests', 431: 'Request Header Fields Too Large', 451: 'Unavailable For Legal Reasons', 500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout', 505: 'HTTP Version Not Supported', 506: 'Variant Also Negotiates', 507: 'Insufficient Storage', 508: 'Loop Detected', 509: 'Bandwidth Limit Exceeded', 510: 'Not Extended', 511: 'Network Authentication Required' };\n"
     "      const METHODS = ['ACL', 'BIND', 'CHECKOUT', 'CONNECT', 'COPY', 'DELETE', 'GET', 'HEAD', 'LINK', 'LOCK', 'M-SEARCH', 'MERGE', 'MKACTIVITY', 'MKCALENDAR', 'MKCOL', 'MOVE', 'NOTIFY', 'OPTIONS', 'PATCH', 'POST', 'PROPFIND', 'PROPPATCH', 'PURGE', 'PUT', 'QUERY', 'REBIND', 'REPORT', 'SEARCH', 'SOURCE', 'SUBSCRIBE', 'TRACE', 'UNBIND', 'UNLINK', 'UNLOCK', 'UNSUBSCRIBE'];\n"
@@ -6317,7 +6323,13 @@ static const char isl_modules_bootstrap[] =
     "      return mod;\n"
     "    };\n"
     "    builtins.http = memo(() => makeHttpMod(false));\n"
-    "    builtins.https = memo(() => makeHttpMod(true));\n"
+    /* node:https is the CLIENT leg's module (its server half is fenced
+     * for both islands), so a host with only the server bridge leaves it
+     * unregistered — the island's does-not-provide throw, not a module
+     * whose every member dies. */
+    "    if (host.httpStart) {\n"
+    "      builtins.https = memo(() => makeHttpMod(true));\n"
+    "    }\n"
     "  }\n"
     /* ── island-js/30a-net-tls-load.js ───────────────────────────────────── */
     /* node:net/node:tls — enough to LOAD (eval-time requires succeed,
