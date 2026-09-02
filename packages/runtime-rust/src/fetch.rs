@@ -23,6 +23,7 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
 pub fn fetch_start(
     url: &JsString,
     method: &JsString,
+    headers: &JsArray<JsString>,
     body: Option<&JsString>,
 ) -> JsPromise<JsHttpRequest> {
     let result = promise_new();
@@ -30,9 +31,23 @@ pub fn fetch_start(
     let setup_target = result.clone();
     let url = url.clone();
     let method = method.clone();
+    let headers = headers.clone();
     let body = body.cloned();
     promise_run_segment(&setup_guard, move || {
-        let request = http_client_request_url(&url, &method, false);
+        let (host, port, path) = http_client_url_parts(&url, false);
+        let request = http_client_new(
+            &host,
+            port,
+            &path,
+            &method,
+            false,
+            0.0,
+            &headers,
+            false,
+            true,
+            &empty_string(),
+            None,
+        );
 
         let fulfilled = setup_target.clone();
         let fulfilled_trace = setup_target.clone();
