@@ -439,6 +439,131 @@
   global.DOMException = DOMException;
   global.btoa = btoa;
   global.atob = atob;
+
+  class Headers {
+    constructor(init) {
+      this._pairs = [];
+      if (init === undefined || init === null) return;
+      if (init instanceof Headers) {
+        this._pairs = init._pairs.map(([name, value]) => [name, value]);
+      } else if (typeof init[Symbol.iterator] === "function") {
+        for (const pair of init) this.append(pair[0], pair[1]);
+      } else {
+        for (const name of Object.keys(init)) this.append(name, init[name]);
+      }
+    }
+    append(name, value) {
+      this._pairs.push([String(name).toLowerCase(), String(value).trim()]);
+    }
+    get(name) {
+      const key = String(name).toLowerCase();
+      const values = this._pairs.filter(([entry]) => entry === key).map(([, value]) => value);
+      return values.length === 0 ? null : values.join(", ");
+    }
+    has(name) {
+      const key = String(name).toLowerCase();
+      return this._pairs.some(([entry]) => entry === key);
+    }
+    set(name, value) {
+      const key = String(name).toLowerCase();
+      this.delete(key);
+      this.append(key, value);
+    }
+    delete(name) {
+      const key = String(name).toLowerCase();
+      this._pairs = this._pairs.filter(([entry]) => entry !== key);
+    }
+    entries() { return this._pairs[Symbol.iterator](); }
+    keys() { return this._pairs.map(([name]) => name)[Symbol.iterator](); }
+    values() { return this._pairs.map(([, value]) => value)[Symbol.iterator](); }
+    forEach(callback, thisArg) {
+      for (const [name, value] of this._pairs) callback.call(thisArg, value, name, this);
+    }
+    [Symbol.iterator]() { return this.entries(); }
+    _flat() { return this._pairs.flat(); }
+  }
+
+  class Response {
+    constructor(body = null, init = {}) {
+      this.status = init.status === undefined ? 200 : Number(init.status);
+      this.statusText = init.statusText === undefined ? "" : String(init.statusText);
+      this.headers = new Headers(init.headers);
+      this.url = init.url === undefined ? "" : String(init.url);
+      this.redirected = Boolean(init.redirected);
+      this.type = "default";
+      this.bodyUsed = false;
+      this._body = body === null
+        ? new Uint8Array(0)
+        : body instanceof Uint8Array
+          ? body
+          : new TextEncoder().encode(String(body));
+    }
+    get ok() { return this.status >= 200 && this.status <= 299; }
+    async bytes() {
+      if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
+      this.bodyUsed = true;
+      return new Uint8Array(this._body);
+    }
+    async arrayBuffer() {
+      const bytes = await this.bytes();
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+    async text() { return new TextDecoder().decode(await this.bytes()); }
+    async json() { return JSON.parse(await this.text()); }
+    clone() {
+      if (this.bodyUsed) throw new TypeError("Response.clone: Body has already been consumed.");
+      return new Response(new Uint8Array(this._body), {
+        status: this.status,
+        statusText: this.statusText,
+        headers: this.headers,
+        url: this.url,
+        redirected: this.redirected,
+      });
+    }
+    static _native(row) {
+      const headers = [];
+      for (let index = 0; index < row[3].length; index += 2) {
+        headers.push([row[3][index], row[3][index + 1]]);
+      }
+      return new Response(row[4], {
+        status: row[0],
+        statusText: row[1],
+        url: row[2],
+        headers,
+      });
+    }
+  }
+
+  const fetchBody = (body, headers) => {
+    if (body === undefined || body === null) return new Uint8Array(0);
+    if (body instanceof Uint8Array) return body;
+    if (body instanceof ArrayBuffer) return new Uint8Array(body);
+    if (ArrayBuffer.isView(body)) {
+      return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    }
+    if (typeof body === "string") {
+      if (!headers.has("content-type")) headers.set("content-type", "text/plain;charset=UTF-8");
+      return new TextEncoder().encode(body);
+    }
+    throw new TypeError("fetch body is outside the supported byte/string subset");
+  };
+  global.Headers = Headers;
+  global.Response = Response;
+  global.fetch = function fetch(input, init = {}) {
+    const url = input && typeof input === "object" && input.url !== undefined
+      ? String(input.url)
+      : String(input);
+    const method = String(init.method === undefined ? "GET" : init.method).toUpperCase();
+    const headers = new Headers(init.headers);
+    const body = fetchBody(init.body, headers);
+    return host.fetch(url, method, headers._flat(), body)
+      .then((row) => Response._native(row))
+      .catch((cause) => {
+        const error = new TypeError("fetch failed");
+        error.cause = cause;
+        throw error;
+      });
+  };
   /* queueMicrotask: the engine ships the job queue but not this spelling,
    * and the shared island bootstrap's process.nextTick and stream
    * scheduling are written against it. A resolved promise's reaction IS a

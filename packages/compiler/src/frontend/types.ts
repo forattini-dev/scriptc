@@ -1,5 +1,6 @@
 import { InternalCompilerError } from "../errors.js";
 import * as ts from "./ts7/adapter.js";
+import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
@@ -971,47 +972,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       return DYN;
     }
   }
-  // The lib's BOXED wrapper interfaces used as TYPES (`const n: Number =
-  // 5`): every value such a slot can hold IS the primitive — `new
-  // Number(...)` construction is fenced, so no box object ever exists —
-  // and the interface members are exactly the primitive's lowered surface.
-  // Provenance-gated: a user's own `interface Number` maps as a record.
-  {
-    const boxSym = widened.getSymbol();
-    if (
-      boxSym &&
-      (boxSym.name === "Number" || boxSym.name === "String" || boxSym.name === "Boolean") &&
-      checker.declarationsOf(boxSym).some((d) => ctx.isStdlibFile(d.getSourceFile()))
-    ) {
-      return boxSym.name === "Number" ? F64 : boxSym.name === "String" ? STRING : BOOL;
-    }
-  }
-  // The lib's PRIMITIVE-CONSTRUCTOR interfaces as TYPES (`typeof String`,
-  // a `type: StringConstructor` record field — the CLI option-table
-  // idiom): the VALUE is the interned coercion closure (lower-exprs mints
-  // one per program), so the type maps to that closure's one concrete
-  // signature — the string-coercion form `(value: string) => primitive`.
-  // String(s) is identity on strings, Number(s) the ECMA StringToNumber,
-  // Boolean(s) emptiness — the parsed-token shape every stored-constructor
-  // call feeds. Calls passing other argument types fence at their site
-  // (the func param coercion), exactly like any other typed closure slot.
-  // Provenance-gated like the boxed wrappers above: a user's own
-  // `interface StringConstructor` maps as a record.
-  {
-    const ctorSym = widened.getSymbol();
-    if (
-      ctorSym &&
-      (ctorSym.name === "StringConstructor" ||
-        ctorSym.name === "NumberConstructor" ||
-        ctorSym.name === "BooleanConstructor") &&
-      checker.declarationsOf(ctorSym).some((d) => ctx.isStdlibFile(d.getSourceFile()))
-    ) {
-      return funcOf(
-        [STRING],
-        ctorSym.name === "StringConstructor" ? STRING : ctorSym.name === "NumberConstructor" ? F64 : BOOL,
-      );
-    }
-  }
+  const ambientValue = mapAmbientValueType(widened, ctx);
+  if (ambientValue !== null) return ambientValue;
   // `symbol` and `unique symbol` (the type of `const k = Symbol(...)` —
   // getBaseTypeOfLiteralType widens unique symbols, but check both flags)
   // map to the symbol identity kind.

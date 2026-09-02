@@ -460,9 +460,7 @@ pub fn island_spread_values(value: &IslandValue) -> Option<Vec<IslandValue>> {
         let method = object
             .get(BoaJsSymbol::iterator(), context)
             .unwrap_or_else(|error| island_eval_error(error, context));
-        let Some(method) = method.as_callable() else {
-            return None;
-        };
+        let method = method.as_callable()?;
         let iterator = method
             .call(&value.0, &[], context)
             .unwrap_or_else(|error| island_eval_error(error, context));
@@ -500,9 +498,9 @@ pub fn island_spread_values(value: &IslandValue) -> Option<Vec<IslandValue>> {
 }
 
 /// Apply JavaScript await adoption inside the embedded realm and return the
-/// fulfilled value. Embedded module jobs are single-threaded and run on this
-/// same host turn; a promise still pending afterwards has no native event
-/// source capable of settling it in the current island subset.
+/// fulfilled value. Engine jobs run on this thread, while host-backed
+/// promises may also require native timers or sockets; both are driven until
+/// this promise settles, never by holding the island-state borrow.
 pub fn island_await(value: &IslandValue) -> IslandValue {
     let promise = with_island_state(|state| {
         let promise = BoaJsPromise::resolve(value.0.clone(), &mut state.context)
@@ -510,31 +508,22 @@ pub fn island_await(value: &IslandValue) -> IslandValue {
         island_run_jobs(state);
         promise
     });
-    loop {
-        // The borrow is taken per probe and DROPPED before pumping: a
-        // timer callback re-enters the island to call into the realm, and
-        // ISLAND_STATE is a RefCell, so holding it across the pump would
-        // panic rather than run the timer.
-        let settled = with_island_state(|state| match promise.state() {
-            BoaPromiseState::Fulfilled(value) => Some(IslandValue(value)),
-            BoaPromiseState::Rejected(reason) => {
-                island_eval_error(BoaJsError::from_opaque(reason), &mut state.context)
-            }
-            BoaPromiseState::Pending => None,
-        });
-        if let Some(settled) = settled {
-            return settled;
-        }
-        // Pending with no timer armed is genuinely unsettleable: nothing
-        // left on this thread can advance it.
-        if !timers_pump_once() {
-            throw_error_code(
-                "Embedded module promise did not settle".to_owned(),
-                "ERR_MODULE_PROMISE_PENDING",
-            );
-        }
-        with_island_state(island_run_jobs);
+    let settled = || {
+        with_island_state(|_| !matches!(promise.state(), BoaPromiseState::Pending))
+    };
+    if !settled() && !run_event_loop_until(settled) {
+        throw_error_code(
+            "Embedded module promise did not settle".to_owned(),
+            "ERR_MODULE_PROMISE_PENDING",
+        );
     }
+    with_island_state(|state| match promise.state() {
+        BoaPromiseState::Fulfilled(value) => IslandValue(value),
+        BoaPromiseState::Rejected(reason) => {
+            island_eval_error(BoaJsError::from_opaque(reason), &mut state.context)
+        }
+        BoaPromiseState::Pending => unreachable!("settled island promise became pending"),
+    })
 }
 
 /// Drain the realm's queued promise jobs.

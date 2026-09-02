@@ -12,7 +12,7 @@ export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
       for (const item of value) visit(item);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown };
+    const node = value as { kind?: unknown; fn?: unknown; op?: unknown };
     if (
       node.kind === "libCall" &&
       (node.fn === "island.eval" ||
@@ -20,6 +20,10 @@ export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
         node.fn === "island.importDyn" ||
         node.fn === "island.importDynPath")
     ) {
+      islandEval = true;
+      return;
+    }
+    if (node.kind === "jsOp" && node.op === "globalGet") {
       islandEval = true;
       return;
     }

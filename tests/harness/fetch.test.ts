@@ -114,14 +114,23 @@ async function runBinary(
   }
 }
 
-async function build(entry: string): Promise<string> {
+async function build(
+  entry: string,
+  backend: "c" | "rust" = "c",
+  optimization: "release" | "dev" = "release",
+): Promise<string> {
   const hash = createHash("sha256");
   const inputs = [
     entry,
     ...globSync(join(fixturesRoot, "node_modules/**/*.{js,mjs,cjs,json,d.ts}")).sort(),
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
-  const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+  const key = hash
+    .update(sanitize ? "san" : "plain")
+    .update(backend)
+    .update(optimization)
+    .digest("hex")
+    .slice(0, 16);
   const outDir = join(cacheDir, `fetch-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
@@ -129,10 +138,11 @@ async function build(entry: string): Promise<string> {
     outDir,
     sanitize,
     dynamic: true,
-    // Pinned: real-socket fixtures — the compiled lane stays the C
-    // reference so a diff is fetch behavior, never a backend-lane change
-    // (npm.test.ts rides the default and covers the fallback at scale).
-    backend: "c",
+    optimization,
+    // The existing real-socket matrix stays pinned to C; the focused Rust
+    // value-injection case opts into Rust explicitly without changing that
+    // reference lane (npm.test.ts covers the fallback at scale).
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -142,6 +152,20 @@ async function build(entry: string): Promise<string> {
   }
   return result.binaryPath;
 }
+
+test.skipIf(sanitize)("Rust dynamic fetch remains callable when injected as a value", async () => {
+  const entry = join(fixturesRoot, "fetch-value/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry, baseUrl]),
+    runBinary(binary, [baseUrl], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
+  expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+}, 120_000);
 
 async function buildStatic(
   entry: string,

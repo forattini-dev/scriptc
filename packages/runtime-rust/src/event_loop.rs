@@ -470,17 +470,32 @@ pub fn process_available_memory() -> f64 {
 }
 
 pub fn run_event_loop() {
-    run_event_loop_with_first_checkpoint(true);
+    let _ = run_event_loop_with_first_checkpoint(true, || false);
 }
 
 pub fn run_event_loop_commonjs() {
-    run_event_loop_with_first_checkpoint(false);
+    let _ = run_event_loop_with_first_checkpoint(false, || false);
 }
 
-fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
+/// Drive native work until `stop` observes its target condition or the loop
+/// has no referenced work left. Island await uses this to let a Boa promise
+/// consume the same socket/timer phases as compiled promises.
+fn run_event_loop_until(stop: impl FnMut() -> bool) -> bool {
+    run_event_loop_with_first_checkpoint(true, stop)
+}
+
+fn run_event_loop_with_first_checkpoint(
+    skip_initial_ticks: bool,
+    mut stop: impl FnMut() -> bool,
+) -> bool {
     let mut turn = 0_u64;
     let mut first_checkpoint = skip_initial_ticks;
+    let mut stopped = false;
     loop {
+        if stop() {
+            stopped = true;
+            break;
+        }
         EVENT_TURN.with(|current| current.set(turn));
         // Between callbacks no user borrow is live, so this is the safe
         // point where accumulated drop candidates may be traced.
@@ -691,6 +706,7 @@ fn run_event_loop_with_first_checkpoint(skip_initial_ticks: bool) {
     }
     EVENT_PHASE.with(|phase| phase.set(0));
     EVENT_TURN.with(|turn| turn.set(0));
+    stopped || stop()
 }
 
 #[doc(hidden)]

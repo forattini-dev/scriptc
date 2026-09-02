@@ -37,6 +37,8 @@ import {
 } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
+import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
+import { templateRawTextOf } from "./lower-templates.js";
 
 export {
   type FieldTarget,
@@ -49,6 +51,7 @@ export {
   uniqueSymbolKeyOf,
 } from "./lower-properties.js";
 export { probeLower } from "./lower-probe.js";
+export { templateRawTextOf } from "./lower-templates.js";
 
 const PURE_STATIC_BINARY_OPS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.PlusToken,
@@ -302,24 +305,6 @@ function staticDataScalarLit(value: StaticDataScalar, loc: SrcLoc): IrExpr {
   if (typeof value === "number") return numLit(value, loc);
   if (typeof value === "string") return strLit(value, loc);
   return boolLit(value, loc);
-}
-
-/** A template piece's RAW text (String.raw's contract: escapes stay
- * characters). 7's client AST ships no rawText at runtime (the typing
- * declares it; the serialized node data omits it), so the raw span comes
- * off the SOURCE: between the piece's delimiters — backticks for the
- * no-substitution form, `\`...${` / `}...${` / `}...\`` for head/middle/
- * tail. 5.9.3's rawText, when a build ever supplies it, wins unchanged. */
-export function templateRawTextOf(
-  node: ts.NoSubstitutionTemplateLiteral | ts.TemplateHead | ts.TemplateMiddle | ts.TemplateTail,
-): string {
-  const own = (node as { rawText?: string }).rawText;
-  if (own !== undefined) return own;
-  const sf = node.getSourceFile();
-  const start = node.getStart(sf);
-  const end = node.getEnd();
-  const tailTrim = node.kind === ts.SyntaxKind.TemplateHead || node.kind === ts.SyntaxKind.TemplateMiddle ? 2 : 1;
-  return sf.text.slice(start + 1, end - tailTrim);
 }
 
 /** Expression lowering recurses once per operand nesting level (plus the
@@ -1291,6 +1276,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       ) {
         return primitiveCtorClosure(L, expr.text, loc);
       }
+      const dynamicGlobal = lowerDynamicGlobalIdentifier(L, expr, loc);
+      if (dynamicGlobal !== null) return dynamicGlobal;
       // The lib fence's IDENTIFIER chokepoint: the real standard library
       // resolves names the old minimal ambient world never declared
       // (Symbol, Reflect, Infinity, Date, ...) — and the adopted
