@@ -770,7 +770,7 @@ declare var Request: {
   new (input: string | URL | Request, init?: RequestInit): Request;
   readonly prototype: Request;
 };
-declare function fetch(input: string | URL, init?: RequestInit): Promise<Response>;
+declare function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
 
 /* The repeating timer pair (setTimeout lives in scriptc.d.ts — always
  * shipped). The handle is the Timeout interface, like Node's — it maps to

@@ -480,6 +480,7 @@ pub fn run_event_loop_commonjs() {
 /// Drive native work until `stop` observes its target condition or the loop
 /// has no referenced work left. Island await uses this to let a Boa promise
 /// consume the same socket/timer phases as compiled promises.
+#[cfg(feature = "island-eval")]
 fn run_event_loop_until(stop: impl FnMut() -> bool) -> bool {
     run_event_loop_with_first_checkpoint(true, stop)
 }

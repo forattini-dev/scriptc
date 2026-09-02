@@ -547,6 +547,22 @@
     return bytes;
   };
 
+  class Request {
+    constructor(input, init = {}) {
+      const source = input instanceof Request ? input : null;
+      this.url = source === null ? String(input) : source.url;
+      this.method = String(init.method === undefined
+        ? source === null ? "GET" : source.method
+        : init.method).toUpperCase();
+      this.headers = new Headers(init.headers === undefined
+        ? source === null ? undefined : source.headers
+        : init.headers);
+      this._body = init.body === undefined
+        ? source === null ? undefined : source._body
+        : init.body;
+    }
+  }
+
   class Response {
     constructor(body = null, init = {}) {
       this.status = init.status === undefined ? 200 : Number(init.status);
@@ -670,15 +686,21 @@
     throw new TypeError("fetch body is outside the supported byte/string subset");
   };
   global.Headers = Headers;
+  global.Request = Request;
   global.Response = Response;
   global.fetch = function fetch(input, init = {}) {
-    const url = input && typeof input === "object" && input.url !== undefined
-      ? String(input.url)
-      : String(input);
-    const method = String(init.method === undefined ? "GET" : init.method).toUpperCase();
-    const headers = new Headers(init.headers);
+    const source = input instanceof Request ? input : null;
+    const url = source === null ? String(input) : source.url;
+    const method = String(init.method === undefined
+      ? source === null ? "GET" : source.method
+      : init.method).toUpperCase();
+    const headers = new Headers(init.headers === undefined
+      ? source === null ? undefined : source.headers
+      : init.headers);
     if (!headers.has("connection")) headers.set("connection", "close");
-    const body = fetchBody(init.body, headers);
+    const body = fetchBody(init.body === undefined
+      ? source === null ? undefined : source._body
+      : init.body, headers);
     const redirect = init.redirect === undefined ? "follow" : String(init.redirect);
     if (redirect !== "follow" && redirect !== "error" && redirect !== "manual") {
       throw new TypeError(`undefined: ${redirect} is not an accepted type. Expected one of follow, manual, error.`);

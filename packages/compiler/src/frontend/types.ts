@@ -10,7 +10,6 @@ import { accessorSlotProp } from "../ir/nodes.js";
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
 export { typeKey };
-
 /** The ambient TYPE names of the fetch slice. Under --dynamic their
  * values live in the embedded engine and map to island handles (jsval).
  * Static fetch gives Response, RequestInit, AbortController/AbortSignal, response
@@ -20,6 +19,7 @@ export { typeKey };
  * Declaration provenance is checked in mapType so user types with the
  * same names keep their ordinary structural representation. */
 export const ISLAND_AMBIENT_TYPES = [
+  "Request",
   "Response",
   "ResponseInit",
   "RequestInit",

@@ -3092,7 +3092,7 @@ export function lowerStaticReadableStreamReaderCall(
    * are admitted; engine property names have no identifier restriction. Plain
    * spreads copy through the engine's CopyDataProperties operation in
    * source order, including nested RequestInit/header dictionaries. */
-  function lowerIslandObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
+  export function lowerIslandObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     let args: IrExpr[] = [];
     let acc: IrExpr | null = null;
