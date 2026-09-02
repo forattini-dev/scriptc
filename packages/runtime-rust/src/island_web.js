@@ -413,6 +413,7 @@
     get code() {
       if (this.name === "InvalidCharacterError") return 5;
       if (this.name === "AbortError") return 20;
+      if (this.name === "TimeoutError") return 23;
       return 0;
     }
   }
@@ -429,6 +430,20 @@
     static abort(reason) {
       const signal = new AbortSignal(abortSignalToken);
       abortSignal(signal, reason);
+      return signal;
+    }
+    static timeout(ms) {
+      const signal = new AbortSignal(abortSignalToken);
+      const id = host.setTimer(() => {
+        abortSignal(
+          signal,
+          new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          ),
+        );
+      }, Number(ms), false);
+      host.setTimerRef(id, false);
       return signal;
     }
   }
