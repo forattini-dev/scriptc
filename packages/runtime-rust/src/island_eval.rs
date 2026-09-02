@@ -593,8 +593,12 @@ fn island_module_namespace(
         ));
     };
     let module = module.clone();
-    if state.evaluated.insert(module_key.to_owned()) {
+    if !state.evaluated.contains(module_key) {
         island_module_evaluate(state, &module, key)?;
+        // Cache only a successful lifecycle. Marking before evaluation
+        // made a rejected first import expose an unevaluated namespace on
+        // the second import instead of rejecting with the module failure.
+        state.evaluated.insert(module_key.to_owned());
     }
     Ok(module.namespace(&mut state.context).into())
 }
@@ -743,8 +747,9 @@ pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
                 .loader
                 .load_external(&path, &mut state.context)
                 .map_err(IslandImportFailure::Engine)?;
-            if state.evaluated.insert(key.clone()) {
+            if !state.evaluated.contains(&key) {
                 island_module_evaluate(state, &module, &key)?;
+                state.evaluated.insert(key.clone());
             }
             Ok(module.namespace(&mut state.context).into())
         })();
@@ -923,6 +928,25 @@ fn island_timer_clear(
         timer_clear(id);
     }
     Ok(JsValue::undefined())
+}
+
+fn island_timer_set_ref(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = arguments.first().and_then(JsValue::as_number).unwrap_or(0.0);
+    let referenced = arguments.get(1).is_none_or(JsValue::to_boolean);
+    Ok(JsValue::from(timer_set_ref(id, referenced)))
+}
+
+fn island_timer_has_ref(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = arguments.first().and_then(JsValue::as_number).unwrap_or(0.0);
+    Ok(JsValue::from(timer_has_ref(id)))
 }
 
 /// Run one island timer callback, then drain the microtasks it queued.

@@ -142,7 +142,9 @@
     "unwatchFile",
     "openSync",
     "closeSync",
+    "fstatSync",
     "readSync",
+    "writeSync",
     "read",
     "open"
   ],

@@ -464,22 +464,22 @@
    * keeps the process alive), FIFO-ordered against static timers on one
    * heap. Returns a Timeout-shaped object (ref/unref/refresh/close,
    * numeric via toPrimitive) that clearTimeout/clearInterval accept
-   * alongside plain ids; unref is accepted but not honored (the entry
-   * stays ref'd — the same documented approximation the C island makes in
-   * scr_web.c, kept identical so the two lanes cannot drift). */
+   * alongside plain ids. ref/unref update native event-loop liveness. */
   class Timeout {
     constructor(fn, delay, repeat) {
       this._fn = fn;
       this._delay = delay;
       this._repeat = repeat;
       this._id = host.setTimer(fn, delay, repeat);
+      this._refed = true;
     }
-    ref() { return this; }
-    unref() { return this; }
-    hasRef() { return true; }
+    ref() { this._refed = true; host.setTimerRef(this._id, true); return this; }
+    unref() { this._refed = false; host.setTimerRef(this._id, false); return this; }
+    hasRef() { return host.timerHasRef(this._id); }
     refresh() {
       host.clearTimer(this._id);
       this._id = host.setTimer(this._fn, this._delay, this._repeat);
+      if (!this._refed) host.setTimerRef(this._id, false);
       return this;
     }
     close() { host.clearTimer(this._id); return this; }

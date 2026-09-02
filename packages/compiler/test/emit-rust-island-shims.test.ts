@@ -76,17 +76,19 @@ describe.sequential("Rust island builtin shims", () => {
     );
   });
 
-  test("a builtin outside the island's manifest still throws at RUNTIME", async () => {
-    // The fence the shims do not remove: node:net needs an event loop
-    // inside the island, which the Rust bridge does not carry, so its
-    // part stays out of the manifest and requiring it is an honest
-    // throw rather than a wrong answer.
-    const failure = await run(await build("builtin-unshimmed.ts")).catch(
-      (error: unknown) => error,
-    );
-    expect(failure).toHaveProperty("stderr");
-    expect((failure as { stderr: string }).stderr).toContain(
-      "the island does not provide the 'node:net' builtin",
+  test("load-only builtins expose shape while operations stay fenced", async () => {
+    // Bundled npm code commonly imports node:net, child_process and URL
+    // helpers at module evaluation. Loading exposes Node's function shape;
+    // file URL conversion delegates to Rust, while asynchronous operations
+    // remain explicit runtime fences until their island bridges exist.
+    const fixture = join(fixtures, "builtin-unshimmed.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("builtin-unshimmed.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe(
+      "function:function:function:function:true:function:function:function\n",
     );
   });
 

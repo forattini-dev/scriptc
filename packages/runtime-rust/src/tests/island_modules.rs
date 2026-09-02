@@ -190,23 +190,72 @@ fn island_require_walks_relative_edges_and_caches() {
 }
 
 #[test]
-fn island_require_of_an_unshimmed_builtin_reports_the_island_message() {
-    // node:net is outside the island-js "rust" manifest — its shims need
-    // an event loop inside the island, which this bridge does not carry —
-    // so it is the fence the shims deliberately do NOT remove. A builtin
-    // the manifest does list (node:events, and now node:fs/os/crypto/zlib)
-    // answers its shim instead; that is pinned end-to-end in
-    // packages/compiler/test/emit-rust-island-shims.test.ts.
+fn island_require_of_net_exposes_socket_function_shape() {
+    // Package bundles often import node:net during module initialization
+    // without opening a socket on the selected command. The shim exposes
+    // Node's function shape, while its call remains an explicit fence until
+    // asynchronous sockets can run inside the island.
     with_require_realm(|| {
         let rendered = island_eval(&string(
-            "(() => { try { globalThis.__scr_require('node:net'); } \
-             catch (e) { return e.message; } return 'no throw'; })()",
+            "typeof globalThis.__scr_require('node:net').createConnection",
         ));
-        assert_eq!(
-            rendered.as_ref(),
-            "the island does not provide the 'node:net' builtin",
-        );
+        assert_eq!(rendered.as_ref(), "function");
     });
+}
+
+#[test]
+fn island_timeout_unref_updates_native_liveness() {
+    let rendered = with_require_realm(|| {
+        island_eval(&string(
+            "(() => { const timer = setInterval(() => {}, 1000); \
+             const before = timer.hasRef(); timer.unref(); \
+             const after = timer.hasRef(); clearInterval(timer); \
+             return before + '|' + after; })()",
+        ))
+    });
+    assert_eq!(rendered.as_ref(), "true|false");
+}
+
+#[test]
+fn external_module_with_many_builtin_imports_links_once() {
+    struct TempModule(std::path::PathBuf);
+    impl Drop for TempModule {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    let path = std::env::temp_dir().join(format!(
+        "scriptc-island-many-imports-{}.mjs",
+        std::process::id(),
+    ));
+    let file = TempModule(path);
+    let mut source = String::new();
+    for index in 0..32 {
+        source.push_str(&format!(
+            "import {{ basename as path{index} }} from 'node:path';\n",
+        ));
+    }
+    source.push_str(
+        "import { EventEmitter } from 'node:events';\n\
+         import { readFileSync } from 'node:fs';\n\
+         import { readFile } from 'node:fs/promises';\n\
+         import { basename } from 'node:path';\n\
+         import { fileURLToPath } from 'node:url';\n\
+         import { createHash } from 'node:crypto';\n\
+         import { createInterface } from 'node:readline';\n\
+         export const ready = [EventEmitter, readFileSync, readFile, basename, \
+           fileURLToPath, createHash, createInterface].every(x => typeof x === 'function');",
+    );
+    std::fs::write(&file.0, source).expect("write external module fixture");
+    let specifier = string(url::Url::from_file_path(&file.0).unwrap().as_str());
+
+    let rendered = with_require_realm(|| {
+        let promise = island_import_dyn_path(&specifier);
+        let namespace = island_await(&promise);
+        island_to_string(&island_get_property(&namespace, "ready"))
+    });
+    assert_eq!(rendered.as_ref(), "true");
 }
 
 #[test]

@@ -34,7 +34,7 @@ static const struct {
      "exists,realpath,mkdir,rm,rmdir,unlink,readdir,stat,lstat,access,"
      "mkdtemp,chmod,copyFile,rename,readlink,readlinkSync,"
      "createReadStream,createWriteStream,watch,watchFile,unwatchFile,"
-     "openSync,closeSync,readSync,read,open"},
+     "openSync,closeSync,fstatSync,readSync,writeSync,read,open"},
     {"node:fs/promises",
      "readFile,writeFile,appendFile,realpath,mkdir,rm,rmdir,unlink,"
      "readdir,stat,lstat,access,mkdtemp,chmod,copyFile,rename,readlink,"

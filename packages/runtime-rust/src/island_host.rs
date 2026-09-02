@@ -303,6 +303,26 @@ fn island_host_path(
     Ok(answer)
 }
 
+/* ── URL file-path bridge ─────────────────────────────────────────── */
+
+fn island_host_url_to_path(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let value: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    Ok(island_host_string(&url_string_to_path(&value)))
+}
+
+fn island_host_url_from_path(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let value: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    Ok(island_host_string(&url_href(&url_path_to_file_url(&value))))
+}
+
 /* ── the bridge object ─────────────────────────────────────────────── */
 
 /// One `host` member: the JavaScript name, the Rust answer, and the
@@ -323,7 +343,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 33] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 37] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -342,6 +362,8 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 33] = [
     ("readStdin", island_host_read_stdin, 0),
     ("promiseState", island_host_promise_state, 1),
     ("path", island_host_path, 4),
+    ("urlToPath", island_host_url_to_path, 1),
+    ("urlFromPath", island_host_url_from_path, 1),
     // The I/O bridge (island_host_io.rs): the arities match the C
     // island's registrations, because one body of JavaScript calls both.
     ("fs", island_host_fs, 4),
@@ -353,11 +375,13 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 33] = [
     // on its own web host object.
     ("random", island_host_random, 1),
     ("uuid", island_host_uuid, 0),
-    // The timer bridge the web prelude builds its Timeout class over; the
-    // C island registers the same pair on its own web host object, and
-    // both arm on the SHARED native timer heap.
+    // The timer bridge the web prelude builds its Timeout class over.
+    // Rust additionally carries Node's ref/unref liveness through to the
+    // shared native timer heap.
     ("setTimer", island_timer_set, 3),
     ("clearTimer", island_timer_clear, 1),
+    ("setTimerRef", island_timer_set_ref, 2),
+    ("timerHasRef", island_timer_has_ref, 1),
     ("zlib", island_host_zlib, 4),
     ("arch", island_host_arch, 0),
     ("hostname", island_host_hostname, 0),

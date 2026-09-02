@@ -1,6 +1,7 @@
 // @dynamic
-// A require() of a Node builtin the Rust island does not shim: the build
-// EMBEDS it, and the throw surfaces at runtime with the island's message.
+// Bundled code may import node:net without using a socket on this command.
+// The module must load with Node's shape; unsupported socket calls remain
+// loud runtime fences in the island shim.
 import { name } from "needsnet";
 
 console.log(name());

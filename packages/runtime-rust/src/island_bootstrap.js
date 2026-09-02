@@ -12,22 +12,26 @@
  *   06-tty.js
  *   07-diagnostics-channel.js
  *   08-module.js
+ *   09-url.js
  *   10-buffer.js
  *   11-string-decoder.js
  *   12-crypto.js
  *   13-stream.js
  *   14-assert.js
  *   15-util.js
+ *   16-child-process.js
  *   17-async-hooks.js
  *   18-domain.js
  *   20-perf-hooks.js
  *   21-v8.js
+ *   23-readline.js
  *   24-punycode.js
  *   25-querystring.js
  *   26-constants.js
  *   27-console.js
  *   28-timers.js
  *   29-zlib.js
+ *   30a-net-tls-load.js
  *   31-process.js
  *   32-epilogue.js
  *
@@ -773,6 +777,9 @@ function makeFs(env) {
       throw new Error("fs.openSync is not available in the scriptc island (whole-file reads/writes only)");
     },
     closeSync: () => undefined,
+    fstatSync: () => {
+      throw new Error("fs.fstatSync is not available in the scriptc island (whole-file reads/writes only)");
+    },
     readSync: () => {
       throw new Error("fs.readSync is not available in the scriptc island (whole-file reads/writes only)");
     },
@@ -950,6 +957,81 @@ function makeFs(env) {
     };
     m.default = m;
     return m;
+  });
+  builtins.url = memo(() => {
+    const fileURLToPath = (u) => {
+      const s = typeof u === 'object' && u !== null && 'href' in u ? String(u.href) : String(u);
+      return host.urlToPath(s);
+    };
+    const pathToFileURL = (p) => new globalThis.URL(host.urlFromPath(String(p)));
+    const parse = (input, parseQuery) => {
+      const out = { protocol: null, slashes: null, auth: null, host: null, port: null,
+        hostname: null, hash: null, search: null, query: null, pathname: null, path: null, href: String(input) };
+      let u = null;
+      try { u = new globalThis.URL(String(input)); } catch (e) { u = null; }
+      if (u !== null) {
+        out.protocol = u.protocol || null;
+        out.slashes = u.href.startsWith(u.protocol + '//') ? true : null;
+        out.auth = u.username !== '' ? (u.password !== '' ? u.username + ':' + u.password : u.username) : null;
+        out.host = u.host || null;
+        out.port = u.port !== '' ? u.port : null;
+        out.hostname = u.hostname || null;
+        out.hash = u.hash !== '' ? u.hash : null;
+        out.search = u.search !== '' ? u.search : null;
+        out.query = u.search !== '' ? u.search.slice(1) : null;
+        out.pathname = u.pathname || null;
+        out.path = (u.pathname || '') + (u.search || '') || null;
+        out.href = u.href;
+      } else {
+        let rest = String(input);
+        const hashAt = rest.indexOf('#');
+        if (hashAt >= 0) { out.hash = rest.slice(hashAt); rest = rest.slice(0, hashAt); }
+        const qAt = rest.indexOf('?');
+        if (qAt >= 0) { out.search = rest.slice(qAt); out.query = rest.slice(qAt + 1); rest = rest.slice(0, qAt); }
+        out.pathname = rest || null;
+        out.path = (rest || '') + (out.search || '') || null;
+      }
+      if (parseQuery) {
+        const q = {};
+        for (const [k, v] of new globalThis.URLSearchParams(out.query || '')) {
+          if (k in q) { if (Array.isArray(q[k])) q[k].push(v); else q[k] = [q[k], v]; }
+          else q[k] = v;
+        }
+        out.query = q;
+      }
+      return out;
+    };
+    const format = (obj) => {
+      if (typeof obj === 'string') return obj;
+      if (obj !== null && typeof obj === 'object' && typeof obj.href === 'string' && obj instanceof globalThis.URL) return obj.href;
+      const protocol = obj.protocol ? (obj.protocol.endsWith(':') ? obj.protocol : obj.protocol + ':') : '';
+      const host = obj.host !== undefined && obj.host !== null ? obj.host
+        : obj.hostname ? obj.hostname + (obj.port ? ':' + obj.port : '') : '';
+      const auth = obj.auth ? obj.auth + '@' : '';
+      const slashes = obj.slashes || host !== '' ? '//' : '';
+      let pathname = obj.pathname || '';
+      if (pathname !== '' && !pathname.startsWith('/') && host !== '') pathname = '/' + pathname;
+      let search = obj.search || (obj.query && typeof obj.query === 'object' ? '?' + new globalThis.URLSearchParams(obj.query).toString() : obj.query ? '?' + obj.query : '');
+      if (search !== '' && !search.startsWith('?')) search = '?' + search;
+      let hash = obj.hash || '';
+      if (hash !== '' && !hash.startsWith('#')) hash = '#' + hash;
+      return protocol + slashes + auth + host + pathname + search + hash;
+    };
+    const resolve = (from, to) => {
+      const u = new globalThis.URL(String(to), new globalThis.URL(String(from), 'resolve://'));
+      if (u.protocol === 'resolve:') return u.pathname + u.search + u.hash;
+      return u.href;
+    };
+    const u = {
+      URL: globalThis.URL,
+      URLSearchParams: globalThis.URLSearchParams,
+      fileURLToPath, pathToFileURL, parse, format, resolve,
+      domainToASCII: (d) => String(d).toLowerCase(),
+      domainToUnicode: (d) => String(d).toLowerCase(),
+      urlToHttpOptions: (u2) => ({ protocol: u2.protocol, hostname: u2.hostname, hash: u2.hash, search: u2.search, pathname: u2.pathname, path: u2.pathname + (u2.search || ''), href: u2.href, port: u2.port !== '' ? Number(u2.port) : undefined, host: u2.host }),
+    };
+    u.default = u;
+    return u;
   });
   builtins.buffer = memo(() => {
 function makeBuffer() {
@@ -4480,6 +4562,15 @@ function makeUtil(env) {
     t.default = t;
     return t;
   });
+  builtins.child_process = memo(() => {
+    const die = (name) => () => {
+      throw new Error('child_process.' + name + ' is not available in the scriptc island');
+    };
+    const cp = {};
+    for (const n of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) cp[n] = die(n);
+    cp.default = cp;
+    return cp;
+  });
   builtins.async_hooks = memo(() => {
     class AsyncLocalStorage {
       constructor() { this._stack = []; this._entered = undefined; }
@@ -4643,6 +4734,107 @@ function makeUtil(env) {
     };
     v8.default = v8;
     return v8;
+  });
+  builtins.readline = memo(() => {
+    const EventEmitter = builtins.events();
+    class Interface extends EventEmitter {
+      constructor(input, output, completer, terminal) {
+        super();
+        let opts = input;
+        if (!opts || typeof opts.on === 'function') opts = { input, output, completer, terminal };
+        this.input = opts.input;
+        this.output = opts.output;
+        this.terminal = opts.terminal !== undefined ? !!opts.terminal : !!(this.output && this.output.isTTY);
+        this._prompt = opts.prompt !== undefined ? opts.prompt : '> ';
+        this._buf = '';
+        this.closed = false;
+        this.line = '';
+        this.cursor = 0;
+        this._onData = (chunk) => {
+          this._buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          let i;
+          while ((i = this._buf.indexOf('\n')) >= 0) {
+            let line = this._buf.slice(0, i);
+            if (line.endsWith('\r')) line = line.slice(0, -1);
+            this._buf = this._buf.slice(i + 1);
+            const q = this._questions && this._questions.shift();
+            if (q !== undefined) q(line);
+            else this.emit('line', line);
+          }
+        };
+        this._onEnd = () => this.close();
+        if (this.input && typeof this.input.on === 'function') {
+          this.input.on('data', this._onData);
+          this.input.on('end', this._onEnd);
+        }
+      }
+      question(query, optionsOrCb, maybeCb) {
+        const cb = typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb;
+        if (this.output && typeof this.output.write === 'function') this.output.write(String(query));
+        if (typeof cb === 'function') {
+          if (this._questions === undefined) this._questions = [];
+          this._questions.push(cb);
+        }
+      }
+      setPrompt(p) { this._prompt = String(p); }
+      getPrompt() { return this._prompt; }
+      prompt() {
+        if (this.output && typeof this.output.write === 'function') this.output.write(this._prompt);
+      }
+      write(data) {
+        if (data !== undefined && data !== null && this.output && typeof this.output.write === 'function') this.output.write(String(data));
+      }
+      pause() { if (this.input && this.input.pause) this.input.pause(); return this; }
+      resume() { if (this.input && this.input.resume) this.input.resume(); return this; }
+      close() {
+        if (this.closed) return;
+        this.closed = true;
+        if (this.input && typeof this.input.removeListener === 'function') {
+          this.input.removeListener('data', this._onData);
+          this.input.removeListener('end', this._onEnd);
+        }
+        this.emit('close');
+      }
+      [Symbol.asyncIterator]() {
+        const lines = [];
+        let notify = null;
+        let done = false;
+        this.on('line', (l) => { lines.push(l); if (notify) { const n = notify; notify = null; n(); } });
+        this.on('close', () => { done = true; if (notify) { const n = notify; notify = null; n(); } });
+        return {
+          next: async () => {
+            while (lines.length === 0 && !done) await new Promise((res) => { notify = res; });
+            if (lines.length > 0) return { value: lines.shift(), done: false };
+            return { value: undefined, done: true };
+          },
+          [Symbol.asyncIterator]() { return this; },
+        };
+      }
+    }
+    const wr = (stream, s, cb) => {
+      if (stream && typeof stream.write === 'function') stream.write(s);
+      if (typeof cb === 'function') queueMicrotask(cb);
+      return true;
+    };
+    const rl = {
+      Interface,
+      createInterface: (input, output, completer, terminal) => new Interface(input, output, completer, terminal),
+      clearLine: (stream, dir, cb) => wr(stream, dir < 0 ? '\u001b[1K' : dir > 0 ? '\u001b[0K' : '\u001b[2K', cb),
+      clearScreenDown: (stream, cb) => wr(stream, '\u001b[0J', cb),
+      cursorTo: (stream, x, y, cb) => {
+        if (typeof y === 'function') { cb = y; y = undefined; }
+        return wr(stream, y === undefined ? '\u001b[' + (x + 1) + 'G' : '\u001b[' + (y + 1) + ';' + (x + 1) + 'H', cb);
+      },
+      moveCursor: (stream, dx, dy, cb) => {
+        let s = '';
+        if (dx < 0) s += '\u001b[' + (-dx) + 'D'; else if (dx > 0) s += '\u001b[' + dx + 'C';
+        if (dy < 0) s += '\u001b[' + (-dy) + 'A'; else if (dy > 0) s += '\u001b[' + dy + 'B';
+        return wr(stream, s, cb);
+      },
+      emitKeypressEvents: () => {},
+    };
+    rl.default = rl;
+    return rl;
   });
   builtins.punycode = memo(() => {
 function makePunycode() {
@@ -5104,6 +5296,62 @@ function makeQuerystring() {
     z.default = z;
     return z;
   });
+    builtins.net = memo(() => {
+      const isIPv4 = (s) => {
+        if (typeof s !== 'string') return false;
+        const parts = s.split('.');
+        if (parts.length !== 4) return false;
+        for (const p of parts) {
+          if (!/^\d{1,3}$/.test(p)) return false;
+          if (p.length > 1 && p[0] === '0') return false;
+          if (Number(p) > 255) return false;
+        }
+        return true;
+      };
+      const isIPv6 = (s) => {
+        if (typeof s !== 'string' || s.indexOf(':') < 0) return false;
+        let body = s;
+        const lastColon = s.lastIndexOf(':');
+        if (s.indexOf('.') >= 0) {
+          if (!isIPv4(s.slice(lastColon + 1))) return false;
+          body = s.slice(0, lastColon + 1) + '0:0';
+        }
+        const dbl = body.indexOf('::');
+        if (dbl >= 0 && body.indexOf('::', dbl + 1) >= 0) return false;
+        const groups = body.split(':');
+        if (dbl < 0 && groups.length !== 8) return false;
+        if (dbl >= 0 && groups.length > 8) return false;
+        for (const g of groups) {
+          if (g === '') continue;
+          if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return false;
+        }
+        return true;
+      };
+      const isIP = (s) => (isIPv4(s) ? 4 : isIPv6(s) ? 6 : 0);
+      const die = (what) => () => {
+        throw new Error("node:net '" + what + "' is not supported in the scriptc island yet (the http/https client is)");
+      };
+      const mod = {
+        isIP, isIPv4, isIPv6,
+        connect: die('connect'), createConnection: die('createConnection'), createServer: die('createServer'),
+        Socket: class Socket { constructor() { die('new Socket')(); } },
+        Server: class Server { constructor() { die('new Server')(); } },
+      };
+      mod.default = mod;
+      return mod;
+    });
+    builtins.tls = memo(() => {
+      const die = (what) => () => {
+        throw new Error("node:tls '" + what + "' is not supported in the scriptc island yet (the https client is)");
+      };
+      const mod = {
+        connect: die('connect'), createServer: die('createServer'), createSecureContext: die('createSecureContext'),
+        TLSSocket: class TLSSocket { constructor() { die('new TLSSocket')(); } },
+        rootCertificates: [],
+      };
+      mod.default = mod;
+      return mod;
+    });
   builtins.process = memo(() => {
     const argv = host.argv();
     const stream = (fd) => {

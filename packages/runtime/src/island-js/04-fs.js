@@ -238,6 +238,9 @@ function makeFs(env) {
       throw new Error("fs.openSync is not available in the scriptc island (whole-file reads/writes only)");
     },
     closeSync: () => undefined,
+    fstatSync: () => {
+      throw new Error("fs.fstatSync is not available in the scriptc island (whole-file reads/writes only)");
+    },
     readSync: () => {
       throw new Error("fs.readSync is not available in the scriptc island (whole-file reads/writes only)");
     },

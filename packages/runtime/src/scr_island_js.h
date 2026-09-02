@@ -861,6 +861,9 @@ static const char isl_modules_bootstrap[] =
     "      throw new Error(\"fs.openSync is not available in the scriptc island (whole-file reads/writes only)\");\n"
     "    },\n"
     "    closeSync: () => undefined,\n"
+    "    fstatSync: () => {\n"
+    "      throw new Error(\"fs.fstatSync is not available in the scriptc island (whole-file reads/writes only)\");\n"
+    "    },\n"
     "    readSync: () => {\n"
     "      throw new Error(\"fs.readSync is not available in the scriptc island (whole-file reads/writes only)\");\n"
     "    },\n"
@@ -6311,10 +6314,12 @@ static const char isl_modules_bootstrap[] =
     "    };\n"
     "    builtins.http = memo(() => makeHttpMod(false));\n"
     "    builtins.https = memo(() => makeHttpMod(true));\n"
+    "  }\n"
+    /* ── island-js/30a-net-tls-load.js ───────────────────────────────────── */
     /* node:net/node:tls — enough to LOAD (eval-time requires succeed,
      * Node's shape); the socket surfaces fence loudly at the call. isIP
      * and friends are real (address validation is common eval-adjacent
-     * work). */
+     * work). This part is host-independent so both islands can embed it. */
     "    builtins.net = memo(() => {\n"
     "      const isIPv4 = (s) => {\n"
     "        if (typeof s !== 'string') return false;\n"
@@ -6330,11 +6335,9 @@ static const char isl_modules_bootstrap[] =
     "      const isIPv6 = (s) => {\n"
     "        if (typeof s !== 'string' || s.indexOf(':') < 0) return false;\n"
     "        let body = s;\n"
-    "        let v4tail = false;\n"
     "        const lastColon = s.lastIndexOf(':');\n"
     "        if (s.indexOf('.') >= 0) {\n"
     "          if (!isIPv4(s.slice(lastColon + 1))) return false;\n"
-    "          v4tail = true;\n"
     "          body = s.slice(0, lastColon + 1) + '0:0';\n"
     "        }\n"
     "        const dbl = body.indexOf('::');\n"
@@ -6373,7 +6376,6 @@ static const char isl_modules_bootstrap[] =
     "      mod.default = mod;\n"
     "      return mod;\n"
     "    });\n"
-    "  }\n"
     /* ── island-js/31-process.js ─────────────────────────────────────────── */
     "  builtins.process = memo(() => {\n"
     "    const argv = host.argv();\n"

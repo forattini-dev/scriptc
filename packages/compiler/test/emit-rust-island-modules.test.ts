@@ -182,6 +182,16 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe("armed:idle\n");
   });
 
+  test("dynamic import() keeps a failed module rejected", async () => {
+    const fixture = join(fixtures, "dynamic-import-rejection-cache.ts");
+    const [node, rust] = [
+      await execFileAsync(nodeOracleExecutable(), [fixture]),
+      await run(await build("dynamic-import-rejection-cache.ts")),
+    ];
+    expect(rust.stdout).toBe(node.stdout);
+    expect(rust.stdout).toBe("broken module evaluation\nbroken module evaluation\n");
+  });
+
   test("Object.keys follows the runtime shape of a package-returned record", async () => {
     const fixture = join(fixtures, "object-keys-package-record.ts");
     const [node, rust] = [
