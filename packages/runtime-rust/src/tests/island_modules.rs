@@ -1,6 +1,6 @@
 /* The embedded module/edge tables the island resolves against. */
 
-static TEST_MODULES: [IslandModule; 4] = [
+static TEST_MODULES: [IslandModule; 5] = [
     IslandModule {
         key: "/pkg/timer.js",
         source: "export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}",
@@ -23,6 +23,12 @@ static TEST_MODULES: [IslandModule; 4] = [
         key: "/pkg/meta.json",
         source: "{\"label\":\"v9\"}",
         format: IslandModuleFormat::Json,
+        esm: None,
+    },
+    IslandModule {
+        key: "/pkg/import-meta.mjs",
+        source: "export const url = import.meta.url;",
+        format: IslandModuleFormat::Esm,
         esm: None,
     },
 ];
@@ -244,18 +250,35 @@ fn external_module_with_many_builtin_imports_links_once() {
          import { fileURLToPath } from 'node:url';\n\
          import { createHash } from 'node:crypto';\n\
          import { createInterface } from 'node:readline';\n\
+         export const metaUrl = import.meta.url;\n\
          export const ready = [EventEmitter, readFileSync, readFile, basename, \
            fileURLToPath, createHash, createInterface].every(x => typeof x === 'function');",
     );
     std::fs::write(&file.0, source).expect("write external module fixture");
     let specifier = string(url::Url::from_file_path(&file.0).unwrap().as_str());
 
-    let rendered = with_require_realm(|| {
+    let (ready, meta_url) = with_require_realm(|| {
         let promise = island_import_dyn_path(&specifier);
         let namespace = island_await(&promise);
-        island_to_string(&island_get_property(&namespace, "ready"))
+        (
+            island_to_string(&island_get_property(&namespace, "ready")),
+            island_to_string(&island_get_property(&namespace, "metaUrl")),
+        )
     });
-    assert_eq!(rendered.as_ref(), "true");
+    assert_eq!(ready.as_ref(), "true");
+    assert_eq!(meta_url, specifier);
+}
+
+#[test]
+fn island_modules_expose_their_file_url_through_import_meta() {
+    with_tables(|| {
+        let url = island_import(
+            &JsString::from("/pkg/import-meta.mjs"),
+            &JsString::from("url"),
+        );
+        assert_eq!(island_to_string(&url).as_ref(), "file:///pkg/import-meta.mjs");
+    });
+    island_eval_finish();
 }
 
 #[test]

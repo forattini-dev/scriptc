@@ -235,6 +235,27 @@ impl boa_engine::module::ModuleLoader for IslandModuleLoader {
             .and_then(|key| self.load(&key, &mut context.borrow_mut()));
         async { result }
     }
+
+    fn init_import_meta(
+        self: Rc<Self>,
+        import_meta: &boa_engine::object::JsObject,
+        module: &Module,
+        context: &mut Context,
+    ) {
+        let Some(path) = module.path() else {
+            return;
+        };
+        let Ok(url) = url::Url::from_file_path(path) else {
+            return;
+        };
+        if let Err(error) = import_meta.create_data_property_or_throw(
+            js_string!("url"),
+            boa_engine::JsString::from(url.as_str()),
+            context,
+        ) {
+            island_eval_error(error, context);
+        }
+    }
 }
 
 include!("island_builtin_exports.rs");
