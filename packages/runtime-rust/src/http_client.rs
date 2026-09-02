@@ -191,6 +191,7 @@ fn http_client_feed(
             connection.chunked = chunked;
             let socket = request.with(|request| request.socket.clone());
             let response = Gc::new(HttpRequestData {
+                fetch_response: false,
                 socket,
                 method: empty_string(),
                 url: empty_string(),

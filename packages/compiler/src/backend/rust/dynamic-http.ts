@@ -23,6 +23,9 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
 
   open(`fn sc_dyn_http_request_get(request: &runtime::JsHttpRequest, key: &runtime::JsString) -> ${dyn} {`);
   open("match key.as_ref() {");
+  line(`"status" if runtime::http_request_is_fetch_response(request) => ${dyn}::Number(runtime::http_request_status_code(request).unwrap_or(200.0)),`);
+  line(`"ok" if runtime::http_request_is_fetch_response(request) => { let status = runtime::http_request_status_code(request).unwrap_or(200.0); ${dyn}::Boolean((200.0..300.0).contains(&status)) },`);
+  line(`"statusText" if runtime::http_request_is_fetch_response(request) => ${dyn}::String(runtime::http_request_status_message(request).unwrap_or_else(runtime::empty_string)),`);
   line(`"url" => ${dyn}::String(runtime::http_request_url(request)),`);
   line(`"method" => ${dyn}::String(runtime::http_request_method(request)),`);
   line(`"statusCode" => runtime::http_request_status_code(request).map(${dyn}::Number).unwrap_or(${dyn}::Null),`);

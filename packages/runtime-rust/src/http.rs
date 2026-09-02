@@ -57,6 +57,7 @@ impl HttpServerState {
 }
 
 pub struct HttpRequestData {
+    fetch_response: bool,
     socket: Option<JsNetSocket>,
     method: JsString,
     url: JsString,
@@ -350,6 +351,14 @@ pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {
 
 pub fn http_request_status_message(request: &JsHttpRequest) -> Option<JsString> {
     request.with(|request| request.status_message.clone())
+}
+
+pub fn http_request_mark_fetch_response(request: &JsHttpRequest) {
+    request.with_mut(|request| request.fetch_response = true);
+}
+
+pub fn http_request_is_fetch_response(request: &JsHttpRequest) -> bool {
+    request.with(|request| request.fetch_response)
 }
 
 pub fn http_request_on_data(

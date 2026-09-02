@@ -4,6 +4,7 @@
 
 pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
     Gc::new(HttpRequestData {
+        fetch_response: true,
         socket: None,
         method: empty_string(),
         url: empty_string(),
@@ -54,6 +55,7 @@ pub fn fetch_start(
         http_client_on_response(
             &request,
             Rc::new(move |response| {
+                http_request_mark_fetch_response(&response);
                 let _ = promise_fulfill(&fulfilled, response);
             }),
             Rc::new(move |tracer| tracer.edge(&fulfilled_trace)),
