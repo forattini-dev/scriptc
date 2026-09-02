@@ -320,6 +320,19 @@ test.skipIf(sanitize)("Rust dynamic fetch rejects when timeout fires in flight",
     .toBe(nodeRes.stdout.toString("utf8"));
 }, 120_000);
 
+test.skipIf(sanitize)("Rust dynamic abort closes the in-flight host transport", async () => {
+  const entry = join(fixturesRoot, "fetch-abort-host-release/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const nodeRes = await runBinary(oracleExecutable, [entry, baseUrl]);
+  const nativeRes = await runBinary(binary, [baseUrl], {
+    ...process.env,
+    SCRIPTC_RUST_HEAP_AUDIT: "1",
+  });
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
 test.skipIf(sanitize)("Rust dynamic fetch matches the package fetch suite", async () => {
   const entry = join(fixturesRoot, "cases/fetch-suite/main.ts");
   const binary = await build(entry, "rust", "dev");

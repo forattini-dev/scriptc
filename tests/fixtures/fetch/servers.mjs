@@ -20,7 +20,7 @@
  * /redirect-fragment/path /redirect-backslash /redirect-invalid-utf8
  * /redirect-same-scheme/dir/start
  * /early-hints
- * /switching-protocols /invalid-utf8 /slow /drip
+ * /switching-protocols /invalid-utf8 /slow /slow-state /drip
  * /chunked /backpressure /backpressure-state /gzip /gzip-concat
  * /gzip-truncated /gzip-pressure /deflate
  * /status-meta /no-content /reset-content /reset-content-large
@@ -38,6 +38,7 @@ import { deflateSync, gzipSync } from "node:zlib";
 export async function startFetchServers() {
   const fragmentRedirects = new Set();
   const backpressureStates = new Map();
+  const slowStates = new Map();
   let gzipPressurePayload;
   const server = createServer((req, res) => {
     const url = req.url ?? "/";
@@ -224,6 +225,27 @@ export async function startFetchServers() {
       } else if (url === "/invalid-utf8") {
         res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
         res.end(Buffer.from([0x61, 0xc3, 0x28, 0x62]));
+      } else if (url.startsWith("/slow-state?")) {
+        const parsed = new URL(url, "http://fixture.invalid");
+        const key = parsed.searchParams.get("key") ?? "missing";
+        const state = slowStates.get(key);
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end(state?.closed ? "closed" : state?.done ? "done" : state ? "open" : "missing");
+        slowStates.delete(key);
+      } else if (url.startsWith("/slow?")) {
+        const parsed = new URL(url, "http://fixture.invalid");
+        const key = parsed.searchParams.get("key") ?? "missing";
+        const state = { closed: false, done: false };
+        slowStates.set(key, state);
+        res.on("close", () => {
+          state.closed = true;
+        });
+        setTimeout(() => {
+          if (state.closed) return;
+          state.done = true;
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end("slow done");
+        }, 3000);
       } else if (url === "/slow") {
         // Answers after 1500ms: the abort/timeout cases cancel long before.
         setTimeout(() => {

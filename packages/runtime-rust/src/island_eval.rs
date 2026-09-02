@@ -1134,6 +1134,7 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 /// too, so `ISLAND_STATE` never survives to an uncontrolled thread-exit
 /// drop with the GC arena mid-mutation.
 fn island_eval_finish() {
+    island_fetch_requests_reset();
     ISLAND_STATE.with(|slot| *slot.borrow_mut() = None);
     island_modules_reset();
     ISLAND_HOST_CALLBACKS.with(|slot| slot.borrow_mut().clear());

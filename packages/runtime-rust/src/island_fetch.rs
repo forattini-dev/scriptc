@@ -9,6 +9,47 @@
 
 type IslandFetchResolvers = boa_engine::builtins::promise::ResolvingFunctions;
 
+thread_local! {
+    static ISLAND_FETCH_REQUESTS: RefCell<HashMap<u64, JsHttpClientRequest>> = RefCell::new(HashMap::new());
+    static ISLAND_FETCH_REQUEST_ID: Cell<u64> = const { Cell::new(0) };
+}
+
+fn island_fetch_request_id() -> u64 {
+    ISLAND_FETCH_REQUEST_ID.with(|slot| {
+        let id = slot.get().checked_add(1).unwrap_or(1);
+        slot.set(id);
+        id
+    })
+}
+
+fn island_fetch_request_remove(id: u64) -> Option<JsHttpClientRequest> {
+    ISLAND_FETCH_REQUESTS.with(|requests| requests.borrow_mut().remove(&id))
+}
+
+fn island_fetch_requests_reset() {
+    let requests = ISLAND_FETCH_REQUESTS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    for request in requests.into_values() {
+        http_client_destroy(&request);
+    }
+    ISLAND_FETCH_REQUEST_ID.with(|slot| slot.set(0));
+}
+
+fn island_host_fetch_cancel(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    if let Some(id) = arguments.first().and_then(JsValue::as_number)
+        && id.is_finite()
+        && id >= 1.0
+        && id.fract() == 0.0
+        && let Some(request) = island_fetch_request_remove(id as u64)
+    {
+        http_client_destroy(&request);
+    }
+    Ok(JsValue::undefined())
+}
+
 /// `host.urlResolve(base, reference)` — the WHATWG resolution step used by
 /// redirect following. Keeping it native reuses the same URL parser as the
 /// statically compiled runtime instead of growing a second JS URL parser.
@@ -138,8 +179,10 @@ fn island_host_fetch(
     };
 
     let (promise, resolvers) = BoaJsPromise::new_pending(context);
+    let request_id = island_fetch_request_id();
     let response_resolvers = resolvers.clone();
     let response_url = url.clone();
+    let response_request_id = request_id;
     let response_callback = Rc::new(move |response: JsHttpRequest| {
         let status = http_request_status_code(&response).unwrap_or(0.0);
         let status_text = http_request_status_message(&response).unwrap_or_else(empty_string);
@@ -154,9 +197,11 @@ fn island_host_fetch(
         );
         let end_resolvers = response_resolvers.clone();
         let end_url = response_url.clone();
+        let end_request_id = response_request_id;
         http_request_on_end(
             &response,
             Rc::new(move || {
+                island_fetch_request_remove(end_request_id);
                 island_fetch_resolve(
                     end_resolvers.clone(),
                     status,
@@ -191,16 +236,27 @@ fn island_host_fetch(
     )?;
     request.with_mut(|request| request.half_close_after_write = false);
     let error_resolvers = resolvers;
+    let error_request_id = request_id;
     http_client_on_error(
         &request,
-        Rc::new(move |error| island_fetch_reject(error_resolvers.clone(), error)),
+        Rc::new(move |error| {
+            island_fetch_request_remove(error_request_id);
+            island_fetch_reject(error_resolvers.clone(), error);
+        }),
         Rc::new(|_| {}),
         true,
     );
+    ISLAND_FETCH_REQUESTS.with(|requests| {
+        requests.borrow_mut().insert(request_id, request.clone());
+    });
     if bytes_len(&body) == 0.0 {
         http_client_end(&request);
     } else {
         http_client_end_bytes(&request, &body);
     }
-    Ok(promise.into())
+    let task = BoaJsArray::from_iter(
+        [promise.into(), JsValue::from(request_id as f64)],
+        context,
+    );
+    Ok(task.into())
 }

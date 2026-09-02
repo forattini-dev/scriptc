@@ -343,7 +343,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 39] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 40] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -372,6 +372,7 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 39] = [
     ("digest", island_host_digest, 2),
     ("hmac", island_host_hmac, 3),
     ("fetch", island_host_fetch, 4),
+    ("cancelFetch", island_host_fetch_cancel, 1),
     // The web prelude's randomness (island_web.js builds globalThis.crypto
     // over these); the C island registers the same pair as `fill`/`uuid`
     // on its own web host object.

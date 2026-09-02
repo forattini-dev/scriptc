@@ -751,7 +751,7 @@
   global.Headers = Headers;
   global.Request = Request;
   global.Response = Response;
-  const withAbortSignal = (promise, signal) => {
+  const withAbortSignal = (promise, signal, cancel) => {
     if (signal === undefined || signal === null) return promise;
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -761,7 +761,10 @@
         signal.removeEventListener("abort", onAbort);
         callback(value);
       };
-      const onAbort = () => finish(reject, signal.reason);
+      const onAbort = () => {
+        cancel();
+        finish(reject, signal.reason);
+      };
       signal.addEventListener("abort", onAbort);
       promise.then(
         (value) => finish(resolve, value),
@@ -790,9 +793,24 @@
     if (redirect !== "follow" && redirect !== "error" && redirect !== "manual") {
       throw new TypeError(`undefined: ${redirect} is not an accepted type. Expected one of follow, manual, error.`);
     }
+    const activeRequests = [];
+    const removeActiveRequest = (id) => {
+      const index = activeRequests.indexOf(id);
+      if (index >= 0) activeRequests.splice(index, 1);
+    };
+    const cancelActiveRequests = () => {
+      for (const id of activeRequests.splice(0)) host.cancelFetch(id);
+    };
     const send = (bytes) => {
-      const hop = (hopUrl, hopMethod, hopHeaders, hopBody, count, redirected) =>
-        host.fetch(hopUrl, hopMethod, hopHeaders._flat(), hopBody).then((row) => {
+      if (signal !== undefined && signal !== null && signal.aborted) {
+        return Promise.reject(signal.reason);
+      }
+      const hop = (hopUrl, hopMethod, hopHeaders, hopBody, count, redirected) => {
+        const task = host.fetch(hopUrl, hopMethod, hopHeaders._flat(), hopBody);
+        const requestId = task[1];
+        activeRequests.push(requestId);
+        return task[0].then((row) => {
+          removeActiveRequest(requestId);
           const response = Response._native(row, redirected);
           const location = response.headers.get("location");
           const redirectStatus = response.status === 301 || response.status === 302 ||
@@ -814,11 +832,15 @@
             nextHeaders.delete("content-type");
           }
           return hop(nextUrl, nextMethod, nextHeaders, nextBody, count + 1, true);
+        }, (error) => {
+          removeActiveRequest(requestId);
+          throw error;
         });
+      };
       return hop(url, method, headers, bytes, 0, false);
     };
     const request = body instanceof Promise ? body.then(send) : send(body);
-    return withAbortSignal(request, signal).catch((cause) => {
+    return withAbortSignal(request, signal, cancelActiveRequests).catch((cause) => {
       if (signal !== undefined && signal !== null && cause === signal.reason) throw cause;
       if (cause instanceof TypeError && cause.message === "fetch failed") throw cause;
       const error = new TypeError("fetch failed");
