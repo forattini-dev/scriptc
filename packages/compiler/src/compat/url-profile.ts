@@ -63,16 +63,18 @@ export interface UrlCompatProfile {
 const corpus = compatCorpus;
 
 /** Most URL refusals are stdlib-surface fences (SC2020). Component WRITES
- * are not: nothing claims the assignment, so it is refused as an
- * unsupported expression shape (SC1090, 'assignment to non-variables').
- * The fence code is per row, not per profile. */
+ * are not: the ambient `.d.ts` marks every component but pathname
+ * `readonly`, so the assignment never reaches the lowerer — it is a
+ * TypeScript type error (SC0001, 'Cannot assign ... because it is a
+ * read-only property'), probed by compiling one assignment per component
+ * rather than assumed. The fence code is per row, not per profile. */
 const { staticEntry, unsupportedEntry, outOfScopeEntry } = compatEntries("SC2020");
-const { unsupportedEntry: unsupportedShapeEntry } = compatEntries("SC1090");
+const { unsupportedEntry: unsupportedShapeEntry } = compatEntries("SC0001");
 
 const islandOnly =
   "the emulated URL class inside the dynamic engine serves island and npm JS only; a compiled URL value exposes no lowering for this member in either tier";
 const componentWrite =
-  "URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it";
+  "URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it";
 const iteratorHandle =
   "materialized iterator objects are not first-class handles; for-of over the params, or directly over keys()/values()/entries(), is the lowered iteration form";
 const iteratorHelpers =

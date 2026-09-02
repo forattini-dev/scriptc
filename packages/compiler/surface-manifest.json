@@ -4177,40 +4177,40 @@
       "kind": "stdlib",
       "name": "URL.hash (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.host",
       "kind": "stdlib",
       "name": "URL.host (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.hostname",
       "kind": "stdlib",
       "name": "URL.hostname (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.href",
       "kind": "stdlib",
       "name": "URL.href (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.password",
       "kind": "stdlib",
       "name": "URL.password (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.pathname",
@@ -4224,32 +4224,32 @@
       "kind": "stdlib",
       "name": "URL.port (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.protocol",
       "kind": "stdlib",
       "name": "URL.protocol (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.search",
       "kind": "stdlib",
       "name": "URL.search (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.setter.username",
       "kind": "stdlib",
       "name": "URL.username (setter)",
       "status": "unsupported",
-      "code": "SC1090",
-      "note": "Node 24.15.0; URL components are read-only in the static tier: there is no component-assignment lowering and no native mutation path behind it"
+      "code": "SC0001",
+      "note": "Node 24.15.0; URL components are read-only in the static tier: the ambient .d.ts declares the member readonly, so the assignment is a TypeScript type error before the lowerer ever sees it — there is no component-assignment lowering and no native mutation path behind it"
     },
     {
       "id": "stdlib.url.static.canParse",
