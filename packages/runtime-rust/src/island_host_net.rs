@@ -333,16 +333,10 @@ fn island_host_net_flow(
         entry.resumed = resume;
         Some(entry.socket.clone())
     });
-    // A socket the shim resumed BEFORE the loop handed it over has no
-    // entry yet: remember the intent so `island_net_adopt` honours it.
+    // No entry means the socket is already gone (closed, or destroyed
+    // before the shim let go of its id). Every LIVE socket is registered
+    // before the realm can learn its id, so there is no intent to record.
     let Some(socket) = socket else {
-        if resume {
-            ISLAND_NET_SOCKETS.with(|sockets| {
-                sockets.borrow_mut().entry(id).and_modify(|entry| {
-                    entry.resumed = true;
-                });
-            });
-        }
         return Ok(JsValue::undefined());
     };
     if resume {
