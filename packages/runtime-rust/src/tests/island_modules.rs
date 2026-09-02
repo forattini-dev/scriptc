@@ -406,6 +406,52 @@ fn island_json_results_deep_copy_into_the_realm() {
     island_eval_finish();
 }
 
+/* ── boa 0.22.0 defects, pinned as the behavior we WANT ────────────────
+ *
+ * Both tests below assert V8's answer, which is what Node produces and
+ * what a program compiled against the island has every right to expect.
+ * They fail today against boa 0.22.0 and are ignored rather than deleted
+ * so they turn green by themselves once the engine is fixed. The
+ * divergence is written up for upstream in
+ * docs/upstream/boa-to-json-drops-typed-array-elements.md.
+ *
+ * Run them with `--ignored` today and the process ABORTS rather than
+ * printing an assertion diff. That is not these tests misbehaving: any
+ * panic unwinding out of a live island corrupts the heap, which is a
+ * separate scriptc-side defect isolated in
+ * docs/upstream/boa-suspected-aborts-are-not-upstream.md. Once the engine
+ * is fixed these assertions hold, nothing panics, and the abort is moot. */
+
+#[test]
+#[ignore = "boa 0.22.0 serializes every typed array as {} — JsValue::to_json \
+            drops the elements; see docs/upstream/\
+            boa-to-json-drops-typed-array-elements.md"]
+fn island_json_serializes_typed_array_elements() {
+    // A typed array's indices are own enumerable properties, so
+    // JSON.stringify walks them: Node answers {"0":1,"1":2,"2":3}. boa
+    // answers {} — silently, with Ok(Some(..)), which is what makes the
+    // loss surface far from its cause.
+    island_eval(&string("globalThis.probe = new Uint8Array([1,2,3]); 0"));
+    let value = island_global_get("probe");
+    assert_eq!(island_json(&value).as_ref(), "{\"0\":1,\"1\":2,\"2\":3}");
+    island_eval_finish();
+}
+
+#[test]
+#[ignore = "boa 0.22.0 does not invoke toJSON from JsValue::to_json (no \
+            JavaScript runs during serialization); see docs/upstream/\
+            boa-to-json-drops-typed-array-elements.md"]
+fn island_json_honors_a_to_json_method() {
+    // Node answers "\"TJ\"". boa serializes the method as an ordinary
+    // property instead of calling it.
+    island_eval(&string(
+        "globalThis.probe = { a: 1 }; globalThis.probe.toJSON = () => 'TJ'; 0",
+    ));
+    let value = island_global_get("probe");
+    assert_eq!(island_json(&value).as_ref(), "\"TJ\"");
+    island_eval_finish();
+}
+
 #[test]
 fn island_host_arguments_exit_strictly_by_kind() {
     let echo = island_value_host_function(
