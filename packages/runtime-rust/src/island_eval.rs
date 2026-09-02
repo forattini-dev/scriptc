@@ -341,6 +341,16 @@ pub fn island_strict_equal_boolean(value: &IslandValue, other: bool) -> bool {
     value.0.strict_equals(&JsValue::from(other))
 }
 
+pub fn island_strict_equal_number(value: &IslandValue, other: f64) -> bool {
+    value.0.strict_equals(&JsValue::from(other))
+}
+
+pub fn island_strict_equal_string(value: &IslandValue, other: &JsString) -> bool {
+    value
+        .0
+        .strict_equals(&JsValue::from(boa_engine::JsString::from(other.as_ref())))
+}
+
 pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
     with_island_state(|state| {
         let object = value
