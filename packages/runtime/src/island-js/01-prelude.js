@@ -76,6 +76,101 @@
      * engine does not retain (no receiver, no eval origin, no method
      * binding): undefined/null, never a throw. toString() gets Node's
      * "name (file:line:col)" text, which depd renders into its trace. */
+    /* The OTHER half of the same gap: an engine with NO
+     * Error.captureStackTrace at all (boa). The block above fills in a
+     * CallSite class the engine already has; this one synthesizes the
+     * whole V8 seam from the engine's own `error.stack` TEXT, because
+     * depd — and therefore http-errors, express, router, send,
+     * body-parser and serve-static — calls it at module scope and dies
+     * on the first `require`. The frames are parsed, not invented: the
+     * function name, file and position come from the engine's own trace,
+     * and every accessor the engine cannot answer returns the honest
+     * empty value rather than throwing. `stack` is an ACCESSOR, so
+     * Error.prepareStackTrace is consulted at READ time — V8's laziness,
+     * and the only reason depd's set-then-capture-then-read works. */
+  if (typeof Error.captureStackTrace !== 'function') {
+    class CallSite {
+      constructor(name, file, line, column) {
+        this._n = name; this._f = file; this._l = line; this._c = column;
+      }
+      getThis() { return undefined; }
+      getTypeName() { return null; }
+      getFunction() { return undefined; }
+      getFunctionName() { return this._n; }
+      getMethodName() { return null; }
+      getFileName() { return this._f; }
+      getLineNumber() { return this._l; }
+      getColumnNumber() { return this._c; }
+      getEvalOrigin() { return undefined; }
+      getPosition() { return this._c; }
+      isToplevel() { return this._n === null; }
+      isEval() { return false; }
+      isNative() { return this._f === null; }
+      isConstructor() { return false; }
+      isAsync() { return false; }
+      isPromiseAll() { return false; }
+      getPromiseIndex() { return null; }
+      toString() {
+        const where = (this._f === null ? '<anonymous>' : this._f) +
+          (this._l === null ? '' : ':' + this._l + (this._c === null ? '' : ':' + this._c));
+        return this._n === null ? where : this._n + ' (' + where + ')';
+      }
+    }
+    const parseFrames = (text) => {
+      const frames = [];
+      for (const raw of String(text === undefined || text === null ? '' : text).split('\n')) {
+        const trimmed = raw.trim();
+        if (!trimmed.startsWith('at ')) continue;
+        let body = trimmed.slice(3).trim();
+        let name = null;
+        const open = body.lastIndexOf(' (');
+        if (open >= 0 && body.endsWith(')')) {
+          name = body.slice(0, open);
+          body = body.slice(open + 2, -1);
+        }
+        let file = body;
+        let line = null;
+        let column = null;
+        const at = /:(\d+):(\d+)$/.exec(body);
+        if (at !== null) {
+          file = body.slice(0, at.index);
+          line = Number(at[1]);
+          column = Number(at[2]);
+        }
+        file = file.trim();
+        if (file === '' || file === 'native' || file === 'unknown' || file === 'unknown at') file = null;
+        frames.push(new CallSite(name === '' || name === null ? null : name, file, line, column));
+      }
+      return frames;
+    };
+    if (Error.stackTraceLimit === undefined) Error.stackTraceLimit = 10;
+    Error.captureStackTrace = function captureStackTrace(target, constructorOpt) {
+      const frames = parseFrames(new Error().stack);
+    /* Drop this function's own frame, and everything above the
+     * constructor V8 was asked to hide. */
+      let cut = frames.length > 0 ? 1 : 0;
+      if (typeof constructorOpt === 'function' && constructorOpt.name) {
+        for (let i = 0; i < frames.length; i += 1) {
+          if (frames[i].getFunctionName() === constructorOpt.name) { cut = i + 1; break; }
+        }
+      }
+      const kept = frames.slice(cut);
+      Object.defineProperty(target, 'stack', {
+        configurable: true,
+        get() {
+          const prep = Error.prepareStackTrace;
+          if (typeof prep === 'function') return prep(target, kept);
+          const head = (target instanceof Error) ? (target.name + ': ' + target.message) : '';
+          const body = kept.map((f) => '    at ' + f.toString()).join('\n');
+          return head === '' ? body : (body === '' ? head : head + '\n' + body);
+        },
+        set(value) {
+          Object.defineProperty(target, 'stack', { value, writable: true, configurable: true });
+        },
+      });
+      return undefined;
+    };
+  }
   if (typeof Error.captureStackTrace === 'function') {
     const proto = (() => {
       const prep = Error.prepareStackTrace;
