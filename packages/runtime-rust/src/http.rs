@@ -353,8 +353,11 @@ pub fn http_request_status_message(request: &JsHttpRequest) -> Option<JsString> 
     request.with(|request| request.status_message.clone())
 }
 
-pub fn http_request_mark_fetch_response(request: &JsHttpRequest) {
-    request.with_mut(|request| request.fetch_response = true);
+pub fn http_request_mark_fetch_response(request: &JsHttpRequest, url: &JsString) {
+    request.with_mut(|request| {
+        request.fetch_response = true;
+        request.url = url.clone();
+    });
 }
 
 pub fn http_request_is_fetch_response(request: &JsHttpRequest) -> bool {

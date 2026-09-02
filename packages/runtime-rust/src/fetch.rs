@@ -52,10 +52,11 @@ pub fn fetch_start(
 
         let fulfilled = setup_target.clone();
         let fulfilled_trace = setup_target.clone();
+        let response_url = url.clone();
         http_client_on_response(
             &request,
             Rc::new(move |response| {
-                http_request_mark_fetch_response(&response);
+                http_request_mark_fetch_response(&response, &response_url);
                 let _ = promise_fulfill(&fulfilled, response);
             }),
             Rc::new(move |tracer| tracer.edge(&fulfilled_trace)),
