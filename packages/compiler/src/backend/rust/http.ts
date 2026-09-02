@@ -185,6 +185,13 @@ export function emitRustHttpCall(
     const dyn = context.dynTypeName();
     return `{ let ${response} = ${context.emitExpr(expr.args[0])}; match &${response} { ${dyn}::HttpRequest(sc_response) => runtime::fetch_response_text(sc_response), sc_value => sc_dyn_arg_type_fail("this", "an instance of Response", sc_value), } }`;
   }
+  if (expr.fn === "fetch.responseBytes" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&
+      expr.type.inner.kind === "bytes" && expr.type.inner.elem === "u8") {
+    const response = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; match &${response} { ${dyn}::HttpRequest(sc_response) => runtime::fetch_response_bytes(sc_response), sc_value => sc_dyn_arg_type_fail("this", "an instance of Response", sc_value), } }`;
+  }
   if (expr.fn === "fetch.responseJson" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&
       expr.type.inner.kind === "dyn") {

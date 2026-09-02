@@ -36,10 +36,10 @@ pub fn fetch_start(url: &JsString) -> JsPromise<JsHttpRequest> {
     result
 }
 
-pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
+pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> {
     let result = promise_new();
     if response.with(|response| response.ended) {
-        let _ = promise_fulfill(&result, empty_string());
+        let _ = promise_fulfill(&result, bytes_from_elements(Vec::new()));
         return result;
     }
 
@@ -51,8 +51,7 @@ pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
         response,
         Rc::new(move || {
             let bytes = bytes_from_elements(std::mem::take(&mut *body_at_end.borrow_mut()));
-            let text = bytes_to_string(&bytes, &string("utf8"));
-            let _ = promise_fulfill(&fulfilled, text);
+            let _ = promise_fulfill(&fulfilled, bytes);
         }),
         Rc::new(move |tracer| tracer.edge(&fulfilled_trace)),
         true,
@@ -65,4 +64,9 @@ pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
         false,
     );
     result
+}
+
+pub fn fetch_response_text(response: &JsHttpRequest) -> JsPromise<JsString> {
+    let bytes = fetch_response_bytes(response);
+    promise_map(&bytes, |bytes| bytes_to_string(&bytes, &string("utf8")))
 }
