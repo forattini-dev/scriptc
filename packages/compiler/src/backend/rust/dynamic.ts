@@ -1012,6 +1012,7 @@ export class RustDynamicEmitter {
     this.context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
     this.context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
     this.context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
+    if (usesEmbeddedModules) this.context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);
     this.context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);
     this.context.line(`(${name}::Url(left), ${name}::Url(right)) => std::rc::Rc::ptr_eq(left, right),`);
     this.context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);

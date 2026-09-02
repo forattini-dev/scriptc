@@ -428,12 +428,25 @@
     get reason() { return this._reason; }
     static abort(reason) {
       const signal = new AbortSignal(abortSignalToken);
-      signal._aborted = true;
-      signal._reason = reason === undefined
-        ? new DOMException("This operation was aborted", "AbortError")
-        : reason;
+      abortSignal(signal, reason);
       return signal;
     }
+  }
+
+  const abortSignal = (signal, reason) => {
+    if (signal._aborted) return;
+    signal._aborted = true;
+    signal._reason = reason === undefined
+      ? new DOMException("This operation was aborted", "AbortError")
+      : reason;
+  };
+
+  class AbortController {
+    constructor() {
+      this._signal = new AbortSignal(abortSignalToken);
+    }
+    get signal() { return this._signal; }
+    abort(reason) { abortSignal(this._signal, reason); }
   }
 
   const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -480,6 +493,7 @@
   global.URLSearchParams = URLSearchParams;
   global.DOMException = DOMException;
   global.AbortSignal = AbortSignal;
+  global.AbortController = AbortController;
   global.btoa = btoa;
   global.atob = atob;
 

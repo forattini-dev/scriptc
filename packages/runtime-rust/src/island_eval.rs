@@ -340,6 +340,10 @@ pub fn island_is_null(value: &IslandValue) -> bool {
     value.0.is_null()
 }
 
+pub fn island_strict_equal(left: &IslandValue, right: &IslandValue) -> bool {
+    left.0.strict_equals(&right.0)
+}
+
 pub fn island_strict_equal_boolean(value: &IslandValue, other: bool) -> bool {
     value.0.strict_equals(&JsValue::from(other))
 }
