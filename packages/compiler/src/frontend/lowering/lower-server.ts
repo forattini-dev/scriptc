@@ -26,6 +26,7 @@ import {
   TLS_SERVER_DOCUMENTED_OPTIONS,
 } from "./surfaces.js";
 import { conditionalSpreadOf } from "./lower-exprs.js";
+import { knownBufEncoding } from "./lower-containers.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 
 const NARROW_DATA_HINT =
@@ -1440,6 +1441,18 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
           const data2 = L.lowerExpr(args[0]!);
           const fn: IrLibFn = data2.type.kind === "string" ? "net.sockWrite" : "net.sockWriteBytes";
           return { kind: "libCall", fn, args: [receiver2, data2], type: VOID, loc };
+        }
+        // A spelling Node does not know is its synchronous
+        // ERR_UNKNOWN_ENCODING TypeError, raised before anything is
+        // written. Only string chunks reach here: a Buffer chunk ignored
+        // the encoding in the passthrough above, exactly like Node. Known
+        // but not-yet-lowered spellings ('hex', 'base64', ...) keep the
+        // fence below rather than silently writing the wrong bytes.
+        if (chunkT.kind === "string" && knownBufEncoding(encT.value) === undefined) {
+          L.lowerExpr(args[0]!); // evaluation order (effect-free in practice)
+          return nodeThrowExpr(
+            1, "ERR_UNKNOWN_ENCODING", `Unknown encoding: ${encT.value}`, VOID, loc,
+          );
         }
       }
     }

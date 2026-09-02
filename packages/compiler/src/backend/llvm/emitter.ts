@@ -5818,18 +5818,36 @@ class LlEmitter {
             B.startBlock(lj);
             return { name: "", type: e.type };
           }
-          if (e.type.kind !== "jsval") throw new InternalCompilerError("llvm emitter bug: jsval optChain result kind");
+          // The result is the ENGINE's undefined only when the chain itself
+          // answers an engine value. A step that lands back in the static
+          // world (`handle?.trim()` over a package's optional string) is a
+          // UNION, and its unit path is that union's interned undefined
+          // arm — the C emitter's two-arm shape.
+          if (e.type.kind !== "jsval" && e.type.kind !== "union") {
+            throw new LlvmUnsupportedError(`optChainResult:${e.type.kind}`, e.loc);
+          }
+          const jty = this.llType(e.type);
           const slot = B.slot();
-          B.entryAllocas.push(`${slot} = alloca ptr`);
+          B.entryAllocas.push(`${slot} = alloca ${jty}`);
           const lu = B.newLabel("ocj.u");
           const lb = B.newLabel("ocj.b");
           const lj = B.newLabel("ocj.j");
           B.condBr(isN, lu, lb);
           B.startBlock(lu);
-          this.declare(`declare ptr @scr_jsval_undefined()`);
-          const un = B.tmp();
-          B.line(`${un} = call ptr @scr_jsval_undefined()`);
-          B.line(`store ptr ${un}, ptr ${slot}`);
+          if (e.type.kind === "jsval") {
+            this.declare(`declare ptr @scr_jsval_undefined()`);
+            const un = B.tmp();
+            B.line(`${un} = call ptr @scr_jsval_undefined()`);
+            B.line(`store ptr ${un}, ptr ${slot}`);
+          } else {
+            const undefTag = undefinedArmTag(e.type, this.unionsById);
+            if (undefTag < 0) {
+              throw new InternalCompilerError(
+                "llvm emitter bug: jsval optChain result lacks its undefined arm",
+              );
+            }
+            B.line(`store ptr ${this.unitInstanceRef(e.type.unionId, undefTag)}, ptr ${slot}`);
+          }
           B.br(lj);
           B.startBlock(lb);
           const rr = B.tmp();
@@ -5841,7 +5859,7 @@ class LlEmitter {
           B.br(lj);
           B.startBlock(lj);
           const t = B.tmp();
-          B.line(`${t} = load ptr, ptr ${slot}`);
+          B.line(`${t} = load ${jty}, ptr ${slot}`);
           return this.own({ name: t, type: e.type });
         }
         if (e.receiver.type.kind !== "union") throw new LlvmUnsupportedError(`optChain:${e.receiver.type.kind}`, e.loc);

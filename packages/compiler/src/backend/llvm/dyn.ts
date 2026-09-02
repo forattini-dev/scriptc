@@ -2843,7 +2843,12 @@ export class LlDyn {
     const host = this.host;
     const B = new BlockBuilder();
     const argNames: string[] = [];
-    t.params.forEach((p, i) => {
+    // An ISLAND-REST signature (restAbi jsval) SPELLS its trailing
+    // engine-array param, so only the LEADING params fill positionally —
+    // the last slot IS the pack and there is no extra dyn rest argument.
+    const islandRest = t.rest === true && t.restAbi === "jsval";
+    const fixed = islandRest ? t.params.slice(0, -1) : t.params;
+    fixed.forEach((p, i) => {
       // JS arity: a missing argument IS the undefined dyn value.
       const adSlot = B.slot();
       B.entryAllocas.push(`${adSlot} = alloca ptr`);
@@ -2883,7 +2888,7 @@ export class LlDyn {
         const lOk = B.newLabel("dfk.jo");
         B.condBr(isNull, lFail, lOk);
         B.startBlock(lFail);
-        t.params.slice(0, i).forEach((q, j) => {
+        fixed.slice(0, i).forEach((q, j) => {
           if (isRefCounted(q)) B.line(`call void ${releaseSym(host, q)}(ptr ${argNames[j]})`);
         });
         B.terminate(`ret ptr null`);
@@ -2904,7 +2909,7 @@ export class LlDyn {
         const a = B.tmp();
         B.line(`${a} = call ${this.valTy(p)} @${this.dynCheckHelper(p)}(ptr ${ad}, ptr ${pathSlot})`);
         this.pendingBail(B, "dfk", () => {
-          t.params.slice(0, i).forEach((q, j) => {
+          fixed.slice(0, i).forEach((q, j) => {
             if (isRefCounted(q)) B.line(`call void ${releaseSym(host, q)}(ptr ${argNames[j]})`);
           });
         }, "ptr null");
@@ -2914,7 +2919,28 @@ export class LlDyn {
     // VARIADIC (rest-marked) signatures: one extra trailing dyn-array
     // param carries the call's arguments from index params.length on.
     let rest: string | null = null;
-    if (t.rest) {
+    if (islandRest) {
+      // The trailing jsval slot: the surplus dyn arguments marshalled into
+      // one fresh ENGINE array (+1, moved into the callee) — the same pack
+      // the direct call builds inline and the host-call adapter builds for
+      // a closure entering the island.
+      host.declare(`declare ptr @scr_jsval_rest_from_dyn(ptr, ${host.sizeType}, ${host.sizeType})`);
+      rest = B.tmp();
+      B.line(
+        `${rest} = call ptr @scr_jsval_rest_from_dyn(ptr %args, ${host.sizeType} ${fixed.length}, ${host.sizeType} %argc)`,
+      );
+      const isNull = B.tmp();
+      B.line(`${isNull} = icmp eq ptr ${rest}, null`);
+      const lFail = B.newLabel("dfk.rf");
+      const lOk = B.newLabel("dfk.ro");
+      B.condBr(isNull, lFail, lOk);
+      B.startBlock(lFail);
+      fixed.forEach((q, j) => {
+        if (isRefCounted(q)) B.line(`call void ${releaseSym(host, q)}(ptr ${argNames[j]})`);
+      });
+      B.terminate(`ret ptr null`);
+      B.startBlock(lOk);
+    } else if (t.rest) {
       host.declare(`declare ptr @scr_dyn_new_arr()`);
       host.declare(`declare void @scr_dyn_arr_push(ptr, ptr)`);
       rest = B.tmp();
@@ -2953,7 +2979,7 @@ export class LlDyn {
     const retTy = t.ret.kind === "void" ? "void" : this.valTy(t.ret);
     const callArgs = [
       `ptr %c`,
-      ...t.params.map((p, i) => `${this.valTy(p)} ${argNames[i]}`),
+      ...fixed.map((p, i) => `${this.valTy(p)} ${argNames[i]}`),
       ...(rest !== null ? [`ptr ${rest}`] : []),
     ].join(", ");
     if (t.ret.kind === "void") {

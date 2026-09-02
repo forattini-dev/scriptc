@@ -651,7 +651,16 @@ static const char web_prelude[] =
     "        bytes.push(parseInt(s.slice(i + 1, i + 3), 16));\n"
     "        i += 2;\n"
     "      } else {\n"
-    "        const enc = new TextEncoder().encode(ch);\n"
+    /* A literal (unescaped) char goes through utf-8. s[i] is a CODE UNIT,
+     * so an astral character would hand TextEncoder a lone high surrogate
+     * and come back as U+FFFD; pair it with its low surrogate first so
+     * 'x=<U+1F600>' serializes back as %F0%9F%98%80 like Node. A genuinely
+     * lone surrogate still falls through to the U+FFFD replacement. */
+    "        const hi = s.charCodeAt(i);\n"
+    "        const lo = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;\n"
+    "        let unit = ch;\n"
+    "        if (hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff) { unit = s.slice(i, i + 2); i++; }\n"
+    "        const enc = new TextEncoder().encode(unit);\n"
     "        for (let j = 0; j < enc.length; j++) bytes.push(enc[j]);\n"
     "      }\n"
     "    }\n"
@@ -740,21 +749,50 @@ static const char web_prelude[] =
     "    toString() {\n"
     "      return this._pairs.map(([k, v]) => formEncode(k) + '=' + formEncode(v)).join('&');\n"
     "    }\n"
+    /* WebIDL pair-iterable iteration is LIVE: forEach and the
+     * entries/keys/values iterators hold the params object plus a
+     * positional index and re-read the CURRENT list on every step — they
+     * do NOT snapshot. So a callback that appends is re-entered for the
+     * new tail, a delete() mid-iteration makes the iterator skip forward
+     * over the hole, and a sort() mid-iteration can re-yield a pair that
+     * moved past the cursor. Oracle-pinned by corpus 1120 lines 32-35
+     * against Node (a snapshot answers 'a1|b2' where Node answers
+     * 'a1|b2|c3'), so keep the index-based reads. */
     "    forEach(fn, thisArg) {\n"
-    "      for (const [k, v] of this._pairs.slice()) fn.call(thisArg, v, k, this);\n"
+    "      for (let i = 0; i < this._pairs.length; i++) {\n"
+    "        const [k, v] = this._pairs[i];\n"
+    "        fn.call(thisArg, v, k, this);\n"
+    "      }\n"
     "    }\n"
-    "    *entries() { for (const [k, v] of this._pairs) yield [k, v]; }\n"
-    "    *keys() { for (const [k] of this._pairs) yield k; }\n"
-    "    *values() { for (const [, v] of this._pairs) yield v; }\n"
+    "    _iterate(kind) {\n"
+    "      const params = this;\n"
+    "      let i = 0;\n"
+    "      const it = {\n"
+    "        next() {\n"
+    "          if (i >= params._pairs.length) return { value: undefined, done: true };\n"
+    "          const [k, v] = params._pairs[i++];\n"
+    "          return { value: kind === 'key' ? k : kind === 'value' ? v : [k, v], done: false };\n"
+    "        },\n"
+    "        [Symbol.iterator]() { return it; },\n"
+    "      };\n"
+    "      return it;\n"
+    "    }\n"
+    "    entries() { return this._iterate('key+value'); }\n"
+    "    keys() { return this._iterate('key'); }\n"
+    "    values() { return this._iterate('value'); }\n"
     "    [Symbol.iterator]() { return this.entries(); }\n"
     "  }\n"
     "\n"
     "  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n"
-    "  const invalidChar = (op) => {\n"
-    "    const e = new Error(\"Invalid character\");\n"
-    "    e.name = 'InvalidCharacterError';\n"
-    "    return e;\n"
-    "  };\n"
+    /* btoa/atob reject with a DOMException, not a plain Error: Node hands
+     * back InvalidCharacterError with the legacy .code 5, and corpus 1120
+     * reads error.constructor.name / .code / instanceof DOMException. The
+     * DOMException class is declared further down this same prelude scope;
+     * it is initialized long before any user code can call btoa/atob, so
+     * the forward reference is safe. The static (non-island) tier's
+     * scr_btoa/scr_atob already throw the same shape — keep both tiers
+     * observably identical. */
+    "  const invalidChar = (op) => new DOMException('Invalid character', 'InvalidCharacterError');\n"
     "  const btoa = (data) => {\n"
     "    const s = String(data);\n"
     "    let out = '';\n"

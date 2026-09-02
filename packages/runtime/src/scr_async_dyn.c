@@ -358,15 +358,31 @@ static void scr_dyn_then_entry(ScrFiber *self, void *ap) {
       /* The handler threw: dst rejects with that. */
       scr_promise_reject_pending(a->dst);
     } else if (a->onfin != NULL) {
-      /* finally: the callback's value is dropped and the source
-       * settlement passes through (JS — a finally callback returning a
-       * promise would delay adoption; that refinement waits for a use). */
+      /* finally: a callback returning a PROMISE delays the settlement —
+       * JS awaits it before the chain continues, and its REJECTION
+       * REPLACES the source outcome (a source rejection included, whose
+       * caught record is then dropped). A cleanup FULFILLMENT is
+       * discarded and the source settlement passes through, which is also
+       * the non-thenable case. */
+      bool replaced = false;
+      while (r != NULL && r->kind == SCR_DYN_PROMISE) {
+        ScrDyn *inner = scr_await_dyn(r->v.promise);
+        scr_dyn_release(r);
+        r = inner; /* NULL with the cleanup rejection re-thrown */
+        if (scr_exc_pending()) {
+          scr_promise_reject_pending(a->dst);
+          replaced = true;
+          break;
+        }
+      }
       scr_dyn_release(r);
-      if (rejected) {
-        scr_rethrow(c);
-        scr_promise_reject_pending(a->dst);
-      } else {
-        scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+      if (!replaced) {
+        if (rejected) {
+          scr_rethrow(c);
+          scr_promise_reject_pending(a->dst);
+        } else {
+          scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+        }
       }
     } else {
       /* Adopt dyn-promise results (JS's resolve walk). */

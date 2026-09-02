@@ -4678,6 +4678,12 @@ ScrJsval *scr_jsval_tpl_strings(int n, ScrJsval **kv);
 ScrJsval *scr_jsval_obj_spread(ScrJsval *obj, ScrJsval *src);
 ScrJsval *scr_jsval_arr_lit(int n, ScrJsval **elems);
 
+/* The ISLAND-REST pack a dyn-boxed closure's call thunk hands its trailing
+ * jsval slot: the surplus dyn arguments (index `from` on) marshalled into
+ * one fresh ENGINE array (+1). NULL + pending when an argument has no
+ * crossing. */
+ScrJsval *scr_jsval_rest_from_dyn(ScrDyn *const *args, size_t from, size_t argc);
+
 /* Marshal out (island → static): validated, STRICT extraction — a
  * non-number refuses to exit as number (no coercion), throwing a
  * catchable path-less TypeError like the dynCheck walkers'. Composite

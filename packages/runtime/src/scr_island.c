@@ -2340,6 +2340,28 @@ ScrJsval *scr_jsval_arr_lit(int n, ScrJsval **elems) {
   return isl_cell_new(a);
 }
 
+/* The ISLAND-REST pack a DYN-BOXED closure's call thunk hands its
+ * trailing jsval slot: the surplus dyn arguments (index `from` on)
+ * marshalled into one fresh ENGINE array, so the closure's `...args`
+ * binding is the engine's own array on this path too — the same shape
+ * isl_hostfn_invoke builds for the host-call path and the direct call
+ * builds inline from an arrLit. NULL with the exception pending when an
+ * argument has no crossing (scr_jsval_from_dyn's refusal). */
+ScrJsval *scr_jsval_rest_from_dyn(ScrDyn *const *args, size_t from, size_t argc) {
+  isl_entry();
+  JSValue a = JS_NewArray(isl_ctx);
+  for (size_t i = from; i < argc; i++) {
+    ScrJsval *cell = scr_jsval_from_dyn(args[i]);
+    if (!cell) {
+      JS_FreeValue(isl_ctx, a);
+      return NULL;
+    }
+    JS_SetPropertyUint32(isl_ctx, a, (uint32_t)(i - from), JS_DupValue(isl_ctx, cell->v));
+    scr_jsval_release(cell);
+  }
+  return isl_cell_new(a);
+}
+
 /* ── the module system (embedded npm code) ────────────────────────────
  * The engine's module loader and a CommonJS require shim, both resolving
  * exclusively from the emitted tables (isl_mods/isl_edges — no filesystem).

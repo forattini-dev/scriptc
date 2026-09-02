@@ -80,6 +80,7 @@ const who = process.argv.length > 2 ? process.argv[2] : "world";
 ## Dynamic-tier limits
 
 - **The island is quickjs-ng, not V8** — correct, but slower for CPU-bound dependency code. The win is startup, size, memory, deployment shape.
+- **Engine-thrown error *messages* are quickjs-ng's, not V8's** — the error type and the throw itself match (a bad `Number.prototype.toFixed` receiver is a `TypeError` either way), but the wording is the engine's: `not a number` where V8 writes `Number.prototype.toFixed requires that 'this' be a Number`. The vendored engine is an unmodified upstream snapshot and its prebuilt archive is cached by upstream commit, so this text is deliberately not patched. Match on error type, not message text.
 - **The island's Node builtins are shims** — reimplementations, reported per-builtin in the coverage report, not the real modules.
 - **Island microtask interleaving**: static fibers drain first, then the engine's jobs at loop quiescence — a static `await` racing a package promise resolves in a documented, deterministic order that can differ from Node's interleaving.
 - **Top-level `await` in embedded ESM packages** is not supported yet. It does compile in your program's own ESM graph and in npm packages compiled through `--npm-static`; the remaining limit is package code running inside the `--dynamic` island.

@@ -23,16 +23,19 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { DRIVER_FIXTURES } from "./driver-fixtures.js";
-import { nodeOracleExecutable, nodeTransformTypesArgs } from "./oracle-environment.js";
+import { nodeTransformTypesArgs } from "./oracle-environment.js";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
-const oracleExecutable = nodeOracleExecutable();
+// The SEMANTIC oracle pins to the compat matrix's primary, not the host —
+// see the note in differential.test.ts.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 // Same corpus, same SCRIPTC_TEST_SHARD slice as differential.test.ts (the
 // two files split identically, so a shard's compile cache serves both lanes).
