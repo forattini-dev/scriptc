@@ -130,3 +130,10 @@ pub fn fetch_response_header(response: &JsHttpRequest, name: &JsString) -> Optio
         .find(|(header, _)| header.as_ref() == lower)
         .map(|(_, value)| value)
 }
+
+pub fn fetch_response_set_cookies(response: &JsHttpRequest) -> Vec<JsString> {
+    http_request_headers(response)
+        .into_iter()
+        .filter_map(|(name, value)| (name.as_ref() == "set-cookie").then_some(value))
+        .collect()
+}

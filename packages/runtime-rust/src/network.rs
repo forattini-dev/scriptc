@@ -683,6 +683,9 @@ pub fn net_socket_end(socket: &JsNetSocket) {
     socket.with_mut(|socket| {
         if !socket.destroyed && socket.writable {
             socket.end_requested = true;
+            if socket.data_listeners.is_empty() {
+                socket.flowing = true;
+            }
         }
     });
 }
