@@ -71,6 +71,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   open(`fn sc_dyn_http_headers_invoke(headers: &runtime::JsHttpRequest, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
   open("match method {");
   line(`"get" => { let name = sc_dyn_to_string(args.first().unwrap_or(&${dyn}::Undefined)); runtime::fetch_response_header(headers, &name).map(${dyn}::String).unwrap_or(${dyn}::Null) },`);
+  line(`"has" => { let name = sc_dyn_to_string(args.first().unwrap_or(&${dyn}::Undefined)); ${dyn}::Boolean(runtime::fetch_response_header(headers, &name).is_some()) },`);
   line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
   close("}");
   close("}");
