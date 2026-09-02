@@ -7,6 +7,9 @@ import tseslint from "typescript-eslint";
  * a style problem. */
 const TS5_ISLANDS = [
   "packages/compiler/src/frontend/npm.ts",
+  // Workspace runtime TypeScript is a text→text transpile island; only the
+  // emitted JavaScript string returns to npm.ts, never a 5.9.3 node or enum.
+  "packages/compiler/src/frontend/npm-typescript.ts",
   "packages/compiler/src/frontend/cjs-lexer.ts",
   "packages/compiler/src/frontend/lowering/lower-comptime.ts",
   "packages/compiler/src/frontend/ts7/world-check.ts",

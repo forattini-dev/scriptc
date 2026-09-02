@@ -89,6 +89,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { npmExecutableSource } from "./npm-typescript.js";
 import { resolveExports, resolvePackageImports } from "./resolve.js";
 import { workspacePackageOfPath } from "./shared.js";
 
@@ -1542,11 +1543,9 @@ export class NpmGraphBuilder {
    * refuse at link. */
   private readonly lazilyReached = new Set<string>();
 
-  /** Embeds `key` and everything it reaches. `chain` is the package path
-   * from the user's import to this module's package — diagnostics name it
+  /** Embeds `key` and everything it reaches. `chain` names the package path
    * so a failure five dependencies deep is attributable. `lazy` is the
-   * REACHABILITY mode: true when every path from the user's import to this
-   * module crosses a require()/dynamic-import() edge. */
+   * REACHABILITY mode: true when every path crosses a lazy edge. */
   private walk(key: string, chain: readonly string[], lazy: boolean): void {
     const existing = this.modules.get(key);
     if (existing) {
@@ -1582,10 +1581,11 @@ export class NpmGraphBuilder {
       return;
     }
     const format = this.formatOf(key);
-    this.modules.set(key, { key, source, format });
+    const executableSource = npmExecutableSource(key, source);
+    this.modules.set(key, { key, source: executableSource, format });
     if (lazy) this.lazilyReached.add(key);
     if (format === "json") return;
-    this.sweepEdges(key, source, chain, lazy);
+    this.sweepEdges(key, executableSource, chain, lazy);
   }
 
   /** moduleSpecifiersOf through the per-module cache (each module parses
