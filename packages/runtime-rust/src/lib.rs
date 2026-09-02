@@ -94,6 +94,7 @@ include!("http_framing.rs");
 include!("http.rs");
 include!("http_server.rs");
 include!("http_client.rs");
+include!("fetch.rs");
 include!("http_agent.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
