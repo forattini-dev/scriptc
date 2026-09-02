@@ -55,6 +55,123 @@
         );
     }
 
+    /// MD5 is spelled out by hand in `md5.rs` (ring carries none), so it
+    /// gets the RFC's own acceptance suite rather than a spot check: RFC
+    /// 1321 A.5 pins the digest AND the padding, since the 62-byte
+    /// alphanumeric vector is the one that needs a second block.
+    #[test]
+    fn crypto_md5_digests_match_rfc_1321_vectors() {
+        let hex = string("hex");
+        let md5 = string("md5");
+        let digest = |input: &str| crypto_hash_digest_string(&md5, &string(input), &hex);
+        assert_eq!(digest("").as_ref(), "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(digest("a").as_ref(), "0cc175b9c0f1b6a831c399e269772661");
+        assert_eq!(digest("abc").as_ref(), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(
+            digest("message digest").as_ref(),
+            "f96b697d7cb7938d525a2f31aaf161d0"
+        );
+        assert_eq!(
+            digest("abcdefghijklmnopqrstuvwxyz").as_ref(),
+            "c3fcd3d76192e4007dfb496cca67e13b"
+        );
+        assert_eq!(
+            digest("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789").as_ref(),
+            "d174ab98d277d9f5a5611c2c9f419d9f"
+        );
+        assert_eq!(
+            digest(&"1234567890".repeat(8)).as_ref(),
+            "57edf4a22be3c955ac49da2e2107b67a"
+        );
+
+        // The three padding boundaries around one block: 55 bytes fits
+        // the 0x80 and the length field, 56 pushes the length into a
+        // second block, 64 needs a whole second block of padding.
+        assert_eq!(
+            digest(&"x".repeat(55)).as_ref(),
+            "04364420e25c512fd958a70738aa8f72"
+        );
+        assert_eq!(
+            digest(&"x".repeat(56)).as_ref(),
+            "668a72d5ba17f08e62dabcafad6db14b"
+        );
+        assert_eq!(
+            digest(&"x".repeat(64)).as_ref(),
+            "c1bb4f81d892b2d57947682aeb252456"
+        );
+
+        // Bytes and base64, the other two entry shapes.
+        assert_eq!(
+            crypto_hash_digest_bytes(&md5, &bytes_from_vec(b"abc".to_vec()), &hex).as_ref(),
+            "900150983cd24fb0d6963f7d28e17f72",
+        );
+        assert_eq!(
+            crypto_hash_digest_bytes(
+                &md5,
+                &bytes_from_vec(vec![0, 1, 2, 253, 254, 255]),
+                &string("base64"),
+            )
+            .as_ref(),
+            "5yuGRWwZHDJ149VcCrLnVg==",
+        );
+
+        // The island bridge answers md5 rather than fencing it, which is
+        // what lets npm's ETag and cache-key code run here.
+        let raw = crypto_digest_raw(&md5, &bytes_from_vec(b"abc".to_vec()))
+            .expect("md5 must be a carried digest");
+        assert_eq!(bytes_len(&raw), 16.0);
+        assert!(crypto_digest_raw(&string("sha3-256"), &bytes_from_vec(vec![])).is_none());
+    }
+
+    /// HMAC-MD5 (RFC 2202) — the construction is hand-written too, so the
+    /// short, exact-block and over-long key cases each get a vector.
+    #[test]
+    fn crypto_hmac_md5_matches_rfc_2202_vectors() {
+        let hex = string("hex");
+        let md5 = string("md5");
+        assert_eq!(
+            crypto_hmac_digest_string(
+                &md5,
+                &bytes_from_vec(vec![0x0b; 16]),
+                &string("Hi There"),
+                &hex,
+            )
+            .as_ref(),
+            "9294727a3638bb1c13f48ef8158bfc9d",
+        );
+        assert_eq!(
+            crypto_hmac_digest_string(
+                &md5,
+                &bytes_from_vec(b"Jefe".to_vec()),
+                &string("what do ya want for nothing?"),
+                &hex,
+            )
+            .as_ref(),
+            "750c783e6ab0b503eaa86e310a5db738",
+        );
+        // Test case 6: an 80-byte key, longer than the 64-byte block, so
+        // the key is replaced by its own digest first.
+        assert_eq!(
+            crypto_hmac_digest_bytes(
+                &md5,
+                &bytes_from_vec(vec![0xaa; 80]),
+                &bytes_from_vec(
+                    b"Test Using Larger Than Block-Size Key - Hash Key First".to_vec()
+                ),
+                &hex,
+            )
+            .as_ref(),
+            "6b1ab7fe4bd7bf8f0b62e6ce61b9d0cd",
+        );
+        let tag = crypto_hmac_raw(
+            &md5,
+            &bytes_from_vec(b"key".to_vec()),
+            &bytes_from_vec(b"msg".to_vec()),
+        )
+        .expect("md5 must be a carried HMAC");
+        assert_eq!(bytes_len(&tag), 16.0);
+    }
+
     #[test]
     fn crypto_hmac_digests_match_rfc_4231_vectors() {
         // RFC 4231 test case 1: a 20-byte 0x0b key over "Hi There".

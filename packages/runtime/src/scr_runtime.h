@@ -2628,10 +2628,10 @@ bool scr_children_wait(double max_wait_ms);
 ScrStr *scr_crypto_random_uuid(void);
 ScrStr *scr_crypto_random_string(double n, ScrStr *enc); /* +1, or throws */
 /* The composed createHash(alg).update(data).digest(enc) chain, fused by
- * the compiler (no Hash handle exists). alg is "sha1" | "sha256" |
- * "sha384" | "sha512" and enc "hex" | "base64" — compile-time literals,
+ * the compiler (no Hash handle exists). alg is "md5" | "sha1" | "sha256"
+ * | "sha384" | "sha512" and enc "hex" | "base64" — compile-time literals,
  * frontend-fenced (sha1 exists for the RFC 6455 Sec-WebSocket-Accept
- * hash). Strings hash their UTF-8 bytes (Node's default input encoding;
+ * hash, md5 for ETags and cache keys). Strings hash their UTF-8 bytes (Node's default input encoding;
  * ScrStr storage IS utf8), the bytes form a Buffer/typed array's raw
  * bytes. Borrowed; +1 string. Never throw. */
 ScrStr *scr_crypto_hash_digest_str(ScrStr *alg, ScrStr *data, ScrStr *enc);

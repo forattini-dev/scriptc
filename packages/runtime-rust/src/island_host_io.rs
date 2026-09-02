@@ -7,7 +7,7 @@
  * FIRST, every call here delegates to the SAME runtime primitive the
  * static lane lowers to: the island's `fs.readFileSync` and a compiled
  * `fs.readFileSync` are both `fs_read_file_bytes`, its `createHash` and a
- * compiled `createHash` are both ring through `crypto_digest_raw`. The
+ * compiled `createHash` are both `crypto_digest_raw`. The
  * island is a different engine, not a different runtime.
  *
  * SECOND, these primitives THROW, and a scriptc throw is an unwinding
@@ -357,9 +357,9 @@ fn island_host_fs_constants(
 ///
 /// `undefined` is a RETURN, never a throw: the shared crypto shim probes
 /// with an empty input (`env.digest(alg, new Uint8Array(0)) === undefined`)
-/// and raises Node's own "Digest method not supported" itself. Node's
-/// `md5` takes that path here — ring does not carry it — so the island
-/// refuses it out loud instead of answering wrongly.
+/// and raises Node's own "Digest method not supported" itself. `md5`
+/// ANSWERS — `md5.rs` carries it, since ring does not — so the fence is
+/// reached only by a name neither runtime has (`sha3-256`, `blake2b512`).
 fn island_host_digest(
     _this: &JsValue,
     arguments: &[JsValue],

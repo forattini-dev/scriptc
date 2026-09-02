@@ -58,6 +58,7 @@ include!("bytes.rs");
 include!("bytes_encoding.rs");
 include!("zlib.rs");
 include!("text_decoder.rs");
+include!("md5.rs");
 include!("crypto.rs");
 include!("collections.rs");
 include!("event_emitter.rs");
