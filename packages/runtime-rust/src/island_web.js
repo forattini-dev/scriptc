@@ -424,9 +424,15 @@
       if (token !== abortSignalToken) throw new TypeError("Illegal constructor");
       this._aborted = false;
       this._reason = undefined;
+      this._listeners = [];
     }
     get aborted() { return this._aborted; }
     get reason() { return this._reason; }
+    addEventListener(type, listener) {
+      if (String(type) === "abort" && typeof listener === "function") {
+        this._listeners.push(listener);
+      }
+    }
     static abort(reason) {
       const signal = new AbortSignal(abortSignalToken);
       abortSignal(signal, reason);
@@ -454,6 +460,7 @@
     signal._reason = reason === undefined
       ? new DOMException("This operation was aborted", "AbortError")
       : reason;
+    for (const listener of signal._listeners.slice()) listener.call(signal);
   };
 
   class AbortController {
