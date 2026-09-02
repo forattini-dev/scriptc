@@ -28,13 +28,19 @@ import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
+import { primaryOracleExecutable } from "./node-matrix.js";
 import { normalizeNodeTestOutput } from "./node-test-normalize.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/node-test");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header): the reporter's stdout/exit code must match ONE Node's fixed
+// behavior, so this pins to the compat matrix primary rather than
+// whichever `node` the PATH happens to resolve.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 interface ProgramRun {
   stdout: string;
@@ -109,7 +115,7 @@ describe(`node:test differential (${cases.length} programs${sanitize ? ", saniti
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
     const binary = await build(c.entry);
     const [nodeRes, nativeRes] = await Promise.all([
-      runLane("node", [c.entry]),
+      runLane(oracleExecutable, [c.entry]),
       runLane(binary, []),
     ]);
     expect(normalize(nativeRes.stdout)).toBe(normalize(nodeRes.stdout));

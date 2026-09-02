@@ -22,7 +22,8 @@ import { globSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import { analyze, compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, analyze, compile } from "@scriptc/compiler";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -30,6 +31,11 @@ const fixturesRoot = join(repoRoot, "tests/fixtures");
 const pilotRoot = join(fixturesRoot, "npm-static");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header): stdout must match ONE Node's fixed behavior, so this pins to
+// the compat matrix primary rather than whichever `node` the PATH happens
+// to resolve.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 interface RunResult {
   stdout: Buffer;
@@ -110,7 +116,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(binary, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -150,7 +156,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.stats.statementsFailed).toBe(0);
     const binary = await buildStatic(entry, "auto");
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(binary, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -327,7 +333,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     const result = await compile(entry, { outPath: join(outDir, "program"), outDir, sanitize, npmStatic: ["wslinked"] });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(result.binaryPath, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -373,7 +379,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
     const binary = await buildStatic(entry, [pkg]);
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(binary, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -405,7 +411,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.diagnostics).toHaveLength(0);
     const binary = await buildStatic(entry, ["gtwrap", "gtcore", "gtable"]);
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(binary, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -529,7 +535,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.runtimeFences ?? []).toHaveLength(0);
     const binary = await buildStatic(entry, ["jsonzoo"]);
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry]),
+      runBinary(oracleExecutable, [entry]),
       runBinary(binary, []),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));

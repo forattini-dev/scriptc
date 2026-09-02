@@ -27,17 +27,23 @@ import { createServer as createHttpsServer } from "node:https";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
 // The servers live in the fixture tree (a plain .mjs): the Linux lane runs
 // the IDENTICAL routes standalone inside its container.
 // eslint-disable-next-line import/no-relative-packages
 import { startFetchServers } from "../fixtures/fetch/servers.mjs";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/fetch");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header): stdout must match ONE Node's fixed behavior, so this pins to
+// the compat matrix primary rather than whichever `node` the PATH happens
+// to resolve.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 /* ── the local servers (tests/fixtures/fetch/servers.mjs: all routes, the
  * refused port, and the counting forward proxy for the NODE_USE_ENV_PROXY
@@ -201,7 +207,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
     const binary = await buildStatic(entry, backend);
     const redirectKey = `${name}-${backend}`;
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry, baseUrl, `${redirectKey}-node`]),
+      runBinary(oracleExecutable, [entry, baseUrl, `${redirectKey}-node`]),
       runBinary(binary, [baseUrl, `${redirectKey}-native`]),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(
@@ -216,7 +222,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
       const entry = join(fixturesRoot, "static-abandon/main.mts");
       const binary = await buildStatic(entry, backend);
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [entry, baseUrl], undefined, 3_000),
+        runBinary(oracleExecutable, [entry, baseUrl], undefined, 3_000),
         runBinary(binary, [baseUrl], undefined, 3_000),
       ]);
       expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
@@ -254,7 +260,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
           NODE_EXTRA_CA_CERTS: join(certs, "ca.pem"),
         };
         const [nodeRes, nativeRes] = await Promise.all([
-          runBinary("node", [entry, ...argv], env),
+          runBinary(oracleExecutable, [entry, ...argv], env),
           runBinary(binary, argv, env),
         ]);
         expect(nativeRes.stdout.toString("utf8")).toBe(
@@ -323,7 +329,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
         }
         const before = servers.proxiedRequests();
         const [nodeRes, ...nativeResults] = await Promise.all([
-          runBinary("node", [entry, ...argv], env),
+          runBinary(oracleExecutable, [entry, ...argv], env),
           runBinary(dynamic, argv, env),
           runBinary(c, argv, env),
           runBinary(llvm, argv, env),
@@ -373,7 +379,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
         };
         const before = servers.proxiedRequests();
         const [nodeRes, nativeRes] = await Promise.all([
-          runBinary("node", [entry, ...argv], env),
+          runBinary(oracleExecutable, [entry, ...argv], env),
           runBinary(binary, argv, env),
         ]);
         expect(nativeRes.stdout.toString("utf8")).toBe(
@@ -459,7 +465,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
         ]);
         const argv = [blockedUrl, redirectUrl];
         const [nodeRes, ...nativeResults] = await Promise.all([
-          runBinary("node", [entry, ...argv]),
+          runBinary(oracleExecutable, [entry, ...argv]),
           runBinary(dynamic, argv),
           runBinary(c, argv),
           runBinary(llvm, argv),
@@ -546,7 +552,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
     const before = servers.proxiedRequests();
     const authBefore = servers.proxyAuthorizations().length;
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry, ...argv], env),
+      runBinary(oracleExecutable, [entry, ...argv], env),
       runBinary(binary, argv, env),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
@@ -574,7 +580,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
       const before = servers.proxiedRequests();
       const authBefore = servers.proxyAuthorizations().length;
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [entry, baseUrl], env),
+        runBinary(oracleExecutable, [entry, baseUrl], env),
         runBinary(binary, [baseUrl], env),
       ]);
       expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
@@ -611,7 +617,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
       const before = servers.proxiedRequests();
       const authBefore = servers.proxyAuthorizations().length;
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [entry, baseUrl], env),
+        runBinary(oracleExecutable, [entry, baseUrl], env),
         runBinary(binary, [baseUrl], env),
       ]);
       expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
@@ -669,7 +675,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
           NO_PROXY: "",
         };
         const [nodeRes, ...nativeResults] = await Promise.all([
-          runBinary("node", [entry, ...argv], env),
+          runBinary(oracleExecutable, [entry, ...argv], env),
           runBinary(dynamic, argv, env),
           runBinary(c, argv, env),
           runBinary(llvm, argv, env),
@@ -705,7 +711,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
         NO_PROXY: "",
       };
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [entry, baseUrl], env),
+        runBinary(oracleExecutable, [entry, baseUrl], env),
         runBinary(binary, [baseUrl], env),
       ]);
       expect(nativeRes.stdout.equals(nodeRes.stdout)).toBe(true);
@@ -729,7 +735,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
     };
     const before = servers.proxiedRequests();
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [entry, ...argv], env),
+      runBinary(oracleExecutable, [entry, ...argv], env),
       runBinary(binary, argv, env),
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(
@@ -755,7 +761,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
       };
       const before = servers.proxiedRequests();
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [entry, ...argv], env),
+        runBinary(oracleExecutable, [entry, ...argv], env),
         runBinary(binary, argv, env),
       ]);
       expect(nativeRes.stdout.toString("utf8")).toBe(
@@ -781,7 +787,7 @@ describe(`fetch differential (${cases.length} programs${sanitize ? ", sanitized"
         ? [...argv, "redirect-resolution-native"]
         : argv;
     const [nodeRes, nativeRes] = await Promise.all([
-      runBinary("node", [c.entry, ...nodeArgv]),
+      runBinary(oracleExecutable, [c.entry, ...nodeArgv]),
       runBinary(binary, nativeArgv),
     ]);
     if (!nodeRes.stdout.equals(nativeRes.stdout)) {

@@ -14,12 +14,20 @@ import { createHash } from "node:crypto";
 import { existsSync, globSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
+import { primaryOracleExecutable } from "./node-matrix.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/dgram");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header, server.test.ts's identical pattern): the fixture's stdout/exit
+// code must match ONE Node's fixed behavior, so this pins to the compat
+// matrix primary rather than whichever `node` the PATH happens to
+// resolve. The driver spawned inside runLane stays plain "node" — it is
+// the identical fixed workload on both lanes, not an oracle subject.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 
 interface ProgramRun {
   stdout: Buffer;
@@ -115,7 +123,7 @@ describe(`dgram differential (${cases.length} programs${sanitize ? ", sanitized"
     const binary = await build(c.entry);
     // Sequential, not parallel: both lanes bind ephemeral ports and drive
     // real sockets — parallelism buys little and interleaves kernel state.
-    const nodeRes = await runLane("node", [c.entry], c.driver);
+    const nodeRes = await runLane(oracleExecutable, [c.entry], c.driver);
     const nativeRes = await runLane(binary, [], c.driver);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
     if (!nodeRes.stdout.equals(nativeRes.stdout)) {

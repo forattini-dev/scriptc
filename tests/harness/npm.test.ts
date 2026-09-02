@@ -19,8 +19,9 @@ import { globSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import { compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
+import { primaryOracleExecutable } from "./node-matrix.js";
 import { shardSelect, shardSuffix } from "./shard.js";
 
 const execFileAsync = promisify(execFile);
@@ -28,6 +29,12 @@ const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
+// SEMANTIC oracle (differential.test.ts's rationale, node-matrix.ts's
+// header): stdout must match ONE Node's fixed behavior, so this pins to
+// the compat matrix primary rather than whichever `node` the PATH happens
+// to resolve — a bare "node" spawn would silently compare against
+// whatever major is running the suite.
+const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
 /* SCRIPTC_TEST_BACKEND pins the lane. Unset — the normal run, and what CI
  * gates on — this suite rides the RELEASE DEFAULT, because embedded npm
  * tables are production surface and this differential is what keeps
@@ -187,7 +194,7 @@ describe(`npm differential (${cases.length} programs${sanitize ? ", sanitized" :
     const binary = await build(c.entry);
     for (const argv of c.argvs ?? [[]]) {
       const [nodeRes, nativeRes] = await Promise.all([
-        runBinary("node", [c.entry, ...argv]),
+        runBinary(oracleExecutable, [c.entry, ...argv]),
         runBinary(binary, argv),
       ]);
       const label = argv.join(" ");

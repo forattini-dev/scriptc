@@ -102,8 +102,10 @@ describe("URL compatibility profile", () => {
         expect(entry.reason, `${entry.id}: static rows are explained by evidence`).toBeUndefined();
       } else if (entry.status === "dynamic-only" || entry.status === "unsupported") {
         // The fence is per row: member-shaped refusals raise the stdlib
-        // fence, whole-expression refusals raise the syntax fence.
-        expect(["SC2020", "SC1090"], `${entry.id}: unexpected fence`).toContain(entry.code);
+        // fence, component-write refusals raise the TypeScript preflight
+        // gate (the ambient .d.ts marks the component readonly, so the
+        // assignment never reaches the lowerer).
+        expect(["SC2020", "SC0001"], `${entry.id}: unexpected fence`).toContain(entry.code);
         expect(entry.reason?.length, `${entry.id}: missing gap rationale`).toBeGreaterThan(0);
       } else {
         expect(entry.code, `${entry.id}: exclusions are not refusal claims`).toBeUndefined();
@@ -113,7 +115,7 @@ describe("URL compatibility profile", () => {
 
     expect(inventory.entries.some((entry) => entry.status === "unsupported")).toBe(true);
     expect(inventory.entries.some((entry) => entry.status === "out-of-scope")).toBe(true);
-    expect(inventory.entries.some((entry) => entry.code === "SC1090")).toBe(true);
+    expect(inventory.entries.some((entry) => entry.code === "SC0001")).toBe(true);
     expect(inventory.excludedInterfaces.length).toBeGreaterThan(0);
     for (const exclusion of inventory.excludedInterfaces) {
       expect(exclusion.name.length).toBeGreaterThan(0);
