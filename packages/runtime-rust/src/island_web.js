@@ -659,6 +659,7 @@
     async text() {
       return new TextDecoder().decode(await this.bytes());
     }
+    async json() { return JSON.parse(await this.text()); }
     async bytes() {
       if (this.bodyUsed) throw new TypeError("Body is unusable: Body has already been read");
       this.bodyUsed = true;

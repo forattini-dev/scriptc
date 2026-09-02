@@ -423,6 +423,21 @@ test.skipIf(sanitize)("Rust dynamic Request.bytes returns exact UTF-8 bytes", as
     .toBe(nodeRes.stdout.toString("utf8"));
 }, 120_000);
 
+test.skipIf(sanitize)("Rust dynamic Request.json parses a textual body", async () => {
+  const entry = join(fixturesRoot, "fetch-request-json/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry]),
+    runBinary(binary, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
 test.skipIf(sanitize)("Rust dynamic Request body rejects a second read", async () => {
   const entry = join(fixturesRoot, "fetch-request-second-read/main.ts");
   const binary = await build(entry, "rust", "dev");
