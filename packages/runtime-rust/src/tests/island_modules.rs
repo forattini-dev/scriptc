@@ -3,7 +3,7 @@
 static TEST_MODULES: [IslandModule; 5] = [
     IslandModule {
         key: "/pkg/timer.js",
-        source: b"export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}",
+        source: b"export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}\nexport function failLater(ms, message) {\n  return new Promise((_, reject) => setTimeout(() => reject(new TypeError(message)), ms));\n}\nexport function never() {\n  return new Promise(() => {});\n}",
         source_raw: 0,
         format: IslandModuleFormat::Esm,
         esm: None,
@@ -505,6 +505,80 @@ fn island_await_settles_a_promise_only_a_timer_can_resolve() {
         let pending = island_call(&delay, &[island_value_number(5.0), island_value_number(42.0)]);
         let settled = island_await(&pending);
         assert_eq!(island_to_string(&settled).as_ref(), "42");
+    });
+    island_eval_finish();
+}
+
+/* ── the lazy promise bridge ───────────────────────────────────────── */
+
+/// The bridge answers a promise that is still PENDING at the call site.
+///
+/// `island_await` above drives the loop until the realm settles, so a
+/// caller can never observe the parked state. Generated code takes the
+/// bridge instead, and this is why: `const p = pkg.later(); sync();` keeps
+/// JavaScript's own order, because the call site returns before the timer
+/// that settles `p` has run. Fulfillment then arrives through the loop.
+#[test]
+fn island_promise_bridge_answers_a_pending_native_promise() {
+    with_tables(|| {
+        let delay = island_import(&JsString::from("/pkg/timer.js"), &JsString::from("delay"));
+        let pending = island_call(&delay, &[island_value_number(5.0), island_value_number(42.0)]);
+        let bridged = island_promise_bridge(&pending, |value| value);
+        assert!(promise_poll(&bridged).is_none(), "bridge blocked at the call site");
+        assert!(run_event_loop_until(|| promise_poll(&bridged).is_some()));
+        let Some(Ok(value)) = promise_poll(&bridged) else {
+            panic!("timer-settled island promise did not fulfill");
+        };
+        assert_eq!(island_to_string(&value).as_ref(), "42");
+    });
+    island_eval_finish();
+}
+
+/// A realm rejection becomes a native REJECTION, never a throw at the
+/// bridge.
+///
+/// The blocking bridge raised the engine error where the promise was
+/// adopted, so a static `.catch()` downstream never saw it — the value the
+/// call site answered was the throw itself. Adoption instead converts the
+/// engine error exactly once, with the same `island_error_caught`
+/// conversion, and hands it to the native promise: the class and message
+/// survive for a typed catch, and NOTHING unwinds through this test body.
+#[test]
+fn island_promise_bridge_rejects_natively_with_the_engine_error() {
+    with_tables(|| {
+        let fail = island_import(&JsString::from("/pkg/timer.js"), &JsString::from("failLater"));
+        let rejecting = island_call(
+            &fail,
+            &[island_value_number(5.0), island_value_string(&string("boom"))],
+        );
+        let bridged = island_promise_bridge(&rejecting, |value| value);
+        assert!(promise_poll(&bridged).is_none());
+        assert!(run_event_loop_until(|| promise_poll(&bridged).is_some()));
+        let Some(Err(reason)) = promise_poll(&bridged) else {
+            panic!("rejected island promise did not reject the native promise");
+        };
+        assert!(caught_is_error_class(&reason, "TypeError"));
+        assert_eq!(caught_error_message(&reason).as_ref(), "boom");
+    });
+    island_eval_finish();
+}
+
+/// A promise nothing can settle stays PENDING and lets the loop exhaust.
+///
+/// The blocking bridge had no answer for this shape: with no timer left to
+/// pump it raised ERR_MODULE_PROMISE_PENDING, turning Node's
+/// await-forever-then-exit-0 into a runtime error. Lazily adopted, the
+/// native promise simply never settles, contributes no referenced work,
+/// and the loop ends on its own — which is what lets an abandoned fiber's
+/// process exit cleanly.
+#[test]
+fn island_promise_bridge_leaves_an_unsettleable_promise_pending() {
+    with_tables(|| {
+        let never = island_import(&JsString::from("/pkg/timer.js"), &JsString::from("never"));
+        let pending = island_call(&never, &[]);
+        let bridged = island_promise_bridge(&pending, |value| value);
+        assert!(!run_event_loop_until(|| promise_poll(&bridged).is_some()));
+        assert!(promise_poll(&bridged).is_none());
     });
     island_eval_finish();
 }

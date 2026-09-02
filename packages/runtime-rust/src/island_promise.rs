@@ -4,6 +4,13 @@
  * heap, not Boa's garbage collector, and must never be hidden in an
  * untraceable engine closure. */
 
+/// An engine handle carries no scriptc heap edge: Boa owns the value's
+/// storage and its own collector traces it, so the native promise that
+/// adopts one has nothing to report to `Tracer`. Declaring it lets the
+/// bridge answer a `JsPromise<IslandValue>` directly — the identity
+/// adoption a test observes, and the shape `Dyn::Island` wraps.
+impl HeapValue for IslandValue {}
+
 type IslandPromiseSettlement = Box<dyn FnOnce(Result<IslandValue, Caught>)>;
 
 thread_local! {
