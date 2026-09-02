@@ -443,6 +443,26 @@
       abortSignal(signal, reason);
       return signal;
     }
+    static any(signals) {
+      const signal = new AbortSignal(abortSignalToken);
+      const listeners = [];
+      const abortFrom = (source) => {
+        for (const [entry, listener] of listeners) {
+          entry.removeEventListener("abort", listener);
+        }
+        abortSignal(signal, source.reason);
+      };
+      for (const source of signals) {
+        if (source.aborted) {
+          abortFrom(source);
+          break;
+        }
+        const listener = () => abortFrom(source);
+        listeners.push([source, listener]);
+        source.addEventListener("abort", listener);
+      }
+      return signal;
+    }
     static timeout(ms) {
       const signal = new AbortSignal(abortSignalToken);
       const id = host.setTimer(() => {

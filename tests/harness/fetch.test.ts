@@ -290,6 +290,36 @@ test.skipIf(sanitize)("Rust dynamic AbortSignal.timeout aborts asynchronously", 
     .toBe(nodeRes.stdout.toString("utf8"));
 }, 120_000);
 
+test.skipIf(sanitize)("Rust dynamic AbortSignal.any adopts the first abort", async () => {
+  const entry = join(fixturesRoot, "fetch-abort-signal-any/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry]),
+    runBinary(binary, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
+test.skipIf(sanitize)("Rust dynamic AbortSignal.any respects pre-aborted iterable order", async () => {
+  const entry = join(fixturesRoot, "fetch-abort-signal-any-preaborted/main.ts");
+  const binary = await build(entry, "rust", "dev");
+  const [nodeRes, nativeRes] = await Promise.all([
+    runBinary(oracleExecutable, [entry]),
+    runBinary(binary, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
+  expect(nativeRes.stdout.toString("utf8"), nativeRes.stderr.toString("utf8"))
+    .toBe(nodeRes.stdout.toString("utf8"));
+}, 120_000);
+
 test.skipIf(sanitize)("Rust dynamic AbortController notifies abort listeners", async () => {
   const entry = join(fixturesRoot, "fetch-abort-listener/main.ts");
   const binary = await build(entry, "rust", "dev");
