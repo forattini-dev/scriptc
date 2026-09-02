@@ -24,6 +24,12 @@ import { InternalCompilerError } from "../errors.js";
  *       kind: "syntax" | "stdlib" | "node-builtin" | "diagnostic-fence",
  *       name: string,            // human-readable surface name
  *       status: "static" | "dynamic-only" | "unsupported",
+ *       backends: BackendId[] | "unknown",
+ *                                // WHICH backends lower this entry —
+ *                                // derived from the entry's libCall
+ *                                // spellings and the per-backend
+ *                                // recognition table, or "unknown" where
+ *                                // the entry has no libCall linkage
  *       code?: "SC____",         // REQUIRED on every non-static entry:
  *                                // the diagnostic code the compiler
  *                                // raises where the refusal applies
@@ -38,6 +44,11 @@ import { InternalCompilerError } from "../errors.js";
  * harness asserts refusals match entry codes. renderSurfaceManifest is
  * byte-deterministic: entries sort by id, keys are emitted in one fixed
  * order, and the output carries no timestamps or absolute paths. */
+import { BACKEND_IDS, BACKEND_LIB_CALLS, type BackendId } from "./backend-libcalls.js";
+/* Re-exported here so a consumer of the manifest reaches the backend
+ * column and the generated table it is derived from through one module. */
+export { BACKEND_IDS, BACKEND_LIB_CALLS, type BackendId } from "./backend-libcalls.js";
+import type { IrLibFn } from "../ir/nodes.js";
 import { FENCE_CODES, UNSUPPORTED } from "../diagnostics/diagnostic.js";
 import { FETCH_COMPAT_PROJECTION } from "../compat/fetch-profile.js";
 import { NODE_COMPAT_MATRIX } from "../compat/node-matrix.js";
@@ -56,6 +67,7 @@ import {
   ARRAY_METHODS,
   BUILTIN_MODULE_CONSTS,
   BUILTIN_MODULE_FENCE_HINTS,
+  BUILTIN_MODULE_FN_ALIASES,
   BUILTIN_MODULE_FNS,
   COMPOUND_ASSIGN_OPS,
   ISLAND_SURFACE,
@@ -74,11 +86,18 @@ export type SurfaceEntryKind = "syntax" | "stdlib" | "node-builtin" | "diagnosti
 
 export type SurfaceEntryStatus = "static" | "dynamic-only" | "unsupported";
 
+/** The backends that lower an entry, or "unknown" where the entry has no
+ * libCall linkage to derive from — never a hand-written claim, and never
+ * an empty list (an entry nothing lowers would be a tree inconsistency,
+ * caught in generateSurfaceManifest's invariants). */
+export type SurfaceEntryBackends = readonly BackendId[] | "unknown";
+
 export interface SurfaceManifestEntry {
   id: string;
   kind: SurfaceEntryKind;
   name: string;
   status: SurfaceEntryStatus;
+  backends: SurfaceEntryBackends;
   code?: string;
   note?: string;
 }
@@ -108,6 +127,9 @@ const COVERAGE_NOTES: string[] = [
   `The WHATWG URL projection targets ${compatTargetList(NODE24_URL_COMPAT_PROFILE.targets).map((target) => `Node ${target.node}`).join(" and ")}, whose reflections of these interfaces are identical. Its reflected census covers URL, URLSearchParams, and the search-params iterator: component READS, query operations, and the one writable component (the pathname setter) are projected as static rows with their differential corpus evidence, while the other nine component WRITES (setters), the members served only by the dynamic engine's own emulated URL class (origin, port, hash, username, password, toJSON), the URL statics, and the iterator-helper protocol are projected as their fenced rows.`,
   "Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.",
   "Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.",
+  `The 'backends' column names WHICH code-generating backends (${BACKEND_IDS.join(", ")}) lower an entry — the artifact for reading how far the Rust backend has come against the C backend it is meant to replace. It is derived, never written: an entry projected from a lowering table that carries libCall spellings (the node-builtin module members with their alternate spellings, the static Math and number surfaces, and the ambient Date/perf_hooks/process rows) takes the backends whose emitter sources name EVERY one of its spellings; an entry with no libCall linkage is 'unknown'.`,
+  "'unknown' in the 'backends' column means 'not derivable', never 'unsupported' and never 'supported everywhere'. It covers the entry classes that reach code generation through something other than a libCall: syntax entries, the string/array/map/set method surfaces (string methods lower to string INTRINSICS, a separate dispatch; array/map/set methods to container operations), the builtin-class compat profile rows (fetch, URL, events — censuses of runtime behavior, not lowering tables), the builtin-module constant reads (folded values, no call), the named module fence hints, and the diagnostic-fence entries (refusals, which every backend shares by construction because the frontend raises them before a backend is chosen).",
+  "A derived 'backends' column rounds DOWN: a surface whose lowering picks between several libCall spellings (fs.readFileSync's string, Buffer, fd, and checked-dynamic forms) lists a backend only when that backend names all of them, so a partially-lowered surface reads as absent rather than as covered. The column is also a claim about SPELLINGS only — the per-site arity and argument-shape fences each emitter raises are outside it.",
   "No scheduling metadata is published; entry ids are the stable diff keys across releases.",
 ];
 
@@ -147,10 +169,38 @@ function arityNote(min: number, max: number): string {
   return `the lowered call form takes ${min} to ${max} arguments`;
 }
 
+/** The `backends` column of an entry whose surface lowers through the
+ * named libCall spellings: the backends that lower EVERY one of them.
+ *
+ * "Every", not "any", because the spellings of one surface are the call
+ * FORMS the lowering picks between (readFileSync's string, Buffer, fd and
+ * checked-dynamic forms are five spellings of one member). A backend that
+ * lowers some of them covers the surface only in part, and the column has
+ * one bit per backend — so the honest bit is the conservative one, and
+ * the coverage notes say which way it rounds. */
+function backendsForLibCalls(fns: readonly IrLibFn[]): readonly BackendId[] {
+  return BACKEND_IDS.filter((backend) =>
+    fns.every((fn) => BACKEND_LIB_CALLS[fn]?.includes(backend) === true),
+  );
+}
+
 export function generateSurfaceManifest(compilerVersion: string): SurfaceManifest {
   const entries: SurfaceManifestEntry[] = [];
-  const add = (e: SurfaceManifestEntry): void => {
-    entries.push(e);
+  /* Every entry is rebuilt here in the manifest's one key order, so the
+   * serialization is byte-deterministic no matter how a call site spells
+   * its object literal. `fns` is the entry's libCall linkage: given, the
+   * backend column is derived from it; omitted, the entry has no libCall
+   * to derive from and the column is "unknown". */
+  const add = (e: Omit<SurfaceManifestEntry, "backends">, fns?: readonly IrLibFn[]): void => {
+    entries.push({
+      id: e.id,
+      kind: e.kind,
+      name: e.name,
+      status: e.status,
+      backends: fns === undefined ? "unknown" : backendsForLibCalls(fns),
+      ...(e.code !== undefined ? { code: e.code } : {}),
+      ...(e.note !== undefined ? { note: e.note } : {}),
+    });
   };
 
   // ── syntax: the unsupported-syntax dispatch tables ────────────────────
@@ -230,7 +280,7 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
           (island !== undefined
             ? "; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic)"
             : ""),
-      });
+      }, [stat.fn]);
     } else {
       add({ id: `stdlib.math.${name}`, kind: "stdlib", name: `Math.${name}`, status: "dynamic-only", code: "SC2012" });
     }
@@ -267,7 +317,7 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
         name: `number.prototype.${name}`,
         status: "static",
         note: arityNote(stat.minArgs, stat.maxArgs),
-      });
+      }, stat.fns);
     } else {
       add({
         id: `stdlib.number.${name}`,
@@ -308,13 +358,18 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     });
   }
   for (const [mod, members] of Object.entries(BUILTIN_MODULE_FNS)) {
-    for (const member of Object.keys(members!)) {
+    for (const [member, row] of Object.entries(members!)) {
+      // The member's surface is its table row PLUS the alternate spellings
+      // the dispatch special-cases around it (the Buffer/fd/options forms):
+      // the same set the fence detector and the determinism attestation
+      // witness a member's reach through.
+      const aliases = BUILTIN_MODULE_FN_ALIASES[mod]?.[member] ?? [];
       add({
         id: `${moduleId(mod)}.${member}`,
         kind: "node-builtin",
         name: `${mod}.${member}`,
         status: "static",
-      });
+      }, [row!.fn, ...aliases]);
     }
   }
   for (const [mod, members] of Object.entries(BUILTIN_MODULE_CONSTS)) {
@@ -407,7 +462,7 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
       name: row.name,
       status: "static",
       ...(row.note !== undefined ? { note: row.note } : {}),
-    });
+    }, row.fns);
   }
 
   // ── diagnostic-fence: the enumerable refusal codes ─────────────────────
@@ -442,6 +497,19 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
     }
     if (e.code !== undefined && !/^SC\d{4}$/.test(e.code)) {
       throw new InternalCompilerError(`manifest entry ${e.id} has a malformed code: ${e.code}`);
+    }
+    // An empty derived column would say "no backend lowers this" — for a
+    // surface projected from a libCall spelling that is a tree
+    // inconsistency, not a publishable row. "unknown" is the only way an
+    // entry may decline to answer.
+    if (e.backends !== "unknown") {
+      if (e.backends.length === 0) {
+        throw new InternalCompilerError(`manifest entry ${e.id} derives an empty backend column`);
+      }
+      const order = e.backends.map((backend) => BACKEND_IDS.indexOf(backend));
+      if (order.some((index, at) => index < 0 || (at > 0 && index <= order[at - 1]!))) {
+        throw new InternalCompilerError(`manifest entry ${e.id} has a disordered backend column`);
+      }
     }
   }
   entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

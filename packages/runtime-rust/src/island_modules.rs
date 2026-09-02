@@ -20,12 +20,26 @@ pub enum IslandModuleFormat {
     Json,
 }
 
+/// One embedded module.
+///
+/// `source` and `esm` are STORED bytes, not text: a module text at least
+/// `NPM_COMPRESS_MIN` (1024) characters long is embedded as a raw DEFLATE
+/// stream when that shrinks it, exactly as the C lane embeds it, because a
+/// real npm graph is tens of megabytes of JavaScript and is the dominant
+/// term in a `--dynamic` binary's size. The companion `_raw` field is the
+/// INFLATED byte length, or 0 for "these bytes are the text".
+///
+/// Nothing reads the fields directly: `island_module_source` and
+/// `island_module_esm` inflate on first use and cache the result, so a
+/// module a run never loads costs its compressed pages and nothing more.
 #[derive(Clone, Copy)]
 pub struct IslandModule {
     pub key: &'static str,
-    pub source: &'static str,
+    pub source: &'static [u8],
+    pub source_raw: usize,
     pub format: IslandModuleFormat,
-    pub esm: Option<&'static str>,
+    pub esm: Option<&'static [u8]>,
+    pub esm_raw: usize,
 }
 
 /// Which call form an edge was resolved for.
@@ -51,6 +65,62 @@ pub struct IslandEdge {
 thread_local! {
     static ISLAND_MODULES: RefCell<&'static [IslandModule]> = const { RefCell::new(&[]) };
     static ISLAND_EDGES: RefCell<&'static [IslandEdge]> = const { RefCell::new(&[]) };
+    /// Inflated module texts, keyed by the stored slice's address. The
+    /// tables are `&'static`, so a slice's address identifies its row for
+    /// the process's life and `source`/`esm` of the same module never
+    /// collide.
+    static ISLAND_MODULE_TEXT: RefCell<HashMap<usize, &'static str>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Inflate one stored module text, or hand back the bytes as text when
+/// the row was stored plain (`raw == 0`).
+///
+/// The inflated result is LEAKED and cached: an embedded module that has
+/// been loaded stays loaded for the process's life, so a `&'static str`
+/// is the honest lifetime and keeps every reader's signature unchanged
+/// from when the tables held plain text.
+///
+/// Failure here is not a runtime condition — the bytes were written by
+/// this compiler in the same build — so a corrupt row panics rather than
+/// surfacing as a JavaScript error the program could catch.
+fn island_module_text(stored: &'static [u8], raw: usize) -> &'static str {
+    if raw == 0 {
+        return std::str::from_utf8(stored)
+            .expect("scriptc: embedded module text is not valid UTF-8");
+    }
+    let slot = stored.as_ptr() as usize;
+    if let Some(text) = ISLAND_MODULE_TEXT.with(|cache| cache.borrow().get(&slot).copied()) {
+        return text;
+    }
+    // The row carries the exact inflated length, so one pass into an
+    // exactly-sized buffer finishes the stream — no grow-and-retry loop.
+    let mut inflated = Vec::with_capacity(raw);
+    let status = flate2::Decompress::new(false)
+        .decompress_vec(stored, &mut inflated, flate2::FlushDecompress::Finish)
+        .expect("scriptc: embedded module inflate failed");
+    assert!(
+        status == flate2::Status::StreamEnd && inflated.len() == raw,
+        "scriptc: embedded module inflated to {} bytes, expected {raw}",
+        inflated.len(),
+    );
+    let text: &'static str = String::from_utf8(inflated)
+        .expect("scriptc: embedded module text is not valid UTF-8")
+        .leak();
+    ISLAND_MODULE_TEXT.with(|cache| cache.borrow_mut().insert(slot, text));
+    text
+}
+
+/// The module's own source text, inflating on first use.
+pub(crate) fn island_module_source(module: &IslandModule) -> &'static str {
+    island_module_text(module.source, module.source_raw)
+}
+
+/// The module's build-time ESM facade, inflating on first use.
+pub(crate) fn island_module_esm(module: &IslandModule) -> Option<&'static str> {
+    module
+        .esm
+        .map(|stored| island_module_text(stored, module.esm_raw))
 }
 
 /// Install the embedded module table. Emitted `main` calls this before
@@ -283,9 +353,8 @@ pub(crate) fn island_builtin_wrapper(key: &str) -> String {
 /// default-only wrapper.
 pub(crate) fn island_module_esm_source(module: &IslandModule) -> String {
     match module.format {
-        IslandModuleFormat::Esm => module.source.to_owned(),
-        IslandModuleFormat::Cjs | IslandModuleFormat::Json => module
-            .esm
+        IslandModuleFormat::Esm => island_module_source(module).to_owned(),
+        IslandModuleFormat::Cjs | IslandModuleFormat::Json => island_module_esm(module)
             .map_or_else(|| island_builtin_wrapper(module.key), str::to_owned),
     }
 }
@@ -338,7 +407,7 @@ fn island_host_source(
     };
     let entry = BoaJsArray::from_iter(
         [
-            JsValue::from(boa_engine::JsString::from(module.source)),
+            JsValue::from(boa_engine::JsString::from(island_module_source(module))),
             JsValue::from(format),
         ],
         context,

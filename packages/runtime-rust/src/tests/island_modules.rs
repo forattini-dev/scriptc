@@ -3,33 +3,43 @@
 static TEST_MODULES: [IslandModule; 5] = [
     IslandModule {
         key: "/pkg/timer.js",
-        source: "export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}",
+        source: b"export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}",
+        source_raw: 0,
         format: IslandModuleFormat::Esm,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/index.js",
-        source: "module.exports = require('./inner.js');",
+        source: b"module.exports = require('./inner.js');",
+        source_raw: 0,
         format: IslandModuleFormat::Cjs,
-        esm: Some("const m=globalThis.__scr_require(\"/pkg/index.js\");export default m;"),
+        esm: Some(b"const m=globalThis.__scr_require(\"/pkg/index.js\");export default m;"),
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/inner.js",
-        source: "module.exports = 7;",
+        source: b"module.exports = 7;",
+        source_raw: 0,
         format: IslandModuleFormat::Cjs,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/meta.json",
-        source: "{\"label\":\"v9\"}",
+        source: b"{\"label\":\"v9\"}",
+        source_raw: 0,
         format: IslandModuleFormat::Json,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/import-meta.mjs",
-        source: "export const url = import.meta.url;",
+        source: b"export const url = import.meta.url;",
+        source_raw: 0,
         format: IslandModuleFormat::Esm,
         esm: None,
+        esm_raw: 0,
     },
 ];
 
@@ -134,30 +144,38 @@ fn island_import_falls_back_to_a_require_edge_but_require_never_does() {
 static REQUIRE_MODULES: [IslandModule; 4] = [
     IslandModule {
         key: "/pkg/broken.js",
-        source: "module.exports = require('nope');",
+        source: b"module.exports = require('nope');",
+        source_raw: 0,
         format: IslandModuleFormat::Cjs,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/index.js",
-        source: "const inner = require('./inner.js');\n\
+        source: b"const inner = require('./inner.js');\n\
                  const meta = require('./meta.json');\n\
                  module.exports.describe = (a, b) => \
                  meta.label + ':' + inner.add(a, b) + ':' + __dirname;",
+        source_raw: 0,
         format: IslandModuleFormat::Cjs,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/inner.js",
-        source: "exports.add = (a, b) => a + b;",
+        source: b"exports.add = (a, b) => a + b;",
+        source_raw: 0,
         format: IslandModuleFormat::Cjs,
         esm: None,
+        esm_raw: 0,
     },
     IslandModule {
         key: "/pkg/meta.json",
-        source: "{\"label\":\"pkg\"}",
+        source: b"{\"label\":\"pkg\"}",
+        source_raw: 0,
         format: IslandModuleFormat::Json,
         esm: None,
+        esm_raw: 0,
     },
 ];
 
@@ -388,6 +406,52 @@ fn island_json_results_deep_copy_into_the_realm() {
     island_eval_finish();
 }
 
+/* ── boa 0.22.0 defects, pinned as the behavior we WANT ────────────────
+ *
+ * Both tests below assert V8's answer, which is what Node produces and
+ * what a program compiled against the island has every right to expect.
+ * They fail today against boa 0.22.0 and are ignored rather than deleted
+ * so they turn green by themselves once the engine is fixed. The
+ * divergence is written up for upstream in
+ * docs/upstream/boa-to-json-drops-typed-array-elements.md.
+ *
+ * Run them with `--ignored` today and the process ABORTS rather than
+ * printing an assertion diff. That is not these tests misbehaving: any
+ * panic unwinding out of a live island corrupts the heap, which is a
+ * separate scriptc-side defect isolated in
+ * docs/upstream/boa-suspected-aborts-are-not-upstream.md. Once the engine
+ * is fixed these assertions hold, nothing panics, and the abort is moot. */
+
+#[test]
+#[ignore = "boa 0.22.0 serializes every typed array as {} — JsValue::to_json \
+            drops the elements; see docs/upstream/\
+            boa-to-json-drops-typed-array-elements.md"]
+fn island_json_serializes_typed_array_elements() {
+    // A typed array's indices are own enumerable properties, so
+    // JSON.stringify walks them: Node answers {"0":1,"1":2,"2":3}. boa
+    // answers {} — silently, with Ok(Some(..)), which is what makes the
+    // loss surface far from its cause.
+    island_eval(&string("globalThis.probe = new Uint8Array([1,2,3]); 0"));
+    let value = island_global_get("probe");
+    assert_eq!(island_json(&value).as_ref(), "{\"0\":1,\"1\":2,\"2\":3}");
+    island_eval_finish();
+}
+
+#[test]
+#[ignore = "boa 0.22.0 does not invoke toJSON from JsValue::to_json (no \
+            JavaScript runs during serialization); see docs/upstream/\
+            boa-to-json-drops-typed-array-elements.md"]
+fn island_json_honors_a_to_json_method() {
+    // Node answers "\"TJ\"". boa serializes the method as an ordinary
+    // property instead of calling it.
+    island_eval(&string(
+        "globalThis.probe = { a: 1 }; globalThis.probe.toJSON = () => 'TJ'; 0",
+    ));
+    let value = island_global_get("probe");
+    assert_eq!(island_json(&value).as_ref(), "\"TJ\"");
+    island_eval_finish();
+}
+
 #[test]
 fn island_host_arguments_exit_strictly_by_kind() {
     let echo = island_value_host_function(
@@ -524,4 +588,79 @@ fn island_scriptc_throw_leaves_the_realm_intact() {
     let rendered = island_eval(&string("globalThis.marker"));
     assert_eq!(rendered.as_ref(), "kept");
     island_eval_finish();
+}
+
+/* ── DEFLATE-stored module texts ───────────────────────────────────────
+ *
+ * A `--dynamic` build embeds every reached npm source, so the module
+ * table is the dominant term in the binary's size. Texts at or above the
+ * compiler's NPM_COMPRESS_MIN are embedded as raw DEFLATE — the same rule
+ * and the same stream format the C lane uses — with the row carrying the
+ * inflated length; the runtime inflates on first use and caches. */
+
+#[test]
+fn a_deflated_module_text_inflates_on_first_use_and_is_cached() {
+    let text = "export const parts = [\n".to_owned()
+        + &"  \"an embedded module payload line\",\n".repeat(64)
+        + "];\n";
+    assert!(text.len() >= 1024, "the fixture must clear NPM_COMPRESS_MIN");
+    let stored: &'static [u8] = Vec::leak(zlib_compress_bytes(text.as_bytes(), false));
+    assert!(
+        stored.len() < text.len(),
+        "the fixture must actually compress: {} >= {}",
+        stored.len(),
+        text.len(),
+    );
+    let module = IslandModule {
+        key: "/pkg/deflated.mjs",
+        source: stored,
+        source_raw: text.len(),
+        format: IslandModuleFormat::Esm,
+        esm: None,
+        esm_raw: 0,
+    };
+
+    let first = island_module_source(&module);
+    assert_eq!(first, text);
+    // The second read is served from the cache rather than inflated
+    // again — the same allocation, which is what keeps a require loop
+    // over one hot module cheap.
+    let second = island_module_source(&module);
+    assert_eq!(second.as_ptr(), first.as_ptr());
+}
+
+#[test]
+fn a_deflated_esm_facade_inflates_independently_of_the_source() {
+    let source = "module.exports = { tag: \"cjs\" };\n".repeat(64);
+    let facade =
+        "const m = globalThis.__scr_require(\"/pkg/dual.js\");\nexport default m;\n".repeat(32);
+    let module = IslandModule {
+        key: "/pkg/dual.js",
+        source: Vec::leak(zlib_compress_bytes(source.as_bytes(), false)),
+        source_raw: source.len(),
+        format: IslandModuleFormat::Cjs,
+        esm: Some(Vec::leak(zlib_compress_bytes(facade.as_bytes(), false))),
+        esm_raw: facade.len(),
+    };
+    assert_eq!(island_module_source(&module), source);
+    assert_eq!(island_module_esm(&module), Some(facade.as_str()));
+    // A CJS module enters the ES graph through its facade, never through
+    // its source — so the two stored texts must not be confusable.
+    assert_eq!(island_module_esm_source(&module), facade);
+}
+
+#[test]
+fn a_plain_stored_module_text_is_read_without_inflating() {
+    // Below NPM_COMPRESS_MIN the compiler stores the bytes verbatim and
+    // marks the row with raw = 0; the reader must take them as the text.
+    let module = IslandModule {
+        key: "/pkg/small.mjs",
+        source: b"export const value = 1;\n",
+        source_raw: 0,
+        format: IslandModuleFormat::Esm,
+        esm: None,
+        esm_raw: 0,
+    };
+    assert_eq!(island_module_source(&module), "export const value = 1;\n");
+    assert_eq!(island_module_esm(&module), None);
 }
