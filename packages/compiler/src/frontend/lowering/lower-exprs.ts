@@ -7083,6 +7083,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // `slice(-1)[0]`); an empty result is ordinary undefined, not a bounds
     // failure. Downstream lowering keeps the explicit optional union, so an
     // unchecked consumer still cannot place it into a plain element slot.
+    if (arr.type.kind === "array" && isRuntimeOptionalArrayBinding(L, expr)) {
+      const safe = lowerSafeIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr));
+      if (safe) return safe;
+    }
     if (arr.type.kind === "array" && isFreshArrayProbe(expr.expression)) {
       const safe = lowerSafeIndexRead(L, arr as IrExpr & { type: { kind: "array" } }, index, locOf(expr));
       if (safe) return safe;
@@ -7117,6 +7121,37 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         current.expression.name.text === "slice" ||
         current.expression.name.text === "sort")
     );
+  }
+
+  /** An inferred block-local `const/let value = array[index]` can retain
+   * JavaScript's hidden out-of-bounds undefined arm. lowerVarDecl adopts
+   * the safe read's union and tracks it until a guard proves the element
+   * present. Explicit annotations, globals, and hoisted vars keep their
+   * declared storage contract. */
+  function isRuntimeOptionalArrayBinding(L: Lowerer, node: ts.Expression): boolean {
+    let current = node;
+    while (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertion(current.parent) ||
+      ts.isNonNullExpression(current.parent)
+    ) {
+      current = current.parent;
+    }
+    const declaration = current.parent;
+    if (
+      !ts.isVariableDeclaration(declaration) ||
+      declaration.initializer !== current ||
+      declaration.type !== undefined ||
+      !ts.isIdentifier(declaration.name) ||
+      !ts.isVariableDeclarationList(declaration.parent)
+    ) {
+      return false;
+    }
+    const list = declaration.parent;
+    if ((list.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) === 0) return false;
+    const symbol = L.checker.getSymbolAtLocation(declaration.name);
+    return symbol !== undefined && !L.globalsBySymbol.has(symbol);
   }
 
 /** `o[k]` where the RECEIVER is an island value — a jsval-mapped checker

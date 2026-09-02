@@ -3620,14 +3620,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (stmt.elseStatement) return null;
     let condition = stmt.expression;
     while (ts.isParenthesizedExpression(condition)) condition = condition.expression;
-    let guarded: ts.Identifier | null = null;
-    if (ts.isPrefixUnaryExpression(condition) && condition.operator === ts.SyntaxKind.ExclamationToken) {
-      let operand = condition.operand;
-      while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
-      if (ts.isIdentifier(operand)) guarded = operand;
-    } else {
-      guarded = strictUndefinedEqualityIdentifier(L, condition);
-    }
+    const guarded = exitingAbsenceGuardIdentifier(L, condition);
     if (guarded === null) return null;
     const local = L.resolveLocal(guarded);
     if (!local || !L.runtimeOptionalLocals.has(L.runtimeOptionalRootOf(local))) return null;
@@ -3638,6 +3631,22 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       (ts.isBlock(stmt.thenStatement) && stmt.thenStatement.statements.length > 0 &&
         exitsImmediately(stmt.thenStatement.statements[stmt.thenStatement.statements.length - 1]!));
     return exits ? local : null;
+  }
+
+  function exitingAbsenceGuardIdentifier(L: Lowerer, node: ts.Expression): ts.Identifier | null {
+    let expr = node;
+    while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
+    if (ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken) {
+      let operand = expr.operand;
+      while (ts.isParenthesizedExpression(operand)) operand = operand.expression;
+      return ts.isIdentifier(operand) ? operand : null;
+    }
+    const strict = strictUndefinedEqualityIdentifier(L, expr);
+    if (strict !== null) return strict;
+    if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+      return exitingAbsenceGuardIdentifier(L, expr.left) ?? exitingAbsenceGuardIdentifier(L, expr.right);
+    }
+    return null;
   }
 
   function strictUndefinedEqualityIdentifier(L: Lowerer, node: ts.Expression): ts.Identifier | null {
