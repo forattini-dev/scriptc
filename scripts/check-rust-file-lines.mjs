@@ -13,7 +13,7 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/backend/cc.test.ts", 4_104],
   ["packages/compiler/src/backend/cc.ts", 6_087],
   ["packages/compiler/src/backend/emission/emit-async.ts", 1_279],
-  ["packages/compiler/src/backend/emission/emit-exprs.ts", 7_964],
+  ["packages/compiler/src/backend/emission/emit-exprs.ts", 7_963],
   ["packages/compiler/src/backend/emission/emit-walkers.ts", 2_062],
   ["packages/compiler/src/backend/emission/emitter.ts", 2_134],
   ["packages/compiler/src/backend/llvm/dyn.ts", 3_105],

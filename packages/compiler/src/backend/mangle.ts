@@ -212,6 +212,11 @@ export function mangleDnsLookupThunk(n: number): string {
 export function mangleFsRenameThunk(n: number): string {
   return `sc_fsren_${n}`;
 }
+/** Emitted readline async-iterator adapter (the `string | undefined`
+ * union's tags are program data), interned per result-union typeKey. */
+export function mangleReadlineNextThunk(n: number): string {
+  return `sc_rlnext_${n}`;
+}
 /** Emitted SNI answer-closure thunk (the `(err, ctx?) => void` callback a
  * TLS server's SNICallback receives — its unions' tags are program data),
  * interned per cb func-type key. */

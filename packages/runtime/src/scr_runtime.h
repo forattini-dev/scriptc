@@ -4109,9 +4109,18 @@ bool scr_stdin_ended(void);
  * "readline was closed" on a closed interface (may-throw); close fires
  * the 'close' listeners SYNCHRONOUSLY (Node's inline emit) and detaches
  * the stdin consumer; onClose registers a zero-arg listener (moves).
- * Answer adapters: thunk0 ignores the line, thunk_str passes it. */
+ * Answer adapters: thunk0 ignores the line, thunk_str passes it.
+ *
+ * nextLine is `for await (const line of rl)`: the same adapter shape,
+ * except the line is NULL for JS's undefined — the iterator's done — and
+ * a closed interface ANSWERS undefined instead of throwing, at that call
+ * and at every later one, which is what ends the loop. The emitter's
+ * adapter owns the +1 line and fulfills the `string | undefined` promise
+ * it captured. Never throws. */
 double scr_rl_create(void);
 void scr_rl_question(double id, const ScrStr *query, ScrClosure *cb /*moves*/,
+                      void (*fn)(ScrClosure *, ScrStr *));
+void scr_rl_next_line(double id, ScrClosure *cb /*moves*/,
                       void (*fn)(ScrClosure *, ScrStr *));
 void scr_rl_close(double id);
 void scr_rl_on_close(double id, ScrClosure *cb /*moves*/);

@@ -10,6 +10,7 @@ import { OVERFLOW_MEMBER } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { collectFfiRetainedOps, parseFfiCallbackKey } from "../ffi-callbacks.js";
 import { genResultThunkFor } from "./emit-async.js";
+import { emitReadlineNextLine } from "./emit-readline.js";
 import { isStableBytesOperand, newValueMayThrow, streamTypedRefEligible, undefinedArmTag } from "../../ir/analysis.js";
 
 function streamTypedRefCommitAdapter(
@@ -7013,11 +7014,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return { name: "", type: e.type };
           }
           case "rl.nextLine":
-            // The native async-iterator slice currently belongs to the Rust
-            // runtime. Keep the C switch exhaustive while refusing an
-            // accidental C emission loudly instead of generating a wrong
-            // promise representation.
-            throw new InternalCompilerError("C emitter does not implement rl.nextLine yet");
+            // `for await (const line of rl)` — emit-readline.ts, which
+            // owns the interned `string | undefined` answer adapter.
+            return emitReadlineNextLine(E, e, arg(0));
           // The StringDecoder trio (scr_bytes.c): pure functions over the
           // canonical encoding name + packed-f64 pending state; never
           // throw.
