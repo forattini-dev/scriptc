@@ -186,7 +186,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "dyn.cloneTransferFail": ["c", "llvm", "rust"],
   "dyn.defineProps": ["c", "llvm", "rust"],
   "dyn.errInstanceof": ["c", "llvm", "rust"],
-  "dyn.hasKey": ["c", "llvm"],
+  "dyn.hasKey": ["c", "llvm", "rust"],
   "dyn.hasOwn": ["c", "llvm", "rust"],
   "dyn.iterPack": ["c", "llvm", "rust"],
   "dyn.keySet": ["c", "llvm", "rust"],

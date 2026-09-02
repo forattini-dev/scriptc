@@ -159,6 +159,12 @@ export function emitRustDynamicLibCall(
     const key = context.nextTemporary();
     return `{ let ${value} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; sc_dyn_has_own(&${value}, &${key}) }`;
   }
+  if (expr.fn === "dyn.hasKey" && expr.args.length === 2 &&
+    arg?.type.kind === "dyn" && secondArg?.type.kind === "string" && expr.type.kind === "bool") {
+    const value = context.nextTemporary();
+    const key = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${key} = ${context.emitExpr(secondArg)}; sc_dyn_has_key(&${value}, &${key}) }`;
+  }
   if (expr.fn === "dyn.errInstanceof" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "string") {
     const value = context.nextTemporary();
