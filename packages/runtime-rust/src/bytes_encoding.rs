@@ -297,6 +297,19 @@ fn checked_buffer_encoding(encoding: &JsString) -> &'static str {
     })
 }
 
+pub fn fs_read_file_encoded(path: &JsString, encoding: &JsString) -> JsString {
+    let encoding = normalize_buffer_encoding(encoding).unwrap_or_else(|| {
+        throw_type_error_code(
+            format!(
+                "The argument 'encoding' is invalid encoding. Received '{encoding}'"
+            ),
+            "ERR_INVALID_ARG_VALUE",
+        )
+    });
+    let bytes = fs_read_file_bytes(path);
+    bytes_to_string(&bytes, &string(encoding))
+}
+
 pub fn bytes_to_string(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
     bytes_to_string_range(bytes, encoding, 0.0, f64::INFINITY)
 }

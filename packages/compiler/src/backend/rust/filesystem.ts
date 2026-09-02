@@ -6,6 +6,8 @@ export function emitRustFilesystemCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  const read = emitRustFsReadCall(expr, context);
+  if (read !== null) return read;
   const write = emitRustFsWriteCall(expr, context);
   if (write !== null) return write;
   const watch = emitRustFsWatchCall(expr, context);
@@ -39,6 +41,22 @@ export function emitRustFilesystemCall(
     `${mangleField("parentPath")}: ${path}.clone()`,
   ].join(", ");
   return `{ let ${path} = ${context.emitExpr(pathExpr)}; let ${output}: ${context.rustType(expr.type, expr.loc)} = runtime::array_new(Vec::new()); for ${entry} in runtime::fs_readdir_types(&${path}) { let sc_row = runtime::Gc::new(${mangleRecordStruct(rowType.shapeId)} { ${fields} }); runtime::array_push(&${output}, sc_row); } ${output} }`;
+}
+
+function emitRustFsReadCall(
+  expr: RustLibCallExpr,
+  context: RustLibCallContext,
+): string | null {
+  const [pathExpr, encodingExpr] = expr.args;
+  if (expr.fn !== "fs.readFileSyncDyn" || expr.args.length !== 2 ||
+      pathExpr?.type.kind !== "string" || encodingExpr?.type.kind !== "dyn" ||
+      expr.type.kind !== "dyn") {
+    return null;
+  }
+  const path = context.nextTemporary();
+  const encoding = context.nextTemporary();
+  const dyn = context.dynTypeName();
+  return `{ let ${path} = ${context.emitExpr(pathExpr)}; let ${encoding} = ${context.emitExpr(encodingExpr)}; let ${encoding} = if matches!(&${encoding}, ${dyn}::Object(..)) { sc_dyn_key_get(&${encoding}, &runtime::string("encoding"), false) } else { ${encoding} }; match &${encoding} { ${dyn}::Undefined | ${dyn}::Null => ${dyn}::Buffer(runtime::fs_read_file_bytes(&${path})), ${dyn}::String(sc_encoding) => ${dyn}::String(runtime::fs_read_file_encoded(&${path}, sc_encoding)), sc_value => sc_dyn_arg_type_fail("options", "of type string or an instance of Object", sc_value), } }`;
 }
 
 function emitRustFsWriteCall(

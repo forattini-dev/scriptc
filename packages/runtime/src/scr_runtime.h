@@ -5251,8 +5251,8 @@ double scr_bytes_write_var(ScrBytes *b, double value, double offset, double byte
  * Failures THROW catchably (scr_fs_throw, Node-shaped messages). */
 ScrBytes *scr_fs_read_file_bytes(ScrStr *path); /* +1 */
 /* readFileSync's runtime-encoding form (scr_bytes_io.c's note): +1 dyn
- * value — a Buffer box for undefined/null, a string for utf8 — or NULL
- * with the exception pending. */
+ * value — a Buffer box for undefined/null, a string for a known encoding —
+ * or NULL with the exception pending. */
 ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc);
 ScrBytes *scr_fs_read_fd_bytes(double fd);      /* +1; the fd form (scr_lib.c) */
 void scr_fs_write_file_bytes(ScrStr *path, const ScrBytes *data);

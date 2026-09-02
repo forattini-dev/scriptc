@@ -20,6 +20,17 @@ static void scr_bytes_io_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
+static bool scr_fs_encoding_eq_ci(const ScrStr *raw, const char *name) {
+  size_t n = strlen(name);
+  if (raw->len != n) return false;
+  for (size_t i = 0; i < n; i++) {
+    char c = raw->data[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
+    if (c != name[i]) return false;
+  }
+  return true;
+}
+
 /* ── fs (the Buffer forms of scr_lib.c's utf8 pair) ────────────────────── */
 
 ScrBytes *scr_fs_read_file_bytes(ScrStr *path) {
@@ -58,9 +69,9 @@ ScrBytes *scr_fs_read_file_bytes(ScrStr *path) {
 
 /* readFileSync's runtime-encoding form (a JS helper's untyped `enc`
  * parameter — test/common fixtures.js): undefined/null answer a Buffer,
- * utf8 answers a string, Node's other real encodings meet the loud
- * not-supported ladder, unknown names throw ERR_UNKNOWN_ENCODING, and an
- * options object dispatches on its `encoding` member (Node's form). +1
+ * known encodings and aliases answer a string; unknown names throw
+ * ERR_INVALID_ARG_VALUE, and an options object dispatches on its `encoding`
+ * member (Node's form). +1
  * dyn value, or NULL with the exception pending. */
 ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc) {
   if (enc->kind == SCR_DYN_OBJ) {
@@ -76,30 +87,31 @@ ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc) {
   }
   if (enc->kind == SCR_DYN_STR) {
     const ScrStr *e = enc->v.str;
-    if ((e->len == 4 && memcmp(e->data, "utf8", 4) == 0) ||
-        (e->len == 5 && memcmp(e->data, "utf-8", 5) == 0)) {
-      ScrStr *text = scr_fs_read_file(path);
-      if (!text) return NULL;
-      ScrDyn *d = scr_dyn_new_str(text);
-      scr_str_release(text);
-      return d;
-    }
-    static const char *const known[] = { "ascii", "latin1", "binary", "base64",
-      "base64url", "hex", "ucs2", "ucs-2", "utf16le", "utf-16le", NULL };
-    for (size_t i = 0; known[i]; i++) {
-      if (e->len == strlen(known[i]) && memcmp(e->data, known[i], e->len) == 0) {
-        char msg[128];
-        int n = snprintf(msg, sizeof msg,
-                         "readFileSync with encoding '%s' is not supported yet (only 'utf8' and Buffer reads here)",
-                         known[i]);
-        scr_throw_error_msg(SCR_ERR_ERROR, msg, (size_t)n);
-        return NULL;
+    static const struct { const char *from; const char *to; } encodings[] = {
+      {"utf8", "utf8"}, {"utf-8", "utf8"}, {"hex", "hex"},
+      {"base64", "base64"}, {"base64url", "base64url"},
+      {"latin1", "latin1"}, {"binary", "latin1"}, {"ascii", "ascii"},
+      {"utf16le", "utf16le"}, {"utf-16le", "utf16le"},
+      {"ucs2", "utf16le"}, {"ucs-2", "utf16le"},
+    };
+    for (size_t i = 0; i < sizeof encodings / sizeof encodings[0]; i++) {
+      if (scr_fs_encoding_eq_ci(e, encodings[i].from)) {
+        ScrBytes *bytes = scr_fs_read_file_bytes(path);
+        if (!bytes) return NULL;
+        ScrStr *canonical = scr_str_new(encodings[i].to, strlen(encodings[i].to));
+        ScrStr *text = scr_bytes_to_str(bytes, canonical);
+        scr_str_release(canonical);
+        scr_bytes_release(bytes);
+        ScrDyn *d = scr_dyn_new_str(text);
+        scr_str_release(text);
+        return d;
       }
     }
     char msg[128];
-    int n = snprintf(msg, sizeof msg, "Unknown encoding: %.*s",
+    int n = snprintf(msg, sizeof msg,
+                     "The argument 'encoding' is invalid encoding. Received '%.*s'",
                      (int)(e->len < 64 ? e->len : 64), e->data);
-    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_UNKNOWN_ENCODING");
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_ARG_VALUE");
     return NULL;
   }
   {

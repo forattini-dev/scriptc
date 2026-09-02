@@ -288,7 +288,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fs.readFileSync": ["c", "llvm", "rust"],
   "fs.readFileSyncBuf": ["c", "llvm", "rust"],
   "fs.readFileSyncBytes": ["c", "llvm", "rust"],
-  "fs.readFileSyncDyn": ["c", "llvm"],
+  "fs.readFileSyncDyn": ["c", "llvm", "rust"],
   "fs.readSync": ["c", "llvm", "rust"],
   "fs.readdirSync": ["c", "llvm", "rust"],
   "fs.readdirTypesSync": ["c", "llvm", "rust"],
