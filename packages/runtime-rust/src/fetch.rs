@@ -83,7 +83,12 @@ pub fn fetch_start(
 }
 
 pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> {
-    http_request_mark_fetch_body_used(response);
+    if !http_request_claim_fetch_body(response) {
+        return promise_rejected(caught_value(error_new(
+            "TypeError",
+            string("Body is unusable: Body has already been read"),
+        )));
+    }
     let result = promise_new();
     if response.with(|response| response.ended) {
         let _ = promise_fulfill(&result, bytes_from_elements(Vec::new()));

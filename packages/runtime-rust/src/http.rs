@@ -369,8 +369,15 @@ pub fn http_request_fetch_body_used(request: &JsHttpRequest) -> bool {
     request.with(|request| request.fetch_body_used)
 }
 
-pub fn http_request_mark_fetch_body_used(request: &JsHttpRequest) {
-    request.with_mut(|request| request.fetch_body_used = true);
+pub fn http_request_claim_fetch_body(request: &JsHttpRequest) -> bool {
+    request.with_mut(|request| {
+        if request.fetch_body_used {
+            false
+        } else {
+            request.fetch_body_used = true;
+            true
+        }
+    })
 }
 
 pub fn http_request_on_data(
