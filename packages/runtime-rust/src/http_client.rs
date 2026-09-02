@@ -192,6 +192,7 @@ fn http_client_feed(
             let socket = request.with(|request| request.socket.clone());
             let response = Gc::new(HttpRequestData {
                 fetch_response: false,
+                fetch_body_used: false,
                 socket,
                 method: empty_string(),
                 url: empty_string(),

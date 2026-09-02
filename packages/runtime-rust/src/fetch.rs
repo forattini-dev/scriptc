@@ -5,6 +5,7 @@
 pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
     Gc::new(HttpRequestData {
         fetch_response: true,
+        fetch_body_used: false,
         socket: None,
         method: empty_string(),
         url: empty_string(),
@@ -82,6 +83,7 @@ pub fn fetch_start(
 }
 
 pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> {
+    http_request_mark_fetch_body_used(response);
     let result = promise_new();
     if response.with(|response| response.ended) {
         let _ = promise_fulfill(&result, bytes_from_elements(Vec::new()));

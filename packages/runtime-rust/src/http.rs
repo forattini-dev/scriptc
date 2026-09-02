@@ -58,6 +58,7 @@ impl HttpServerState {
 
 pub struct HttpRequestData {
     fetch_response: bool,
+    fetch_body_used: bool,
     socket: Option<JsNetSocket>,
     method: JsString,
     url: JsString,
@@ -362,6 +363,14 @@ pub fn http_request_mark_fetch_response(request: &JsHttpRequest, url: &JsString)
 
 pub fn http_request_is_fetch_response(request: &JsHttpRequest) -> bool {
     request.with(|request| request.fetch_response)
+}
+
+pub fn http_request_fetch_body_used(request: &JsHttpRequest) -> bool {
+    request.with(|request| request.fetch_body_used)
+}
+
+pub fn http_request_mark_fetch_body_used(request: &JsHttpRequest) {
+    request.with_mut(|request| request.fetch_body_used = true);
 }
 
 pub fn http_request_on_data(
