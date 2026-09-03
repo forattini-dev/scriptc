@@ -52,7 +52,7 @@ export class RustDynamicEmitter {
     this.context.line("Promise(runtime::JsPromiseHandle),");
     this.context.line("NetServer(runtime::JsNetServer),");
     this.context.line("NetSocket(runtime::JsNetSocket),");
-    this.context.line("AbortController(runtime::JsAbortSignal), AbortSignal(runtime::JsAbortSignal), HttpRequest(runtime::JsHttpRequest),");
+    this.context.line(`AbortController(runtime::JsAbortSignal<${name}>), AbortSignal(runtime::JsAbortSignal<${name}>), HttpRequest(runtime::JsHttpRequest),`);
     this.context.line("HttpHeaders(runtime::JsHttpRequest),");
     this.context.line("HttpResponse(runtime::JsHttpResponse),");
     this.context.line("HttpAgent(runtime::JsHttpAgent),");
@@ -570,7 +570,7 @@ export class RustDynamicEmitter {
     this.context.line(`match runtime::http_server_timeout_value(server, selector) { Some(runtime::JsHttpTimeout::Undefined) | None => ${name}::Undefined, Some(runtime::JsHttpTimeout::Number(value)) => ${name}::Number(value), Some(runtime::JsHttpTimeout::String(value)) => ${name}::String(value), }`);
     this.context.popIndent();
     this.context.line("},");
-    this.context.line(`${name}::AbortController(signal) => if key.as_ref() == "signal" { ${name}::AbortSignal(signal.clone()) } else { ${name}::Undefined }, ${name}::AbortSignal(signal) => if key.as_ref() == "aborted" { ${name}::Boolean(runtime::abort_signal_aborted(signal)) } else { ${name}::Undefined }, ${name}::HttpRequest(request) => sc_dyn_http_request_get(request, key),`);
+    this.context.line(`${name}::AbortController(signal) => if key.as_ref() == "signal" { ${name}::AbortSignal(signal.clone()) } else { ${name}::Undefined }, ${name}::AbortSignal(signal) => match key.as_ref() { "aborted" => ${name}::Boolean(runtime::abort_signal_aborted(signal)), "reason" => runtime::abort_signal_reason(signal).unwrap_or(${name}::Undefined), _ => ${name}::Undefined, }, ${name}::HttpRequest(request) => sc_dyn_http_request_get(request, key),`);
     this.context.line(`${name}::HttpHeaders(..) => ${name}::Undefined,`);
     this.context.line(`${name}::HttpResponse(response) => sc_dyn_http_response_get(response, key),`);
     this.context.line(`${name}::HttpAgent(agent) => sc_dyn_http_agent_get(agent, key),`);

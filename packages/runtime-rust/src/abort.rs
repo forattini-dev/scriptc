@@ -1,29 +1,46 @@
-pub struct AbortSignalData {
+pub struct AbortSignalData<T: HeapValue> {
     aborted: bool,
+    reason: Option<T>,
 }
 
-impl Trace for AbortSignalData {
-    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+impl<T: HeapValue> Trace for AbortSignalData<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(reason) = &self.reason {
+            reason.trace_value(tracer);
+        }
+    }
 }
 
-impl ClearEdges for AbortSignalData {
-    fn clear_edges(&mut self) {}
+impl<T: HeapValue> ClearEdges for AbortSignalData<T> {
+    fn clear_edges(&mut self) {
+        self.reason = None;
+    }
 }
 
-pub type JsAbortSignal = Gc<AbortSignalData>;
+pub type JsAbortSignal<T> = Gc<AbortSignalData<T>>;
 
-pub fn abort_controller_new() -> JsAbortSignal {
-    Gc::new(AbortSignalData { aborted: false })
+pub fn abort_controller_new<T: HeapValue>() -> JsAbortSignal<T> {
+    Gc::new(AbortSignalData {
+        aborted: false,
+        reason: None,
+    })
 }
 
-pub fn abort_signal_new_aborted() -> JsAbortSignal {
-    Gc::new(AbortSignalData { aborted: true })
+pub fn abort_signal_new_aborted<T: HeapValue>(reason: T) -> JsAbortSignal<T> {
+    Gc::new(AbortSignalData {
+        aborted: true,
+        reason: Some(reason),
+    })
 }
 
-pub fn abort_signal_aborted(signal: &JsAbortSignal) -> bool {
+pub fn abort_signal_aborted<T: HeapValue>(signal: &JsAbortSignal<T>) -> bool {
     signal.with(|signal| signal.aborted)
 }
 
-pub fn abort_controller_abort(signal: &JsAbortSignal) {
+pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T> {
+    signal.with(|signal| signal.reason.clone())
+}
+
+pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>) {
     signal.with_mut(|signal| signal.aborted = true);
 }
