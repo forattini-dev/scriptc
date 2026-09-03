@@ -19,3 +19,7 @@ pub fn abort_controller_new() -> JsAbortSignal {
 pub fn abort_signal_aborted(signal: &JsAbortSignal) -> bool {
     signal.with(|signal| signal.aborted)
 }
+
+pub fn abort_controller_abort(signal: &JsAbortSignal) {
+    signal.with_mut(|signal| signal.aborted = true);
+}

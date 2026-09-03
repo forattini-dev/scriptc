@@ -374,6 +374,7 @@ class RustDynamicInvokeEmitter {
     this.emitBufferArm();
     this.emitPromiseArm();
     this.emitNetSocketArm();
+    this.emitAbortControllerArm();
     this.emitHttpRequestArm();
     this.emitHttpHeadersArm();
     this.emitHttpResponseArm();
@@ -583,6 +584,10 @@ class RustDynamicInvokeEmitter {
 
   private emitHttpRequestArm(): void {
     this.context.line(`${this.dyn}::HttpRequest(request) => sc_dyn_http_request_invoke(request, recv, method, args, callee_name),`);
+  }
+
+  private emitAbortControllerArm(): void {
+    this.context.line(`${this.dyn}::AbortController(signal) => match method { "abort" => { runtime::abort_controller_abort(signal); ${this.dyn}::Undefined }, _ => runtime::throw_type_error(format!("{callee_name} is not a function")), },`);
   }
 
   private emitHttpHeadersArm(): void {
