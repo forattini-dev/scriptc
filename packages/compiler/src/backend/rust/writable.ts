@@ -98,7 +98,9 @@ export class RustWritableEmitter {
       this.context.line("}");
       this.context.line("fn sc_writable_finish_destroy(sc_writable: &ScWritable, sc_error: Option<runtime::JsError>) { if let Some(sc_error) = sc_error { let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || sc_writable_emit_error(&sc_writable, sc_error))); } let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || { if runtime::writable_take_destroy_close(&sc_writable) { sc_writable_emit_void(&sc_writable, \"close\"); } })); }");
     }
-    this.context.line("fn sc_writable_schedule_close(sc_writable: &ScWritable) { let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || { if runtime::writable_take_close(&sc_writable) { sc_writable_emit_void(&sc_writable, \"close\"); } })); }");
+    this.context.line(this.context.streams.usesWritableDestroy
+      ? "fn sc_writable_schedule_close(sc_writable: &ScWritable) { if !runtime::writable_should_auto_destroy(sc_writable) { return; } let sc_error = Option::<runtime::JsError>::None; if runtime::writable_destroy(sc_writable, sc_error.clone()) && !runtime::writable_invoke_destroy_callback(sc_writable, sc_error.clone()) { sc_writable_finish_destroy(sc_writable, sc_error); } }"
+      : "fn sc_writable_schedule_close(sc_writable: &ScWritable) { let sc_writable = sc_writable.clone(); runtime::process_next_tick(Box::new(move || { if runtime::writable_take_close(&sc_writable) { sc_writable_emit_void(&sc_writable, \"close\"); } })); }");
     this.emitWriteDispatch(loc);
     this.emitDoneDispatch(loc);
     this.emitFinalDispatch(loc);
@@ -119,6 +121,7 @@ export class RustWritableEmitter {
       case "writable.uncork": return this.emitUncork(expr);
       case "stream.setWrite": return this.isWritable(expr.args[0]?.type) ? this.emitSetCallback(expr, true) : null;
       case "stream.setFinal": return this.isWritable(expr.args[0]?.type) ? this.emitSetCallback(expr, false) : null;
+      case "stream.setDestroy": return this.isWritable(expr.args[0]?.type) ? this.emitSetDestroy(expr) : null;
       case "stream.prop": return this.isWritable(expr.args[0]?.type) ? this.emitProp(expr) : null;
       case "stream.destroy": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, false) : null;
       case "stream.destroyErr": return this.isWritable(expr.args[0]?.type) ? this.emitDestroy(expr, true) : null;
@@ -473,6 +476,32 @@ export class RustWritableEmitter {
     return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; runtime::${runtime}(&sc_writable, ${variant}::${this.variant(shape)}(${values[1]})); }`;
   }
 
+  private emitSetDestroy(expr: RustLibCallExpr): string {
+    const [receiver, callback] = expr.args;
+    const params = callback?.type.kind === "func" ? callback.type.params : [];
+    const completion = params[2];
+    if (receiver === undefined || !this.isWritable(receiver.type) || callback?.type.kind !== "func" ||
+      callback.type.ret.kind !== "void" || params.length !== 3 || params[0]?.kind !== "object" ||
+      typeKey(params[0]) !== typeKey(receiver.type) || params[1]?.kind !== "union" ||
+      completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 1 ||
+      expr.args.length !== 2 || expr.type.kind !== "void") {
+      this.context.unsupported("Writable assigned destroy callback shape", expr.loc);
+    }
+    this.standardErrorType(expr.loc);
+    const completionError = completion.params[0];
+    if (completionError === undefined) this.context.unsupported("Writable assigned destroy completion", expr.loc);
+    const completionShape = this.context.closureShapeForType(completion, expr.loc);
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const writable = this.writableHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    const inputError = this.errorOptionUnionValue(params[1], "sc_error", expr.loc);
+    const completedError = this.errorOption("sc_callback_error", completionError, expr.loc);
+    const completionValue = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_writable = sc_context.2.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |sc_callback_error| { if sc_called.replace(true) { return; } sc_writable_finish_destroy(&sc_writable, ${completedError}); } })), trace: Some(std::rc::Rc::new({ let sc_writable = sc_context.2.clone(); move |tracer| tracer.edge(&sc_writable) })) })`;
+    const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, [
+      "sc_owner", inputError, completionValue,
+    ], expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_context = std::rc::Rc::new((${values[0]}.clone(), ${values[1]}.clone(), sc_writable.clone())); let sc_invoke_context = sc_context.clone(); let sc_trace_context = sc_context.clone(); let sc_destroy = runtime::writable_destroy_callback_new(std::rc::Rc::new(move |sc_error| { let sc_context = sc_invoke_context.clone(); let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let _ = ${dispatch}; }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_trace_context.0); tracer.edge(&sc_trace_context.1); tracer.edge(&sc_trace_context.2); })); runtime::writable_set_destroy_callback(&sc_writable, sc_destroy); }`;
+  }
+
   private emitWrite(expr: RustLibCallExpr, stringChunk: boolean): string {
     const [receiver, chunk] = expr.args;
     const expected = stringChunk ? "string" : "bytes";
@@ -629,10 +658,10 @@ export class RustWritableEmitter {
     if (errorValue !== null && error !== undefined) bindings.push(`let ${errorValue} = ${this.context.emitExpr(error)};`);
     const errorOption = errorValue === null ? "Option::<runtime::JsError>::None" : `Some(${errorValue})`;
     const writable = this.writableHandle(ownerValue, receiver.type, expr.loc);
-    const finish = receiver.type.className === "%Writable"
+    const fallback = receiver.type.className === "%Writable"
       ? "sc_writable_finish_destroy(&sc_writable, sc_error);"
       : `let sc_destroy = ${ownerValue}.with(|object| object.sc_writable_destroy.clone()); match sc_destroy { Some(ScWritableDestroy::RuntimeDestroy(callback, _)) => callback(sc_writable.clone(), sc_error), None => sc_writable_finish_destroy(&sc_writable, sc_error), }`;
-    return `{ ${bindings.join(" ")} let sc_writable = ${writable}; let sc_error = ${errorOption}; if runtime::writable_destroy(&sc_writable, sc_error.clone()) { ${finish} } ${ownerValue} }`;
+    return `{ ${bindings.join(" ")} let sc_writable = ${writable}; let sc_error = ${errorOption}; if runtime::writable_destroy(&sc_writable, sc_error.clone()) && !runtime::writable_invoke_destroy_callback(&sc_writable, sc_error.clone()) { ${fallback} } ${ownerValue} }`;
   }
 
   private emitErrored(expr: RustLibCallExpr): string {

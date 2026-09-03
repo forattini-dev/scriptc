@@ -197,6 +197,7 @@ export class RustReadableEmitter {
     if (this.context.streams.usesReadableDestroy) {
       const errorType = this.standardErrorType(loc);
       this.context.line(`fn sc_readable_finish_destroy(sc_readable: &ScReadable, sc_error: Option<${errorType}>) { if let Some(sc_error) = sc_error { let sc_readable = sc_readable.clone(); runtime::process_next_tick(Box::new(move || sc_readable_emit_error(&sc_readable, sc_error))); } let sc_readable = sc_readable.clone(); runtime::process_next_tick(Box::new(move || { if runtime::readable_take_destroy_close(&sc_readable) { sc_readable_emit_void(&sc_readable, "close"); } })); }`);
+      this.emitDestroyDispatch(loc);
     }
     this.context.line("fn sc_readable_call_read(sc_readable: &ScReadable) {");
     this.context.pushIndent();
@@ -212,8 +213,12 @@ export class RustReadableEmitter {
     this.context.pushIndent();
     this.context.line("sc_readable_emit_void(sc_readable, \"end\");");
     this.context.line("runtime::readable_end_pipes(sc_readable);");
-    this.context.line("let sc_readable = sc_readable.clone();");
-    this.context.line("runtime::process_next_tick(Box::new(move || { if runtime::readable_take_close(&sc_readable) { sc_readable_emit_void(&sc_readable, \"close\"); } }));");
+    if (this.context.streams.usesReadableDestroy) {
+      this.context.line("if runtime::readable_should_auto_destroy(sc_readable) && runtime::readable_destroy(sc_readable, Option::<runtime::JsError>::None) { sc_readable_call_destroy(sc_readable, Option::<runtime::JsError>::None); }");
+    } else {
+      this.context.line("let sc_readable = sc_readable.clone();");
+      this.context.line("runtime::process_next_tick(Box::new(move || { if runtime::readable_take_close(&sc_readable) { sc_readable_emit_void(&sc_readable, \"close\"); } }));");
+    }
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_readable_drain(sc_readable: ScReadable) {");
@@ -276,6 +281,7 @@ export class RustReadableEmitter {
       case "readable.isPaused": return this.emitIsPaused(expr);
       case "readable.flowing": return this.emitFlowing(expr);
       case "stream.setRead": return this.isReadable(expr.args[0]) ? this.emitSetRead(expr) : null;
+      case "stream.setDestroy": return this.isReadable(expr.args[0]) ? this.emitSetDestroy(expr) : null;
       case "stream.prop": return this.isReadable(expr.args[0]) ? this.emitProp(expr) : null;
       case "stream.destroy": return this.isReadable(expr.args[0]) ? this.emitDestroy(expr, false) : null;
       case "stream.destroyErr": return this.isReadable(expr.args[0]) ? this.emitDestroy(expr, true) : null;
@@ -451,6 +457,46 @@ export class RustReadableEmitter {
     if (shape === undefined) this.context.unsupported("unregistered assigned Readable read callback", expr.loc);
     const values = expr.args.map(() => this.context.nextTemporary());
     return `{ ${this.bind(expr.args, values)} runtime::readable_set_read_callback(&${values[0]}, ScReadableRead::${this.listenerVariant(shape)}(${values[1]})); }`;
+  }
+
+  private emitSetDestroy(expr: RustLibCallExpr): string {
+    const [receiver, callback] = expr.args;
+    if (!this.isReadable(receiver) || callback?.type.kind !== "func" ||
+      expr.args.length !== 2 || expr.type.kind !== "void") {
+      this.context.unsupported("Readable assigned destroy callback shape", expr.loc);
+    }
+    const shape = this.context.streams.readableDestroyShapes.get(typeKey(callback.type));
+    if (shape === undefined) {
+      this.context.unsupported("unregistered assigned Readable destroy callback", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const readable = this.readableHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; runtime::readable_set_destroy_callback(&sc_readable, ScReadableRead::${this.listenerVariant(shape)}(${values[1]})); }`;
+  }
+
+  private emitDestroyDispatch(loc: SrcLoc): void {
+    const arms = [...this.context.streams.readableDestroyShapes.values()].map((shape) => {
+      const [thisType, inputType, completion] = shape.type.params;
+      if (shape.type.rest === true || shape.type.params.length !== 3 || shape.type.ret.kind !== "void" ||
+        thisType?.kind !== "object" || thisType.className !== "%Readable" || inputType?.kind !== "union" ||
+        completion?.kind !== "func" || completion.rest === true || completion.params.length !== 1 ||
+        completion.ret.kind !== "void") {
+        this.context.unsupported("Readable destroy callback shape", loc);
+      }
+      const completionArgument = completion.params[0];
+      if (completionArgument === undefined) this.context.unsupported("Readable destroy completion argument", loc);
+      const completionShape = this.context.closureShapeForType(completion, loc);
+      const input = this.errorOptionUnionValue(inputType, "sc_error.clone()", loc);
+      const completedError = this.errorOption("sc_result", completionArgument, loc);
+      const completionValue = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_readable = sc_readable_shared.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |sc_result| { if sc_called.replace(true) { return; } sc_readable_finish_destroy(sc_readable.as_ref(), ${completedError}); } })), trace: Some(std::rc::Rc::new({ let sc_readable = sc_readable_shared.clone(); move |tracer| tracer.edge(sc_readable.as_ref()) })) })`;
+      const dispatch = this.context.emitClosureDispatch("callback", shape.type, [
+        "sc_readable.clone()", input, completionValue,
+      ], loc);
+      return `ScReadableRead::${this.listenerVariant(shape)}(callback) => { let sc_readable_shared = std::rc::Rc::new(sc_readable.clone()); let _ = ${dispatch}; }`;
+    });
+    arms.push("ScReadableRead::Never => sc_readable_finish_destroy(sc_readable, sc_error)");
+    arms.push("_ => unreachable!(\"scriptc invariant: Readable destroy callback signature\")");
+    this.context.line(`fn sc_readable_call_destroy(sc_readable: &ScReadable, sc_error: Option<runtime::JsError>) { match runtime::readable_destroy_callback(sc_readable) { Some(callback) => match callback { ${arms.join(", ")} }, None => sc_readable_finish_destroy(sc_readable, sc_error), } }`);
   }
 
   private emitPush(expr: RustLibCallExpr, stringChunk: boolean): string {
@@ -634,28 +680,7 @@ export class RustReadableEmitter {
     const errorOption = errorValue === null ? "Option::<runtime::JsError>::None" : `Some(${errorValue}.clone())`;
     const bindings = [`let ${readableValue} = ${this.context.emitExpr(receiver)};`];
     if (errorValue !== null && error !== undefined) bindings.push(`let ${errorValue} = ${this.context.emitExpr(error)};`);
-    const destroyArms = [...this.context.streams.readableDestroyShapes.values()].map((shape) => {
-      const [thisType, inputType, completion] = shape.type.params;
-      if (shape.type.rest === true || shape.type.params.length !== 3 || shape.type.ret.kind !== "void" ||
-        thisType?.kind !== "object" || thisType.className !== "%Readable" || inputType?.kind !== "union" ||
-        completion?.kind !== "func" || completion.rest === true || completion.params.length !== 1 ||
-        completion.ret.kind !== "void") {
-        this.context.unsupported("Readable destroy callback shape", expr.loc);
-      }
-      const completionArgument = completion.params[0];
-      if (completionArgument === undefined) this.context.unsupported("Readable destroy completion argument", expr.loc);
-      const completionShape = this.context.closureShapeForType(completion, expr.loc);
-      const input = this.errorUnionValue(inputType, errorValue, expr.loc);
-      const completedError = this.errorOption("sc_result", completionArgument, expr.loc);
-      const completionValue = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_readable = sc_readable_shared.clone(); let sc_called = std::rc::Rc::new(std::cell::Cell::new(false)); move |sc_result| { if sc_called.replace(true) { return; } sc_readable_finish_destroy(sc_readable.as_ref(), ${completedError}); } })), trace: Some(std::rc::Rc::new({ let sc_readable = sc_readable_shared.clone(); move |tracer| tracer.edge(sc_readable.as_ref()) })) })`;
-      const dispatch = this.context.emitClosureDispatch("callback", shape.type, [
-        `${readableValue}.clone()`, input, completionValue,
-      ], expr.loc);
-      return `ScReadableRead::${this.listenerVariant(shape)}(callback) => { let sc_readable_shared = std::rc::Rc::new(${readableValue}.clone()); let _ = ${dispatch}; }`;
-    });
-    destroyArms.push(`ScReadableRead::Never => sc_readable_finish_destroy(&${readableValue}, sc_error)`);
-    destroyArms.push("_ => unreachable!(\"scriptc invariant: Readable destroy callback signature\")");
-    return `{ ${bindings.join(" ")} let sc_error = ${errorOption}; if runtime::readable_destroy(&${readableValue}, sc_error.clone()) { match runtime::readable_destroy_callback(&${readableValue}) { Some(callback) => match callback { ${destroyArms.join(", ")} }, None => sc_readable_finish_destroy(&${readableValue}, sc_error), } } ${readableValue} }`;
+    return `{ ${bindings.join(" ")} let sc_error = ${errorOption}; if runtime::readable_destroy(&${readableValue}, sc_error.clone()) { sc_readable_call_destroy(&${readableValue}, sc_error); } ${readableValue} }`;
   }
 
   private emitErrored(expr: RustLibCallExpr): string {
@@ -726,6 +751,16 @@ export class RustReadableEmitter {
       this.context.unsupported(`stream completion error arm '${arm.kind}'`, loc);
     });
     return `match ${value} { ${arms.join(", ")} }`;
+  }
+
+  private errorOptionUnionValue(type: IrType, option: string, loc: SrcLoc): string {
+    if (type.kind !== "union") this.context.unsupported("stream destroy error union", loc);
+    const union = this.context.union(type.unionId, loc);
+    const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    if (errorTag < 0 || nullTag < 0) this.context.unsupported("stream destroy error union arms", loc);
+    const name = this.context.unionName(union.id);
+    return `match ${option} { Some(sc_error) => ${name}::${this.context.unionVariant(errorTag)}(sc_error), None => ${name}::${this.context.unionVariant(nullTag)}, }`;
   }
 
   private standardErrorType(loc: SrcLoc): string {

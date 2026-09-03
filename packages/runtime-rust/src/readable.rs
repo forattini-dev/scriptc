@@ -776,6 +776,22 @@ where
     readable.with(|data| data.destroy_callback.clone())
 }
 
+pub fn readable_set_destroy_callback<L, R>(readable: &JsReadable<L, R>, callback: R)
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with_mut(|data| data.destroy_callback = Some(callback));
+}
+
+pub fn readable_should_auto_destroy<L, R>(readable: &JsReadable<L, R>) -> bool
+where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+{
+    readable.with(|data| data.auto_destroy && !data.destroyed)
+}
+
 pub fn readable_destroy<L, R>(readable: &JsReadable<L, R>, error: Option<JsError>) -> bool
 where
     L: Clone + Trace + 'static,

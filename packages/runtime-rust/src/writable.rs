@@ -11,6 +11,18 @@ struct WritableDrainResume {
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
+#[derive(Clone)]
+pub struct WritableDestroyCallback {
+    invoke: Rc<dyn Fn(Option<JsError>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+}
+
+impl Trace for WritableDestroyCallback {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        (self.trace)(tracer);
+    }
+}
+
 pub struct WritableData<L, W, F, C>
 where
     L: Clone + Trace + 'static,
@@ -35,6 +47,7 @@ where
     closed: bool,
     corked: usize,
     drain_resumes: Vec<WritableDrainResume>,
+    destroy_callback: Option<WritableDestroyCallback>,
     destroyed: bool,
     errored: Option<JsError>,
 }
@@ -63,6 +76,9 @@ where
         for resume in &self.drain_resumes {
             (resume.trace)(tracer);
         }
+        if let Some(callback) = &self.destroy_callback {
+            callback.trace(tracer);
+        }
         if let Some(error) = &self.errored {
             error.trace(tracer);
         }
@@ -83,6 +99,7 @@ where
         self.queue.clear();
         self.writable_length = 0;
         self.drain_resumes.clear();
+        self.destroy_callback = None;
         self.errored = None;
     }
 }
@@ -131,6 +148,7 @@ where
         closed: false,
         corked: 0,
         drain_resumes: Vec::new(),
+        destroy_callback: None,
         destroyed: false,
         errored: None,
     })
@@ -226,6 +244,41 @@ where
     C: Clone + Trace + 'static,
 {
     writable.with_mut(|data| data.final_callback = Some(callback));
+}
+
+pub fn writable_destroy_callback_new(
+    invoke: Rc<dyn Fn(Option<JsError>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+) -> WritableDestroyCallback {
+    WritableDestroyCallback { invoke, trace }
+}
+
+pub fn writable_set_destroy_callback<L, W, F, C>(
+    writable: &JsWritable<L, W, F, C>,
+    callback: WritableDestroyCallback,
+) where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with_mut(|data| data.destroy_callback = Some(callback));
+}
+
+pub fn writable_invoke_destroy_callback<L, W, F, C>(
+    writable: &JsWritable<L, W, F, C>,
+    error: Option<JsError>,
+) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    let callback = writable.with(|data| data.destroy_callback.clone());
+    let Some(callback) = callback else { return false };
+    (callback.invoke)(error);
+    true
 }
 
 pub fn writable_enqueue<L, W, F, C>(
@@ -397,6 +450,16 @@ where
         data.finish_scheduled = false;
         data.finished = true;
     });
+}
+
+pub fn writable_should_auto_destroy<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool
+where
+    L: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+{
+    writable.with(|data| data.auto_destroy && !data.destroyed)
 }
 
 pub fn writable_take_close<L, W, F, C>(writable: &JsWritable<L, W, F, C>) -> bool

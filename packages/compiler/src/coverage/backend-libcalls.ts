@@ -803,7 +803,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "stream.pipeline": ["c", "llvm", "rust"],
   "stream.pipelineDyn": ["c", "llvm", "rust"],
   "stream.prop": ["c", "llvm", "rust"],
-  "stream.setDestroy": ["c", "llvm"],
+  "stream.setDestroy": ["c", "llvm", "rust"],
   "stream.setFinal": ["c", "llvm", "rust"],
   "stream.setFlush": ["c", "llvm"],
   "stream.setRead": ["c", "llvm", "rust"],

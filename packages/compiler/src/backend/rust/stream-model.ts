@@ -93,7 +93,8 @@ export class RustStreamModel {
         return true;
       }
     }
-    if (node.fn === "stream.setRead" || node.fn === "stream.setWrite" || node.fn === "stream.setFinal") {
+    if (node.fn === "stream.setRead" || node.fn === "stream.setWrite" ||
+        node.fn === "stream.setFinal" || node.fn === "stream.setDestroy") {
       const args = node.args as StreamArgument[] | undefined;
       const receiver = args?.[0]?.type;
       const callback = args?.[1]?.type;
@@ -103,6 +104,13 @@ export class RustStreamModel {
       if (node.fn === "stream.setRead" && receiver.className === "%Readable") {
         this.usesReadable = true;
         this.readableReadShapes.set(typeKey(callback), ensureClosureShape(callback));
+        return true;
+      }
+      if (node.fn === "stream.setDestroy" && receiver.className === "%Readable") {
+        this.usesReadable = true;
+        this.usesReadableDestroy = true;
+        this.readableDestroyShapes.set(typeKey(callback), ensureClosureShape(callback));
+        this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
         return true;
       }
       if ((node.fn === "stream.setWrite" || node.fn === "stream.setFinal") &&
@@ -121,6 +129,13 @@ export class RustStreamModel {
           completionShape.runtimeCallback = true;
           this.writableDynamicCompletionShape = completionShape;
         }
+        return true;
+      }
+      if (node.fn === "stream.setDestroy" && receiver.className === "%Writable") {
+        this.usesWritable = true;
+        this.usesWritableDestroy = true;
+        ensureClosureShape(callback);
+        this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
         return true;
       }
     }

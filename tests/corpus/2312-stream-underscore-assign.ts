@@ -13,6 +13,10 @@ r._read = function () {
   if (pushed <= 2) this.push(`chunk${pushed}`);
   else this.push(null);
 };
+r._destroy = (error: Error | null, cb: (e?: Error | null) => void) => {
+  console.log("read destroy ran", error === null);
+  cb();
+};
 const got: string[] = [];
 r.on("data", (c: Buffer) => got.push(c.toString()));
 r.on("end", () => {
@@ -30,6 +34,10 @@ r.on("end", () => {
   };
   w._final = (cb: (e?: Error | null) => void) => {
     console.log("final ran");
+    cb();
+  };
+  w._destroy = (error: Error | null, cb: (e?: Error | null) => void) => {
+    console.log("destroy ran", error === null);
     cb();
   };
   w.write("hello");
