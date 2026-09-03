@@ -13,6 +13,7 @@ export interface RustDuplexContext {
   popIndent(): void;
   nextTemporary(): string;
   emitExpr(expr: IrExpr): string;
+  dynFunctionVariant(shape: RustClosureShape): string;
   dynTypeName(): string;
   closureName(shape: RustClosureShape): string;
   closureShapeForType(type: IrFuncType, loc?: SrcLoc): RustClosureShape;
@@ -33,7 +34,7 @@ export class RustDuplexEmitter {
     if (!this.context.streams.usesDuplex) return;
     const subclass = this.context.streams.usesDuplexSubclass;
     this.emitCallbackType("ScDuplexRead", this.context.streams.duplexReadShapes, subclass ? {
-      variant: "RuntimeRead", fields: "std::rc::Rc<dyn Fn()>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>",
+      variant: "RuntimeRead", fields: "std::rc::Rc<dyn Fn(f64)>, std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)>",
     } : null);
     this.emitCallbackType("ScDuplexWrite", this.context.streams.duplexWriteShapes, subclass ? {
       variant: "RuntimeWrite",
@@ -60,6 +61,7 @@ export class RustDuplexEmitter {
     const duplexReceiver = this.isDuplex(receiver);
     switch (expr.fn) {
       case "duplex.new": return this.emitNew(expr);
+      case "duplex.newDyn": return this.emitNewDynamic(expr);
       case "duplex.init": return this.emitInit(expr);
       case "readable.push": return duplexReceiver ? this.emitPush(expr, false) : null;
       case "readable.pushStr": return duplexReceiver ? this.emitPushString(expr) : null;
@@ -206,7 +208,7 @@ export class RustDuplexEmitter {
       readArms.push(`ScDuplexRead::${this.variant(shape)}(callback) => { let _ = ${dispatch}; },`);
     }
     if (this.context.streams.usesDuplexSubclass) {
-      readArms.push("ScDuplexRead::RuntimeRead(callback, _) => callback(),");
+      readArms.push("ScDuplexRead::RuntimeRead(callback, _) => callback(runtime::readable_prop(sc_readable, &runtime::string(\"readableHighWaterMark\"))),");
     }
     readArms.push("ScDuplexRead::Never => {},");
     readArms.push("_ => unreachable!(\"scriptc invariant: Duplex read callback signature\"),");
@@ -299,6 +301,25 @@ export class RustDuplexEmitter {
     return `{ ${this.bind(expr.args, values)} let _ = (${values[5]}, ${values[6]}, ${values[7]}); let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScDuplexRead>(${values[0]}, ${values[2]}, ${values[3]}, ${read}, Option::<ScDuplexRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScDuplexWrite, ScDuplexFinal, ScDuplexDone>(${values[1]}, ${values[2]}, ${values[3]}, ${write}, Option::<ScDuplexFinal>::None); runtime::writable_set_emitter(&sc_writable, sc_emitter); runtime::duplex_new(sc_readable, sc_writable, ${values[4]}) }`;
   }
 
+  private emitNewDynamic(expr: RustLibCallExpr): string {
+    const [options] = expr.args;
+    if (options?.type.kind !== "dyn" || expr.args.length !== 1 ||
+      expr.type.kind !== "object" || expr.type.className !== "%Duplex") {
+      this.context.unsupported("dynamic Duplex constructor shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    const dyn = this.context.dynTypeName();
+    const option = (key: string): string =>
+      `match &${value} { ${dyn}::Object(..) => sc_dyn_key_get(&${value}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const read = `let sc_read_option = ${option("read")}; let sc_read = if sc_dyn_function_identity(&sc_read_option).is_some() { let sc_context = std::rc::Rc::new(sc_read_option); Some(ScDuplexRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_size| { let _ = sc_dyn_call(&sc_context, &[${dyn}::Number(sc_size)], "read"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { Option::<ScDuplexRead>::None };`;
+    const completionShape = this.dynamicCompletionShape(expr.loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } let sc_writable = runtime::duplex_writable(&sc_completion.0); runtime::writable_complete_write(&sc_writable, sc_length); sc_duplex_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+    const done = `${dyn}::${this.context.dynFunctionVariant(completionShape)}(${completion}, runtime::empty_string(), runtime::map_new())`;
+    const write = `let sc_write_option = ${option("write")}; let sc_write = if sc_dyn_function_identity(&sc_write_option).is_some() { let sc_context = std::rc::Rc::new(sc_write_option); Some(ScDuplexWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_duplex, sc_chunk, sc_length, sc_done| { let sc_completion = std::rc::Rc::new((sc_duplex, sc_done, std::cell::Cell::new(false))); let _ = sc_dyn_call(&sc_context, &[${dyn}::Buffer(sc_chunk), ${dyn}::String(runtime::string("buffer")), ${done}], "write"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { Option::<ScDuplexWrite>::None };`;
+    const init = `let sc_hwm = ${option("highWaterMark")}; let sc_rhwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("readableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_whwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("writableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false)); let sc_allow_half_open = !matches!(${option("allowHalfOpen")}, ${dyn}::Boolean(false)); let sc_encoding = ${option("encoding")};`;
+    return `{ let ${value} = ${this.context.emitExpr(options)}; ${read} ${write} ${init} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScDuplexRead>(sc_rhwm, sc_auto_destroy, sc_emit_close, sc_read, Option::<ScDuplexRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScDuplexWrite, ScDuplexFinal, ScDuplexDone>(sc_whwm, sc_auto_destroy, sc_emit_close, sc_write, Option::<ScDuplexFinal>::None); runtime::writable_set_emitter(&sc_writable, sc_emitter); runtime::duplex_new(sc_readable, sc_writable, sc_allow_half_open) }`;
+  }
+
   private emitInit(expr: RustLibCallExpr): string {
     const [receiver, hwmRead, hwmWrite, autoDestroy, emitClose, allowHalfOpen, readableSide, writableSide, flags] = expr.args;
     if (receiver?.type.kind !== "object" || receiver.type.className === "%Duplex" ||
@@ -321,7 +342,7 @@ export class RustDuplexEmitter {
       }
       const callbackValue = this.requiredValue(values, index, expr.loc);
       const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, ["sc_owner"], expr.loc);
-      read = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScDuplexRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move || { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      read = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScDuplexRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |_sc_size| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
       index += 1;
     }
     if ((flags.value & 2) !== 0) {
@@ -453,6 +474,12 @@ export class RustDuplexEmitter {
   private isDuplex(expr: IrExpr | undefined): boolean {
     return expr?.type.kind === "object" &&
       (expr.type.className === "%Duplex" || this.context.runtimeStreamBase(expr.type.className) === "%Duplex");
+  }
+
+  private dynamicCompletionShape(loc: SrcLoc): RustClosureShape {
+    const shape = this.context.streams.duplexDynamicCompletionShape;
+    if (shape === null) this.context.unsupported("unregistered dynamic Duplex completion callback", loc);
+    return shape;
   }
 
   private duplexHandle(value: string, type: IrType, loc: SrcLoc): string {

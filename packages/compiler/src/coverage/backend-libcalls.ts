@@ -177,7 +177,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "duplex.init": ["c", "llvm", "rust"],
   "duplex.initDyn": ["c", "llvm"],
   "duplex.new": ["c", "llvm", "rust"],
-  "duplex.newDyn": ["c", "llvm"],
+  "duplex.newDyn": ["c", "llvm", "rust"],
   "dyn.arrAt": ["c", "llvm", "rust"],
   "dyn.arrLen": ["c", "llvm", "rust"],
   "dyn.assign": ["c", "llvm", "rust"],

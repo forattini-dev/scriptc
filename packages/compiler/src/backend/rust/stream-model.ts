@@ -30,6 +30,7 @@ export class RustStreamModel {
   readonly duplexWriteShapes = new Map<string, RustClosureShape>();
   readonly duplexFinalShapes = new Map<string, RustClosureShape>();
   readonly duplexDoneShapes = new Map<string, RustClosureShape>();
+  duplexDynamicCompletionShape: RustClosureShape | null = null;
   readonly transformCallbackShapes = new Map<string, RustClosureShape>();
   readonly transformFlushShapes = new Map<string, RustClosureShape>();
   readonly transformDoneShapes = new Map<string, RustClosureShape>();
@@ -270,6 +271,16 @@ export class RustStreamModel {
           this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
         }
       }
+      return true;
+    }
+    if (node.fn === "duplex.newDyn") {
+      this.usesDuplex = true;
+      this.usesDuplexSubclass = true;
+      const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+      registerDynBoxedFunction(completionType);
+      const completionShape = ensureClosureShape(completionType);
+      completionShape.runtimeCallback = true;
+      this.duplexDynamicCompletionShape = completionShape;
       return true;
     }
     if (node.fn === "readable.fromArr" || node.fn === "readable.nextChunk" ||
