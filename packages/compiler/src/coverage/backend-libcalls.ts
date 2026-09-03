@@ -371,7 +371,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "http.reqPipeSock": ["c", "llvm"],
   "http.reqRawHeaders": ["c", "llvm", "rust"],
   "http.reqResume": ["c", "llvm", "rust"],
-  "http.reqSetEncoding": ["c", "llvm"],
+  "http.reqSetEncoding": ["c", "llvm", "rust"],
   "http.reqSocket": ["c", "llvm", "rust"],
   "http.reqStatusCode": ["c", "llvm", "rust"],
   "http.reqStatusMessage": ["c", "llvm", "rust"],

@@ -63,9 +63,12 @@ function emitIncomingDataListener(
   }
   const callback = context.nextTemporary();
   const traced = context.nextTemporary();
-  const argument = parameter?.kind === "dyn" ? `${context.dynTypeName()}::Buffer(sc_chunk)` : "sc_chunk";
+  const encoded = context.nextTemporary();
+  const argument = parameter?.kind === "dyn"
+    ? `if ${encoded} { ${context.dynTypeName()}::String(runtime::bytes_to_string(&sc_chunk, &runtime::string("utf8"))) } else { ${context.dynTypeName()}::Buffer(sc_chunk) }`
+    : "sc_chunk";
   const dispatch = context.emitClosureDispatch(callback, callbackType, parameter === undefined ? [] : [argument], expr.loc);
-  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_request_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_request_on_data(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_chunk, ${encoded}| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
 function emitIncomingEndListener(
@@ -405,6 +408,10 @@ export function emitRustHttpCall(
   if (expr.fn === "http.reqResume" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "httpReq") {
     return `runtime::http_request_resume(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if (expr.fn === "http.reqSetEncoding" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "httpReq" && expr.args[1]?.type.kind === "string") {
+    return `runtime::http_request_set_encoding(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
   }
   if (expr.fn === "http.reqDestroy" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "httpReq") {

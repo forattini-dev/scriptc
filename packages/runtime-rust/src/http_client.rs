@@ -217,6 +217,7 @@ fn http_client_feed(
                 finish_pending: false,
                 paused: false,
                 flowing: false,
+                encoding_utf8: false,
                 data_listeners: Vec::new(),
                 end_listeners: Vec::new(),
                 aborted_listeners: Vec::new(),

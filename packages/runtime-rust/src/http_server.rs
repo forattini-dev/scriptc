@@ -25,26 +25,26 @@ impl HttpServerConnection {
 }
 
 fn http_dispatch_data(request: &JsHttpRequest) {
-    let (listeners, body) = request.with_mut(|request| {
+    let (listeners, body, encoding_utf8) = request.with_mut(|request| {
         if request.paused || request.body.is_empty() ||
             (!request.flowing && request.data_listeners.is_empty())
         {
-            return (Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), false);
         }
         if request.data_listeners.is_empty() {
             request.body.clear();
-            return (Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), false);
         }
         let listeners = request.data_listeners.clone();
         request.data_listeners.retain(|listener| !listener.once);
-        (listeners, std::mem::take(&mut request.body))
+        (listeners, std::mem::take(&mut request.body), request.encoding_utf8)
     });
     if body.is_empty() {
         return;
     }
     let chunk = bytes_from_elements(body);
     for listener in listeners {
-        (listener.invoke)(chunk.clone());
+        (listener.invoke)(chunk.clone(), encoding_utf8);
     }
 }
 
@@ -211,6 +211,7 @@ fn http_server_next(connection: &mut HttpServerConnection) -> HttpServerStep {
         finish_pending: false,
         paused: false,
         flowing: false,
+        encoding_utf8: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
         aborted_listeners: Vec::new(),

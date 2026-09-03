@@ -21,6 +21,7 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
         finish_pending: true,
         paused: false,
         flowing: false,
+        encoding_utf8: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
         aborted_listeners: Vec::new(),
@@ -117,7 +118,7 @@ pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> 
 
     http_request_on_data(
         response,
-        Rc::new(move |chunk| body.borrow_mut().extend(bytes_u8_values(&chunk))),
+        Rc::new(move |chunk, _encoding_utf8| body.borrow_mut().extend(bytes_u8_values(&chunk))),
         Rc::new(|_| {}),
         false,
     );

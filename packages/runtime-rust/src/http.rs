@@ -16,7 +16,7 @@ struct HttpRequestListener {
 
 #[derive(Clone)]
 struct HttpDataListener {
-    invoke: Rc<dyn Fn(JsBytes<u8>)>,
+    invoke: Rc<dyn Fn(JsBytes<u8>, bool)>,
     trace: NetTrace,
     once: bool,
 }
@@ -74,6 +74,7 @@ pub struct HttpRequestData {
     finish_pending: bool,
     paused: bool,
     flowing: bool,
+    encoding_utf8: bool,
     data_listeners: Vec<HttpDataListener>,
     end_listeners: Vec<HttpVoidListener>,
     aborted_listeners: Vec<HttpVoidListener>,
@@ -111,6 +112,7 @@ impl ClearEdges for HttpRequestData {
         self.finish_pending = false;
         self.paused = false;
         self.flowing = false;
+        self.encoding_utf8 = false;
         self.data_listeners.clear();
         self.end_listeners.clear();
         self.aborted_listeners.clear();
@@ -454,7 +456,7 @@ pub fn http_request_claim_fetch_body(request: &JsHttpRequest) -> bool {
 
 pub fn http_request_on_data(
     request: &JsHttpRequest,
-    callback: Rc<dyn Fn(JsBytes<u8>)>,
+    callback: Rc<dyn Fn(JsBytes<u8>, bool)>,
     trace: NetTrace,
     once: bool,
 ) {
@@ -466,6 +468,20 @@ pub fn http_request_on_data(
     });
     http_dispatch_data(request);
     http_request_maybe_finish(request);
+}
+
+pub fn http_request_set_encoding(request: &JsHttpRequest, encoding: &JsString) {
+    match encoding.as_ref() {
+        "utf8" | "utf-8" => request.with_mut(|request| request.encoding_utf8 = true),
+        "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2"
+        | "ucs-2" | "utf16le" | "utf-16le" => throw_error(format!(
+            "setEncoding('{encoding}') is not supported yet (only 'utf8' here)"
+        )),
+        _ => throw_type_error_code(
+            format!("Unknown encoding: {encoding}"),
+            "ERR_UNKNOWN_ENCODING",
+        ),
+    }
 }
 
 pub fn http_request_pause(request: &JsHttpRequest) {
@@ -595,7 +611,9 @@ pub fn http_request_pipe_response(request: &JsHttpRequest, response: &JsHttpResp
         }
         request.flowing = true;
         request.data_listeners.push(HttpDataListener {
-            invoke: Rc::new(move |chunk| http_response_write_bytes(&write_response, &chunk)),
+            invoke: Rc::new(move |chunk, _encoding_utf8| {
+                http_response_write_bytes(&write_response, &chunk)
+            }),
             trace: Rc::new(move |tracer| tracer.edge(&write_trace)),
             once: false,
         });
