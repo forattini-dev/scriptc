@@ -831,7 +831,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "text.decodeLegacy": ["c", "llvm", "rust"],
   "timers.clearImmediate": ["c", "llvm", "rust"],
   "timers.clearInterval": ["c", "llvm", "rust"],
-  "timers.clearNoop": ["c", "llvm"],
+  "timers.clearNoop": ["c", "llvm", "rust"],
   "timers.clearTimeout": ["c", "llvm", "rust"],
   "timers.hasRef": ["c", "llvm", "rust"],
   "timers.immediateHasRef": ["c", "llvm", "rust"],

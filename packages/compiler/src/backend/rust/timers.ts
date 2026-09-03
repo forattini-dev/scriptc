@@ -4,6 +4,7 @@ export function emitRustTimerCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  if (expr.fn === "timers.clearNoop" && expr.args.length === 0) return "()";
   const callbackExpr = expr.args[0];
   if (expr.fn !== "timers.queueMicrotaskDyn" || expr.args.length !== 1 ||
       callbackExpr?.type.kind !== "dyn" || expr.type.kind !== "void") return null;
