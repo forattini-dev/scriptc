@@ -165,6 +165,20 @@ function emitResponseFinishListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_response_on_finish(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
 }
 
+function emitResponseCloseListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr, onceExpr] = expr.args;
+  if (receiver?.type.kind !== "httpRes" || callbackExpr === undefined || onceExpr?.type.kind !== "bool" ||
+      callbackType.params.length !== 0) context.unsupported("http.resOnClose shape", expr.loc);
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_response_on_close(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced}))); }`;
+}
+
 export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
@@ -355,6 +369,11 @@ export function emitRustHttpCall(
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.resOnFinish callback", expr.loc);
     return emitResponseFinishListener(expr, callbackType, context);
+  }
+  if (expr.fn === "http.resOnClose" && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported("http.resOnClose callback", expr.loc);
+    return emitResponseCloseListener(expr, callbackType, context);
   }
   if (expr.fn === "http.reqPipeRes" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "httpReq" && expr.args[1]?.type.kind === "httpRes") {

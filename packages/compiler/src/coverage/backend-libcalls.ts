@@ -391,7 +391,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "http.resGetHeader": ["c", "llvm", "rust"],
   "http.resHasHeader": ["c", "llvm", "rust"],
   "http.resHeadersSent": ["c", "llvm", "rust"],
-  "http.resOnClose": ["c", "llvm"],
+  "http.resOnClose": ["c", "llvm", "rust"],
   "http.resOnFinish": ["c", "llvm", "rust"],
   "http.resRemoveHeader": ["c", "llvm", "rust"],
   "http.resSetHeader": ["c", "llvm", "rust"],
