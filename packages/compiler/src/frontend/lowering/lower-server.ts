@@ -28,9 +28,9 @@ import {
 import { conditionalSpreadOf } from "./lower-exprs.js";
 import { knownBufEncoding } from "./lower-containers.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
+import { dynamicMethodInvoke } from "./dynamic-invoke.js";
 
-const NARROW_DATA_HINT =
-  'write/end take one string or one Uint8Array/Buffer value (narrow unions first)';
+const NARROW_DATA_HINT = 'write/end take one string or one Uint8Array/Buffer value (narrow unions first)';
 
 /** The writable numeric http.Server timeout fields. The selector is an
  * internal runtime ABI shared by the get/set libCalls (kept here beside
@@ -4696,11 +4696,11 @@ function lowerHttpResMethodCall(L: Lowerer, call: ts.CallExpression,
     if (name === "end" && args.length === 2) {
       const { cb } = lowerCallbackArg(L, args[1]!, "end callbacks", 0, () => false, "use ()", []);
       cbArg = cb;
-    } else if (name === "end" && args.length === 1 &&
-               L.mapTypeOf(L.typeOf(args[0]!))?.kind !== "string" &&
-               L.mapTypeOf(L.typeOf(args[0]!))?.kind !== "bytes") {
+    } else if (name === "end" && args.length === 1) {
       const probe = L.typeOf(args[0]!);
-      if (L.mapTypeOf(probe)?.kind === "func" || L.mapTypeOf(probe) === null || L.mapTypeOf(probe)?.kind === "dyn") {
+      const mapped = L.mapTypeOf(probe);
+      if (mapped?.kind === "dyn" || (probe.flags & ts.TypeFlags.Any) !== 0) return dynamicMethodInvoke(receiver, "end", "res.end", [L.lowerExpr(args[0]!)], loc);
+      if (mapped?.kind === "func" || mapped === null) {
         const { cb } = lowerCallbackArg(L, args[0]!, "end callbacks", 0, () => false, "use ()", []);
         cbArg = cb;
         dataNode = undefined;
