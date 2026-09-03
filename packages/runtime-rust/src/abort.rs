@@ -44,6 +44,24 @@ pub fn abort_signal_timeout<T: HeapValue>(delay_ms: f64, reason: T) -> JsAbortSi
     signal
 }
 
+pub fn abort_signal_any<T: HeapValue>(signals: Vec<JsAbortSignal<T>>) -> JsAbortSignal<T> {
+    let combined = abort_controller_new();
+    for signal in signals {
+        let reason = signal.with(|signal| {
+            if signal.aborted {
+                signal.reason.clone()
+            } else {
+                None
+            }
+        });
+        if let Some(reason) = reason {
+            abort_controller_abort(&combined, reason);
+            break;
+        }
+    }
+    combined
+}
+
 pub fn abort_signal_aborted<T: HeapValue>(signal: &JsAbortSignal<T>) -> bool {
     signal.with(|signal| signal.aborted)
 }

@@ -239,7 +239,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "error.nodeThrow": ["c", "llvm", "rust"],
   "error.propTypeThrow": ["c", "llvm", "rust"],
   "error.toString": ["c", "llvm", "rust"],
-  "fetch.abortAny": ["c", "llvm"],
+  "fetch.abortAny": ["c", "llvm", "rust"],
   "fetch.abortControllerNew": ["c", "llvm", "rust"],
   "fetch.abortNow": ["c", "llvm", "rust"],
   "fetch.abortTimeout": ["c", "llvm", "rust"],

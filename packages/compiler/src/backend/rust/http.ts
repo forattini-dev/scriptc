@@ -179,6 +179,12 @@ export function emitRustHttpCall(
     const dyn = context.dynTypeName();
     return `{ let ${delay} = ${context.emitExpr(expr.args[0])}; match ${delay} { ${dyn}::Number(${delay}) => ${dyn}::AbortSignal(runtime::abort_signal_timeout(${delay}, sc_dyn_abort_timeout_reason())), ${delay} => sc_dyn_arg_type_fail("delay", "of type number", &${delay}), } }`;
   }
+  if (expr.fn === "fetch.abortAny" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const signals = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${signals} = ${context.emitExpr(expr.args[0])}; match ${signals} { ${dyn}::Array(${signals}) => { let ${signals} = runtime::array_values(&${signals}).into_iter().map(|signal| match signal { ${dyn}::AbortSignal(signal) => signal, signal => sc_dyn_arg_type_fail("signals", "must contain only AbortSignals", &signal), }).collect(); ${dyn}::AbortSignal(runtime::abort_signal_any(${signals})) }, ${signals} => sc_dyn_arg_type_fail("signals", "can not be converted to sequence", &${signals}), } }`;
+  }
   if (expr.fn === "fetch.abortNow" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "dyn") {
     const reason = context.nextTemporary();
