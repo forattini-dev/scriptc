@@ -552,7 +552,8 @@ class RustEmitter {
     for (const cls of this.classes.values()) {
       if (cls.base !== undefined && !this.classes.has(cls.base) &&
         cls.base !== RUNTIME_EMITTER_CLASS &&
-        cls.base !== "%Readable" && cls.base !== "%Writable" && cls.base !== "%Duplex" && cls.base !== "%Transform" &&
+        cls.base !== "%Readable" && cls.base !== "%Writable" && cls.base !== "%Duplex" &&
+        cls.base !== "%Transform" && cls.base !== "%PassThrough" &&
         (cls.base === "%DOMException" || !RUNTIME_ERROR_CLASSES.has(cls.base))) {
         this.unsupported(`inheritance from runtime-provided class '${cls.base}'`, cls.loc);
       }

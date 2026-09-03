@@ -222,8 +222,8 @@ export class RustStreamModel {
       }
       return true;
     }
-    if (node.fn === "duplex.init" || node.fn === "transform.init") {
-      const transform = node.fn === "transform.init";
+    if (node.fn === "duplex.init" || node.fn === "transform.init" || node.fn === "passthrough.init") {
+      const transform = node.fn !== "duplex.init";
       if (transform) {
         this.usesTransform = true;
         this.usesTransformSubclass = true;

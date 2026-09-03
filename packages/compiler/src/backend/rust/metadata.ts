@@ -61,14 +61,16 @@ export class RustMetadata {
   }
 
   runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null {
-    const runtimeBases = new Set(["%Readable", "%Writable", "%Duplex", "%Transform"]);
+    const runtimeBases = new Map<string, "%Readable" | "%Writable" | "%Duplex" | "%Transform">([
+      ["%Readable", "%Readable"], ["%Writable", "%Writable"], ["%Duplex", "%Duplex"],
+      ["%Transform", "%Transform"], ["%PassThrough", "%Transform"],
+    ]);
     const seen = new Set<string>();
     let cls = this.context.classes.get(name);
     while (cls?.base !== undefined && !seen.has(cls.name)) {
       seen.add(cls.name);
-      if (runtimeBases.has(cls.base)) {
-        return cls.base as "%Readable" | "%Writable" | "%Duplex" | "%Transform";
-      }
+      const runtimeBase = runtimeBases.get(cls.base);
+      if (runtimeBase !== undefined) return runtimeBase;
       cls = this.context.classes.get(cls.base);
     }
     return null;

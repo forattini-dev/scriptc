@@ -627,7 +627,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "os.userHomedir": ["c", "llvm", "rust"],
   "os.userName": ["c", "llvm", "rust"],
   "os.userShell": ["c", "llvm", "rust"],
-  "passthrough.init": ["c", "llvm"],
+  "passthrough.init": ["c", "llvm", "rust"],
   "passthrough.initDyn": ["c", "llvm"],
   "passthrough.new": ["c", "llvm", "rust"],
   "passthrough.newDyn": ["c", "llvm"],

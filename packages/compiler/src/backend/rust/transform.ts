@@ -62,7 +62,7 @@ export class RustTransformEmitter {
 
   emitLibCall(expr: RustLibCallExpr): string | null {
     if (expr.fn === "transform.new" || expr.fn === "passthrough.new") return this.emitNew(expr);
-    if (expr.fn === "transform.init") return this.emitInit(expr);
+    if (expr.fn === "transform.init" || expr.fn === "passthrough.init") return this.emitInit(expr);
     const receiver = expr.args[0];
     if (!this.isTransform(receiver)) return null;
     switch (expr.fn) {
@@ -322,6 +322,7 @@ export class RustTransformEmitter {
       flags?.kind !== "numLit" || (flags.value & ~3) !== 0 || expr.type.kind !== "void") {
       this.context.unsupported("Transform subclass constructor shape", expr.loc);
     }
+    const passthrough = expr.fn === "passthrough.init";
     const values = expr.args.map(() => this.context.nextTemporary());
     const owner = this.requiredValue(values, 0, expr.loc);
     let index = 9;
@@ -390,7 +391,7 @@ export class RustTransformEmitter {
       index += 1;
     }
     if (index !== expr.args.length) this.context.unsupported("Transform subclass constructor arity", expr.loc);
-    return `{ ${this.bind(expr.args, values)} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[1]}, ${values[3]}, ${values[4]}, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[2]}, ${values[3]}, ${values[4]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[5]}); let sc_transform = runtime::transform_new(sc_duplex, ${transform}, ${flush}, false); let _ = (${values[6]}, ${values[7]}, ${values[8]}); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
+    return `{ ${this.bind(expr.args, values)} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[1]}, ${values[3]}, ${values[4]}, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[2]}, ${values[3]}, ${values[4]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[5]}); let sc_transform = runtime::transform_new(sc_duplex, ${transform}, ${flush}, ${passthrough}); let _ = (${values[6]}, ${values[7]}, ${values[8]}); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
   }
 
   private emitNextChunkDynamic(expr: RustLibCallExpr): string {
