@@ -601,7 +601,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "net.sockWritable": ["c", "llvm", "rust"],
   "net.sockWrite": ["c", "llvm", "rust"],
   "net.sockWriteBytes": ["c", "llvm", "rust"],
-  "net.sockWriteDyn": ["c", "llvm"],
+  "net.sockWriteDyn": ["c", "llvm", "rust"],
   "num.fromString": ["c", "llvm", "rust"],
   "num.isNaN": ["c", "llvm", "rust"],
   "num.parseFloat": ["c", "llvm", "rust"],

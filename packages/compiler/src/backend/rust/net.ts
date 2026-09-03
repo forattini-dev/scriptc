@@ -385,12 +385,14 @@ export function emitRustNetCall(
     const fn = expr.fn === "net.sockWriteBytes" ? "net_socket_write_bytes" : "net_socket_end_bytes";
     return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
   }
-  if (expr.fn === "net.sockEndDyn" && expr.args.length === 2 &&
+  if ((expr.fn === "net.sockWriteDyn" || expr.fn === "net.sockEndDyn") && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "netSocket" && expr.args[1]?.type.kind === "dyn") {
     const socket = context.nextTemporary();
     const chunk = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${socket} = ${context.emitExpr(expr.args[0])}; let ${chunk} = ${context.emitExpr(expr.args[1])}; match &${chunk} { ${dyn}::String(sc_chunk) => runtime::net_socket_end_str(&${socket}, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::net_socket_end_bytes(&${socket}, sc_chunk), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), } }`;
+    const stringFn = expr.fn === "net.sockWriteDyn" ? "net_socket_write_str" : "net_socket_end_str";
+    const bytesFn = expr.fn === "net.sockWriteDyn" ? "net_socket_write_bytes" : "net_socket_end_bytes";
+    return `{ let ${socket} = ${context.emitExpr(expr.args[0])}; let ${chunk} = ${context.emitExpr(expr.args[1])}; match &${chunk} { ${dyn}::String(sc_chunk) => runtime::${stringFn}(&${socket}, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::${bytesFn}(&${socket}, sc_chunk), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), } }`;
   }
   if (expr.fn === "net.sockEnd" && expr.args.length === 1 && expr.args[0]?.type.kind === "netSocket") {
     return `runtime::net_socket_end(&(${context.emitExpr(expr.args[0])}))`;
