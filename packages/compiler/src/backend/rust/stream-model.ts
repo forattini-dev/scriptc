@@ -240,6 +240,29 @@ export class RustStreamModel {
       this.writableDynamicCompletionShape = completionShape;
       return true;
     }
+    if (node.fn === "duplex.initDyn") {
+      this.usesDuplex = true;
+      this.usesDuplexSubclass = true;
+      const args = node.args as StreamArgument[] | undefined;
+      const flags = args?.[2];
+      if (flags?.kind !== "numLit" || typeof flags.value !== "number") {
+        unsupported("malformed dynamic Duplex subclass callback flags IR");
+      }
+      let callbackIndex = 3;
+      for (let bit = 0; bit < 4; bit += 1) {
+        if ((flags.value & (1 << bit)) === 0) continue;
+        const callback = args?.[callbackIndex++];
+        if (callback?.type?.kind !== "func") unsupported("malformed dynamic Duplex subclass callback IR");
+        ensureClosureShape(callback.type);
+        if (bit >= 1) this.markRuntimeCompletion(callback.type, ensureClosureShape, unsupported);
+      }
+      const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+      registerDynBoxedFunction(completionType);
+      const completionShape = ensureClosureShape(completionType);
+      completionShape.runtimeCallback = true;
+      this.duplexDynamicCompletionShape = completionShape;
+      return true;
+    }
     if (node.fn === "duplex.init" || node.fn === "transform.init" || node.fn === "passthrough.init") {
       const transform = node.fn !== "duplex.init";
       if (transform) {

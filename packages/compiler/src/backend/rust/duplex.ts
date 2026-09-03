@@ -63,6 +63,7 @@ export class RustDuplexEmitter {
       case "duplex.new": return this.emitNew(expr);
       case "duplex.newDyn": return this.emitNewDynamic(expr);
       case "duplex.init": return this.emitInit(expr);
+      case "duplex.initDyn": return this.emitInitDynamic(expr);
       case "readable.push": return duplexReceiver ? this.emitPush(expr, false) : null;
       case "readable.pushStr": return duplexReceiver ? this.emitPushString(expr) : null;
       case "readable.pushNull": return duplexReceiver ? this.emitPushNull(expr) : null;
@@ -366,6 +367,62 @@ export class RustDuplexEmitter {
     }
     if (index !== expr.args.length) this.context.unsupported("Duplex subclass constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScDuplexRead>(${values[1]}, ${values[3]}, ${values[4]}, ${read}, Option::<ScDuplexRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScDuplexWrite, ScDuplexFinal, ScDuplexDone>(${values[2]}, ${values[3]}, ${values[4]}, ${write}, Option::<ScDuplexFinal>::None); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex = runtime::duplex_new(sc_readable, sc_writable, ${values[5]}); let _ = (${values[6]}, ${values[7]}, ${values[8]}); ${owner}.with_mut(|object| object.sc_duplex = Some(sc_duplex)); }`;
+  }
+
+  private emitInitDynamic(expr: RustLibCallExpr): string {
+    const [receiver, options, flags] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className === "%Duplex" ||
+      this.context.runtimeStreamBase(receiver.type.className) !== "%Duplex" || options?.type.kind !== "dyn" ||
+      flags?.kind !== "numLit" || (flags.value & ~3) !== 0 || expr.type.kind !== "void") {
+      this.context.unsupported("dynamic Duplex subclass constructor shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const owner = this.requiredValue(values, 0, expr.loc);
+    let index = 3;
+    let readFallback = "Option::<ScDuplexRead>::None";
+    let writeFallback = "Option::<ScDuplexWrite>::None";
+    if ((flags.value & 1) !== 0) {
+      const callback = expr.args[index];
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || callback.type.params.length !== 1 ||
+        callback.type.params[0]?.kind !== "object" || callback.type.params[0].className !== receiver.type.className) {
+        this.context.unsupported("dynamic Duplex fallback read callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, ["sc_owner"], expr.loc);
+      readFallback = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScDuplexRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |_sc_size| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if ((flags.value & 2) !== 0) {
+      const callback = expr.args[index];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      const completion = params[3];
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || params.length !== 4 ||
+        params[0]?.kind !== "object" || params[0].className !== receiver.type.className ||
+        params[1]?.kind !== "bytes" || params[1].elem !== "u8" || params[2]?.kind !== "string" ||
+        completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 0) {
+        this.context.unsupported("dynamic Duplex fallback write callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const completionShape = this.context.closureShapeForType(completion, expr.loc);
+      const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } let sc_writable = runtime::duplex_writable(&sc_completion.0); runtime::writable_complete_write(&sc_writable, sc_length); sc_duplex_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, [
+        "sc_owner", "sc_chunk", "runtime::string(\"buffer\")", done,
+      ], expr.loc);
+      writeFallback = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScDuplexWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_duplex, sc_chunk, sc_length, sc_done| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_duplex, sc_done, std::cell::Cell::new(false))); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if (index !== expr.args.length) this.context.unsupported("dynamic Duplex subclass constructor arity", expr.loc);
+    const dyn = this.context.dynTypeName();
+    const optionsValue = this.requiredValue(values, 1, expr.loc);
+    const option = (key: string): string =>
+      `match &${optionsValue} { ${dyn}::Object(..) => sc_dyn_key_get(&${optionsValue}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const read = `let sc_read_option = ${option("read")}; let sc_read = if sc_dyn_function_identity(&sc_read_option).is_some() { let sc_context = std::rc::Rc::new(sc_read_option); Some(ScDuplexRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_size| { let _ = sc_dyn_call(&sc_context, &[${dyn}::Number(sc_size)], "read"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${readFallback} };`;
+    const completionShape = this.dynamicCompletionShape(expr.loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } let sc_writable = runtime::duplex_writable(&sc_completion.0); runtime::writable_complete_write(&sc_writable, sc_length); sc_duplex_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+    const done = `${dyn}::${this.context.dynFunctionVariant(completionShape)}(${completion}, runtime::empty_string(), runtime::map_new())`;
+    const write = `let sc_write_option = ${option("write")}; let sc_write = if sc_dyn_function_identity(&sc_write_option).is_some() { let sc_context = std::rc::Rc::new(sc_write_option); Some(ScDuplexWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_duplex, sc_chunk, sc_length, sc_done| { let sc_completion = std::rc::Rc::new((sc_duplex, sc_done, std::cell::Cell::new(false))); let _ = sc_dyn_call(&sc_context, &[${dyn}::Buffer(sc_chunk), ${dyn}::String(runtime::string("buffer")), ${done}], "write"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${writeFallback} };`;
+    const init = `let sc_hwm = ${option("highWaterMark")}; let sc_rhwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("readableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_whwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("writableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false)); let sc_allow_half_open = !matches!(${option("allowHalfOpen")}, ${dyn}::Boolean(false)); let sc_encoding = ${option("encoding")};`;
+    return `{ ${this.bind(expr.args, values)} ${read} ${write} ${init} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScDuplexRead>(sc_rhwm, sc_auto_destroy, sc_emit_close, sc_read, Option::<ScDuplexRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScDuplexWrite, ScDuplexFinal, ScDuplexDone>(sc_whwm, sc_auto_destroy, sc_emit_close, sc_write, Option::<ScDuplexFinal>::None); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex = runtime::duplex_new(sc_readable, sc_writable, sc_allow_half_open); ${owner}.with_mut(|object| object.sc_duplex = Some(sc_duplex)); }`;
   }
 
   private emitPushString(expr: RustLibCallExpr): string {
