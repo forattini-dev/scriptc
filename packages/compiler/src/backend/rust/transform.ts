@@ -76,6 +76,8 @@ export class RustTransformEmitter {
       case "writable.end": return this.emitEnd(expr);
       case "writable.cork": return this.emitCork(expr);
       case "writable.uncork": return this.emitUncork(expr);
+      case "stream.setTransform": return this.emitSetCallback(expr, true);
+      case "stream.setFlush": return this.emitSetCallback(expr, false);
       case "stream.prop": return this.emitProp(expr);
       default: return null;
     }
@@ -475,6 +477,26 @@ export class RustTransformEmitter {
     const values = expr.args.map(() => this.context.nextTemporary());
     const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
     return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; runtime::readable_set_encoding(&runtime::transform_readable(&sc_transform), &${values[1]}); ${values[0]} }`;
+  }
+
+  private emitSetCallback(expr: RustLibCallExpr, transform: boolean): string {
+    const [receiver, callback] = expr.args;
+    if (!this.isTransform(receiver) || callback?.type.kind !== "func" ||
+      expr.args.length !== 2 || expr.type.kind !== "void") {
+      this.context.unsupported(`Transform assigned ${transform ? "transform" : "flush"} callback shape`, expr.loc);
+    }
+    const shapes = transform
+      ? this.context.streams.transformCallbackShapes
+      : this.context.streams.transformFlushShapes;
+    const shape = shapes.get(typeKey(callback.type));
+    if (shape === undefined) {
+      this.context.unsupported(`unregistered assigned Transform ${transform ? "transform" : "flush"} callback`, expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
+    const runtime = transform ? "transform_set_callback" : "transform_set_flush_callback";
+    const variant = transform ? "ScTransformCallback" : "ScTransformFlush";
+    return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; runtime::${runtime}(&sc_transform, ${variant}::${this.variant(shape)}(${values[1]})); }`;
   }
 
   private emitPushNull(expr: RustLibCallExpr): string {

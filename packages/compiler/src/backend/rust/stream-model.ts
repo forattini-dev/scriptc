@@ -94,7 +94,8 @@ export class RustStreamModel {
       }
     }
     if (node.fn === "stream.setRead" || node.fn === "stream.setWrite" ||
-        node.fn === "stream.setFinal" || node.fn === "stream.setDestroy") {
+        node.fn === "stream.setFinal" || node.fn === "stream.setDestroy" ||
+        node.fn === "stream.setTransform" || node.fn === "stream.setFlush") {
       const args = node.args as StreamArgument[] | undefined;
       const receiver = args?.[0]?.type;
       const callback = args?.[1]?.type;
@@ -135,6 +136,15 @@ export class RustStreamModel {
         this.usesWritable = true;
         this.usesWritableDestroy = true;
         ensureClosureShape(callback);
+        this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
+        return true;
+      }
+      if ((node.fn === "stream.setTransform" || node.fn === "stream.setFlush") &&
+          (receiver.className === "%Transform" || receiver.className === "%PassThrough")) {
+        this.usesTransform = true;
+        const shape = ensureClosureShape(callback);
+        (node.fn === "stream.setTransform" ? this.transformCallbackShapes : this.transformFlushShapes)
+          .set(typeKey(callback), shape);
         this.markRuntimeCompletion(callback, ensureClosureShape, unsupported);
         return true;
       }

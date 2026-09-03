@@ -159,6 +159,21 @@ where
     transform.with(|data| data.transform_callback.clone())
 }
 
+pub fn transform_set_callback<L, R, W, F, C, T, H>(
+    transform: &JsTransform<L, R, W, F, C, T, H>,
+    callback: T,
+) where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+    T: Clone + Trace + 'static,
+    H: Clone + Trace + 'static,
+{
+    transform.with_mut(|data| data.transform_callback = Some(callback));
+}
+
 pub fn transform_flush_callback<L, R, W, F, C, T, H>(
     transform: &JsTransform<L, R, W, F, C, T, H>,
 ) -> Option<H>
@@ -172,6 +187,21 @@ where
     H: Clone + Trace + 'static,
 {
     transform.with(|data| data.flush_callback.clone())
+}
+
+pub fn transform_set_flush_callback<L, R, W, F, C, T, H>(
+    transform: &JsTransform<L, R, W, F, C, T, H>,
+    callback: H,
+) where
+    L: Clone + Trace + 'static,
+    R: Clone + Trace + 'static,
+    W: Clone + Trace + 'static,
+    F: Clone + Trace + 'static,
+    C: Clone + Trace + 'static,
+    T: Clone + Trace + 'static,
+    H: Clone + Trace + 'static,
+{
+    transform.with_mut(|data| data.flush_callback = Some(callback));
 }
 
 pub fn transform_is_passthrough<L, R, W, F, C, T, H>(
