@@ -2,12 +2,22 @@ pub struct AbortSignalData<T: HeapValue> {
     aborted: bool,
     reason: Option<T>,
     dependents: Vec<GcWeak<AbortSignalData<T>>>,
+    listeners: Vec<AbortListener<T>>,
+}
+
+#[derive(Clone)]
+struct AbortListener<T: HeapValue> {
+    notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
 impl<T: HeapValue> Trace for AbortSignalData<T> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         if let Some(reason) = &self.reason {
             reason.trace_value(tracer);
+        }
+        for listener in &self.listeners {
+            (listener.trace)(tracer);
         }
     }
 }
@@ -16,6 +26,7 @@ impl<T: HeapValue> ClearEdges for AbortSignalData<T> {
     fn clear_edges(&mut self) {
         self.reason = None;
         self.dependents.clear();
+        self.listeners.clear();
     }
 }
 
@@ -26,6 +37,7 @@ pub fn abort_controller_new<T: HeapValue>() -> JsAbortSignal<T> {
         aborted: false,
         reason: None,
         dependents: Vec::new(),
+        listeners: Vec::new(),
     })
 }
 
@@ -34,6 +46,7 @@ pub fn abort_signal_new_aborted<T: HeapValue>(reason: T) -> JsAbortSignal<T> {
         aborted: true,
         reason: Some(reason),
         dependents: Vec::new(),
+        listeners: Vec::new(),
     })
 }
 
@@ -77,19 +90,35 @@ pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T>
     signal.with(|signal| signal.reason.clone())
 }
 
+pub fn abort_signal_add_listener<T: HeapValue>(
+    signal: &JsAbortSignal<T>,
+    notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
+    trace: Rc<dyn Fn(&mut Tracer<'_>)>,
+) {
+    signal.with_mut(|signal| signal.listeners.push(AbortListener { notify, trace }));
+}
+
 pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>, reason: T) {
-    let dependents = signal.with_mut(|signal| {
+    let dispatch = signal.with_mut(|signal| {
         if signal.aborted {
             return None;
         }
         signal.aborted = true;
         signal.reason = Some(reason.clone());
-        Some(std::mem::take(&mut signal.dependents))
+        Some((
+            std::mem::take(&mut signal.dependents),
+            signal.listeners.clone(),
+        ))
     });
-    let Some(dependents) = dependents else { return };
+    let Some((dependents, listeners)) = dispatch else {
+        return;
+    };
     for dependent in dependents {
         if let Some(dependent) = dependent.upgrade() {
             abort_controller_abort(&dependent, reason.clone());
         }
+    }
+    for listener in listeners {
+        (listener.notify)(signal);
     }
 }

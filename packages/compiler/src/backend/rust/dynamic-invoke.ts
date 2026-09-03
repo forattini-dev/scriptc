@@ -592,7 +592,11 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitAbortSignalArm(): void {
-    this.context.line(`${this.dyn}::AbortSignal(signal) => match method { "throwIfAborted" => { if let Some(reason) = runtime::abort_signal_reason(signal) { runtime::throw_value(reason); } ${this.dyn}::Undefined }, _ => runtime::throw_type_error(format!("{callee_name} is not a function")), },`);
+    this.open(`${this.dyn}::AbortSignal(signal) => match method {`);
+    this.context.line(`"throwIfAborted" => { if let Some(reason) = runtime::abort_signal_reason(signal) { runtime::throw_value(reason); } ${this.dyn}::Undefined },`);
+    this.context.line(`"addEventListener" => { let event = match args.first() { Some(${this.dyn}::String(value)) => value.as_ref(), value => sc_dyn_arg_type_fail("type", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined); if sc_dyn_function_identity(&callback).is_none() { sc_dyn_arg_type_fail("listener", "of type function", &callback); } if event == "abort" { let traced = callback.clone(); runtime::abort_signal_add_listener(signal, std::rc::Rc::new(move |signal| { let _this_guard = sc_dyn_this_push(${this.dyn}::AbortSignal(signal.clone())); let _ = sc_dyn_call(&callback, &[], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer))); } ${this.dyn}::Undefined },`);
+    this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+    this.close("},");
   }
 
   private emitHttpHeadersArm(): void {
