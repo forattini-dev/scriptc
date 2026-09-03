@@ -98,6 +98,13 @@ pub fn abort_signal_add_listener<T: HeapValue>(
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 ) {
     signal.with_mut(|signal| {
+        if signal
+            .listeners
+            .iter()
+            .any(|listener| listener.identity == identity)
+        {
+            return;
+        }
         signal.listeners.push(AbortListener {
             identity,
             notify,
