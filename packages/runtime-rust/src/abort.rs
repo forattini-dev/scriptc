@@ -1,6 +1,7 @@
 pub struct AbortSignalData<T: HeapValue> {
     aborted: bool,
     reason: Option<T>,
+    dependents: Vec<GcWeak<AbortSignalData<T>>>,
 }
 
 impl<T: HeapValue> Trace for AbortSignalData<T> {
@@ -14,6 +15,7 @@ impl<T: HeapValue> Trace for AbortSignalData<T> {
 impl<T: HeapValue> ClearEdges for AbortSignalData<T> {
     fn clear_edges(&mut self) {
         self.reason = None;
+        self.dependents.clear();
     }
 }
 
@@ -23,6 +25,7 @@ pub fn abort_controller_new<T: HeapValue>() -> JsAbortSignal<T> {
     Gc::new(AbortSignalData {
         aborted: false,
         reason: None,
+        dependents: Vec::new(),
     })
 }
 
@@ -30,6 +33,7 @@ pub fn abort_signal_new_aborted<T: HeapValue>(reason: T) -> JsAbortSignal<T> {
     Gc::new(AbortSignalData {
         aborted: true,
         reason: Some(reason),
+        dependents: Vec::new(),
     })
 }
 
@@ -46,7 +50,7 @@ pub fn abort_signal_timeout<T: HeapValue>(delay_ms: f64, reason: T) -> JsAbortSi
 
 pub fn abort_signal_any<T: HeapValue>(signals: Vec<JsAbortSignal<T>>) -> JsAbortSignal<T> {
     let combined = abort_controller_new();
-    for signal in signals {
+    for signal in &signals {
         let reason = signal.with(|signal| {
             if signal.aborted {
                 signal.reason.clone()
@@ -56,8 +60,11 @@ pub fn abort_signal_any<T: HeapValue>(signals: Vec<JsAbortSignal<T>>) -> JsAbort
         });
         if let Some(reason) = reason {
             abort_controller_abort(&combined, reason);
-            break;
+            return combined;
         }
+    }
+    for signal in signals {
+        signal.with_mut(|signal| signal.dependents.push(combined.downgrade()));
     }
     combined
 }
@@ -71,11 +78,18 @@ pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T>
 }
 
 pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>, reason: T) {
-    signal.with_mut(|signal| {
+    let dependents = signal.with_mut(|signal| {
         if signal.aborted {
-            return;
+            return None;
         }
         signal.aborted = true;
-        signal.reason = Some(reason);
+        signal.reason = Some(reason.clone());
+        Some(std::mem::take(&mut signal.dependents))
     });
+    let Some(dependents) = dependents else { return };
+    for dependent in dependents {
+        if let Some(dependent) = dependent.upgrade() {
+            abort_controller_abort(&dependent, reason.clone());
+        }
+    }
 }
