@@ -921,6 +921,28 @@ pub fn island_to_string(value: &IslandValue) -> JsString {
     with_island_state(|state| island_render(value.0.clone(), &mut state.context))
 }
 
+pub fn island_inspect(value: &IslandValue, _recurse: f64, _depth: f64) -> JsString {
+    if value.0.is_undefined() {
+        return string("undefined");
+    }
+    if value.0.is_null() {
+        return string("null");
+    }
+    if let Some(number) = value.0.as_number() {
+        return inspect_number(number);
+    }
+    if let Some(text) = value.0.as_string() {
+        return inspect_string(&string(&text.to_std_string_lossy()));
+    }
+    if let Some(boolean) = value.0.as_boolean() {
+        return string(&display_bool(boolean));
+    }
+    throw_type_error(format!(
+        "util.inspect of a composite 'any' value (typeof '{}') is not supported yet — validate with 'as <type>' first",
+        value.0.type_of()
+    ))
+}
+
 /// Arm one island timer on the SHARED native timer heap.
 ///
 /// Island `setTimeout`/`setInterval` ride `event_loop`'s `TIMER_TASKS` —

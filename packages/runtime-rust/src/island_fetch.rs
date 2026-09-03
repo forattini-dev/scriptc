@@ -191,7 +191,9 @@ fn island_host_fetch(
         let body_data = body.clone();
         http_request_on_data(
             &response,
-            Rc::new(move |chunk| body_data.borrow_mut().extend(bytes_u8_values(&chunk))),
+            Rc::new(move |chunk, _encoding_utf8| {
+                body_data.borrow_mut().extend(bytes_u8_values(&chunk));
+            }),
             Rc::new(|_| {}),
             false,
         );

@@ -217,7 +217,7 @@ fn island_http_exchange_begin(
     let data_wiring = wiring;
     http_request_on_data(
         &request,
-        Rc::new(move |chunk| {
+        Rc::new(move |chunk, _encoding_utf8| {
             island_net_call(&data_wiring, "onData", |context| {
                 let bytes = BoaJsUint8Array::from_iter(bytes_u8_values(&chunk), context)
                     .map(JsValue::from)
@@ -456,7 +456,7 @@ fn island_host_http_start(
         let data_callbacks = response_callbacks.clone();
         http_request_on_data(
             &response,
-            Rc::new(move |chunk| {
+            Rc::new(move |chunk, _encoding_utf8| {
                 island_net_call(&data_callbacks, "onData", |context| {
                     let bytes = BoaJsUint8Array::from_iter(bytes_u8_values(&chunk), context)
                         .map(JsValue::from)

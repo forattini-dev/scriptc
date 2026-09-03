@@ -48,6 +48,22 @@ export function emitRustDynamicLibCall(
     arg?.type.kind === "dyn" && expr.type.kind === "dyn") {
     return `runtime::util_parse_args(${context.emitExpr(arg)})`;
   }
+  if (expr.fn === "insp.jsonDyn" && expr.args.length === 1 &&
+    arg?.type.kind === "dyn" && expr.type.kind === "string") {
+    const value = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; runtime::json_stringify(&${value}) }`;
+  }
+  if (expr.fn === "insp.jsval" && expr.args.length === 3 &&
+    arg?.type.kind === "jsval" && expr.type.kind === "string") {
+    const recurse = expr.args[1];
+    const depth = expr.args[2];
+    if (recurse?.type.kind !== "f64" || depth?.type.kind !== "f64") {
+      context.unsupported("island inspect arguments", expr.loc);
+    }
+    const value = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${value} = ${context.emitExpr(arg)}; match &${value} { ${dyn}::Island(sc_value) => runtime::island_inspect(sc_value, ${context.emitExpr(recurse)}, ${context.emitExpr(depth)}), sc_value => sc_dyn_inspect(sc_value, ${context.emitExpr(recurse)}, ${context.emitExpr(depth)}), } }`;
+  }
   if (expr.fn === "dyn.this" && expr.args.length === 0) return "sc_dyn_this_get()";
   if (expr.fn === "dyn.defineProps" && expr.args.length === 2 &&
     arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn") {
