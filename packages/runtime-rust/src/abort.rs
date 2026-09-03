@@ -41,6 +41,12 @@ pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T>
     signal.with(|signal| signal.reason.clone())
 }
 
-pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>) {
-    signal.with_mut(|signal| signal.aborted = true);
+pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>, reason: T) {
+    signal.with_mut(|signal| {
+        if signal.aborted {
+            return;
+        }
+        signal.aborted = true;
+        signal.reason = Some(reason);
+    });
 }
