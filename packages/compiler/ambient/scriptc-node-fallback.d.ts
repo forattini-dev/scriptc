@@ -1177,6 +1177,7 @@ declare module "fs/promises" {
     options?: { mode?: number; encoding?: "utf8" | "utf-8"; flag?: string; [option: string]: unknown },
   ): Promise<void>;
   export function writeFile(path: string, data: string, encoding: "utf8" | "utf-8"): Promise<void>;
+  export function access(path: string, mode?: number): Promise<void>;
   export function mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void>;
   export function readdir(path: string): Promise<string[]>;
   export function rm(path: string): Promise<void>;

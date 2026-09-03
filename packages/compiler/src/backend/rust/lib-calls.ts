@@ -414,11 +414,11 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fsp.unlink" && expr.args.length === 1 && arg !== undefined) {
     return context.emitPromiseFromSync([arg], (value) => `runtime::fs_unlink(&${value(0)})`);
   }
-  if (expr.fn === "fsp.chmod" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
-    return context.emitPromiseFromSync(
-      [arg, expr.args[1]],
-      (value) => `runtime::fs_chmod(&${value(0)}, ${value(1)})`,
-    );
+  // chmod and access share the (path, mode) settled-promise shape over
+  // the sync runtime call; only the runtime function differs.
+  if ((expr.fn === "fsp.chmod" || expr.fn === "fsp.access") && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
+    const fsFn = expr.fn === "fsp.chmod" ? "fs_chmod" : "fs_access";
+    return context.emitPromiseFromSync([arg, expr.args[1]], (value) => `runtime::${fsFn}(&${value(0)}, ${value(1)})`);
   }
   if (expr.fn === "fsp.rename" && expr.args.length === 2 && arg !== undefined && expr.args[1] !== undefined) {
     return context.emitPromiseFromSync(

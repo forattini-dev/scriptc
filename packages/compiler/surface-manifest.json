@@ -1176,6 +1176,17 @@
       "note": "recognized module (bare and node:-prefixed specifiers)"
     },
     {
+      "id": "node-builtin.fs.promises.access",
+      "kind": "node-builtin",
+      "name": "fs/promises.access",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm",
+        "rust"
+      ]
+    },
+    {
       "id": "node-builtin.fs.promises.chmod",
       "kind": "node-builtin",
       "name": "fs/promises.chmod",

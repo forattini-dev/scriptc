@@ -3209,6 +3209,11 @@ export type IrLibFn =
   | "process.stdoutWriteBytesCb"
   | "process.stderrWriteBytesCb"
   | "fsp.readFile"
+  /** fs/promises.access(path, mode): the settled-promise twin of
+   * fs.accessSync — the same probe, fulfilling on success and rejecting
+   * with the errno error otherwise (the `try { await access(p) }` idiom
+   * every scaffolder uses to test for an existing path). */
+  | "fsp.access"
   | "fsp.writeFile"
   /** fs.promises.writeFile(path, data, { mode }): the settled-promise
    * twin of fs.writeFileModeSync. */

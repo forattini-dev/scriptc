@@ -312,6 +312,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fs.writeFileSyncBytes": ["c", "llvm", "rust"],
   "fs.writeStrSync": ["c", "llvm", "rust"],
   "fs.writeSync": ["c", "llvm", "rust"],
+  "fsp.access": ["c", "llvm", "rust"],
   "fsp.chmod": ["c", "llvm", "rust"],
   "fsp.lchmodChk": ["c", "llvm", "rust"],
   "fsp.mkdir": ["c", "llvm", "rust"],

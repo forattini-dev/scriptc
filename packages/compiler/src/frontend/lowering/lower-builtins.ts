@@ -1534,17 +1534,32 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         loc,
       };
     }
-    // accessSync(p, mode?): an omitted mode is Node's F_OK (0). The mode
-    // is an ordinary number — fs.constants.* reads bake to literals.
-    if (bi.module === "fs" && bi.member === "accessSync") {
+    // accessSync(p, mode?) and its fs/promises twin access(p, mode?): an
+    // omitted mode is Node's F_OK (0). The mode is an ordinary number —
+    // fs.constants.* reads bake to literals. The promise form runs the
+    // same probe and settles: `await access(p)` fulfils when the check
+    // passes and REJECTS with the errno error when it does not, which is
+    // the whole idiom (`try { await access(p) } catch { … }`).
+    const isAccessSync = bi.module === "fs" && bi.member === "accessSync";
+    if (isAccessSync || (bi.module === "fs/promises" && bi.member === "access")) {
+      const spelling = isAccessSync ? "accessSync" : "access";
       if (expr.arguments.length < 1 || expr.arguments.length > 2) {
-        L.noLowering(`accessSync with ${expr.arguments.length} arguments`, expr);
+        L.noLowering(`${spelling} with ${expr.arguments.length} arguments`, expr);
       }
       const path = L.lowerExprExpecting(expr.arguments[0]!, STRING);
       const mode: IrExpr = expr.arguments[1]
         ? L.lowerExprExpecting(expr.arguments[1], F64)
         : { kind: "numLit", value: 0, type: F64, loc };
-      return { kind: "libCall", fn: "fs.accessSync", args: [path, mode], type: VOID, loc };
+      if (isAccessSync) {
+        return { kind: "libCall", fn: "fs.accessSync", args: [path, mode], type: VOID, loc };
+      }
+      return {
+        kind: "libCall",
+        fn: "fsp.access",
+        args: [path, mode],
+        type: { kind: "promise", inner: VOID },
+        loc,
+      };
     }
     if (bi.module === "fs" && bi.member === "writeFileSync" && expr.arguments.length === 2) {
       const dataIr = L.mapTypeOf(L.typeOf(expr.arguments[1]!));

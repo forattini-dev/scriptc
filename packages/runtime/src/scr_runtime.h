@@ -2321,6 +2321,7 @@ ScrPromise *scr_fsp_read_file(ScrStr *path);
 ScrPromise *scr_fsp_write_file(ScrStr *path, ScrStr *data);
 ScrPromise *scr_fsp_write_file_mode(ScrStr *path, ScrStr *data, double mode);
 ScrPromise *scr_fsp_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode);
+ScrPromise *scr_fsp_access(ScrStr *path, double mode);
 ScrPromise *scr_fsp_mkdir(ScrStr *path);
 ScrPromise *scr_fsp_mkdir_mode(ScrStr *path, double mode);
 ScrPromise *scr_fsp_mkdir_recursive(ScrStr *path);
