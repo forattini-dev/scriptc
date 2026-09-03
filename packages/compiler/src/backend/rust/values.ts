@@ -187,6 +187,7 @@ export class RustValueEmitter {
       case "void": return "()";
       case "f64": return "f64";
       case "date": return "f64";
+      case "procStream": return "f64";
       case "bool": return "bool";
       case "string": return "runtime::JsString";
       case "classval": {

@@ -649,7 +649,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "path.win32Resolve": ["c", "llvm", "rust"],
   "path.win32ToNamespacedPath": ["c", "llvm", "rust"],
   "perf.now": ["c", "llvm", "rust"],
-  "procStream.write": ["c", "llvm"],
+  "procStream.write": ["c", "llvm", "rust"],
   "process.activeResources": ["c", "llvm", "rust"],
   "process.arch": ["c", "llvm", "rust"],
   "process.argv": ["c", "llvm", "rust"],

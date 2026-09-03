@@ -132,6 +132,13 @@ export function emitRustProcessCall(
     const target = expr.fn === "process.stdoutWrite" ? "stdout" : "stderr";
     return `runtime::process_${target}_write(&(${context.emitExpr(arg)}))`;
   }
+  if (expr.fn === "procStream.write" && expr.args.length === 2 &&
+      arg?.type.kind === "procStream" && secondArg?.type.kind === "string" &&
+      expr.type.kind === "bool") {
+    const stream = context.nextTemporary();
+    const value = context.nextTemporary();
+    return `{ let ${stream} = ${context.emitExpr(arg)}; let ${value} = ${context.emitExpr(secondArg)}; if ${stream} == 1.0 { runtime::process_stdout_write(&${value}) } else { runtime::process_stderr_write(&${value}) } }`;
+  }
   return null;
 }
 
