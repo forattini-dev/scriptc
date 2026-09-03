@@ -5794,6 +5794,7 @@ export function canConvertToDyn(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
+  visiting: Set<string> = new Set(),
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   // bytes<u8> and boxable functions are dyn kinds the walker boxes
@@ -5819,19 +5820,17 @@ export function canConvertToDyn(
     return (
       t.inner.kind === "dyn" ||
       t.inner.kind === "void" ||
-      canConvertToDyn(t.inner, getRecord, getUnion)
+      canConvertToDyn(t.inner, getRecord, getUnion, visiting)
     );
   }
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
-    // JSON-safe arms box as before; BOXABLE FUNCTION arms join them (the
-    // invalid-input probes iterate `[1, null, () => {}, true]` — the
-    // union's func arm crosses through the checked-dynamic function
-    // boundary exactly like a bare func dynFrom).
-    return !!def && def.arms.every((a) =>
-      a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion) ||
-      (a.kind === "func" && canBoxFuncIntoDyn(a, getRecord, getUnion)),
-    );
+    if (!def) return false;
+    if (visiting.has(t.unionId)) return true;
+    visiting.add(t.unionId);
+    const convertible = def.arms.every((arm) => canConvertToDyn(arm, getRecord, getUnion, visiting));
+    visiting.delete(t.unionId);
+    return convertible;
   }
   return false;
 }

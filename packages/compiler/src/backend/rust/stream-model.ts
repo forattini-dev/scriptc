@@ -283,6 +283,16 @@ export class RustStreamModel {
       this.duplexDynamicCompletionShape = completionShape;
       return true;
     }
+    if (node.fn === "transform.newDyn" || node.fn === "passthrough.newDyn") {
+      this.usesTransform = true;
+      this.usesTransformSubclass = true;
+      const completionType: IrFuncType = { kind: "func", params: [DYN, DYN], ret: VOID };
+      registerDynBoxedFunction(completionType);
+      const completionShape = ensureClosureShape(completionType);
+      completionShape.runtimeCallback = true;
+      this.transformDynamicCompletionShape = completionShape;
+      return true;
+    }
     if (node.fn === "readable.fromArr" || node.fn === "readable.nextChunk" ||
         node.fn === "readable.nextChunkDyn") {
       this.usesReadable = true;
