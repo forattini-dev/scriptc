@@ -351,6 +351,9 @@ export function emitRustHttpCall(
   if (expr.fn === "http.resEnd" && expr.args.length === 1 && expr.args[0]?.type.kind === "httpRes") {
     return `runtime::http_response_end(&(${context.emitExpr(expr.args[0])}))`;
   }
+  if (expr.fn === "http.resDestroy" && expr.args.length === 1 && expr.args[0]?.type.kind === "httpRes") {
+    return `runtime::http_response_destroy(&(${context.emitExpr(expr.args[0])}))`;
+  }
   if (expr.fn === "http.reqOnData" && expr.args.length === 3) {
     const callbackType = expr.args[1]?.type;
     if (callbackType?.kind !== "func") context.unsupported("http.reqOnData callback", expr.loc);

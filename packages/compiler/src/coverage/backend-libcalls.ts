@@ -383,7 +383,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "http.requestConnCb": ["c", "llvm"],
   "http.requestUrl": ["c", "llvm", "rust"],
   "http.requestUrlCb": ["c", "llvm", "rust"],
-  "http.resDestroy": ["c", "llvm"],
+  "http.resDestroy": ["c", "llvm", "rust"],
   "http.resEnd": ["c", "llvm", "rust"],
   "http.resEndBytes": ["c", "llvm", "rust"],
   "http.resEndDyn": ["c", "llvm", "rust"],

@@ -745,6 +745,33 @@ fn http_response_dispatch_close(response: &JsHttpResponse) {
     response.with_mut(|response| response.request = None);
 }
 
+pub fn http_response_destroy(response: &JsHttpResponse) {
+    let socket = response.with_mut(|response| {
+        if response.destroyed {
+            return None;
+        }
+        response.destroyed = true;
+        response.ended = true;
+        response.cork_buffer.clear();
+        response.cork_callbacks.clear();
+        response.finish_listeners.clear();
+        response.socket.clone()
+    });
+    let Some(socket) = socket else {
+        http_response_dispatch_close(response);
+        return;
+    };
+    let invoke_response = response.clone();
+    let trace_response = response.clone();
+    net_socket_on_close(
+        &socket,
+        Rc::new(move || http_response_dispatch_close(&invoke_response)),
+        Rc::new(move |tracer| tracer.edge(&trace_response)),
+        true,
+    );
+    net_socket_destroy(&socket);
+}
+
 pub fn http_response_end(response: &JsHttpResponse) {
     http_response_end_raw(response, &[]);
 }
