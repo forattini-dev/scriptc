@@ -13,7 +13,7 @@ import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
-import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, textCodecBindingDecl } from "./lower-builtins.js";
+import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, textCodecBindingDecl } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
 import { isVarDeclared, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
@@ -1269,19 +1269,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             }
           }
         }
-        // `const execFileAsync = promisify(execFile)` at file scope: no
-        // global exists (the promisified function value never does) — the
-        // symbol registers HERE, before any use site can lower, and the
-        // statement lowering skips the declaration by the same check. A
-        // bad promisify target reports here (recorded once; the statement
-        // lowering poisons too, like every collectGlobals failure).
-        if (ts.isIdentifier(decl.name) && decl.initializer && isPromisifyCall(L, decl.initializer)) {
+        // Special function bindings (`promisify(execFile)` and the
+        // runtime-selected http/https client) register HERE before uses.
+        // Their values never exist, so no global storage is allocated.
+        if (ts.isIdentifier(decl.name) && decl.initializer && isConst) {
           try {
-            L.promisifiedExecFileDecl(decl.name, decl.initializer);
+            if (L.promisifiedExecFileDecl(decl.name, decl.initializer)) continue;
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
+            continue;
           }
-          continue;
         }
         // `const inspect = require("util").inspect` at file scope: a
         // named import in const clothing (builtinImportOf resolves uses)

@@ -536,6 +536,23 @@ export function emitRustHttpCall(
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::http_agent_client_request_callback(${args}, ${invoke}, ${trace})`);
   }
+  if (expr.fn === "https.requestFn" && expr.args.length === 10) {
+    const [secure, host, port, path, method, timeout, headers, autoEnd, reject, ca] = expr.args;
+    if (secure?.type.kind !== "bool" || host?.type.kind !== "string" || port?.type.kind !== "f64" ||
+        path?.type.kind !== "string" || method?.type.kind !== "string" || timeout?.type.kind !== "f64" ||
+        headers?.type.kind !== "array" || headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool" ||
+        reject?.type.kind !== "bool" || (ca?.type.kind !== "string" &&
+          (ca?.type.kind !== "bytes" || ca.type.elem !== "u8")) || expr.type.kind !== "httpClientReq") {
+      context.unsupported("https.requestFn shape", expr.loc);
+    }
+    const values = expr.args.map(() => context.nextTemporary());
+    const bind = expr.args.map((arg, index) => `let ${values[index]} = ${context.emitExpr(arg)};`).join(" ");
+    const caValue = ca.type.kind === "string"
+      ? values[9]
+      : `runtime::bytes_to_string(&${values[9]}, &runtime::string("utf8"))`;
+    const common = `&${values[1]}, ${values[2]}, &${values[3]}, &${values[4]}, ${values[5]}, &${values[6]}, ${values[7]}`;
+    return `{ ${bind} if ${values[0]} { runtime::https_client_request(${common}, ${values[8]}, &${caValue}) } else { let _ = (&${values[8]}, &${values[9]}); runtime::http_client_request(${common}) } }`;
+  }
   if ((expr.fn === "https.request" || expr.fn === "https.requestCb") &&
       (expr.args.length === 9 || expr.args.length === 10)) {
     const [host, port, path, method, timeout, headers, autoEnd, reject, ca, callbackExpr] = expr.args;

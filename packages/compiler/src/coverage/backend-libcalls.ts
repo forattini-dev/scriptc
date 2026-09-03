@@ -488,7 +488,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "https.requestAgent": ["c"],
   "https.requestAgentCb": ["c"],
   "https.requestCb": ["c", "llvm", "rust"],
-  "https.requestFn": ["c"],
+  "https.requestFn": ["c", "rust"],
   "https.requestFnCb": ["c"],
   "https.requestUrl": ["c", "llvm", "rust"],
   "https.requestUrlCb": ["c", "llvm", "rust"],
