@@ -446,9 +446,15 @@ export function emitRustHttpCall(
     if (callbackType?.kind !== "func") context.unsupported("http.resOnClose callback", expr.loc);
     return emitResponseCloseListener(expr, callbackType, context);
   }
-  if (expr.fn === "http.reqPipeRes" && expr.args.length === 2 &&
-      expr.args[0]?.type.kind === "httpReq" && expr.args[1]?.type.kind === "httpRes") {
-    return `runtime::http_request_pipe_response(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
+  if ((expr.fn === "http.reqPipeRes" || expr.fn === "http.reqPipeClient" || expr.fn === "http.reqPipeSock") &&
+      expr.args.length === 2 && expr.args[0]?.type.kind === "httpReq") {
+    const target = expr.args[1];
+    const expected = expr.fn === "http.reqPipeRes" ? "httpRes"
+      : expr.fn === "http.reqPipeClient" ? "httpClientReq" : "netSocket";
+    if (target?.type.kind !== expected) context.unsupported(`${expr.fn} target`, expr.loc);
+    const suffix = expr.fn === "http.reqPipeRes" ? "response"
+      : expr.fn === "http.reqPipeClient" ? "client" : "socket";
+    return `runtime::http_request_pipe_${suffix}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(target)}))`;
   }
   if (expr.fn === "http.reqStatusCode" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "httpReq") {

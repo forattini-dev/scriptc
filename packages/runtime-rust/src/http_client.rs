@@ -289,7 +289,7 @@ fn http_client_new_with_socket(
         ca: ca.clone(),
         headers: http_client_headers(headers),
         body: Vec::new(),
-        half_close_after_write: true,
+        half_close_after_write: false,
         sent: false,
         destroyed: false,
         response_listeners: Vec::new(),

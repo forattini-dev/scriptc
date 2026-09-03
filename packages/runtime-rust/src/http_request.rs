@@ -148,28 +148,67 @@ pub fn http_request_on_end(
     });
 }
 
-pub fn http_request_pipe_response(request: &JsHttpRequest, response: &JsHttpResponse) {
-    let write_response = response.clone();
-    let write_trace = response.clone();
-    let end_response = response.clone();
-    let end_trace = response.clone();
+fn http_request_pipe_bytes(
+    request: &JsHttpRequest,
+    write: Rc<dyn Fn(JsBytes<u8>)>,
+    write_trace: NetTrace,
+    end: Rc<dyn Fn()>,
+    end_trace: NetTrace,
+) {
     request.with_mut(|request| {
         if request.ended {
             return;
         }
         request.flowing = true;
         request.data_listeners.push(HttpDataListener {
-            invoke: Rc::new(move |chunk, _encoding_utf8| {
-                http_response_write_bytes(&write_response, &chunk)
-            }),
-            trace: Rc::new(move |tracer| tracer.edge(&write_trace)),
+            invoke: Rc::new(move |chunk, _encoding_utf8| write(chunk)),
+            trace: write_trace,
             once: false,
         });
-        request.end_listeners.push(HttpVoidListener {
-            invoke: Rc::new(move || http_response_end(&end_response)),
-            trace: Rc::new(move |tracer| tracer.edge(&end_trace)),
-        });
+        request.end_listeners.push(HttpVoidListener { invoke: end, trace: end_trace });
     });
     http_dispatch_data(request);
     http_request_maybe_finish(request);
+}
+
+pub fn http_request_pipe_response(request: &JsHttpRequest, response: &JsHttpResponse) {
+    let write_response = response.clone();
+    let write_trace = response.clone();
+    let end_response = response.clone();
+    let end_trace = response.clone();
+    http_request_pipe_bytes(
+        request,
+        Rc::new(move |chunk| http_response_write_bytes(&write_response, &chunk)),
+        Rc::new(move |tracer| tracer.edge(&write_trace)),
+        Rc::new(move || http_response_end(&end_response)),
+        Rc::new(move |tracer| tracer.edge(&end_trace)),
+    );
+}
+
+pub fn http_request_pipe_client(request: &JsHttpRequest, client: &JsHttpClientRequest) {
+    let write_client = client.clone();
+    let write_trace = client.clone();
+    let end_client = client.clone();
+    let end_trace = client.clone();
+    http_request_pipe_bytes(
+        request,
+        Rc::new(move |chunk| http_client_write_bytes(&write_client, &chunk)),
+        Rc::new(move |tracer| tracer.edge(&write_trace)),
+        Rc::new(move || http_client_end(&end_client)),
+        Rc::new(move |tracer| tracer.edge(&end_trace)),
+    );
+}
+
+pub fn http_request_pipe_socket(request: &JsHttpRequest, socket: &JsNetSocket) {
+    let write_socket = socket.clone();
+    let write_trace = socket.clone();
+    let end_socket = socket.clone();
+    let end_trace = socket.clone();
+    http_request_pipe_bytes(
+        request,
+        Rc::new(move |chunk| net_socket_write_bytes(&write_socket, &chunk)),
+        Rc::new(move |tracer| tracer.edge(&write_trace)),
+        Rc::new(move || net_socket_end(&end_socket)),
+        Rc::new(move |tracer| tracer.edge(&end_trace)),
+    );
 }

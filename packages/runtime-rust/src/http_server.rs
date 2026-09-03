@@ -306,7 +306,7 @@ fn http_server_accept(server: &JsNetServer, socket: &JsNetSocket) {
         socket,
         Rc::new(move || {
             let request = end_connection.borrow().request.clone();
-            if let Some(request) = request {
+            if let Some(request) = request.filter(|request| !http_request_complete(request)) {
                 http_request_destroy(&request);
             }
         }),
