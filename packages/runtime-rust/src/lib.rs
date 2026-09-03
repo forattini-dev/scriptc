@@ -94,6 +94,7 @@ include!("network_wait.rs");
 include!("dgram_wait.rs");
 include!("http_framing.rs");
 include!("http.rs");
+include!("http_request.rs");
 include!("http_server.rs");
 include!("http_client.rs");
 include!("abort.rs");
