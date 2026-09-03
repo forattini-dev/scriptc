@@ -509,7 +509,7 @@ export class RustWritableEmitter {
     const chunkValue = this.requiredValue(values, 1, expr.loc);
     const writable = this.writableHandle(receiverValue, receiver.type, expr.loc);
     const dyn = this.context.dynTypeName();
-    const converted = `match &${chunkValue} { ${dyn}::String(sc_chunk) => runtime::buffer_from_string(sc_chunk, &runtime::string("utf8")), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => sc_chunk.clone(), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), }`;
+    const converted = `match &${chunkValue} { ${dyn}::String(sc_chunk) => runtime::buffer_from_string(sc_chunk, &runtime::string("utf8")), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => sc_chunk.clone(), ${dyn}::Null => runtime::throw_type_error_code("May not write null values to stream".to_owned(), "ERR_STREAM_NULL_VALUES"), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), }`;
     return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_chunk = ${converted}; let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable) }`;
   }
 
