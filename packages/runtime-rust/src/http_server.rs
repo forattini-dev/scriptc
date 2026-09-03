@@ -197,6 +197,7 @@ fn http_server_next(connection: &mut HttpServerConnection) -> HttpServerStep {
         socket: Some(connection.socket.clone()),
         method: head.method,
         url: head.url,
+        http10: head.http10,
         status_code: None,
         status_message: None,
         headers: head.headers,

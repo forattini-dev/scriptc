@@ -24,6 +24,7 @@ enum HttpBodyFraming {
 struct HttpRequestHead {
     method: JsString,
     url: JsString,
+    http10: bool,
     headers: Vec<(JsString, JsString, JsString)>,
     framing: HttpBodyFraming,
     keep_alive: bool,
@@ -81,7 +82,14 @@ fn http_parse_request_head(bytes: &[u8]) -> Option<HttpRequestHead> {
     } else {
         HttpBodyFraming::Length(content_length.unwrap_or(0))
     };
-    Some(HttpRequestHead { method, url, headers, framing, keep_alive })
+    Some(HttpRequestHead {
+        method,
+        url,
+        http10: version == "HTTP/1.0",
+        headers,
+        framing,
+        keep_alive,
+    })
 }
 
 fn http_chunk(bytes: &[u8]) -> Vec<u8> {

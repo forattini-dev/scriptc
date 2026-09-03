@@ -62,6 +62,7 @@ pub struct HttpRequestData {
     socket: Option<JsNetSocket>,
     method: JsString,
     url: JsString,
+    http10: bool,
     status_code: Option<f64>,
     status_message: Option<JsString>,
     headers: Vec<(JsString, JsString, JsString)>,
@@ -372,6 +373,30 @@ pub fn http_request_socket(request: &JsHttpRequest) -> JsNetSocket {
             .clone()
             .expect("scriptc invariant: an IncomingMessage has a socket")
     })
+}
+
+pub fn http_request_http_version(request: &JsHttpRequest) -> JsString {
+    string(if request.with(|request| request.http10) {
+        "1.0"
+    } else {
+        "1.1"
+    })
+}
+
+pub fn http_request_http_version_major(_request: &JsHttpRequest) -> f64 {
+    1.0
+}
+
+pub fn http_request_http_version_minor(request: &JsHttpRequest) -> f64 {
+    if request.with(|request| request.http10) {
+        0.0
+    } else {
+        1.0
+    }
+}
+
+pub fn http_request_complete(request: &JsHttpRequest) -> bool {
+    request.with(|request| request.ended)
 }
 
 pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {

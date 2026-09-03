@@ -19,6 +19,7 @@ type HttpClientResponseCallback = (Rc<dyn Fn(JsHttpRequest)>, NetTrace);
 type ParsedHttpResponse = (
     f64,
     JsString,
+    bool,
     Vec<(JsString, JsString, JsString)>,
     Option<usize>,
     bool,
@@ -33,7 +34,8 @@ fn http_parse_response_head(bytes: &[u8]) -> Option<ParsedHttpResponse> {
     let mut lines = text[..text.len().saturating_sub(4)].split("\r\n");
     let status_line = lines.next()?;
     let mut parts = status_line.splitn(3, ' ');
-    if !matches!(parts.next()?, "HTTP/1.0" | "HTTP/1.1") {
+    let version = parts.next()?;
+    if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
         return None;
     }
     let status: u16 = parts.next()?.parse().ok()?;
@@ -55,7 +57,14 @@ fn http_parse_response_head(bytes: &[u8]) -> Option<ParsedHttpResponse> {
         }
         headers.push((string(name), string(&lower), string(value)));
     }
-    Some((f64::from(status), status_message, headers, content_length, chunked))
+    Some((
+        f64::from(status),
+        status_message,
+        version == "HTTP/1.0",
+        headers,
+        content_length,
+        chunked,
+    ))
 }
 
 fn http_client_dispatch_response(request: &JsHttpClientRequest, response: &JsHttpRequest) {
@@ -173,7 +182,7 @@ fn http_client_feed(
             let Some(head_len) = http_header_end(&connection.buffer) else {
                 return;
             };
-            let Some((status, status_message, headers, content_length, chunked)) =
+            let Some((status, status_message, http10, headers, content_length, chunked)) =
                 http_parse_response_head(&connection.buffer[..head_len])
             else {
                 let socket = request.with(|request| request.socket.clone());
@@ -196,6 +205,7 @@ fn http_client_feed(
                 socket,
                 method: empty_string(),
                 url: empty_string(),
+                http10,
                 status_code: Some(status),
                 status_message: Some(status_message),
                 headers,

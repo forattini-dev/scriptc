@@ -9,6 +9,7 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
         socket: None,
         method: empty_string(),
         url: empty_string(),
+        http10: false,
         status_code: Some(200.0),
         status_message: Some(empty_string()),
         headers: Vec::new(),

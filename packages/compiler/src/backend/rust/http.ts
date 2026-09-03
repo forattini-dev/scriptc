@@ -290,6 +290,15 @@ export function emitRustHttpCall(
       expr.args[0]?.type.kind === "httpReq" && expr.type.kind === "netSocket") {
     return `runtime::http_request_socket(&(${context.emitExpr(expr.args[0])}))`;
   }
+  if ((expr.fn === "http.reqHttpVersion" || expr.fn === "http.reqHttpVersionMajor" ||
+      expr.fn === "http.reqHttpVersionMinor" || expr.fn === "http.reqComplete") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "httpReq") {
+    const suffix = expr.fn === "http.reqHttpVersion" ? "http_version"
+      : expr.fn === "http.reqHttpVersionMajor" ? "http_version_major"
+      : expr.fn === "http.reqHttpVersionMinor" ? "http_version_minor"
+      : "complete";
+    return `runtime::http_request_${suffix}(&(${context.emitExpr(expr.args[0])}))`;
+  }
   if ((expr.fn === "http.resStatusGet" || expr.fn === "http.resStatusMsgGet" ||
       expr.fn === "http.resHeadersSent") && expr.args.length === 1 && expr.args[0]?.type.kind === "httpRes") {
     const fn = expr.fn === "http.resStatusGet" ? "http_response_status_get"

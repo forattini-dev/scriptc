@@ -2241,6 +2241,11 @@ declare module "http" {
     readonly statusCode: number | undefined;
     readonly statusMessage: string | undefined;
     readonly socket: Socket;
+    readonly httpVersion: string;
+    readonly httpVersionMajor: number;
+    readonly httpVersionMinor: number;
+    readonly aborted: boolean;
+    readonly complete: boolean;
     readonly headers: { [name: string]: string | undefined };
     readonly rawHeaders: string[];
     resume(): void;
