@@ -366,6 +366,20 @@ export function emitRustHttpCall(
       expr.args[3]?.type.kind === "array" && expr.args[3].type.elem.kind === "string") {
     return `runtime::http_response_write_head_n(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}), &(${context.emitExpr(expr.args[3])}))`;
   }
+  if (expr.fn === "http.resWriteHeadPairs" && expr.args.length === 3 &&
+      expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "array" && expr.args[2].type.elem.kind === "string") {
+    return `runtime::http_response_write_head_pairs(&(${context.emitExpr(expr.args[0])}), ${context.emitExpr(expr.args[1])}, &(${context.emitExpr(expr.args[2])}))`;
+  }
+  if (expr.fn === "http.resWriteHeadDyn" && expr.args.length === 3 &&
+      expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "f64" &&
+      expr.args[2]?.type.kind === "dyn") {
+    const response = context.nextTemporary();
+    const status = context.nextTemporary();
+    const headers = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; let ${status} = ${context.emitExpr(expr.args[1])}; let ${headers} = ${context.emitExpr(expr.args[2])}; match &${headers} { ${dyn}::Undefined | ${dyn}::Null => runtime::http_response_write_head(&${response}, ${status}), ${dyn}::Object(sc_values) => { let mut sc_index = 0.0; while sc_index < runtime::map_iter_count(sc_values) { if runtime::map_iter_live(sc_values, sc_index) { let sc_name = runtime::map_iter_key(sc_values, sc_index); let sc_value = runtime::map_iter_value(sc_values, sc_index); let sc_text = match &sc_value { ${dyn}::String(sc_text) => sc_text.clone(), ${dyn}::Number(..) => sc_dyn_to_string(&sc_value), sc_value => sc_dyn_arg_type_fail("value", "of type string or number", sc_value), }; runtime::http_response_set_header(&${response}, &sc_name, &sc_text); } sc_index += 1.0; } runtime::http_response_write_head(&${response}, ${status}); }, sc_value => sc_dyn_arg_type_fail("headers", "an instance of Object", sc_value), } }`;
+  }
   if ((expr.fn === "http.resWrite" || expr.fn === "http.resEndStr") && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "string") {
     const fn = expr.fn === "http.resWrite" ? "http_response_write_str" : "http_response_end_str";

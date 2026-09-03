@@ -564,6 +564,30 @@ pub fn http_response_write_head_n(
     http_response_write_head(response, status);
 }
 
+pub fn http_response_write_head_pairs(
+    response: &JsHttpResponse,
+    status: f64,
+    pairs: &JsArray<JsString>,
+) {
+    if response.with(|response| response.headers_sent) {
+        return;
+    }
+    let mut seen: Vec<JsString> = Vec::new();
+    let length = array_len(pairs) as usize;
+    for index in (0..length.saturating_sub(1)).step_by(2) {
+        let name = array_get(pairs, index as f64);
+        let value = array_get(pairs, (index + 1) as f64);
+        let repeated = seen.iter().any(|prior| prior.eq_ignore_ascii_case(&name));
+        if repeated {
+            response.with_mut(|response| response.headers.push((name.clone(), value)));
+        } else {
+            http_response_set_header(response, &name, &value);
+        }
+        seen.push(name);
+    }
+    http_response_write_head(response, status);
+}
+
 pub fn http_response_write_str(response: &JsHttpResponse, value: &JsString) {
     http_response_write_raw(response, value.as_bytes());
 }
