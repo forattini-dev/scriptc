@@ -483,20 +483,22 @@ bool scr_http_req_destroyed_flag(ScrHttpReq *r) { return r->destroyed; }
 bool scr_http_req_readable(ScrHttpReq *r) { return !r->ended && !r->destroyed; }
 static void scr_http_req_finish(ScrHttpReq *r, bool fire);
 
+static void scr_http_req_abort(ScrHttpReq *r) {
+  if (r->ended || r->aborted) return;
+  /* Reuse finish(false) to drop body listeners and pipe edges, then
+   * preserve complete=false for the aborted message. */
+  scr_http_req_finish(r, false);
+  r->ended = false;
+  r->aborted = true;
+  scr_net_fire0_this(&r->aborted_ls, r, SCR_DYNH_HTTP_REQ);
+  scr_net_ls_drop(&r->aborted_ls);
+}
+
 /* destroy(): tears the underlying connection down NOW; the teardown
  * events flow through the socket's native hooks like a peer close. */
 void scr_http_req_destroy(ScrHttpReq *r) {
   r->destroyed = true;
-  if (!r->ended && !r->aborted) {
-    /* Destroying an incomplete IncomingMessage aborts it synchronously.
-     * Reuse finish(false) to drop body listeners and pipe edges, then
-     * preserve complete=false for the aborted message. */
-    scr_http_req_finish(r, false);
-    r->ended = false;
-    r->aborted = true;
-    scr_net_fire0_this(&r->aborted_ls, r, SCR_DYNH_HTTP_REQ);
-    scr_net_ls_drop(&r->aborted_ls);
-  }
+  scr_http_req_abort(r);
   if (r->h2_stream != NULL) {
     scr_http_h2_ops->destroy(r->h2_stream);
     return;
@@ -2040,8 +2042,11 @@ static void scr_http_conn_eof(void *ctx) {
     scr_http_client_eof(conn);
     return;
   }
-  /* client FIN between requests: our half closes too (keep-alive over);
-   * mid-request it is an aborted request — everything settles quietly */
+  /* client FIN between requests: our half closes too (keep-alive over). */
+  if (conn->req && !conn->req->ended) {
+    conn->req->destroyed = true;
+    scr_http_req_abort(conn->req);
+  }
   scr_http_conn_drop_request(conn, false);
   conn->len = 0;
 }
@@ -2051,6 +2056,10 @@ static void scr_http_conn_closed(void *ctx) {
   if (conn->client_mode) {
     scr_http_client_closed(conn);
     return;
+  }
+  if (conn->req && !conn->req->ended) {
+    conn->req->destroyed = true;
+    scr_http_req_abort(conn->req);
   }
   scr_http_conn_drop_request(conn, false);
 }

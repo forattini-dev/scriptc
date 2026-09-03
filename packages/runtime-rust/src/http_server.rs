@@ -289,7 +289,7 @@ fn http_server_accept(server: &JsNetServer, socket: &JsNetSocket) {
         stopped: false,
     }));
     let invoke_connection = connection.clone();
-    let trace_connection = connection;
+    let trace_connection = connection.clone();
     net_socket_on_data(
         socket,
         Rc::new(move |chunk, _encoding_utf8| {
@@ -298,5 +298,18 @@ fn http_server_accept(server: &JsNetServer, socket: &JsNetSocket) {
         }),
         Rc::new(move |tracer| trace_connection.borrow().trace(tracer)),
         false,
+    );
+    let end_connection = connection.clone();
+    let end_trace = connection;
+    net_socket_on_end(
+        socket,
+        Rc::new(move || {
+            let request = end_connection.borrow().request.clone();
+            if let Some(request) = request {
+                http_request_destroy(&request);
+            }
+        }),
+        Rc::new(move |tracer| end_trace.borrow().trace(tracer)),
+        true,
     );
 }
