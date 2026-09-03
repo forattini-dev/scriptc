@@ -110,6 +110,7 @@ export class RustWritableEmitter {
   emitLibCall(expr: RustLibCallExpr): string | null {
     switch (expr.fn) {
       case "writable.new": return this.emitNew(expr);
+      case "writable.newDyn": return this.emitNewDynamic(expr);
       case "writable.init": return this.emitInit(expr);
       case "writable.initDyn": return this.emitInitDynamic(expr);
       case "writable.write": return this.emitWrite(expr, false);
@@ -328,6 +329,24 @@ export class RustWritableEmitter {
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Writable constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let _ = ${values[3]}; runtime::writable_new::<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>(${values[0]}, ${values[1]}, ${values[2]}, ${write}, ${final}) }`;
+  }
+
+  private emitNewDynamic(expr: RustLibCallExpr): string {
+    const [options] = expr.args;
+    if (options?.type.kind !== "dyn" || expr.args.length !== 1 ||
+      expr.type.kind !== "object" || expr.type.className !== "%Writable") {
+      this.context.unsupported("dynamic Writable constructor shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    const dyn = this.context.dynTypeName();
+    const option = (key: string): string =>
+      `match &${value} { ${dyn}::Object(..) => sc_dyn_key_get(&${value}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const completionShape = this.dynamicCompletionShape(expr.loc);
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move || { if sc_completion.2.replace(true) { return; } runtime::writable_complete_write(&sc_completion.0, sc_length); sc_writable_after_write(&sc_completion.0, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+    const dynamicCompletion = this.dynamicCompletion(completionShape, completion);
+    const write = `let sc_write_option = ${option("write")}; let sc_write = if sc_dyn_function_identity(&sc_write_option).is_some() { let sc_context = std::rc::Rc::new(sc_write_option); Some(ScWritableWrite::RuntimeWrite(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_writable, sc_chunk, sc_length, sc_done| { let sc_completion = std::rc::Rc::new((sc_writable, sc_done, std::cell::Cell::new(false))); let _ = sc_dyn_call(&sc_context, &[${dyn}::Buffer(sc_chunk), ${dyn}::String(runtime::string("buffer")), ${dynamicCompletion}], "write"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { Option::<ScWritableWrite>::None };`;
+    const init = `let sc_hwm = match ${option("highWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false));`;
+    return `{ let ${value} = ${this.context.emitExpr(options)}; ${write} ${init} runtime::writable_new::<ScEmitterListener, ScWritableWrite, ScWritableFinal, ScWritableDone>(sc_hwm, sc_auto_destroy, sc_emit_close, sc_write, Option::<ScWritableFinal>::None) }`;
   }
 
   private emitInit(expr: RustLibCallExpr): string {

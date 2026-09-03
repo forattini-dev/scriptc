@@ -261,6 +261,7 @@ export class RustReadableEmitter {
   emitLibCall(expr: RustLibCallExpr): string | null {
     switch (expr.fn) {
       case "readable.new": return this.emitNew(expr);
+      case "readable.newDyn": return this.emitNewDynamic(expr);
       case "readable.init": return this.emitInit(expr);
       case "readable.initDyn": return this.emitInitDynamic(expr);
       case "readable.fromArr": return this.emitFromArray(expr);
@@ -325,6 +326,21 @@ export class RustReadableEmitter {
     }
     if (callbackIndex !== expr.args.length) this.context.unsupported("Readable constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let _ = ${values[3]}; runtime::readable_new::<ScEmitterListener, ScReadableRead>(${values[0]}, ${values[1]}, ${values[2]}, ${read}, ${destroy}) }`;
+  }
+
+  private emitNewDynamic(expr: RustLibCallExpr): string {
+    const [options] = expr.args;
+    if (options?.type.kind !== "dyn" || expr.args.length !== 1 ||
+      expr.type.kind !== "object" || expr.type.className !== "%Readable") {
+      this.context.unsupported("dynamic Readable constructor shape", expr.loc);
+    }
+    const value = this.context.nextTemporary();
+    const dyn = this.context.dynTypeName();
+    const option = (key: string): string =>
+      `match &${value} { ${dyn}::Object(..) => sc_dyn_key_get(&${value}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const read = `let sc_read_option = ${option("read")}; let sc_read = if sc_dyn_function_identity(&sc_read_option).is_some() { let sc_context = std::rc::Rc::new(sc_read_option); Some(ScReadableRead::RuntimeRead(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_size| { let _ = sc_dyn_call(&sc_context, &[${dyn}::Number(sc_size)], "read"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { Option::<ScReadableRead>::None };`;
+    const init = `let sc_hwm = match ${option("highWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false)); let sc_encoding = ${option("encoding")};`;
+    return `{ let ${value} = ${this.context.emitExpr(options)}; ${read} ${init} let sc_readable = runtime::readable_new::<ScEmitterListener, ScReadableRead>(sc_hwm, sc_auto_destroy, sc_emit_close, sc_read, Option::<ScReadableRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } sc_readable }`;
   }
 
   private emitInit(expr: RustLibCallExpr): string {

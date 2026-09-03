@@ -91,7 +91,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line("let this_request = request.clone();");
   line("let once = method == \"once\";");
   open("match event {");
-  line(`"data" => runtime::http_request_on_data(request, std::rc::Rc::new(move |chunk| { let _guard = sc_dyn_this_push(${dyn}::HttpRequest(this_request.clone())); let _ = sc_dyn_call(&callback, &[${dyn}::Buffer(chunk)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
+  line(`"data" => runtime::http_request_on_data(request, std::rc::Rc::new(move |chunk, _encoding_utf8| { let _guard = sc_dyn_this_push(${dyn}::HttpRequest(this_request.clone())); let _ = sc_dyn_call(&callback, &[${dyn}::Buffer(chunk)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
   line(`"end" => runtime::http_request_on_end(request, std::rc::Rc::new(move || { let _guard = sc_dyn_this_push(${dyn}::HttpRequest(this_request.clone())); let _ = sc_dyn_call(&callback, &[], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer)), once),`);
   line(`_ => runtime::throw_error(format!("listening for '{event}' on a dynamic IncomingMessage is not supported yet")),`);
   close("}");

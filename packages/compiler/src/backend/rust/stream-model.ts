@@ -170,6 +170,13 @@ export class RustStreamModel {
       }
       return true;
     }
+    if (node.fn === "readable.newDyn") {
+      this.usesReadable = true;
+      // Dynamic option callbacks use the same type-erased runtime bridge as
+      // subclass callbacks, even though the returned object is the base type.
+      this.usesReadableSubclass = true;
+      return true;
+    }
     if (node.fn === "readable.init" || node.fn === "readable.initDyn") {
       this.usesReadable = true;
       this.usesReadableSubclass = true;
@@ -220,6 +227,16 @@ export class RustStreamModel {
         }
         if (bit === 2) this.usesWritableDestroy = true;
       }
+      return true;
+    }
+    if (node.fn === "writable.newDyn") {
+      this.usesWritable = true;
+      this.usesWritableSubclass = true;
+      const completionType: IrFuncType = { kind: "func", params: [], ret: VOID };
+      registerDynBoxedFunction(completionType);
+      const completionShape = ensureClosureShape(completionType);
+      completionShape.runtimeCallback = true;
+      this.writableDynamicCompletionShape = completionShape;
       return true;
     }
     if (node.fn === "duplex.init" || node.fn === "transform.init" || node.fn === "passthrough.init") {
