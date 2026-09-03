@@ -33,6 +33,17 @@ pub fn abort_signal_new_aborted<T: HeapValue>(reason: T) -> JsAbortSignal<T> {
     })
 }
 
+pub fn abort_signal_timeout<T: HeapValue>(delay_ms: f64, reason: T) -> JsAbortSignal<T> {
+    let signal = abort_controller_new();
+    let pending = signal.clone();
+    let timer = timer_set_timeout_handle(
+        Box::new(move || abort_controller_abort(&pending, reason.clone())),
+        delay_ms,
+    );
+    timer_set_ref(timer, false);
+    signal
+}
+
 pub fn abort_signal_aborted<T: HeapValue>(signal: &JsAbortSignal<T>) -> bool {
     signal.with(|signal| signal.aborted)
 }
