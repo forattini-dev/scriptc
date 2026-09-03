@@ -536,8 +536,9 @@ export function emitRustHttpCall(
     return emitResponseCallback(callbackExpr, callbackType, context, expr,
       (invoke, trace) => `runtime::http_agent_client_request_callback(${args}, ${invoke}, ${trace})`);
   }
-  if (expr.fn === "https.requestFn" && expr.args.length === 10) {
-    const [secure, host, port, path, method, timeout, headers, autoEnd, reject, ca] = expr.args;
+  if ((expr.fn === "https.requestFn" || expr.fn === "https.requestFnCb") &&
+      expr.args.length === (expr.fn === "https.requestFnCb" ? 11 : 10)) {
+    const [secure, host, port, path, method, timeout, headers, autoEnd, reject, ca, callbackExpr] = expr.args;
     if (secure?.type.kind !== "bool" || host?.type.kind !== "string" || port?.type.kind !== "f64" ||
         path?.type.kind !== "string" || method?.type.kind !== "string" || timeout?.type.kind !== "f64" ||
         headers?.type.kind !== "array" || headers.type.elem.kind !== "string" || autoEnd?.type.kind !== "bool" ||
@@ -551,7 +552,22 @@ export function emitRustHttpCall(
       ? values[9]
       : `runtime::bytes_to_string(&${values[9]}, &runtime::string("utf8"))`;
     const common = `&${values[1]}, ${values[2]}, &${values[3]}, &${values[4]}, ${values[5]}, &${values[6]}, ${values[7]}`;
-    return `{ ${bind} if ${values[0]} { runtime::https_client_request(${common}, ${values[8]}, &${caValue}) } else { let _ = (&${values[8]}, &${values[9]}); runtime::http_client_request(${common}) } }`;
+    if (expr.fn === "https.requestFn") {
+      return `{ ${bind} if ${values[0]} { runtime::https_client_request(${common}, ${values[8]}, &${caValue}) } else { let _ = (&${values[8]}, &${values[9]}); runtime::http_client_request(${common}) } }`;
+    }
+    const callbackType = callbackExpr?.type;
+    const parameter = callbackType?.kind === "func" ? callbackType.params[0] : undefined;
+    if (callbackExpr === undefined || callbackType?.kind !== "func" || callbackType.params.length > 1 ||
+        (parameter !== undefined && parameter.kind !== "httpReq")) {
+      context.unsupported("https.requestFnCb callback", expr.loc);
+    }
+    const traced = context.nextTemporary();
+    const invoke = context.nextTemporary();
+    const trace = context.nextTemporary();
+    const dispatch = context.emitClosureDispatch(values[10] ?? "", callbackType,
+      parameter === undefined ? [] : ["sc_response"], expr.loc);
+    const callbacks = `let ${traced} = ${values[10]}.clone(); let ${invoke}: std::rc::Rc<dyn Fn(runtime::JsHttpRequest)> = std::rc::Rc::new(move |sc_response| { let _ = ${dispatch}; }); let ${trace}: std::rc::Rc<dyn Fn(&mut runtime::Tracer<'_>)> = std::rc::Rc::new(move |sc_tracer| sc_tracer.edge(&${traced}));`;
+    return `{ ${bind} ${callbacks} if ${values[0]} { runtime::https_client_request_callback(${common}, ${values[8]}, &${caValue}, ${invoke}, ${trace}) } else { let _ = (&${values[8]}, &${values[9]}); runtime::http_client_request_callback(${common}, ${invoke}, ${trace}) } }`;
   }
   if ((expr.fn === "https.request" || expr.fn === "https.requestCb") &&
       (expr.args.length === 9 || expr.args.length === 10)) {
