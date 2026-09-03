@@ -173,7 +173,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "dgram.sendChk": ["c", "rust"],
   "dgram.sendStr": ["c", "rust"],
   "dgram.unref": ["c", "rust"],
-  "dns.lookup": ["c"],
+  "dns.lookup": ["c", "rust"],
   "duplex.init": ["c", "llvm", "rust"],
   "duplex.initDyn": ["c", "llvm", "rust"],
   "duplex.new": ["c", "llvm", "rust"],

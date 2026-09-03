@@ -89,6 +89,7 @@ include!("number_format.rs");
 include!("numeric_ops.rs");
 include!("network_listener.rs");
 include!("network.rs");
+include!("dns.rs");
 include!("dgram.rs");
 include!("network_wait.rs");
 include!("dgram_wait.rs");

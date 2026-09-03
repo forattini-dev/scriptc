@@ -82,6 +82,40 @@ function emitMessageListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::dgram_on_message(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move |sc_message, sc_address, sc_family, sc_port, sc_size| { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitDnsLookup(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const [hostname, family, callbackExpr] = expr.args;
+  const callbackType = callbackExpr?.type;
+  if (hostname?.type.kind !== "string" || family?.type.kind !== "f64" ||
+      callbackExpr === undefined || callbackType?.kind !== "func" || callbackType.ret.kind !== "void" ||
+      callbackType.params.length > 3 || expr.args.length !== 3 || expr.type.kind !== "void") {
+    context.unsupported("dns.lookup shape", expr.loc);
+  }
+  const errorType = callbackType.params[0];
+  let error = "";
+  if (errorType !== undefined) {
+    if (errorType.kind !== "union") context.unsupported("dns.lookup error parameter", expr.loc);
+    const union = context.union(errorType.unionId, expr.loc);
+    const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
+    const errorTag = union.arms.findIndex((arm) => arm.kind === "object" && arm.className === "%Error");
+    if (nullTag < 0 || errorTag < 0 || union.arms.length !== 2) {
+      context.unsupported("dns.lookup error union", expr.loc);
+    }
+    const name = context.unionName(union.id);
+    const payload = context.hasErrorClassRoots() ? `${context.errorValueName()}::Builtin(sc_error)` : "sc_error";
+    error = `match sc_error { Some(sc_error) => ${name}::${context.unionVariant(errorTag)}(${payload}), None => ${name}::${context.unionVariant(nullTag)}, }`;
+  }
+  if (callbackType.params[1] !== undefined && callbackType.params[1].kind !== "string") {
+    context.unsupported("dns.lookup address parameter", expr.loc);
+  }
+  if (callbackType.params[2] !== undefined && callbackType.params[2].kind !== "f64") {
+    context.unsupported("dns.lookup family parameter", expr.loc);
+  }
+  const args = [error, "sc_address", "sc_family"].slice(0, callbackType.params.length);
+  const callback = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, args, expr.loc);
+  return `{ let sc_hostname = ${context.emitExpr(hostname)}; let sc_family = ${context.emitExpr(family)}; let ${callback} = ${context.emitExpr(callbackExpr)}; runtime::dns_lookup(&sc_hostname, sc_family, std::rc::Rc::new(move |sc_error, sc_address, sc_family| { let _ = ${dispatch}; })); }`;
+}
+
 function emitSendChecked(expr: RustLibCallExpr, context: RustLibCallContext): string {
   const [socketExpr, bufferExpr, a1Expr, a2Expr, a3Expr, a4Expr, fenceExpr] = expr.args;
   if (socketExpr?.type.kind !== "dgramSocket" || fenceExpr?.type.kind !== "string" ||
@@ -108,6 +142,7 @@ export function emitRustDgramCall(
   context: RustLibCallContext,
 ): string | null {
   const [receiver] = expr.args;
+  if (expr.fn === "dns.lookup") return emitDnsLookup(expr, context);
   if (expr.fn === "dgram.createSocket" && expr.args.length === 1 && receiver?.type.kind === "bool" &&
       expr.type.kind === "dgramSocket") {
     return `runtime::dgram_create_socket(${context.emitExpr(receiver)})`;
