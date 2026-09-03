@@ -113,6 +113,7 @@ export class RustWritableEmitter {
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
       case "writable.writeDyn": return this.emitWriteDynamic(expr);
+      case "writable.writeU": return this.emitWriteUnion(expr);
       case "writable.end": return this.emitEnd(expr);
       case "writable.cork": return this.emitCork(expr);
       case "writable.uncork": return this.emitUncork(expr);
@@ -510,6 +511,28 @@ export class RustWritableEmitter {
     const dyn = this.context.dynTypeName();
     const converted = `match &${chunkValue} { ${dyn}::String(sc_chunk) => runtime::buffer_from_string(sc_chunk, &runtime::string("utf8")), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => sc_chunk.clone(), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), }`;
     return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_chunk = ${converted}; let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable) }`;
+  }
+
+  private emitWriteUnion(expr: RustLibCallExpr): string {
+    const [receiver, chunk] = expr.args;
+    if (receiver === undefined || !this.isWritable(receiver.type) || chunk?.type.kind !== "union" ||
+      expr.args.length !== 2 || expr.type.kind !== "bool") {
+      this.context.unsupported("Writable union write shape", expr.loc);
+    }
+    const union = this.context.union(chunk.type.unionId, expr.loc);
+    const name = this.context.unionName(union.id);
+    const arms = union.arms.map((arm, tag) => {
+      const variant = `${name}::${this.context.unionVariant(tag)}`;
+      if (arm.kind === "bytes" && arm.elem === "u8") return `${variant}(value) => value`;
+      if (arm.kind === "string") {
+        return `${variant}(value) => runtime::buffer_from_string(&value, &runtime::string("utf8"))`;
+      }
+      this.context.unsupported(`Writable union write arm '${arm.kind}'`, expr.loc);
+    });
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const receiverValue = this.requiredValue(values, 0, expr.loc);
+    const writable = this.writableHandle(receiverValue, receiver.type, expr.loc);
+    return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_chunk = match ${values[1]} { ${arms.join(", ")} }; let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable) }`;
   }
 
   private emitEnd(expr: RustLibCallExpr): string {

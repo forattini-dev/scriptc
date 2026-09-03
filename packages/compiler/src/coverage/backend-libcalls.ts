@@ -902,7 +902,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "writable.write": ["c", "llvm", "rust"],
   "writable.writeDyn": ["c", "llvm", "rust"],
   "writable.writeStr": ["c", "llvm", "rust"],
-  "writable.writeU": ["c", "llvm"],
+  "writable.writeU": ["c", "llvm", "rust"],
   "zlib.deflateRawSync": ["c", "llvm", "rust"],
   "zlib.deflateSync": ["c", "llvm", "rust"],
   "zlib.gunzipSync": ["c", "llvm", "rust"],
