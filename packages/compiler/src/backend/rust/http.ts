@@ -322,12 +322,17 @@ export function emitRustHttpCall(
     const fn = expr.fn === "http.resWriteBytes" ? "http_response_write_bytes" : "http_response_end_bytes";
     return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])}))`;
   }
-  if (expr.fn === "http.resWriteDyn" && expr.args.length === 2 &&
+  if ((expr.fn === "http.resWriteDyn" || expr.fn === "http.resEndDyn") && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "httpRes" && expr.args[1]?.type.kind === "dyn") {
     const response = context.nextTemporary();
     const chunk = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; let ${chunk} = ${context.emitExpr(expr.args[1])}; match &${chunk} { ${dyn}::String(sc_chunk) => runtime::http_response_write_str(&${response}, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::http_response_write_bytes(&${response}, sc_chunk), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), } }`;
+    const stringFn = expr.fn === "http.resWriteDyn" ? "http_response_write_str" : "http_response_end_str";
+    const bytesFn = expr.fn === "http.resWriteDyn" ? "http_response_write_bytes" : "http_response_end_bytes";
+    const nullish = expr.fn === "http.resEndDyn"
+      ? `${dyn}::Undefined | ${dyn}::Null => runtime::http_response_end(&${response}), `
+      : "";
+    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; let ${chunk} = ${context.emitExpr(expr.args[1])}; match &${chunk} { ${dyn}::String(sc_chunk) => runtime::${stringFn}(&${response}, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::${bytesFn}(&${response}, sc_chunk), ${nullish}sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), } }`;
   }
   if (expr.fn === "http.resEnd" && expr.args.length === 1 && expr.args[0]?.type.kind === "httpRes") {
     return `runtime::http_response_end(&(${context.emitExpr(expr.args[0])}))`;
