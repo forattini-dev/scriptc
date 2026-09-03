@@ -112,6 +112,7 @@ export class RustWritableEmitter {
       case "writable.initDyn": return this.emitInitDynamic(expr);
       case "writable.write": return this.emitWrite(expr, false);
       case "writable.writeStr": return this.emitWrite(expr, true);
+      case "writable.writeDyn": return this.emitWriteDynamic(expr);
       case "writable.end": return this.emitEnd(expr);
       case "writable.cork": return this.emitCork(expr);
       case "writable.uncork": return this.emitUncork(expr);
@@ -494,6 +495,21 @@ export class RustWritableEmitter {
       done = `ScWritableDone::${this.variant(shape)}(${values[2]})`;
     }
     return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_chunk = ${converted}; let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ${done}); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable) }`;
+  }
+
+  private emitWriteDynamic(expr: RustLibCallExpr): string {
+    const [receiver, chunk] = expr.args;
+    if (receiver === undefined || !this.isWritable(receiver.type) || chunk?.type.kind !== "dyn" ||
+      expr.args.length !== 2 || expr.type.kind !== "bool") {
+      this.context.unsupported("Writable dynamic write shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const receiverValue = this.requiredValue(values, 0, expr.loc);
+    const chunkValue = this.requiredValue(values, 1, expr.loc);
+    const writable = this.writableHandle(receiverValue, receiver.type, expr.loc);
+    const dyn = this.context.dynTypeName();
+    const converted = `match &${chunkValue} { ${dyn}::String(sc_chunk) => runtime::buffer_from_string(sc_chunk, &runtime::string("utf8")), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => sc_chunk.clone(), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), }`;
+    return `{ ${this.bind(expr.args, values)} let sc_writable = ${writable}; let sc_chunk = ${converted}; let _ = runtime::writable_enqueue(&sc_writable, sc_chunk, ScWritableDone::Never); sc_writable_drain_queue(&sc_writable); runtime::writable_write_result(&sc_writable) }`;
   }
 
   private emitEnd(expr: RustLibCallExpr): string {

@@ -899,7 +899,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "writable.newDyn": ["c", "llvm"],
   "writable.uncork": ["c", "llvm", "rust"],
   "writable.write": ["c", "llvm", "rust"],
-  "writable.writeDyn": ["c", "llvm"],
+  "writable.writeDyn": ["c", "llvm", "rust"],
   "writable.writeStr": ["c", "llvm", "rust"],
   "writable.writeU": ["c", "llvm"],
   "zlib.deflateRawSync": ["c", "llvm", "rust"],
