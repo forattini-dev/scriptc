@@ -427,6 +427,23 @@ pub fn net_server_port(server: &JsNetServer) -> f64 {
     server.with(|server| f64::from(server.port))
 }
 
+fn net_server_local_address(server: &JsNetServer) -> Option<std::net::SocketAddr> {
+    server.with(|server| {
+        server
+            .listener
+            .as_ref()
+            .and_then(|listener| listener.local_addr().ok())
+    })
+}
+
+pub fn net_server_address_ip(server: &JsNetServer) -> JsString {
+    string(&net_server_local_address(server).map_or_else(|| "0.0.0.0".to_owned(), |address| address.ip().to_string()))
+}
+
+pub fn net_server_address_family(server: &JsNetServer) -> JsString {
+    string(if net_server_local_address(server).is_some_and(|address| address.is_ipv6()) { "IPv6" } else { "IPv4" })
+}
+
 pub fn net_server_set_close_override(
     server: &JsNetServer,
     callback: Rc<dyn Fn()>,

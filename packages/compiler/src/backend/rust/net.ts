@@ -1,4 +1,5 @@
 import type { IrType } from "../../ir/nodes.js";
+import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -268,6 +269,28 @@ export function emitRustNetCall(
   }
   if (expr.fn === "net.serverPort" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_port(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if (expr.fn === "net.serverAddress" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "netServer" && expr.type.kind === "record") {
+    const shape = context.record(expr.type.shapeId, expr.loc);
+    const expected = [
+      ["address", "string"],
+      ["family", "string"],
+      ["port", "f64"],
+    ] as const;
+    if (shape.tuple || shape.indexValue !== undefined || shape.fields.length !== expected.length ||
+        shape.fields.some((field, index) =>
+          field.name !== expected[index]?.[0] || field.type.kind !== expected[index]?.[1]
+        )) {
+      context.unsupported("net.serverAddress record", expr.loc);
+    }
+    const server = context.nextTemporary();
+    const fields = [
+      `${mangleField("address")}: runtime::net_server_address_ip(&${server})`,
+      `${mangleField("family")}: runtime::net_server_address_family(&${server})`,
+      `${mangleField("port")}: runtime::net_server_port(&${server})`,
+    ].join(", ");
+    return `{ let ${server} = ${context.emitExpr(expr.args[0])}; runtime::Gc::new(${mangleRecordStruct(expr.type.shapeId)} { ${fields} }) }`;
   }
   if (expr.fn === "net.serverClose" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_close(&(${context.emitExpr(expr.args[0])}))`;

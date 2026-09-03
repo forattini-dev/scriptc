@@ -557,7 +557,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "net.listenOptsCb": ["c", "llvm", "rust"],
   "net.listenOptsReusePort": ["c", "llvm", "rust"],
   "net.listenOptsReusePortCb": ["c", "llvm", "rust"],
-  "net.serverAddress": ["c", "llvm"],
+  "net.serverAddress": ["c", "llvm", "rust"],
   "net.serverClose": ["c", "llvm", "rust"],
   "net.serverCloseBind": ["c", "llvm", "rust"],
   "net.serverCloseCb": ["c", "llvm", "rust"],
