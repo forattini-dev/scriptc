@@ -5704,6 +5704,22 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (member === "pid") {
       return { kind: "libCall", fn: "process.pid", args: [], type: F64, loc };
     }
+    // process.version: Node DEFINES it as "v" + process.versions.node, and
+    // the invariant is what programs use (`.slice(1)` or a "v"-strip before
+    // parseInt). Lowering it as that concatenation keeps the two reads
+    // consistent by construction and answers with the runtime's Node
+    // COMPATIBILITY TARGET for the same reason versions.node does
+    // (SEMANTICS.md divergence 60): there is no Node under the binary whose
+    // patch level could honestly be reported.
+    if (member === "version") {
+      return {
+        kind: "strConcat",
+        left: { kind: "strLit", value: "v", type: STRING, loc },
+        right: { kind: "libCall", fn: "process.versionsNode", args: [], type: STRING, loc },
+        type: STRING,
+        loc,
+      };
+    }
     // process.execPath: the compiled binary's own resolved absolute path —
     // the honest answer where Node's is the node executable's (SEMANTICS.md
     // divergence 12, the argv[0]/argv[1] precedent).
