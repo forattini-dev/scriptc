@@ -14,6 +14,7 @@ import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/
 import { emitRustStatements } from "./statements.js";
 import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import { RustDynamicEmitter } from "./dynamic.js";
+import { registerDynamicFunctionShapes } from "./dynamic-function-model.js";
 import { RustAsyncControlEmitter, type RustAsyncHandlers } from "./async-control.js";
 import { RustAsyncValueEmitter } from "./async-values.js";
 import { RustExpressionEmitter } from "./expressions.js";
@@ -679,9 +680,7 @@ class RustEmitter {
       if (node.kind === "dynFrom" || node.kind === "jsMarshal") {
         this.usesDyn = true;
         const operand = node.value as { type?: IrType } | undefined;
-        if (operand?.type?.kind === "func") {
-          this.registerDynBoxedFunction(operand.type);
-        }
+        if (operand?.type !== undefined) registerDynamicFunctionShapes(operand.type, this.records, this.unions, (type) => this.registerDynBoxedFunction(type));
       }
       if (node.kind === "dynCheck") {
         const operand = node.value as { kind?: string; fn?: string } | undefined;
