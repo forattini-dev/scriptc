@@ -735,7 +735,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "readable.setEncoding": ["c", "llvm", "rust"],
   "readable.unpipe": ["c", "llvm", "rust"],
   "readable.unshift": ["c", "llvm", "rust"],
-  "readable.unshiftStr": ["c", "llvm"],
+  "readable.unshiftStr": ["c", "llvm", "rust"],
   "regex.new": ["c", "llvm", "rust"],
   "regexp.escape": ["c", "llvm", "rust"],
   "rl.close": ["c", "llvm", "rust"],

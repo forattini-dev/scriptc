@@ -269,7 +269,8 @@ export class RustReadableEmitter {
       case "readable.pushU": return this.emitPushUnion(expr);
       case "readable.pushNull": return this.emitPushNull(expr);
       case "readable.read": return this.emitRead(expr);
-      case "readable.unshift": return this.emitUnshift(expr);
+      case "readable.unshift": return this.emitUnshift(expr, false);
+      case "readable.unshiftStr": return this.emitUnshift(expr, true);
       case "readable.pause": return this.emitPause(expr);
       case "readable.resume": return this.emitResume(expr);
       case "readable.isPaused": return this.emitIsPaused(expr);
@@ -561,14 +562,20 @@ export class RustReadableEmitter {
     return `match runtime::readable_read(&(${this.context.emitExpr(receiver)}), ${this.context.emitExpr(size)}) { Some(value) => ${name}::${this.context.unionVariant(bytesTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, }`;
   }
 
-  private emitUnshift(expr: RustLibCallExpr): string {
+  private emitUnshift(expr: RustLibCallExpr, stringChunk: boolean): string {
     const [receiver, chunk] = expr.args;
+    const expected = stringChunk ? "string" : "bytes";
     if (receiver?.type.kind !== "object" || receiver.type.className !== "%Readable" ||
-      chunk?.type.kind !== "bytes" || chunk.type.elem !== "u8" || expr.args.length !== 2 ||
+      chunk?.type.kind !== expected || (chunk.type.kind === "bytes" && chunk.type.elem !== "u8") ||
+      expr.args.length !== 2 ||
       expr.type.kind !== "void") {
-      this.context.unsupported("Readable unshift shape", expr.loc);
+      this.context.unsupported(`Readable ${stringChunk ? "string " : ""}unshift shape`, expr.loc);
     }
-    return `runtime::readable_unshift(&(${this.context.emitExpr(receiver)}), ${this.context.emitExpr(chunk)})`;
+    const value = this.context.emitExpr(chunk);
+    const converted = stringChunk
+      ? `runtime::buffer_from_string(&(${value}), &runtime::string("utf8"))`
+      : value;
+    return `runtime::readable_unshift(&(${this.context.emitExpr(receiver)}), ${converted})`;
   }
 
   private emitProp(expr: RustLibCallExpr): string {
