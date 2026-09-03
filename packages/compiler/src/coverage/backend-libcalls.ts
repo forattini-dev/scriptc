@@ -584,7 +584,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "net.sockOnData": ["c", "llvm", "rust"],
   "net.sockOnEnd": ["c", "llvm", "rust"],
   "net.sockOnError": ["c", "llvm", "rust"],
-  "net.sockOnFinish": ["c", "llvm"],
+  "net.sockOnFinish": ["c", "llvm", "rust"],
   "net.sockOnReadable": ["c", "llvm"],
   "net.sockOnTimeout": ["c", "llvm"],
   "net.sockPause": ["c", "llvm", "rust"],

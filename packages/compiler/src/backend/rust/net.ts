@@ -442,6 +442,17 @@ export function emitRustNetCall(
     if (callbackType?.kind !== "func") context.unsupported("net.sockOnError callback", expr.loc);
     return emitSocketErrorListener(expr, callbackType, context);
   }
+  if (expr.fn === "net.sockOnFinish" && expr.args.length === 2 &&
+      expr.args[0]?.type.kind === "netSocket") {
+    const callbackExpr = expr.args[1];
+    const callbackType = callbackExpr?.type;
+    if (callbackExpr === undefined || callbackType?.kind !== "func" || callbackType.params.length !== 0) {
+      context.unsupported("net.sockOnFinish shape", expr.loc);
+    }
+    const socket = context.emitExpr(expr.args[0]);
+    return emitVoidCallback(callbackExpr, callbackType, context, expr,
+      (invoke, trace) => `runtime::net_socket_on_finish(&(${socket}), ${invoke}, ${trace});`);
+  }
   if ((expr.fn === "net.sockOnEnd" || expr.fn === "net.sockOnClose" || expr.fn === "net.sockOnConnect") &&
       expr.args.length === 3 && expr.args[0]?.type.kind === "netSocket" && expr.args[2]?.type.kind === "bool") {
     const callbackExpr = expr.args[1];
