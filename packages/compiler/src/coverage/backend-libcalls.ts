@@ -401,7 +401,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "http.resStatusSet": ["c", "llvm", "rust"],
   "http.resWrite": ["c", "llvm", "rust"],
   "http.resWriteBytes": ["c", "llvm", "rust"],
-  "http.resWriteDyn": ["c", "llvm"],
+  "http.resWriteDyn": ["c", "llvm", "rust"],
   "http.resWriteHead": ["c", "llvm", "rust"],
   "http.resWriteHeadDyn": ["c", "llvm"],
   "http.resWriteHeadN": ["c", "llvm", "rust"],
