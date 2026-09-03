@@ -587,7 +587,7 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitAbortControllerArm(): void {
-    this.context.line(`${this.dyn}::AbortController(signal) => match method { "abort" => { let reason = args.first().cloned().unwrap_or(${this.dyn}::Undefined); runtime::abort_controller_abort(signal, reason); ${this.dyn}::Undefined }, _ => runtime::throw_type_error(format!("{callee_name} is not a function")), },`);
+    this.context.line(`${this.dyn}::AbortController(signal) => match method { "abort" => { let reason = match args.first() { None | Some(${this.dyn}::Undefined) => sc_dyn_abort_default_reason(), Some(reason) => reason.clone(), }; runtime::abort_controller_abort(signal, reason); ${this.dyn}::Undefined }, _ => runtime::throw_type_error(format!("{callee_name} is not a function")), },`);
   }
 
   private emitHttpHeadersArm(): void {

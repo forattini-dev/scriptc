@@ -176,7 +176,8 @@ export function emitRustHttpCall(
   if (expr.fn === "fetch.abortNow" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "dyn") {
     const reason = context.nextTemporary();
-    return `{ let ${reason} = ${context.emitExpr(expr.args[0])}; ${context.dynTypeName()}::AbortSignal(runtime::abort_signal_new_aborted(${reason})) }`;
+    const dyn = context.dynTypeName();
+    return `{ let ${reason} = ${context.emitExpr(expr.args[0])}; let ${reason} = if matches!(&${reason}, ${dyn}::Undefined) { sc_dyn_abort_default_reason() } else { ${reason} }; ${dyn}::AbortSignal(runtime::abort_signal_new_aborted(${reason})) }`;
   }
   if (expr.fn === "fetch.responseNew" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "dyn" && expr.args[1]?.type.kind === "dyn" &&

@@ -881,6 +881,7 @@ export class RustDynamicEmitter {
     const errorType = this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
     const errorHelper = (helper: string): string => this.context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
     const errorTarget = this.context.errorClassRoots().length === 0 ? "target.strip_prefix('%').unwrap_or(target)" : "target";
+    const abortError = this.context.errorClassRoots().length === 0 ? `runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None)` : `${this.context.errorValueName()}::Builtin(runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None))`;
 
     this.context.line("std::thread_local! {");
     this.context.pushIndent();
@@ -913,6 +914,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(object)`);
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_abort_default_reason() -> ${name} { let error = ${abortError}; sc_dyn_error_box(&error) }`);
     this.context.line(`fn sc_dyn_error_instanceof(value: &${name}, target: &str) -> bool {`);
     this.context.pushIndent();
     this.context.line(`let ${name}::Object(object) = value else { return false; };`);
