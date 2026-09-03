@@ -278,6 +278,18 @@ export function emitRustHttpCall(
     const name = context.unionName(union.id);
     return `match runtime::http_request_header(&(${context.emitExpr(expr.args[0])}), &(${context.emitExpr(expr.args[1])})) { Some(sc_value) => ${name}::${context.unionVariant(stringTag)}(sc_value), None => ${name}::${context.unionVariant(undefinedTag)}, }`;
   }
+  if ((expr.fn === "http.reqRawHeaders" || expr.fn === "http.reqHeaderPairs") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "httpReq" &&
+      expr.type.kind === "array" && expr.type.elem.kind === "string") {
+    const fn = expr.fn === "http.reqRawHeaders"
+      ? "http_request_raw_headers"
+      : "http_request_header_pairs";
+    return `runtime::${fn}(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if (expr.fn === "http.reqSocket" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpReq" && expr.type.kind === "netSocket") {
+    return `runtime::http_request_socket(&(${context.emitExpr(expr.args[0])}))`;
+  }
   if ((expr.fn === "http.resStatusGet" || expr.fn === "http.resStatusMsgGet" ||
       expr.fn === "http.resHeadersSent") && expr.args.length === 1 && expr.args[0]?.type.kind === "httpRes") {
     const fn = expr.fn === "http.resStatusGet" ? "http_response_status_get"

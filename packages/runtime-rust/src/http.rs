@@ -346,6 +346,34 @@ pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)
     })
 }
 
+pub fn http_request_raw_headers(request: &JsHttpRequest) -> JsArray<JsString> {
+    array_new(request.with(|request| {
+        request
+            .headers
+            .iter()
+            .flat_map(|(original, _, value)| [original.clone(), value.clone()])
+            .collect()
+    }))
+}
+
+pub fn http_request_header_pairs(request: &JsHttpRequest) -> JsArray<JsString> {
+    array_new(
+        http_request_headers(request)
+            .into_iter()
+            .flat_map(|(name, value)| [name, value])
+            .collect(),
+    )
+}
+
+pub fn http_request_socket(request: &JsHttpRequest) -> JsNetSocket {
+    request.with(|request| {
+        request
+            .socket
+            .clone()
+            .expect("scriptc invariant: an IncomingMessage has a socket")
+    })
+}
+
 pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {
     request.with(|request| request.status_code)
 }
