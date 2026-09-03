@@ -262,6 +262,7 @@ export class RustReadableEmitter {
       case "readable.nextChunkDyn": return this.emitNextChunkDynamic(expr);
       case "readable.push": return this.emitPush(expr, false);
       case "readable.pushStr": return this.emitPush(expr, true);
+      case "readable.pushDyn": return this.emitPushDynamic(expr);
       case "readable.pushStrEnc": return this.emitPushStringEncoding(expr);
       case "readable.pushEncoding": return this.emitPushEncoding(expr);
       case "readable.setEncoding": return this.emitSetEncoding(expr);
@@ -463,6 +464,21 @@ export class RustReadableEmitter {
     const pushed = stringChunk
       ? `runtime::readable_push_string(&sc_readable, &${values[1]})`
       : `runtime::readable_push(&sc_readable, ${values[1]})`;
+    return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; let sc_result = ${pushed}; sc_readable_schedule(&sc_readable); sc_readable_schedule_notification(&sc_readable); sc_result }`;
+  }
+
+  private emitPushDynamic(expr: RustLibCallExpr): string {
+    const [receiver, chunk] = expr.args;
+    if (!this.isReadable(receiver) || chunk?.type.kind !== "dyn" ||
+      expr.args.length !== 2 || expr.type.kind !== "bool") {
+      this.context.unsupported("Readable dynamic push shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const receiverValue = this.requiredValue(values, 0, expr.loc);
+    const chunkValue = this.requiredValue(values, 1, expr.loc);
+    const readable = this.readableHandle(receiverValue, receiver.type, expr.loc);
+    const dyn = this.context.dynTypeName();
+    const pushed = `match &${chunkValue} { ${dyn}::String(sc_chunk) => runtime::readable_push_string(&sc_readable, sc_chunk), ${dyn}::Bytes(sc_chunk) | ${dyn}::Buffer(sc_chunk) => runtime::readable_push(&sc_readable, sc_chunk.clone()), ${dyn}::Null => runtime::readable_push_null(&sc_readable), sc_chunk => sc_dyn_arg_type_fail("chunk", "of type string or an instance of Buffer or Uint8Array", sc_chunk), }`;
     return `{ ${this.bind(expr.args, values)} let sc_readable = ${readable}; let sc_result = ${pushed}; sc_readable_schedule(&sc_readable); sc_readable_schedule_notification(&sc_readable); sc_result }`;
   }
 

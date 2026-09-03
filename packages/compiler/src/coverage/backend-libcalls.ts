@@ -724,7 +724,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "readable.pause": ["c", "llvm", "rust"],
   "readable.pipe": ["c", "llvm", "rust"],
   "readable.push": ["c", "llvm", "rust"],
-  "readable.pushDyn": ["c", "llvm"],
+  "readable.pushDyn": ["c", "llvm", "rust"],
   "readable.pushEncoding": ["c", "llvm", "rust"],
   "readable.pushNull": ["c", "llvm", "rust"],
   "readable.pushStr": ["c", "llvm", "rust"],
