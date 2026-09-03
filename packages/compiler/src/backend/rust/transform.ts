@@ -64,7 +64,7 @@ export class RustTransformEmitter {
     if (expr.fn === "transform.new" || expr.fn === "passthrough.new") return this.emitNew(expr);
     if (expr.fn === "transform.newDyn" || expr.fn === "passthrough.newDyn") return this.emitNewDynamic(expr);
     if (expr.fn === "transform.init" || expr.fn === "passthrough.init") return this.emitInit(expr);
-    if (expr.fn === "transform.initDyn") return this.emitInitDynamic(expr);
+    if (expr.fn === "transform.initDyn" || expr.fn === "passthrough.initDyn") return this.emitInitDynamic(expr);
     const receiver = expr.args[0];
     if (!this.isTransform(receiver)) return null;
     switch (expr.fn) {
@@ -423,6 +423,7 @@ export class RustTransformEmitter {
 
   private emitInitDynamic(expr: RustLibCallExpr): string {
     const [receiver, options, flags] = expr.args;
+    const passthrough = expr.fn === "passthrough.initDyn";
     if (receiver?.type.kind !== "object" || receiver.type.className === "%Transform" ||
       this.context.runtimeStreamBase(receiver.type.className) !== "%Transform" || options?.type.kind !== "dyn" ||
       flags?.kind !== "numLit" || (flags.value & ~3) !== 0 || expr.type.kind !== "void") {
@@ -493,7 +494,7 @@ export class RustTransformEmitter {
     const flushDone = `${dyn}::${this.context.dynFunctionVariant(completionShape)}(${flushCompletion}, runtime::empty_string(), runtime::map_new())`;
     const flush = `let sc_flush_option = ${option("flush")}; let sc_flush_callback = if sc_dyn_function_identity(&sc_flush_option).is_some() { let sc_context = std::rc::Rc::new(sc_flush_option); Some(ScTransformFlush::RuntimeFlush(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_finish, sc_finish_trace| { let sc_completion = std::rc::Rc::new((sc_transform, sc_finish, std::cell::Cell::new(false), sc_finish_trace)); let _ = sc_dyn_call(&sc_context, &[${flushDone}], "flush"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${flushFallback} };`;
     const init = `let sc_hwm = ${option("highWaterMark")}; let sc_rhwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("readableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_whwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("writableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false)); let sc_allow_half_open = !matches!(${option("allowHalfOpen")}, ${dyn}::Boolean(false)); let sc_encoding = ${option("encoding")};`;
-    return `{ ${this.bind(expr.args, values)} ${transform} ${flush} ${init} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(sc_rhwm, sc_auto_destroy, sc_emit_close, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(sc_whwm, sc_auto_destroy, sc_emit_close, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, sc_allow_half_open); let sc_transform = runtime::transform_new(sc_duplex, sc_transform_callback, sc_flush_callback, false); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
+    return `{ ${this.bind(expr.args, values)} ${transform} ${flush} ${init} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(sc_rhwm, sc_auto_destroy, sc_emit_close, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(sc_whwm, sc_auto_destroy, sc_emit_close, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, sc_allow_half_open); let sc_transform = runtime::transform_new(sc_duplex, sc_transform_callback, sc_flush_callback, ${passthrough}); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
   }
 
   private emitNextChunkDynamic(expr: RustLibCallExpr): string {

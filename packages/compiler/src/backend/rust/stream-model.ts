@@ -263,7 +263,7 @@ export class RustStreamModel {
       this.duplexDynamicCompletionShape = completionShape;
       return true;
     }
-    if (node.fn === "transform.initDyn") {
+    if (node.fn === "transform.initDyn" || node.fn === "passthrough.initDyn") {
       this.usesTransform = true;
       this.usesTransformSubclass = true;
       const args = node.args as StreamArgument[] | undefined;
