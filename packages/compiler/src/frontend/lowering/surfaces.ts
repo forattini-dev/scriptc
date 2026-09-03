@@ -684,6 +684,9 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // utf8-fenced exactly like readFileSync (same special case below).
     readFile: { fn: "fsp.readFile", params: [STRING, STRING], result: { kind: "promise", inner: STRING } },
     writeFile: { fn: "fsp.writeFile", params: [STRING, STRING], result: { kind: "promise", inner: VOID } },
+    // access's omitted mode completes to 0 (F_OK) in the special case
+    // below, exactly like accessSync's; both share one runtime probe.
+    access: { fn: "fsp.access", params: [STRING, F64], result: { kind: "promise", inner: VOID } },
     mkdir: { fn: "fsp.mkdir", params: [STRING], result: { kind: "promise", inner: VOID } },
     readdir: { fn: "fsp.readdir", params: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
     rm: { fn: "fsp.rm", params: [STRING], result: { kind: "promise", inner: VOID } },

@@ -609,6 +609,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fsp.writeFile": "scr_fsp_write_file",
   "fsp.writeFileMode": "scr_fsp_write_file_mode",
   "fsp.writeFileExclusiveMode": "scr_fsp_write_file_exclusive_mode",
+  "fsp.access": "scr_fsp_access",
   "fsp.mkdir": "scr_fsp_mkdir",
   "fsp.mkdirMode": "scr_fsp_mkdir_mode",
   "fsp.mkdirRecursive": "scr_fsp_mkdir_recursive",

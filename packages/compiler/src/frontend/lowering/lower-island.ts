@@ -7,8 +7,8 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
-import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf } from "../program.js";
+import { invalidJsonModuleDiag, requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
+import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, resolveImport } from "../program.js";
 import { foldedStringKeyOf, lowerDynObjectLiteral, pureReemittable } from "./lower-exprs.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import {
@@ -2766,8 +2766,87 @@ export function lowerStaticReadableStreamReaderCall(
    * loader; the C/LLVM island keeps its existing non-embedded-key rejection.
    * Static builds report the per-site SC2012. Null for anything that isn't
    * `import(...)`. */
+/** The `{ with: { type: "json" } }` attribute bag of a dynamic import, as
+   * the attribute VALUE — null when the second argument is not that exact
+   * object-literal shape (a computed bag stays dynamic). The legacy
+   * `assert` spelling is accepted for the same reason Node still reads it. */
+  function jsonImportAttributeOf(call: ts.CallExpression): boolean {
+    const bag = call.arguments[1];
+    if (bag === undefined || !ts.isObjectLiteralExpression(bag)) return false;
+    for (const prop of bag.properties) {
+      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+      if (prop.name.text !== "with" && prop.name.text !== "assert") continue;
+      if (!ts.isObjectLiteralExpression(prop.initializer)) continue;
+      for (const attr of prop.initializer.properties) {
+        if (!ts.isPropertyAssignment(attr)) continue;
+        const key = ts.isIdentifier(attr.name) || ts.isStringLiteral(attr.name) ? attr.name.text : null;
+        if (key === "type" && ts.isStringLiteral(attr.initializer) && attr.initializer.text === "json") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+/** `await import("./data.json", { with: { type: "json" } })` — the JSON
+   * module read every zero-dependency CLI uses to find its own version.
+   * The document is DATA known at build time, exactly like the static
+   * `import pkg from "./data.json"` binding (collectJsonImports), so the
+   * call bakes into an already-resolved promise over the namespace record
+   * rather than reaching the dynamic engine: a program whose only import()
+   * is this one stays FULLY STATIC.
+   *
+   * DIVERGENCE (the static JSON binding's, inherited): the document is
+   * baked at compile time, so a runtime read never fails — the `catch`
+   * arm callers write around this import (Node rejects for a missing or
+   * malformed file) is unreachable in a compiled binary. A malformed
+   * document is a BUILD error there, which is the earlier and louder
+   * answer.
+   *
+   * Falls through (returns null) whenever any premise fails — a computed
+   * specifier, a non-JSON target, a namespace type outside the bakeable
+   * surface — so the ordinary import() fences still report. */
+  function lowerJsonDynamicImport(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.arguments.length !== 2 || !jsonImportAttributeOf(call)) return null;
+    const arg = call.arguments[0];
+    if (arg === undefined || !ts.isStringLiteralLike(arg)) return null;
+    const jsonSf = resolveImport(L.program, call.getSourceFile(), arg.text);
+    if (jsonSf === null || !jsonSf.fileName.endsWith(".json")) return null;
+    // The MODULE NAMESPACE type has no mapping of its own (it is not a
+    // record the checker hands out structurally), so the shape is built
+    // from its one readable member: `default`, the parsed document.
+    const nsTs = L.checker.getAwaitedType(L.typeOf(call));
+    const defaultSym = nsTs === undefined ? undefined : L.checker.getPropertyOfType(nsTs, "default");
+    if (defaultSym === undefined) return null;
+    const doc = L.mapTypeOf(L.checker.getTypeOfSymbol(defaultSym));
+    if (doc === undefined || doc === null) return null;
+    const ns: IrType = { kind: "record", shapeId: L.shapes.intern([{ name: "default", type: doc }]) };
+    const mapped: IrType = { kind: "promise", inner: ns };
+    if (!L.comptimeBakeable(ns)) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonSf.text);
+    } catch (e) {
+      L.pushDiag(invalidJsonModuleDiag(
+        jsonSf.fileName,
+        e instanceof Error ? e.message : String(e),
+        locOf(call),
+      ));
+      throw new PoisonError();
+    }
+    // The namespace, not the document: Node's JSON module puts the parsed
+    // value on `default` (and nothing else that a compiled program can
+    // read), so the baked record is shaped by the checker's namespace type
+    // with the document under that one key.
+    const loc = locOf(call);
+    const value = L.comptimeValueToIr({ default: parsed }, ns, "$", call);
+    return { kind: "intrinsic", name: "promise.resolve", args: [value], type: mapped, loc };
+  }
+
   export function lowerDynamicImportCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+    const json = lowerJsonDynamicImport(L, call);
+    if (json !== null) return json;
     L.requireDynamicApi("'import()'", call);
     const loc = locOf(call);
     const arg = call.arguments[0];

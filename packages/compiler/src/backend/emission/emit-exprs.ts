@@ -5897,6 +5897,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_off_rejection_handled(${arg(0)})`);
           case "fsp.readFile":
             return finish(`scr_fsp_read_file(${arg(0)})`);
+          case "fsp.access":
+            return finish(`scr_fsp_access(${arg(0)}, ${arg(1)})`);
           case "fsp.writeFile":
             return finish(`scr_fsp_write_file(${arg(0)}, ${arg(1)})`);
           case "fsp.writeFileMode":

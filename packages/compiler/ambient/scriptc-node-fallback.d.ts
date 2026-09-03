@@ -141,6 +141,9 @@ declare var process: {
    * (`Boolean(process.versions.openssl)`) answers false: no OpenSSL and
    * no SQLite ship in a scriptc binary. Other members fence per site. */
   readonly versions: { readonly node: string; readonly openssl?: string; readonly sqlite?: string };
+  /* process.version is Node's "v" + versions.node, and lowers as exactly
+   * that concatenation — so it names the same compatibility target. */
+  readonly version: string;
   /* The build-configuration snapshot Node exposes from its gyp config.
    * A scriptc binary has no V8 and no gyp, so `variables` answers the
    * honest capability record (v8_enable_i18n_support: 0 — no ICU; asan
@@ -1177,6 +1180,7 @@ declare module "fs/promises" {
     options?: { mode?: number; encoding?: "utf8" | "utf-8"; flag?: string; [option: string]: unknown },
   ): Promise<void>;
   export function writeFile(path: string, data: string, encoding: "utf8" | "utf-8"): Promise<void>;
+  export function access(path: string, mode?: number): Promise<void>;
   export function mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void>;
   export function readdir(path: string): Promise<string[]>;
   export function rm(path: string): Promise<void>;

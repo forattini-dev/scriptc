@@ -1,0 +1,13 @@
+{
+  "name": "fixture-data",
+  "version": "1.2.3",
+  "count": 41,
+  "enabled": true,
+  "keywords": ["native", "json", "modules"],
+  "config": {
+    "retries": 2.5,
+    "mode": "fast",
+    "flags": [true, false]
+  },
+  "@scoped/dep": "workspace:*"
+}
