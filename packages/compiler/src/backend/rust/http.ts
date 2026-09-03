@@ -173,6 +173,11 @@ export function emitRustHttpCall(
       expr.type.kind === "dyn") {
     return `${context.dynTypeName()}::AbortController(runtime::abort_controller_new())`;
   }
+  if (expr.fn === "fetch.abortNow" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const reason = context.nextTemporary();
+    return `{ let ${reason} = ${context.emitExpr(expr.args[0])}; let _ = ${reason}; ${context.dynTypeName()}::AbortSignal(runtime::abort_signal_new_aborted()) }`;
+  }
   if (expr.fn === "fetch.responseNew" && expr.args.length === 2 &&
       expr.args[0]?.type.kind === "dyn" && expr.args[1]?.type.kind === "dyn" &&
       expr.type.kind === "dyn") {

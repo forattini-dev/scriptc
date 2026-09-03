@@ -16,6 +16,10 @@ pub fn abort_controller_new() -> JsAbortSignal {
     Gc::new(AbortSignalData { aborted: false })
 }
 
+pub fn abort_signal_new_aborted() -> JsAbortSignal {
+    Gc::new(AbortSignalData { aborted: true })
+}
+
 pub fn abort_signal_aborted(signal: &JsAbortSignal) -> bool {
     signal.with(|signal| signal.aborted)
 }
