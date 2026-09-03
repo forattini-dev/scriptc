@@ -577,7 +577,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "net.sockEncrypted": ["c", "llvm", "rust"],
   "net.sockEnd": ["c", "llvm", "rust"],
   "net.sockEndBytes": ["c", "llvm", "rust"],
-  "net.sockEndDyn": ["c", "llvm"],
+  "net.sockEndDyn": ["c", "llvm", "rust"],
   "net.sockEndStr": ["c", "llvm", "rust"],
   "net.sockOnClose": ["c", "llvm", "rust"],
   "net.sockOnConnect": ["c", "llvm", "rust"],
