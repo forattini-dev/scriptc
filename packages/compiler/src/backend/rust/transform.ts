@@ -64,6 +64,7 @@ export class RustTransformEmitter {
     if (expr.fn === "transform.new" || expr.fn === "passthrough.new") return this.emitNew(expr);
     if (expr.fn === "transform.newDyn" || expr.fn === "passthrough.newDyn") return this.emitNewDynamic(expr);
     if (expr.fn === "transform.init" || expr.fn === "passthrough.init") return this.emitInit(expr);
+    if (expr.fn === "transform.initDyn") return this.emitInitDynamic(expr);
     const receiver = expr.args[0];
     if (!this.isTransform(receiver)) return null;
     switch (expr.fn) {
@@ -418,6 +419,81 @@ export class RustTransformEmitter {
     }
     if (index !== expr.args.length) this.context.unsupported("Transform subclass constructor arity", expr.loc);
     return `{ ${this.bind(expr.args, values)} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(${values[1]}, ${values[3]}, ${values[4]}, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(${values[2]}, ${values[3]}, ${values[4]}, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, ${values[5]}); let sc_transform = runtime::transform_new(sc_duplex, ${transform}, ${flush}, ${passthrough}); let _ = (${values[6]}, ${values[7]}, ${values[8]}); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
+  }
+
+  private emitInitDynamic(expr: RustLibCallExpr): string {
+    const [receiver, options, flags] = expr.args;
+    if (receiver?.type.kind !== "object" || receiver.type.className === "%Transform" ||
+      this.context.runtimeStreamBase(receiver.type.className) !== "%Transform" || options?.type.kind !== "dyn" ||
+      flags?.kind !== "numLit" || (flags.value & ~3) !== 0 || expr.type.kind !== "void") {
+      this.context.unsupported("dynamic Transform subclass constructor shape", expr.loc);
+    }
+    const values = expr.args.map(() => this.context.nextTemporary());
+    const owner = this.requiredValue(values, 0, expr.loc);
+    const dyn = this.context.dynTypeName();
+    let index = 3;
+    let transformFallback = "Option::<ScTransformCallback>::None";
+    let flushFallback = "Option::<ScTransformFlush>::None";
+    if ((flags.value & 1) !== 0) {
+      const callback = expr.args[index];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      const completion = params[3];
+      const errorType = completion?.kind === "func" ? completion.params[0] : undefined;
+      const outputType = completion?.kind === "func" ? completion.params[1] : undefined;
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || params.length !== 4 ||
+        params[0]?.kind !== "object" || params[0].className !== receiver.type.className ||
+        params[1]?.kind !== "bytes" || params[1].elem !== "u8" || params[2]?.kind !== "string" ||
+        completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 2 ||
+        errorType === undefined || outputType === undefined) {
+        this.context.unsupported("dynamic Transform fallback callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const completionShape = this.context.closureShapeForType(completion, expr.loc);
+      const completedError = this.errorOption("sc_error", errorType, expr.loc);
+      const output = this.emitOutput("sc_output", outputType, "sc_transform", expr.loc);
+      const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if let Some(sc_error) = ${completedError} { sc_transform_destroy_pipeline(&sc_transform, sc_error); return; } ${output} let sc_writable = runtime::transform_writable(&sc_transform); runtime::writable_complete_write(&sc_writable, sc_length); sc_transform_after_write(&sc_transform, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, [
+        "sc_owner", "sc_chunk", "runtime::string(\"buffer\")", done,
+      ], expr.loc);
+      transformFallback = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScTransformCallback::RuntimeTransform(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_chunk, sc_length, sc_done| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_transform, sc_done, std::cell::Cell::new(false))); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if ((flags.value & 2) !== 0) {
+      const callback = expr.args[index];
+      const params = callback?.type.kind === "func" ? callback.type.params : [];
+      const completion = params[1];
+      const errorType = completion?.kind === "func" ? completion.params[0] : undefined;
+      const outputType = completion?.kind === "func" ? completion.params[1] : undefined;
+      if (callback?.type.kind !== "func" || callback.type.ret.kind !== "void" || params.length !== 2 ||
+        params[0]?.kind !== "object" || params[0].className !== receiver.type.className ||
+        completion?.kind !== "func" || completion.ret.kind !== "void" || completion.params.length !== 2 ||
+        errorType === undefined || outputType === undefined) {
+        this.context.unsupported("dynamic Transform fallback flush callback shape", expr.loc);
+      }
+      const callbackValue = this.requiredValue(values, index, expr.loc);
+      const completionShape = this.context.closureShapeForType(completion, expr.loc);
+      const completedError = this.errorOption("sc_error", errorType, expr.loc);
+      const output = this.emitOutput("sc_output", outputType, "sc_transform", expr.loc);
+      const done = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if let Some(sc_error) = ${completedError} { sc_transform_destroy_pipeline(&sc_transform, sc_error); return; } ${output} (sc_completion.1)(); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); (sc_completion.3)(tracer); } })) })`;
+      const dispatch = this.context.emitClosureDispatch("sc_callback", callback.type, ["sc_owner", done], expr.loc);
+      flushFallback = `Some({ let sc_context = std::rc::Rc::new((${owner}.clone(), ${callbackValue}.clone())); ScTransformFlush::RuntimeFlush(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_finish, sc_finish_trace| { let sc_owner = sc_context.0.clone(); let sc_callback = sc_context.1.clone(); let sc_completion = std::rc::Rc::new((sc_transform, sc_finish, std::cell::Cell::new(false), sc_finish_trace)); let _ = ${dispatch}; } }), std::rc::Rc::new(move |tracer| { tracer.edge(&sc_context.0); tracer.edge(&sc_context.1); })) })`;
+      index += 1;
+    }
+    if (index !== expr.args.length) this.context.unsupported("dynamic Transform subclass constructor arity", expr.loc);
+    const optionsValue = this.requiredValue(values, 1, expr.loc);
+    const option = (key: string): string =>
+      `match &${optionsValue} { ${dyn}::Object(..) => sc_dyn_key_get(&${optionsValue}, &runtime::string("${key}"), false), _ => ${dyn}::Undefined }`;
+    const completionShape = this.dynamicCompletionShape(expr.loc);
+    const output = `match sc_output { ${dyn}::Undefined | ${dyn}::Null => {}, ${dyn}::String(sc_output) => sc_transform_emit_output(&sc_transform, runtime::buffer_from_string(&sc_output, &runtime::string("utf8"))), ${dyn}::Bytes(sc_output) | ${dyn}::Buffer(sc_output) => sc_transform_emit_output(&sc_transform, sc_output), sc_output => sc_dyn_arg_type_fail("transform callback output", "a string, Buffer, null, or undefined", &sc_output), }`;
+    const completion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if !matches!(&sc_error, ${dyn}::Undefined | ${dyn}::Null) { sc_transform_destroy_pipeline(&sc_transform, sc_dyn_error_unbox(sc_error)); return; } ${output} let sc_writable = runtime::transform_writable(&sc_transform); runtime::writable_complete_write(&sc_writable, sc_length); sc_transform_after_write(&sc_transform, sc_completion.1.clone()); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); runtime::Trace::trace(&sc_completion.1, tracer); } })) })`;
+    const done = `${dyn}::${this.context.dynFunctionVariant(completionShape)}(${completion}, runtime::empty_string(), runtime::map_new())`;
+    const transform = `let sc_transform_option = ${option("transform")}; let sc_transform_callback = if sc_dyn_function_identity(&sc_transform_option).is_some() { let sc_context = std::rc::Rc::new(sc_transform_option); Some(ScTransformCallback::RuntimeTransform(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_chunk, sc_length, sc_done| { let sc_completion = std::rc::Rc::new((sc_transform, sc_done, std::cell::Cell::new(false))); let _ = sc_dyn_call(&sc_context, &[${dyn}::Buffer(sc_chunk), ${dyn}::String(runtime::string("buffer")), ${done}], "transform"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${transformFallback} };`;
+    const flushOutput = `match sc_output { ${dyn}::Undefined | ${dyn}::Null => {}, ${dyn}::String(sc_output) => sc_transform_emit_output(&sc_transform, runtime::buffer_from_string(&sc_output, &runtime::string("utf8"))), ${dyn}::Bytes(sc_output) | ${dyn}::Buffer(sc_output) => sc_transform_emit_output(&sc_transform, sc_output), sc_output => sc_dyn_arg_type_fail("flush callback output", "a string, Buffer, null, or undefined", &sc_output), }`;
+    const flushCompletion = `runtime::Gc::new(${this.context.closureName(completionShape)}::RuntimeCallback { callback: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |sc_error, sc_output| { if sc_completion.2.replace(true) { return; } let sc_transform = sc_completion.0.clone(); if !matches!(&sc_error, ${dyn}::Undefined | ${dyn}::Null) { sc_transform_destroy_pipeline(&sc_transform, sc_dyn_error_unbox(sc_error)); return; } ${flushOutput} (sc_completion.1)(); } })), trace: Some(std::rc::Rc::new({ let sc_completion = sc_completion.clone(); move |tracer| { tracer.edge(&sc_completion.0); (sc_completion.3)(tracer); } })) })`;
+    const flushDone = `${dyn}::${this.context.dynFunctionVariant(completionShape)}(${flushCompletion}, runtime::empty_string(), runtime::map_new())`;
+    const flush = `let sc_flush_option = ${option("flush")}; let sc_flush_callback = if sc_dyn_function_identity(&sc_flush_option).is_some() { let sc_context = std::rc::Rc::new(sc_flush_option); Some(ScTransformFlush::RuntimeFlush(std::rc::Rc::new({ let sc_context = sc_context.clone(); move |sc_transform, sc_finish, sc_finish_trace| { let sc_completion = std::rc::Rc::new((sc_transform, sc_finish, std::cell::Cell::new(false), sc_finish_trace)); let _ = sc_dyn_call(&sc_context, &[${flushDone}], "flush"); } }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(sc_context.as_ref(), tracer)))) } else { ${flushFallback} };`;
+    const init = `let sc_hwm = ${option("highWaterMark")}; let sc_rhwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("readableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_whwm = match &sc_hwm { ${dyn}::Number(sc_value) => *sc_value, _ => match ${option("writableHighWaterMark")} { ${dyn}::Number(sc_value) => sc_value, _ => -1.0 } }; let sc_auto_destroy = !matches!(${option("autoDestroy")}, ${dyn}::Boolean(false)); let sc_emit_close = !matches!(${option("emitClose")}, ${dyn}::Boolean(false)); let sc_allow_half_open = !matches!(${option("allowHalfOpen")}, ${dyn}::Boolean(false)); let sc_encoding = ${option("encoding")};`;
+    return `{ ${this.bind(expr.args, values)} ${transform} ${flush} ${init} let sc_emitter = runtime::emitter_new_shaped::<ScEmitterListener>(&["close", "error", "prefinish", "finish", "drain", "data", "end", "readable"]); let sc_readable = runtime::readable_new::<ScEmitterListener, ScTransformRead>(sc_rhwm, sc_auto_destroy, sc_emit_close, Option::<ScTransformRead>::None, Option::<ScTransformRead>::None); if let ${dyn}::String(sc_encoding) = sc_encoding { runtime::readable_set_encoding(&sc_readable, &sc_encoding); } runtime::readable_set_emitter(&sc_readable, sc_emitter.clone()); let sc_writable = runtime::writable_new::<ScEmitterListener, ScTransformWrite, ScTransformFinal, ScTransformDone>(sc_whwm, sc_auto_destroy, sc_emit_close, Some(ScTransformWrite::Transform), Some(ScTransformFinal::Flush)); runtime::writable_set_emitter(&sc_writable, sc_emitter); let sc_duplex: ScTransformDuplex = runtime::duplex_new(sc_readable, sc_writable, sc_allow_half_open); let sc_transform = runtime::transform_new(sc_duplex, sc_transform_callback, sc_flush_callback, false); ${owner}.with_mut(|object| object.sc_transform = Some(sc_transform)); }`;
   }
 
   private emitNextChunkDynamic(expr: RustLibCallExpr): string {

@@ -869,7 +869,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "tp.setImmediate": ["c", "llvm", "rust"],
   "tp.setTimeout": ["c", "llvm", "rust"],
   "transform.init": ["c", "llvm", "rust"],
-  "transform.initDyn": ["c", "llvm"],
+  "transform.initDyn": ["c", "llvm", "rust"],
   "transform.new": ["c", "llvm", "rust"],
   "transform.newDyn": ["c", "llvm", "rust"],
   "url.canParse": ["c", "llvm", "rust"],
