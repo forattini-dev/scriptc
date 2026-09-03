@@ -84,6 +84,21 @@ function emitIncomingEndListener(
   return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_request_on_end(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
 }
 
+function emitIncomingVoidListener(
+  expr: RustLibCallExpr,
+  callbackType: IrFuncType,
+  event: "aborted" | "close",
+  context: RustLibCallContext,
+): string {
+  const [receiver, callbackExpr, onceExpr] = expr.args;
+  if (receiver?.type.kind !== "httpReq" || callbackExpr === undefined || onceExpr?.type.kind !== "bool" ||
+      callbackType.params.length !== 0) context.unsupported(`http.reqOn${event} shape`, expr.loc);
+  const callback = context.nextTemporary();
+  const traced = context.nextTemporary();
+  const dispatch = context.emitClosureDispatch(callback, callbackType, [], expr.loc);
+  return `{ let ${callback} = ${context.emitExpr(callbackExpr)}; let ${traced} = ${callback}.clone(); runtime::http_request_on_${event}(&(${context.emitExpr(receiver)}), std::rc::Rc::new(move || { let _ = ${dispatch}; }), std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${traced})), ${context.emitExpr(onceExpr)}); }`;
+}
+
 function emitResponseCallback(
   callbackExpr: RustLibCallExpr["args"][number],
   callbackType: IrFuncType,
@@ -291,12 +306,14 @@ export function emitRustHttpCall(
     return `runtime::http_request_socket(&(${context.emitExpr(expr.args[0])}))`;
   }
   if ((expr.fn === "http.reqHttpVersion" || expr.fn === "http.reqHttpVersionMajor" ||
-      expr.fn === "http.reqHttpVersionMinor" || expr.fn === "http.reqComplete") &&
+      expr.fn === "http.reqHttpVersionMinor" || expr.fn === "http.reqComplete" ||
+      expr.fn === "http.reqAborted" || expr.fn === "http.reqDestroyed") &&
       expr.args.length === 1 && expr.args[0]?.type.kind === "httpReq") {
     const suffix = expr.fn === "http.reqHttpVersion" ? "http_version"
       : expr.fn === "http.reqHttpVersionMajor" ? "http_version_major"
       : expr.fn === "http.reqHttpVersionMinor" ? "http_version_minor"
-      : "complete";
+      : expr.fn === "http.reqComplete" ? "complete"
+      : expr.fn === "http.reqAborted" ? "aborted" : "destroyed";
     return `runtime::http_request_${suffix}(&(${context.emitExpr(expr.args[0])}))`;
   }
   if ((expr.fn === "http.resStatusGet" || expr.fn === "http.resStatusMsgGet" ||
@@ -388,6 +405,15 @@ export function emitRustHttpCall(
   if (expr.fn === "http.reqResume" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "httpReq") {
     return `runtime::http_request_resume(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if (expr.fn === "http.reqDestroy" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "httpReq") {
+    return `runtime::http_request_destroy(&(${context.emitExpr(expr.args[0])}))`;
+  }
+  if ((expr.fn === "http.reqOnClose" || expr.fn === "http.reqOnAborted") && expr.args.length === 3) {
+    const callbackType = expr.args[1]?.type;
+    if (callbackType?.kind !== "func") context.unsupported(`${expr.fn} callback`, expr.loc);
+    return emitIncomingVoidListener(expr, callbackType, expr.fn === "http.reqOnClose" ? "close" : "aborted", context);
   }
   if (expr.fn === "http.resOnFinish" && expr.args.length === 2) {
     const callbackType = expr.args[1]?.type;

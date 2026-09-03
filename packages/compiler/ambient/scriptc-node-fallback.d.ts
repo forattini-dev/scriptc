@@ -2246,6 +2246,7 @@ declare module "http" {
     readonly httpVersionMinor: number;
     readonly aborted: boolean;
     readonly complete: boolean;
+    readonly destroyed: boolean;
     readonly headers: { [name: string]: string | undefined };
     readonly rawHeaders: string[];
     resume(): void;
@@ -2257,14 +2258,14 @@ declare module "http" {
      * ClientRequest, or a raw Socket; natural end ends the destination. */
     pipe(destination: ServerResponse | ClientRequest | Socket): void;
     on(event: "data", listener: (chunk: any) => void): void;
-    on(event: "end" | "close", listener: () => void): void;
+    on(event: "end" | "close" | "aborted", listener: () => void): void;
     on(event: "error", listener: (err: Error) => void): void;
     /* addListener IS on (Node aliases them) — the suite spells both. */
     addListener(event: "data", listener: (chunk: any) => void): void;
-    addListener(event: "end" | "close", listener: () => void): void;
+    addListener(event: "end" | "close" | "aborted", listener: () => void): void;
     addListener(event: "error", listener: (err: Error) => void): void;
     once(event: "data", listener: (chunk: any) => void): void;
-    once(event: "end" | "close", listener: () => void): void;
+    once(event: "end" | "close" | "aborted", listener: () => void): void;
     once(event: "error", listener: (err: Error) => void): void;
   }
   export interface ServerResponse {

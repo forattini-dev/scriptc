@@ -481,11 +481,22 @@ void scr_http_req_set_timeout(ScrHttpReq *r, double ms, ScrClosure *cb /*moves, 
 
 bool scr_http_req_destroyed_flag(ScrHttpReq *r) { return r->destroyed; }
 bool scr_http_req_readable(ScrHttpReq *r) { return !r->ended && !r->destroyed; }
+static void scr_http_req_finish(ScrHttpReq *r, bool fire);
 
 /* destroy(): tears the underlying connection down NOW; the teardown
  * events flow through the socket's native hooks like a peer close. */
 void scr_http_req_destroy(ScrHttpReq *r) {
   r->destroyed = true;
+  if (!r->ended && !r->aborted) {
+    /* Destroying an incomplete IncomingMessage aborts it synchronously.
+     * Reuse finish(false) to drop body listeners and pipe edges, then
+     * preserve complete=false for the aborted message. */
+    scr_http_req_finish(r, false);
+    r->ended = false;
+    r->aborted = true;
+    scr_net_fire0_this(&r->aborted_ls, r, SCR_DYNH_HTTP_REQ);
+    scr_net_ls_drop(&r->aborted_ls);
+  }
   if (r->h2_stream != NULL) {
     scr_http_h2_ops->destroy(r->h2_stream);
     return;
@@ -1497,7 +1508,7 @@ static void scr_http_conn_drop_request(ScrHttpConn *conn, bool fire_end) {
   if (conn->res) scr_http_queue_res_close(conn->res);
   if (conn->req) scr_http_queue_req_close(conn->req);
   if (conn->req) {
-    scr_http_req_finish(conn->req, fire_end);
+    if (!conn->req->aborted) scr_http_req_finish(conn->req, fire_end);
     scr_http_req_release(conn->req);
     conn->req = NULL;
   }

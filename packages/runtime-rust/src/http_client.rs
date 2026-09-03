@@ -211,11 +211,16 @@ fn http_client_feed(
                 headers,
                 body: Vec::new(),
                 ended: false,
+                aborted: false,
+                destroyed: false,
+                close_emitted: false,
                 finish_pending: false,
                 paused: false,
                 flowing: false,
                 data_listeners: Vec::new(),
                 end_listeners: Vec::new(),
+                aborted_listeners: Vec::new(),
+                close_listeners: Vec::new(),
             });
             connection.response = Some(response.clone());
             Some((request.clone(), response))

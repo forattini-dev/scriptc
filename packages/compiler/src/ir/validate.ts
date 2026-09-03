@@ -526,7 +526,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "http.reqHttpVersionMajor": { argTypes: [HTTPREQ_T], result: F64 },
   "http.reqHttpVersionMinor": { argTypes: [HTTPREQ_T], result: F64 },
   "http.reqAborted": { argTypes: [HTTPREQ_T], result: BOOL },
-  "http.reqComplete": { argTypes: [HTTPREQ_T], result: BOOL },
+  "http.reqComplete": { argTypes: [HTTPREQ_T], result: BOOL }, "http.reqDestroyed": { argTypes: [HTTPREQ_T], result: BOOL },
   "http.resDestroy": { argTypes: [HTTPRES_T], result: VOID },
   "http.resOnClose": { argTypes: [HTTPRES_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "http.resWriteHeadPairs": { argTypes: [HTTPRES_T, F64, arrayOf(STRING)], result: VOID },

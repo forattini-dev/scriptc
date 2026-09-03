@@ -2745,7 +2745,7 @@ export type IrLibFn =
   | "http.reqHttpVersionMajor"
   | "http.reqHttpVersionMinor"
   | "http.reqAborted"
-  | "http.reqComplete"
+  | "http.reqComplete" | "http.reqDestroyed"
   | "http.resDestroy"
   | "http.resOnClose"
   | "http.resWriteHeadPairs"

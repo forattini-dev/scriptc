@@ -68,11 +68,16 @@ pub struct HttpRequestData {
     headers: Vec<(JsString, JsString, JsString)>,
     body: Vec<u8>,
     ended: bool,
+    aborted: bool,
+    destroyed: bool,
+    close_emitted: bool,
     finish_pending: bool,
     paused: bool,
     flowing: bool,
     data_listeners: Vec<HttpDataListener>,
     end_listeners: Vec<HttpVoidListener>,
+    aborted_listeners: Vec<HttpVoidListener>,
+    close_listeners: Vec<HttpVoidListener>,
 }
 
 impl Trace for HttpRequestData {
@@ -83,7 +88,12 @@ impl Trace for HttpRequestData {
         for listener in &self.data_listeners {
             (listener.trace)(tracer);
         }
-        for listener in &self.end_listeners {
+        for listener in self
+            .end_listeners
+            .iter()
+            .chain(self.aborted_listeners.iter())
+            .chain(self.close_listeners.iter())
+        {
             (listener.trace)(tracer);
         }
     }
@@ -95,11 +105,16 @@ impl ClearEdges for HttpRequestData {
         self.headers.clear();
         self.body.clear();
         self.ended = true;
+        self.aborted = false;
+        self.destroyed = true;
+        self.close_emitted = true;
         self.finish_pending = false;
         self.paused = false;
         self.flowing = false;
         self.data_listeners.clear();
         self.end_listeners.clear();
+        self.aborted_listeners.clear();
+        self.close_listeners.clear();
     }
 }
 
@@ -399,6 +414,10 @@ pub fn http_request_complete(request: &JsHttpRequest) -> bool {
     request.with(|request| request.ended)
 }
 
+pub fn http_request_aborted(request: &JsHttpRequest) -> bool {
+    request.with(|request| request.aborted)
+}
+
 pub fn http_request_status_code(request: &JsHttpRequest) -> Option<f64> {
     request.with(|request| request.status_code)
 }
@@ -482,7 +501,74 @@ pub fn http_request_readable(request: &JsHttpRequest) -> bool {
 }
 
 pub fn http_request_destroyed(request: &JsHttpRequest) -> bool {
-    request.with(|request| request.socket.as_ref().is_none_or(net_socket_destroyed))
+    request.with(|request| request.destroyed)
+}
+
+pub fn http_request_on_aborted(
+    request: &JsHttpRequest,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+    _once: bool,
+) {
+    request.with_mut(|request| {
+        if !request.aborted && !request.close_emitted {
+            request.aborted_listeners.push(HttpVoidListener { invoke: callback, trace });
+        }
+    });
+}
+
+pub fn http_request_on_close(
+    request: &JsHttpRequest,
+    callback: Rc<dyn Fn()>,
+    trace: NetTrace,
+    _once: bool,
+) {
+    request.with_mut(|request| {
+        if !request.close_emitted {
+            request.close_listeners.push(HttpVoidListener { invoke: callback, trace });
+        }
+    });
+}
+
+fn http_request_dispatch_aborted(request: &JsHttpRequest) {
+    let listeners = request.with_mut(|request| {
+        if request.ended || request.aborted || request.close_emitted {
+            return Vec::new();
+        }
+        request.aborted = true;
+        std::mem::take(&mut request.aborted_listeners)
+    });
+    for listener in listeners {
+        (listener.invoke)();
+    }
+}
+
+fn http_request_dispatch_close(request: &JsHttpRequest) {
+    let listeners = request.with_mut(|request| {
+        if request.close_emitted {
+            return Vec::new();
+        }
+        request.close_emitted = true;
+        request.destroyed = true;
+        request.aborted_listeners.clear();
+        std::mem::take(&mut request.close_listeners)
+    });
+    for listener in listeners {
+        (listener.invoke)();
+    }
+}
+
+pub fn http_request_destroy(request: &JsHttpRequest) {
+    let socket = request.with_mut(|request| {
+        request.destroyed = true;
+        request.socket.clone()
+    });
+    if let Some(socket) = socket {
+        net_socket_destroy(&socket);
+    }
+    http_request_dispatch_aborted(request);
+    let request = request.clone();
+    process_next_tick(Box::new(move || http_request_dispatch_close(&request)));
 }
 
 pub fn http_request_on_end(

@@ -4553,9 +4553,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_http_req_aborted_flag(${arg(0)})`);
           case "http.reqComplete":
             return finish(`scr_http_req_complete(${arg(0)})`);
+          case "http.reqDestroyed": return finish(`scr_http_req_destroyed_flag(${arg(0)})`);
           case "http.reqHeader": {
-            // string|undefined, type-directed exactly like process.envGet:
-            // the runtime answers +1 or NULL; NULL takes the undefined arm.
+            // string|undefined, type-directed like process.envGet; NULL takes the undefined arm.
             if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: http.reqHeader result is not a union");
             const def = E.unionsById.get(e.type.unionId);
             const strTag = def ? def.arms.findIndex((a) => a.kind === "string") : -1;

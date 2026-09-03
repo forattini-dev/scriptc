@@ -15,11 +15,16 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
         headers: Vec::new(),
         body: body.as_bytes().to_vec(),
         ended: false,
+        aborted: false,
+        destroyed: false,
+        close_emitted: false,
         finish_pending: true,
         paused: false,
         flowing: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
+        aborted_listeners: Vec::new(),
+        close_listeners: Vec::new(),
     })
 }
 

@@ -2105,11 +2105,11 @@ export function lowerServerProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
       const fn: IrLibFn = name === "httpVersionMajor" ? "http.reqHttpVersionMajor" : "http.reqHttpVersionMinor";
       return { kind: "libCall", fn, args: [receiver], type: F64, loc };
     }
-    if (name === "aborted" || name === "complete") {
-      // The compat pair's flags (Http2ServerRequest); an http/1 request
-      // answers aborted: false and complete-once-ended the same way.
+    if (name === "aborted" || name === "complete" || name === "destroyed") {
+      // IncomingMessage lifecycle flags, shared with the h2 compat
+      // request shape.
       const receiver = handleReceiver(L, expr.expression, HTTPREQ_T);
-      const fn: IrLibFn = name === "aborted" ? "http.reqAborted" : "http.reqComplete";
+      const fn: IrLibFn = name === "aborted" ? "http.reqAborted" : name === "complete" ? "http.reqComplete" : "http.reqDestroyed";
       return { kind: "libCall", fn, args: [receiver], type: BOOL, loc };
     }
     if (name === "rawHeaders") {

@@ -73,6 +73,8 @@ fn http_request_maybe_finish(request: &JsHttpRequest) {
         (listener.invoke)();
     }
     request.with_mut(|request| request.data_listeners.clear());
+    let request = request.clone();
+    process_next_tick(Box::new(move || http_request_dispatch_close(&request)));
 }
 
 /// One unit of progress over a connection's buffer. Every variant that runs
@@ -203,11 +205,16 @@ fn http_server_next(connection: &mut HttpServerConnection) -> HttpServerStep {
         headers: head.headers,
         body: Vec::new(),
         ended: false,
+        aborted: false,
+        destroyed: false,
+        close_emitted: false,
         finish_pending: false,
         paused: false,
         flowing: false,
         data_listeners: Vec::new(),
         end_listeners: Vec::new(),
+        aborted_listeners: Vec::new(),
+        close_listeners: Vec::new(),
     });
     let response = Gc::new(HttpResponseData {
         socket: Some(connection.socket.clone()),
