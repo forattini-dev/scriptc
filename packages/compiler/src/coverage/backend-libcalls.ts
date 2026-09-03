@@ -207,7 +207,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "emitter.countFn": ["c", "llvm", "rust"],
   "emitter.ctor": ["c", "llvm", "rust"],
   "emitter.emit": ["c", "llvm", "rust"],
-  "emitter.emitData": ["c", "llvm"],
+  "emitter.emitData": ["c", "llvm", "rust"],
   "emitter.emitError": ["c", "llvm", "rust"],
   "emitter.getDefaultMax": ["c", "llvm", "rust"],
   "emitter.getMax": ["c", "llvm", "rust"],

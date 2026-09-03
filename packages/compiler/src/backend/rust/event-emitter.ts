@@ -172,6 +172,7 @@ export class RustEventEmitterEmitter {
       case "emitter.offDyn": return this.emitOffDynamic(expr);
       case "emitter.removeAll": return this.emitRemoveAll(expr);
       case "emitter.emit": return this.emitEvent(expr);
+      case "emitter.emitData": return this.emitEvent(expr);
       case "emitter.emitError": return this.emitEvent(expr, true);
       case "emitter.count": return this.emitCount(expr);
       case "emitter.countFn": return this.emitCountIdentity(expr);
