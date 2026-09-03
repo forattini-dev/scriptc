@@ -288,7 +288,7 @@ fn http_roundtrip_server_and_client() {
             let body_log = response_log.clone();
             http_request_on_data(
                 &response,
-                Rc::new(move |chunk| {
+                Rc::new(move |chunk, _encoding_utf8| {
                     note(&body_log, &format!("body:{}", utf8(&chunk)));
                 }),
                 no_trace(),
@@ -320,7 +320,7 @@ fn http_roundtrip_server_and_client() {
 
 #[test]
 fn http_client_parses_latin1_response_header_values() {
-    let (_, _, headers, _, _) =
+    let (_, _, _, headers, _, _) =
         http_parse_response_head(b"HTTP/1.1 200 OK\r\nX-Latin: \xe9\r\n\r\n")
             .expect("HTTP header fields use the byte-oriented Latin-1 surface");
 

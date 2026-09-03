@@ -123,7 +123,7 @@ fn http_server_decodes_chunked_and_pipelined_requests() {
             let data_body = body.clone();
             http_request_on_data(
                 &request,
-                Rc::new(move |chunk| data_body.borrow_mut().push_str(&utf8(&chunk))),
+                Rc::new(move |chunk, _encoding_utf8| data_body.borrow_mut().push_str(&utf8(&chunk))),
                 no_trace(),
                 false,
             );

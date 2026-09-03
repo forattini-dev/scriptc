@@ -264,7 +264,7 @@ fn https_worker_client_roundtrip() {
             let body_log = response_log.clone();
             http_request_on_data(
                 &response,
-                Rc::new(move |chunk| note(&body_log, &format!("body:{}", utf8(&chunk)))),
+                Rc::new(move |chunk, _encoding_utf8| note(&body_log, &format!("body:{}", utf8(&chunk)))),
                 no_trace(),
                 false,
             );
