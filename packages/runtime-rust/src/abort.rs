@@ -7,6 +7,7 @@ pub struct AbortSignalData<T: HeapValue> {
 
 #[derive(Clone)]
 struct AbortListener<T: HeapValue> {
+    identity: usize,
     notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
@@ -92,10 +93,25 @@ pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T>
 
 pub fn abort_signal_add_listener<T: HeapValue>(
     signal: &JsAbortSignal<T>,
+    identity: usize,
     notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 ) {
-    signal.with_mut(|signal| signal.listeners.push(AbortListener { notify, trace }));
+    signal.with_mut(|signal| {
+        signal.listeners.push(AbortListener {
+            identity,
+            notify,
+            trace,
+        })
+    });
+}
+
+pub fn abort_signal_remove_listener<T: HeapValue>(signal: &JsAbortSignal<T>, identity: usize) {
+    signal.with_mut(|signal| {
+        signal
+            .listeners
+            .retain(|listener| listener.identity != identity)
+    });
 }
 
 pub fn abort_controller_abort<T: HeapValue>(signal: &JsAbortSignal<T>, reason: T) {
