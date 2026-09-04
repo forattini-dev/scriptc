@@ -649,6 +649,66 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
   return ib_take(&out);
 }
 
+ScrStr *scr_insp_error_parts(ScrStr *name, ScrStr *message, ScrStr *decl_name) {
+  /* improveStack's regular-error styling: the declaration name prefixes
+   * the inherited default (`Tmp [Error]`); an overridden name wins as-is
+   * unless the declaration name CONTAINS it (`MyError` over `Error`).
+   * The gate is endsWith("Error") — our stack form always starts with
+   * the name and continues with ':' or ends. */
+  const char *name_data = (const char *)name->data;
+  size_t name_len = name->len;
+  const char *decl_data = (const char *)decl_name->data;
+  size_t decl_len = decl_name->len;
+  bool ends_error = name_len >= 5 && memcmp(name_data + name_len - 5, "Error", 5) == 0;
+  const char *style_data = name_data;
+  size_t style_len = name_len;
+  char *joined = NULL; /* the `Decl [Name]` composition, malloc'd */
+  if (ends_error) {
+    bool equal = name_len == decl_len && memcmp(name_data, decl_data, name_len) == 0;
+    bool contains = false;
+    if (!equal && decl_len >= name_len) {
+      for (size_t i = 0; i + name_len <= decl_len; i++) {
+        if (memcmp(decl_data + i, name_data, name_len) == 0) {
+          contains = true;
+          break;
+        }
+      }
+    }
+    if (equal) {
+      /* style stays the name */
+    } else if (contains) {
+      style_data = decl_data;
+      style_len = decl_len;
+    } else {
+      joined = malloc(decl_len + 2 + name_len + 1);
+      if (joined == NULL) { insp_oom(); }
+      memcpy(joined, decl_data, decl_len);
+      joined[decl_len] = ' ';
+      /* Node's getPrefix composes `ctor [tag]`; improveStack's
+       * `${prefix} [${name}]` keeps the bracket form's spacing. */
+      joined[decl_len + 1] = '[';
+      memcpy(joined + decl_len + 2, name_data, name_len);
+      joined[decl_len + 2 + name_len] = ']';
+      style_data = joined;
+      style_len = decl_len + 2 + name_len + 1;
+    }
+  }
+  InspBuf out = {0};
+  ib_char(&out, '[');
+  ib_bytes(&out, style_data, style_len);
+  free(joined);
+  if (message->len) {
+    ib_cstr(&out, ": ");
+    for (size_t i = 0; i < message->len; i++) {
+      char c = message->data[i];
+      ib_char(&out, c);
+      if (c == '\n') ib_spaces(&out, g_indent);
+    }
+  }
+  ib_char(&out, ']');
+  return ib_take(&out);
+}
+
 /* Errors: the STACKLESS rendering — compiled binaries carry no stack, so
  * the base is formatError's bracket form `[Name: message]` / `[Name]`
  * (Node prints these exact forms for an error whose stack is empty;

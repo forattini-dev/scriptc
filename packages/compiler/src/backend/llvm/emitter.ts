@@ -514,6 +514,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.str": "scr_insp_str",
   "insp.regex": "scr_insp_regex",
   "insp.error": "scr_insp_error",
+  "insp.errorParts": "scr_insp_error_parts",
+  "asset.file": "scr_asset_file",
   "insp.begin": "scr_insp_begin",
   "insp.entry": "scr_insp_entry",
   "insp.key": "scr_insp_key",

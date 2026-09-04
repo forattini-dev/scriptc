@@ -5189,6 +5189,11 @@ ScrStr *scr_insp_buffer(ScrBytes *b);  /* <Buffer aa bb ...>, 50-byte cap */
  * code slot as its one extra property ({ code: 'X' }); [Name] beyond
  * depth when a code makes it composite. */
 ScrStr *scr_insp_error(ScrError *e, double recurse, double depth);
+/* The stackless [style: message] bracket of a USER Error subclass
+ * instance, styled like Node's improveStack (the declaration name
+ * prefixes the inherited default); the own-property block is the
+ * frontend's. */
+ScrStr *scr_insp_error_parts(ScrStr *name, ScrStr *message, ScrStr *decl_name);
 /* The checked-dynamic tree: shape lives in the value, so the whole
  * traversal is here. dyn-boxed bytes render in the checked-dynamic tree's documented
  * Uint8Array identity. */
@@ -5250,6 +5255,7 @@ double scr_bytes_write_var(ScrBytes *b, double value, double offset, double byte
 /* fs.readFileSync(path) [no encoding] / writeFileSync(path, buf) — the
  * Buffer forms of scr_lib.c's utf8 pair, byte-exact and NUL-safe.
  * Failures THROW catchably (scr_fs_throw, Node-shaped messages). */
+ScrStr *scr_asset_file(ScrStr *content_b64, ScrStr *name); /* Bun's file loader: embed + extract, answer the path */
 ScrBytes *scr_fs_read_file_bytes(ScrStr *path); /* +1 */
 /* readFileSync's runtime-encoding form (scr_bytes_io.c's note): +1 dyn
  * value — a Buffer box for undefined/null, a string for a known encoding —

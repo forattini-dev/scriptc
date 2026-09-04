@@ -6961,6 +6961,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // prefix carries the name/message/code slots (the error.code
             // precedent).
             return finish(`scr_insp_error((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "insp.errorParts":
+            // The stackless [style: message] bracket of a user Error
+            // subclass instance; the own-property block is synthesized
+            // around it (the frontend owns the field walk).
+            return finish(`scr_insp_error_parts(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "asset.file":
+            // Bun's file loader: decode the embedded base64, write the
+            // asset under the scratch dir, answer the path (scr_bytes_io.c).
+            return finish(`scr_asset_file(${arg(0)}, ${arg(1)})`);
           case "insp.dyn":
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynS":

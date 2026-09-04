@@ -3945,6 +3945,10 @@ export type IrLibFn =
   | "insp.regex"
   | "insp.buffer"
   | "insp.error"
+  /** The stackless `[style: message]` bracket of a USER Error subclass
+   * instance ([name, message, declName]): Node's improveStack styling,
+   * with the own-property block synthesized around it frontend-side. */
+  | "insp.errorParts"
   | "insp.dyn"
   | "insp.dynS"
   | "insp.jsval"
@@ -4379,7 +4383,15 @@ export type IrLibFn =
    * to a plain i32 typed array — sharing is unobservable without
    * threads; SEMANTICS.md documents the stance). Never throws; +1 string
    * result. */
-  | "atomics.wait";
+  | "atomics.wait"
+  /** The embedded FILE asset loader (Bun's `with { type: "file" }` — the
+   * binary counterpart of the text-asset stance): [contentBase64, name]
+   * both compile-time strings. Decodes the bytes, writes the file under a
+   * process-owned scratch directory (idempotent per content+name), and
+   * answers the PATH the default binding carries — Bun's file-loader
+   * contract. Node has no counterpart, so extraction failures trap
+   * (never throws a catchable Node-shaped error). */
+  | "asset.file";
 
 /** Numeric binary ops. The bitwise six (`&`/`|`/`^`/`<<`/`>>`/`>>>`) have
  * JS ToInt32/ToUint32 semantics — operands convert (NaN/±Infinity → 0,

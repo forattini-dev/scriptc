@@ -96,18 +96,32 @@ function inspectKey(name: string): string {
 
 /* ── type support ────────────────────────────────────────────────────── */
 
-/** The error-hierarchy gate: `info`'s instances render through the
- * runtime's name/message/code slots, which subclasses inherit — sound
- * only when NO descendant adds declared fields (they would be own
- * properties Node prints). */
-function errorRenderable(info: ClassInfo): boolean {
-  // The builtin classes' name/message/code live in runtime slots (the
-  // ScrError prefix insp.error reads), not IR fields; only USER-declared
-  // fields are own properties the runtime rendering would miss. #private
-  // fields are NOT own properties — Node never prints them — so they
-  // don't disqualify.
-  if (!info.builtinError && info.def.fields.some((f) => !f.name.startsWith("#"))) return false;
-  return info.subclasses.every((s) => errorRenderable(s));
+/** The error-hierarchy gate: a builtin Error class renders through the
+ * runtime's name/message/code slots; a USER subclass renders through its
+ * own synthesized helper — the bracket from the live name/message slots,
+ * the own-property block from the static field types. Each user subclass
+ * in the tree contributes its declared fields' walk (transitively, so a
+ * base-typed value dispatches over renderable descendants only). #private
+ * fields are NOT own properties — Node never prints them. */
+function errorTreeSupport(L: Lowerer, info: ClassInfo, visiting: Set<string>, out: { recursive: boolean }): string | null {
+  if (!info.builtinError) {
+    if (visiting.has(info.def.name)) {
+      out.recursive = true;
+      return null;
+    }
+    visiting.add(info.def.name);
+    for (const f of info.def.fields) {
+      if (f.name.startsWith("#") || ERROR_RUNTIME_SLOTS.has(f.name)) continue;
+      const why = inspectSupport(L, f.type, visiting, out);
+      if (why !== null) return why;
+    }
+    visiting.delete(info.def.name);
+  }
+  for (const s of info.subclasses) {
+    const why = errorTreeSupport(L, s, visiting, out);
+    if (why !== null) return why;
+  }
+  return null;
 }
 
 function isErrorClass(L: Lowerer, className: string): boolean {
@@ -199,9 +213,7 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
       const info = L.classes.get(t.className);
       if (!info) return `class '${t.className}' has no inspect lowering`;
       if (isErrorClass(L, t.className)) {
-        return errorRenderable(info)
-          ? null
-          : "error subclasses with declared fields have no inspect lowering yet (the extra own properties are runtime-dynamic)";
+        return errorTreeSupport(L, info, visiting, out);
       }
       if (info.subclasses.length > 0) {
         return `inspect of '${t.className}' values is not lowered (the class has subclasses — the runtime value's constructor name and fields are dynamic)`;
@@ -278,6 +290,16 @@ function inspectExpr(
       return { kind: "libCall", fn: "insp.jsval", args: [value, recurse, depth], type: STRING, loc };
     case "object":
       if (isErrorClass(L, t.className)) {
+        const info = L.classes.get(t.className)!;
+        if (!info.builtinError) {
+          return { kind: "call", callee: userErrorInspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
+        }
+        // A builtin static type over a tree with user subclasses answers
+        // at runtime (the value's class is dynamic); pure builtin trees
+        // keep the one runtime call.
+        if (errorDispatchOrder(info).length > 0) {
+          return { kind: "call", callee: errorDispatchHelper(L, info, loc), args: [value, recurse, depth], type: STRING, loc };
+        }
         return { kind: "libCall", fn: "insp.error", args: [value, recurse, depth], type: STRING, loc };
       }
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
@@ -763,6 +785,242 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
   }
   L.liftedFns.push(fn);
   return name;
+}
+
+/* ── user Error subclass inspection ──────────────────────────────────── */
+
+/** The runtime slots a USER Error subclass inherits from the builtin
+ * prefix: `name`/`message` ride the bracket header (formatError removes
+ * both from the keys — the rendered stack always contains them), and
+ * `%code`/`%hasCause`/`%cause` are implementation slots, not own
+ * properties Node would list. */
+const ERROR_RUNTIME_SLOTS = new Set(["name", "message", "%code", "%hasCause", "%cause"]);
+
+/** The own properties Node's formatError would list for a USER Error
+ * subclass instance: the class's declared fields in ctor assignment
+ * order (def.fields carries the layout — the base chain is exactly the
+ * runtime slots here), string keys first and symbol keys last, #private
+ * excluded. Redeclared fields are absent from def.fields (pre-existing
+ * class-helper stance). */
+function userErrorEntries(info: ClassInfo): { name: string; type: IrType }[] {
+  const visible = info.def.fields.filter((f) => !f.name.startsWith("#") && !ERROR_RUNTIME_SLOTS.has(f.name));
+  const symNames = new Set(info.symbolFields?.values() ?? []);
+  return [
+    ...visible.filter((f) => !symNames.has(f.name)),
+    ...visible.filter((f) => symNames.has(f.name)),
+  ];
+}
+
+/** `%util.inspErr.<n>(v, r, d): string` — the STACKLESS inspect of one
+ * USER Error subclass instance. formatError renders the bracket from the
+ * live name/message slots (improveStack's styling — the declaration name
+ * prefixes the inherited default, `Tmp [Error]`, while an overridden
+ * name wins); the frontend synthesizes the own-property block from the
+ * static field types through the shared frame engine. Propertyless
+ * errors return before Node's depth gate (formatRaw's early `keys
+ * .length === 0` return); with properties, the beyond-depth answer is
+ * the bare constructor name. */
+function userErrorInspectHelper(L: Lowerer, t: IrType & { kind: "object" }, loc: SrcLoc): string {
+  const key = `inspErr:${typeKey(t)}`;
+  const existing = L.inspectHelpers.get(key);
+  if (existing) return existing;
+  const helperName = `%util.inspErr.${L.inspectHelpers.size}`;
+  L.inspectHelpers.set(key, helperName);
+  const info = L.classes.get(t.className);
+  if (!info) throw new InternalCompilerError(`inspect of unknown class ${t.className}`);
+  const display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
+
+  const v = (): IrExpr => varRef("v.0", t, loc);
+  const r = (): IrExpr => varRef("r.0", F64, loc);
+  const d = (): IrExpr => varRef("d.0", F64, loc);
+  const rPlus1 = (): IrExpr => ({ kind: "bin", op: "+", left: r(), right: numLit(1, loc), type: F64, loc });
+  const ret = (value: IrExpr): IrStmt => ({ kind: "return", value, loc });
+  const exprStmt = (expr: IrExpr): IrStmt => ({ kind: "exprStmt", expr, loc });
+  // CYCLE-CAPABLE instances (a field's type reaches the class itself) run
+  // the shared circular machinery, the class-helper protocol.
+  const onCycle = typeReachesItself(L, t);
+  const begin = (): IrStmt[] => [
+    exprStmt({ kind: "libCall", fn: "insp.begin", args: [rPlus1()], type: { kind: "void" }, loc }),
+    ...(onCycle
+      ? [exprStmt({ kind: "libCall", fn: "insp.seenPush", args: [v()], type: { kind: "void" }, loc })]
+      : []),
+  ];
+  const entry = (s: IrExpr, isNum: IrExpr): IrStmt =>
+    exprStmt({ kind: "libCall", fn: "insp.entry", args: [s, isNum], type: { kind: "void" }, loc });
+  const end = (base: IrExpr): IrExpr => {
+    const reduced: IrExpr = {
+      kind: "libCall",
+      fn: "insp.end",
+      args: [base, strLit("{", loc), strLit("}", loc), rPlus1(), boolLit(false, loc), boolLit(false, loc)],
+      type: STRING,
+      loc,
+    };
+    if (!onCycle) return reduced;
+    return { kind: "libCall", fn: "insp.refWrap", args: [v(), reduced], type: STRING, loc };
+  };
+  const child = (elemT: IrType, value: IrExpr): IrExpr => inspectExpr(L, elemT, value, rPlus1(), d(), loc);
+  const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
+
+  // The bracket base reads the LIVE name/message slots — a constructor
+  // that reassigns `this.name` prints the override, like Node.
+  // The bracket base reads the LIVE name/message slots — a constructor
+  // that reassigns `this.name` prints the override, like Node.
+  const header = (): IrExpr => ({
+    kind: "libCall",
+    fn: "insp.errorParts",
+    args: [get("name", STRING), get("message", STRING), strLit(display, loc)],
+    type: STRING,
+    loc,
+  });
+
+  const entries = userErrorEntries(info);
+  const symNames = new Set(info.symbolFields?.values() ?? []);
+  const locals: { id: string; name: string; type: IrType; mutable: boolean }[] = [
+    { id: "v.0", name: "v", type: t, mutable: false },
+    { id: "r.0", name: "r", type: F64, mutable: false },
+    { id: "d.0", name: "d", type: F64, mutable: false },
+    // The bracket base evaluates BEFORE begin() pushes the block frame —
+    // Node's formatError runs with the ENCLOSING indentation level, so a
+    // multi-line message's continuation lines indent by the enclosing
+    // width, not the block's own.
+    { id: "h.0", name: "h", type: STRING, mutable: false },
+  ];
+  const headerLocal = (): IrExpr => varRef("h.0", STRING, loc);
+  let body: IrStmt[];
+  if (entries.length === 0) {
+    body = [ret(header())];
+  } else {
+    body = [
+      { kind: "varDecl", localId: "h.0", init: header(), loc },
+      {
+        kind: "if",
+        cond: { kind: "bin", op: ">", left: r(), right: d(), type: BOOL, loc },
+        then: [ret(strLit(`[${display}]`, loc))],
+        else_: null,
+        loc,
+      },
+      ...begin(),
+    ];
+    for (const f of entries) {
+      const key = symNames.has(f.name) ? f.name : inspectKey(f.name);
+      body.push(
+        entry(concatAll([strLit(`${key}: `, loc), child(f.type, get(f.name, f.type))], loc), boolLit(false, loc)),
+      );
+    }
+    body.push(ret(end(headerLocal())));
+  }
+
+  if (onCycle && entries.length > 0) {
+    // The circular check, FIRST: a value already on the traversal stack
+    // renders [Circular *N] before any depth answer.
+    locals.push({ id: "cc.0", name: "cc", type: F64, mutable: false });
+    const cc = (): IrExpr => varRef("cc.0", F64, loc);
+    body.unshift(
+      {
+        kind: "varDecl",
+        localId: "cc.0",
+        init: { kind: "libCall", fn: "insp.circCheck", args: [v()], type: F64, loc },
+        loc,
+      },
+      {
+        kind: "if",
+        cond: { kind: "bin", op: ">", left: cc(), right: numLit(0, loc), type: BOOL, loc },
+        then: [ret({ kind: "libCall", fn: "insp.circular", args: [cc()], type: STRING, loc })],
+        else_: null,
+        loc,
+      },
+    );
+  }
+
+  L.liftedFns.push({
+    name: helperName,
+    params: [
+      { localId: "v.0", name: "v", type: t },
+      { localId: "r.0", name: "r", type: F64 },
+      { localId: "d.0", name: "d", type: F64 },
+    ],
+    returnType: STRING,
+    locals,
+    body,
+    loc,
+  });
+  return helperName;
+}
+
+/** The USER Error subclasses in one class's tree, DEEPEST FIRST — an
+ * instanceof dispatch chain must never let an ancestor's arm shadow a
+ * descendant (`class E extends B` must be tested before B). */
+function errorDispatchOrder(info: ClassInfo): ClassInfo[] {
+  const entries: { info: ClassInfo; depth: number }[] = [];
+  const walk = (current: ClassInfo, depth: number): void => {
+    for (const child of current.subclasses) {
+      if (!child.builtinError) entries.push({ info: child, depth: depth + 1 });
+      walk(child, depth + 1);
+    }
+  };
+  walk(info, 0);
+  return entries.sort((a, b) => b.depth - a.depth).map((e) => e.info);
+}
+
+/** `%util.inspErrD.<n>(v, r, d): string` — the runtime dispatch for a
+ * builtin Error static type whose tree contains user subclasses: each
+ * subclass answers through its own helper (`instanceof` narrowing — the
+ * trust-the-checker downcast), everything else is a builtin JsError. */
+function errorDispatchHelper(L: Lowerer, info: ClassInfo, loc: SrcLoc): string {
+  const key = `inspErrD:${info.def.name}`;
+  const existing = L.inspectHelpers.get(key);
+  if (existing) return existing;
+  const helperName = `%util.inspErrD.${L.inspectHelpers.size}`;
+  L.inspectHelpers.set(key, helperName);
+  const t: IrType = { kind: "object", className: info.def.name };
+  const v = (): IrExpr => varRef("v.0", t, loc);
+  const r = (): IrExpr => varRef("r.0", F64, loc);
+  const d = (): IrExpr => varRef("d.0", F64, loc);
+  const body: IrStmt[] = [];
+  for (const sub of errorDispatchOrder(info)) {
+    const subT: IrType = { kind: "object", className: sub.def.name };
+    body.push({
+      kind: "if",
+      cond: { kind: "instanceOf", value: v(), className: sub.def.name, type: BOOL, loc },
+      then: [
+        {
+          kind: "return",
+          value: {
+            kind: "call",
+            callee: userErrorInspectHelper(L, subT, loc),
+            args: [{ kind: "downcast", value: v(), type: subT, loc }, r(), d()],
+            type: STRING,
+            loc,
+          },
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    });
+  }
+  body.push({
+    kind: "return",
+    value: { kind: "libCall", fn: "insp.error", args: [v(), r(), d()], type: STRING, loc },
+    loc,
+  });
+  L.liftedFns.push({
+    name: helperName,
+    params: [
+      { localId: "v.0", name: "v", type: t },
+      { localId: "r.0", name: "r", type: F64 },
+      { localId: "d.0", name: "d", type: F64 },
+    ],
+    returnType: STRING,
+    locals: [
+      { id: "v.0", name: "v", type: t, mutable: false },
+      { id: "r.0", name: "r", type: F64, mutable: false },
+      { id: "d.0", name: "d", type: F64, mutable: false },
+    ],
+    body,
+    loc,
+  });
+  return helperName;
 }
 
 /* ── the console/format top-level value rendering ────────────────────── */

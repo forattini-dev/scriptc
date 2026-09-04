@@ -306,6 +306,55 @@ pub fn inspect_error_parts(
     )
 }
 
+/// improveStack's regular-error styling for the STACKLESS inspect of a
+/// USER Error subclass instance (Node's lib/internal/util/inspect.js):
+/// the declaration name prefixes the inherited default (`Tmp [Error]`),
+/// while an overridden name prints as-is — unless the declaration name
+/// CONTAINS it, where the declaration spelling subsumes the shorter one
+/// (`MyError` over `Error`). The gate is `name.endsWith("Error")`: the
+/// stack our errors render always starts with the name and continues
+/// with ':' or ends, so the "regular error" shape condition holds
+/// exactly when the name ends with "Error".
+fn error_inspect_style(name: &JsString, decl_name: &str) -> JsString {
+    if !name.as_ref().ends_with("Error") {
+        return name.clone();
+    }
+    if name.as_ref() == decl_name {
+        return name.clone();
+    }
+    if decl_name.contains(name.as_ref()) {
+        return string(decl_name);
+    }
+    string(&format!("{decl_name} [{}]", name.as_ref()))
+}
+
+/// The stackless `[style: message]` bracket of a USER Error subclass
+/// instance — the base `formatError` renders before the own-property
+/// block the frontend synthesizes (the field types are compile-time
+/// truth there, and the beyond-depth `[DeclName]` placeholder folds
+/// frontend-side). Message newlines indent by the CURRENT frame level,
+/// exactly the builtin path's stance.
+pub fn inspect_user_error_parts(
+    name: &JsString,
+    message: &JsString,
+    decl_name: &str,
+) -> JsString {
+    let style = error_inspect_style(name, decl_name);
+    let indentation = INSPECT_FRAMES.with(|frames| frames.borrow().len() * 2);
+    let mut base = format!("[{}", style.as_ref());
+    if !message.is_empty() {
+        base.push_str(": ");
+        for character in message.chars() {
+            base.push(character);
+            if character == '\n' {
+                base.push_str(&" ".repeat(indentation));
+            }
+        }
+    }
+    base.push(']');
+    string(&base)
+}
+
 pub fn inspect_begin(recurse: f64) {
     if recurse == 1.0 {
         INSPECT_SEEN.with(|seen| seen.borrow_mut().clear());

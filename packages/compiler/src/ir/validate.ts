@@ -356,6 +356,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.mkdirRecursiveModeSync": { argTypes: [STRING, F64], result: VOID },
   // Atomics.wait over an Int32Array — the synchronous-sleep idiom.
   "atomics.wait": { argTypes: [bytesOf("i32"), F64, F64, F64], result: STRING },
+  "asset.file": { argTypes: [STRING, STRING], result: STRING },
   "cp.spawnSync": { argTypes: [STRING, arrayOf(STRING)], result: SPAWNRES_T },
   // spawnSync's options form: timeout, killSignal name ("" = SIGTERM),
   // and the three stdio modes.
@@ -1072,6 +1073,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.regex": { argTypes: [REGEX], result: STRING },
   "insp.buffer": { argTypes: [BYTES_U8], result: STRING },
   "insp.error": { argTypes: [null, F64, F64], result: STRING },
+  "insp.errorParts": { argTypes: [STRING, STRING, STRING], result: STRING },
   "insp.dyn": { argTypes: [DYN, F64, F64], result: STRING },
   "insp.dynS": { argTypes: [DYN, F64], result: STRING },
   "insp.jsval": { argTypes: [JSVAL, F64, F64], result: STRING },

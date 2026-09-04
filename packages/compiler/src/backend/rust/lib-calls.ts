@@ -201,6 +201,17 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     expr.args[4]?.type.kind === "bool" && expr.args[5]?.type.kind === "bool") {
     return `runtime::inspect_end(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), &(${context.emitExpr(expr.args[2])}), ${context.emitExpr(expr.args[3])}, ${context.emitExpr(expr.args[4])}, ${context.emitExpr(expr.args[5])})`;
   }
+  if (expr.fn === "insp.errorParts" && expr.args.length === 3 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "string" &&
+    expr.args[2]?.type.kind === "string") {
+    const declaration = expr.args[2]!;
+    if (declaration.kind !== "strLit") context.unsupported("insp.errorParts declaration name", expr.loc);
+    return `runtime::inspect_user_error_parts(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}), "${context.rustString(declaration.value)}")`;
+  }
+  if (expr.fn === "asset.file" && expr.args.length === 2 &&
+    arg?.type.kind === "string" && secondArg?.type.kind === "string") {
+    return `runtime::asset_file(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "insp.dyn" && expr.args.length === 3 && arg?.type.kind === "dyn") {
     const recurse = expr.args[1];
     const depth = expr.args[2];
