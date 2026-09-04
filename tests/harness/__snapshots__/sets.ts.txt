@@ -5,9 +5,9 @@ sets.ts:8:16 - error SC2020: 'new Set(values)' is part of the standard library t
     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
   9 | 
 
-  hint: construct the Set empty and add() each value — only an array of already-legal elements (string or number) seeds a Set
+  hint: construct the Set empty and add() each value — only an array of already-legal elements (including records by identity) seeds a Set
 
-sets.ts:12:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'boolean' is outside that domain
+sets.ts:12:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — 'boolean' is outside that domain
 
   11 | // element type.
   12 | const byFlag = new Set<boolean>();
@@ -16,30 +16,14 @@ sets.ts:12:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: t
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-sets.ts:12:16 - error SC1090: Set elements of type 'boolean' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) is not supported yet
+sets.ts:12:16 - error SC1090: Set elements of type 'boolean' (Set elements must be string or number, or a record/callback/symbol/server handle stored under reference identity) is not supported yet
 
   11 | // element type.
   12 | const byFlag = new Set<boolean>();
      |                ^~~~~~~~~~~~~~~~~~
   13 | 
 
-sets.ts:16:7 - error SC2009: values of type 'Set<{ id: number; }>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — '{ id: number; }' is outside that domain
-
-  15 | // fenced for now.
-  16 | const recs = new Set<{ id: number }>();
-     |       ^~~~
-  17 | 
-
-  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
-
-sets.ts:16:14 - error SC1090: Set elements of type '{ id: number; }' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) is not supported yet
-
-  15 | // fenced for now.
-  16 | const recs = new Set<{ id: number }>();
-     |              ^~~~~~~~~~~~~~~~~~~~~~~~~
-  17 | 
-
-sets.ts:19:17 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'boolean' is outside that domain
+sets.ts:19:17 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — 'boolean' is outside that domain
 
   18 | // Set-typed slots elsewhere report the ordinary unsupported-type diagnostic.
   19 | function useBad(s: Set<boolean>): number {

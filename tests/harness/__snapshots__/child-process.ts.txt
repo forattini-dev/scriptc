@@ -23,7 +23,7 @@ child-process.ts:23:14 - error SC1090: listeners returning a value (make the cal
      |              ^~~~~~~~~~~~~~~
   24 | 
 
-child-process.ts:26:7 - error SC2007: values of type '{ (event: "exit", listener: (code: number | null, signal: string | null) => void): void; (event: "error", listener: (err: Error) => void): void; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
+child-process.ts:26:7 - error SC2007: values of type '{ (event: "exit", listener: (code: number | null, signal: string | null) => void): void; (event: "error", listener: (err: Error) => void): void; (event: "close", listener: (code: number | null, signal: string | null) => void): void; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
   25 | // Methods have no bound-value form — call on directly.
   26 | const f = c.on;

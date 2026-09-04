@@ -1,10 +1,3 @@
-overload-fences.ts:12:13 - error SC1090: calls selecting an overload signature of a generic function (only the implementation signature monomorphizes) is not supported yet
-
-  11 | }
-  12 | console.log(twice("q").length);
-     |             ^~~~~~~~~~
-  13 | 
-
 overload-fences.ts:22:7 - error SC2007: values of type '{ (x: "a"): string; (x: "b"): number; }' cannot be compiled: the type declares multiple call signatures (overloads), and a compiled function value is always one concrete signature
 
   21 | // directly compiles (corpus 1851).

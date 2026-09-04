@@ -61,13 +61,6 @@ inheritance.ts:66:7 - error SC1090: super() calls anywhere but as a top-level co
      |       ^~~~~~~
   67 |     }
 
-inheritance.ts:73:13 - error SC1090: 'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
-
-  72 | const rec = { name: "r" };
-  73 | console.log(rec instanceof Animal);
-     |             ^~~~~~~~~~~~~~~~~~~~~
-  74 | 
-
 inheritance.ts:80:13 - error SC1090: statically-decided 'instanceof' on computed operands (bind the value to a variable first) are not supported yet
 
   79 | }

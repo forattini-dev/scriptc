@@ -48,7 +48,7 @@ component-fences.ts:10:13 - error SC2004: uses of 'listeners' inherit the blocke
 
   hint: the declaration of 'listeners' did not compile — fix the diagnostic reported there and these sites clear with it
 
-component-fences.ts:13:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'boolean' is outside that domain
+component-fences.ts:13:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — 'boolean' is outside that domain
 
   12 | // Set elements are limited to numbers and strings.
   13 | const flags = new Set<boolean>();
@@ -57,7 +57,7 @@ component-fences.ts:13:7 - error SC2009: values of type 'Set<boolean>' cannot be
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-component-fences.ts:13:15 - error SC1090: Set elements of type 'boolean' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) is not supported yet
+component-fences.ts:13:15 - error SC1090: Set elements of type 'boolean' (Set elements must be string or number, or a record/callback/symbol/server handle stored under reference identity) is not supported yet
 
   12 | // Set elements are limited to numbers and strings.
   13 | const flags = new Set<boolean>();

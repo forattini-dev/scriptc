@@ -52,7 +52,7 @@ mixins.ts:35:13 - error SC2004: uses of 'a' inherit the blocker on its declarati
 
   34 | const b = new A2();
   35 | console.log(a.m + b.m);
-     |             ^~~
+     |             ^
   36 | 
 
   hint: the declaration of 'a' did not compile — fix the diagnostic reported there and these sites clear with it

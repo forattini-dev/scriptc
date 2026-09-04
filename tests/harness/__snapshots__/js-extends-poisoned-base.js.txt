@@ -4,3 +4,10 @@ js-extends-poisoned-base.js:12:5 - error SC1090: constructor-assigned fields sha
   12 |     this.foo = () => {
      |     ^~~~~~~~
   13 |       console.log("called arrow");
+
+js-extends-poisoned-base.js:21:17 - error SC1090: extending classes not declared in the program ('C') is not supported yet
+
+  20 | 
+  21 | class D extends C {
+     |                 ^
+  22 |   foo() {

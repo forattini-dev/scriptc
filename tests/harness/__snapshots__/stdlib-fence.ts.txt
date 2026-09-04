@@ -32,15 +32,6 @@ stdlib-fence.ts:18:14 - error SC2020: 'Reflect.has' is part of the standard libr
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:19:18 - error SC2020: 'Date.parse' is part of the standard library types but has no scriptc lowering yet
-
-  18 | const refl = Reflect.has({ a: 1 }, "a");
-  19 | const parsedMs = Date.parse("2024-01-01");
-     |                  ^~~~~~~~~~
-  20 | const fmt = new Intl.NumberFormat();
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 stdlib-fence.ts:20:7 - error SC2020: 'NumberFormat' is part of the standard library types but has no scriptc lowering yet
 
   19 | const parsedMs = Date.parse("2024-01-01");
@@ -134,7 +125,7 @@ stdlib-fence.ts:30:12 - error SC2020: 'new Set(values)' is part of the standard 
      |            ^~~~~~~~~~~~~~~~~~~~~~~~
   31 | // (new Error / TypeError / RangeError / SyntaxError now LOWER — the error
 
-  hint: construct the Set empty and add() each value — only an array of already-legal elements (string or number) seeds a Set
+  hint: construct the Set empty and add() each value — only an array of already-legal elements (including records by identity) seeds a Set
 
 stdlib-fence.ts:34:7 - error SC2020: 'AggregateError' is part of the standard library types but has no scriptc lowering yet
 
@@ -172,14 +163,12 @@ stdlib-fence.ts:37:15 - error SC2020: 'Math.SQRT2' is part of the standard libra
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:40:17 - error SC2020: 'Math.min' is part of the standard library types but has no scriptc lowering yet
+stdlib-fence.ts:40:29 - error SC1090: spreading '[number, number]' into Math.min (only a number[] spreads) is not supported yet
 
   39 | // corpus; the mixed spread/positional list is the form that stays fenced.)
   40 | const clamped = Math.min(1, ...[2, 3]);
-     |                 ^~~~~~~~
+     |                             ^~~~~~~~~
   41 | const entries = [1, 2].entries();
-
-  hint: Math.min lowers with any number of plain arguments or ONE number[] spread — mixed spread/positional lists don't: spread a single array (Math.min(...xs))
 
 stdlib-fence.ts:41:7 - error SC2020: 'ArrayIterator<[number, number]>' is part of the standard library types but has no scriptc lowering yet
 
@@ -277,15 +266,6 @@ stdlib-fence.ts:61:16 - error SC2020: 'JSON.stringify with replacer/space parame
   62 | // The promise surface beyond await.
 
   hint: the serializer is type-directed — shape the value before stringifying
-
-stdlib-fence.ts:66:16 - error SC2020: 'then with 2 arguments' is part of the standard library types but has no scriptc lowering yet
-
-  65 | }
-  66 | const thened = work().then((v) => v + 1, () => 0);
-     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  67 | const caught = work().catch(() => 0);
-
-  hint: the supported form takes exactly one fulfillment handler — chain .catch(...) for the rejection half
 
 stdlib-fence.ts:73:15 - error SC2020: 'Object.is over a dynamic operand' is part of the standard library types but has no scriptc lowering yet
 
