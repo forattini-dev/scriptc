@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "strictNullChecks": true,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "paths": {
+      "solid-js/jsx-runtime": [
+        "./src/jsx-runtime.d.ts"
+      ]
+    }
+  }
+}

@@ -61,6 +61,13 @@ export const UNSUPPORTED_EXPR: Partial<Record<ts.SyntaxKind, { code: keyof typeo
   [ts.SyntaxKind.SpreadElement]: { code: "SC1090", feature: "spread arguments" },
   // PostfixUnaryExpression is supported (expression-position ++/-- over
   // f64 locals/globals — lowerIncDec); field/element receivers fence there.
+  // JSX elements: the adopted tsconfig "jsx" widens what RESOLVES and
+  // TYPES (.tsx modules join the graph against the project's own runtime),
+  // but the element tree itself has no lowering — solid/preact/TUI trees
+  // are a renderer slice of their own.
+  [ts.SyntaxKind.JsxElement]: { code: "SC1090", feature: "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)" },
+  [ts.SyntaxKind.JsxSelfClosingElement]: { code: "SC1090", feature: "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)" },
+  [ts.SyntaxKind.JsxFragment]: { code: "SC1090", feature: "JSX fragments (the .tsx surface resolves and types; the element tree has no lowering)" },
 };
 
 /** The narrow-first hint every union fence shares — how to get from a

@@ -1,12 +1,12 @@
 // The import/export forms that stay OUTSIDE the lowered set now that
 // local-module namespace imports, namespace re-exports of user modules,
-// and default exports/imports compile: default imports of builtin
-// modules, package/builtin re-exports, namespace imports of JSON and
-// CommonJS modules, and the module namespace OBJECT as a first-class
-// value (member accesses resolve statically; the frozen, alphabetically-
-// keyed object itself is not materialized).
+// default exports/imports, and DEFAULT imports of builtin modules compile
+// (Node's CJS-builtin default interop is runtime-native — corpus
+// 2948 pins the positive): package/builtin star re-exports, namespace
+// imports of JSON and CommonJS modules, and the module namespace OBJECT
+// as a first-class value (member accesses resolve statically; the frozen,
+// alphabetically-keyed object itself is not materialized).
 import * as helpers from "./helpers.ts";
-import os from "node:os";
 import * as cfg from "./cfg.json";
 import * as legacy from "./legacy.cjs";
 
@@ -15,4 +15,4 @@ import * as legacy from "./legacy.cjs";
 export * from "node:child_process";
 
 const grabbed = helpers;
-console.log(grabbed.one(), helpers.one(), os.tmpdir(), cfg.count, legacy.two);
+console.log(grabbed.one(), helpers.one(), cfg.count, legacy.two);

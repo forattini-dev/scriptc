@@ -1,15 +1,6 @@
-import-forms/main.ts:9:8 - error SC1012: default exports/imports are not supported yet
-
-   8 | import * as helpers from "./helpers.ts";
-   9 | import os from "node:os";
-     |        ^~
-  10 | import * as cfg from "./cfg.json";
-
-  hint: use named exports: export function f() {} / import { f } from "./m"
-
 import-forms/main.ts:10:8 - error SC1013: namespace imports of JSON modules are not supported yet
 
-   9 | import os from "node:os";
+   9 | import * as helpers from "./helpers.ts";
   10 | import * as cfg from "./cfg.json";
      |        ^~~~~~~~
   11 | import * as legacy from "./legacy.cjs";
