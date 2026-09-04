@@ -527,7 +527,7 @@ fn bytes_base64_value(byte: u8) -> Option<u8> {
     }
 }
 
-fn bytes_base64_decode(text: &str) -> Vec<u8> {
+pub fn bytes_base64_decode(text: &str) -> Vec<u8> {
     let values: Vec<u8> = text
         .bytes()
         .take_while(|byte| *byte != b'=')

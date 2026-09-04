@@ -8,6 +8,8 @@ import { InternalCompilerError } from "../../errors.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, posix } from "node:path";
 import type { Lowerer } from "./lowerer.js";
+import { trapUseThrowExpr } from "./lowerer.js";
+import { trapModuleOf } from "./lower-builtins.js";
 import { wasiGuestPath } from "../../wasi-paths.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -999,6 +1001,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (L.isSelfReference(expr)) {
         return { kind: "selfRef", type: L.ctx.selfType!, loc };
       }
+      // A runtime-TRAPPED module binding read as a VALUE (`ptr` flowing
+      // into a same-module dlopen call): the whole read IS the runtime
+      // throw — the value never materializes (nodeThrowExpr; the ledger
+      // entry joins runtimeFences).
+      const tm = trapModuleOf(L, expr);
+      if (tm !== null) {
+        return trapUseThrowExpr(L, tm, expr, L.mapTypeOf(L.typeOf(expr)), loc);
+      }
       // `arguments` in a variadic JS function (the rest-marked form): the
       // synthetic trailing dyn-array param — lambdaSignature marked the
       // type and lowerLambda declared the local.
@@ -1486,7 +1496,17 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // any other super position (field reads, bare references) stays out.
       L.unsupported("SC1090", expr, "'super' outside super() and super.method() calls");
     }
-    if (ts.isNewExpression(expr)) return L.lowerNew(expr);
+    if (ts.isNewExpression(expr)) {
+      // `new <trapped-module member>` (bun:sqlite's Database): the whole
+      // construction IS the runtime throw — arguments never lower.
+      if (ts.isIdentifier(expr.expression)) {
+        const tm = trapModuleOf(L, expr.expression);
+        if (tm !== null) {
+          return trapUseThrowExpr(L, tm, expr, L.mapTypeOf(L.typeOf(expr)), loc);
+        }
+      }
+      return L.lowerNew(expr);
+    }
     if (ts.isAwaitExpression(expr)) {
       if (!L.ctx.isAsync) {
         // A tsc-clean occurrence here is outside both an async function

@@ -9,7 +9,9 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, nodeThrowExpr, own } from "./lowerer.js";
 import { canonicalBuiltinModule, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
-import { isRelativeSpecifier } from "../shared.js";
+import {
+  BUN_MODULE_MEMBER_ALIASES,
+  TRAP_RUNTIME_MODULES, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { trackedReadFile } from "../input-tracker.js";
@@ -187,7 +189,10 @@ function lowerBuiltinOptionalDefault(
       if (tdecl !== undefined && tdecl.getSourceFile().isDeclarationFile) {
         for (let p: ts.Node | undefined = tdecl.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
           if (ts.isModuleDeclaration(p) && ts.isStringLiteral(p.name)) {
-            const module = canonicalBuiltinModule(p.name.text);
+            // The "bun" module's node:url re-exports (bun-types' ambient):
+            // members in the alias table key the url tables directly.
+            const aliased = p.name.text === "bun" ? BUN_MODULE_MEMBER_ALIASES[target.name] : undefined;
+            const module = canonicalBuiltinModule(p.name.text) ?? aliased ?? null;
             if (module !== null) return { module, member: target.name };
             break;
           }
@@ -195,6 +200,23 @@ function lowerBuiltinOptionalDefault(
       }
     }
     return null;
+  }
+
+/** The runtime-TRAPPED module a binding reaches (shared.ts's
+ * TRAP_RUNTIME_MODULES — bun:sqlite/bun:ffi/v8): the ESM named-import
+ * walk (the checker's declaration IS this program's ImportSpecifier —
+ * bun-types has no exporter to alias onto), or null. Callers emit the
+ * use-site trap (nodeThrowExpr) instead of a value. */
+  export function trapModuleOf(L: Lowerer, ident: ts.Identifier): { module: string; member: string } | null {
+    const symbol = L.checker.getSymbolAtLocation(ident);
+    const decl = symbol ? L.checker.declarationsOf(symbol)[0] : undefined;
+    if (!decl) return null;
+    if (!ts.isImportSpecifier(decl)) return null;
+    const importDecl = decl.parent.parent.parent;
+    if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) return null;
+    const spec = importDecl.moduleSpecifier.text;
+    if (!TRAP_RUNTIME_MODULES.has(spec)) return null;
+    return { module: spec, member: decl.propertyName?.text ?? decl.name.text };
   }
 
 /** True for `const <name> = require("<builtin>").<member>` — the

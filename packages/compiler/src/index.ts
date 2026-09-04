@@ -722,6 +722,7 @@ function runFrontend(
     for (const p of dropping) {
       effective.delete(p);
       statuses.push({ package: p, status: "fallback", detail: reasons.get(p)! });
+      if (process.env["SCRIPTC_TRACE_FENCE"]) process.stderr.write(`[drop] ${p}: ${reasons.get(p)}\n`);
     }
     load.dispose();
     load = loadProgram(entryPath, { npmStatic: effective, externalTypes });

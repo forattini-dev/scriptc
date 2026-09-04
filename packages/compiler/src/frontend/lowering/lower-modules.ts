@@ -8,6 +8,8 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isRelativeSpecifier, isRuntimeSourceFileName } from "../shared.js";
+import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
+import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -198,6 +200,7 @@ export interface FileParts {
         for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
         L.collectNpmImports(parts);
         L.collectJsonImports(parts);
+        L.collectAssetImports(parts);
       } finally {
         L.diagSink = null;
       }
@@ -205,6 +208,7 @@ export interface FileParts {
       for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
       L.collectNpmImports(parts);
       L.collectJsonImports(parts);
+      L.collectAssetImports(parts);
     }
   }
 
@@ -518,6 +522,120 @@ export interface FileParts {
       }
     }
     return out;
+  }
+
+/** The `with { type: "..." }` attribute value of an import declaration, or
+   * null when the declaration carries none (tsgo's client AST carries the
+   * attributes as a LAZY node — the declaration's ImportAttributes child —
+   * so the walk rides forEachChild). */
+  function attributeValueOf(stmt: ts.ImportDeclaration): string | null {
+    let value: string | null = null;
+    stmt.forEachChild((child: ts.Node) => {
+      if (ts.SyntaxKind[child.kind] !== "ImportAttributes") return;
+      child.forEachChild((attr) => {
+        const entry = attr as unknown as { name?: { text?: string }; value?: { text?: string } };
+        if (entry.name?.text === "type" && entry.value?.text !== undefined) value = entry.value.text;
+      });
+    });
+    return value;
+  }
+
+/** Asset bindings — the Bun-target story, one chokepoint over both
+   * loaders. Bun serves a relative or package-subpath import of a
+   * non-module file as a STRING default binding: the `.txt` TEXT loader
+   * (and any extension via `with { type: "text" }`) answers the file
+   * CONTENT; the FILE loader (the default for every other extension, or
+   * `with { type: "file" }`) answers a PATH to the file — which a compiled
+   * binary materializes from bytes embedded at build time (`asset.file`,
+   * scr_bytes_io.c / assets.rs). Node's ESM loader refuses all of these,
+   * so the compile-time bake is the only story a binary has. The document
+   * is DATA either way, exactly the JSON module's stance: one string
+   * global per document assigned in the importer's %init prelude, shared
+   * across importers (Node's module cache in miniature), the checker's
+   * ambient typing stays the project's dialect, and a binding whose
+   * checker type is NOT string fences (the ambient said something neither
+   * loader can serve). Named/namespace bindings kept their preflight
+   * fences. */
+  export function collectAssetImports(L: Lowerer, parts: FileParts[]): void {
+    const byDocument = new Map<string, IrGlobal>();
+    for (const fp of parts) {
+      for (const stmt of fp.sf.statements) {
+        if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+        const clause = stmt.importClause;
+        if (!clause?.name || clause.phaseModifier === ts.SyntaxKind.TypeKeyword) continue;
+        const spec = stmt.moduleSpecifier.text;
+        const assetPath = resolveRelativeAsset(fp.sf.fileName, spec) ?? resolveBareAsset(fp.sf.fileName, spec);
+        if (assetPath === null) continue;
+        const nameSym = L.checker.getSymbolAtLocation(clause.name);
+        if (!nameSym) continue;
+        const target = nameSym.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(nameSym) : null;
+        const tsType = L.typeOf(clause.name);
+        const mapped = L.mapTypeOf(tsType);
+        // The runtime value IS a string (the path or the content) — a
+        // jsval-mapped ambient (`any` from a missing declaration) accepts
+        // it too; only an ambient that CLAIMS a non-string shape fences
+        // (that claim is the project's own lie about the loader).
+        if (!mapped || (mapped.kind !== "string" && mapped.kind !== "jsval")) {
+          if (process.env["SCRIPTC_TRACE_FENCE"]) {
+            process.stderr.write(`[asset] ${spec} | tsType=${L.checker.typeToString(tsType).slice(0, 80)} | mapped=${mapped ? mapped.kind : "null"}\n`);
+          }
+          L.badType(clause.name, tsType);
+          continue;
+        }
+        // The loader kind: the `with { type: ... }` attribute decides when
+        // present ("text" content / "file" path); bare .txt rides Bun's
+        // TEXT loader, bare .toml parses to an OBJECT (fenced — no static
+        // story for the toml surface), and every other bare extension is
+        // Bun's FILE loader (a path).
+        const attribute = attributeValueOf(stmt);
+        if (attribute !== null && attribute !== "text" && attribute !== "file") {
+          L.unsupported("SC1090", clause.name, `the '${spec}' import with type attribute '${attribute}' (only 'type: "text"' and 'type: "file"' serve assets)`);
+          continue;
+        }
+        const isText = attribute === "text" || (attribute === null && assetPath.toLowerCase().endsWith(".txt"));
+        const content = isText ? trackedReadFile(assetPath) : trackedReadFileBytes(assetPath);
+        if (content === null) {
+          L.unsupported("SC1090", clause.name, `the '${spec}' asset file (readable at check time, unreadable at lowering — the asset went missing)`);
+          continue;
+        }
+        let g = (target !== null ? L.globalsBySymbol.get(target) : undefined) ?? byDocument.get(assetPath);
+        if (!g) {
+          g = {
+            id: `%g.asset.${L.globalsList.length}`,
+            name: clause.name.text,
+            type: STRING,
+            mutable: false,
+          };
+          byDocument.set(assetPath, g);
+          L.globalsList.push(g);
+        }
+        if (target !== null) L.globalsBySymbol.set(target, g);
+        // The BINDING's own symbol too: an ambient-typed default import has
+        // no program module to alias onto, so reads must find the global
+        // through this symbol directly.
+        L.globalsBySymbol.set(nameSym, g);
+        const actions = L.jsonInitActions.get(fp.sf) ?? [];
+        L.jsonInitActions.set(fp.sf, actions);
+        const value: IrExpr = isText
+          ? { kind: "strLit", value: content as string, type: STRING, loc: locOf(clause.name) }
+          : {
+              kind: "libCall",
+              fn: "asset.file",
+              args: [
+                { kind: "strLit", value: (content as Buffer).toString("base64"), type: STRING, loc: locOf(clause.name) },
+                { kind: "strLit", value: assetPath.split("/").pop() ?? assetPath, type: STRING, loc: locOf(clause.name) },
+              ],
+              type: STRING,
+              loc: locOf(clause.name),
+            };
+        actions.push({
+          kind: "assign",
+          localId: g.id,
+          value,
+          loc: locOf(clause.name),
+        });
+      }
+    }
   }
 
 /** JSON module bindings (`import pkg from "../package.json"`, and the

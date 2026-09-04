@@ -91,7 +91,7 @@ import {
   withUndefinedArm as withUndefinedArmCanonical,
 } from "../types.js";
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
-import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
+import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, collectAssetImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, implicitMonoFile, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
@@ -722,6 +722,34 @@ export function nodeThrowExpr(kind: 0 | 1 | 2, code: string, message: string, ty
     type,
     loc,
   };
+}
+
+/** The runtime-TRAP throw for a use of a trapped-module binding
+ * (shared.ts's TRAP_RUNTIME_MODULES — bun:sqlite/bun:ffi/v8): kind-0
+ * Node-parity Error naming the module and member, `type` the replaced
+ * expression's own (never materialized — it never returns). The
+ * diagnostic joins the runtime-fence ledger so the coverage report says
+ * so instead of silently trapping. */
+export function trapUseThrowExpr(
+  L: Lowerer,
+  tm: { module: string; member: string },
+  node: ts.Node,
+  mapped: IrType | null,
+  loc: SrcLoc,
+): IrExpr {
+  const d = noLoweringDiag(
+    `runtime trap: '${tm.module}.${tm.member}' has no compiled-binary equivalent (the module requires the runtime that provides it)`,
+    loc,
+  );
+  L.runtimeFences.push(d);
+  const runtime = tm.module.startsWith("bun:") ? "Bun" : "V8";
+  return nodeThrowExpr(
+    0,
+    "",
+    `the '${tm.member}' of '${tm.module}' is not available in a compiled binary (requires the ${runtime} runtime)`,
+    mapped && mapped.kind !== "void" && mapped.kind !== "undefinedT" ? mapped : STRING,
+    loc,
+  );
 }
 
 /** The post-validation fence STRING a validation-ladder Chk libCall
@@ -2309,6 +2337,10 @@ export class Lowerer {
 
   collectJsonImports(parts: FileParts[]): void {
     return collectJsonImports(this, parts);
+  }
+
+  collectAssetImports(parts: FileParts[]): void {
+    return collectAssetImports(this, parts);
   }
 
   run(): LowerResult {

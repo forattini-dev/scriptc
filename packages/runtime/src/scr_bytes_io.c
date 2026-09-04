@@ -677,3 +677,115 @@ void scr_fs_stream_opts_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr
   }
   scr_throw_lowering_fence(fence);
 }
+
+/* ── embedded file assets (Bun's `with { type: "file" }` loader) ─────────
+ * The compiler embeds the asset's bytes at build time (base64 in the
+ * generated source); the loader decodes, writes the file under a
+ * process-owned scratch directory, and answers the PATH the default
+ * binding carries (Bun's file-loader contract — a string path). Node has
+ * no counterpart (its ESM loader refuses the extensions), so extraction
+ * failures trap: there is no catchable Node-shaped error to reproduce. */
+#include <stdint.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef _WIN32
+#include <direct.h> /* _mkdir */
+#include <process.h> /* _getpid */
+#define scr_asset_getpid _getpid
+#define scr_asset_mkdir(p) (_mkdir(p))
+#define scr_asset_pid_cast(x) ((unsigned)(x))
+#else
+#define scr_asset_getpid getpid
+#define scr_asset_mkdir(p) (mkdir((p), 0777))
+#define scr_asset_pid_cast(x) (x)
+#endif
+
+static unsigned char *scr_asset_b64_decode(const char *text, size_t text_len, size_t *out_len) {
+  static const signed char table[256] = {
+    /* -1 = invalid; filled by value rule below */
+  };
+  (void)table;
+  unsigned char *out = malloc(text_len / 4 * 3 + 3);
+  if (!out) scr_bytes_io_oom();
+  size_t n = 0;
+  unsigned triple = 0;
+  int bits = 0;
+  for (size_t i = 0; i < text_len; i++) {
+    char c = text[i];
+    int value;
+    if (c >= 'A' && c <= 'Z') value = c - 'A';
+    else if (c >= 'a' && c <= 'z') value = c - 'a' + 26;
+    else if (c >= '0' && c <= '9') value = c - '0' + 52;
+    else if (c == '+') value = 62;
+    else if (c == '/') value = 63;
+    else if (c == '=') { /* trailing padding: leftover bits discard */
+      break;
+    } else continue; /* forgiving-base64's ASCII whitespace strip */
+    triple = (triple << 6) | (unsigned)value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[n++] = (unsigned char)((triple >> bits) & 0xff);
+    }
+  }
+  *out_len = n;
+  return out;
+}
+
+static uint64_t scr_asset_fnv(const unsigned char *data, size_t len) {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  for (size_t i = 0; i < len; i++) {
+    hash ^= data[i];
+    hash *= 0x100000001b3ULL;
+  }
+  return hash;
+}
+
+ScrStr *scr_asset_file(ScrStr *content_b64, ScrStr *name) {
+  size_t content_len = 0;
+  unsigned char *content = scr_asset_b64_decode(content_b64->data, content_b64->len, &content_len);
+  if (content == NULL) scr_bytes_io_oom();
+  /* The name rides the compiler's baking — still strip to the basename so
+   * no path component can escape the scratch directory. */
+  const char *raw = name->data;
+  size_t raw_len = name->len;
+  size_t base = 0;
+  for (size_t i = 0; i < raw_len; i++) {
+    if (raw[i] == '/' || raw[i] == '\\') base = i + 1;
+  }
+  const char *file_name = raw + base;
+  size_t file_name_len = raw_len - base;
+  if (file_name_len == 0 || (file_name_len == 1 && file_name[0] == '.') ||
+    (file_name_len == 2 && file_name[0] == '.' && file_name[1] == '.')) {
+    free(content);
+    scr_trap("scriptc: asset extraction failed: invalid asset name\n");
+  }
+  static char *asset_dir; /* the process's scratch dir, once */
+  if (asset_dir == NULL) {
+    const char *tmp = getenv("TMPDIR");
+    if (tmp == NULL || tmp[0] == '\0') tmp = getenv("TEMP");
+    if (tmp == NULL || tmp[0] == '\0') tmp = "/tmp";
+    size_t dir_len = strlen(tmp) + 32;
+    asset_dir = malloc(dir_len);
+    if (asset_dir == NULL) scr_bytes_io_oom();
+    snprintf(asset_dir, dir_len, "%s/scriptc-assets-%u", tmp, scr_asset_pid_cast(scr_asset_getpid()));
+    if (scr_asset_mkdir(asset_dir) != 0 && errno != EEXIST) {
+      scr_trap("scriptc: asset extraction failed: cannot create the scratch directory\n");
+    }
+  }
+  size_t path_len = strlen(asset_dir) + 1 + 16 + 1 + file_name_len;
+  char *path = malloc(path_len + 1);
+  if (path == NULL) scr_bytes_io_oom();
+  uint64_t hash = scr_asset_fnv(content, content_len);
+  snprintf(path, path_len + 1, "%s/%016llx-%.*s", asset_dir,
+    (unsigned long long)hash, (int)file_name_len, file_name);
+  FILE *f = fopen(path, "wb");
+  if (!f || fwrite(content, 1, content_len, f) != content_len) {
+    scr_trap("scriptc: asset extraction failed: cannot write the asset file\n");
+  }
+  fclose(f);
+  free(content);
+  ScrStr *out = scr_str_new(path, path_len);
+  free(path);
+  return out;
+}

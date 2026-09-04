@@ -135,6 +135,21 @@ export function trackedReadFile(path: string): string | null {
   }
 }
 
+/** The BYTES twin of trackedReadFile — binary assets (Bun's file loader
+ * embeds arbitrary files) ride the same probe discipline: the read is
+ * content-addressed so an edited asset invalidates the early cache. */
+export function trackedReadFileBytes(path: string): Buffer | null {
+  path = resolve(path);
+  try {
+    const bytes = readFileSync(path);
+    record({ op: "file", path, digest: createHash("sha256").update(bytes).digest("hex") });
+    return bytes;
+  } catch {
+    record({ op: "read-error", path });
+    return null;
+  }
+}
+
 export function trackedFileExists(path: string): boolean {
   path = resolve(path);
   const kind = pathKind(path);
