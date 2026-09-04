@@ -1,3 +1,5 @@
+type AbortNotify<T> = Rc<dyn Fn(&JsAbortSignal<T>)>;
+
 pub struct AbortSignalData<T: HeapValue> {
     aborted: bool,
     reason: Option<T>,
@@ -8,7 +10,7 @@ pub struct AbortSignalData<T: HeapValue> {
 #[derive(Clone)]
 struct AbortListener<T: HeapValue> {
     identity: usize,
-    notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
+    notify: AbortNotify<T>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 }
 
@@ -94,7 +96,7 @@ pub fn abort_signal_reason<T: HeapValue>(signal: &JsAbortSignal<T>) -> Option<T>
 pub fn abort_signal_add_listener<T: HeapValue>(
     signal: &JsAbortSignal<T>,
     identity: usize,
-    notify: Rc<dyn Fn(&JsAbortSignal<T>)>,
+    notify: AbortNotify<T>,
     trace: Rc<dyn Fn(&mut Tracer<'_>)>,
 ) {
     signal.with_mut(|signal| {
