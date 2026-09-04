@@ -88,6 +88,19 @@ export const ModuleDetectionKind: ModuleDetectionKindEnum =
   loadHiddenEnum<ModuleDetectionKindEnum>("moduleDetectionKind", "ModuleDetectionKind");
 export type ModuleDetectionKind = number;
 
+interface JsxEmitEnum {
+  readonly None: number;
+  readonly Preserve: number;
+  readonly ReactNative: number;
+  readonly React: number;
+  readonly ReactJSX: number;
+  readonly ReactJSXDev: number;
+  readonly [key: string | number]: string | number;
+}
+
+export const JsxEmit: JsxEmitEnum = loadHiddenEnum<JsxEmitEnum>("jsxEmit", "JsxEmit");
+export type JsxEmit = number;
+
 /** Reverse-maps a numeric enum value to its TS7 key name ("ESNext",
  * "Bundler") — the spelling tsgo's tsconfig JSON parser accepts (lowercased
  * by the caller where needed). Symbolic by construction: the name comes from

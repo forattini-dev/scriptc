@@ -50,13 +50,14 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import { isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
+import { isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareAsset, resolveBareModule, resolveProjectImport, resolveRelativeAsset, resolveRelativeModule, resolveTsPathsMapping, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
+  BUN_MODULE_MEMBER_ALIASES,
   ambientDtsPath,
   builtinDefaultImportModule,
   canonicalBuiltinModule,
@@ -72,6 +73,7 @@ import {
   overridesDtsPath,
   registerWorkspacePackage,
   SUPPORTED_NODE_MODULES,
+  TRAP_RUNTIME_MODULES,
   tsgoPath,
   unsupportedModuleFeatureOf,
   workspacePackageOfPath,
@@ -153,16 +155,27 @@ function jsoncSyntaxError(text: string): string | null {
 function adoptProjectConfig7(
   host: ts.Ts7Host,
   entryPath: string,
-): { configFile: string | null; options: ts.Ts7CompilerOptions; diags: ScrDiagnostic[] } {
+): {
+  configFile: string | null;
+  options: ts.Ts7CompilerOptions;
+  /** The project's tsconfig "paths" table, targets ABSOLUTIZED (against
+   * baseUrl, defaulting to the config's own directory — TS 4.1+ semantics),
+   * or null when the project declares none. Feeds both worlds: the program
+   * options (the checker resolves aliased specifiers exactly like the
+   * project's own toolchain) and the preflight resolver (which answers the
+   * aliased edge as an ordinary user module — see resolveTsPathsMapping). */
+  pathAliases: ReadonlyMap<string, readonly string[]> | null;
+  diags: ScrDiagnostic[];
+} {
   const configFile = ts.findConfigFile(dirname(entryPath), ts.sys.fileExists) ?? null;
   if (!configFile) {
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, diags: [] };
+    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, diags: [] };
   }
   const diags: ScrDiagnostic[] = [];
   const syntaxError = jsoncSyntaxError(ts.sys.readFile(configFile) ?? "");
   if (syntaxError !== null) {
     diags.push(tscPassthroughDiag(syntaxError, { file: configFile, start: 0, end: 0 }));
-    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, diags };
+    return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, diags };
   }
   const parsed = host.parseConfigFile(configFile);
   const adopted: Record<string, unknown> = {};
@@ -175,7 +188,64 @@ function adoptProjectConfig7(
     diags.push(strictNullChecksFloorDiag(configFile));
     adopted["strictNullChecks"] = true;
   }
-  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...FORCED_OPTIONS }, diags };
+  // tsconfig "paths": the compile-time alias surface (Bun resolves it at
+  // runtime; Node does not — a compiled binary never sees the alias because
+  // the lowering rewrites the edge to the target FILE, the bundler stance).
+  // Targets absolutize against baseUrl so the synthesized tsconfig — written
+  // next to the ENTRY, not at the config's location — resolves the same
+  // files: TS 4.1+ resolves relative targets against the tsconfig's own
+  // directory when baseUrl is absent.
+  let pathAliases: ReadonlyMap<string, readonly string[]> | null = null;
+  const rawPaths = parsed.options["paths"] as Record<string, readonly string[]> | undefined;
+  if (rawPaths !== undefined && rawPaths !== null) {
+    const baseUrl = typeof parsed.options.baseUrl === "string"
+      ? resolve(dirname(configFile), parsed.options.baseUrl)
+      : dirname(configFile);
+    const mapped = new Map<string, readonly string[]>();
+    for (const [key, targets] of Object.entries(rawPaths)) {
+      if (!Array.isArray(targets)) continue;
+      const resolvedTargets = targets
+        .filter((target): target is string => typeof target === "string")
+        .map((target) => resolve(baseUrl, target));
+      if (resolvedTargets.length > 0) mapped.set(key, resolvedTargets);
+    }
+    if (mapped.size > 0) {
+      pathAliases = mapped;
+      adopted["paths"] = Object.fromEntries(mapped);
+    }
+  }
+  // tsconfig "jsx"/"jsxImportSource": .tsx files typecheck against the
+  // project's own JSX runtime exactly like its toolchain. Adoption is
+  // inert for JSX-free projects (FORCED carries no jsx default), and the
+  // ELEMENT tree itself keeps its lowering fence (jsx.ts) — this widens
+  // what RESOLVES and TYPES, not what lowers.
+  if (parsed.options.jsx !== undefined) adopted["jsx"] = parsed.options.jsx;
+  if (parsed.options.jsxImportSource !== undefined) {
+    adopted["jsxImportSource"] = parsed.options.jsxImportSource;
+  }
+  // tsconfig "lib": the project's own checker surface, UNIONED with the
+  // es2025 floor — a project may WIDEN (DOM's RequestInfo/HeadersInit are
+  // type-only names; the runtime serves the web globals it serves) but
+  // never reduce the floor FORCED otherwise pins. Normalized to the bare
+  // tsconfig spellings ("ESNext" -> "esnext", "DOM.Iterable" ->
+  // "dom.iterable"); serializeOptions re-renders for the synthesized
+  // tsconfig.
+  const rawLib = parsed.options.lib as readonly string[] | undefined;
+  if (Array.isArray(rawLib) && rawLib.length > 0) {
+    const normalize = (name: string): string =>
+      name.startsWith("lib.") && name.endsWith(".d.ts") ? name.slice(4, -5).toLowerCase() : name.toLowerCase();
+    const libs = new Set<string>(["es2025"]);
+    for (const name of rawLib) {
+      if (typeof name === "string" && name !== "") libs.add(normalize(name));
+    }
+    adopted["lib"] = [...libs];
+  }
+  // FORCED pins the es2025 lib as the flagless floor; an adopted project
+  // lib REPLACES it (adoption already unioned the floor in — a project
+  // lib never reduces the checker surface below es2025).
+  const forced: ts.Ts7CompilerOptions = { ...FORCED_OPTIONS };
+  if (adopted["lib"] !== undefined) delete forced.lib;
+  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...forced }, pathAliases, diags };
 }
 
 /** The target project's @types/node, resolved with the OWN resolver's
@@ -189,6 +259,11 @@ function resolveNodeTypes7(entryPath: string): string | null {
 export interface LoadResult {
   program: ts.Program;
   entry: ts.SourceFile;
+  /** The project's adopted tsconfig "paths" table (targets absolutized),
+   * or null when the project declares none. Preflight answers aliased
+   * bare specifiers through it as ordinary user-module edges; the checker
+   * received the same table in the program options. */
+  pathAliases: ReadonlyMap<string, readonly string[]> | null;
   /** User source files in Node's evaluation order: depth-first postorder
    * of the import graph from the entry, each module once. The entry is
    * last. Empty until checkPreflight runs (and empty when preflight fails
@@ -323,13 +398,25 @@ function loadProgram7(
   externalTypes: ReadonlyMap<string, string> = new Map(),
 ): LoadResult & { disposeAll: () => void } {
   const config = adoptProjectConfig7(host, entryPath);
+  setPathAliases(config.pathAliases);
   const nodeTypes = config.configFile ? resolveNodeTypes7(entryPath) : null;
+  // The BUN surface (the Bun-target story): a project typed against
+  // @types/bun chains bun-types → @types/node, whose globals carry the
+  // `UseLibDomIfAvailable` discipline — bun-types STANDS DOWN where the
+  // adopted lib covers a name and supplies its own (looser, Bun-shaped)
+  // typing where it doesn't. A `types: []` config with a per-package
+  // @types/bun install (bun's isolated layout — the store lives under
+  // node_modules/.bun) never answers the plain "node" directive, so the
+  // bun surface resolves FIRST when it exists: it IS the project's
+  // dialect. When both surfaces resolve, both join (they are designed to
+  // coexist).
+  const bunTypes = config.configFile ? resolveTypeDirective("bun", entryPath) : null;
   // skipLibCheck is FORCED with @types/node in the program: checking a
   // third-party lib's internals against OUR lib choice (es2025, no dyn) is
   // not scriptc's fence and drowns real diagnostics in hundreds of
   // .d.ts-internal errors. Fence discipline never depended on it: the
   // lowerer checks provenance and forms at every use site.
-  let options: ts.Ts7CompilerOptions = nodeTypes ? { ...config.options, skipLibCheck: true } : { ...config.options };
+  let options: ts.Ts7CompilerOptions = nodeTypes || bunTypes ? { ...config.options, skipLibCheck: true } : { ...config.options };
   // --npm-static: opted-in packages' shipped JS must be TYPE-INCLUDED (not
   // just resolved) — without maxNodeModuleJsDepth, node_modules JS types as
   // an implicit-any module (TS7016) and nothing infers. Only flagged
@@ -340,15 +427,53 @@ function loadProgram7(
   // source files the preflight resolver answers — the checker types the
   // driver against the package's real TypeScript, not its shipped .d.ts.
   const provenance = provenancePaths();
-  if (provenance !== null || externalTypes.size > 0) {
-    const paths: Record<string, string[]> = { ...(provenance ?? {}) };
+  // The project's own paths table merges UNDER the compiler mappings
+  // (provenance/externalTypes are explicit registrations that must win),
+  // and the table only reaches the program options when the project
+  // actually declared one (flagless builds keep byte-identical options
+  // when it didn't).
+  if (provenance !== null || externalTypes.size > 0 || config.pathAliases !== null) {
+    const paths: Record<string, string[]> = {};
+    for (const [specifier, targets] of config.pathAliases?.entries() ?? []) paths[specifier] = [...targets];
+    if (provenance !== null) {
+      for (const [specifier, targets] of Object.entries(provenance)) paths[specifier] = [...targets];
+    }
     for (const [specifier, declarationPath] of externalTypes) {
       paths[specifier] = [declarationPath];
     }
     options = { ...options, paths };
   }
-  const coreRoots = [entryPath, ambientDtsPath(), nodeTypes ?? fallbackDtsPath()];
-  const program = ts.createProgram([...coreRoots, overridesDtsPath()], options, host);
+  // The type surface: the project's bun surface (@types/bun) when it
+  // resolves, else the node surface, else the shipped fallback. Both real
+  // surfaces join when the project carries both. skipLibCheck applies
+  // whenever a REAL surface is present (see the nodeTypes note).
+  const nodeSurface = nodeTypes ?? bunTypes ?? fallbackDtsPath();
+  const coreRoots = [entryPath, ambientDtsPath(), nodeSurface];
+  if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
+  let program = ts.createProgram([...coreRoots, overridesDtsPath()], options, host);
+  // tsgo's own module resolution may pull @types/node files our own
+  // resolver's type-directive lookup missed (bun's isolated layout: the
+  // store lives under node_modules/.bun with per-package symlinks, so a
+  // root-level `types: []` config still lands the project's real Node
+  // types in the program). The fallback's global declarations COLLIDE
+  // with the real surface when both load (declare var console twice,
+  // TextEncoder overloads from two worlds, crypto: unknown vs Crypto) —
+  // so a program that carries @types/node re-creates standing the
+  // fallback down: the project's real Node types are the surface, the
+  // documented stance.
+  if (nodeTypes === null && bunTypes === null) {
+    let hasTypesNode = false;
+    for (const sf of program.getSourceFiles()) {
+      if (sf.fileName.includes("/@types/node/")) {
+        hasTypesNode = true;
+        break;
+      }
+    }
+    if (hasTypesNode) {
+      program.dispose();
+      program = ts.createProgram([entryPath, ambientDtsPath(), overridesDtsPath()], options, host);
+    }
+  }
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);
   const externalTypeSpecifiersByFile = externalTypeFileClosure7(program, externalTypes);
@@ -356,6 +481,7 @@ function loadProgram7(
   return {
     program,
     entry,
+    pathAliases: config.pathAliases,
     moduleOrder: [],
     configDiags: config.diags,
     externalTypes,
@@ -1803,6 +1929,25 @@ function preflight7(load: LoadResult): {
       const sf = p.getSourceFile(d.fileName);
       if (sf && insideBlockComment(sf.text, d.pos)) commentDup.add(`${d.fileName}:${sf.text.slice(d.pos, d.end)}`);
     }
+    // TS2307 over an ASSET specifier: the preflight's asset resolution
+    // answers the import (the checker has no ambient for it — the bare
+    // package/extension pair carries no typings by design), so the
+    // checker's refusal must not gate the compile.
+    const assetImportSuppressed = (d: ts.Diagnostic): boolean => {
+      if (d.code !== 2307 || d.fileName === undefined || d.pos === undefined || d.end === undefined) return false;
+      const sf = p.getSourceFile(d.fileName);
+      if (!sf) return false;
+      const spec = sf.text.slice(d.pos, d.end).replace(/^['"]|['"]$/g, "");
+      return resolveRelativeAsset(sf.fileName, spec) !== null || resolveBareAsset(sf.fileName, spec) !== null;
+    };
+    // TS2578 (unused '@ts-expect-error'): the directive is the AUTHOR'S
+    // claim about THEIR toolchain's behavior — scriptc's adopted type
+    // world diverges (their lib surface, their tsgo snapshot), so the
+    // expected error may legitimately not occur here. An unused directive
+    // never indicates a broken program (the code typechecks clean — that
+    // is what "unused" means), and the compiled binary is unaffected by a
+    // source comment. Noise, not a gate.
+    const unusedExpectErrorSuppressed = (d: ts.Diagnostic): boolean => d.code === 2578;
     return all.filter(
       (d) =>
         d.category === ts.DiagnosticCategory.Error &&
@@ -1811,6 +1956,8 @@ function preflight7(load: LoadResult): {
         !nodeModulesJsSuppressed(d) &&
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
+        !assetImportSuppressed(d) &&
+        !unusedExpectErrorSuppressed(d) &&
         !jsdocTypeSuppressed(p, d, commentDup),
     );
   };
@@ -1978,6 +2125,24 @@ function preflight7(load: LoadResult): {
           diags.push(externalHostModuleDiag7(fromSpec, stmt));
           continue;
         }
+        // An OPTED-IN --npm-static package's re-export is an ordinary
+        // program-module edge: the robust program-file lookup (the
+        // npmStaticProgramDep path-identity fallbacks) answers the
+        // runtime-source entry, star and namespace forms included — its
+        // %init header rides the module order exactly like a relative
+        // re-export's. Hoisted above the fences so the fall-through reDep
+        // below sees it.
+        const npmStaticReexport = (() => {
+          if (fromSpec.startsWith("#") || isRelativeSpecifier(fromSpec)) return null;
+          const npm = resolveNpmImport7(sf.fileName, fromSpec);
+          if (npm === null || !isNpmStaticPackage(npm.packageName)) {
+            if (process.env["SCRIPTC_TRACE_FENCE"]) process.stderr.write(`[fence] ${fromSpec} | npm=${npm ? npm.typesFile : "null"} | static=${npm ? isNpmStaticPackage(npm.packageName) : "-"}\n`);
+            return null;
+          }
+          const dep = npmStaticProgramDep(program, npm.packageName, npm.typesFile);
+          if (process.env["SCRIPTC_TRACE_FENCE"]) process.stderr.write(`[fence] ${fromSpec} | static | dep=${dep !== null}\n`);
+          return dep;
+        })();
         if (!isRelativeSpecifier(fromSpec)) {
           // NAMED re-exports from a SUPPORTED builtin pass (`export { ok }
           // from "node:assert"` — a universal re-export facade facade): the
@@ -2012,10 +2177,21 @@ function preflight7(load: LoadResult): {
           ) {
             continue;
           }
-          diags.push(unsupportedDiag("SC1014", locOf7(stmt), "re-exports from packages or builtin modules"));
-          continue;
+          // tsconfig "paths" aliases: a project-internal re-export through
+          // an aliased specifier is an ordinary user-module edge — the same
+          // binding machinery as the relative form (the alias answers below
+          // via the shared reDep computation). The --npm-static program
+          // module answers above; only specs NO resolution answers keep
+          // the fence.
+          if (pathAliasesSf7(program, fromSpec) === null && npmStaticReexport === null) {
+            diags.push(unsupportedDiag("SC1014", locOf7(stmt), "re-exports from packages or builtin modules"));
+            continue;
+          }
         }
-        const reDep = resolveImport7(program, sf, fromSpec);
+        const reDep =
+          resolveImport7(program, sf, fromSpec) ??
+          npmStaticReexport ??
+          (!isRelativeSpecifier(fromSpec) ? pathAliasesSf7(program, fromSpec) : null);
         // `export * as ns from "./m"` re-exports the module NAMESPACE
         // object under a name: importers' `x.ns.member` reads resolve
         // statically through the same alias machinery as `import * as ns`
@@ -2084,6 +2260,32 @@ function preflight7(load: LoadResult): {
           pos: stmt.getStart(sf),
         });
       };
+      // The "bun" module's node:url re-exports (bun-types' ambient): a
+      // named-only import whose every binding sits in the alias table
+      // lowers exactly like the node:url import — no edge, no load (the
+      // binding keys the url tables). Anything else (the Bun global, its
+      // APIs, namespace forms) keeps the fence. FIRST: both the
+      // @types/bun types-only branch and Node's own resolution probe would
+      // otherwise fence or crash-compile the bare specifier.
+      const bunModuleAliasImport =
+        (spec === "bun" || spec.startsWith("bun/")) &&
+        stmt.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(stmt.importClause.namedBindings) &&
+        stmt.importClause.namedBindings.elements.length > 0 &&
+        stmt.importClause.namedBindings.elements.every((el) => {
+          const imported = el.propertyName ?? el.name;
+          return ts.isIdentifier(imported) && BUN_MODULE_MEMBER_ALIASES[imported.text] !== undefined;
+        });
+      if (bunModuleAliasImport) continue;
+      // Runtime-TRAPPED modules: the import typechecks (the project's
+      // bun-types surface declares them), so no edge and no fence — the
+      // bindings lower to use-site traps (lower-builtins.ts's
+      // trapModuleOf). Node's resolution probe must not see these: a
+      // bun:* specifier refuses at runtime and would compile the startup
+      // crash.
+      if (TRAP_RUNTIME_MODULES.has(spec) || (spec.startsWith("node:") && TRAP_RUNTIME_MODULES.has(spec.slice(5)))) {
+        continue;
+      }
       // "#" specifiers can never name an npm package — they are the
       // imports-field family, resolved below.
       const npm = isBare && !spec.startsWith("#") ? resolveNpmImport7(sf.fileName, spec) : null;
@@ -2129,6 +2331,12 @@ function preflight7(load: LoadResult): {
       if (isBare && npmStaticDep === null) {
         const resolved = resolveProjectImport(sf.fileName, spec);
         projDep = resolved !== null ? (program.getSourceFile(resolved) ?? null) : null;
+        // tsconfig "paths" answers when no package.json-mediated form did
+        // (the project's own alias surface — Bun resolves these at runtime,
+        // and the checker already answered the same specifier through the
+        // same table): an aliased edge is an ordinary user module exactly
+        // like a relative import, the alias itself never reaching runtime.
+        if (projDep === null) projDep = pathAliasesSf7(program, spec);
         if (projDep !== null && projDep.isDeclarationFile) {
           diags.push(
             unsupportedDiag(
@@ -2140,6 +2348,14 @@ function preflight7(load: LoadResult): {
           continue;
         }
         if (projDep === null) {
+          // Bun's asset surface FIRST: a bare specifier whose npm
+          // resolution lands on an existing ASSET file (the `.txt` text
+          // loader, or the `with { type: "file" }` file loader over any
+          // other extension — `@pkg/audio/x.mp3`) embeds at build time
+          // instead of refusing as an ambient-only surface. The attribute
+          // validation and the kind classification ride the shared clause
+          // walk below (the `assetPath` it computes answers the same).
+          if (resolveBareAsset(sf.fileName, spec) !== null) continue;
           const nodeBuiltin = spec.startsWith("node:") || nodeBuiltinNames.has(spec);
           if (nodeBuiltin) {
             diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
@@ -2187,6 +2403,37 @@ function preflight7(load: LoadResult): {
       const clause = stmt.importClause;
       const dep = isRelative ? resolveImport7(program, sf, spec) : (npmStaticDep ?? projDep);
       const isJson = dep !== null && dep.fileName.endsWith(".json");
+      // ASSET modules (the Bun-target story): a RELATIVE import whose file
+      // exists but no program module carries (the checker typed the
+      // binding through the project's ambient `declare module "*.txt"`
+      // surface). The kind — text content vs file path — and the attribute
+      // validation live in the lowering's single chokepoint
+      // (collectAssetImports); preflight only stops fencing the default
+      // binding and keeps named/namespace fences up. BARE assets exited
+      // the npm fence branch above.
+      const assetPath = dep === null && isRelative ? resolveRelativeAsset(sf.fileName, spec) : null;
+      if (assetPath !== null) {
+        // Import attributes: `with { type: "text" | "file" }` is the
+        // grammar (tsgo's client AST carries them as a LAZY node — the
+        // declaration's ImportAttributes child, whose children are
+        // ImportAttribute { name, value } — so the walk rides
+        // forEachChild). Only those two values serve an asset.
+        stmt.forEachChild((child: ts.Node) => {
+          if (ts.SyntaxKind[child.kind] !== "ImportAttributes") return;
+          child.forEachChild((attr) => {
+            const entry = attr as unknown as { name?: { text?: string }; value?: { text?: string } };
+            if (entry.name?.text !== "type") return;
+            if (entry.value?.text === "text" || entry.value?.text === "file") return;
+            diags.push(
+              unsupportedDiag(
+                "SC1010",
+                locOf7(stmt),
+                `the '${spec}' import with type attribute '${entry.value?.text ?? ""}' (only 'type: "text"' and 'type: "file"' serve assets)`,
+              ),
+            );
+          });
+        });
+      }
       // SELF-imports: the bindings alias this module's OWN declarations,
       // so a TOP-LEVEL read lexically above the aliased declaration is
       // Node's TDZ ReferenceError at runtime (exactly what tsc's TS2448
@@ -2198,28 +2445,20 @@ function preflight7(load: LoadResult): {
         selfImportTdzFences7(program, sf, clause, diags);
       }
       if (clause) {
-        // Default imports of SUPPORTED builtins pass where the spelling is
-        // legal: Node's default export of a CJS builtin IS the module
-        // object, so the binding exposes exactly the namespace-import
-        // surface and the lowering keys the same tables
-        // (builtinNamespaceModuleOf's default-import twin). JS sources
-        // always (Node never asks for interop flags); TS sources when the
-        // adopted interop knobs made the checker accept the spelling
-        // (the `import os from 'os'` spelling under esModuleInterop — the
-        // program TYPECHECKED, so the form is the project's own legal
-        // dialect). A TS project without interop flags keeps the fence:
-        // the SC1012 wording beats the raw TS1259 at the same site. The
-        // callable module objects (assert, events, test) stay allowed
-        // everywhere.
-        const opts = program.getCompilerOptions() as {
-          esModuleInterop?: boolean;
-          allowSyntheticDefaultImports?: boolean;
-        };
-        const interopOn = opts.esModuleInterop === true || opts.allowSyntheticDefaultImports === true;
-        const defaultOk =
-          builtinDefaultImportModule(spec) !== null ||
-          ((isJsSourceFileName(sf.fileName) || interopOn) && canonicalBuiltinModule(spec) !== null);
-        if (clause.name && !isJson && dep === null && !defaultOk) {
+        // Default imports of SUPPORTED builtins lower everywhere: Node's
+        // default export of a CJS builtin IS the module object (runtime
+        // interop, no flag involved — Node 24/26 run `import path from
+        // "path"` in any ESM module), so the binding exposes exactly the
+        // namespace-import surface and the lowering keys the same tables
+        // (builtinNamespaceModuleOf's default-import twin). The 7-world
+        // checker answers the same spelling without interop knobs (the
+        // 5.9.3 TS1259 that once justified fencing TS-without-interop does
+        // not fire under tsgo), and canonicalBuiltinModule already encodes
+        // Node's own spelling rules — prefix-only builtins refuse the bare
+        // form, so the acceptance here is exactly Node's. User-module
+        // default imports keep their fence (SC1012 below).
+        const defaultOk = canonicalBuiltinModule(spec) !== null;
+        if (clause.name && !isJson && assetPath === null && dep === null && !defaultOk) {
           diags.push(unsupportedDiag("SC1012", locOf7(clause.name)));
         }
         if (clause.namedBindings && ts.isNamedImports(clause.namedBindings) && isJson) {
@@ -2230,6 +2469,20 @@ function preflight7(load: LoadResult): {
               "named imports from JSON modules",
             ),
           );
+        }
+        if (clause.namedBindings && assetPath !== null) {
+          // Text assets serve ONE value — the file content as the default
+          // binding. The ambient surface may type members, but no runtime
+          // module exists to serve them.
+          if (ts.isNamedImports(clause.namedBindings)) {
+            diags.push(
+              unsupportedDiag(
+                "SC1013",
+                locOf7(clause.namedBindings),
+                "named imports of text assets (only the default binding lowers)",
+              ),
+            );
+          }
         }
         if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
           // `import * as ns from "./m"` of a RESOLVED user module lowers:
@@ -2244,6 +2497,8 @@ function preflight7(load: LoadResult): {
           // before (their namespace members are the declared surface).
           if (isJson) {
             diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings), "namespace imports of JSON modules"));
+          } else if (assetPath !== null) {
+            diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings), "namespace imports of text assets (only the default binding lowers)"));
           } else if (dep !== null && isCjsJsFile7(dep)) {
             // A CJS namespace binding whose every use is a bare expression
             // statement (`cjs;` — the corpus's "the import linked"
@@ -2821,7 +3076,7 @@ export function orderedImportsOf(
     // packages, whose entries are program modules the header must init.
     const dep = isRelative
       ? resolveImport7(program, sf, spec)
-      : (npmStaticDepSf7(program, sf, spec) ?? resolveProjectImportSf7(program, sf, spec));
+      : (npmStaticDepSf7(program, sf, spec) ?? resolveProjectImportSf7(program, sf, spec) ?? pathAliasesSf7(program, spec));
     const isJson = dep !== null && dep.fileName.endsWith(".json");
     out.push({ stmt, dep: isJson ? null : dep });
   }
@@ -2853,6 +3108,26 @@ function resolveProjectImportSf7(
 ): ts.SourceFile | null {
   if (spec.startsWith("node:")) return null;
   const p = resolveProjectImport(sf.fileName, spec);
+  if (p === null) return null;
+  const dep = program.getSourceFile(p) ?? null;
+  return dep !== null && !dep.isDeclarationFile ? dep : null;
+}
+
+/** The current load's adopted tsconfig "paths" table (targets absolutized)
+ * — null outside a load, cleared per loadProgram like the npm-static set. */
+let currentPathAliases: ReadonlyMap<string, readonly string[]> | null = null;
+
+function setPathAliases(paths: ReadonlyMap<string, readonly string[]> | null): void {
+  currentPathAliases = paths;
+}
+
+/** The program source file a bare specifier reaches through the adopted
+ * tsconfig "paths" table (Bun's runtime alias surface; the checker already
+ * answered the same specifier through the same table). Non-declaration
+ * program files only — same discipline as the project-imports twin. */
+function pathAliasesSf7(program: ts.Program, spec: string): ts.SourceFile | null {
+  if (currentPathAliases === null || spec.startsWith("node:") || spec.startsWith("#")) return null;
+  const p = resolveTsPathsMapping(currentPathAliases, spec);
   if (p === null) return null;
   const dep = program.getSourceFile(p) ?? null;
   return dep !== null && !dep.isDeclarationFile ? dep : null;

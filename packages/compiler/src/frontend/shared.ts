@@ -48,7 +48,10 @@ export function fallbackDtsPath(): string {
  * everything else those packages declare. */
 export function isNodeTypesPath(file: string): boolean {
   const pkg = npmPackageNameOf(file);
-  return pkg === "@types/node" || pkg === "undici-types";
+  // bun-types/@types/bun: the Bun type surface (@types/bun → bun-types →
+  // @types/node) — the same recognition applies, the lowering tables key
+  // by member name + provenance either way.
+  return pkg === "@types/node" || pkg === "undici-types" || pkg === "bun-types" || pkg === "@types/bun";
 }
 
 /** The node builtin modules with scriptc lowerings, by CANONICAL (bare)
@@ -202,6 +205,59 @@ export function workspacePackageOfPath(path: string): string | null {
 export function isRelativeSpecifier(spec: string): boolean {
   return spec === "." || spec === ".." || spec.startsWith("./") || spec.startsWith("../");
 }
+
+/* ── text-asset modules (the Bun-target story) ───────────────────────────
+ * Bun's runtime loader serves a relative import of a ".txt"/".md" file as
+ * the file CONTENT — the default binding is a string (`.md` rides the
+ * standard `with { type: "text" }` import-attributes grammar; bare ".txt"
+ * needs no attribute). Node's own ESM loader REFUSES both (the extension
+ * is unknown to it), so a compiled binary serves them differently: the
+ * content embeds at BUILD time and the default binding bakes into a
+ * string constant — the module cache in miniature, no init, no edge. The
+ * checker stays the project's dialect (Bun types these through its
+ * ambient `declare module "*.txt"` — scriptc requires the ambient to
+ * type the binding and bakes whatever string the file carries). */
+
+/** The extensions a compiled binary serves as text assets. ".toml" parses
+ * to an OBJECT under Bun — a different surface, kept out. */
+export const TEXT_ASSET_EXTENSIONS: readonly string[] = [".txt", ".md"];
+
+/** The text-asset extension a path carries, or null. */
+export function textAssetExtensionOf(path: string): string | null {
+  return TEXT_ASSET_EXTENSIONS.find((ext) => path.toLowerCase().endsWith(ext)) ?? null;
+}
+
+/** True when the specifier is a RELATIVE import whose spelling names a
+ * text-asset extension (the file-existence answer is the caller's job —
+ * it owns the tracked FS and the diagnostic). */
+export function isTextAssetSpecifier(spec: string): boolean {
+  return isRelativeSpecifier(spec) && textAssetExtensionOf(spec) !== null;
+}
+
+/** The runtime-TRAPPED modules (the Bun-target story): imports TYPECHECK
+ * against the project's own bun-types surface, but a compiled binary has
+ * no runtime module to serve — so the import emits no edge and every USE
+ * (call, construct, value read) of a trap binding throws a catchable
+ * error at runtime naming the module. The honest middle between a build
+ * failure (the 5.9.3 posture) and a silent wrong answer: the program
+ * builds and runs everything that never touches these paths, and the
+ * trapped paths fail loud at their own use site. */
+export const TRAP_RUNTIME_MODULES: ReadonlySet<string> = new Set([
+  "bun:sqlite",
+  "bun:ffi",
+  "v8",
+  "node:v8",
+]);
+
+/** The "bun" module's re-exports of node:url members (bun-types declares
+ * `module "bun"` re-exporting them — the redcode authoring imports
+ * `pathToFileURL` from "bun"). Members in this table lower exactly like
+ * their node:url originals; the "bun" module's other surface (the Bun
+ * global, its APIs) keeps its fence. */
+export const BUN_MODULE_MEMBER_ALIASES: Readonly<Record<string, string | undefined>> = {
+  pathToFileURL: "url",
+  fileURLToPath: "url",
+};
 
 /** Package name from a path under node_modules — the LAST node_modules
  * segment (nested installs blame the innermost package), scoped-aware:

@@ -27,7 +27,7 @@ import type {
 } from "typescript/unstable/sync";
 import type { SourceFile } from "typescript/unstable/ast";
 import { CheckerFacade } from "./checker.js";
-import { enumKeyOf, ModuleDetectionKind, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
+import { enumKeyOf, JsxEmit, ModuleDetectionKind, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../shared.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "../input-tracker.js";
 
@@ -71,6 +71,11 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
         out[key] = (value as string[]).map((lib) =>
           lib.startsWith("lib.") && lib.endsWith(".d.ts") ? lib.slice(4, -5) : lib,
         );
+        break;
+      case "jsx":
+        // Same enum-name spelling discipline (adopted project configs carry
+        // numeric JsxEmit values): "Preserve" -> "preserve".
+        out[key] = enumKeyOf(JsxEmit as never, value as number)?.toLowerCase() ?? value;
         break;
       default: {
         if (typeof value === "number" && key !== "maxNodeModuleJsDepth") {

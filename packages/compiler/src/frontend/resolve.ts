@@ -17,7 +17,7 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { provenanceEntryFor } from "./provenance-registry.js";
-import { isRuntimeSourceFileName, isTsSourceFileName } from "./shared.js";
+import { isRelativeSpecifier, isRuntimeSourceFileName, isTsSourceFileName } from "./shared.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 function isFile(path: string): boolean {
@@ -420,8 +420,113 @@ export function resolveExports(
   return resolveExportCandidates(exports, subpath, conditions)[0] ?? null;
 }
 
+/** tsconfig "paths" lookup — TypeScript's mapping semantics: exact keys
+ * first, then '*' patterns (longest literal prefix wins), each target
+ * tried in order through the ordinary file answer (extension substitution
+ * included — `@/x` maps to `<base>/src/x` and answers `src/x.ts`). Targets
+ * arrive ABSOLUTIZED (adoptProjectConfig7). Returns the first source path
+ * that exists on disk, or null when the table has no answer for the
+ * specifier — the bundler rewrite stance: the caller treats the answered
+ * file as an ordinary user module and the alias never reaches runtime. */
+export function resolveTsPathsMapping(
+  paths: ReadonlyMap<string, readonly string[]>,
+  specifier: string,
+): string | null {
+  const answerOf = (target: string): string | null =>
+    loadAsFile(target) ?? loadAsDirectory(target) ?? (isFile(target) ? target : null);
+  if (paths.has(specifier)) {
+    for (const target of paths.get(specifier)!) {
+      const answer = answerOf(target);
+      if (answer !== null) return answer;
+    }
+    return null;
+  }
+  let best: { prefix: string; suffix: string; targets: readonly string[] } | null = null;
+  for (const [key, targets] of paths) {
+    const star = key.indexOf("*");
+    if (star < 0) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (
+      specifier.startsWith(prefix) &&
+      specifier.length >= prefix.length + suffix.length &&
+      specifier.endsWith(suffix) &&
+      (!best || prefix.length > best.prefix.length)
+    ) {
+      best = { prefix, suffix, targets };
+    }
+  }
+  if (!best) return null;
+  const wildcard = specifier.slice(best.prefix.length, specifier.length - best.suffix.length);
+  for (const pattern of best.targets) {
+    const answer = answerOf(pattern.split("*").join(wildcard));
+    if (answer !== null) return answer;
+  }
+  return null;
+}
+
+/** The extensions that are PROGRAM surfaces — never asset answers (a
+ * relative ".ts" import resolves as a module or fences as one; the asset
+ * loaders only ever see files no module carries). */
+const NON_ASSET_EXTENSIONS: readonly string[] = [
+  ".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".json", ".ln",
+];
+
+/** The ASSET answers for a RELATIVE specifier: the file the spelling names
+ * must exist and must not be a program-source extension (a relative ".ts"
+ * is a module-or-fence, never an asset). Absolute path or null. */
+export function resolveRelativeAsset(fromFileName: string, specifier: string): string | null {
+  if (!isRelativeSpecifier(specifier)) return null;
+  if (NON_ASSET_EXTENSIONS.some((ext) => specifier.toLowerCase().endsWith(ext))) return null;
+  const path = resolve(dirname(resolve(fromFileName)), specifier);
+  return trackedFileExists(path) ? path : null;
+}
+
+/** The ASSET answer for a BARE specifier (Bun's file loader over a
+ * package's subpath — `@pkg/audio/x.mp3` through `./audio/*` exports): the
+ * node_modules walk, exports candidates matched, and the FIRST target that
+ * exists as a file answers. Exports defined with NO existing target keeps
+ * null (Node refuses the whole import; the ambient fence stays). Absolute
+ * path or null. */
+export function resolveBareAsset(fromFileName: string, specifier: string): string | null {
+  if (isRelativeSpecifier(specifier) || specifier.startsWith("#") || specifier.startsWith("node:")) return null;
+  if (NON_ASSET_EXTENSIONS.some((ext) => specifier.toLowerCase().endsWith(ext))) return null;
+  const pkgName = packagePrefixOf(specifier);
+  if (pkgName === null) return null;
+  const rest = specifier.slice(pkgName.length).replace(/^\//, "");
+  const subpath = rest === "" ? "." : `./${rest}`;
+  // A bare subpath answers as an asset only when the target is a FILE with
+  // a non-module extension (module files — .ts/.js/... — are real npm
+  // imports the checker resolves; directories never answer).
+  const assetFileOf = (file: string): string | null => {
+    if (!isFile(file)) return null;
+    if (NON_ASSET_EXTENSIONS.some((ext) => file.toLowerCase().endsWith(ext))) return null;
+    return file;
+  };
+  for (let dir = dirname(resolve(fromFileName)); ; ) {
+    const nm = join(dir, "node_modules");
+    if (isDirectory(nm)) {
+      const pkgDir = join(nm, pkgName);
+      const pkg = pkgJsonOf(pkgDir);
+      if (pkg) {
+        if (pkg.exports !== undefined) {
+          for (const target of resolveExportCandidates(pkg.exports, subpath, EXPORT_CONDITIONS)) {
+            const answer = assetFileOf(join(pkgDir, target));
+            if (answer !== null) return answer;
+          }
+          return null;
+        }
+        const answer = assetFileOf(join(pkgDir, rest));
+        if (answer !== null) return answer;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 /* ── project imports (package.json "imports" / self-name "exports") ─────
- *
  * The two package.json-mediated specifier families that resolve INSIDE the
  * project rather than into node_modules — Node's `#alias` imports field and
  * the self-name reference (a bare specifier naming the nearest package.json's

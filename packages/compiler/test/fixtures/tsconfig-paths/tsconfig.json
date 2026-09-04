@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strictNullChecks": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@deep/lib": ["./src/lib/index.ts", "./src/lib/alt.ts"]
+    }
+  }
+}

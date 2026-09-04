@@ -519,7 +519,7 @@ declare var Buffer: BufferConstructor;
  * labels compile statically; runtime-valued/unknown labels and the
  * fatal/ignoreBOM options fence at the use site). */
 interface TextEncoder {
-  encode(input?: string): Uint8Array;
+  encode(input?: string): Uint8Array<ArrayBuffer>;
 }
 declare var TextEncoder: { new (): TextEncoder };
 interface TextDecoder {
