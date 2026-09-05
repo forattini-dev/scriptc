@@ -24,6 +24,7 @@ thread_local! {
 
 const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
 const ISLAND_STREAM_BOOTSTRAP: &str = include_str!("island_streams.js");
+const ISLAND_WEB_GLOBALS_BOOTSTRAP: &str = include_str!("island_web_globals.js");
 
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
@@ -178,7 +179,7 @@ fn island_web_boot(context: &mut Context) -> JsResult<()> {
     context.eval(Source::from_bytes(
         format!("globalThis.__scr_runtime_target = {:?};", target_runtime_id()).as_bytes(),
     ))?;
-    for source in [ISLAND_STREAM_BOOTSTRAP, ISLAND_WEB_BOOTSTRAP] {
+    for source in [ISLAND_STREAM_BOOTSTRAP, ISLAND_WEB_BOOTSTRAP, ISLAND_WEB_GLOBALS_BOOTSTRAP] {
         let boot = context.eval(Source::from_bytes(source))?;
         let Some(boot) = boot.as_callable() else {
             return Err(boa_engine::JsNativeError::typ()
@@ -1112,8 +1113,23 @@ fn island_error_caught(error: boa_engine::JsError, context: &mut Context) -> Cau
     }
 }
 
+/// A FATAL island failure (module evaluation, job draining): the thrown
+/// value carries boa's own rendering — the throw position (embedded
+/// module path, line and column) and the call stack — because an
+/// uncaught "not a callable function" is unlocatable without them, and
+/// Node prints a stack for uncaught errors too.
 fn island_eval_error(error: boa_engine::JsError, context: &mut Context) -> ! {
-    rethrow_caught(island_error_caught(error, context))
+    let rendered = error.to_string();
+    let name = match error.try_native(context) {
+        Ok(native) => island_error_name(&error, context, &native.kind().to_string()),
+        Err(_) => "Error".to_owned(),
+    };
+    let prefix = format!("{name}: ");
+    let message = rendered.strip_prefix(&prefix).unwrap_or(&rendered).to_owned();
+    if message.is_empty() {
+        rethrow_caught(island_error_caught(error, context));
+    }
+    rethrow_caught(caught_value(error_new(&name, string(&message))))
 }
 
 fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallback: &str) -> String {
