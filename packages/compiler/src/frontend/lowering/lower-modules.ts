@@ -10,7 +10,7 @@ import { isNpmStaticPackage } from "../npm-static.js";
 import { isRelativeSpecifier, isRuntimeSourceFileName } from "../shared.js";
 import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -79,7 +79,14 @@ export interface FileParts {
     sf: ts.SourceFile,
     spec: string,
   ): ts.SourceFile | null {
-    if (!isRelativeSpecifier(spec) && !spec.startsWith("/")) return null;
+    // tsconfig paths ALIASES (`import("@/effect/app-runtime")`): the
+    // adopted alias table answers the bare specifier into a program file —
+    // same program-module story as the relative form.
+    if (!isRelativeSpecifier(spec) && !spec.startsWith("/")) {
+      const aliased = pathAliasesProgramModule(program, spec);
+      if (aliased !== null) return aliased;
+      return null;
+    }
     const dep = resolveImport(program, sf, spec);
     if (!dep || dep.isDeclarationFile) return null;
     if (dep.fileName.endsWith(".json") || dep.fileName.endsWith(".cts")) return null;
@@ -424,13 +431,27 @@ export interface FileParts {
           // module has no runtime namespace object — the per-site fence
           // says so. Only non-declaration source files count; a sibling
           // .d.mts typing shipped JS is the EMBED case, not this one.
+          // tsconfig "paths" ALIASES (`import("@/effect/app-runtime")` —
+          // bun-types' runtime shape): the checker's symbol lookup misses
+          // the bare specifier, so the adopted alias table answers (the
+          // static resolution preflight already proved); a compiled module
+          // reached through the alias is a program-module import() like a
+          // relative one.
           const modSym = L.checker.getSymbolAtLocation(node.arguments[0]);
           const ownModule = modSym !== undefined && L.checker.declarationsOf(modSym).some(
             (d) => ts.isSourceFile(d) && !d.isDeclarationFile,
           );
+          // A tsconfig paths ALIAS (`import("@/effect/app-runtime")` —
+          // bun-types' runtime shape): the symbol lookup misses the bare
+          // specifier, so the adopted alias table answers — a compiled
+          // program file is a program-module import() exactly like a
+          // relative one. The resolved file rides the resolution (the
+          // lowerer builds the namespace builder for it).
           const res = ownModule
             ? ({ kind: "program-module" } as const)
-            : builder.addDynamicImport(sf.fileName, spec);
+            : pathAliasesProgramModule(L.program, spec) !== null
+              ? ({ kind: "program-module-aliased", from: spec } as const)
+              : builder.addDynamicImport(sf.fileName, spec);
           L.dynImports.set(mapKey, res);
           if (res.kind === "unsupported-builtin") {
             L.pushDiag(

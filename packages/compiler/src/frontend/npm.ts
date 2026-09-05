@@ -188,6 +188,11 @@ export type DynamicImportResolution =
   /** The specifier resolves into the compiled program's own TypeScript —
    * fenced at the site (static imports are the way in). */
   | { kind: "program-module" }
+  /** The same, through a tsconfig paths alias (bun-types' runtime shape —
+   * `import("@/effect/app-runtime")`): the alias table answered the bare
+   * specifier, the target is a compiled program file, and the per-site
+   * lowerer builds the namespace builder for it. */
+  | { kind: "program-module-aliased"; from: string }
   /** No resolution — a build diagnostic, like static imports. */
   | { kind: "unresolved"; message: string };
 

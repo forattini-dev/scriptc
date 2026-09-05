@@ -2999,6 +2999,7 @@ export {
   requiresOf7 as requiresOf,
   isNodeEsmFile7 as isNodeEsmFile,
   resolveImport7 as resolveImport,
+  pathAliasesSf7 as pathAliasesProgramModule,
   resolveNpmImport7 as resolveNpmImport,
   locOf7 as locOf,
 };
@@ -3121,11 +3122,7 @@ function setPathAliases(paths: ReadonlyMap<string, readonly string[]> | null): v
   currentPathAliases = paths;
 }
 
-/** The program source file a bare specifier reaches through the adopted
- * tsconfig "paths" table (Bun's runtime alias surface; the checker already
- * answered the same specifier through the same table). Non-declaration
- * program files only — same discipline as the project-imports twin. */
-function pathAliasesSf7(program: ts.Program, spec: string): ts.SourceFile | null {
+export function pathAliasesSf7(program: ts.Program, spec: string): ts.SourceFile | null {
   if (currentPathAliases === null || spec.startsWith("node:") || spec.startsWith("#")) return null;
   const p = resolveTsPathsMapping(currentPathAliases, spec);
   if (p === null) return null;

@@ -8,7 +8,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { invalidJsonModuleDiag, requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, resolveImport } from "../program.js";
+import { isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, pathAliasesProgramModule, resolveImport } from "../program.js";
 import { foldedStringKeyOf, lowerDynObjectLiteral, pureReemittable } from "./lower-exprs.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, own } from "./lowerer.js";
 import {
@@ -2921,6 +2921,14 @@ export function lowerStaticReadableStreamReaderCall(
         dep = d;
         break;
       }
+    }
+    // tsconfig paths ALIASES (`import("@/effect/app-runtime")`): the
+    // symbol lookup misses the bare specifier — the adopted alias table
+    // answers (the collection pass already classified it
+    // program-module-aliased).
+    if (dep === null) {
+      const aliased = pathAliasesProgramModule(L.program, arg.text);
+      dep = aliased;
     }
     if (dep !== null && (dep.fileName.endsWith(".cts") || isCjsJsFile(dep))) {
       L.unsupported(
