@@ -726,6 +726,11 @@ export interface TypeMapperCtx {
    * would ICE the validator. Such instance types stay unmapped (null):
    * callers fence them like any other unsupported type. */
   isProgramFile: (sf: ts.SourceFile) => boolean;
+  /** True for a program module classified ISLAND (--island-module): its
+   * declarations are handle provenance exactly like an npm .d.ts — under
+   * --dynamic the values are engine handles, statically they stay
+   * unmapped. See frontend/tiering.ts. */
+  isIslandModuleFile: (sf: ts.SourceFile) => boolean;
 }
 
 
@@ -1071,7 +1076,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     npmDecls.length > 0 &&
     npmDecls.every((d) => {
       const sf = d.getSourceFile();
-      return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf);
+      return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
     })
   ) {
     return ctx.dynamic ? JSVAL : null;
@@ -1095,7 +1100,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (decls.length > 0) {
           return decls.every((d) => {
             const sf = d.getSourceFile();
-            return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
           });
         }
       }
@@ -1106,7 +1111,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return decls.length > 0 &&
           decls.every((d) => {
             const sf = d.getSourceFile();
-            return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
           });
       });
     };

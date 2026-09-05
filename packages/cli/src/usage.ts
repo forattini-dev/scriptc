@@ -28,6 +28,16 @@ Options:
       --conditions <c[,c…]>
                      extra export/imports conditions, matched after the
                      target's own (repeatable)
+      --island-module <glob[,glob…]>
+                     program modules that run in the embedded engine (the
+                     island tier) instead of compiling statically; static
+                     code binds their exports as engine handles. Globs match
+                     paths under the entry's package root (repeatable;
+                     requires --dynamic). "auto" lets the compiler move any
+                     module whose lowering reports a blocker into the
+                     island and lower again, to a fixpoint. The coverage
+                     report lists the resulting static frontier with each
+                     island module's reason
       --backend <b>  code generator. llvm is the default; c emits readable C,
                      and rust emits memory-safe Rust and invokes rustc directly
                      without a C translation or compiler fallback. Rust is an
@@ -79,6 +89,7 @@ export const CLI_OPTIONS = {
   backend: { type: "string" },
   target: { type: "string" },
   conditions: { type: "string", multiple: true },
+  "island-module": { type: "string", multiple: true },
   optimization: { type: "string" },
   "from-c": { type: "boolean", default: false },
   "keep-c": { type: "boolean", default: true },

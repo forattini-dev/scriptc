@@ -991,6 +991,28 @@ export class NpmGraphBuilder {
     return key;
   }
 
+  /** Registers one user-level import of a PROGRAM module classified island
+   * (--island-module): the importer's resolution already named the file,
+   * so it embeds by realpath and walks eagerly like a relative file
+   * import. Idempotent per (importing dir, specifier). */
+  addResolvedFileImport(fromFile: string, specifier: string, absFile: string): string | null {
+    const cacheKey = this.entryKeyFor(fromFile, specifier);
+    const cached = this.entries.get(cacheKey);
+    if (cached !== undefined) {
+      if (cached !== "") this.walk(cached, [packageNameOfPath(cached) ?? cached], false);
+      return cached === "" ? null : cached;
+    }
+    if (!this.host.isFile(absFile)) {
+      this.errors.push({ message: `cannot read island module '${specifier}' (${absFile}) from ${fromFile}` });
+      this.entries.set(cacheKey, "");
+      return null;
+    }
+    const key = this.host.realpath(absFile);
+    this.entries.set(cacheKey, key);
+    this.walk(key, [packageNameOfPath(key) ?? key], false);
+    return key;
+  }
+
   /** Registers one user-level dynamic `import(specifier)` and embeds what
    * it reaches, returning the build-time classification the lowering acts
    * on. Bare package specifiers take the same path as static imports;

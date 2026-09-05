@@ -38,6 +38,9 @@ export interface CoverageInput {
    * error shape; listed in the builtins table so the build output stays
    * honest about what the binary cannot reach. */
   npmLazyTraps?: NpmLazyTrap[];
+  /** The static frontier (--island-module): every program module with its
+   * tier and reason; the report names each island module. */
+  tiers?: readonly { module: string; tier: "static" | "island"; reason: string }[];
   /** --npm-static: each requested (or auto-detected) package's outcome —
    * compiled statically as program modules, or fallen back to the island
    * with the first refusal reason. */
@@ -166,6 +169,23 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
     );
   }
   out.push("");
+
+  // The static frontier: how many program modules lowered natively and
+  // which ones run in the island, each with its reason — the number the
+  // progressive-compilation work drives down.
+  const tiers = input.tiers ?? [];
+  if (tiers.length > 0) {
+    const island = tiers.filter((t) => t.tier === "island");
+    out.push(
+      `  ${c(DIM, "static frontier:")} ${c(GREEN, c(BOLD, String(tiers.length - island.length)))} of ${tiers.length} program module${tiers.length === 1 ? "" : "s"} static, ${c(YELLOW, c(BOLD, String(island.length)))} in the island`,
+    );
+    const base = input.file.replace(/\/[^/]*$/, "/");
+    for (const t of island) {
+      const name = t.module.startsWith(base) ? t.module.slice(base.length) : t.module;
+      out.push(`    ${name}  ${c(YELLOW, "island")}  ${c(DIM, `(${t.reason})`)}`);
+    }
+    out.push("");
+  }
 
   // --npm-static outcomes: which opted-in packages compiled statically as
   // program modules and which fell back to the island (with the first

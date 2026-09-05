@@ -51,6 +51,8 @@ export const VERSION = "0.0.1";
 
 export { InternalCompilerError } from "./errors.js";
 import { RUNTIME_TARGETS, activeRuntimeTargetKey, resolveRuntimeTarget, setActiveRuntimeTarget, type RuntimeTargetId } from "./compat/runtime-target.js";
+import { addAutoIslandModule, autoIslandTiering, isIslandModulePath, islandModulePatterns, setIslandModules } from "./frontend/tiering.js";
+export { globToRegExp, type ModuleTierRow } from "./frontend/tiering.js";
 export {
   compileC,
   runtimeSrcDir,
@@ -209,6 +211,11 @@ export interface CompileOptions {
   /** Extra runtime export/imports conditions (--conditions), matched after
    * the target's own. */
   conditions?: readonly string[];
+  /** --island-module: globs naming program modules that embed as engine
+   * source (the island tier) instead of lowering statically; static code
+   * binds their exports as engine handles. Requires --dynamic. See
+   * frontend/tiering.ts. */
+  islandModules?: readonly string[];
   /** Output executable path. Default: <outDir>/<stem>. */
   outPath: string;
   /** Where intermediates (program.c, program.ir.json) land. */
@@ -439,9 +446,10 @@ export function buildTargetPlatform(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 export interface AnalyzeOptions {
-  /** See CompileOptions.target / conditions. */
+  /** See CompileOptions.target / conditions / islandModules. */
   target?: RuntimeTargetId;
   conditions?: readonly string[];
+  islandModules?: readonly string[];
   /** Analyze as a --dynamic build (island constructs lower instead of
    * producing requires-dynamic diagnostics). */
   dynamic?: boolean;
@@ -480,6 +488,9 @@ interface Frontend {
   entryContract: () => ContractFacts;
   sourceTexts: () => Map<string, string>;
   lower: (opts: LowerOptions) => LowerResult;
+  /** Every program module in evaluation order (the tiering fixpoint's
+   * universe of movable modules). */
+  moduleFiles: () => readonly string[];
   /** --npm-static: each requested (or auto-detected) package's outcome —
    * compiled statically, or fallen back with the first refusal reason. */
   npmStatic: NpmStaticStatus[];
@@ -842,6 +853,7 @@ function runFrontend(
       externalTypes: finalLoad.externalTypes,
       externalTypeSpecifiersByFile: finalLoad.externalTypeSpecifiersByFile,
     }),
+    moduleFiles: () => finalLoad.moduleOrder.map((sf) => sf.fileName),
     npmStatic: statuses,
     npmImportSites: npmSites,
     dispose: finalLoad.dispose,
@@ -850,8 +862,48 @@ function runFrontend(
 
 /** Analysis without codegen: how much of the program compiles statically.
  * Unlike compile(), lowering diagnostics are data here, not failure. */
+/** Diagnostics that never move a module by themselves: cascade markers
+ * (a use inheriting its declaration's blocker), import-form fences, the
+ * requires-dynamic and island-embedding refusals, checker and internal
+ * errors. The module owning the ROOT blocker moves instead. */
+const TIERING_CASCADE_CODES: ReadonlySet<string> = new Set([
+  "SC0001", "SC0002", "SC0003", "SC0004",
+  "SC1010", "SC1012", "SC1013", "SC1014", "SC1015",
+  "SC2004", "SC2013", "SC2030", "SC9001",
+]);
+
+/** Lowers to the static-frontier FIXPOINT under `--island-module auto`:
+ * every program module (never the entry) that owns a root blocker moves
+ * to the island and the program lowers again, until a round moves
+ * nothing. Each round is a full (non-coverage) lowering; the final
+ * lowering carries the caller's options. Explicit-only tiering and static
+ * builds lower exactly once. */
+function lowerWithFrontier(fe: Frontend, options: LowerOptions): LowerResult {
+  if (!autoIslandTiering() || options.dynamic !== true) return fe.lower(options);
+  const movable = new Set(fe.moduleFiles().map((f) => resolve(f)));
+  const roundOptions: LowerOptions = { ...options, coverage: false };
+  let lowered = fe.lower(roundOptions);
+  for (let round = 0; round < 12 && lowered.diagnostics.length > 0; round++) {
+    const offenders = new Map<string, string>();
+    for (const d of lowered.diagnostics) {
+      if (TIERING_CASCADE_CODES.has(d.code)) continue;
+      const file = resolve(d.loc.file);
+      if (!movable.has(file) || isIslandModulePath(file) || offenders.has(file)) continue;
+      offenders.set(file, `${d.code} ${d.message}`);
+    }
+    if (offenders.size === 0) break;
+    for (const [file, reason] of offenders) addAutoIslandModule(file, reason);
+    if (process.env["SCRIPTC_TIMING"]) {
+      process.stderr.write(`scriptc tiering ${JSON.stringify({ round: round + 1, moved: offenders.size })}\n`);
+    }
+    lowered = fe.lower(roundOptions);
+  }
+  return options.coverage === true ? fe.lower(options) : lowered;
+}
+
 export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeResult {
   setActiveRuntimeTarget(resolveRuntimeTarget(resolve(entryPath), opts.target).profile, opts.conditions ?? []);
+  setIslandModules(opts.islandModules ?? [], resolve(entryPath));
   let ffi: FfiProfile | null = null;
   if (opts.ffiProfilePath !== undefined) {
     const loaded = loadFfiProfile(opts.ffiProfilePath);
@@ -900,7 +952,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     // reaches, but the analysis additionally lowers the unreached remainder
     // (throwaway) so the report covers everything the source declares — with
     // the unreached share in its own group.
-    const lowered = fe.lower({
+    const lowered = lowerWithFrontier(fe, {
       dynamic: opts.dynamic ?? false,
       coverage: true,
       targetPlatform: buildTargetPlatform(),
@@ -920,6 +972,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
         ...(lowered.npmLazyTraps ? { npmLazyTraps: lowered.npmLazyTraps } : {}),
+        ...(lowered.tiers !== undefined ? { tiers: lowered.tiers } : {}),
         ...(fe.npmStatic.length > 0 ? { npmStatic: fe.npmStatic } : {}),
         // --provenance-sources: the per-package attribution inputs (the
         // report aggregates statsByFile under each package's source dir).
@@ -1065,6 +1118,7 @@ async function compileTracked(
 ): Promise<CompileResult> {
   entryPath = resolve(entryPath);
   setActiveRuntimeTarget(resolveRuntimeTarget(entryPath, opts.target).profile, opts.conditions ?? []);
+  setIslandModules(opts.islandModules ?? [], entryPath);
   const rustBackend = opts.backend === "rust";
   let ffi: FfiProfile | null = null;
   let ffiProfileBytes: Uint8Array | null = null;
@@ -1130,6 +1184,7 @@ async function compileTracked(
         : { path: opts.ffiProfilePath, bytes: ffiProfileBytes },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}`,
     runtimeTarget: activeRuntimeTargetKey(),
+    islandModules: [...islandModulePatterns()],
     compiler: rustBackend ? ["rustc"] : [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment: rustBackend
       ? `rustc:${process.env["RUSTUP_TOOLCHAIN"] ?? "default"}`
@@ -1217,7 +1272,7 @@ async function compileTracked(
     if (fe.preflight.length > 0) return fail(fe.preflight);
 
     try {
-      lowered = fe.lower({
+      lowered = lowerWithFrontier(fe, {
         dynamic: opts.dynamic ?? false,
         targetPlatform: buildPlatform,
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),

@@ -1,5 +1,6 @@
 import { InternalCompilerError } from "../../errors.js";
 import { activeRuntimeTarget, runtimeTargetIr } from "../../compat/runtime-target.js";
+import { isIslandModulePath, islandModuleReason, type ModuleTierRow } from "../tiering.js";
 /* AST + checker → IR.
  *
  * Invariants:
@@ -321,6 +322,9 @@ export interface LowerResult {
   /** Coverage only (LowerOptions.coverage): the unreached remainder,
    * lowered in a throwaway pass — blockers in it can never fail a build. */
   unreached?: { diagnostics: ScrDiagnostic[]; stats: LowerStats };
+  /** The static frontier (present when any module is island-classified):
+   * every program module with its tier and the reason. */
+  tiers?: ModuleTierRow[];
   /** --dynamic only: every Node builtin the embedded npm graph imports,
    * shimmed or not — the coverage report's island honesty. */
   npmBuiltins?: NpmBuiltinUse[];
@@ -1609,12 +1613,16 @@ export class Lowerer {
       // fileTag is filled just below; the hook is only ever CALLED during
       // lowering, long after the constructor completes.
       isProgramFile: (sf) => this.fileTag.has(sf),
+      isIslandModuleFile: (sf) => isIslandModulePath(sf.fileName),
     };
     // --dynamic: modules reachable only through dynamic import() joined
     // moduleOrder BEFORE any pass constructed — lowerToIr runs
     // appendDynamicImportModules once on the shared array (a per-pass run
     // here would repeatedly extend the graph and duplicate cycle reports).
     this.moduleOrder.forEach((sf, i) => {
+      // Island modules (--island-module) are not program files: they embed
+      // as engine source and their declarations map to handles.
+      if (sf !== entry && isIslandModulePath(sf.fileName)) return;
       this.fileTag.set(sf, sf === entry ? "" : `%m${i}.`);
     });
     if (this.moduleOrder.length === 0) this.fileTag.set(entry, "");
@@ -2586,11 +2594,16 @@ export class Lowerer {
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
           };
+    const tiers: ModuleTierRow[] = this.moduleOrder.map((sf) =>
+      sf !== this.entry && isIslandModulePath(sf.fileName)
+        ? { module: sf.fileName, tier: "island", reason: islandModuleReason(sf.fileName) ?? "island" }
+        : { module: sf.fileName, tier: "static", reason: "static" });
     return {
       module,
       diagnostics: this.diags,
       runtimeFences: this.runtimeFences,
       stats: this.stats,
+      ...(tiers.some((t) => t.tier === "island") ? { tiers } : {}),
       ...(this.statsByFile.size > 0 ? { statsByFile: this.statsByFile } : {}),
       ...(this.provenanceElided.length > 0 ? { provenanceElided: this.provenanceElided } : {}),
       ...(this.npmBuiltins ? { npmBuiltins: this.npmBuiltins } : {}),

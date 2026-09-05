@@ -87,6 +87,7 @@ async function fixture(): Promise<{
       ffiProfile: null,
       target: "test",
       runtimeTarget: "node24:{}:node,import,default",
+      islandModules: [],
       compiler: ["clang"],
       nativeEnvironment: "test-native-environment",
       nodeVersion: "v24-test",

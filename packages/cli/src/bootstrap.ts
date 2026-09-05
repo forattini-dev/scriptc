@@ -61,6 +61,10 @@ async function tryFastPath(): Promise<number | null> {
   const backend = values.backend;
   if (backend !== undefined && backend !== "c" && backend !== "llvm") return null;
   const targetArg = values.target;
+  const islandModules = (values["island-module"] ?? [])
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
   const conditions = (values.conditions ?? [])
     .flatMap((value) => value.split(","))
     .map((value) => value.trim())
@@ -126,6 +130,7 @@ async function tryFastPath(): Promise<number | null> {
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${arch}`,
     runtimeTarget,
+    islandModules,
     compiler: [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment,
     nodeVersion: process.version,

@@ -509,6 +509,20 @@ fn island_await_settles_a_promise_only_a_timer_can_resolve() {
     island_eval_finish();
 }
 
+/// `import * as ns` binds the module namespace object itself ("*"), so a
+/// member read through it answers the same binding a named import does.
+#[test]
+fn island_import_star_answers_the_module_namespace() {
+    with_tables(|| {
+        let namespace = island_import(&JsString::from("/pkg/timer.js"), &JsString::from("*"));
+        let delay = island_get_property(&namespace, "delay");
+        let pending = island_call(&delay, &[island_value_number(1.0), island_value_number(9.0)]);
+        assert_eq!(island_to_string(&island_await(&pending)).as_ref(), "9");
+        assert_eq!(island_to_string(&island_get_property(&namespace, "missing")).as_ref(), "undefined");
+    });
+    island_eval_finish();
+}
+
 /* ── the lazy promise bridge ───────────────────────────────────────── */
 
 /// The bridge answers a promise that is still PENDING at the call site.

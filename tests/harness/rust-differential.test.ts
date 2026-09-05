@@ -18,7 +18,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
@@ -98,6 +98,19 @@ function targetOf(file: string): RuntimeTargetId {
     }
   }
   return "node24";
+}
+
+/** `// @island-module: <spec>` lines in the directive head: program
+ * modules (relative to the entry) that compile in the ISLAND tier —
+ * embedded as engine source, bound as handles. Node needs nothing: the
+ * modules are ordinary modules there. */
+function islandModulesOf(file: string): string[] {
+  const out: string[] = [];
+  for (const line of directiveHead(file)) {
+    const m = /^\/\/ @island-module:\s*(\S+)\s*$/.exec(line);
+    if (m) out.push(resolve(dirname(file), m[1]!));
+  }
+  return out;
 }
 
 /** The oracle for a target, or the reason it is unavailable on this host
@@ -208,6 +221,7 @@ async function build(file: string) {
     .update(wantsDynamic(file) ? "dyn" : "")
     .update("rust")
     .update(targetOf(file))
+    .update(islandModulesOf(file).join("\0"))
     .digest("hex")
     .slice(0, 16);
   const outDir = join(cacheDir, key);
@@ -223,6 +237,7 @@ async function build(file: string) {
     optimization: "dev",
     dynamic: wantsDynamic(file),
     target: targetOf(file),
+    ...(islandModulesOf(file).length > 0 ? { islandModules: islandModulesOf(file) } : {}),
   });
 }
 

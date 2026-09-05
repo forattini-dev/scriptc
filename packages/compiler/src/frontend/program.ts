@@ -79,6 +79,7 @@ import {
 } from "./shared.js";
 import { trackedFileExists } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
+import { setEmbedJsxOptions } from "./npm-typescript.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
@@ -168,6 +169,7 @@ function adoptProjectConfig7(
   diags: ScrDiagnostic[];
 } {
   const configFile = ts.findConfigFile(dirname(entryPath), ts.sys.fileExists) ?? null;
+  setEmbedJsxOptions(null);
   if (!configFile) {
     return { configFile, options: { ...BASE_OPTIONS, ...FORCED_OPTIONS }, pathAliases: null, diags: [] };
   }
@@ -223,6 +225,13 @@ function adoptProjectConfig7(
   if (parsed.options.jsxImportSource !== undefined) {
     adopted["jsxImportSource"] = parsed.options.jsxImportSource;
   }
+  // Embedded .tsx modules (island program modules, workspace TS sources)
+  // emit through the project's JSX runtime.
+  setEmbedJsxOptions(
+    parsed.options.jsx !== undefined || parsed.options.jsxImportSource !== undefined
+      ? { ...(typeof parsed.options.jsxImportSource === "string" ? { jsxImportSource: parsed.options.jsxImportSource } : {}) }
+      : null,
+  );
   // tsconfig "lib": the project's own checker surface, UNIONED with the
   // es2025 floor — a project may WIDEN (DOM's RequestInfo/HeadersInit are
   // type-only names; the runtime serves the web globals it serves) but

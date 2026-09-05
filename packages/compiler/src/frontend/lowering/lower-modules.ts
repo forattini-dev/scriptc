@@ -7,6 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
+import { isIslandModulePath } from "../tiering.js";
 import { isRelativeSpecifier, isRuntimeSourceFileName } from "../shared.js";
 import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
@@ -42,7 +43,9 @@ export interface FileParts {
    * (tests, coverage on broken files) may arrive with an empty order — fall
    * back to the entry alone. */
   export function splitFiles(L: Lowerer): FileParts[] {
-    const files = L.moduleOrder.length > 0 ? L.moduleOrder : [L.entry];
+    const files = (L.moduleOrder.length > 0 ? L.moduleOrder : [L.entry])
+      // Island modules (--island-module) embed as engine source instead.
+      .filter((sf) => sf === L.entry || !isIslandModulePath(sf.fileName));
     return files.map((sf) => {
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
       for (const stmt of sf.statements) {
@@ -235,6 +238,13 @@ export interface FileParts {
   export function collectNpmImports(L: Lowerer, parts: FileParts[]): void {
     const builder = L.dynamic ? new NpmGraphBuilder() : null;
     for (const fp of parts) {
+      // Program modules classified ISLAND that this file imports: their
+      // edges take the npm path below (the module's own source embeds,
+      // the bindings are engine handles).
+      const islandDeps = new Map<ts.Statement, ts.SourceFile>();
+      for (const { stmt, dep } of orderedImportsOf(L.program, fp.sf)) {
+        if (dep !== null && dep !== fp.sf && isIslandModulePath(dep.fileName)) islandDeps.set(stmt, dep);
+      }
       for (const stmt of fp.sf.statements) {
         // NAMED re-exports from npm packages (`export { isUrl } from
         // "url-or-path"` — preflight admitted them): import-plus-export
@@ -273,7 +283,8 @@ export interface FileParts {
         // island runtime implementation; the preflight/import-use SC1010
         // fences are the whole story.
         if (L.externalTypes.has(spec)) continue;
-        const npm = resolveNpmImport(fp.sf.fileName, spec);
+        const islandDep = islandDeps.get(stmt);
+        const npm = islandDep !== undefined ? null : resolveNpmImport(fp.sf.fileName, spec);
         // --npm-static: an opted-in package that made it through preflight
         // is a PROGRAM-MODULE dependency — its entry sits in the module
         // order, orderedImportsOf answers it for the %init header, and the
@@ -304,7 +315,7 @@ export interface FileParts {
         // A relative import INTO an opted-in --npm-static package is the
         // program-module path too (preflight resolved the file edge).
         if (relIsJs && isNpmStaticPackage(relPkg)) continue;
-        if (!npm && !relIsJs) continue;
+        if (!npm && !relIsJs && islandDep === undefined) continue;
         // An edge Node's RUNTIME resolution refuses at startup (types
         // resolved, but the exports target ships no JS — the types-only
         // package shape): preflight registered Node's startup crash for
@@ -312,13 +323,15 @@ export interface FileParts {
         // link — nothing to embed, no island requirement, in EITHER mode.
         if (npm !== null && probeNodeImportRefusal(fp.sf.fileName, spec) !== null) continue;
         if (!builder) {
-          L.pushDiag(requiresDynamicImportDiag(npm?.packageName ?? relPkg!, locOf(stmt)));
+          L.pushDiag(requiresDynamicImportDiag(npm?.packageName ?? relPkg ?? spec, locOf(stmt)));
           continue;
         }
         const before = builder.errors.length;
-        const entryKey = npm
-          ? (builder.addImport(fp.sf.fileName, spec), builder.entryOf(fp.sf.fileName, spec))
-          : builder.addFileImport(fp.sf.fileName, spec);
+        const entryKey = islandDep !== undefined
+          ? builder.addResolvedFileImport(fp.sf.fileName, spec, islandDep.fileName)
+          : npm
+            ? (builder.addImport(fp.sf.fileName, spec), builder.entryOf(fp.sf.fileName, spec))
+            : builder.addFileImport(fp.sf.fileName, spec);
         for (const err of builder.errors.slice(before)) {
           L.pushDiag(npmEmbedFailedDiag(err.message, locOf(stmt)));
         }

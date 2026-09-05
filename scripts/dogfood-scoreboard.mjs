@@ -9,8 +9,8 @@
 // committed scoreboard and, with --write, replaces it.
 //
 // Usage:
-//   node scripts/dogfood-scoreboard.mjs <entry.ts> [--dynamic]
-//        [--npm-static <pkg>]... [--name redcode] [--write]
+//   node scripts/dogfood-scoreboard.mjs <entry.ts> [--dynamic] [--target <id>]
+//        [--npm-static <pkg>]... [--island-module <glob>]... [--name redcode] [--write]
 //
 // The committed file is tests/dogfood/<name>.scoreboard.json. Nothing
 // here is a test gate: the scoreboard is the progress meter the plan's
@@ -30,13 +30,17 @@ let entry = null;
 let dynamic = false;
 let write = false;
 let name = "redcode";
+let target;
 const npmStatic = [];
+const islandModules = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--dynamic") dynamic = true;
   else if (a === "--write") write = true;
   else if (a === "--npm-static") npmStatic.push(args[++i]);
   else if (a === "--name") name = args[++i];
+  else if (a === "--target") target = args[++i];
+  else if (a === "--island-module") islandModules.push(args[++i]);
   else if (a.startsWith("--")) { console.error(`unknown flag ${a}`); process.exit(1); }
   else entry = path.resolve(a);
 }
@@ -65,7 +69,12 @@ process.stderr.write = (chunk, ...rest) => {
 };
 
 const t0 = performance.now();
-const { coverage } = analyze(entry, { dynamic, ...(npmStatic.length > 0 ? { npmStatic } : {}) });
+const { coverage } = analyze(entry, {
+  dynamic,
+  ...(target !== undefined ? { target } : {}),
+  ...(npmStatic.length > 0 ? { npmStatic } : {}),
+  ...(islandModules.length > 0 ? { islandModules } : {}),
+});
 const wallMs = Math.round(performance.now() - t0);
 process.stderr.write = realWrite;
 
@@ -157,7 +166,7 @@ function fold(diagnostics) {
 const board = {
   name,
   entry: path.relative(repoRoot, entry),
-  options: { dynamic, npmStatic },
+  options: { dynamic, target: target ?? null, npmStatic, islandModules },
   preflightFailed: coverage.preflightFailed,
   stats: coverage.stats,
   unreachedStats: coverage.unreached?.stats ?? null,

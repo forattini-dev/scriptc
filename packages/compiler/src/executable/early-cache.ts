@@ -91,6 +91,8 @@ export interface EarlyExecutableCacheOptions {
   target: string;
   /** The runtime target selection (id, pins, conditions). */
   runtimeTarget: string;
+  /** --island-module globs, in order. */
+  islandModules: readonly string[];
   compiler: string[];
   nativeEnvironment: string;
   nodeVersion: string;
@@ -193,6 +195,7 @@ function cacheKey(options: EarlyExecutableCacheOptions): string {
         : JSON.stringify(options.npmStatic),
     options.target,
     options.runtimeTarget,
+    JSON.stringify(options.islandModules),
     options.compiler.join("\x1f"),
     options.nativeEnvironment,
     options.nodeVersion,
@@ -222,6 +225,7 @@ function routeKey(options: EarlyExecutableRouteOptions): string {
         : JSON.stringify(options.npmStatic)).update("\0")
     .update(options.target).update("\0")
     .update(options.runtimeTarget).update("\0")
+    .update(JSON.stringify(options.islandModules)).update("\0")
     .update(options.compiler.join("\x1f")).update("\0")
     .update(options.nativeEnvironment).update("\0")
     .update(options.nodeVersion).update("\0");

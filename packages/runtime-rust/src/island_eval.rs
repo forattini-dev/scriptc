@@ -721,6 +721,11 @@ pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
     with_island_state(|state| {
         let namespace = island_module_namespace(state, key.as_ref())
             .unwrap_or_else(|failure| island_import_throw(failure, &mut state.context));
+        // `import * as ns` binds the module namespace object itself (the
+        // C island's scr_jsval_import answers "*" the same way).
+        if export.as_ref() == "*" {
+            return IslandValue(namespace);
+        }
         let value = namespace
             .to_object(&mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context))

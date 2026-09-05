@@ -122,8 +122,8 @@ async function main(): Promise<number> {
         "scriptc build --lib takes no --dynamic/--backend/--optimization/--npm-static/--ffi/--external-types: the profile pins the emission and optimization, npm imports are judged automatically, outbound FFI belongs to executable builds, and external type mappings belong to coverage",
       );
     }
-    if (values.target !== undefined || (values.conditions ?? []).length > 0) {
-      fail("scriptc build --lib takes no --target/--conditions: library archives are Node-semantics artifacts");
+    if (values.target !== undefined || (values.conditions ?? []).length > 0 || (values["island-module"] ?? []).length > 0) {
+      fail("scriptc build --lib takes no --target/--conditions/--island-module: library archives are Node-semantics, static-only artifacts");
     }
     const profilePath = resolve(profileArg);
     const libOutDir = values.out ? dirname(resolve(values.out)) : join(dirname(profilePath), ".scriptc");
@@ -204,6 +204,10 @@ async function main(): Promise<number> {
   if (targetNote !== null) process.stderr.write(`${targetNote}\n`);
   const target = runtimeTarget.profile.id;
   const conditions = (values.conditions ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter((v) => v !== "");
+  const islandModules = (values["island-module"] ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter((v) => v !== "");
+  if (islandModules.length > 0 && !values.dynamic) {
+    fail(`--island-module runs program modules in the embedded engine and needs --dynamic\n\n${USAGE}`);
+  }
 
   // --npm-static: repeatable and comma-splittable; the literal "auto"
   // switches to eligibility-based detection (mixing "auto" with names
@@ -236,6 +240,7 @@ async function main(): Promise<number> {
     const { coverage, sourceTexts } = analyze(input, {
       target,
       ...(conditions.length > 0 ? { conditions } : {}),
+      ...(islandModules.length > 0 ? { islandModules } : {}),
       dynamic: values.dynamic,
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
@@ -267,6 +272,7 @@ async function main(): Promise<number> {
     const result = await compile(input, {
       target,
       ...(conditions.length > 0 ? { conditions } : {}),
+      ...(islandModules.length > 0 ? { islandModules } : {}),
       outPath,
       outDir,
       emitIr: values["emit-ir"],
