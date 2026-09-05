@@ -92,7 +92,7 @@ import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedReal
 import { npmExecutableSource } from "./npm-typescript.js";
 import { activeRuntimeConditions, activeRuntimeTarget } from "../compat/runtime-target.js";
 import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
-import { resolveExports, resolvePackageImports } from "./resolve.js";
+import { isNodeModulesPath, resolveEmbedPathAlias, resolveExports, resolvePackageImports } from "./resolve.js";
 import { workspacePackageOfPath } from "./shared.js";
 
 /** The embedded graph resolves with the ACTIVE RUNTIME TARGET's conditions
@@ -1455,6 +1455,14 @@ export class NpmGraphBuilder {
         dir = parent;
       }
       return null;
+    }
+    // A PROGRAM module classified island keeps its tsconfig "paths"
+    // aliases (`@/x` → `<pkg>/src/x.ts`): the alias answers a program
+    // file, embedded by realpath like any island module. Package code
+    // never sees the table — bundlers rewrite aliases the same way.
+    if (!isNodeModulesPath(ctx.importer)) {
+      const aliased = resolveEmbedPathAlias(specifier);
+      if (aliased !== null) return this.host.realpath(aliased);
     }
     const name = packageNameOf(specifier);
     const parts = specifier.split("/");

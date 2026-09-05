@@ -428,6 +428,21 @@ export function resolveExports(
   return resolveExportCandidates(exports, subpath, conditions)[0] ?? null;
 }
 
+/** The current load's tsconfig "paths" table for the EMBEDDER: a program
+ * module classified island (--island-module) keeps its aliases when it
+ * embeds — the alias answers a program file, never a package, so
+ * node_modules code never consults it. Set per load by program.ts. */
+let embedPathAliases: ReadonlyMap<string, readonly string[]> | null = null;
+
+export function setEmbedPathAliases(paths: ReadonlyMap<string, readonly string[]> | null): void {
+  embedPathAliases = paths;
+}
+
+export function resolveEmbedPathAlias(specifier: string): string | null {
+  if (embedPathAliases === null || specifier.startsWith("node:") || specifier.startsWith("#")) return null;
+  return resolveTsPathsMapping(embedPathAliases, specifier);
+}
+
 /** tsconfig "paths" lookup — TypeScript's mapping semantics: exact keys
  * first, then '*' patterns (longest literal prefix wins), each target
  * tried in order through the ordinary file answer (extension substitution

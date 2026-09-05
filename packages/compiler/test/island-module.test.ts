@@ -20,6 +20,7 @@ test("an --island-module program module stops blocking the build and shows in th
   const tiered = analyze(entry, { dynamic: true, islandModules: ["src/proxied.ts", "src/blocked2.ts"] });
   expect(tiered.coverage.diagnostics.map((d) => `${d.code} ${d.message}`)).toEqual([]);
   expect(tiered.coverage.tiers?.map((t) => [t.module.split("/").pop(), t.tier])).toEqual([
+    ["helper.ts", "static"],
     ["proxied.ts", "island"],
     ["blocked2.ts", "island"],
     ["main.ts", "static"],
@@ -76,5 +77,5 @@ test("the island module's exports bind as handles and run (rust)", async () => {
     });
   });
   expect(run.code).toBe(0);
-  expect(run.stdout).toBe("<x> 42 1\n");
+  expect(run.stdout).toBe("[<x>] 42 1\n");
 });

@@ -50,7 +50,7 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import { isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareAsset, resolveBareModule, resolveProjectImport, resolveRelativeAsset, resolveRelativeModule, resolveTsPathsMapping, resolveTypeDirective, setProjectRealm } from "./resolve.js";
+import { isNodeModulesPath, nearestInvalidPackageJsonPath, nearestPackageType, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareAsset, resolveBareModule, resolveProjectImport, resolveRelativeAsset, resolveRelativeModule, resolveTsPathsMapping, resolveTypeDirective, setEmbedPathAliases, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
@@ -3146,6 +3146,7 @@ let currentPathAliases: ReadonlyMap<string, readonly string[]> | null = null;
 
 function setPathAliases(paths: ReadonlyMap<string, readonly string[]> | null): void {
   currentPathAliases = paths;
+  setEmbedPathAliases(paths);
 }
 
 export function pathAliasesSf7(program: ts.Program, spec: string): ts.SourceFile | null {
