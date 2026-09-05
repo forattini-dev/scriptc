@@ -219,7 +219,31 @@ function nsBlockKindOfSymbol(L: Lowerer, sym: ts.Symbol): "flattened" | "typeOnl
  * Builtin/stdlib module namespaces (string-named ambient modules in
  * .d.ts files) and npm packages answer null — their own chokepoints and
  * fences keep ownership. */
-function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression): ts.SourceFile | null {
+/** The file-scope `const X = <namespace reference>` declaration behind
+ * `sym`, when `sym` is such an ALIAS VARIABLE (`export const Event =
+ * ServerEvent`, the re-export-under-a-new-name house style): a const,
+ * declared at a module's top level, never reassigned (const), whose
+ * initializer is an identifier or qualified name. The declaration is
+ * pure plumbing — no storage registers (collectGlobals), the statement
+ * lowers to nothing (lowerVarDecl), qualified reads resolve through the
+ * namespace like `Ns.member` (moduleNsSourceFileOf follows the
+ * initializer), and a bare value use materializes the namespace record at
+ * the use site (lowerNsIdentifierValue). */
+export function nsAliasVarDeclOf(L: Lowerer, sym: ts.Symbol): ts.VariableDeclaration | null {
+  if ((sym.flags & ts.SymbolFlags.Variable) === 0) return null;
+  const vd = L.checker.valueDeclarationOf(sym);
+  if (vd === undefined || !ts.isVariableDeclaration(vd) || !ts.isIdentifier(vd.name)) return null;
+  if (vd.initializer === undefined || vd.type !== undefined) return null;
+  if ((ts.getCombinedNodeFlags(vd) & ts.NodeFlags.Const) === 0) return null;
+  const stmt = vd.parent.parent;
+  if (!ts.isVariableStatement(stmt) || !ts.isSourceFile(stmt.parent)) return null;
+  let init: ts.Expression = vd.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  if (!ts.isIdentifier(init) && !ts.isPropertyAccessExpression(init)) return null;
+  return moduleNsSourceFileOf(L, init, 1) !== null ? vd : null;
+}
+
+function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression, depth = 0): ts.SourceFile | null {
   let sym: ts.Symbol | undefined;
   if (ts.isIdentifier(e)) {
     sym = L.checker.getSymbolAtLocation(e);
@@ -232,6 +256,17 @@ function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression): ts.SourceFile | nul
   }
   if (!sym) return null;
   if (sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym);
+  // An alias VARIABLE (`const Event = ServerEvent`): the namespace is the
+  // initializer's (chains resolve link by link, depth-capped).
+  if (sym.flags & ts.SymbolFlags.Variable && depth < 8) {
+    const vd = nsAliasVarDeclOf(L, sym);
+    if (vd !== null) {
+      let init: ts.Expression = vd.initializer!;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      return moduleNsSourceFileOf(L, init, depth + 1);
+    }
+    return null;
+  }
   for (const d of L.checker.declarationsOf(sym)) {
     if (
       sym.flags & ts.SymbolFlags.ValueModule &&
@@ -911,7 +946,14 @@ export function moduleNamespaceRecord(
  * reference at all. */
 export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr | null {
   const sym = L.resolveValueSymbol(ident);
-  if (!sym || !(sym.flags & (ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule))) {
+  if (!sym) return null;
+  // An alias VARIABLE of a module namespace used as a VALUE: the record
+  // materializes here exactly as the namespace identifier itself would.
+  if (sym.flags & ts.SymbolFlags.Variable && nsAliasVarDeclOf(L, sym) !== null) {
+    const aliasSf = moduleNsSourceFileOf(L, ident);
+    if (aliasSf !== null) return moduleNamespaceRecord(L, aliasSf, ident, new Set());
+  }
+  if (!(sym.flags & (ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule))) {
     return null;
   }
   if (sym.flags & (ts.SymbolFlags.Class | ts.SymbolFlags.Function | ts.SymbolFlags.RegularEnum | ts.SymbolFlags.ConstEnum | ts.SymbolFlags.Variable)) {

@@ -21,7 +21,7 @@ import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingG
 import { isVarDeclared, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { stdlibGlobalAliasDecl } from "./surfaces.js";
-import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
+import { collectNamespaceStmt, nsAliasVarDeclOf, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
@@ -1304,6 +1304,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // probes below would otherwise claim the call-initializer shape
         // and put its fences on the build.
         if (provenanceElidedConstDecl(L, decl)) continue;
+        // `const Event = ServerEvent` — an ALIAS of a module namespace:
+        // pure plumbing, no storage (nsAliasVarDeclOf; the statement
+        // lowering skips by the same test).
+        if (
+          isConst &&
+          ts.isIdentifier(decl.name) &&
+          nsAliasVarDeclOf(L, L.checker.getSymbolAtLocation(decl.name) ?? ({} as ts.Symbol)) === decl
+        ) {
+          continue;
+        }
         // A stored built-in numeric value iterator has no first-class
         // global representation. Its same-%init for-of uses are backed by
         // hidden source/cursor/done locals registered when the declaration

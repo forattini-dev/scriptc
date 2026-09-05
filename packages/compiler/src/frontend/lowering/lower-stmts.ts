@@ -12,7 +12,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
-import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
+import { ambientUndefVarRootOf, lowerImportEquals, nsAliasVarDeclOf, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
@@ -3064,6 +3064,15 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // probes below would otherwise claim the call-initializer shape and
     // put its fences on the build.
     if (provenanceElidedConstDecl(L, decl)) return null;
+    // `const Event = ServerEvent` at file scope — an alias of a module
+    // namespace: no storage, no statement (collectGlobals skipped the
+    // global by the same test; reads resolve through the namespace).
+    if (
+      ts.isIdentifier(decl.name) &&
+      nsAliasVarDeclOf(L, L.checker.getSymbolAtLocation(decl.name) ?? ({} as ts.Symbol)) === decl
+    ) {
+      return null;
+    }
 
     // A TRAP declaration — the initializer's chain roots at an
     // ambient-undefined name (`declare function factory...; const make =
