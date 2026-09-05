@@ -1326,7 +1326,10 @@ export class NpmGraphBuilder {
   private resolveFile(path: string, depth = 0): string | null {
     if (depth > 8) return null; // a "main" cycle — refuse quietly
     if (this.host.isFile(path)) return path;
-    for (const ext of [".js", ".json", ".mjs", ".cjs", ".node"]) {
+    // TypeScript targets resolve too (the workspace-monorepo package
+    // shape: exports point at ./src/*.ts with no shipped dist):
+    // npmExecutableSource transpiles the reached file at embed time.
+    for (const ext of [".js", ".json", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".node"]) {
       if (this.host.isFile(path + ext)) return path + ext;
     }
     if (this.host.isDirectory(path)) {
@@ -1336,7 +1339,7 @@ export class NpmGraphBuilder {
         const viaMain = this.resolveFile(join(dir, main), depth + 1);
         if (viaMain) return viaMain;
       }
-      for (const idx of ["index.js", "index.json", "index.mjs", "index.cjs", "index.node"]) {
+      for (const idx of ["index.js", "index.json", "index.mjs", "index.cjs", "index.node", "index.ts", "index.mts", "index.cts"]) {
         const p = join(path, idx);
         if (this.host.isFile(p)) return p;
       }
@@ -1385,6 +1388,31 @@ export class NpmGraphBuilder {
     mode: "import" | "require",
     ctx: { importer: string; chain: readonly string[] },
   ): string | null {
+    // A "." specifier is Node's OWN-package shorthand (the
+    // `export * as ns from "."` barrel): the nearest scope's ENTRY answers
+    // through its exports map, no name walk needed.
+    if (specifier === "." || specifier === "./") {
+      for (let dir = fromDir; ; ) {
+        const selfPkg = this.pkgJsonOf(dir);
+        if (selfPkg) {
+          const fromExports = selfPkg.exports !== undefined
+            ? resolveExports(selfPkg.exports, ".", nodeExportConditions(mode))
+            : null;
+          const resolved = fromExports !== null
+            ? this.resolveFile(join(dir, fromExports))
+            : this.resolveFile(join(dir, selfPkg.main ?? "./index.js"));
+          if (resolved === null) {
+            this.errors.push({ message: `package '.' (self-reference from ${ctx.importer}) resolves to a missing entry` });
+            return null;
+          }
+          return this.host.realpath(resolved);
+        }
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      return null;
+    }
     const name = packageNameOf(specifier);
     const parts = specifier.split("/");
     const subparts = specifier.startsWith("@") ? parts.slice(2) : parts.slice(1);
