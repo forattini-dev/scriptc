@@ -52,7 +52,7 @@ export const VERSION = "0.0.1";
 export { InternalCompilerError } from "./errors.js";
 import { RUNTIME_TARGETS, activeRuntimeTargetKey, resolveRuntimeTarget, setActiveRuntimeTarget, type RuntimeTargetId } from "./compat/runtime-target.js";
 import { addAutoIslandModule, autoIslandTiering, isIslandModulePath, islandModulePatterns, setIslandModules } from "./frontend/tiering.js";
-export { globToRegExp, type ModuleTierRow } from "./frontend/tiering.js";
+export { globToRegExp, writeProjectTiers, type ModuleTierRow } from "./frontend/tiering.js";
 export {
   compileC,
   runtimeSrcDir,

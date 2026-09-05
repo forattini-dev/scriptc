@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { RUNTIME_TARGET_IDS, analyze, buildTargetPlatform, compile, compileC, compileLibrary, describeRuntimeTargetOrigin, isExactExternalTypeSpecifier, isRuntimeTargetId, renderAll, renderCoverage, resolveProvenanceSources, resolveRuntimeTarget, setProvenanceSources, warmNativeCaches, type NativeCacheWarmProfile } from "@scriptc/compiler";
+import { RUNTIME_TARGET_IDS, analyze, writeProjectTiers, buildTargetPlatform, compile, compileC, compileLibrary, describeRuntimeTargetOrigin, isExactExternalTypeSpecifier, isRuntimeTargetId, renderAll, renderCoverage, resolveProvenanceSources, resolveRuntimeTarget, setProvenanceSources, warmNativeCaches, type NativeCacheWarmProfile } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 import { CLI_OPTIONS, USAGE } from "./usage.js";
 
@@ -208,6 +208,14 @@ async function main(): Promise<number> {
   if (islandModules.length > 0 && !values.dynamic) {
     fail(`--island-module runs program modules in the embedded engine and needs --dynamic\n\n${USAGE}`);
   }
+  if (values["write-tiers"] && !islandModules.includes("auto")) {
+    fail(`--write-tiers persists the frontier an --island-module auto run computes\n\n${USAGE}`);
+  }
+  const persistTiers = (): void => {
+    if (!values["write-tiers"]) return;
+    const file = writeProjectTiers();
+    process.stderr.write(`tiers: wrote ${file}\n`);
+  };
 
   // --npm-static: repeatable and comma-splittable; the literal "auto"
   // switches to eligibility-based detection (mixing "auto" with names
@@ -248,6 +256,7 @@ async function main(): Promise<number> {
     });
     const color = process.stdout.isTTY ?? false;
     process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
+    if (!coverage.preflightFailed) persistTiers();
     return coverage.preflightFailed ? 1 : 0;
   }
 
@@ -290,6 +299,7 @@ async function main(): Promise<number> {
       process.stderr.write(`\n${n} error${n === 1 ? "" : "s"}.\n`);
       throw new CliExit(1);
     }
+    persistTiers();
     // The lane-change note: the ONLY case where silence would be dishonest
     // is the default lane quietly building through C — one stderr line
     // names the refusal. A successful LLVM build is the documented default

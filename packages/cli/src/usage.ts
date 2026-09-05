@@ -37,7 +37,12 @@ Options:
                      module whose lowering reports a blocker into the
                      island and lower again, to a fixpoint. The coverage
                      report lists the resulting static frontier with each
-                     island module's reason
+                     island module's reason. A scriptc.json beside the
+                     entry's package.json pins its "tiers.island" modules
+                     without a fixpoint
+      --write-tiers  after an --island-module auto build or coverage run,
+                     persist the frontier into that scriptc.json so later
+                     builds skip the fixpoint
       --backend <b>  code generator. llvm is the default; c emits readable C,
                      and rust emits memory-safe Rust and invokes rustc directly
                      without a C translation or compiler fallback. Rust is an
@@ -90,6 +95,7 @@ export const CLI_OPTIONS = {
   target: { type: "string" },
   conditions: { type: "string", multiple: true },
   "island-module": { type: "string", multiple: true },
+  "write-tiers": { type: "boolean", default: false },
   optimization: { type: "string" },
   "from-c": { type: "boolean", default: false },
   "keep-c": { type: "boolean", default: true },

@@ -3,7 +3,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "vitest";
-import { analyze, compile } from "../src/index.js";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { analyze, compile, writeProjectTiers } from "../src/index.js";
 
 const entry = resolve("packages/compiler/test/fixtures/island-module/src/main.ts");
 
@@ -29,7 +30,24 @@ test("--island-module auto moves the blocked module by itself and names the bloc
   expect(coverage.diagnostics).toEqual([]);
   const island = coverage.tiers?.filter((t) => t.tier === "island");
   expect(island?.map((t) => t.module.split("/").pop())).toEqual(["proxied.ts"]);
-  expect(island?.[0]?.reason).toContain("auto: SC2020 'new Proxy'");
+  expect(island?.[0]?.reason).toContain("auto: round 1: SC2020 'new Proxy'");
+});
+
+test("--write-tiers persists the frontier into scriptc.json, which later builds pin without a fixpoint", () => {
+  const config = resolve("packages/compiler/test/fixtures/island-module/scriptc.json");
+  try {
+    analyze(entry, { dynamic: true, islandModules: ["auto"] });
+    expect(writeProjectTiers()).toBe(config);
+    const written = JSON.parse(readFileSync(config, "utf8")) as { tiers: { island: { module: string; reason: string }[] } };
+    expect(written.tiers.island.map((r) => r.module)).toEqual(["src/proxied.ts"]);
+    expect(written.tiers.island[0]?.reason).toContain("SC2020 'new Proxy'");
+    // No flag at all: the pin alone classifies the module.
+    const pinnedRun = analyze(entry, { dynamic: true });
+    expect(pinnedRun.coverage.diagnostics).toEqual([]);
+    expect(pinnedRun.coverage.tiers?.find((t) => t.module.endsWith("proxied.ts"))?.reason).toContain("pinned (scriptc.json)");
+  } finally {
+    if (existsSync(config)) rmSync(config);
+  }
 });
 
 test("a static build refuses --island-module without --dynamic at the import", () => {

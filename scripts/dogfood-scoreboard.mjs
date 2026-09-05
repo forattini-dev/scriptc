@@ -31,6 +31,7 @@ let dynamic = false;
 let write = false;
 let name = "redcode";
 let target;
+let writeTiers = false;
 const npmStatic = [];
 const islandModules = [];
 for (let i = 0; i < args.length; i++) {
@@ -40,13 +41,14 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--npm-static") npmStatic.push(args[++i]);
   else if (a === "--name") name = args[++i];
   else if (a === "--target") target = args[++i];
+  else if (a === "--write-tiers") writeTiers = true;
   else if (a === "--island-module") islandModules.push(args[++i]);
   else if (a.startsWith("--")) { console.error(`unknown flag ${a}`); process.exit(1); }
   else entry = path.resolve(a);
 }
 if (entry === null || !existsSync(entry)) { console.error("entry file missing"); process.exit(1); }
 
-const { analyze } = await import(path.join(repoRoot, "packages/compiler/dist/index.js"));
+const { analyze, writeProjectTiers } = await import(path.join(repoRoot, "packages/compiler/dist/index.js"));
 
 // Lowering phase timings arrive on stderr as `scriptc lowering {...}`
 // JSON lines when SCRIPTC_TIMING=1; capture them without losing the rest.
@@ -77,6 +79,7 @@ const { coverage } = analyze(entry, {
 });
 const wallMs = Math.round(performance.now() - t0);
 process.stderr.write = realWrite;
+if (writeTiers && !coverage.preflightFailed) console.log(`tiers: wrote ${writeProjectTiers()}`);
 
 /** The construct family a diagnostic belongs to — the unit the plan's
  * workstreams are cut along. Order matters: first match wins. */
