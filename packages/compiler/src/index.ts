@@ -292,6 +292,21 @@ function rustRefusalDiag(err: RustUnsupportedError, entryPath: string): ScrDiagn
   };
 }
 
+/** Every refusal one emission collected (SCRIPTC_RUST_REFUSALS=all), the
+ * first one alone otherwise; identical (message, location) pairs once. */
+function rustRefusalDiags(err: RustUnsupportedError, entryPath: string): ScrDiagnostic[] {
+  const seen = new Set<string>();
+  const out: ScrDiagnostic[] = [];
+  for (const refusal of [err, ...err.also]) {
+    const diag = rustRefusalDiag(refusal, entryPath);
+    const key = `${diag.message}@${diag.loc.file}:${diag.loc.start}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(diag);
+  }
+  return out;
+}
+
 /** A valid IR surface the explicitly-selected code generator cannot host.
  * SC3001 is backend coverage (as with an LLVM tier refusal), not a target
  * capability gap: wasm32-wasi's production LLVM lane still accepts it. */
@@ -1370,7 +1385,7 @@ async function compileTracked(
       rustSource = emitRustModule(lowered.module!);
     } catch (error) {
       if (!(error instanceof RustUnsupportedError)) throw error;
-      return { ok: false, diagnostics: [rustRefusalDiag(error, entryPath)], sourceTexts };
+      return { ok: false, diagnostics: rustRefusalDiags(error, entryPath), sourceTexts };
     }
     const sourcePath = join(opts.outDir, `${stem}.rs`);
     await writeFile(sourcePath, rustSource);
@@ -2548,7 +2563,7 @@ async function compileLibraryTracked(
       rustSource = emitRustModule(mod);
     } catch (error) {
       if (!(error instanceof RustUnsupportedError)) throw error;
-      return fail([rustRefusalDiag(error, entryPath)]);
+      return fail(rustRefusalDiags(error, entryPath));
     }
     const sourcePath = join(opts.outDir, `${stem}.lib.rs`);
     await writeFile(sourcePath, rustSource);

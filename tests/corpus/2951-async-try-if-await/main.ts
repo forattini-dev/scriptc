@@ -24,6 +24,18 @@ async function run(flag: boolean, fail: boolean): Promise<string> {
   return out;
 }
 
+// A suspension as the CONDITION itself, over a union-typed promise.
+async function gate(on: boolean): Promise<false | string[]> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  return on ? ["uv", "format"] : false;
+}
+async function choose(on: boolean): Promise<string> {
+  if (await gate(on)) return "enabled";
+  if (!(await gate(!on))) return "double-off";
+  return "disabled";
+}
+console.log(await choose(true), await choose(false));
+
 console.log(await run(true, false));
 console.log(await run(false, false));
 console.log(await run(false, true));

@@ -68,6 +68,11 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return [expr.value];
     case "jsonStringify":
       return [expr.value];
+    // Truthiness and unary wrappers over a suspending operand
+    // (`if (await gate())` over a union-typed promise).
+    case "toBool":
+    case "unary":
+      return [expr.operand];
     default:
       return null;
   }

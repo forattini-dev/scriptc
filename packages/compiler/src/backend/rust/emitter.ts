@@ -27,10 +27,14 @@ import { RustStreamModel } from "./stream-model.js";
 import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
 import { rustRuntimeFeatures } from "./runtime-features.js";
+import { buildRustClassGraph } from "./class-graph.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
 import type { IrAwaitExpr, IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 /** A valid IR construct that the incremental Rust backend has not ported yet. */
 export class RustUnsupportedError extends Error {
+  /** Further refusals collected past this one — SCRIPTC_RUST_REFUSALS=all
+   * keeps emitting function by function so one build names every gap. */
+  readonly also: RustUnsupportedError[] = [];
   constructor(
     readonly kind: string,
     readonly loc?: SrcLoc,
@@ -494,7 +498,7 @@ class RustEmitter {
     for (const record of mod.records ?? []) this.records.set(record.id, record);
     for (const union of mod.unions ?? []) this.unions.set(union.id, union);
     this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn" || global.type.kind === "jsval");
-    this.buildClassGraph();
+    buildRustClassGraph(this.classMeta, this.functions, (kind, loc) => this.unsupported(kind, loc));
     this.discoverClosures();
   }
   emit(): string {
@@ -520,14 +524,38 @@ class RustEmitter {
     this.emitClassDefinitions();
     this.emitErrorValueDefinition();
     this.emitGlobals();
+    // SCRIPTC_RUST_REFUSALS=all: a refusal drops the function's partial
+    // output and emission continues, so one build of a large program
+    // names every backend gap (the output is diagnostics-only then).
+    const collectAll = process.env["SCRIPTC_RUST_REFUSALS"] === "all";
+    const refusals: RustUnsupportedError[] = [];
     for (const fn of this.mod.functions) {
       if (fn.captures !== undefined && !this.closureTargets.has(fn.name)) continue;
       // The frontend may intern this helper while probing process.env as a
       // receiver, even when every actual read becomes process.envGet. Its
       // indexed-record body is irrelevant unless a whole env value escapes.
       if (fn.name.startsWith("%env.snapshot.") && !this.isFunctionReferenced(fn.name)) continue;
-      this.emitFunction(fn);
-      this.line("");
+      if (!collectAll) {
+        this.emitFunction(fn);
+        this.line("");
+        continue;
+      }
+      const start = this.lines.length;
+      const indent = this.indent;
+      try {
+        this.emitFunction(fn);
+        this.line("");
+      } catch (error) {
+        if (!(error instanceof RustUnsupportedError)) throw error;
+        this.lines.length = start;
+        this.indent = indent;
+        refusals.push(error);
+      }
+    }
+    if (refusals.length > 0) {
+      const [first, ...rest] = refusals as [RustUnsupportedError, ...RustUnsupportedError[]];
+      first.also.push(...rest);
+      throw first;
     }
     this.dynamicEmitter.emitDynFromDefinitions();
     this.lines.push(...emitRustModuleEntry({
@@ -561,63 +589,6 @@ class RustEmitter {
       }
     }
   }
-  private buildClassGraph(): void {
-    for (const meta of this.classMeta.values()) {
-      if (meta.def.base === undefined) continue;
-      const base = this.classMeta.get(meta.def.base);
-      if (base === undefined) continue;
-      meta.base = base;
-      base.children.push(meta);
-    }
-    let pre = 0;
-    const number = (meta: RustClassMeta, root: RustClassMeta): void => {
-      meta.root = root;
-      meta.pre = pre++;
-      for (const child of meta.children) number(child, root);
-      meta.post = pre - 1;
-    };
-    for (const meta of this.classMeta.values()) {
-      if (meta.base === null) number(meta, meta);
-    }
-    for (const meta of this.classMeta.values()) {
-      meta.hierarchy = meta.base !== null || meta.children.length > 0;
-    }
-    const declares = (meta: RustClassMeta, method: string): boolean => meta.def.methods?.includes(method) ?? false;
-    const declaredBelow = (meta: RustClassMeta, method: string): boolean =>
-      meta.children.some((child) => declares(child, method) || declaredBelow(child, method));
-    const collectSlots = (meta: RustClassMeta, root: RustClassMeta): void => {
-      for (const method of meta.def.methods ?? []) {
-        let inherited = false;
-        for (let ancestor = meta.base; ancestor !== null; ancestor = ancestor.base) {
-          inherited ||= declares(ancestor, method);
-        }
-        if (!inherited && declaredBelow(meta, method)) {
-          let fn = this.functions.get(`%${meta.def.name}.${method}`);
-          if (fn === undefined && meta.def.abstractMethods?.includes(method)) {
-            const findImplementation = (candidate: RustClassMeta): IrFunction | undefined => {
-              for (const child of candidate.children) {
-                const implementation = child.def.methods?.includes(method) && !child.def.abstractMethods?.includes(method)
-                  ? this.functions.get(`%${child.def.name}.${method}`)
-                  : undefined;
-                const found = implementation ?? findImplementation(child);
-                if (found !== undefined) return found;
-              }
-              return undefined;
-            };
-            fn = findImplementation(meta);
-            if (fn === undefined) continue;
-          }
-          if (fn === undefined) this.unsupported(`missing virtual method '${meta.def.name}.${method}'`, meta.def.loc);
-          root.slots.push({ method, declarer: meta, fn });
-        }
-      }
-      for (const child of meta.children) collectSlots(child, root);
-    };
-    for (const meta of this.classMeta.values()) {
-      if (meta.base === null && meta.hierarchy) collectSlots(meta, meta);
-    }
-  }
-
   private discoverClosures(): void {
     const visit = (value: unknown): void => {
       if (Array.isArray(value)) {
