@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal"]
+island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal", "boa_engine/annex-b"]
 
 [dependencies]
 boa_engine = { version = "=0.22.0", default-features = false, optional = true }
