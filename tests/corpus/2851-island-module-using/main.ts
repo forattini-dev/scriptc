@@ -11,5 +11,4 @@ import { ordered, throwing, stacked, asyncOrdered } from "./resources.ts";
 console.log(ordered());
 console.log(throwing());
 console.log(stacked());
-// (An awaited island promise stays a handle today; the template form exits it as a string.)
-console.log(`${await asyncOrdered()}`);
+console.log(await asyncOrdered());

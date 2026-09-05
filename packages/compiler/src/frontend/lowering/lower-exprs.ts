@@ -11,7 +11,7 @@ import type { Lowerer } from "./lowerer.js";
 import { trapUseThrowExpr } from "./lowerer.js";
 import { trapModuleOf } from "./lower-builtins.js";
 import { wasiGuestPath } from "../../wasi-paths.js";
-import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, canExitIslandToType, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -1626,7 +1626,23 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             type: { kind: "promise", inner },
             loc,
           };
-          return { kind: "awaitExpr", value: bridged, type: inner, loc };
+          const awaited: IrExpr = { kind: "awaitExpr", value: bridged, type: inner, loc };
+          // A DECLARED fulfillment type the boundary can validate (an
+          // island function typed `Promise<string>`, `Promise<Row[]>`):
+          // exit the settled handle to it here, the typed boundary every
+          // island call result already takes.
+          if (mapped?.kind === "promise" && inner.kind === "jsval") {
+            const declared = mapped.inner;
+            if (
+              declared.kind !== "jsval" &&
+              declared.kind !== "void" &&
+              declared.kind !== "dyn" &&
+              canExitIslandToType(declared, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+            ) {
+              return { kind: "jsExit", value: awaited, type: declared, loc };
+            }
+          }
+          return awaited;
         }
         // A TYPED non-promise operand (`await 42`, an awaited record):
         // JS awaits non-thenables through exactly one microtask turn and
