@@ -2434,9 +2434,6 @@ static JSModuleDef *isl_module_load(JSContext *ctx, const char *name, void *opaq
   (void)opaque;
   const char *src = NULL;
   size_t len = 0;
-  /* Sized for the widest wrapper: node:util/types' export list alone is
-   * ~700 bytes. */
-  char buf[2048];
   char *heap = NULL;
   if (strncmp(name, "node:", 5) == 0) {
     const char *exports = NULL;
@@ -2450,12 +2447,21 @@ static JSModuleDef *isl_module_load(JSContext *ctx, const char *name, void *opaq
       JS_ThrowReferenceError(ctx, "the island does not provide the '%s' builtin", name);
       return NULL;
     }
-    snprintf(buf, sizeof buf,
+    /* The wrapper is sized per builtin: the export lists carry Node's
+     * full member names (node:fs alone is well over 2 KB), and a
+     * truncated wrapper would be a parse error at the first import. */
+    size_t n = strlen(name) + strlen(exports) + 80;
+    heap = malloc(n);
+    if (!heap) {
+      JS_ThrowOutOfMemory(ctx);
+      return NULL;
+    }
+    snprintf(heap, n,
              "const m=globalThis.__scr_require(\"%s\");export default m;"
              "export const{%s}=m;",
              name, exports);
-    src = buf;
-    len = strlen(buf);
+    src = heap;
+    len = strlen(heap);
   } else {
     const ScrIslandModule *m = isl_mod_find(name);
     if (!m) {

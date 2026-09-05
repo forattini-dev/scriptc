@@ -53,3 +53,7 @@ required-features = ["island-eval"]
 [[example]]
 name = "island_eval"
 required-features = ["island-eval"]
+
+[[example]]
+name = "island_module"
+required-features = ["island-eval"]
