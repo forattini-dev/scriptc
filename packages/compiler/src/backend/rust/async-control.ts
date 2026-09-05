@@ -4,7 +4,8 @@ import { emitAwaitDependency } from "./async-await.js";
 import { asyncTrampolineCall } from "./async-trampoline.js";
 import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
-import { emitAsyncProtectedWhile } from "./async-protected-loop.js";
+import { emitAsyncIf } from "./async-if.js";
+import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected-loop.js";
 
 export interface RustAsyncHandlers {
   readonly fallthrough: () => void;
@@ -91,7 +92,7 @@ export interface RustAsyncControlContext {
 export class RustAsyncControlEmitter {
   private loopControl: RustAsyncLoopControl | null = null;
 
-  constructor(private readonly context: RustAsyncControlContext) {}
+  constructor(readonly context: RustAsyncControlContext) {}
 
   containsAsyncSuspension(value: unknown): boolean {
     if (value === null || typeof value !== "object") return false;
@@ -356,29 +357,7 @@ export class RustAsyncControlEmitter {
     remaining: readonly IrStmt[],
     onComplete: (() => void) | null,
   ): void {
-    const outerLocals = new Set(this.context.currentAsyncLocals() ?? []);
-    const resume = this.emitAsyncResumeHelper(remaining, onComplete, outerLocals, stmt.loc, "if_continue");
-    const emitBranches = (condition: string): void => {
-      this.context.line(`if ${condition} {`);
-      this.context.pushIndent();
-      this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(stmt.then, resume));
-      this.context.popIndent();
-      this.context.line("} else {");
-      this.context.pushIndent();
-      const elseBody = stmt.else_;
-      if (elseBody === null) {
-        resume();
-      } else {
-        this.withAsyncLocals(new Set(outerLocals), () => this.emitAsyncStatements(elseBody, resume));
-      }
-      this.context.popIndent();
-      this.context.line("}");
-    };
-    if (this.containsAsyncSuspension(stmt.cond)) {
-      this.context.emitAsyncValue(stmt.cond, emitBranches);
-      return;
-    }
-    emitBranches(this.context.emitExpr(stmt.cond));
+    emitAsyncIf(this, stmt, remaining, onComplete);
   }
 
   emitAsyncFor(
@@ -617,6 +596,24 @@ export class RustAsyncControlEmitter {
         if (current === undefined) break;
         if (current.kind === "while" && this.containsAsyncSuspension(current.body)) {
           emitAsyncProtectedWhile(
+            this.context,
+            (...args) => this.emitAsyncProtectedSequence(...args),
+            (locals, emit) => this.withAsyncLocals(locals, emit),
+            current,
+            statements.slice(index + 1),
+            exitLocals,
+            handlers,
+            loc,
+          );
+          this.context.line("return runtime::AsyncCompletion::Suspended;");
+          terminal = "await";
+          break;
+        }
+        if (current.kind === "if" && this.containsAsyncSuspension(current)) {
+          if (this.containsAsyncSuspension(current.cond)) {
+            this.context.unsupported("async suspension in a protected if condition", current.loc);
+          }
+          emitAsyncProtectedIf(
             this.context,
             (...args) => this.emitAsyncProtectedSequence(...args),
             (locals, emit) => this.withAsyncLocals(locals, emit),

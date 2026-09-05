@@ -94,3 +94,55 @@ export function emitAsyncProtectedWhile(
   context.line("}");
   context.line(call);
 }
+
+/** `if` with a suspension in a branch inside try/catch: each branch
+ * continues with the rest of the protected segment inside a helper
+ * (nested segments own their own completions), so the branch taken
+ * decides which continuation runs. The condition evaluates in the
+ * CURRENT segment — a throw there stays protected — and crosses as a
+ * bool; the helper carries the live async locals like the loop helpers. */
+export function emitAsyncProtectedIf(
+  context: RustAsyncControlContext,
+  emitSequence: ProtectedSequenceEmitter,
+  withAsyncLocals: AsyncLocalsEmitter,
+  stmt: Extract<IrStmt, { kind: "if" }>,
+  remaining: readonly IrStmt[],
+  exitLocals: ReadonlySet<string>,
+  handlers: RustAsyncHandlers,
+  loc: SrcLoc,
+): void {
+  const result = context.currentAsyncResult();
+  const fn = context.currentFunction();
+  if (result === null || fn?.async !== true) {
+    context.unsupported("protected async if outside an async function", stmt.loc);
+  }
+  const outerLocals = new Set(context.currentAsyncLocals() ?? []);
+  const locals = [...outerLocals].map((localId) => context.local(localId, stmt.loc));
+  const helper = context.nextName("sc_async_protected_if");
+  const params = [
+    "sc_cond: bool",
+    `${result}: runtime::JsPromise<${context.rustType(fn.returnType, stmt.loc)}>`,
+    ...locals.map((local: IrFunction["locals"][number]) =>
+      `${mangleLocal(local.id)}: runtime::JsCell<${context.rustType(local.type, stmt.loc)}>`
+    ),
+  ];
+  const condition = context.emitExpr(stmt.cond);
+  context.line(`fn ${helper}(${params.join(", ")}) {`);
+  context.pushIndent();
+  context.line("if sc_cond {");
+  context.pushIndent();
+  withAsyncLocals(new Set(outerLocals), () => emitSequence([...stmt.then, ...remaining], exitLocals, handlers, loc));
+  context.popIndent();
+  context.line("} else {");
+  context.pushIndent();
+  withAsyncLocals(new Set(outerLocals), () => emitSequence([...(stmt.else_ ?? []), ...remaining], exitLocals, handlers, loc));
+  context.popIndent();
+  context.line("}");
+  context.popIndent();
+  context.line("}");
+  context.line(`${helper}(${[
+    condition,
+    `${result}.clone()`,
+    ...locals.map((local: IrFunction["locals"][number]) => `${mangleLocal(local.id)}.clone()`),
+  ].join(", ")});`);
+}
