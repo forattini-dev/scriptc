@@ -8,6 +8,7 @@
 // keys and never compares identity.)
 import * as Event from "./event.ts";
 import { Catalog } from "./catalog.ts";
+import * as SelfNs from "./self.ts";
 
 console.log(Object.keys(Event).sort().join(","));
 console.log(Object.values(Event).length);
@@ -17,3 +18,8 @@ console.log(Catalog.Event.kind, Catalog.Event.ids.length);
 console.log(Object.keys(Catalog.Event).sort().join("|"));
 const table = { first: Event, second: Event };
 console.log(table.first.define("a"), table.second.ids[1]);
+// A module whose namespace contains ITSELF (`export * as Self from "."`):
+// the self member is omitted from the record (documented divergence —
+// Node's keys would include "Self"), the other members read as usual.
+const selfObject = SelfNs;
+console.log(selfObject.a, selfObject.f());

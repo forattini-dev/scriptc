@@ -885,6 +885,12 @@ export function moduleNamespaceRecord(
     if (target.flags & ts.SymbolFlags.ValueModule) {
       const nested = L.checker.declarationsOf(target).find((d): d is ts.SourceFile => ts.isSourceFile(d));
       if (nested !== undefined && !nested.isDeclarationFile && L.fileTag.has(nested)) {
+        // The module's OWN namespace as a member (`export * as Ns from
+        // "."` in the module that is `.`): the object would hold itself.
+        // The member is omitted here and in the mapped shape (types.ts) —
+        // a documented divergence; mutual cycles between modules keep the
+        // fence below.
+        if (nested === sf) continue;
         fields.push({ name, value: moduleNamespaceRecord(L, nested, site, visiting) });
         continue;
       }

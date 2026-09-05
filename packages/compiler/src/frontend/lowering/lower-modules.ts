@@ -263,7 +263,16 @@ export interface FileParts {
           !stmt.moduleSpecifier.text.startsWith("#")
             ? stmt.exportClause
             : null;
-        if (reexport === null && (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier))) continue;
+        // `export * from "<island module>"` in a STATIC barrel: every value
+        // export of the island module binds here, keyed by the same
+        // symbols a consumer's alias chain lands on through the barrel.
+        const exportStarIsland =
+          ts.isExportDeclaration(stmt) &&
+          !stmt.isTypeOnly &&
+          stmt.moduleSpecifier !== undefined &&
+          stmt.exportClause === undefined &&
+          islandDeps.get(stmt);
+        if (reexport === null && !exportStarIsland && (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier))) continue;
         const specNode = ts.isImportDeclaration(stmt) || ts.isExportDeclaration(stmt) ? stmt.moduleSpecifier : undefined;
         if (specNode === undefined || !ts.isStringLiteral(specNode)) continue;
         const clause = ts.isImportDeclaration(stmt) ? stmt.importClause : undefined;
@@ -356,17 +365,12 @@ export interface FileParts {
           type: JSVAL,
           loc,
         });
-        const bind = (nameNode: ts.Identifier | ts.StringLiteral, exportName: string): void => {
-          let symbol = L.checker.getSymbolAtLocation(nameNode);
-          if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
-            symbol = L.checker.getAliasedSymbol(symbol);
-          }
-          if (!symbol) return;
+        const bindSymbol = (symbol: ts.Symbol, name: string, exportName: string): void => {
           let g = L.globalsBySymbol.get(symbol);
           if (!g) {
             g = {
               id: `%g.npm.${L.globalsList.length}`,
-              name: nameNode.text,
+              name,
               type: JSVAL,
               mutable: false,
             };
@@ -375,6 +379,26 @@ export interface FileParts {
           }
           actions.push({ kind: "assign", localId: g.id, value: importExpr(exportName), loc });
         };
+        const bind = (nameNode: ts.Identifier | ts.StringLiteral, exportName: string): void => {
+          let symbol = L.checker.getSymbolAtLocation(nameNode);
+          if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+            symbol = L.checker.getAliasedSymbol(symbol);
+          }
+          if (!symbol) return;
+          bindSymbol(symbol, nameNode.text, exportName);
+        };
+        if (exportStarIsland) {
+          const exportsOf = L.checker.getSymbolAtLocation(exportStarIsland)?.getExports();
+          for (const [key, exportSym] of exportsOf ?? []) {
+            const name = String(key);
+            if (name === "default") continue; // `export *` never forwards default
+            let target = exportSym;
+            if (target.flags & ts.SymbolFlags.Alias) target = L.checker.getAliasedSymbol(target);
+            if (!(target.flags & ts.SymbolFlags.Value)) continue; // type-only export
+            bindSymbol(target, name, name);
+          }
+          continue;
+        }
         if (reexport !== null) {
           for (const el of reexport.elements) {
             if (el.isTypeOnly) continue;

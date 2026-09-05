@@ -3745,6 +3745,17 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         return null;
       }
       const fieldTs = checker.getTypeOfSymbol(p);
+      // A module namespace's SELF member (`export * as Ns from "."` in
+      // the module that is `.`): the object holds itself, which no record
+      // shape can snapshot. The member leaves the shape, and the namespace
+      // record literal (moduleNamespaceRecord) omits it the same way — a
+      // documented divergence beside key order and identity.
+      if (
+        (fieldTs === widened || (fieldTs.getSymbol() !== undefined && fieldTs.getSymbol() === widened.getSymbol())) &&
+        checker.declarationsOf(p).some((d) => ts.isNamespaceExport(d))
+      ) {
+        continue;
+      }
       // GENERIC-callable members leave the shape (no single closure slot
       // can hold them — see isGenericCallableMemberType): the shape keeps
       // its data fields, and calls of the member monomorphize per call

@@ -1382,7 +1382,7 @@ export class NpmGraphBuilder {
         const viaMain = this.resolveFile(join(dir, main), depth + 1);
         if (viaMain) return viaMain;
       }
-      for (const idx of ["index.js", "index.json", "index.mjs", "index.cjs", "index.node", "index.ts", "index.mts", "index.cts"]) {
+      for (const idx of ["index.js", "index.json", "index.mjs", "index.cjs", "index.node", "index.ts", "index.tsx", "index.mts", "index.cts"]) {
         const p = join(path, idx);
         if (this.host.isFile(p)) return p;
       }
