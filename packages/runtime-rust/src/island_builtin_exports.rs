@@ -9,7 +9,7 @@
 
 /// Named exports per shimmed builtin, mirroring the C island's
 /// `isl_builtins`.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 42] = [
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 53] = [
     ("node:events", "EventEmitter,EventEmitterAsyncResource,addAbortListener,captureRejectionSymbol,captureRejections,defaultMaxListeners,errorMonitor,getEventListeners,getMaxListeners,init,listenerCount,on,once,setMaxListeners,usingDomains"),
     ("node:path", "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,matchesGlob,normalize,parse,posix,relative,resolve,sep,toNamespacedPath,win32"),
     ("node:path/posix", "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,matchesGlob,normalize,parse,posix,relative,resolve,sep,toNamespacedPath,win32"),
@@ -47,6 +47,17 @@ static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 42] = [
     ("node:timers", "clearImmediate,clearInterval,clearTimeout,promises,setImmediate,setInterval,setTimeout"),
     ("node:timers/promises", "scheduler,setImmediate,setInterval,setTimeout"),
     ("node:zlib", "BrotliCompress,BrotliDecompress,Deflate,DeflateRaw,Gunzip,Gzip,Inflate,InflateRaw,Unzip,ZstdCompress,ZstdDecompress,brotliCompress,brotliCompressSync,brotliDecompress,brotliDecompressSync,codes,constants,crc32,createBrotliCompress,createBrotliDecompress,createDeflate,createDeflateRaw,createGunzip,createGzip,createInflate,createInflateRaw,createUnzip,createZstdCompress,createZstdDecompress,deflate,deflateRaw,deflateRawSync,deflateSync,gunzip,gunzipSync,gzip,gzipSync,inflate,inflateRaw,inflateRawSync,inflateSync,unzip,unzipSync,zstdCompress,zstdCompressSync,zstdDecompress,zstdDecompressSync"),
+    ("node:http2", "Http2ServerRequest,Http2ServerResponse,connect,constants,createSecureServer,createServer,getDefaultSettings,getPackedSettings,getUnpackedSettings,performServerHandshake,sensitiveHeaders"),
+    ("node:dgram", "Socket,_createSocketHandle,createSocket"),
+    ("node:cluster", "SCHED_NONE,SCHED_RR,Worker,_events,_eventsCount,_maxListeners,disconnect,fork,isMaster,isPrimary,isWorker,schedulingPolicy,settings,setupMaster,setupPrimary,workers"),
+    ("node:inspector", "DOMStorage,Network,NetworkResources,Session,close,console,open,url,waitForDebugger"),
+    ("node:vm", "Script,compileFunction,constants,createContext,createScript,isContext,measureMemory,runInContext,runInNewContext,runInThisContext"),
+    ("node:sea", "getAsset,getAssetAsBlob,getAssetKeys,getRawAsset,isSea"),
+    ("node:trace_events", "createTracing,getEnabledCategories"),
+    ("node:repl", "REPLServer,REPL_MODE_SLOPPY,REPL_MODE_STRICT,Recoverable,isValidSyntax,start,writer"),
+    ("node:wasi", "WASI"),
+    ("node:test", "after,afterEach,assert,before,beforeEach,describe,expectFailure,getTestContext,it,mock,only,run,skip,snapshot,suite,test,todo"),
+    ("node:sqlite", "DatabaseSync,Session,StatementSync,backup,constants"),
     ("node:http", "Agent,ClientRequest,CloseEvent,IncomingMessage,METHODS,MessageEvent,OutgoingMessage,STATUS_CODES,Server,ServerResponse,WebSocket,_connectionListener,createServer,get,globalAgent,maxHeaderSize,request,setGlobalProxyFromEnv,setMaxIdleHTTPParsers,validateHeaderName,validateHeaderValue"),
     ("node:https", "Agent,ClientRequest,IncomingMessage,METHODS,OutgoingMessage,STATUS_CODES,Server,ServerResponse,createServer,get,globalAgent,request"),
     ("node:net", "BlockList,BoundSocket,Server,Socket,SocketAddress,Stream,_createServerHandle,_normalizeArgs,connect,createConnection,createServer,getDefaultAutoSelectFamily,getDefaultAutoSelectFamilyAttemptTimeout,isIP,isIPv4,isIPv6,setDefaultAutoSelectFamily,setDefaultAutoSelectFamilyAttemptTimeout"),

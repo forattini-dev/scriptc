@@ -258,6 +258,38 @@ static const struct {
      "gunzip,gunzipSync,gzip,gzipSync,inflate,inflateRaw,inflateRawSync,"
      "inflateSync,unzip,unzipSync,zstdCompress,zstdCompressSync,"
      "zstdDecompress,zstdDecompressSync"},
+    {"node:http2",
+     "Http2ServerRequest,Http2ServerResponse,connect,constants,"
+     "createSecureServer,createServer,getDefaultSettings,"
+     "getPackedSettings,getUnpackedSettings,performServerHandshake,"
+     "sensitiveHeaders"},
+    {"node:dgram",
+     "Socket,_createSocketHandle,createSocket"},
+    {"node:cluster",
+     "SCHED_NONE,SCHED_RR,Worker,_events,_eventsCount,_maxListeners,"
+     "disconnect,fork,isMaster,isPrimary,isWorker,schedulingPolicy,"
+     "settings,setupMaster,setupPrimary,workers"},
+    {"node:inspector",
+     "DOMStorage,Network,NetworkResources,Session,close,console,open,url,"
+     "waitForDebugger"},
+    {"node:vm",
+     "Script,compileFunction,constants,createContext,createScript,"
+     "isContext,measureMemory,runInContext,runInNewContext,"
+     "runInThisContext"},
+    {"node:sea",
+     "getAsset,getAssetAsBlob,getAssetKeys,getRawAsset,isSea"},
+    {"node:trace_events",
+     "createTracing,getEnabledCategories"},
+    {"node:repl",
+     "REPLServer,REPL_MODE_SLOPPY,REPL_MODE_STRICT,Recoverable,"
+     "isValidSyntax,start,writer"},
+    {"node:wasi",
+     "WASI"},
+    {"node:test",
+     "after,afterEach,assert,before,beforeEach,describe,expectFailure,"
+     "getTestContext,it,mock,only,run,skip,snapshot,suite,test,todo"},
+    {"node:sqlite",
+     "DatabaseSync,Session,StatementSync,backup,constants"},
     {"node:http",
      "Agent,ClientRequest,CloseEvent,IncomingMessage,METHODS,MessageEvent,"
      "OutgoingMessage,STATUS_CODES,Server,ServerResponse,WebSocket,"

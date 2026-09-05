@@ -592,6 +592,11 @@ const SHIMMED_BUILTINS = new Set([
   // fences at the call. Prettier's bundled error helpers call
   // startupSnapshot.isBuildingSnapshot() on every CLI start.
   "v8",
+  // Loadable with Node's shape and constants, the operations fenced at
+  // the call (29a-more-builtins.js, 22-dns.js): fastify requires http2
+  // at load, undici probes dgram, cluster/inspector guards run on every
+  // start, vm compiles nothing but links.
+  "http2", "dgram", "cluster", "inspector", "vm", "sea", "trace_events", "repl", "wasi", "test", "sqlite",
 ]);
 
 /** Node builtins importable WITHOUT the "node:" prefix — used to tell
