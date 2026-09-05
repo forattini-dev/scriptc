@@ -60,6 +60,11 @@ async function tryFastPath(): Promise<number | null> {
   ) return null;
   const backend = values.backend;
   if (backend !== undefined && backend !== "c" && backend !== "llvm") return null;
+  const targetArg = values.target;
+  const conditions = (values.conditions ?? [])
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
   const optimization = values.optimization;
   if (optimization !== undefined && optimization !== "release" && optimization !== "dev") return null;
   const npmRaw = (values["npm-static"] ?? [])
@@ -85,6 +90,15 @@ async function tryFastPath(): Promise<number | null> {
   const buildPlatform = startup.targetPlatform(driver);
   if (command === "run" && buildPlatform === "wasi") return null;
   const input = resolve(inputArg);
+  // The runtime target joins the cache key exactly as the full CLI
+  // computes it; an invalid spelling leaves the error to the full CLI.
+  if (targetArg !== undefined && !startup.isRuntimeTargetId(targetArg)) return null;
+  let runtimeTarget: string;
+  try {
+    runtimeTarget = startup.runtimeTargetKey(startup.resolveRuntimeTarget(input, targetArg).profile, conditions);
+  } catch {
+    return null;
+  }
   const outDir = values.out ? dirname(resolve(values.out)) : join(dirname(input), ".scriptc");
   const stem = basename(input).replace(/\.(ts|js|mjs|cjs|c|ll)$/, "");
   const defaultName = buildPlatform === "win32"
@@ -111,6 +125,7 @@ async function tryFastPath(): Promise<number | null> {
     npmStatic,
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${arch}`,
+    runtimeTarget,
     compiler: [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment,
     nodeVersion: process.version,

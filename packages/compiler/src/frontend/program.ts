@@ -59,7 +59,6 @@ import {
   ADOPTED_OPTIONS,
   BUN_MODULE_MEMBER_ALIASES,
   ambientDtsPath,
-  builtinDefaultImportModule,
   canonicalBuiltinModule,
   clearWorkspacePackages,
   fallbackDtsPath,
@@ -73,12 +72,13 @@ import {
   overridesDtsPath,
   registerWorkspacePackage,
   SUPPORTED_NODE_MODULES,
-  TRAP_RUNTIME_MODULES,
+  isTrapRuntimeModule,
   tsgoPath,
   unsupportedModuleFeatureOf,
   workspacePackageOfPath,
 } from "./shared.js";
 import { trackedFileExists } from "./input-tracker.js";
+import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
@@ -417,6 +417,16 @@ function loadProgram7(
   // .d.ts-internal errors. Fence discipline never depended on it: the
   // lowerer checks provenance and forms at every use site.
   let options: ts.Ts7CompilerOptions = nodeTypes || bunTypes ? { ...config.options, skipLibCheck: true } : { ...config.options };
+  // The runtime target's conditions (node24/node26: "node"; bun: "bun",
+  // "node"; plus --conditions) reach tsgo as customConditions, so the
+  // checker's bundler resolution lands on the SAME package branch the
+  // runtime graph embeds; the project's own customConditions (adopted)
+  // join for type resolution. "import"/"default"/"types" are implicit.
+  {
+    const projectConditions = (config.options.customConditions as readonly string[] | undefined) ?? [];
+    const conditions = [...activeRuntimeConditions().filter((c) => c !== "import" && c !== "default"), ...projectConditions];
+    if (conditions.length > 0) options = { ...options, customConditions: [...new Set(conditions)] };
+  }
   // --npm-static: opted-in packages' shipped JS must be TYPE-INCLUDED (not
   // just resolved) — without maxNodeModuleJsDepth, node_modules JS types as
   // an implicit-any module (TS7016) and nothing infers. Only flagged
@@ -2283,7 +2293,14 @@ function preflight7(load: LoadResult): {
       // trapModuleOf). Node's resolution probe must not see these: a
       // bun:* specifier refuses at runtime and would compile the startup
       // crash.
-      if (TRAP_RUNTIME_MODULES.has(spec) || (spec.startsWith("node:") && TRAP_RUNTIME_MODULES.has(spec.slice(5)))) {
+      if (isTrapRuntimeModule(spec)) {
+        continue;
+      }
+      // A Bun runtime module under a Node target: no runtime serves it,
+      // so the import is the honest fence (naming the target that would
+      // trap it at use instead).
+      if (spec.startsWith("bun:")) {
+        diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
         continue;
       }
       // "#" specifiers can never name an npm package — they are the

@@ -3,6 +3,7 @@
  * identity primitives before deciding whether that graph is necessary. */
 export { readRoutedExecutableCache } from "./executable/early-cache.js";
 export type { EarlyExecutableRouteOptions } from "./executable/early-cache.js";
+export { isRuntimeTargetId, resolveRuntimeTarget, runtimeTargetKey } from "./compat/runtime-target.js";
 export {
   executableNativeEnvironmentFingerprint,
   prepareBuildCacheRoot,

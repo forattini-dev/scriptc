@@ -524,13 +524,18 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    let (available, eof, encoded) = readable.with_mut(|data| {
+    let (available, eof, encoded, head) = readable.with_mut(|data| {
         // Node clears emittedReadable for every read except read(0).
         // The absent read() form arrives as -1 and therefore clears too.
         if size != 0.0 {
             data.emitted_readable = false;
         }
-        (data.buffered_length, data.eof, data.encoding.is_some())
+        let head = match data.chunks.front() {
+            Some(ReadableChunk::Bytes(chunk)) => bytes_len(chunk) as usize,
+            Some(ReadableChunk::String(text)) => text.encode_utf16().count(),
+            None => 0,
+        };
+        (data.buffered_length, data.eof, data.encoding.is_some(), head)
     });
     if encoded {
         throw_error("read() on a stream with an encoding set is not supported yet (consume 'data' events, which deliver strings)".to_owned());
@@ -547,11 +552,13 @@ where
     //
     // An encoded stream throws above and flowing delivers through 'data',
     // so this is the paused raw-Buffer path and 24 collapses the queue.
-    // Promoting the primary to 26 means asking for the head chunk's length
-    // (`data.chunks.front()`) instead of `available`; this expression is
-    // the single point of change. See nodejs#60441.
+    // The target decides (target_config.rs): a --target node26 binary asks
+    // for the head chunk's length, the primary for everything buffered.
+    // See nodejs#60441.
     let requested = if size.is_finite() && size >= 0.0 {
         size.trunc() as usize
+    } else if target_readable_bare_read() == ReadRule::HeadChunk {
+        head
     } else {
         available
     };

@@ -1,4 +1,5 @@
 import { InternalCompilerError } from "../../errors.js";
+import { activeRuntimeTarget, runtimeTargetIr } from "../../compat/runtime-target.js";
 /* AST + checker → IR.
  *
  * Invariants:
@@ -2574,6 +2575,7 @@ export class Lowerer {
         : {
             irVersion: 6,
             sourceFile: this.entry.fileName,
+            runtimeTarget: runtimeTargetIr(activeRuntimeTarget()),
             ...(!isNodeEsmFile(this.entry) ? { entryCommonJs: true as const } : {}),
             functions,
             classes: artifacts.classes,

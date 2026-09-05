@@ -1,4 +1,4 @@
-import type { IrFunction, IrGlobal, IrLibSection } from "../../ir/nodes.js";
+import type { IrFunction, IrGlobal, IrLibSection, IrModule } from "../../ir/nodes.js";
 import { emitRustLibraryEntries } from "./library-entry.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 
@@ -16,6 +16,7 @@ export interface RustModuleEntryOptions {
   readonly usesProcessRejectionEvents: boolean;
   readonly usesProcessWarningEvents: boolean;
   readonly usesEmbeddedModules: boolean;
+  readonly runtimeTarget?: NonNullable<IrModule["runtimeTarget"]>;
   readonly isHeapGlobal: (global: IrGlobal) => boolean;
   readonly unsupported: (kind: string) => never;
 }
@@ -51,5 +52,6 @@ export function emitRustModuleEntry(options: RustModuleEntryOptions): string[] {
     usesProcessRejectionEvents: options.usesProcessRejectionEvents,
     usesProcessWarningEvents: options.usesProcessWarningEvents,
     usesEmbeddedModules: options.usesEmbeddedModules,
+    ...(options.runtimeTarget === undefined ? {} : { runtimeTarget: options.runtimeTarget }),
   });
 }

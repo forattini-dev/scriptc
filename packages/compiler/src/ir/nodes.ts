@@ -769,6 +769,15 @@ export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
   irVersion: 6;
   sourceFile: string;
+  /** The runtime target the program was lowered for (--target): the
+   * backends configure the runtime's per-runtime semantic switches from
+   * it. Absent means the matrix primary (serialized IR from before the
+   * field existed). */
+  runtimeTarget?: {
+    id: "node24" | "node26" | "bun";
+    semanticsNode: string;
+    readableBareRead: "collapse-queue" | "head-chunk";
+  };
   /** The entry follows Node's CommonJS first-checkpoint ordering: nextTick
    * callbacks run before promise jobs and queueMicrotask callbacks. Absent
    * preserves the historical ESM ordering for serialized IR producers. */

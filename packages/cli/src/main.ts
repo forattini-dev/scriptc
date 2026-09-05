@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, buildTargetPlatform, compile, compileC, compileLibrary, isExactExternalTypeSpecifier, renderAll, renderCoverage, resolveProvenanceSources, setProvenanceSources, warmNativeCaches, type NativeCacheWarmProfile } from "@scriptc/compiler";
+import { RUNTIME_TARGET_IDS, analyze, buildTargetPlatform, compile, compileC, compileLibrary, describeRuntimeTargetOrigin, isExactExternalTypeSpecifier, isRuntimeTargetId, renderAll, renderCoverage, resolveProvenanceSources, resolveRuntimeTarget, setProvenanceSources, warmNativeCaches, type NativeCacheWarmProfile } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 import { CLI_OPTIONS, USAGE } from "./usage.js";
 
@@ -69,7 +69,7 @@ async function main(): Promise<number> {
   const [command, inputArg] = positionals;
   if (command === "cache") {
     if (inputArg !== "warm") fail(`unknown cache command "${inputArg ?? ""}" (supported: warm)\n\n${USAGE}`);
-    if (values.lib || values.dynamic || values.backend !== undefined || values["from-c"] || values.ffi !== undefined || values.profile !== undefined || (values["npm-static"] ?? []).length > 0 || values["provenance-sources"] || externalTypeArgs.length > 0 || values.out !== undefined || values["emit-ir"] || !values["keep-c"]) {
+    if (values.lib || values.dynamic || values.backend !== undefined || values.target !== undefined || (values.conditions ?? []).length > 0 || values["from-c"] || values.ffi !== undefined || values.profile !== undefined || (values["npm-static"] ?? []).length > 0 || values["provenance-sources"] || externalTypeArgs.length > 0 || values.out !== undefined || values["emit-ir"] || !values["keep-c"]) {
       fail(`scriptc cache warm takes only native optimization/sanitizer options and profile names\n\n${USAGE}`);
     }
     const optimization = values.optimization;
@@ -121,6 +121,9 @@ async function main(): Promise<number> {
       fail(
         "scriptc build --lib takes no --dynamic/--backend/--optimization/--npm-static/--ffi/--external-types: the profile pins the emission and optimization, npm imports are judged automatically, outbound FFI belongs to executable builds, and external type mappings belong to coverage",
       );
+    }
+    if (values.target !== undefined || (values.conditions ?? []).length > 0) {
+      fail("scriptc build --lib takes no --target/--conditions: library archives are Node-semantics artifacts");
     }
     const profilePath = resolve(profileArg);
     const libOutDir = values.out ? dirname(resolve(values.out)) : join(dirname(profilePath), ".scriptc");
@@ -184,6 +187,23 @@ async function main(): Promise<number> {
   if (optimization !== undefined && optimization !== "release" && optimization !== "dev") {
     fail(`unknown optimization "${optimization}" (supported: release, dev)\n\n${USAGE}`);
   }
+  // --target: an explicit runtime target, else the project's own pins
+  // decide (and a one-line note says which file did). --conditions is
+  // repeatable and comma-splittable like --npm-static.
+  const targetArg = values.target;
+  if (targetArg !== undefined && !isRuntimeTargetId(targetArg)) {
+    fail(`unknown target "${targetArg}" (supported: ${RUNTIME_TARGET_IDS.join(", ")})\n\n${USAGE}`);
+  }
+  let runtimeTarget;
+  try {
+    runtimeTarget = resolveRuntimeTarget(input, targetArg);
+  } catch (error) {
+    fail(`scriptc: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const targetNote = describeRuntimeTargetOrigin(runtimeTarget);
+  if (targetNote !== null) process.stderr.write(`${targetNote}\n`);
+  const target = runtimeTarget.profile.id;
+  const conditions = (values.conditions ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter((v) => v !== "");
 
   // --npm-static: repeatable and comma-splittable; the literal "auto"
   // switches to eligibility-based detection (mixing "auto" with names
@@ -214,6 +234,8 @@ async function main(): Promise<number> {
 
   if (command === "coverage") {
     const { coverage, sourceTexts } = analyze(input, {
+      target,
+      ...(conditions.length > 0 ? { conditions } : {}),
       dynamic: values.dynamic,
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
@@ -243,6 +265,8 @@ async function main(): Promise<number> {
       return outPath;
     }
     const result = await compile(input, {
+      target,
+      ...(conditions.length > 0 ? { conditions } : {}),
       outPath,
       outDir,
       emitIr: values["emit-ir"],

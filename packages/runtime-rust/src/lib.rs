@@ -74,6 +74,7 @@ include!("duplex.rs");
 include!("transform.rs");
 include!("strings_and_process.rs");
 include!("number_parse.rs");
+include!("target_config.rs");
 include!("string_search.rs");
 include!("querystring.rs");
 include!("os.rs");
@@ -114,6 +115,7 @@ mod tests {
     use super::*;
 
     include!("tests/support.rs");
+    include!("tests/target_config.rs");
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
     include!("tests/event_loop_order.rs");

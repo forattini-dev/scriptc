@@ -6,6 +6,7 @@
  * their spelling across the phase-4 flip that retired the 5.9.3 lane. */
 
 import { createRequire } from "node:module";
+import { activeRuntimeTarget } from "../compat/runtime-target.js";
 
 const require = createRequire(import.meta.url);
 
@@ -150,7 +151,26 @@ const OUT_OF_SCOPE_BUILTIN_REASONS: Record<string, string | undefined> = {
 export function unsupportedModuleFeatureOf(spec: string): string {
   const bare = spec.startsWith("node:") ? spec.slice(5) : spec;
   const reason = Object.hasOwn(OUT_OF_SCOPE_BUILTIN_REASONS, bare) ? OUT_OF_SCOPE_BUILTIN_REASONS[bare] : undefined;
-  return reason === undefined ? `the '${spec}' module` : `the '${spec}' module (${reason})`;
+  if (reason !== undefined) return `the '${spec}' module (${reason})`;
+  // Target-qualified wording: the module exists in SOME runtime target.
+  const target = activeRuntimeTarget();
+  if (spec.startsWith("bun:") && target.family !== "bun") {
+    return `the '${spec}' module (a Bun runtime module — compile with --target bun, where its uses trap at runtime instead of failing the build)`;
+  }
+  if (bare === "ffi" && target.id === "node24") {
+    return `the '${spec}' module (node:ffi exists from Node 26 — compile with --target node26)`;
+  }
+  return `the '${spec}' module`;
+}
+
+/** True when `spec` is a runtime-trapped module UNDER THE ACTIVE TARGET:
+ * `bun:*` traps only when the binary reproduces Bun (a Node target has no
+ * such module and fences the import instead); `v8` traps everywhere. */
+export function isTrapRuntimeModule(spec: string): boolean {
+  const bare = spec.startsWith("node:") ? spec.slice(5) : spec;
+  if (!TRAP_RUNTIME_MODULES.has(spec) && !TRAP_RUNTIME_MODULES.has(bare)) return false;
+  if (spec.startsWith("bun:")) return activeRuntimeTarget().family === "bun";
+  return true;
 }
 
 /* ── workspace-linked packages ───────────────────────────────────────────
@@ -281,6 +301,9 @@ export function npmPackageNameOf(file: string): string | null {
  * ADOPTED knobs change which programs typecheck; FORCED knobs change
  * semantics scriptc depends on; strictNullChecks is a FLOOR. */
 export const ADOPTED_OPTIONS = [
+  // The project's own resolution conditions reach the CHECKER only (the
+  // runtime graph resolves with the --target profile's conditions).
+  "customConditions",
   "strict",
   "noImplicitAny",
   "strictNullChecks",

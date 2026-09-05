@@ -29,7 +29,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { compatTargetList, type CompatRuntimeTarget, type CompatTargets } from "@scriptc/compiler";
+import { BUN_VERSION, compatTargetList, type CompatRuntimeTarget, type CompatTargets, type RuntimeTargetId } from "@scriptc/compiler";
 
 /** Ask a candidate interpreter its version, without the leading "v".
  * Returns null when it cannot be executed, so a stale path falls through
@@ -124,6 +124,54 @@ export function primaryOracleExecutable(
   const override = env["SCRIPTC_NODE_ORACLE"];
   if (override !== undefined && override !== "") return override;
   return resolveMatrixExecutable(targets.primary, env, hostExecutable);
+}
+
+/**
+ * The pinned bun interpreter (BUN_VERSION — the runtime the `bun` target
+ * is censused and oracled against): SCRIPTC_BUN, then `bun` on PATH, then
+ * the mise install tree; each candidate is asked its --version and
+ * rejected on disagreement, exactly like the Node lanes.
+ */
+export function bunOracleExecutable(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env["SCRIPTC_BUN"];
+  const miseData = env["MISE_DATA_DIR"] ?? join(homedir(), ".local/share/mise");
+  let onPath: string | null = null;
+  try {
+    onPath = execFileSync("sh", ["-c", "command -v bun"], { encoding: "utf8", timeout: 10_000 }).trim() || null;
+  } catch {
+    onPath = null;
+  }
+  const candidates = [override, onPath, join(miseData, "installs/bun", BUN_VERSION, "bin/bun")]
+    .filter((candidate): candidate is string => candidate !== undefined && candidate !== null && candidate !== "");
+  const rejected: string[] = [];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    const version = interpreterVersion(candidate);
+    if (version === BUN_VERSION) return candidate;
+    if (candidate === override) {
+      throw new Error(`SCRIPTC_BUN points at ${candidate}, which reports bun ${version ?? "nothing"} — the bun target is bun ${BUN_VERSION}`);
+    }
+    if (version !== null) rejected.push(`${candidate} (bun ${version})`);
+  }
+  throw new Error(
+    `no bun ${BUN_VERSION} interpreter found for target 'bun'. Install it (mise install bun@${BUN_VERSION}) or point SCRIPTC_BUN at one.` +
+      (rejected.length > 0 ? ` Rejected: ${rejected.join(", ")}.` : ""),
+  );
+}
+
+/** The byte-for-byte oracle for a `// @target <id>` corpus program:
+ * node24 is the primary (SCRIPTC_NODE_ORACLE honored), node26 the matrix
+ * candidate, bun the pinned bun binary. */
+export function oracleExecutableForTarget(
+  id: RuntimeTargetId,
+  targets: CompatTargets,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (id === "bun") return bunOracleExecutable(env);
+  if (id === targets.primary.id) return primaryOracleExecutable(targets, env);
+  const candidate = compatTargetList(targets).find((target) => target.id === id);
+  if (candidate === undefined) throw new Error(`target '${id}' is not in the compat matrix`);
+  return resolveMatrixExecutable(candidate, env);
 }
 
 /** Every declared target, primary first — re-exported so a caller needs

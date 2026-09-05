@@ -1,3 +1,4 @@
+import type { IrModule } from "../../ir/nodes.js";
 import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 
 export interface RustProgramEntryOptions {
@@ -13,6 +14,18 @@ export interface RustProgramEntryOptions {
   readonly usesProcessRejectionEvents: boolean;
   readonly usesProcessWarningEvents: boolean;
   readonly usesEmbeddedModules: boolean;
+  readonly runtimeTarget?: NonNullable<IrModule["runtimeTarget"]>;
+}
+
+/** The runtime's per-target configuration call — the one place the
+ * binary learns which runtime it reproduces. Absent target = the matrix
+ * primary, which is also the runtime's built-in default. */
+function targetConfigureLine(target: RustProgramEntryOptions["runtimeTarget"]): string[] {
+  if (target === undefined) return [];
+  const rule = target.readableBareRead === "head-chunk" ? "HeadChunk" : "CollapseQueue";
+  return [
+    `    runtime::target_configure(runtime::TargetConfig { runtime_id: ${JSON.stringify(target.id)}, node_version: ${JSON.stringify(target.semanticsNode)}, readable_bare_read: runtime::ReadRule::${rule} });`,
+  ];
 }
 
 /** Emit the process boundary separately from IR expression/statement emission. */
@@ -20,6 +33,7 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
   const lines = [
     "fn main() {",
     "    runtime::init();",
+    ...targetConfigureLine(options.runtimeTarget),
     ...(options.usesEmbeddedModules
       ? [
         "    runtime::island_register_modules(&SC_ISLAND_MODULES);",

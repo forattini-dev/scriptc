@@ -4,7 +4,13 @@ All notable changes to scriptc will be documented in this file.
 
 ## Unreleased
 
+### Fixes
+
+- **The surface manifest generates again.** The JSX element and self-closing element fences shared one manifest id, so `pnpm manifest --check` and `manifest:parity` failed and the committed manifest had stopped tracking new lowerings (it still listed `crypto.createHash` as unsupported). A `--dynamic` build whose asset import carries an ambient type the loader cannot serve now reports the SC2020 fence for that binding instead of crashing the compiler with an escaped poison.
+
 ### Features
+
+- **`--target node24 | node26 | bun` selects the runtime a binary reproduces.** The target decides the export/imports conditions the module graph resolves with (`node` for the Node targets; `bun` then `node` for Bun — the branch a package.json `imports`/`exports` map takes, so `#db: { bun, node, default }` style splits embed the same arm the runtime itself would pick), hands the same conditions to the checker as `customConditions`, answers `process.versions.bun` under the Bun target, and joins the executable cache key. Unset, the target is inferred from the project (`packageManager: bun@…`, `.node-version`/`.nvmrc`, `engines.node`) and a stderr note says which file decided; `--conditions` appends extra conditions. Library builds stay Node-semantics artifacts and refuse the flag.
 
 - **The memory-safe Rust backend now supports classes vertically.** Constructors, field initialization and expression-position mutation, accessors, monomorphic and virtual methods, generic specializations, abstract dispatch, first-class constructor values, lexical `this` captures, object identity, single inheritance, runtime `instanceof`, composition, and cyclic class graphs compile to traced safe-Rust heap objects.
 - **The Rust backend now covers basic Node process and POSIX path APIs.** Read-only environment access, argv identity, platform/cwd/process metadata, compatibility versions, normalization, joining, resolution, path decomposition, absolute checks, and relative paths are differential-tested against Node.

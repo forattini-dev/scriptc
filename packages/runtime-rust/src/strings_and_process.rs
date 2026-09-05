@@ -944,7 +944,7 @@ const NODE_COMPAT_VERSION: &str = "24.0.0";
 const NODE_COMPAT_USER_AGENT: &str = "Node.js/24";
 
 pub fn process_versions_node() -> JsString {
-    string(NODE_COMPAT_VERSION)
+    string(target_node_version())
 }
 
 pub fn navigator_user_agent() -> JsString {

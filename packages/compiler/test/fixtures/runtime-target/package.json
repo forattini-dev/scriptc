@@ -1,0 +1,12 @@
+{
+  "name": "runtime-target-fixture",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#db": {
+      "bun": "./src/db.bun.ts",
+      "node": "./src/db.node.ts",
+      "default": "./src/db.default.ts"
+    }
+  }
+}

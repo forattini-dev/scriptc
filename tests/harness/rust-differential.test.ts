@@ -23,11 +23,11 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
-import { NODE_COMPAT_MATRIX, compile } from "@scriptc/compiler";
+import { NODE_COMPAT_MATRIX, compile, isRuntimeTargetId, type RuntimeTargetId } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { DRIVER_FIXTURES } from "./driver-fixtures.js";
 import { nodeTransformTypesArgs } from "./oracle-environment.js";
-import { primaryOracleExecutable } from "./node-matrix.js";
+import { oracleExecutableForTarget, primaryOracleExecutable } from "./node-matrix.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -83,6 +83,33 @@ function expectedExitCode(file: string): number {
 
 function wantsDynamic(file: string): boolean {
   return directiveHead(file).some((l) => /^\/\/ @dynamic\s*$/.test(l));
+}
+
+/** `// @target <node24|node26|bun>` in the directive head: the program
+ * compiles for that runtime target and its oracle is that runtime's
+ * pinned interpreter (bun programs run under bun itself, byte for byte).
+ * Absent = node24, the matrix primary. */
+function targetOf(file: string): RuntimeTargetId {
+  for (const line of directiveHead(file)) {
+    const m = /^\/\/ @target\s+(\S+)\s*$/.exec(line);
+    if (m) {
+      if (!isRuntimeTargetId(m[1]!)) throw new Error(`${file}: unknown // @target '${m[1]}'`);
+      return m[1];
+    }
+  }
+  return "node24";
+}
+
+/** The oracle for a target, or the reason it is unavailable on this host
+ * (a skip locally; a failure under SCRIPTC_REQUIRE_TARGETS=1). */
+function oracleFor(target: RuntimeTargetId): { executable: string } | { missing: string } {
+  if (target === "node24") return { executable: oracleExecutable };
+  try {
+    return { executable: oracleExecutableForTarget(target, NODE_COMPAT_MATRIX) };
+  } catch (error) {
+    if (process.env["SCRIPTC_REQUIRE_TARGETS"] === "1") throw error;
+    return { missing: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 async function runBinary(cmd: string, args: string[], stdin: string): Promise<RunResult> {
@@ -153,9 +180,13 @@ function wantsNoDeprecation(file: string): boolean {
   return directiveHead(file).some((l) => /^\/\/ @no-deprecation\s*$/.test(l));
 }
 
-function nodeOracleArgs(file: string): string[] {
+function nodeOracleArgs(file: string, executable: string = oracleExecutable): string[] {
+  if (targetOf(file) === "bun") {
+    // bun runs TypeScript directly; the shims preload the same globals.
+    return ["run", "--preload", comptimeShim, "--preload", islandShim, file];
+  }
   const transform = wantsTransformTypes(file)
-    ? nodeTransformTypesArgs(oracleExecutable, transformTypesHook)
+    ? nodeTransformTypesArgs(executable, transformTypesHook)
     : [];
   const nodep = wantsNoDeprecation(file) ? ["--no-deprecation"] : [];
   return [...transform, ...nodep, "--import", comptimeShim, "--import", islandShim, nodeOracleFile(file)];
@@ -176,6 +207,7 @@ async function build(file: string) {
   const key = hash
     .update(wantsDynamic(file) ? "dyn" : "")
     .update("rust")
+    .update(targetOf(file))
     .digest("hex")
     .slice(0, 16);
   const outDir = join(cacheDir, key);
@@ -190,6 +222,7 @@ async function build(file: string) {
     backend: "rust",
     optimization: "dev",
     dynamic: wantsDynamic(file),
+    target: targetOf(file),
   });
 }
 
@@ -211,7 +244,9 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
   test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
     "%s",
     { retry: 1 },
-    async ([rel, file]) => {
+    async ([rel, file], { skip }) => {
+      const oracle = oracleFor(targetOf(file));
+      if ("missing" in oracle) skip(`no oracle for // @target ${targetOf(file)}: ${oracle.missing}`);
       const res = await build(file);
       if (!res.ok) {
         for (const d of res.diagnostics.filter((d) => d.code === "SC3001")) {
@@ -231,7 +266,7 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
       const stdin = STDIN_FIXTURES[rel] ?? "";
       const [rust, node] = await Promise.all([
         runBinary(res.binaryPath, [], stdin),
-        runBinary(oracleExecutable, nodeOracleArgs(file), stdin),
+        runBinary(oracle.executable, nodeOracleArgs(file, oracle.executable), stdin),
       ]);
 
       // stdout: byte parity.

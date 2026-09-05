@@ -8,10 +8,11 @@ import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { PoisonError, dynUndefinedExpr, ladderFenceExpr, nodeThrowExpr, own } from "./lowerer.js";
+import { activeRuntimeTarget } from "../../compat/runtime-target.js";
 import { canonicalBuiltinModule, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import {
   BUN_MODULE_MEMBER_ALIASES,
-  TRAP_RUNTIME_MODULES, isRelativeSpecifier } from "../shared.js";
+  isRelativeSpecifier, isTrapRuntimeModule } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { trackedReadFile } from "../input-tracker.js";
@@ -215,7 +216,7 @@ function lowerBuiltinOptionalDefault(
     const importDecl = decl.parent.parent.parent;
     if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) return null;
     const spec = importDecl.moduleSpecifier.text;
-    if (!TRAP_RUNTIME_MODULES.has(spec)) return null;
+    if (!isTrapRuntimeModule(spec)) return null;
     return { module: spec, member: decl.propertyName?.text ?? decl.name.text };
   }
 
@@ -5671,6 +5672,11 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     // (process.features.* — no inspector, not a debug build).
     if (!expr.questionDotToken && ts.isPropertyAccessExpression(expr.expression)) {
       const container = L.stdlibGlobalMember(expr.expression, "process");
+      if (container === "versions" && expr.name.text === "bun" && activeRuntimeTarget().family === "bun") {
+        // Under --target bun the probe answers the pinned bun build (the
+        // census identity), so runtime-detection ladders take Bun's arm.
+        return { kind: "strLit", value: activeRuntimeTarget().pins.bun ?? "", type: STRING, loc: locOf(expr) };
+      }
       if (container === "versions" && (expr.name.text === "sqlite" || expr.name.text === "bun" || expr.name.text === "deno")) {
         // versions.bun / versions.deno are the OTHER-runtime probes (a
         // formatter's config loader picks its package.json reader by

@@ -89,6 +89,8 @@ export interface EarlyExecutableCacheOptions {
    * stricter native cache's independent dependency validation. */
   ffiProfile: { path: string; bytes: Uint8Array } | null;
   target: string;
+  /** The runtime target selection (id, pins, conditions). */
+  runtimeTarget: string;
   compiler: string[];
   nativeEnvironment: string;
   nodeVersion: string;
@@ -190,6 +192,7 @@ function cacheKey(options: EarlyExecutableCacheOptions): string {
         ? "<npm-static-auto>"
         : JSON.stringify(options.npmStatic),
     options.target,
+    options.runtimeTarget,
     options.compiler.join("\x1f"),
     options.nativeEnvironment,
     options.nodeVersion,
@@ -218,6 +221,7 @@ function routeKey(options: EarlyExecutableRouteOptions): string {
         ? "<npm-static-auto>"
         : JSON.stringify(options.npmStatic)).update("\0")
     .update(options.target).update("\0")
+    .update(options.runtimeTarget).update("\0")
     .update(options.compiler.join("\x1f")).update("\0")
     .update(options.nativeEnvironment).update("\0")
     .update(options.nodeVersion).update("\0");

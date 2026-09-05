@@ -544,6 +544,7 @@ class RustEmitter {
       usesProcessRejectionEvents: this.usesProcessRejectionEvents,
       usesProcessWarningEvents: this.usesProcessWarningEvents,
       usesEmbeddedModules: hasRustEmbeddedModules(this.mod),
+      ...(this.mod.runtimeTarget === undefined ? {} : { runtimeTarget: this.mod.runtimeTarget }),
       isHeapGlobal: (global) => this.isHeapRoot(global.type),
       unsupported: (kind) => this.unsupported(kind),
     }));

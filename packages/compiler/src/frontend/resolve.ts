@@ -15,6 +15,7 @@
  * and these tables are wrong — that is what the suite is for. */
 
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { provenanceEntryFor } from "./provenance-registry.js";
 import { isRelativeSpecifier, isRuntimeSourceFileName, isTsSourceFileName } from "./shared.js";
@@ -334,16 +335,23 @@ function loadAsJsDirectory(base: string): string | null {
  * failedLookupLocations there), so substitution maps .js targets to their
  * declaration twins only. */
 
-/** The conditions 5.9.3's bundler resolution enables for import sites
- * (probed: "module"/"node"/"browser"/"bundler" keys are NOT matched). */
-const EXPORT_CONDITIONS = new Set(["types", "import", "default"]);
+/** The conditions import sites resolve with: "types" for the checker plus
+ * the ACTIVE RUNTIME TARGET's conditions (node24/node26: node, import,
+ * default; bun: bun, node, import, default; --conditions appends). The
+ * program loader hands the same runtime conditions to tsgo as
+ * customConditions, so the checker and the runtime graph land on the same
+ * package branch. */
+export function exportConditions(): ReadonlySet<string> {
+  return new Set(["types", ...activeRuntimeConditions()]);
+}
 
-/** The bundler condition set minus "types" — what an opted-in --npm-static
+/** The condition set minus "types" — what an opted-in --npm-static
  * package resolves with (its declarations are hidden from resolution; the
  * runtime source is the compile target). Mirrors the types-stripped
  * package.json the tsgo host serves for the same package. */
-export const NPM_STATIC_EXPORT_CONDITIONS: ReadonlySet<string> =
-  new Set(["scriptc", "import", "default"]);
+export function npmStaticExportConditions(): ReadonlySet<string> {
+  return new Set(["scriptc", ...activeRuntimeConditions()]);
+}
 
 /** Ordered package.json "exports" targets for one subpath. TypeScript keeps
  * walking matching conditions when a target does not exist: a `types`
@@ -510,7 +518,7 @@ export function resolveBareAsset(fromFileName: string, specifier: string): strin
       const pkg = pkgJsonOf(pkgDir);
       if (pkg) {
         if (pkg.exports !== undefined) {
-          for (const target of resolveExportCandidates(pkg.exports, subpath, EXPORT_CONDITIONS)) {
+          for (const target of resolveExportCandidates(pkg.exports, subpath, exportConditions())) {
             const answer = assetFileOf(join(pkgDir, target));
             if (answer !== null) return answer;
           }
@@ -579,7 +587,7 @@ function nearestPackageConfigDir(dir: string): string | null {
 export function resolvePackageImports(
   imports: unknown,
   specifier: string,
-  conditions: ReadonlySet<string> = EXPORT_CONDITIONS,
+  conditions: ReadonlySet<string> = exportConditions(),
 ): string | null {
   if (!imports || typeof imports !== "object" || Array.isArray(imports)) return null;
   const map = imports as Record<string, unknown>;
@@ -663,7 +671,7 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
     const pkgName = parts.slice(0, nameLen).join("/");
     if (pkgName !== pkg.name || parts.length < nameLen) return null;
     const subpath = parts.length === nameLen ? "." : "./" + parts.slice(nameLen).join("/");
-    target = resolveExports(pkg.exports, subpath, EXPORT_CONDITIONS);
+    target = resolveExports(pkg.exports, subpath, exportConditions());
   }
   if (target === null) return null;
   const path = join(pkgDir, target);
@@ -834,7 +842,7 @@ export function resolveBareModule(
   // pass only, the "types" export condition dropped, the @types mangling
   // never consulted — mirroring the shadowed world the tsgo host serves.
   const npmStatic = mode === "js-only" || isNpmStaticPackage(pkgName);
-  const conditions = npmStatic ? NPM_STATIC_EXPORT_CONDITIONS : EXPORT_CONDITIONS;
+  const conditions = npmStatic ? npmStaticExportConditions() : exportConditions();
 
   const inPackage = (nmPkgDir: string, name: string, pass: NmPass): BareResolution | null => {
     // A workspace link: the answer's realpath escaped node_modules, so the

@@ -140,7 +140,7 @@ declare var process: {
    * undefined) and LOWER to undefined — the honest capability probe
    * (`Boolean(process.versions.openssl)`) answers false: no OpenSSL and
    * no SQLite ship in a scriptc binary. Other members fence per site. */
-  readonly versions: { readonly node: string; readonly openssl?: string; readonly sqlite?: string };
+  readonly versions: { readonly node: string; readonly openssl?: string; readonly sqlite?: string; readonly bun?: string; readonly deno?: string };
   /* process.version is Node's "v" + versions.node, and lowers as exactly
    * that concatenation — so it names the same compatibility target. */
   readonly version: string;

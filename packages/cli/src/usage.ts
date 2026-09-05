@@ -18,6 +18,16 @@ Usage:
 
 Options:
   -o, --out <path>   output path (default: .scriptc/<name>[.exe|.wasm])
+      --target <t>   runtime target the binary reproduces: node24 (default),
+                     node26, or bun. Selects the ambient type surface
+                     (@types/node or @types/bun), the export/imports
+                     conditions the module graph resolves with (node, or
+                     bun+node), and the runtime's identity. Unset infers
+                     from the project (packageManager bun@…, .node-version,
+                     engines.node) and says so
+      --conditions <c[,c…]>
+                     extra export/imports conditions, matched after the
+                     target's own (repeatable)
       --backend <b>  code generator. llvm is the default; c emits readable C,
                      and rust emits memory-safe Rust and invokes rustc directly
                      without a C translation or compiler fallback. Rust is an
@@ -67,6 +77,8 @@ Options:
 export const CLI_OPTIONS = {
   out: { type: "string", short: "o" },
   backend: { type: "string" },
+  target: { type: "string" },
+  conditions: { type: "string", multiple: true },
   optimization: { type: "string" },
   "from-c": { type: "boolean", default: false },
   "keep-c": { type: "boolean", default: true },

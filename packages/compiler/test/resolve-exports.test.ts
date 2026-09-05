@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  NPM_STATIC_EXPORT_CONDITIONS,
+  npmStaticExportConditions,
   clearResolveCaches,
   resolveBareModule,
   resolveExports,
@@ -22,7 +22,7 @@ describe("npm-static export conditions", () => {
       },
     };
 
-    expect(resolveExports(exports, ".", NPM_STATIC_EXPORT_CONDITIONS))
+    expect(resolveExports(exports, ".", npmStaticExportConditions()))
       .toBe("./dist/portable.js");
   });
 
@@ -34,7 +34,7 @@ describe("npm-static export conditions", () => {
       },
     };
 
-    expect(resolveExports(exports, ".", NPM_STATIC_EXPORT_CONDITIONS))
+    expect(resolveExports(exports, ".", npmStaticExportConditions()))
       .toBe("./dist/index.js");
   });
 

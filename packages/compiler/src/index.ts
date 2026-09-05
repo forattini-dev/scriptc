@@ -50,6 +50,7 @@ import { compilerImplementationIdentity } from "./library/implementation-identit
 export const VERSION = "0.0.1";
 
 export { InternalCompilerError } from "./errors.js";
+import { RUNTIME_TARGETS, activeRuntimeTargetKey, resolveRuntimeTarget, setActiveRuntimeTarget, type RuntimeTargetId } from "./compat/runtime-target.js";
 export {
   compileC,
   runtimeSrcDir,
@@ -85,6 +86,17 @@ export {
   type FetchCompatProfile,
 } from "./compat/fetch-profile.js";
 export { COMPAT_PROFILES } from "./compat/registry.js";
+export {
+  BUN_VERSION,
+  RUNTIME_TARGETS,
+  RUNTIME_TARGET_IDS,
+  describeRuntimeTargetOrigin,
+  isRuntimeTargetId,
+  resolveRuntimeTarget,
+  type ResolvedRuntimeTarget,
+  type RuntimeTargetId,
+  type RuntimeTargetProfile,
+} from "./compat/runtime-target.js";
 export {
   NODE24_EVENTS_COMPAT_PROFILE,
   type EventsCompatFacet,
@@ -188,6 +200,15 @@ export {
 export * as ir from "./ir/nodes.js";
 
 export interface CompileOptions {
+  /** The runtime target the binary reproduces (--target): node24 (the
+   * default), node26, or bun. Selects the ambient type surface, the
+   * runtime export/imports conditions, the builtin-module table and
+   * globals, and the per-runtime semantic switches. Unset infers from the
+   * project (packageManager bun@…, .node-version, engines.node). */
+  target?: RuntimeTargetId;
+  /** Extra runtime export/imports conditions (--conditions), matched after
+   * the target's own. */
+  conditions?: readonly string[];
   /** Output executable path. Default: <outDir>/<stem>. */
   outPath: string;
   /** Where intermediates (program.c, program.ir.json) land. */
@@ -418,6 +439,9 @@ export function buildTargetPlatform(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 export interface AnalyzeOptions {
+  /** See CompileOptions.target / conditions. */
+  target?: RuntimeTargetId;
+  conditions?: readonly string[];
   /** Analyze as a --dynamic build (island constructs lower instead of
    * producing requires-dynamic diagnostics). */
   dynamic?: boolean;
@@ -827,6 +851,7 @@ function runFrontend(
 /** Analysis without codegen: how much of the program compiles statically.
  * Unlike compile(), lowering diagnostics are data here, not failure. */
 export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeResult {
+  setActiveRuntimeTarget(resolveRuntimeTarget(resolve(entryPath), opts.target).profile, opts.conditions ?? []);
   let ffi: FfiProfile | null = null;
   if (opts.ffiProfilePath !== undefined) {
     const loaded = loadFfiProfile(opts.ffiProfilePath);
@@ -1039,6 +1064,7 @@ async function compileTracked(
   frontendInputs: FrontendInputTracker,
 ): Promise<CompileResult> {
   entryPath = resolve(entryPath);
+  setActiveRuntimeTarget(resolveRuntimeTarget(entryPath, opts.target).profile, opts.conditions ?? []);
   const rustBackend = opts.backend === "rust";
   let ffi: FfiProfile | null = null;
   let ffiProfileBytes: Uint8Array | null = null;
@@ -1103,6 +1129,7 @@ async function compileTracked(
         ? null
         : { path: opts.ffiProfilePath, bytes: ffiProfileBytes },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}`,
+    runtimeTarget: activeRuntimeTargetKey(),
     compiler: rustBackend ? ["rustc"] : [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment: rustBackend
       ? `rustc:${process.env["RUSTUP_TOOLCHAIN"] ?? "default"}`
@@ -2214,6 +2241,9 @@ async function compileLibraryTracked(
   // no build-transform markers), automatically — the library path has no
   // island/dynamic tier to offer (SC4006's ground), so eligibility needs
   // no flag and a miss is a refusal, never a fallback.
+  // Library archives are Node-semantics artifacts: the runtime target is
+  // the matrix primary regardless of what the project pins.
+  setActiveRuntimeTarget(RUNTIME_TARGETS.node24);
   const fe = runFrontend(entryPath, "lib");
   timing("frontend-load", {
     entry_bytes: fe.entryText().length,
