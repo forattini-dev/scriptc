@@ -16,7 +16,8 @@ import { InternalCompilerError } from "../../errors.js";
  * 387 cold). createProgram() takes an optional shared host — the default
  * spawns a private one that dispose() closes. */
 
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { createRequire as hostRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
 import type {
@@ -90,6 +91,39 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
 
 let nextConfigId = 0;
 
+
+/** The tsgo SERVER binary for one host, in priority order: an explicit
+ * option, `SCRIPTC_TSGO_BIN`, then THE PROJECT'S OWN checker — the
+ * nearest `@typescript/native-preview` install above `cwd` (the tsgo the
+ * project's own toolchain runs; the type world must be the project's
+ * dialect, the same principle as the @types/bun surface), else undefined
+ * (our own default via getExePath). The client protocol is stable across
+ * 7.0.x snapshots (verified: a 7.0.0-dev server serves the 7.0.2 client
+ * with identical order-parity and diagnostics). */
+function binaryPathOf(explicit: string | undefined, cwd: string): string | undefined {
+  if (explicit !== undefined) return explicit;
+  const env = process.env["SCRIPTC_TSGO_BIN"];
+  if (env !== undefined && env !== "") return env;
+  let dir = cwd;
+  for (;;) {
+    const pkgDir = join(dir, "node_modules", "@typescript", "native-preview");
+    if (existsSync(join(pkgDir, "package.json"))) {
+      try {
+        // Their own resolver answers the platform binary exactly as their
+        // toolchain does (getExePath walks native-preview-<plat>-<arch>).
+        const require = hostRequire(pkgDir);
+        const getExe = require("./lib/getExePath.js");
+        return getExe.default();
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
 /** One spawned tsgo server plus the virtual-FS overlay serving synthesized
  * tsconfigs. Share a host across programs to pay the spawn once; the overlay
  * is a live map, so each createProgram call adds its config before taking
@@ -102,6 +136,11 @@ export class Ts7Host {
   constructor(options?: {
     cwd?: string;
     collectTiming?: boolean;
+    /** The tsgo SERVER binary to spawn: the project's own checker binary
+     * (the tsgo the project's own toolchain runs — the type world must be
+     * the project's dialect, the same principle as the @types/bun
+     * surface), `SCRIPTC_TSGO_BIN` when pinned, or our own default. */
+    binaryPath?: string;
     /** Optional real-path shadow (the --npm-static resolution lever):
      * `readFile` may answer REPLACEMENT content for a real file (a
      * types-stripped package.json) and `hideFile` may shadow a real file
@@ -114,13 +153,16 @@ export class Ts7Host {
   }) {
     const virtualFiles = this.virtualFiles;
     const shadow = options?.fsShadow ?? null;
-    this.api = new API({
-      cwd: options?.cwd ?? process.cwd(),
+    const cwd = options?.cwd ?? process.cwd();
+    const serverPath = binaryPathOf(options?.binaryPath, cwd);
+    const apiOptions = {
+      cwd,
       ...(options?.collectTiming !== undefined ? { collectTiming: options.collectTiming } : {}),
+      ...(serverPath !== undefined ? { tsserverPath: serverPath } : {}),
       fs: {
         // string => virtual (or shadowed) hit; null => shadowed out of
         // existence; undefined => real-FS fallthrough.
-        readFile: (fileName) => {
+        readFile: (fileName: string) => {
           const virtual = virtualFiles.get(tsgoPath(fileName));
           if (virtual !== undefined) return virtual;
           if (shadow !== null) {
@@ -130,17 +172,18 @@ export class Ts7Host {
           }
           return trackedReadFile(fileName);
         },
-        fileExists: (fileName) => {
+        fileExists: (fileName: string) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
           if (shadow !== null && shadow.hideFile(fileName)) return false;
           return trackedFileExists(fileName);
         },
-        directoryExists: (path) => trackedDirectoryExists(path),
-        realpath: (path) =>
+        directoryExists: (path: string) => trackedDirectoryExists(path),
+        realpath: (path: string) =>
           virtualFiles.has(tsgoPath(path)) ? path : (trackedRealpath(path) ?? path),
-        getAccessibleEntries: (path) => trackedAccessibleEntries(path) ?? { files: [], directories: [] },
+        getAccessibleEntries: (path: string) => trackedAccessibleEntries(path) ?? { files: [], directories: [] },
       },
-    });
+    };
+    this.api = new API(serverPath === undefined ? apiOptions : { ...apiOptions, tsserverPath: serverPath });
   }
 
   /** Registers an in-memory file served to tsgo by the virtual-FS hooks. */
