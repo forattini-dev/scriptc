@@ -11,6 +11,7 @@ const TS5_ISLANDS = [
   // emitted JavaScript string returns to npm.ts, never a 5.9.3 node or enum.
   "packages/compiler/src/frontend/npm-typescript.ts",
   "packages/compiler/src/frontend/cjs-lexer.ts",
+  "packages/compiler/src/frontend/cjs-bun-exports.ts",
   "packages/compiler/src/frontend/lowering/lower-comptime.ts",
   "packages/compiler/src/frontend/ts7/world-check.ts",
   // The provenance prescan parses files BEFORE any program world exists

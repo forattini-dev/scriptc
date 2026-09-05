@@ -87,6 +87,7 @@
  */
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
+import { cjsBunVisibleExportsOf } from "./cjs-bun-exports.js";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { npmExecutableSource } from "./npm-typescript.js";
@@ -1206,7 +1207,17 @@ export class NpmGraphBuilder {
       if (!mod || mod.format !== "cjs") return names;
       const lexed = cjsLexedExportsOf(mod.source, key);
       for (const n of lexed.exports) names.add(n);
-      for (const spec of lexed.reexports) {
+      const reexports = [...lexed.reexports];
+      // Bun EVALUATES a CJS module and exposes every key of its exports
+      // (cjs-bun-exports.ts): the facade lists the syntactic superset so
+      // `import { definitions } from "@npmcli/config/…"` links as it does
+      // under Bun, where Node's lexer would refuse the graph.
+      if (activeRuntimeTarget().family === "bun") {
+        const bun = cjsBunVisibleExportsOf(mod.source, key);
+        for (const n of bun.exports) names.add(n);
+        for (const spec of bun.reexports) if (!reexports.includes(spec)) reexports.push(spec);
+      }
+      for (const spec of reexports) {
         const to = target.get(`${key}\u0000${spec}`);
         if (to !== undefined && !to.startsWith("node:")) {
           for (const n of namesOf(to)) names.add(n);
