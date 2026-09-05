@@ -277,6 +277,12 @@ pub fn island_value_json(value: &JsString) -> IslandValue {
 /// the C island's scr_island_web_boot has exactly this shape.
 fn island_web_boot(context: &mut Context) -> JsResult<()> {
     let host = island_host_object(context);
+    // The runtime target the binary reproduces (target_config.rs): the
+    // module bootstrap answers Bun runtime modules with traps only under
+    // the bun target.
+    context.eval(Source::from_bytes(
+        format!("globalThis.__scr_runtime_target = {:?};", target_runtime_id()).as_bytes(),
+    ))?;
     for source in [ISLAND_STREAM_BOOTSTRAP, ISLAND_WEB_BOOTSTRAP] {
         let boot = context.eval(Source::from_bytes(source))?;
         let Some(boot) = boot.as_callable() else {

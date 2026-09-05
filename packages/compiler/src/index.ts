@@ -875,30 +875,37 @@ const TIERING_CASCADE_CODES: ReadonlySet<string> = new Set([
 /** Lowers to the static-frontier FIXPOINT under `--island-module auto`:
  * every program module (never the entry) that owns a root blocker moves
  * to the island and the program lowers again, until a round moves
- * nothing. Each round is a full (non-coverage) lowering; the final
- * lowering carries the caller's options. Explicit-only tiering and static
- * builds lower exactly once. */
+ * nothing. Each round is a COVERAGE lowering — the reached pass plus the
+ * unreached remainder — because a poisoned module hides its dependents'
+ * bodies from the reached pass, and discovering the frontier one module
+ * per round would take as many rounds as the longest import chain. The
+ * final lowering carries the caller's options. Explicit-only tiering and
+ * static builds lower exactly once. */
 function lowerWithFrontier(fe: Frontend, options: LowerOptions): LowerResult {
   if (!autoIslandTiering() || options.dynamic !== true) return fe.lower(options);
   const movable = new Set(fe.moduleFiles().map((f) => resolve(f)));
-  const roundOptions: LowerOptions = { ...options, coverage: false };
+  const roundOptions: LowerOptions = { ...options, coverage: true };
   let lowered = fe.lower(roundOptions);
-  for (let round = 0; round < 12 && lowered.diagnostics.length > 0; round++) {
+  const blockers = (result: LowerResult): ScrDiagnostic[] => [
+    ...result.diagnostics,
+    ...(result.unreached?.diagnostics ?? []),
+  ];
+  for (let round = 0; round < 24 && blockers(lowered).length > 0; round++) {
     const offenders = new Map<string, string>();
-    for (const d of lowered.diagnostics) {
+    for (const d of blockers(lowered)) {
       if (TIERING_CASCADE_CODES.has(d.code)) continue;
       const file = resolve(d.loc.file);
       if (!movable.has(file) || isIslandModulePath(file) || offenders.has(file)) continue;
       offenders.set(file, `${d.code} ${d.message}`);
     }
     if (offenders.size === 0) break;
-    for (const [file, reason] of offenders) addAutoIslandModule(file, reason);
+    for (const [file, reason] of offenders) addAutoIslandModule(file, `round ${round + 1}: ${reason}`);
     if (process.env["SCRIPTC_TIMING"]) {
       process.stderr.write(`scriptc tiering ${JSON.stringify({ round: round + 1, moved: offenders.size })}\n`);
     }
     lowered = fe.lower(roundOptions);
   }
-  return options.coverage === true ? fe.lower(options) : lowered;
+  return options.coverage === true ? lowered : fe.lower(options);
 }
 
 export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeResult {

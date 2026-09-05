@@ -240,7 +240,11 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
       // the build embedded a throwing ERR_DLOPEN_FAILED stub instead of
       // the addon's machine code; unresolvable rows keep Node's not-found
       // error shapes.
-      const what = t.native ? "native addon — lazy trap" : "unresolvable — lazy trap";
+      const what = t.bunTrap
+        ? "Bun runtime module — trap"
+        : t.native
+          ? "native addon — lazy trap"
+          : "unresolvable — lazy trap";
       out.push(
         `    ${t.specifier.padEnd(widestB)}  ${c(YELLOW, what.padEnd(widestS))}  ` +
           c(DIM, `(${t.via.join("/")} in ${t.packages.join(", ")})`),

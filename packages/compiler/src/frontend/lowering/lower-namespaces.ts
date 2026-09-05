@@ -41,7 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
 import { locOf, resolveImport } from "../program.js";
-import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
+import { F64, IrExpr, IrStmt, IrType, STRING, isUnitType } from "../../ir/nodes.js";
 
 /** True when this module declaration produces NO runtime construct at all:
  * ambient (`declare namespace/module`, `declare global`, string-named
@@ -823,6 +823,80 @@ export function lowerImportEquals(L: Lowerer, stmt: ts.ImportEqualsDeclaration):
   return null;
 }
 
+/** The module namespace object as a VALUE: a record literal over the
+ * module's value exports — constants (their module globals), declared
+ * functions (zero-capture closures), and nested `export * as` namespaces
+ * (recursively). Fields sort by name, exactly Node's namespace key order,
+ * so Object.keys/values/entries and structural flows agree with Node.
+ * An export the static tier cannot hold as a record field — a mutable
+ * `export let`, a class, an optional/rest-parameter function, an island
+ * handle — keeps the SC1013 fence, now naming the member. */
+export function moduleNamespaceRecord(
+  L: Lowerer,
+  sf: ts.SourceFile,
+  site: ts.Identifier,
+  visiting: Set<ts.SourceFile>,
+): IrExpr {
+  const loc = locOf(site);
+  const refuse: (member: string, why: string) => never = (member, why) =>
+    L.unsupported(
+      "SC1013",
+      site,
+      `module namespace objects as first-class values (export '${member}' of '${site.text}' ${why}; access '${site.text}' members directly: ${site.text}.<member>)`,
+    );
+  if (visiting.has(sf)) refuse("*", "re-exports its own namespace cyclically");
+  visiting.add(sf);
+  const moduleSymbol = L.checker.getSymbolAtLocation(sf);
+  const fields: { name: string; value: IrExpr }[] = [];
+  const exportsOf = moduleSymbol?.getExports();
+  if (exportsOf === undefined) refuse("*", "has no module symbol");
+  for (const [key, exportSym] of exportsOf) {
+    const name = String(key);
+    let target = exportSym;
+    if (target.flags & ts.SymbolFlags.Alias) target = L.checker.getAliasedSymbol(target);
+    if (!(target.flags & ts.SymbolFlags.Value)) continue; // type-only export
+    const g = L.globalsBySymbol.get(target);
+    if (g !== undefined) {
+      if (g.type.kind === "jsval" || g.type.kind === "dyn" || g.type.kind === "void" || isUnitType(g.type)) {
+        refuse(name, "has no static record representation");
+      }
+      const decl = L.checker.declarationsOf(target).find((d) => ts.isVariableDeclaration(d));
+      if (decl !== undefined && ts.isVariableDeclaration(decl) && (decl.parent.flags & ts.NodeFlags.Const) === 0) {
+        refuse(name, "is a mutable export (`let`/`var`), which a record snapshot cannot keep live");
+      }
+      fields.push({ name, value: { kind: "varRef", localId: g.id, type: g.type, loc } });
+      continue;
+    }
+    const sig = L.fnSigsBySymbol.get(target);
+    if (sig !== undefined) {
+      if (!sig.params.every((p) => p.mode === "required" || p.mode === "dynRest")) {
+        refuse(name, "is a function with optional, defaulted, or rest parameters (call it directly)");
+      }
+      L.noteEdge(sig.name);
+      const funcType: IrType = {
+        kind: "func",
+        params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
+        ret: sig.returnType,
+        ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
+      };
+      fields.push({ name, value: { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc } });
+      continue;
+    }
+    if (target.flags & ts.SymbolFlags.ValueModule) {
+      const nested = L.checker.declarationsOf(target).find((d): d is ts.SourceFile => ts.isSourceFile(d));
+      if (nested !== undefined && !nested.isDeclarationFile && L.fileTag.has(nested)) {
+        fields.push({ name, value: moduleNamespaceRecord(L, nested, site, visiting) });
+        continue;
+      }
+    }
+    refuse(name, "has no static record representation (classes and generic functions stay call-only)");
+  }
+  visiting.delete(sf);
+  fields.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const shapeId = L.shapes.intern(fields.map((f) => ({ name: f.name, type: f.value.type })));
+  return { kind: "recordLit", fields, type: { kind: "record", shapeId }, loc };
+}
+
 /** The bare-identifier fence for namespace objects used as VALUES: the
  * namespace has no first-class runtime object here — members lower at
  * their qualified access sites. Ambient namespaces compile to Node's
@@ -844,17 +918,12 @@ export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr
   }
   if (L.isStdlibSymbol(sym)) return null; // stdlib namespaces keep their chokepoints
   // A MODULE namespace object as a first-class value (`import * as ns`
-  // passed/stored/iterated): member accesses resolve statically, but the
-  // object itself has no runtime representation — Node's frozen,
-  // alphabetically-keyed namespace object is not materialized. Named
-  // residual of the SC1013 lowering.
-  if (moduleNsSourceFileOf(L, ident) !== null) {
-    L.unsupported(
-      "SC1013",
-      ident,
-      `module namespace objects as first-class values (access '${ident.text}' members directly: ${ident.text}.<member>)`,
-    );
-  }
+  // passed/stored/iterated): a record of the module's value exports,
+  // built at the use site (moduleNamespaceRecord) — Node's frozen,
+  // alphabetically-keyed namespace, minus identity (`ns === ns` and
+  // Map-key uses see fresh records; SEMANTICS.md documents it).
+  const nsSf = moduleNsSourceFileOf(L, ident);
+  if (nsSf !== null) return moduleNamespaceRecord(L, nsSf, ident, new Set());
   L.unsupported(
     "SC1090",
     ident,

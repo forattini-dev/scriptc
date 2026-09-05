@@ -1,0 +1,3935 @@
+{
+  "name": "redcode-auto",
+  "entry": "../redcode/packages/redcode/src/index.ts",
+  "options": {
+    "dynamic": true,
+    "target": "bun",
+    "npmStatic": [
+      "@reddb-io/redcode-schema",
+      "@reddb-io/redcode-tui"
+    ],
+    "islandModules": [
+      "auto"
+    ]
+  },
+  "preflightFailed": false,
+  "stats": {
+    "statementsTotal": 3862,
+    "statementsFailed": 634,
+    "statementsIsland": 902,
+    "functionsSkipped": 0
+  },
+  "unreachedStats": {
+    "statementsTotal": 12615,
+    "statementsFailed": 1386,
+    "statementsIsland": 3321,
+    "functionsSkipped": 373
+  },
+  "reached": {
+    "total": 921,
+    "byCode": {
+      "SC1090": 252,
+      "SC2009": 174,
+      "SC2004": 171,
+      "SC2030": 149,
+      "SC2020": 63,
+      "SC1013": 58,
+      "SC2008": 20,
+      "SC2001": 13,
+      "SC2006": 13,
+      "SC2002": 3,
+      "SC2003": 2,
+      "SC1100": 1,
+      "SC1120": 1,
+      "SC2005": 1
+    },
+    "byFamily": {
+      "cascade": 171,
+      "island-cannot-embed": 149,
+      "syntax-other": 102,
+      "effect-generator-body": 77,
+      "stdlib-tail": 63,
+      "namespace-object-value": 61,
+      "component-other": 57,
+      "computed-extends": 49,
+      "solid-idioms": 47,
+      "branded-intersection": 32,
+      "generic-dispatch": 31,
+      "intersection-shape": 20,
+      "island-boundary-function": 14,
+      "index-signature": 13,
+      "type-residual": 13,
+      "effect-typed-member": 8,
+      "jsx": 6,
+      "SC2002": 3,
+      "SC2003": 2,
+      "SC1100": 1,
+      "SC1120": 1,
+      "SC2005": 1
+    },
+    "byPackage": {
+      "redcode": 571,
+      "tui": 304,
+      "schema": 46
+    },
+    "families": [
+      {
+        "family": "cascade",
+        "count": 171,
+        "codes": {
+          "SC2004": 171
+        },
+        "packages": {
+          "redcode": 116,
+          "tui": 55
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/auth.ts",
+          "message": "uses of 'Method' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "island-cannot-embed",
+        "count": 149,
+        "codes": {
+          "SC2030": 149
+        },
+        "packages": {
+          "redcode": 148,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/codex.ts",
+          "message": "cannot embed npm package code: package '.' (self-reference from /home/cyber/Work/reddb.io/redcode/packages/redcode/src/auth/index.ts) resolves to a missing entry"
+        }
+      },
+      {
+        "family": "syntax-other",
+        "count": 102,
+        "codes": {
+          "SC1090": 102
+        },
+        "packages": {
+          "tui": 67,
+          "redcode": 29,
+          "schema": 6
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/queue.ts",
+          "message": "computed method names are not supported yet (instantiating class 'AsyncQueue' with <any>)"
+        }
+      },
+      {
+        "family": "effect-generator-body",
+        "count": 77,
+        "codes": {
+          "SC2009": 77
+        },
+        "packages": {
+          "redcode": 76,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/request.ts",
+          "message": "values of type 'Generator<Effect<AgentPreSystemData, never, never> | Effect<InstanceContext, never, never> | Effect<Utc, never, never> | Effect<...> | Effect<...> | Effect<...>, { ...; }, any>' cannot"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 63,
+        "codes": {
+          "SC2020": 63
+        },
+        "packages": {
+          "tui": 43,
+          "redcode": 20
+        },
+        "sample": {
+          "file": "packages/redcode/src/tool/json-schema.ts",
+          "message": "'WeakMap<Top, JSONSchema7>' is part of the standard library types but has no scriptc lowering yet"
+        }
+      },
+      {
+        "family": "namespace-object-value",
+        "count": 61,
+        "codes": {
+          "SC1013": 58,
+          "SC1090": 3
+        },
+        "packages": {
+          "redcode": 56,
+          "schema": 3,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/question/schema.ts",
+          "message": "module namespace objects as first-class values (access 'QuestionV1' members directly: QuestionV1.<member>) are not supported yet"
+        }
+      },
+      {
+        "family": "component-other",
+        "count": 57,
+        "codes": {
+          "SC2009": 57
+        },
+        "packages": {
+          "tui": 39,
+          "redcode": 17,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/native-request.ts",
+          "message": "values of type '(input: Record<string, ToolInput> | undefined) => ToolDefinition[]' cannot be compiled: the function shape is supported, but its return type 'ToolDefinition[]' does not compile"
+        }
+      },
+      {
+        "family": "computed-extends",
+        "count": 49,
+        "codes": {
+          "SC1090": 49
+        },
+        "packages": {
+          "redcode": 49
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/auth.ts",
+          "message": "extending computed expressions are not supported yet"
+        }
+      },
+      {
+        "family": "solid-idioms",
+        "count": 47,
+        "codes": {
+          "SC1090": 47
+        },
+        "packages": {
+          "schema": 29,
+          "tui": 10,
+          "redcode": 8
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/prompt.ts",
+          "message": "assignment to non-variables are not supported yet"
+        }
+      },
+      {
+        "family": "branded-intersection",
+        "count": 32,
+        "codes": {
+          "SC2009": 32
+        },
+        "packages": {
+          "redcode": 25,
+          "schema": 7
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/native-request.ts",
+          "message": "values of type '(input: RequestInput | { id: string & Brand<\"ModelV2.ID\">; providerID: string & Brand<\"ProviderV2.ID\">; api: { id: string; url: string; npm: string; }; name: string; ... 8 more ...; va"
+        }
+      },
+      {
+        "family": "generic-dispatch",
+        "count": 31,
+        "codes": {
+          "SC1090": 31
+        },
+        "packages": {
+          "tui": 30,
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/server/routes/instance/httpapi/middleware/error.ts",
+          "message": "method calls like 'new NamedError.Unknown({\n              message: \"Unexpected server error. Check server logs for details.\",\n              ref,\n            }).toObject' is not supported yet"
+        }
+      },
+      {
+        "family": "intersection-shape",
+        "count": 20,
+        "codes": {
+          "SC2008": 20
+        },
+        "packages": {
+          "tui": 20
+        },
+        "sample": {
+          "file": "packages/tui/src/feature-plugins/home/tips.tsx",
+          "message": "values of type 'BuiltinTuiPlugin' cannot be compiled: this intersection resolves to no runtime shape"
+        }
+      },
+      {
+        "family": "island-boundary-function",
+        "count": 14,
+        "codes": {
+          "SC1090": 14
+        },
+        "packages": {
+          "tui": 10,
+          "redcode": 4
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/native-request.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      },
+      {
+        "family": "index-signature",
+        "count": 13,
+        "codes": {
+          "SC2006": 13
+        },
+        "packages": {
+          "tui": 12,
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/run-state.ts",
+          "message": "values of type 'string & Brand<\"SessionID\">' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, clas"
+        }
+      },
+      {
+        "family": "type-residual",
+        "count": 13,
+        "codes": {
+          "SC2001": 13
+        },
+        "packages": {
+          "redcode": 8,
+          "tui": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm.ts",
+          "message": "values of type 'ServiceUse<Service, Interface>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of th"
+        }
+      },
+      {
+        "family": "effect-typed-member",
+        "count": 8,
+        "codes": {
+          "SC2009": 8
+        },
+        "packages": {
+          "redcode": 8
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/auth.ts",
+          "message": "values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'methods' has type '() => Effect<{ readonly [x: string]: readonly Method[]; }, never, "
+        }
+      },
+      {
+        "family": "jsx",
+        "count": 6,
+        "codes": {
+          "SC1090": 6
+        },
+        "packages": {
+          "tui": 6
+        },
+        "sample": {
+          "file": "packages/tui/src/ui/dialog-prompt.tsx",
+          "message": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering) are not supported yet"
+        }
+      },
+      {
+        "family": "SC2002",
+        "count": 3,
+        "codes": {
+          "SC2002": 3
+        },
+        "packages": {
+          "redcode": 2,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/server/routes/instance/httpapi/public.ts",
+          "message": "record shapes must match exactly or width-coerce: expected '{ $ref: string | undefined; additionalProperties: boolean | ... | undefined; allOf: ...[] | undefined; anyOf: ...[] | undefined; description"
+        }
+      },
+      {
+        "family": "SC2003",
+        "count": 2,
+        "codes": {
+          "SC2003": 2
+        },
+        "packages": {
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/tui/src/context/local.tsx",
+          "message": "union types must match exactly: expected '(() => { modelID: string; providerID: string } | undefined)[]', got '() => { modelID: string; providerID: string } | undefined' (a union re-tags into another "
+        }
+      },
+      {
+        "family": "SC1100",
+        "count": 1,
+        "codes": {
+          "SC1100": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/native-request.ts",
+          "message": "passing 'unknown' values where 'Uint8Array | string' is expected is not supported yet"
+        }
+      },
+      {
+        "family": "SC1120",
+        "count": 1,
+        "codes": {
+          "SC1120": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/tool/edit.ts",
+          "message": "function replacement values (replacements must be string templates) are not supported yet"
+        }
+      },
+      {
+        "family": "SC2005",
+        "count": 1,
+        "codes": {
+          "SC2005": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/tui.ts",
+          "message": "values of type '<A, Err>(fn: (svc: Interface) => Effect<A, Err, Service>, options?: RunOptions | undefined) => Promise<A>' cannot be compiled: the signature keeps its type parameters, and a compiled f"
+        }
+      }
+    ],
+    "stdlibTail": {
+      ".splice with 3 arguments": 6,
+      "new WeakMap": 4,
+      "string.toLocaleLowerCase": 4,
+      "NumberFormat": 3,
+      "Object.fromEntries": 3,
+      "Array.from with this argument shape": 2,
+      "Bun.write": 2,
+      "crypto.randomUUID": 2,
+      "new Set(values)": 2,
+      "Object.entries": 2,
+      "Promise.allSettled": 2,
+      "RegExpExecArray.index": 2,
+      "Statement<unknown, SQLQueryBindings[] | [null] | [string] | [number] | [bigint] | [false] | [true] | [BigInt64Array<ArrayBufferLike>] | ... 11 more ... | [...]>.all": 2,
+      "Array.isArray": 1,
+      "BunFile.json": 1,
+      "BunFile.text": 1,
+      "ChildProcess.stdin": 1,
+      "fs/promises.appendFile": 1,
+      "IteratorObject<Struct<{ readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly type: Literal<string>; readonly properties: Codec<unknown, unknown, never, never>; }>, undefined, unknown>.toArray": 1,
+      "IteratorObject<Struct<{ readonly type: Literal<\"sync\">; readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly syncEvent: Struct<{ readonly type: Literal<...>; readonly id: brand<...> & { ...; }; readonly seq: Finite; readonly aggregateID: String; readonly data: Codec<...>; ....toArray": 1,
+      "MapIterator<Definition<string, Codec<unknown, unknown, never, never>>>.toArray": 1,
+      "new Map(entries)": 1,
+      "new Proxy": 1,
+      "new URL with 2 arguments": 1,
+      "new WeakSet": 1,
+      "Object.assign": 1,
+      "ReadonlyMap<string, readonly ActiveBinding<Renderable, KeyEvent>[]>.get": 1,
+      "Reflect.get": 1,
+      "Segmenter": 1,
+      "Set<SyntaxStyle>.add": 1,
+      "Set<SyntaxStyle>.delete": 1,
+      "spawn with this stdin slot": 1,
+      "Statement<unknown, SQLQueryBindings[] | [null] | [string] | [number] | [bigint] | [false] | [true] | [BigInt64Array<ArrayBufferLike>] | ... 11 more ... | [...]>.get": 1,
+      "TextEncoder.encode": 1,
+      "util.promisify": 1,
+      "WeakMap<BaseRenderable, { frameID: number; previous: WeakMap<BaseRenderable, BaseRenderable | undefined>; }>": 1,
+      "WeakMap<object, MarkedInstance>": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>": 1,
+      "WeakMap<Top, JSONSchema7>": 1,
+      "WeakSet<BoxRenderable>": 1
+    }
+  },
+  "unreached": {
+    "total": 1684,
+    "byCode": {
+      "SC1090": 899,
+      "SC2009": 244,
+      "SC2020": 204,
+      "SC2004": 203,
+      "SC2001": 33,
+      "SC2002": 15,
+      "SC1100": 13,
+      "SC1013": 11,
+      "SC2006": 11,
+      "SC1120": 10,
+      "SC1031": 9,
+      "SC2003": 9,
+      "SC2008": 9,
+      "SC0004": 5,
+      "SC1101": 4,
+      "SC1045": 3,
+      "SC1030": 1,
+      "SC1042": 1
+    },
+    "byFamily": {
+      "syntax-other": 396,
+      "stdlib-tail": 204,
+      "cascade": 203,
+      "component-other": 200,
+      "island-boundary-function": 144,
+      "jsx": 131,
+      "generic-dispatch": 115,
+      "computed-extends": 74,
+      "type-residual": 33,
+      "solid-idioms": 27,
+      "namespace-object-value": 23,
+      "branded-intersection": 22,
+      "SC2002": 15,
+      "SC1100": 13,
+      "effect-generator-body": 11,
+      "effect-typed-member": 11,
+      "index-signature": 11,
+      "SC1120": 10,
+      "intersection-shape": 9,
+      "SC1031": 9,
+      "SC2003": 9,
+      "SC0004": 5,
+      "SC1101": 4,
+      "SC1045": 3,
+      "SC1030": 1,
+      "SC1042": 1
+    },
+    "byPackage": {
+      "redcode": 952,
+      "tui": 724,
+      "schema": 8
+    },
+    "families": [
+      {
+        "family": "syntax-other",
+        "count": 396,
+        "codes": {
+          "SC1090": 396
+        },
+        "packages": {
+          "redcode": 245,
+          "tui": 151
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/managed.ts",
+          "message": "'delete' on 'unknown' receivers (process.env keys and pure Record<string, T> keys delete) are not supported yet"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 204,
+        "codes": {
+          "SC2020": 204
+        },
+        "packages": {
+          "redcode": 159,
+          "tui": 42,
+          "schema": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/effect/instance-registry.ts",
+          "message": "'Promise.allSettled' is part of the standard library types but has no scriptc lowering yet"
+        }
+      },
+      {
+        "family": "cascade",
+        "count": 203,
+        "codes": {
+          "SC2004": 203
+        },
+        "packages": {
+          "tui": 118,
+          "redcode": 83,
+          "schema": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws-pool.ts",
+          "message": "uses of 'pool' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "component-other",
+        "count": 200,
+        "codes": {
+          "SC2009": 200
+        },
+        "packages": {
+          "redcode": 150,
+          "tui": 50
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/error.ts",
+          "message": "values of type 'ErrorOptions | undefined' cannot be compiled: the union shape is supported, but its arm 'ErrorOptions' does not compile"
+        }
+      },
+      {
+        "family": "island-boundary-function",
+        "count": 144,
+        "codes": {
+          "SC1090": 144
+        },
+        "packages": {
+          "tui": 101,
+          "redcode": 43
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      },
+      {
+        "family": "jsx",
+        "count": 131,
+        "codes": {
+          "SC1090": 131
+        },
+        "packages": {
+          "tui": 110,
+          "redcode": 21
+        },
+        "sample": {
+          "file": "packages/tui/src/config/index.tsx",
+          "message": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering) are not supported yet"
+        }
+      },
+      {
+        "family": "generic-dispatch",
+        "count": 115,
+        "codes": {
+          "SC1090": 115
+        },
+        "packages": {
+          "tui": 109,
+          "redcode": 6
+        },
+        "sample": {
+          "file": "packages/redcode/src/server/shared/tui-control.ts",
+          "message": "method calls like 'request.next' is not supported yet"
+        }
+      },
+      {
+        "family": "computed-extends",
+        "count": 74,
+        "codes": {
+          "SC1090": 74
+        },
+        "packages": {
+          "redcode": 71,
+          "schema": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/repository.ts",
+          "message": "extending computed expressions are not supported yet"
+        }
+      },
+      {
+        "family": "type-residual",
+        "count": 33,
+        "codes": {
+          "SC2001": 33
+        },
+        "packages": {
+          "redcode": 19,
+          "tui": 14
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/error.ts",
+          "message": "values of type 'ParsedStreamError | undefined' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of tho"
+        }
+      },
+      {
+        "family": "solid-idioms",
+        "count": 27,
+        "codes": {
+          "SC1090": 27
+        },
+        "packages": {
+          "redcode": 25,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/agent.ts",
+          "message": "object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet"
+        }
+      },
+      {
+        "family": "namespace-object-value",
+        "count": 23,
+        "codes": {
+          "SC1090": 12,
+          "SC1013": 11
+        },
+        "packages": {
+          "redcode": 17,
+          "tui": 6
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "constructing 'ResponseStreamError' (a namespace member with no class lowering) is not supported yet"
+        }
+      },
+      {
+        "family": "branded-intersection",
+        "count": 22,
+        "codes": {
+          "SC2009": 22
+        },
+        "packages": {
+          "redcode": 22
+        },
+        "sample": {
+          "file": "packages/redcode/src/effect/bridge.ts",
+          "message": "values of type '(string & Brand<\"WorkspaceV2.ID\">) | undefined' cannot be compiled: the union shape is supported, but its arm 'string & Brand<\"WorkspaceV2.ID\">' does not compile"
+        }
+      },
+      {
+        "family": "SC2002",
+        "count": 15,
+        "codes": {
+          "SC2002": 15
+        },
+        "packages": {
+          "tui": 10,
+          "redcode": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run/demo.ts",
+          "message": "record shapes must match exactly or width-coerce: expected '{ details: {}; permissions: number[]; questions: number[]; tabs: number[] }', got '{ details: { [key: string]: { commits: { interrupted: boo"
+        }
+      },
+      {
+        "family": "SC1100",
+        "count": 13,
+        "codes": {
+          "SC1100": 13
+        },
+        "packages": {
+          "redcode": 13
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/error.ts",
+          "message": "switch statements on 'unknown' values are not supported yet"
+        }
+      },
+      {
+        "family": "effect-generator-body",
+        "count": 11,
+        "codes": {
+          "SC2009": 11
+        },
+        "packages": {
+          "redcode": 11
+        },
+        "sample": {
+          "file": "packages/redcode/src/effect/bridge.ts",
+          "message": "values of type 'Generator<Effect<Context<never>, never, never> | Reference<InstanceContext | undefined> | Reference<(string & Brand<\"WorkspaceV2.ID\">) | undefined>, { ...; }, any>' cannot be compiled:"
+        }
+      },
+      {
+        "family": "effect-typed-member",
+        "count": 11,
+        "codes": {
+          "SC2009": 11
+        },
+        "packages": {
+          "redcode": 11
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run/runtime.boot.ts",
+          "message": "values of type 'BootService' cannot be compiled: the record shape is supported, but its member 'resolveModelInfo' has type '(sdk: RedcodeClient, directory: string, model: { providerID: string; modelID"
+        }
+      },
+      {
+        "family": "index-signature",
+        "count": 11,
+        "codes": {
+          "SC2006": 11
+        },
+        "packages": {
+          "redcode": 10,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/transform.ts",
+          "message": "values of type 'string & Brand<\"ProviderV2.ID\">' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, "
+        }
+      },
+      {
+        "family": "SC1120",
+        "count": 10,
+        "codes": {
+          "SC1120": 10
+        },
+        "packages": {
+          "redcode": 7,
+          "tui": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/variable.ts",
+          "message": "function replacement values (replacements must be string templates) are not supported yet"
+        }
+      },
+      {
+        "family": "intersection-shape",
+        "count": 9,
+        "codes": {
+          "SC2008": 9
+        },
+        "packages": {
+          "redcode": 9
+        },
+        "sample": {
+          "file": "packages/redcode/src/lsp/launch.ts",
+          "message": "values of type 'Child' cannot be compiled: this intersection resolves to no runtime shape"
+        }
+      },
+      {
+        "family": "SC1031",
+        "count": 9,
+        "codes": {
+          "SC1031": 9
+        },
+        "packages": {
+          "redcode": 7,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/tool/json-schema.ts",
+          "message": "rest bindings over index-signature shapes (the undeclared entries would need overflow packing) are not supported yet"
+        }
+      },
+      {
+        "family": "SC2003",
+        "count": 9,
+        "codes": {
+          "SC2003": 9
+        },
+        "packages": {
+          "tui": 5,
+          "redcode": 4
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/codex.ts",
+          "message": "union types must match exactly: expected 'string | undefined', got '{ chatgpt_account_id: string | undefined; chatgpt_compute_residency: string | undefined; email: string | undefined; https://api.open"
+        }
+      },
+      {
+        "family": "SC0004",
+        "count": 5,
+        "codes": {
+          "SC0004": 5
+        },
+        "packages": {
+          "redcode": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "the TypeScript checker crashed answering a query here (an upstream typescript-go bug): panic: interface conversion: checker.TypeData is *checker.TypeReference, not *checker.TupleType"
+        }
+      },
+      {
+        "family": "SC1101",
+        "count": 4,
+        "codes": {
+          "SC1101": 4
+        },
+        "packages": {
+          "redcode": 4
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/transform.ts",
+          "message": "passing '([string, unknown]) => [string, unknown]' function values into 'unknown' slots (a parameter or result type has no dynamic representation — only JSON-safe data, Uint8Array, undefined-armed uni"
+        }
+      },
+      {
+        "family": "SC1045",
+        "count": 3,
+        "codes": {
+          "SC1045": 3
+        },
+        "packages": {
+          "redcode": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/ai-sdk.ts",
+          "message": "increment/decrement of record fields or elements in expression position is not supported yet"
+        }
+      },
+      {
+        "family": "SC1030",
+        "count": 1,
+        "codes": {
+          "SC1030": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/rpc.ts",
+          "message": "the reference to 'onmessage' above its 'var' declaration (a read there would be 'undefined', which the binding's type cannot hold — annotate it '| undefined' or move the declaration up) is not support"
+        }
+      },
+      {
+        "family": "SC1042",
+        "count": 1,
+        "codes": {
+          "SC1042": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run/tool.ts",
+          "message": "logical operators on mixed operand types are not supported yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "Array.isArray": 27,
+      "Bun.stringWidth": 18,
+      "Object.fromEntries": 9,
+      "new URL with 2 arguments": 8,
+      "ReadonlyMap<string, readonly ActiveBinding<Renderable, KeyEvent>[]>.get": 8,
+      "Array.from with this argument shape": 7,
+      "crypto.getRandomValues": 5,
+      "Object.entries": 5,
+      "new Headers": 4,
+      "new Map(entries)": 4,
+      "NumberFormat.format": 4,
+      "Promise<void> | undefined.catch": 4,
+      "Reflect.get": 4,
+      "BigInt": 3,
+      "Number of any values": 3,
+      "RegExpExecArray.index": 3,
+      "Segmenter.segment": 3,
+      ".localeCompare with 3 arguments": 2,
+      "crypto.subtle.digest": 2,
+      "Date.prototype.toDateString": 2,
+      "Error.stack": 2,
+      "Map<string, PoolEntry>.get": 2,
+      "Map<string, Semaphore>.get": 2,
+      "Map<string, Semaphore>.set": 2,
+      "new Set(values)": 2,
+      "ReadStream": 2,
+      "RegExpMatchArray | [].find": 2,
+      "RegExpMatchArray.index": 2,
+      "string.toLocaleLowerCase": 2,
+      "TextDecoder.decode": 2,
+      "TextEncoder.encode": 2,
+      "Uint16Array<ArrayBufferLike>": 2,
+      ".splice with 3 arguments": 1,
+      ".values() outside an immediate array spread": 1,
+      "{ directory: string; strategy?: string | undefined; }[] | undefined.toSorted": 1,
+      "address() where the result is not the {address, family, port} record": 1,
+      "Bun": 1,
+      "Date.prototype.toLocaleDateString": 1,
+      "Date.prototype.toLocaleTimeString with arguments": 1,
+      "Hash.digest with this encoding": 1,
+      "JSON.stringify with replacer/space parameters": 1,
+      "Map<string & Brand<\"MessageID\">, number>.get": 1,
+      "Map<string & Brand<\"MessageID\">, number>.set": 1,
+      "Map<string, { payload: { readonly version: 1; readonly generated_at: string; readonly daemon?: { readonly pid: number; readonly daemon_version: string; readonly protocol_version: number; readonly started_at: string; } | undefined; ... 4 more ...; readonly workers: readonly { ...; }[]; }; at: string; }>.get": 1,
+      "Map<string, { payload: { readonly version: 1; readonly generated_at: string; readonly daemon?: { readonly pid: number; readonly daemon_version: string; readonly protocol_version: number; readonly started_at: string; } | undefined; ... 4 more ...; readonly workers: readonly { ...; }[]; }; at: string; }>.set": 1,
+      "Map<string, PoolEntry>.clear": 1,
+      "Map<string, PoolEntry>.delete": 1,
+      "Map<string, PoolEntry>.set": 1,
+      "Map<string, PoolEntry>.values": 1,
+      "Map<string, SelectableItem>.get": 1,
+      "new Function": 1,
+      "new WeakSet": 1,
+      "Number of number | string | undefined values": 1,
+      "Number of number | string values": 1,
+      "Number of string | undefined values": 1,
+      "Number of unknown values": 1,
+      "Object.values": 1,
+      "PlatformPath.normalize": 1,
+      "postMessage": 1,
+      "process.off(\"SIGUSR2\", ...)": 1,
+      "process.on(\"SIGUSR2\", ...)": 1,
+      "Promise.all with this combined result type": 1,
+      "Promise.allSettled": 1,
+      "Promise.race with this combined result type": 1,
+      "Promise<A>.catch": 1,
+      "Promise<TuiPluginModule>.catch": 1,
+      "Promise<void> | undefined.then": 1,
+      "readonly [\"edit\", \"bash\", \"read\", \"task\", \"external\", \"doom\"].find": 1,
+      "readonly [\"loading\", \"empty\", \"error\", \"populated\", \"edge\"].filter": 1,
+      "readonly [\"multi\", \"single\", \"checklist\", \"custom\"].find": 1,
+      "requestAnimationFrame": 1,
+      "Server.closeAllConnections": 1,
+      "spawn with this stdin slot": 1,
+      "typeof globalThis.fetch": 1,
+      "typeof realpathSync.native": 1,
+      "Uint8Array<ArrayBuffer>": 1,
+      "WeakMap<BaseRenderable, { frameID: number; previous: WeakMap<BaseRenderable, BaseRenderable | undefined>; }>.get": 1,
+      "WeakMap<BaseRenderable, BaseRenderable | undefined>": 1,
+      "WeakMap<BaseRenderable, BaseRenderable | undefined>.get": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.delete": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.get": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.set": 1,
+      "WeakMap<Top, JSONSchema7>.get": 1,
+      "WeakMap<Top, JSONSchema7>.set": 1,
+      "WeakSet<object>.add": 1,
+      "WeakSet<object>.has": 1,
+      "WritableStream<Uint8Array<ArrayBufferLike>>": 1
+    }
+  },
+  "runtimeFences": 0,
+  "npmStatic": [
+    {
+      "package": "@reddb-io/redcode-schema",
+      "status": "static"
+    },
+    {
+      "package": "@reddb-io/redcode-tui",
+      "status": "static"
+    }
+  ],
+  "npmBuiltins": [
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]"
+  ],
+  "frontier": [
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/logo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/logo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/ui.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 '.join()' on arrays of this element type (number, string, and boolean arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/cmd.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/effect-cmd.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/filesystem.ts",
+      "tier": "island",
+      "reason": "auto: SC1071 async generators (async function*) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/record.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/error.ts",
+      "tier": "island",
+      "reason": "auto: SC2020 'Error.stack' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/record.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.stdin.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, never> | Effect<Interface, never, Service> | Effect<Shape<{ readonly autoShare: Config<boolean>; readonly pure: Config<boolean>; ... 25 more ...; readonly client: Config<...>; }>, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/generate.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 using an 'any' value where '{ builder: (any) => any; command: string; handler: () => Promise<void> }' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/effect-http-client.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/account/schema.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/account/url.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 assignment to non-variables are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/account/repo.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'active' has type '() => Effect<Option<Info>, AccountRepoError, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/account/account.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '(message?: string) => <A, E, R>(effect: Effect<A, E, R>) => Effect<A, AccountError, R>' cannot be compiled: the function shape is supported, but its return type '<A, E, R>(effect: Effect<A, E, R>) => Effect<A, AccountError, R>' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/effect/prompt.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 using an 'any' value where 'Promise<string | symbol>' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/account.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '(active: Option<{ id: string & Brand<\"AccountID\">; active_org_id: (string & Brand<\"OrgID\">) | null; }>, choice: { accountID: string & Brand<\"AccountID\">; orgID: string & Brand<...>; }) => boolean' cannot be compiled: the function shape is supported, but its parameter 'choice' has type '{ accountID: string & Brand<\"AccountID\">; orgID: string & Brand<\"OrgID\">; }', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/auth/index.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/instance-ref.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/instance-registry.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/local-context.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 redeclaring inherited fields are not supported yet (instantiating 'create' with <any>)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/workspace-context.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ use(): WorkspaceContext; provide<R>(value: WorkspaceContext, fn: () => R): R; }' cannot be compiled: the record shape is supported, but its member 'use' has type '() => WorkspaceContext', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/instance-state.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<never, never, never> | Reference<InstanceContext | undefined>, InstanceContext, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/env/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'get' has type '(key: string) => Effect<string | undefined, never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/instance-context.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/entry-name.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/markdown.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/parse.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/agent.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/command.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/process.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'RunOptions' cannot be compiled: the record shape is supported, but its member 'stdin' has type 'Stdio | undefined', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/managed.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/paths.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<string[], Error, never> | Effect<Interface, never, Service>, string[], any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/plugin.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/variable.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/config.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'get' has type '() => Effect<Info, never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/config-service.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/auth.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/iife.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/proxy-env.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/openai/ws.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/openai/ws-pool.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/openai/codex.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/background/job.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<InstanceState<Interface, never, never>, never, Scope>, Interface, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/id/id.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/bus/global.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending generic classes are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/event-v2-bridge.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/git/index.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/storage/storage.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<unknown, Error, never>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/schema.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ ascending: (id?: string | undefined) => string & Brand<\"MessageID\">; }' cannot be compiled: the record shape is supported, but its member 'ascending' has type '(id?: string | undefined) => string & Brand<\"MessageID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/media.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/message-v2.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/schema.ts",
+      "tier": "island",
+      "reason": "auto: SC2001 values of type 'NoInfer<Utc>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/file-diff.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/snapshot/index.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/runtime-flags.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any' — or parameters convertible at the boundary (number, string, boolean, JSON-safe records/arrays/unions, 'T | undefined'), and return 'any', void, number, string, boolean, a JSON-safe composite, or a Promise of the primitive kinds) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/llm.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/identifier.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/project-id.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ global: string & Brand<\"Project.ID\">; }' cannot be compiled: the record shape is supported, but its member 'global' has type 'string & Brand<\"Project.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/workspace-id.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ ascending: (id?: string | undefined) => string & Brand<\"WorkspaceV2.ID\">; create: () => string & Brand<\"WorkspaceV2.ID\">; }' cannot be compiled: the record shape is supported, but its member 'ascending' has type '(id?: string | undefined) => string & Brand<\"WorkspaceV2.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/location.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/event.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ create: () => string & Brand<\"Event.ID\">; }' cannot be compiled: the record shape is supported, but its member 'create' has type '() => string & Brand<\"Event.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/integration-id.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/credential.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ create: () => string & Brand<\"Credential.ID\">; }' cannot be compiled: the record shape is supported, but its member 'create' has type '() => string & Brand<\"Credential.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/connection.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/integration.ts",
+      "tier": "island",
+      "reason": "auto: SC2001 values of type 'readonly [Struct<{ readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly metadata: decodeTo<optional<toType<$Record<String, Unknown>>>, optionalKey<...>, never, never>; readonly type: Literal<...>; readonly durable: decodeTo<...>; readonly location: decodeTo<...>; readonly ...' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/provider.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ opencode: string & Brand<\"ProviderV2.ID\">; anthropic: string & Brand<\"ProviderV2.ID\">; openai: string & Brand<\"ProviderV2.ID\">; google: string & Brand<\"ProviderV2.ID\">; ... 6 more ...; gitlab: string & Brand<...>; }' cannot be compiled: the record shape is supported, but its member 'opencode' has type 'string & Brand<\"ProviderV2.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/model.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 object spread after explicit properties (or mixed with a conditional spread) in an 'any'-typed object literal — spreads must come first are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/prompt.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any' — or parameters convertible at the boundary (number, string, boolean, JSON-safe records/arrays/unions, 'T | undefined'), and return 'any', void, number, string, boolean, a JSON-safe composite, or a Promise of the primitive kinds) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-id.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ create: () => string & Brand<\"SessionID\">; descending: (id?: string | undefined) => string & Brand<\"SessionID\">; }' cannot be compiled: the record shape is supported, but its member 'create' has type '() => string & Brand<\"SessionID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-message.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ create: () => string & Brand<\"Session.Message.ID\">; }' cannot be compiled: the record shape is supported, but its member 'create' has type '() => string & Brand<\"Session.Message.ID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/session.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'list' has type '(input?: ListInput | undefined) => Effect<{ id: string & Brand<\"SessionID\">; slug: string; projectID: string & Brand<\"Project.ID\">; workspaceID?: (string & Brand<...>) | undefined; ... 14 more ...; revert?: { ...; } | undefined; }[], never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/github-copilot/models.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/github-copilot/copilot.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/modal/models.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/modal/modal.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/cloudflare.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/azure.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/digitalocean.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/xai.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/snowflake-cortex.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/run-service.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 compound assignment as an expression (write `x op= e` as a statement, or spell out `x = x op e`) is not supported yet (instantiating 'makeRuntime' with <m288.Service, S, number>)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/bridge.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/loader.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/types.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/adapters/worktree.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'WorkspaceAdapter' cannot be compiled: the record shape is supported, but its member 'configure' has type '(info: { id: string & Brand<\"WorkspaceV2.ID\">; type: string; name: string; branch?: string | null | undefined; directory?: string | null | undefined; extra?: unknown; projectID: string & Brand<...>; }, context?: WorkspaceAdapterContext | undefined) => Promise<...> | { ...; }', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/adapters/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2006 values of type 'Record<string, WorkspaceAdapter>' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, classes, arrays, unions, functions, Maps, Sets, RegExps, Promises, or 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/hook.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/index.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/providers.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, never> | Effect<Interface, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/agent.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, never> | Effect<Interface, never, Service> | Effect<Interface, never, Service>, undefined, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/installation-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/installation/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'info' has type '() => Effect<{ readonly version: string; readonly latest: string; }, never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/upgrade.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 passing a value of type 'void' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can cross the boundary) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/uninstall.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 passing a value of type 'void' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can cross the boundary) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/models.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, Service> | Effect<never, CliError, never> | Effect<Interface, never, Service>, undefined, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/network.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<typeof import(\"/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/config\"), never, never> | Effect<Info, never, Service>, { ...; }, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/serve.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Listener, never, never> | Effect<typeof import(\"/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/server\"), never, never> | Effect<...>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/config.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<typeof import(\"/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/config\"), never, never> | Effect<Info, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/guard-log.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/guards.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Entry[], never, Service> | Effect<Summary[], never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/file.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Entry[], never, never>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/language.ts",
+      "tier": "island",
+      "reason": "auto: SC2002 record shapes must match exactly or width-coerce: expected '{ .abap: string; .astro: string; .bash: string; .bat: string; .bib: string; .bibtex: string; .c: string; .c++: string; .cc: string; .cjs: string; .clj: string; .cljc: string; .cljs: string; .coffee: string; .cpp: string; .cs: string; .cshtml: string; .css: string; .css.erb: string; .csx: string; .cts: string; .ctsx: string; .cxx: string; .d: string; .dart: string; .diff: string; .dockerfile: string; .edn: string; .erb: string; .erl: string; .ets: string; .ex: string; .exs: string; .fs: string; .fsi: string; .fsscript: string; .fsx: string; .gemspec: string; .gitcommit: string; .gitrebase: string; .gleam: string; .go: string; .groovy: string; .handlebars: string; .hbs: string; .hcl: string; .hrl: string; .hs: string; .htm: string; .html: string; .html.erb: string; .ini: string; .jade: string; .java: string; .jl: string; .js: string; .js.erb: string; .json: string; .json.erb: string; .jsx: string; .ksh: string; .kt: string; .kts: string; .latex: string; .less: string; .lhs: string; .lua: string; .m: string; .makefile: string; .markdown: string; .md: string; .mjs: string; .ml: string; .mli: string; .mm: string; .mts: string; .mtsx: string; .nix: string; .pas: string; .pascal: string; .patch: string; .php: string; .pl: string; .pm: string; .pm6: string; .ps1: string; .psm1: string; .pug: string; .py: string; .r: string; .rake: string; .razor: string; .rb: string; .rs: string; .ru: string; .sass: string; .scala: string; .scss: string; .sh: string; .shader: string; .sql: string; .svelte: string; .swift: string; .tex: string; .tf: string; .tfvars: string; .ts: string; .tsx: string; .typ: string; .typc: string; .vue: string; .xml: string; .xsl: string; .yaml: string; .yml: string; .zig: string; .zon: string; .zsh: string; makefile: string }', got '{ [key: string]: string }' — '.abap' is not a declared field of the source, and the source's index signature could hold it at runtime (a completed undefined would drop that value)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/timeout.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 Promise.race entries of inner type 'void' under a 'string' result (every entry must be the result type, one of its arms, or a sub-union of it) is not supported yet (instantiating 'withTimeout' with <string>)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/client.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/archive.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/launch.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/server.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '(cmd: string[], opts?: RunOptions) => Promise<Result>' cannot be compiled: the function shape is supported, but its parameter 'opts' has type 'RunOptions', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/lsp-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/diagnostic.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/lsp/lsp.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '(servers: Record<string, Info>, flags: Shape<{ readonly autoShare: Config<boolean>; readonly pure: Config<boolean>; readonly disableDefaultPlugins: Config<boolean>; ... 24 more ...; readonly client: Config<...>; }>) => void' cannot be compiled: the function shape is supported, but its parameter 'servers' has type 'Record<string, Info>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/lsp.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Record<string, Diagnostic[]>, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/ripgrep.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Interface, never, Service> | Effect<readonly Entry[], never, never> | Reference<InstanceContext | undefined>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/scrap.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 dynamic import of the program's own module '@reddb-io/redcode-core/effect/app-node-builder' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/operation-hook-bridge.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/permission/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '(readonly { readonly permission: string; readonly pattern: string; readonly action: \"allow\" | \"ask\" | \"deny\"; }[])[]' cannot be compiled: the array shape is supported, but 'readonly { readonly permission: string; readonly pattern: string; readonly action: \"allow\" | \"ask\" | \"deny\"; }[]' elements have no array representation yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/skill/discovery.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/html.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/skill/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Interface' cannot be compiled: the record shape is supported, but its member 'listen' has type '(listener: Subscriber<Definition>) => Effect<Unsubscribe, never, never>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/skill.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<{ readonly name: string; readonly description?: string | undefined; readonly location: string; readonly content: string; }[], never, never> | Effect<Interface, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/snapshot.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<string | undefined, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/agent.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<undefined, CliError, Service | Service | Service | Service> | Effect<...>, undefined, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/runtime.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Interface, never, Service> | Effect<Payload, never, never>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/startup.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/v2.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Info[], never, never> | Effect<(readonly [string & Brand<\"ProviderV2.ID\">, (string & Brand<\"ModelV2.ID\">) | undefined])[], never, never> | Effect<...>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, never>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/auth.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'all' has type '() => Effect<Record<string, { tokens?: { accessToken: string; refreshToken?: string | undefined; expiresAt?: number | undefined; scope?: string | undefined; } | undefined; clientInfo?: { clientId: string; clientSecret?: string | undefined; clientIdIssuedAt?: number | undefined; clientSecretExpiresAt?: number | undef...', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/oauth-provider.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/oauth-callback.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/tui-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/catalog.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/mcp-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/browser.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/mcp/index.ts",
+      "tier": "island",
+      "reason": "auto: SC2001 values of type 'typeof result' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/project.ts",
+      "tier": "island",
+      "reason": "auto: SC2001 values of type 'readonly [Struct<{ readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly metadata: decodeTo<optional<toType<$Record<String, Unknown>>>, optionalKey<...>, never, never>; readonly type: Literal<...>; readonly durable: decodeTo<...>; readonly location: decodeTo<...>; readonly ...' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/v1/permission.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ ascending: (id?: string | undefined) => string & Brand<\"PermissionID\">; }' cannot be compiled: the record shape is supported, but its member 'ascending' has type '(id?: string | undefined) => string & Brand<\"PermissionID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/v1/session.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '{ ascending: (id?: string | undefined) => string & Brand<\"MessageID\">; }' cannot be compiled: the record shape is supported, but its member 'ascending' has type '(id?: string | undefined) => string & Brand<\"MessageID\">', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/v1/legacy-event.ts",
+      "tier": "island",
+      "reason": "auto: SC2001 values of type 'readonly [Struct<{ readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly metadata: decodeTo<optional<toType<$Record<String, Unknown>>>, optionalKey<...>, never, never>; readonly type: Literal<...>; readonly durable: decodeTo<...>; readonly location: decodeTo<...>; readonly ...' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/legacy-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/command/index.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 extending computed expressions are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/project.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'init' has type '() => Effect<void, never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/stats.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<SessionStats, never, Service | Service> | Reference<InstanceContext | undefined>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/mcp.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<{ config: Info; statuses: Record<string, { readonly status: \"connected\"; } | { readonly status: \"disabled\"; } | { readonly status: \"failed\"; readonly error: string; } | { readonly status: \"needs_auth\"; } | { ...; }>; stored: { ...; }; }, never, Service | Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/repository.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/github.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/github.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<undefined, never, Service | Service> | Effect<typeof import(\"/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/github.handler\"), never, never>, undefined, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/export.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, CliError, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/promise.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/transform.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/model-status.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/provider.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'list' has type '() => Effect<Record<string & Brand<\"ProviderV2.ID\">, { id: string & Brand<\"ProviderV2.ID\">; name: string; source: \"api\" | \"config\" | \"custom\" | \"env\"; env: string[]; key?: string | undefined; options: { ...; }; models: { ...; }; }>, never, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/share/share-next.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'init' has type '() => Effect<void, unknown, Service>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/import.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, CliError, FSUtil.Service | Service | Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/tui/validate-session.ts",
+      "tier": "island",
+      "reason": "auto: SC2006 values of type 'string & Brand<\"SessionID\">' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, classes, arrays, unions, functions, Maps, Sets, RegExps, Promises, or 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/attach.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 dynamic import of the program's own module './run' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/rpc.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/terminal-win32.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type '() => Library<{ GetStdHandle: { args: \"i32\"[]; returns: \"ptr\"; }; GetConsoleMode: { args: \"ptr\"[]; returns: \"i32\"; }; SetConsoleMode: { args: (\"ptr\" | \"u32\")[]; returns: \"i32\"; }; FlushConsoleInputBuffer: { args: \"ptr\"[]; returns: \"i32\"; }; }>' cannot be compiled: the function shape is supported, but its return type 'Library<{ GetStdHandle: { args: \"i32\"[]; returns: \"ptr\"; }; GetConsoleMode: { args: \"ptr\"[]; returns: \"i32\"; }; SetConsoleMode: { args: (\"ptr\" | \"u32\")[]; returns: \"i32\"; }; FlushConsoleInputBuffer: { args: \"ptr\"[]; returns: \"i32\"; }; }>' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/tui.ts",
+      "tier": "island",
+      "reason": "auto: SC2020 'new Worker' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/profile.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/toon-stream.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/acp.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, never, never> | Effect<{ hostname: string; port: number; mdns: boolean; mdnsDomain: string; cors: string[]; }, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/web.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<Listener, never, never> | Effect<typeof import(\"/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/server\"), never, never> | Effect<...>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/pr.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<number, never, never> | Effect<never, CliError, never> | Effect<Interface, never, Service> | Effect<Result, never, never> | Effect<...> | Reference<...>, undefined, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/locale.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/locale.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/session.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<void, CliError, never> | Effect<Interface, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/db.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<unknown, never, never> | Effect<Interface, never, Service>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/install.ts",
+      "tier": "island",
+      "reason": "auto: SC1090 using an 'any' value where 'Promise<string>' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/plug.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Generator<Effect<boolean, never, never> | Reference<InstanceContext | undefined>, void, any>' cannot be compiled: the Generator shape is supported, but this instantiation's type arguments are outside the supported set"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/heap.ts",
+      "tier": "island",
+      "reason": "auto: SC2009 values of type 'Timer | undefined' cannot be compiled: the union shape is supported, but its arm 'Timer' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/auth.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/permission/evaluate.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/schema.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/truncation-dir.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/truncate.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/agent/agent.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/v1/question.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/question-v1.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/question/schema.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/question/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-todo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/todo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-status-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/status.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/runner.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/run-state.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/image/image.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/wildcard.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/llm/ai-sdk.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/llm/native-request.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/llm/native-runtime.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/system.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/llm/request.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/llm.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/overflow.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/retry.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/summary.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/loop-guard.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/processor.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/token.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/aux-deadline.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-compaction-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/compaction.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/revert.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/instruction.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/tool.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/plan.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/kinds.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/manifest.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/registry.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/serve.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/lint.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/states.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/design-preview.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/design.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/question.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/lazy.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell/id.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell/prompt.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/permission/arity.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/format/formatter.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/format/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/external-directory.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/bom.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/edit.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/glob.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/grep.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/read.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/json-schema.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/agent/subagent-permissions.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/task.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/todo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/webfetch.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/write.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/invalid.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/skill.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/mcp-websearch.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/websearch.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/lsp.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/patch/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/apply_patch.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/registry.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/step-budget.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/orphan.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/stall.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/data-url.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/system.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/reminders.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/tool-deadline.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/tools.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/session/prompt.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/bootstrap-service.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/instance-store.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/vcs-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/vcs.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/util.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/workspace-adapter-runtime.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/project/bootstrap.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/app-node-builder-v1.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/workspace-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/control-plane/workspace.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/worktree-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/worktree/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/share/session.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/effect/app-runtime.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/tool.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/session-data.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/stream.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/demo.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/config/keybind.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/config/index.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/tui-migrate.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/tui-host-attention.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/tui-cwd.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/tui.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/display.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/prompt-display.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/prompt.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/session.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/variant.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.boot.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/editor-zed.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/editor.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/keymap.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/splash.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/theme.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.lifecycle.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/trace.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.queue.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/runtime.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/projectors.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/init-projectors.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/mdns.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/pty-environment.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/proxy-util.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/ui.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/feedback.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/route-path.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/sdk.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/design/shell.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/design.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/catalog.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-delivery.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/revert.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/permission-v1.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/session-v1.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/durable-event-manifest.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/filesystem.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/filesystem-watcher.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/models-dev.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/permission.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/plugin.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/project-directories.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/pty.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/question.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/reference.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/server-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/tui-event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/event-manifest.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/event-manifest.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/pty-ticket.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/public-ui.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/authorization.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/websocket-tracker.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/proxy.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/fence.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/workspace-routing.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/errors.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/instance-context.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/metadata.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/config.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/control.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/control-plane.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/query.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/experimental.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/file.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/instance.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/mcp.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/permission.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/project.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/project-copy.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/provider.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/pty.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/question.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/session.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/sync.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/util/queue.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/shared/tui-control.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/tui.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/workspace.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/schema/src/redskilled.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/redskilled.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/groups/global.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/schema-error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/api.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/public.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/lifecycle.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/config.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/control.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/control-plane.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/experimental.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/file.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/global-lifecycle.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/global.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/instance.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/mcp.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/permission.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/project.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/project-copy.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/provider.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/pty.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/question.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/session-errors.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/session.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/sync.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/tui.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/redskilled/client.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/redskilled.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/handlers/workspace.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/compression.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/cors-vary.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/middleware/fence.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/routes/instance/httpapi/server.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/server/server.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/debug/agent.handler.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/github.handler.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/register-spinner.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/clipboard.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/clipboard.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/helper.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/exit.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/epilogue.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/selection.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/runtime.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/route.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/theme/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/persistence.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/kv.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/theme.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/border.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/toast.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/sdk.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/project.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/args.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/permission.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/sync.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/scroll.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-select.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/spinner.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-prompt.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/link.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/local.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-variant.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/use-connected.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-model.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/provider-origin.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-provider.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/system.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/error-component.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/plugin-route-missing.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/editor.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/startup-loading.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/data.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/location.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-mcp.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-status.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-confirm.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-hooks.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-debug.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-theme-list.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-help.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-agent.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-session-rename.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/signal.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-alert.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-workspace-file-changes.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-workspace-create.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-session-delete-failed.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-session-list.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-workspace-list.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-console-org.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/history.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/traits.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/part.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/session/activity.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/stash.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/stash.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-stash.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/prompt/frecency.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/autocomplete.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/format.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/spinner.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-skill.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-workspace-unavailable.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/workspace.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/runtime.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-move-session.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/home/session-destination.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/move.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/local-attachment.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/redskilled.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/index.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/logo.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/prompt.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/plugin/api.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/plugin/slots.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/plugin/runtime.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/home.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/tool-display.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/todo-item.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/dialog-message.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/dialog-timeline.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/dialog-fork-from-timeline.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/workspace-label.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/workers/format.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/workers/history.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/workers.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/sidebar.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/sidebar-width.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/subagent-footer.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/filetype.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/parsers-config.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/path.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/path-format.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/permission.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/question.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/ui/dialog-export-options.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/model.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/transcript.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/presentation.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/layout.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/context/thinking.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/collapse-tool-output.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/bg-pulse-render.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/bg-pulse.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/dialog-retry-action.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/revert-diff.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/routes/session/index.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/history.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/prompt/frecency.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/session.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/plugin/command-shim.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/plugin/adapters.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/component/command-palette.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/audio.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/attention.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/util/renderer.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/app.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/index.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/tui/layer.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/meta.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/home/tips-view.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/home/tips.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/context.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/files.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/footer.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/lsp.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/mcp.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/sidebar/todo.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/diff-viewer-file-tree-utils.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/diff-viewer-ui.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/diff-viewer-file-tree.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/diff-viewer.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/notifications.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/plugins.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/system/which-key.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/feature-plugins/builtins.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/tui/internal.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/tui/runtime.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/error.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/config-option.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/content.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/directory.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/session.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/tool.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/child-agent.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/permission.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/event.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/usage.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/service.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/acp/agent.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/code-mode.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.menu.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.command.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/entry.body.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/scrollback.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/scrollback.writer.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.subagent.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/prompt.editor.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.prompt.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/permission.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.width.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.permission.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/question.shared.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.question.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.view.tsx",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/turn-summary.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/scrollback.surface.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/footer.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/session-replay.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/subagent-data.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/cli/cmd/run/stream.transport.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/index.ts",
+      "tier": "static",
+      "reason": "static"
+    }
+  ],
+  "timing": {
+    "wallMs": 985692,
+    "phases": {
+      "ffi-validate": 105,
+      "reachable-emit": 58025
+    }
+  }
+}

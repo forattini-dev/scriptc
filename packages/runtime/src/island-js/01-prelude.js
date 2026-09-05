@@ -230,6 +230,56 @@
   }
   const cache = Object.create(null);
   const builtins = Object.create(null);
+    /* Bun runtime modules under --target bun (`bun`, `bun:sqlite`,
+     * `bun:ffi`, ...): the island has no implementation, so each answers
+     * a TRAP object — every member reads as a callable/constructible
+     * proxy whose invocation throws the same "requires the Bun runtime"
+     * error the static tier's trap-on-call raises, and whose property
+     * reads keep answering traps (so `FFIType.ptr`, destructuring, and
+     * `typeof Database === 'function'` all behave until something is
+     * actually called). The `bun` module's node:url re-exports are real
+     * (bun-types declares them so; the static tier aliases them too).
+     * The compiler rewrites embedded ESM `import ... from "bun:x"` into
+     * reads of this table; CJS `require("bun:x")` reaches it through
+     * resolveFrom/requireKey below. Under a Node target nothing answers:
+     * Node itself has no such module. */
+  const bunTrapMember = (spec, path) => {
+    const throwTrap = () => {
+      throw new Error("the '" + path + "' of '" + spec + "' is not available in a compiled binary (requires the Bun runtime)");
+    };
+    return new Proxy(function scriptcBunTrap() {}, {
+      apply: throwTrap,
+      construct: throwTrap,
+      get: (_t, prop) => {
+        if (prop === Symbol.toPrimitive) return () => '[bun trap ' + path + ']';
+        if (prop === 'then') return undefined;
+        if (typeof prop === 'symbol') return undefined;
+        return bunTrapMember(spec, path + '.' + String(prop));
+      },
+    });
+  };
+  const bunTrapModules = Object.create(null);
+  globalThis.__scr_bun_trap = (spec) => {
+    const hit = bunTrapModules[spec];
+    if (hit) return hit;
+    const real = spec === 'bun' && builtins.url
+      ? { pathToFileURL: builtins.url().pathToFileURL, fileURLToPath: builtins.url().fileURLToPath }
+      : {};
+    const mod = new Proxy(real, {
+      get: (target, prop) => {
+        if (prop in target) return target[prop];
+        if (prop === '__esModule') return true;
+        if (prop === 'default') return mod;
+        if (prop === 'then') return undefined;
+        if (typeof prop === 'symbol') return undefined;
+        return bunTrapMember(spec, String(prop));
+      },
+      has: () => true,
+    });
+    bunTrapModules[spec] = mod;
+    return mod;
+  };
+  const isBunSpec = (spec) => globalThis.__scr_runtime_target === 'bun' && (spec === 'bun' || spec.startsWith('bun:'));
     /* Node's require stack: each CJS module remembers its FIRST requirer
      * (Node's module.parent / moduleParentCache — the chain is static,
      * captured at first load, not the dynamic call stack), and a failing
@@ -255,6 +305,7 @@
   const resolveFrom = (from, spec) => {
     const to = host.resolve(from, spec);
     if (to === undefined) {
+      if (isBunSpec(spec)) return spec;
       const name = spec.startsWith('node:') ? spec.slice(5) : spec;
       if (builtins[name]) return 'node:' + name;
       const stack = requireStackOf(from);
@@ -267,6 +318,7 @@
     return to;
   };
   const requireKey = (key, parent) => {
+    if (isBunSpec(key)) return globalThis.__scr_bun_trap(key);
     if (key.startsWith('node:')) {
       const b = builtins[key.slice(5)];
       if (!b) throw new Error("the island does not provide the '" + key + "' builtin");

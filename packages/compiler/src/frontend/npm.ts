@@ -90,6 +90,8 @@ import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { npmExecutableSource } from "./npm-typescript.js";
+import { activeRuntimeTarget } from "../compat/runtime-target.js";
+import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
 import { resolveExports, resolvePackageImports } from "./resolve.js";
 import { workspacePackageOfPath } from "./shared.js";
 
@@ -240,6 +242,10 @@ export interface NpmLazyTrap {
    * code) instead of the addon's raw bytes; the require/import() throws
    * at the call. Unset for the unresolvable rows above. */
   native?: boolean;
+  /** A Bun runtime module (`bun`, `bun:*`) under --target bun: the island
+   * answers it with a trap table, so the import links and every USE
+   * throws naming the member and the runtime (bun-island-rewrite.ts). */
+  bunTrap?: true;
 }
 
 export interface NpmRuntimeGraph {
@@ -947,7 +953,7 @@ export class NpmGraphBuilder {
    * call forms/packages. */
   private readonly lazyTrapsSeen = new Map<
     string,
-    { via: Set<"require" | "import()" | "import">; packages: Set<string>; native: boolean }
+    { via: Set<"require" | "import()" | "import">; packages: Set<string>; native: boolean; bun: boolean }
   >();
   /** Synthetic keys for embedded import()-not-found stubs. */
   private importTrapCount = 0;
@@ -1241,10 +1247,21 @@ export class NpmGraphBuilder {
           via: (["require", "import()", "import"] as const).filter((v) => t.via.has(v)),
           packages: [...t.packages].sort(),
           ...(t.native ? { native: true } : {}),
+          ...(t.bun ? { bunTrap: true as const } : {}),
         }))
         .sort((a, b) => a.specifier.localeCompare(b.specifier)),
       errors: this.errors,
     };
+  }
+
+  /** Records one Bun runtime module the island answers with a trap table
+   * under --target bun (an inventory row, never an error). */
+  private noteBunTrap(spec: string, pkgName: string): void {
+    let t = this.lazyTrapsSeen.get(spec);
+    if (!t) this.lazyTrapsSeen.set(spec, (t = { via: new Set(), packages: new Set(), native: false, bun: true }));
+    t.bun = true;
+    t.via.add("import");
+    t.packages.add(pkgName);
   }
 
   /* ── lazy runtime traps (require()/import() edges Node fails at the
@@ -1262,7 +1279,7 @@ export class NpmGraphBuilder {
     native = false,
   ): void {
     let t = this.lazyTrapsSeen.get(spec);
-    if (!t) this.lazyTrapsSeen.set(spec, (t = { via: new Set(), packages: new Set(), native }));
+    if (!t) this.lazyTrapsSeen.set(spec, (t = { via: new Set(), packages: new Set(), native, bun: false }));
     if (via.require) t.via.add("require");
     if (via.dynamicImport) t.via.add("import()");
     if (via.static && moduleLazy) t.via.add("import");
@@ -1636,7 +1653,15 @@ export class NpmGraphBuilder {
       return;
     }
     const format = this.formatOf(key);
-    const executableSource = npmExecutableSource(key, source);
+    let executableSource = npmExecutableSource(key, source);
+    // Bun runtime modules under --target bun: the import declarations
+    // become reads of the island's trap table (bun-island-rewrite.ts), so
+    // the module links and only a USE throws.
+    if (format !== "json" && activeRuntimeTarget().family === "bun") {
+      const rewritten = rewriteBunModuleImports(executableSource, key);
+      for (const spec of rewritten.specifiers) this.noteBunTrap(spec, chain[chain.length - 1] ?? key);
+      executableSource = rewritten.source;
+    }
     this.modules.set(key, { key, source: executableSource, format });
     if (lazy) this.lazilyReached.add(key);
     if (format === "json") return;
@@ -1711,13 +1736,16 @@ export class NpmGraphBuilder {
     for (const use of this.specifiersOf(key, source)?.uses ?? []) {
       const spec = use.specifier;
       const eager = !lazy && use.static;
-      if (spec.startsWith("./") || spec.startsWith("../")) {
+      // Bare "." and ".." are the relative DIRECTORY imports Node's
+      // resolution (and the preflight resolver) serve; a package named
+      // "." does not exist.
+      if (spec.startsWith("./") || spec.startsWith("../") || spec === "." || spec === "..") {
         // A relative file: no conditions apply, so every call form shares
         // one "any" edge. A blocked lazy one embeds the import trap only
         // for import()/static-in-lazy sites — require-reached specs embed
         // NO edge and the island's require shim throws Node's
         // MODULE_NOT_FOUND with the live require stack at the call.
-        const absolute = resolve(dirname(key), spec);
+        const absolute = resolve(dirname(key), spec === "." || spec === ".." ? `${spec}/` : spec);
         const file = workspacePackageOfPath(key) === null
           ? this.resolveFile(absolute)
           : this.resolveWorkspaceFile(absolute);
@@ -1743,6 +1771,14 @@ export class NpmGraphBuilder {
         if (to.endsWith(".node")) this.noteLazyTrap(spec, use, pkgName, lazy, true);
         pushEdge(key, spec, to, "any");
         this.walk(to, chain, lazy || !use.static);
+        continue;
+      }
+      // A Bun runtime module reached by require(): under the bun target
+      // the island's require shim answers the trap table (no edge to
+      // embed); a Node target has no such module and takes the bare
+      // package path below, which reports it.
+      if (isBunModuleSpecifier(spec) && activeRuntimeTarget().family === "bun") {
+        this.noteBunTrap(spec, pkgName);
         continue;
       }
       const builtin = builtinKeyOf(spec);

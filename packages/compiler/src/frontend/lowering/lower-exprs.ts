@@ -1093,6 +1093,19 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           L.pushDiag(blockedBindingUseDiag(expr.text, loc));
           throw new PoisonError();
         }
+        // An island binding (an npm or island-module export) READ as a
+        // value whose DECLARED type is a primitive exits to it here, the
+        // validated boundary calls already take — `export const kind:
+        // string` reads as a string, not as a handle.
+        if (g.type.kind === "jsval" && g.id.startsWith("%g.npm.")) {
+          const declared = L.mapTypeOf(L.typeOf(expr));
+          if (declared !== null && (declared.kind === "f64" || declared.kind === "bool" || declared.kind === "string")) {
+            return L.maybeNarrow(
+              { kind: "jsExit", value: { kind: "varRef", localId: g.id, type: g.type, loc }, type: declared, loc },
+              expr,
+            );
+          }
+        }
         return L.maybeNarrow({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
       }
       // `undefined` — tsc's intrinsic global (a local shadowing the name

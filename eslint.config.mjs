@@ -25,6 +25,10 @@ const TS5_ISLANDS = [
   // regex spans and syntax errors; its boundary is strings, offsets, and
   // booleans, so no 5.9.3 AST value enters the 7.0.2 program world.
   "packages/compiler/src/library/semantic-source.ts",
+  // Rewrites `import … from "bun:*"` in EMBEDDED JavaScript (island
+  // source, never program AST) into trap-table reads: like npm.ts's scan,
+  // its boundary is source text and offsets.
+  "packages/compiler/src/frontend/bun-island-rewrite.ts",
 ];
 
 const ts5Fence = {
