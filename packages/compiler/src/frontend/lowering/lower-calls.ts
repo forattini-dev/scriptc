@@ -3619,9 +3619,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // of lowerCall routed unhandled ones to the chain lowering), so
     // `x?.y(...)` re-dispatches into this same method-call form with the
     // receiver reading back as the chain's bound handle.
+    // A namespace-qualified callee whose NAMESPACE maps to a handle type
+    // (`Ns.f(...)` over a static module of island-typed exports, or a
+    // barrel over an island module) is not a method call on a namespace
+    // object: the member resolves to its own handle (lowerExpr's
+    // namespace rule) and the call takes the function-call form below.
     if (
       ts.isPropertyAccessExpression(expr.expression) &&
-      L.isIslandExpr(expr.expression.expression)
+      L.isIslandExpr(expr.expression.expression) &&
+      (expr.expression.questionDotToken !== undefined || nsMemberIdentOf(L, expr.expression) === null)
     ) {
       // Typed fetch/Web Streams handles map to island values under
       // --dynamic, but their inventory still owns which methods exist.

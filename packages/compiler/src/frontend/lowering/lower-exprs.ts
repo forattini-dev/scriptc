@@ -1799,6 +1799,20 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (!expr.questionDotToken && chainTailClaimed(L, expr)) {
         return L.lowerOptionalChain(expr);
       }
+      // A namespace-qualified read whose NAMESPACE maps to a handle type
+      // (a static module of island-typed exports, a barrel over an island
+      // module): the member is still a compile-time-known declaration —
+      // it resolves like a bare identifier (its own handle global), never
+      // through a namespace object. Ahead of the island-receiver path,
+      // which would materialize the namespace as a value.
+      if (!expr.questionDotToken && L.isIslandExpr(expr.expression)) {
+        const nsMember = nsMemberIdentOf(L, expr);
+        if (nsMember) {
+          const memberSym = L.checker.getSymbolAtLocation(nsMember);
+          if (memberSym) fenceEarlyNsMemberRef(L, expr, memberSym);
+          return lowerExpr(L, nsMember);
+        }
+      }
       // Island receiver: o.x is an engine property read (getProp may throw
       // — reading off null/undefined — bridged catchably like everything
       // at the boundary). `o?.x` arrives here too, through the chain
