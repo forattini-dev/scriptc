@@ -449,6 +449,9 @@ export class RustDynamicEmitter {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
     this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
+    // A handle answers what the engine says: solid's accessors and
+    // setters are functions there, and static code branches on that.
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => return runtime::island_value_typeof(value),`);
     this.context.line("_ => \"object\",");
     this.context.popIndent();
     this.context.line("};");

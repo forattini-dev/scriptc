@@ -184,6 +184,81 @@ impl Drop for IslandSlot {
 
 thread_local! {
     static ISLAND_STATE: IslandSlot = const { IslandSlot(RefCell::new(None)) };
+    /// The realm while an engine callback runs Rust code that may call
+    /// back INTO the realm (island_reenter): the Context boa's suspended
+    /// frame owns travels here, borrowed by nested `with_island_state`
+    /// calls, and returns to that frame before the callback answers.
+    static ISLAND_REENTRANT: RefCell<Option<IslandState>> = const { RefCell::new(None) };
+    /// The placeholder Context that stands in boa's frame while the real
+    /// one is re-entered. Built once per thread, reused for every callback.
+    static ISLAND_SPARE: RefCell<Option<Context>> = const { RefCell::new(None) };
+}
+
+/// The realm taken out of its slot for one funnel call; Drop puts it back
+/// — on the ordinary return and on an unwind alike — into the slot it
+/// came from.
+struct TakenState {
+    reentrant: bool,
+    state: Option<IslandState>,
+}
+
+impl Drop for TakenState {
+    fn drop(&mut self) {
+        let Some(state) = self.state.take() else { return; };
+        if self.reentrant {
+            ISLAND_REENTRANT.with(|slot| *slot.borrow_mut() = Some(state));
+        } else {
+            ISLAND_STATE.with(|slot| *slot.borrow_mut() = Some(state));
+        }
+    }
+}
+
+/// Run Rust code that boa invoked (a scriptc callback marshaled into the
+/// realm) so that it may call back INTO the realm synchronously — a
+/// callback reading a signal, a `dispose()` handed to it, a nested
+/// `island_call`. The realm's own Context is the one boa's suspended
+/// frame holds as `context`; it moves into the re-entrant slot for the
+/// duration (a spare realm stands in the frame meanwhile), nested funnel
+/// calls borrow it from there, and the guard moves it back before the
+/// frame resumes — also when the body unwinds, which is how a scriptc
+/// `throw` inside the callback travels. Safe Rust throughout: the swap is
+/// `mem::replace` on the `&mut Context` the callback already owns.
+pub(crate) fn island_reenter<T>(context: &mut Context, body: impl FnOnce() -> T) -> T {
+    let Some(loader) = island_loader() else {
+        return body();
+    };
+    let spare = ISLAND_SPARE
+        .with(|slot| slot.borrow_mut().take())
+        .unwrap_or_else(island_spare_context);
+    let real = std::mem::replace(context, spare);
+    ISLAND_REENTRANT.with(|slot| *slot.borrow_mut() = Some(IslandState { context: real, loader }));
+    let _guard = Reentry { context };
+    body()
+}
+
+struct Reentry<'a> {
+    context: &'a mut Context,
+}
+
+impl Drop for Reentry<'_> {
+    fn drop(&mut self) {
+        if let Some(temp) = ISLAND_REENTRANT.with(|slot| slot.borrow_mut().take()) {
+            let spare = std::mem::replace(self.context, temp.context);
+            ISLAND_SPARE.with(|slot| *slot.borrow_mut() = Some(spare));
+        }
+    }
+}
+
+fn island_spare_context() -> Context {
+    Context::builder()
+        .build()
+        .unwrap_or_else(|error| panic!("scriptc: cannot create the island's spare context: {error}"))
+}
+
+/// Drops every realm-side slot at island teardown (island_eval_finish).
+fn island_reentry_reset() {
+    ISLAND_REENTRANT.with(|slot| *slot.borrow_mut() = None);
+    ISLAND_SPARE.with(|slot| *slot.borrow_mut() = None);
 }
 
 /// The single funnel every island call passes through, so it is also the
@@ -205,11 +280,22 @@ thread_local! {
 /// has unwound itself and the `ISLAND_STATE` borrow is released.
 fn with_island_state<T>(f: impl FnOnce(&mut IslandState) -> T) -> T {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ISLAND_STATE.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            let state = slot.get_or_insert_with(island_state);
-            f(state)
-        })
+        // The realm leaves its slot for the duration of `f` (no RefCell
+        // borrow is held while boa runs), so an engine callback can hand
+        // it back in through island_reenter and nest another call.
+        let reentrant = ISLAND_REENTRANT.with(|slot| slot.borrow_mut().take());
+        let mut taken = match reentrant {
+            Some(state) => TakenState { reentrant: true, state: Some(state) },
+            None => TakenState {
+                reentrant: false,
+                state: Some(
+                    ISLAND_STATE
+                        .with(|slot| slot.borrow_mut().take())
+                        .unwrap_or_else(island_state),
+                ),
+            },
+        };
+        f(taken.state.as_mut().expect("scriptc: island state taken twice"))
     }));
     match outcome {
         Ok(value) => {

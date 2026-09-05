@@ -46,11 +46,14 @@ for (const program of programs) {
   const out = path.join(bench, program.replace(/\.ts$/, ""));
   // Every program keeps a static entry and an island module (the frontier
   // shape); the compiler classifies it automatically.
-  const build = timed(process.execPath, [cli, "build", entry, "--backend", "rust", "--dynamic", "--island-module", "auto", "-o", out], bench);
+  // solid-js's "node" export condition is its SSR build (signals and
+  // effects are inert there); the "browser" condition is the universal
+  // renderer every runtime resolves for this comparison.
+  const build = timed(process.execPath, [cli, "build", entry, "--backend", "rust", "--dynamic", "--island-module", "auto", "--conditions", "browser", "-o", out], bench);
   const row = { build: { ms: build.ms, ok: build.code === 0, note: build.code === 0 ? "" : build.stderr } };
   if (build.code === 0) row.scriptc = timed(out, [], bench);
-  row.node = timed(process.execPath, [entry], bench);
-  if (bun !== null) row.bun = timed(bun, ["run", entry], bench);
+  row.node = timed(process.execPath, ["--conditions=browser", entry], bench);
+  if (bun !== null) row.bun = timed(bun, ["run", "--conditions=browser", entry], bench);
   results[program] = row;
   console.log(program, JSON.stringify(row));
 }

@@ -55,6 +55,8 @@ include!("island_fetch.rs");
 #[cfg(feature = "island-eval")]
 include!("island_eval.rs");
 #[cfg(feature = "island-eval")]
+include!("island_host_functions.rs");
+#[cfg(feature = "island-eval")]
 include!("island_promise.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");

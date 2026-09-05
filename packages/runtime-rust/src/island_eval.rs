@@ -28,37 +28,6 @@ const ISLAND_STREAM_BOOTSTRAP: &str = include_str!("island_streams.js");
 #[derive(Clone)]
 pub struct IslandValue(JsValue);
 
-/// One engine argument as the host closure sees it.
-///
-/// The raw value covers every primitive extraction. `bytes` is copied out
-/// eagerly at the boundary because a Uint8Array cannot be read without
-/// the engine context, and the context is only borrowable inside the
-/// engine's own call — by the time the generated closure body runs, the
-/// island state is already borrowed by the call that reached it.
-#[derive(Clone)]
-pub struct IslandHostArgument {
-    value: IslandValue,
-    bytes: Option<Rc<Vec<u8>>>,
-}
-
-/// What a marshaled scriptc closure hands back to the engine.
-///
-/// This mirrors the C island's host-call adapter returns (emit-island.ts's
-/// `islandAdapter` tags): primitives by value, `Bytes` as a Uint8Array,
-/// and `Json` as text the realm parses — the deep-copy stance the rest of
-/// the boundary already takes for composites.
-pub enum IslandHostResult {
-    Undefined,
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(JsString),
-    Bytes(Vec<u8>),
-    Json(JsString),
-}
-
-type IslandHostCallback = Rc<dyn Fn(&[IslandHostArgument]) -> IslandHostResult>;
-
 pub fn island_value_undefined() -> IslandValue {
     IslandValue(JsValue::undefined())
 }
@@ -73,6 +42,13 @@ pub fn island_value_number(value: f64) -> IslandValue {
 
 pub fn island_value_boolean(value: bool) -> IslandValue {
     IslandValue(JsValue::from(value))
+}
+
+/// `typeof` of a handle, answered by the engine: a handle is not
+/// "object" by construction — solid's `createSignal` tuple holds two
+/// functions, and static code branching on `typeof` must see them.
+pub fn island_value_typeof(value: &IslandValue) -> JsString {
+    string(value.0.type_of())
 }
 
 pub fn island_value_string(value: &JsString) -> IslandValue {
@@ -150,87 +126,6 @@ pub fn island_host_argument_bytes(
         throw_type_error(format!("expected Uint8Array at argument {index}"));
     };
     bytes_from_vec(value.as_ref().clone())
-}
-
-/// Copy a runtime byte array out for an `IslandHostResult::Bytes`.
-pub fn island_bytes_values(bytes: &JsBytes<u8>) -> Vec<u8> {
-    bytes_values(bytes)
-}
-
-/// A `jsval` parameter: the engine handle passes straight through.
-pub fn island_host_argument_value(
-    arguments: &[IslandHostArgument],
-    index: usize,
-) -> IslandValue {
-    arguments
-        .get(index)
-        .map_or_else(island_value_undefined, |argument| argument.value.clone())
-}
-
-pub fn island_value_host_function(
-    arity: usize,
-    callback: IslandHostCallback,
-) -> IslandValue {
-    let id = ISLAND_HOST_CALLBACK_ID.with(|next| {
-        let id = next.get();
-        next.set(id.wrapping_add(1));
-        id
-    });
-    ISLAND_HOST_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, callback));
-    with_island_state(|state| {
-        // The callback is arbitrary generated Rust, so a scriptc `throw`
-        // inside it is the EXPECTED case, not the exotic one: the
-        // boundary is what turns it into an exception the island's
-        // JavaScript can catch instead of an unwind through boa.
-        let native = NativeFunction::from_copy_closure(move |_this, arguments, context| {
-            island_boundary(context, |context| {
-                let arguments = arguments
-                    .iter()
-                    .cloned()
-                    .map(|value| island_host_argument(value, context))
-                    .collect::<JsResult<Vec<_>>>()?;
-                let result = ISLAND_HOST_CALLBACKS.with(|callbacks| {
-                    let callbacks = callbacks.borrow();
-                    let callback = callbacks
-                        .get(&id)
-                        .expect("scriptc: missing island host callback");
-                    callback(&arguments)
-                });
-                island_host_result_value(result, context)
-            })
-        });
-        let function = FunctionObjectBuilder::new(state.context.realm(), native)
-            .length(arity)
-            .build();
-        IslandValue(function.into())
-    })
-}
-
-/// Wrap one borrowed engine argument, copying a Uint8Array out while the
-/// engine context is still reachable.
-fn island_host_argument(value: JsValue, context: &mut Context) -> JsResult<IslandHostArgument> {
-    let bytes = value
-        .as_object()
-        .and_then(|object| BoaJsUint8Array::from_object(object).ok())
-        .map(|array| array.to_vec(context))
-        .transpose()?
-        .map(Rc::new);
-    Ok(IslandHostArgument { value: IslandValue(value), bytes })
-}
-
-/// Marshal a closure result back into the realm.
-fn island_host_result_value(result: IslandHostResult, context: &mut Context) -> JsResult<JsValue> {
-    Ok(match result {
-        IslandHostResult::Undefined => JsValue::undefined(),
-        IslandHostResult::Null => JsValue::null(),
-        IslandHostResult::Bool(value) => JsValue::from(value),
-        IslandHostResult::Number(value) => JsValue::from(value),
-        IslandHostResult::String(value) => {
-            JsValue::from(boa_engine::JsString::from(value.as_ref()))
-        }
-        IslandHostResult::Bytes(value) => BoaJsUint8Array::from_iter(value, context)?.into(),
-        IslandHostResult::Json(value) => island_parse_json(&value, context)?,
-    })
 }
 
 pub fn island_value_object(fields: Vec<(JsString, IslandValue)>) -> IslandValue {
@@ -579,11 +474,31 @@ fn island_run_jobs(state: &mut IslandState) {
 struct IslandState {
     context: Context,
     loader: Rc<IslandModuleLoader>,
+}
+
+/// The realm's module tables, beside the state rather than inside it so a
+/// re-entered call (island_reenter) shares them: every access is a short
+/// borrow that never spans an engine call.
+#[derive(Default)]
+struct IslandTables {
     modules: HashMap<&'static str, Module>,
     evaluated: HashSet<String>,
     /// `node:` wrappers synthesized on demand for `import()`. Keyed by
     /// specifier because builtin keys are not in the embedded table.
     builtins: HashMap<String, Module>,
+}
+
+thread_local! {
+    static ISLAND_TABLES: RefCell<IslandTables> = RefCell::new(IslandTables::default());
+    static ISLAND_LOADER: RefCell<Option<Rc<IslandModuleLoader>>> = const { RefCell::new(None) };
+}
+
+fn with_tables<T>(f: impl FnOnce(&mut IslandTables) -> T) -> T {
+    ISLAND_TABLES.with(|tables| f(&mut tables.borrow_mut()))
+}
+
+fn island_loader() -> Option<Rc<IslandModuleLoader>> {
+    ISLAND_LOADER.with(|slot| slot.borrow().clone())
 }
 
 /// Evaluate JavaScript in the persistent island realm and return String(result).
@@ -621,7 +536,7 @@ fn island_module_namespace(
     state: &mut IslandState,
     key: &str,
 ) -> Result<JsValue, IslandImportFailure> {
-    let Some((&module_key, module)) = state.modules.get_key_value(key) else {
+    let Some((module_key, module)) = with_tables(|t| t.modules.get_key_value(key).map(|(k, m)| (*k, m.clone()))) else {
         // A `node:` specifier is never in the embedded table — the build
         // embeds npm sources, not builtins — so it takes the same
         // synthesized wrapper the ES loader hands the static graph.
@@ -633,13 +548,12 @@ fn island_module_namespace(
             "ERR_MODULE_NOT_FOUND",
         ));
     };
-    let module = module.clone();
-    if !state.evaluated.contains(module_key) {
+    if !with_tables(|t| t.evaluated.contains(module_key)) {
         island_module_evaluate(state, &module, key)?;
         // Cache only a successful lifecycle. Marking before evaluation
         // made a rejected first import expose an unevaluated namespace on
         // the second import instead of rejecting with the module failure.
-        state.evaluated.insert(module_key.to_owned());
+        with_tables(|t| t.evaluated.insert(module_key.to_owned()));
     }
     Ok(module.namespace(&mut state.context).into())
 }
@@ -654,7 +568,7 @@ fn island_builtin_namespace(
     state: &mut IslandState,
     key: &str,
 ) -> Result<JsValue, IslandImportFailure> {
-    if let Some(module) = state.builtins.get(key).cloned() {
+    if let Some(module) = with_tables(|t| t.builtins.get(key).cloned()) {
         return Ok(module.namespace(&mut state.context).into());
     }
     let source = island_builtin_wrapper(key);
@@ -666,7 +580,7 @@ fn island_builtin_namespace(
     )
     .map_err(IslandImportFailure::Engine)?;
     island_module_evaluate(state, &module, key)?;
-    state.builtins.insert(key.to_owned(), module.clone());
+    with_tables(|t| t.builtins.insert(key.to_owned(), module.clone()));
     Ok(module.namespace(&mut state.context).into())
 }
 
@@ -793,9 +707,9 @@ pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
                 .loader
                 .load_external(&path, &mut state.context)
                 .map_err(IslandImportFailure::Engine)?;
-            if !state.evaluated.contains(&key) {
+            if !with_tables(|t| t.evaluated.contains(&key)) {
                 island_module_evaluate(state, &module, &key)?;
-                state.evaluated.insert(key.clone());
+                with_tables(|t| t.evaluated.insert(key.clone()));
             }
             Ok(module.namespace(&mut state.context).into())
         })();
@@ -1112,13 +1026,9 @@ fn island_state() -> IslandState {
         loader.insert(embedded.key, module.clone());
         modules.insert(embedded.key, module);
     }
-    IslandState {
-        context,
-        loader,
-        modules,
-        evaluated: HashSet::new(),
-        builtins: HashMap::new(),
-    }
+    with_tables(|t| *t = IslandTables { modules, evaluated: HashSet::new(), builtins: HashMap::new() });
+    ISLAND_LOADER.with(|slot| *slot.borrow_mut() = Some(loader.clone()));
+    IslandState { context, loader }
 }
 
 fn island_render(value: JsValue, context: &mut Context) -> JsString {
@@ -1193,6 +1103,9 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 /// too, so `ISLAND_STATE` never survives to an uncontrolled thread-exit
 /// drop with the GC arena mid-mutation.
 fn island_eval_finish() {
+    island_reentry_reset();
+    ISLAND_LOADER.with(|slot| *slot.borrow_mut() = None);
+    with_tables(|t| *t = IslandTables::default());
     island_net_reset();
     island_fetch_requests_reset();
     island_promise_bridges_reset();

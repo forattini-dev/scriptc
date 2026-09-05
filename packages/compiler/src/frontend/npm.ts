@@ -90,16 +90,20 @@ import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { npmExecutableSource } from "./npm-typescript.js";
-import { activeRuntimeTarget } from "../compat/runtime-target.js";
+import { activeRuntimeConditions, activeRuntimeTarget } from "../compat/runtime-target.js";
 import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
 import { resolveExports, resolvePackageImports } from "./resolve.js";
 import { workspacePackageOfPath } from "./shared.js";
 
-const NODE_IMPORT_CONDITIONS = new Set(["import", "node", "default"]);
-const NODE_REQUIRE_CONDITIONS = new Set(["require", "node", "default"]);
+/** The embedded graph resolves with the ACTIVE RUNTIME TARGET's conditions
+ * (node24/node26: node; bun: bun then node; plus --conditions) beside the
+ * edge kind's own — the same branches the runtime itself would take. */
+function nodeConditions(mode: "import" | "require"): ReadonlySet<string> {
+  return new Set([mode, ...activeRuntimeConditions().filter((c) => c !== "import"), "default"]);
+}
 
 function nodeExportConditions(mode: "import" | "require"): ReadonlySet<string> {
-  return mode === "import" ? NODE_IMPORT_CONDITIONS : NODE_REQUIRE_CONDITIONS;
+  return nodeConditions(mode);
 }
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
@@ -837,7 +841,7 @@ export function probeNodeImportRefusal(
   // Node's PACKAGE_EXPORTS_RESOLVE outcome for the subpath.
   const withinScope = (pkgDir: string, pkg: PkgJson): NodeImportRefusal | null => {
     if (pkg.exports === undefined) return null; // legacy resolution — conservative
-    const target = resolveExports(pkg.exports, subpath, NODE_IMPORT_CONDITIONS);
+    const target = resolveExports(pkg.exports, subpath, nodeConditions("import"));
     if (target === null) {
       return {
         code: "ERR_PACKAGE_PATH_NOT_EXPORTED",

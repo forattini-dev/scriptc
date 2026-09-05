@@ -1,6 +1,7 @@
 import type { RustClosureShape } from "./model.js";
 
 interface RustDynamicIterationContext {
+  hasEmbeddedModules(): boolean;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -23,6 +24,11 @@ export function emitRustDynamicIteration(
   context.line(`${name}::String(text) => { let mut chars = text.chars(); for _ in 0..count { runtime::array_push(&output, chars.next().map_or(${name}::Undefined, |character| ${name}::String(runtime::string(&character.to_string())))); } },`);
   context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::bytes_len(bytes) { ${name}::Number(runtime::bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
   context.line(`${name}::TypedBytes(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::typed_bytes_len(bytes) { ${name}::Number(runtime::typed_bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);
+  if (context.hasEmbeddedModules()) {
+    // An island value iterates through its own Symbol.iterator; the first
+    // `count` results fill the pattern, missing ones read undefined.
+    context.line(`${name}::Island(source) => { match runtime::island_spread_values(source) { Some(values) => { for index in 0..count { runtime::array_push(&output, values.get(index).cloned().map_or(${name}::Undefined, ${name}::Island)); } } None => runtime::throw_type_error("object is not iterable (cannot read property Symbol(Symbol.iterator))".to_owned()), } },`);
+  }
   context.line("other => {");
   context.pushIndent();
   context.line("let description = match other {");

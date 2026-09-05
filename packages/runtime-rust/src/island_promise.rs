@@ -74,16 +74,20 @@ where
         // which runs the caller's `map` and the native promise's own
         // continuations. Any of that can `throw`, so both reactions are
         // boundaries.
+        // Settling runs the native promise's continuations — scriptc code
+        // that may call back into the realm — so both reactions re-enter.
         let fulfilled = NativeFunction::from_copy_closure(move |_this, arguments, context| {
-            island_boundary(context, |_context| {
-                island_promise_fulfill(id, arguments.first().cloned().unwrap_or_default());
+            island_boundary(context, |context| {
+                let value = arguments.first().cloned().unwrap_or_default();
+                island_reenter(context, || island_promise_fulfill(id, value));
                 Ok(JsValue::undefined())
             })
         });
         let rejected = NativeFunction::from_copy_closure(move |_this, arguments, context| {
             island_boundary(context, |context| {
                 let error = BoaJsError::from_opaque(arguments.first().cloned().unwrap_or_default());
-                island_promise_reject(id, island_error_caught(error, context));
+                let caught = island_error_caught(error, context);
+                island_reenter(context, || island_promise_reject(id, caught));
                 Ok(JsValue::undefined())
             })
         });

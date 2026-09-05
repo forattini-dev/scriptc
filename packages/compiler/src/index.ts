@@ -883,20 +883,33 @@ const TIERING_CASCADE_CODES: ReadonlySet<string> = new Set([
  * static builds lower exactly once. */
 function lowerWithFrontier(fe: Frontend, options: LowerOptions): LowerResult {
   if (!autoIslandTiering() || options.dynamic !== true) return fe.lower(options);
-  const movable = new Set(fe.moduleFiles().map((f) => resolve(f)));
   const roundOptions: LowerOptions = { ...options, coverage: true };
   let lowered = fe.lower(roundOptions);
   const blockers = (result: LowerResult): ScrDiagnostic[] => [
     ...result.diagnostics,
     ...(result.unreached?.diagnostics ?? []),
   ];
-  for (let round = 0; round < 24 && blockers(lowered).length > 0; round++) {
+  const maxRounds = Number(process.env["SCRIPTC_TIERING_ROUNDS"] ?? "24") || 24;
+  const trace = process.env["SCRIPTC_TIERING_TRACE"] === "1";
+  for (let round = 0; round < maxRounds && blockers(lowered).length > 0; round++) {
+    // The module universe is re-read every round: modules reached only
+    // through dynamic import() join the evaluation order during a
+    // lowering, and the entry is never movable.
+    const files = fe.moduleFiles().map((f) => resolve(f));
+    const entryFile = files[files.length - 1] ?? "";
+    const movable = new Set(files.filter((f) => f !== entryFile));
     const offenders = new Map<string, string>();
+    const skipped = new Map<string, number>();
     for (const d of blockers(lowered)) {
-      if (TIERING_CASCADE_CODES.has(d.code)) continue;
+      if (TIERING_CASCADE_CODES.has(d.code)) { skipped.set(`cascade:${d.code}`, (skipped.get(`cascade:${d.code}`) ?? 0) + 1); continue; }
       const file = resolve(d.loc.file);
-      if (!movable.has(file) || isIslandModulePath(file) || offenders.has(file)) continue;
+      if (!movable.has(file)) { skipped.set(`not-movable:${file}`, (skipped.get(`not-movable:${file}`) ?? 0) + 1); continue; }
+      if (isIslandModulePath(file)) { skipped.set(`already-island:${file}`, (skipped.get(`already-island:${file}`) ?? 0) + 1); continue; }
+      if (offenders.has(file)) continue;
       offenders.set(file, `${d.code} ${d.message}`);
+    }
+    if (trace) {
+      process.stderr.write(`scriptc tiering-trace ${JSON.stringify({ round: round + 1, blockers: blockers(lowered).length, offenders: [...offenders.keys()], skipped: [...skipped.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40) })}\n`);
     }
     if (offenders.size === 0) break;
     for (const [file, reason] of offenders) addAutoIslandModule(file, `round ${round + 1}: ${reason}`);

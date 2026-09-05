@@ -363,7 +363,8 @@ function emitOperation(
   if (expr.op === "typeof" && expr.args.length === 1) {
     const value = context.nextName("sc_island_typeof");
     const dyn = context.dynTypeName();
-    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; runtime::string(match &${value} { ${dyn}::Undefined => "undefined", ${dyn}::Boolean(..) => "boolean", ${dyn}::Number(..) => "number", ${dyn}::String(..) => "string", value if sc_dyn_kind(value) == "function" => "function", _ => "object" }) }`;
+    const island = context.hasEmbeddedModules() ? `${dyn}::Island(value) => runtime::island_value_typeof(value), ` : "";
+    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; match &${value} { ${island}value => runtime::string(match value { ${dyn}::Undefined => "undefined", ${dyn}::Boolean(..) => "boolean", ${dyn}::Number(..) => "number", ${dyn}::String(..) => "string", value if sc_dyn_kind(value) == "function" => "function", _ => "object" }) } }`;
   }
   if (expr.op === "callMethod" && expr.name !== undefined && expr.args.length > 0) {
     const receiver = context.nextName("sc_island_receiver");
@@ -497,8 +498,34 @@ function emitIslandArguments(args: string, context: RustIslandContext): string {
   return `${args}.iter().map(|sc_arg| ${emitIslandValue("sc_arg", context)}).collect::<Vec<_>>()`;
 }
 
-function emitIslandValue(value: string, context: RustIslandContext): string {
+function emitIslandValue(value: string, context: RustIslandContext, depth = 0): string {
   const dyn = context.dynTypeName();
+  // A checked-dynamic FUNCTION crossing into the realm (a callback whose
+  // signature the typed host bridge cannot spell — an island-typed
+  // parameter, a rest list): the engine gets a host function that hands
+  // every argument back as a handle, calls the dyn function, and marshals
+  // its result the same way an argument crosses. One level deep: a
+  // callback answering a function is a boundary refusal.
+  const callback = depth > 0
+    ? `runtime::throw_error_code("a callback crossing into the island answered a function (nested callbacks stay island-side)".to_owned(), "SC3001")`
+    // The host function carries the closure's declared arity: libraries
+    // branch on `fn.length` (solid's `createRoot` only hands a disposer
+    // to callbacks declaring one).
+    : `{ let sc_callback = sc_value.clone(); runtime::island_value_host_function(` +
+      `match sc_dyn_key_get(sc_value, &runtime::string("length"), false) { ${dyn}::Number(sc_n) => sc_n as usize, _ => 0 }, ` +
+      `std::rc::Rc::new(move |sc_args| { ` +
+      `let sc_dyn_args: Vec<${dyn}> = (0..sc_args.len()).map(|sc_i| ${dyn}::Island(runtime::island_host_argument_value(sc_args, sc_i))).collect(); ` +
+      `let sc_result = sc_dyn_call(&sc_callback, &sc_dyn_args, "callback"); ` +
+      `match sc_result { ` +
+      `${dyn}::Undefined => runtime::IslandHostResult::Undefined, ` +
+      `${dyn}::Null => runtime::IslandHostResult::Null, ` +
+      `${dyn}::Number(sc_v) => runtime::IslandHostResult::Number(sc_v), ` +
+      `${dyn}::Boolean(sc_v) => runtime::IslandHostResult::Bool(sc_v), ` +
+      `${dyn}::String(sc_v) => runtime::IslandHostResult::String(sc_v), ` +
+      `${dyn}::Bytes(sc_v) | ${dyn}::Buffer(sc_v) => runtime::IslandHostResult::Bytes(runtime::island_bytes_values(&sc_v)), ` +
+      `${dyn}::Island(sc_v) => runtime::IslandHostResult::Island(sc_v), ` +
+      `sc_other => runtime::IslandHostResult::Island(${emitIslandValue("&sc_other", context, depth + 1)}), ` +
+      `} })) }`;
   return `match ${value} { ` +
     `${dyn}::Undefined => runtime::island_value_undefined(), ` +
     `${dyn}::Null => runtime::island_value_null(), ` +
@@ -514,6 +541,7 @@ function emitIslandValue(value: string, context: RustIslandContext): string {
     `${dyn}::Regex(sc_value) => runtime::island_value_regexp(` +
     `&runtime::regex_source(sc_value), &runtime::regex_flags(sc_value)), ` +
     `${dyn}::Island(sc_value) => sc_value.clone(), ` +
+    `sc_value if sc_dyn_typeof(sc_value).as_ref() == "function" => ${callback}, ` +
     `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
     `}`;
 }

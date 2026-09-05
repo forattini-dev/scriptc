@@ -4,76 +4,76 @@
   "results": {
     "effect-gen.ts": {
       "build": {
-        "ms": 95276,
+        "ms": 77329,
         "ok": true,
         "note": ""
       },
       "scriptc": {
-        "ms": 2384,
+        "ms": 1052,
         "code": 0,
-        "stdout": "effect-gen 2000 fibers sum=95971 ms=644",
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=256",
         "stderr": ""
       },
       "node": {
-        "ms": 671,
+        "ms": 327,
         "code": 0,
-        "stdout": "effect-gen 2000 fibers sum=95971 ms=23",
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=11",
         "stderr": ""
       },
       "bun": {
-        "ms": 544,
+        "ms": 177,
         "code": 0,
-        "stdout": "effect-gen 2000 fibers sum=95971 ms=40",
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=15",
         "stderr": ""
       }
     },
     "solid-signals.ts": {
       "build": {
-        "ms": 57015,
+        "ms": 30014,
         "ok": true,
         "note": ""
       },
       "scriptc": {
-        "ms": 142,
-        "code": 1,
-        "stdout": "",
-        "stderr": "Uncaught Error: embedded module call argument is outside the JSON-safe island subset"
+        "ms": 3201,
+        "code": 0,
+        "stdout": "solid-signals 50000 updates observed=344450 ms=3096",
+        "stderr": ""
       },
       "node": {
-        "ms": 131,
+        "ms": 117,
         "code": 0,
-        "stdout": "solid-signals 50000 updates observed=0 ms=2",
+        "stdout": "solid-signals 50000 updates observed=344450 ms=38",
         "stderr": ""
       },
       "bun": {
-        "ms": 50,
+        "ms": 79,
         "code": 0,
-        "stdout": "solid-signals 50000 updates observed=0 ms=4",
+        "stdout": "solid-signals 50000 updates observed=344450 ms=42",
         "stderr": ""
       }
     },
     "json-exit.ts": {
       "build": {
-        "ms": 21045,
+        "ms": 9524,
         "ok": true,
         "note": ""
       },
       "scriptc": {
-        "ms": 15,
+        "ms": 9,
         "code": 0,
-        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=8",
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=5",
         "stderr": ""
       },
       "node": {
-        "ms": 161,
+        "ms": 79,
         "code": 0,
-        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=6",
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=3",
         "stderr": ""
       },
       "bun": {
-        "ms": 47,
+        "ms": 16,
         "code": 0,
-        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=6",
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=2",
         "stderr": ""
       }
     }

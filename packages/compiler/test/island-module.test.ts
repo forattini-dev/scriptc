@@ -17,10 +17,11 @@ test("an --island-module program module stops blocking the build and shows in th
   expect(blocked.coverage.diagnostics.some((d) => d.loc.file.endsWith("proxied.ts"))).toBe(true);
   expect(blocked.coverage.tiers).toBeUndefined();
 
-  const tiered = analyze(entry, { dynamic: true, islandModules: ["src/proxied.ts"] });
+  const tiered = analyze(entry, { dynamic: true, islandModules: ["src/proxied.ts", "src/blocked2.ts"] });
   expect(tiered.coverage.diagnostics.map((d) => `${d.code} ${d.message}`)).toEqual([]);
   expect(tiered.coverage.tiers?.map((t) => [t.module.split("/").pop(), t.tier])).toEqual([
     ["proxied.ts", "island"],
+    ["blocked2.ts", "island"],
     ["main.ts", "static"],
   ]);
 });
@@ -28,9 +29,11 @@ test("an --island-module program module stops blocking the build and shows in th
 test("--island-module auto moves the blocked module by itself and names the blocker", () => {
   const { coverage } = analyze(entry, { dynamic: true, islandModules: ["auto"] });
   expect(coverage.diagnostics).toEqual([]);
+  // Two independent blockers move in the SAME round (one lowering per
+  // round, every offender it names).
   const island = coverage.tiers?.filter((t) => t.tier === "island");
-  expect(island?.map((t) => t.module.split("/").pop())).toEqual(["proxied.ts"]);
-  expect(island?.[0]?.reason).toContain("auto: round 1: SC2020 'new Proxy'");
+  expect(island?.map((t) => t.module.split("/").pop())).toEqual(["proxied.ts", "blocked2.ts"]);
+  for (const row of island ?? []) expect(row.reason).toContain("auto: round 1: SC2020 'new Proxy'");
 });
 
 test("--write-tiers persists the frontier into scriptc.json, which later builds pin without a fixpoint", () => {
@@ -39,7 +42,7 @@ test("--write-tiers persists the frontier into scriptc.json, which later builds 
     analyze(entry, { dynamic: true, islandModules: ["auto"] });
     expect(writeProjectTiers()).toBe(config);
     const written = JSON.parse(readFileSync(config, "utf8")) as { tiers: { island: { module: string; reason: string }[] } };
-    expect(written.tiers.island.map((r) => r.module)).toEqual(["src/proxied.ts"]);
+    expect(written.tiers.island.map((r) => r.module)).toEqual(["src/blocked2.ts", "src/proxied.ts"]);
     expect(written.tiers.island[0]?.reason).toContain("SC2020 'new Proxy'");
     // No flag at all: the pin alone classifies the module.
     const pinnedRun = analyze(entry, { dynamic: true });
@@ -63,7 +66,7 @@ test("the island module's exports bind as handles and run (rust)", async () => {
     backend: "rust",
     optimization: "dev",
     dynamic: true,
-    islandModules: ["**/proxied.ts"],
+    islandModules: ["**/proxied.ts", "**/blocked2.ts"],
   });
   expect(result.ok, result.ok ? "" : result.diagnostics.map((d) => d.message).join("; ")).toBe(true);
   if (!result.ok) return;
@@ -73,5 +76,5 @@ test("the island module's exports bind as handles and run (rust)", async () => {
     });
   });
   expect(run.code).toBe(0);
-  expect(run.stdout).toBe("<x> 42\n");
+  expect(run.stdout).toBe("<x> 42 1\n");
 });
