@@ -27,6 +27,7 @@
     "gen:backend-libcalls": "tsx scripts/gen-backend-libcalls.mjs",
     "manifest": "tsx scripts/surface-manifest.mjs",
     "manifest:parity": "tsx scripts/manifest-parity.mjs",
+    "dogfood:scoreboard": "node scripts/dogfood-scoreboard.mjs",
     "scriptc": "tsx packages/cli/src/main.ts"
   },
   "devDependencies": {

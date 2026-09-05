@@ -600,7 +600,13 @@ export interface FileParts {
           if (process.env["SCRIPTC_TRACE_FENCE"]) {
             process.stderr.write(`[asset] ${spec} | tsType=${L.checker.typeToString(tsType).slice(0, 80)} | mapped=${mapped ? mapped.kind : "null"}\n`);
           }
-          L.badType(clause.name, tsType);
+          // badType diagnoses and throws PoisonError; the poison is this
+          // binding's alone — the next asset import still collects.
+          try {
+            L.badType(clause.name, tsType);
+          } catch (e) {
+            if (!(e instanceof PoisonError)) throw e;
+          }
           continue;
         }
         // The loader kind: the `with { type: ... }` attribute decides when

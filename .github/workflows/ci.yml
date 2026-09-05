@@ -229,6 +229,58 @@ jobs:
           --testNamePattern "Rust stream argument ladders and socket encoding match Node"
           --maxWorkers=1
 
+  # Compatibility gates that ran only by hand before: the pinned Node API
+  # inventory, the surface manifest, and the node24/node26 conformance
+  # matrix. Each interpreter is installed at the EXACT version the matrix
+  # pins (the locator rejects a version mismatch, so a bare "26" would
+  # drift the day 26.8.2 ships); the fetch conformance suite builds a
+  # program through the native backends, hence the Rust toolchain.
+  compat_gates:
+    name: test (compat gates: inventory, manifest, node matrix)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26.8.1"
+      - name: Capture Node 26 interpreter
+        id: node26
+        shell: bash
+        run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Capture Node 24 interpreter
+        id: node24
+        shell: bash
+        run: echo "executable=$(command -v node)" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain
+        working-directory: packages/runtime-rust
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            node_modules/.cache/node-api
+          key: compat-gates-${{ runner.os }}-${{ hashFiles('packages/runtime-rust/Cargo.lock', 'packages/compiler/compat/inventories/*.json') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Node API inventory is current
+        run: node scripts/node-surface-inventory.mjs --check
+      - name: Surface manifest is current
+        run: pnpm manifest -- --check
+      - name: node24/node26 conformance matrix
+        env:
+          SCRIPTC_NODE_NODE24: ${{ steps.node24.outputs.executable }}
+          SCRIPTC_NODE_NODE26: ${{ steps.node26.outputs.executable }}
+        run: pnpm gate:node-matrix
+
   # The runtime crate's own gate: its unit/integration tests and a
   # warnings-as-errors clippy sweep, on the toolchain pinned by the crate's
   # rust-toolchain.toml (running from the package directory is what makes
@@ -272,7 +324,7 @@ jobs:
   # single "test" check (branch protection, badges) keeps resolving. Fails
   # unless every matrix shard and all platform/version integration jobs succeeded.
   test:
-    needs: [tests, linux_host_clang, windows_cli, node_26_host, runtime_rust]
+    needs: [tests, linux_host_clang, windows_cli, node_26_host, runtime_rust, compat_gates]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -283,3 +335,4 @@ jobs:
           test "${{ needs.windows_cli.result }}" = success
           test "${{ needs.node_26_host.result }}" = success
           test "${{ needs.runtime_rust.result }}" = success
+          test "${{ needs.compat_gates.result }}" = success

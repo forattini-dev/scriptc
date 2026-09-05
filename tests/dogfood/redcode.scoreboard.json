@@ -1,0 +1,1088 @@
+{
+  "name": "redcode",
+  "entry": "../redcode/packages/redcode/src/index.ts",
+  "options": {
+    "dynamic": true,
+    "npmStatic": [
+      "@reddb-io/redcode-schema",
+      "@reddb-io/redcode-tui"
+    ]
+  },
+  "preflightFailed": false,
+  "stats": {
+    "statementsTotal": 5116,
+    "statementsFailed": 1092,
+    "statementsIsland": 1175,
+    "functionsSkipped": 0
+  },
+  "unreachedStats": {
+    "statementsTotal": 13321,
+    "statementsFailed": 1488,
+    "statementsIsland": 3367,
+    "functionsSkipped": 478
+  },
+  "reached": {
+    "total": 1345,
+    "byCode": {
+      "SC2009": 376,
+      "SC1090": 314,
+      "SC2004": 277,
+      "SC1013": 192,
+      "SC2020": 92,
+      "SC2001": 39,
+      "SC2008": 20,
+      "SC2006": 19,
+      "SC2002": 4,
+      "SC1100": 3,
+      "SC1120": 2,
+      "SC2003": 2,
+      "SC2005": 2,
+      "SC2030": 2,
+      "SC1071": 1
+    },
+    "byFamily": {
+      "cascade": 277,
+      "namespace-object-value": 192,
+      "component-other": 156,
+      "effect-generator-body": 148,
+      "syntax-other": 134,
+      "stdlib-tail": 92,
+      "computed-extends": 81,
+      "branded-intersection": 53,
+      "generic-dispatch": 48,
+      "type-residual": 39,
+      "solid-idioms": 25,
+      "intersection-shape": 20,
+      "island-boundary-function": 20,
+      "effect-typed-member": 19,
+      "index-signature": 19,
+      "jsx": 6,
+      "SC2002": 4,
+      "SC1100": 3,
+      "island-cannot-embed": 2,
+      "SC1120": 2,
+      "SC2003": 2,
+      "SC2005": 2,
+      "SC1071": 1
+    },
+    "byPackage": {
+      "redcode": 871,
+      "tui": 319,
+      "schema": 155
+    },
+    "families": [
+      {
+        "family": "cascade",
+        "count": 277,
+        "codes": {
+          "SC2004": 277
+        },
+        "packages": {
+          "redcode": 218,
+          "tui": 58,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/account/schema.ts",
+          "message": "uses of 'PollSuccess' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "namespace-object-value",
+        "count": 192,
+        "codes": {
+          "SC1013": 192
+        },
+        "packages": {
+          "schema": 109,
+          "redcode": 81,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/schema/src/connection.ts",
+          "message": "module namespace objects as first-class values (access 'Credential' members directly: Credential.<member>) are not supported yet"
+        }
+      },
+      {
+        "family": "component-other",
+        "count": 156,
+        "codes": {
+          "SC2009": 156
+        },
+        "packages": {
+          "redcode": 113,
+          "tui": 42,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/control-plane/workspace-context.ts",
+          "message": "values of type '{ use(): WorkspaceContext; provide<R>(value: WorkspaceContext, fn: () => R): R; }' cannot be compiled: the record shape is supported, but its member 'use' has type '() => WorkspaceCont"
+        }
+      },
+      {
+        "family": "effect-generator-body",
+        "count": 148,
+        "codes": {
+          "SC2009": 148
+        },
+        "packages": {
+          "redcode": 147,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run.ts",
+          "message": "values of type 'Generator<Effect<void, never, never> | Effect<Interface, never, Service> | Effect<Shape<{ readonly autoShare: Config<boolean>; readonly pure: Config<boolean>; ... 25 more ...; readonly"
+        }
+      },
+      {
+        "family": "syntax-other",
+        "count": 134,
+        "codes": {
+          "SC1090": 134
+        },
+        "packages": {
+          "tui": 67,
+          "redcode": 66,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/queue.ts",
+          "message": "computed method names are not supported yet (instantiating class 'AsyncQueue' with <any>)"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 92,
+        "codes": {
+          "SC2020": 92
+        },
+        "packages": {
+          "tui": 48,
+          "redcode": 44
+        },
+        "sample": {
+          "file": "packages/redcode/src/tool/json-schema.ts",
+          "message": "'WeakMap<Top, JSONSchema7>' is part of the standard library types but has no scriptc lowering yet"
+        }
+      },
+      {
+        "family": "computed-extends",
+        "count": 81,
+        "codes": {
+          "SC1090": 81
+        },
+        "packages": {
+          "redcode": 80,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/effect-cmd.ts",
+          "message": "extending computed expressions are not supported yet"
+        }
+      },
+      {
+        "family": "branded-intersection",
+        "count": 53,
+        "codes": {
+          "SC2009": 53
+        },
+        "packages": {
+          "redcode": 35,
+          "schema": 18
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/account.ts",
+          "message": "values of type '(active: Option<{ id: string & Brand<\"AccountID\">; active_org_id: (string & Brand<\"OrgID\">) | null; }>, choice: { accountID: string & Brand<\"AccountID\">; orgID: string & Brand<...>; })"
+        }
+      },
+      {
+        "family": "generic-dispatch",
+        "count": 48,
+        "codes": {
+          "SC1090": 48
+        },
+        "packages": {
+          "tui": 35,
+          "redcode": 13
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/debug/scrap.ts",
+          "message": "reaching the object-literal generic method 'runPromise' through this receiver (resolution is static, so the receiver must be a never-reassigned binding initialized with the defining literal) is not su"
+        }
+      },
+      {
+        "family": "type-residual",
+        "count": 39,
+        "codes": {
+          "SC2001": 39
+        },
+        "packages": {
+          "schema": 18,
+          "redcode": 16,
+          "tui": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/control-plane/workspace-context.ts",
+          "message": "values of type '{ provide<R>(input: { workspaceID?: (string & Brand<\"WorkspaceV2.ID\">) | undefined; fn: () => R; }): Promise<R>; restore<R>(workspaceID: string & Brand<\"WorkspaceV2.ID\">, fn: () => R):"
+        }
+      },
+      {
+        "family": "solid-idioms",
+        "count": 25,
+        "codes": {
+          "SC1090": 25
+        },
+        "packages": {
+          "redcode": 10,
+          "tui": 10,
+          "schema": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/account/url.ts",
+          "message": "assignment to non-variables are not supported yet"
+        }
+      },
+      {
+        "family": "intersection-shape",
+        "count": 20,
+        "codes": {
+          "SC2008": 20
+        },
+        "packages": {
+          "tui": 20
+        },
+        "sample": {
+          "file": "packages/tui/src/feature-plugins/home/tips.tsx",
+          "message": "values of type 'BuiltinTuiPlugin' cannot be compiled: this intersection resolves to no runtime shape"
+        }
+      },
+      {
+        "family": "island-boundary-function",
+        "count": 20,
+        "codes": {
+          "SC1090": 20
+        },
+        "packages": {
+          "tui": 10,
+          "redcode": 9,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/effect/runtime-flags.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      },
+      {
+        "family": "effect-typed-member",
+        "count": 19,
+        "codes": {
+          "SC2009": 19
+        },
+        "packages": {
+          "redcode": 19
+        },
+        "sample": {
+          "file": "packages/redcode/src/account/repo.ts",
+          "message": "values of type 'ServiceUse<Service, Interface>' cannot be compiled: the record shape is supported, but its member 'active' has type '() => Effect<Option<Info>, AccountRepoError, Service>', which does "
+        }
+      },
+      {
+        "family": "index-signature",
+        "count": 19,
+        "codes": {
+          "SC2006": 19
+        },
+        "packages": {
+          "tui": 12,
+          "redcode": 7
+        },
+        "sample": {
+          "file": "packages/redcode/src/control-plane/adapters/index.ts",
+          "message": "values of type 'Record<string, WorkspaceAdapter>' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records,"
+        }
+      },
+      {
+        "family": "jsx",
+        "count": 6,
+        "codes": {
+          "SC1090": 6
+        },
+        "packages": {
+          "tui": 6
+        },
+        "sample": {
+          "file": "packages/tui/src/ui/dialog-prompt.tsx",
+          "message": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering) are not supported yet"
+        }
+      },
+      {
+        "family": "SC2002",
+        "count": 4,
+        "codes": {
+          "SC2002": 4
+        },
+        "packages": {
+          "redcode": 3,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/lsp/language.ts",
+          "message": "record shapes must match exactly or width-coerce: expected '{ .abap: string; .astro: string; .bash: string; .bat: string; .bib: string; .bibtex: string; .c: string; .c++: string; .cc: string; .cjs: st"
+        }
+      },
+      {
+        "family": "SC1100",
+        "count": 3,
+        "codes": {
+          "SC1100": 3
+        },
+        "packages": {
+          "redcode": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/account/account.ts",
+          "message": "switch statements on 'unknown' values are not supported yet"
+        }
+      },
+      {
+        "family": "island-cannot-embed",
+        "count": 2,
+        "codes": {
+          "SC2030": 2
+        },
+        "packages": {
+          "redcode": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/account/repo.ts",
+          "message": "cannot embed npm package code: package '@reddb-io/redcode-core' requires 'node:sqlite', a Node builtin the island does not provide (available: node:events, node:path, node:process, node:fs, node:child"
+        }
+      },
+      {
+        "family": "SC1120",
+        "count": 2,
+        "codes": {
+          "SC1120": 2
+        },
+        "packages": {
+          "redcode": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/tool/edit.ts",
+          "message": "function replacement values (replacements must be string templates) are not supported yet"
+        }
+      },
+      {
+        "family": "SC2003",
+        "count": 2,
+        "codes": {
+          "SC2003": 2
+        },
+        "packages": {
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/tui/src/context/local.tsx",
+          "message": "union types must match exactly: expected '(() => { modelID: string; providerID: string } | undefined)[]', got '() => { modelID: string; providerID: string } | undefined' (a union re-tags into another "
+        }
+      },
+      {
+        "family": "SC2005",
+        "count": 2,
+        "codes": {
+          "SC2005": 2
+        },
+        "packages": {
+          "redcode": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/installation/index.ts",
+          "message": "values of type '<A, Err>(fn: (svc: Interface) => Effect<A, Err, Service>, options?: RunOptions | undefined) => Promise<A>' cannot be compiled: the signature keeps its type parameters, and a compiled f"
+        }
+      },
+      {
+        "family": "SC1071",
+        "count": 1,
+        "codes": {
+          "SC1071": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/filesystem.ts",
+          "message": "async generators (async function*) are not supported yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      ".splice with 3 arguments": 6,
+      "AsyncGenerator<string, void, unknown>.next": 4,
+      "AsyncGenerator<string, void, unknown>.return": 4,
+      "new WeakMap": 4,
+      "string.toLocaleLowerCase": 4,
+      "new URL with 2 arguments": 3,
+      "NumberFormat": 3,
+      "Object.fromEntries": 3,
+      "Array.from with this argument shape": 2,
+      "Array.isArray": 2,
+      "Bun.write": 2,
+      "crypto.randomUUID": 2,
+      "new Set(values)": 2,
+      "Object.entries": 2,
+      "Promise.allSettled": 2,
+      "RegExpExecArray.index": 2,
+      "Statement<unknown, SQLQueryBindings[] | [null] | [string] | [number] | [bigint] | [false] | [true] | [BigInt64Array<ArrayBufferLike>] | ... 11 more ... | [...]>.all": 2,
+      "Worker.addEventListener": 2,
+      "Bun.stdin.text": 1,
+      "BunFile.json": 1,
+      "BunFile.text": 1,
+      "ChildProcess.stdin": 1,
+      "Error.stack": 1,
+      "fs.promises.writeFile with 3 arguments": 1,
+      "fs.readdir with 2 arguments": 1,
+      "fs/promises.appendFile": 1,
+      "IteratorObject<Struct<{ readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly type: Literal<string>; readonly properties: Codec<unknown, unknown, never, never>; }>, undefined, unknown>.toArray": 1,
+      "IteratorObject<Struct<{ readonly type: Literal<\"sync\">; readonly id: brand<String, \"Event.ID\"> & { create: () => string & Brand<\"Event.ID\">; }; readonly syncEvent: Struct<{ readonly type: Literal<...>; readonly id: brand<...> & { ...; }; readonly seq: Finite; readonly aggregateID: String; readonly data: Codec<...>; ....toArray": 1,
+      "Library<{ GetStdHandle: { args: \"i32\"[]; returns: \"ptr\"; }; GetConsoleMode: { args: \"ptr\"[]; returns: \"i32\"; }; SetConsoleMode: { args: (\"ptr\" | \"u32\")[]; returns: \"i32\"; }; FlushConsoleInputBuffer: { args: \"ptr\"[]; returns: \"i32\"; }; }>": 1,
+      "MapIterator<Definition<string, Codec<unknown, unknown, never, never>>>.toArray": 1,
+      "MemoryUsage.rss": 1,
+      "new Proxy": 1,
+      "new WeakSet": 1,
+      "new Worker": 1,
+      "Object.assign": 1,
+      "Object.getOwnPropertyNames": 1,
+      "PlatformPath.normalize": 1,
+      "process.memoryUsage": 1,
+      "process.off(\"SIGUSR2\", ...)": 1,
+      "process.on(\"SIGUSR2\", ...)": 1,
+      "process.stdin": 1,
+      "ReadonlyMap<string, readonly ActiveBinding<Renderable, KeyEvent>[]>.get": 1,
+      "ReadStream.setRawMode": 1,
+      "Reflect.get": 1,
+      "Segmenter": 1,
+      "Set<SyntaxStyle>.add": 1,
+      "Set<SyntaxStyle>.delete": 1,
+      "spawn with this stdin slot": 1,
+      "Statement<unknown, SQLQueryBindings[] | [null] | [string] | [number] | [bigint] | [false] | [true] | [BigInt64Array<ArrayBufferLike>] | ... 11 more ... | [...]>.get": 1,
+      "TextEncoder.encode": 1,
+      "Timer.unref": 1,
+      "typeof realpathSync.native": 1,
+      "util.promisify": 1,
+      "WeakMap<BaseRenderable, { frameID: number; previous: WeakMap<BaseRenderable, BaseRenderable | undefined>; }>": 1,
+      "WeakMap<object, MarkedInstance>": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>": 1,
+      "WeakMap<Top, JSONSchema7>": 1,
+      "WeakSet<BoxRenderable>": 1,
+      "Worker.terminate": 1
+    }
+  },
+  "unreached": {
+    "total": 1847,
+    "byCode": {
+      "SC1090": 965,
+      "SC2009": 267,
+      "SC2004": 232,
+      "SC2020": 225,
+      "SC2001": 35,
+      "SC2006": 19,
+      "SC1013": 16,
+      "SC1100": 15,
+      "SC2002": 15,
+      "SC1120": 11,
+      "SC2008": 11,
+      "SC1031": 10,
+      "SC2003": 9,
+      "SC1101": 8,
+      "SC0004": 4,
+      "SC1045": 3,
+      "SC1030": 1,
+      "SC1042": 1
+    },
+    "byFamily": {
+      "syntax-other": 413,
+      "cascade": 232,
+      "stdlib-tail": 225,
+      "component-other": 214,
+      "island-boundary-function": 146,
+      "jsx": 131,
+      "generic-dispatch": 123,
+      "computed-extends": 112,
+      "type-residual": 35,
+      "branded-intersection": 30,
+      "namespace-object-value": 28,
+      "solid-idioms": 28,
+      "index-signature": 19,
+      "SC1100": 15,
+      "SC2002": 15,
+      "effect-generator-body": 14,
+      "intersection-shape": 11,
+      "SC1120": 11,
+      "SC1031": 10,
+      "effect-typed-member": 9,
+      "SC2003": 9,
+      "SC1101": 8,
+      "SC0004": 4,
+      "SC1045": 3,
+      "SC1030": 1,
+      "SC1042": 1
+    },
+    "byPackage": {
+      "redcode": 1103,
+      "tui": 732,
+      "schema": 12
+    },
+    "families": [
+      {
+        "family": "syntax-other",
+        "count": 413,
+        "codes": {
+          "SC1090": 413
+        },
+        "packages": {
+          "redcode": 261,
+          "tui": 152
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/filesystem.ts",
+          "message": "'.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+        }
+      },
+      {
+        "family": "cascade",
+        "count": 232,
+        "codes": {
+          "SC2004": 232
+        },
+        "packages": {
+          "tui": 118,
+          "redcode": 112,
+          "schema": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/filesystem.ts",
+          "message": "uses of 'stat' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 225,
+        "codes": {
+          "SC2020": 225
+        },
+        "packages": {
+          "redcode": 178,
+          "tui": 44,
+          "schema": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/ui.ts",
+          "message": "'require' is typed by @types/node but has no scriptc lowering yet"
+        }
+      },
+      {
+        "family": "component-other",
+        "count": 214,
+        "codes": {
+          "SC2009": 214
+        },
+        "packages": {
+          "redcode": 163,
+          "tui": 50,
+          "schema": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/filesystem.ts",
+          "message": "values of type 'BigIntStats | Stats | undefined' cannot be compiled: the union shape is supported, but its arm 'BigIntStats' does not compile"
+        }
+      },
+      {
+        "family": "island-boundary-function",
+        "count": 146,
+        "codes": {
+          "SC1090": 146
+        },
+        "packages": {
+          "tui": 101,
+          "redcode": 45
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      },
+      {
+        "family": "jsx",
+        "count": 131,
+        "codes": {
+          "SC1090": 131
+        },
+        "packages": {
+          "tui": 110,
+          "redcode": 21
+        },
+        "sample": {
+          "file": "packages/tui/src/config/index.tsx",
+          "message": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering) are not supported yet"
+        }
+      },
+      {
+        "family": "generic-dispatch",
+        "count": 123,
+        "codes": {
+          "SC1090": 123
+        },
+        "packages": {
+          "tui": 114,
+          "redcode": 9
+        },
+        "sample": {
+          "file": "packages/tui/src/terminal-win32.ts",
+          "message": "method calls like 'k32!.symbols.GetStdHandle' is not supported yet"
+        }
+      },
+      {
+        "family": "computed-extends",
+        "count": 112,
+        "codes": {
+          "SC1090": 112
+        },
+        "packages": {
+          "redcode": 106,
+          "schema": 6
+        },
+        "sample": {
+          "file": "packages/redcode/src/lsp/client.ts",
+          "message": "extending computed expressions are not supported yet"
+        }
+      },
+      {
+        "family": "type-residual",
+        "count": 35,
+        "codes": {
+          "SC2001": 35
+        },
+        "packages": {
+          "redcode": 21,
+          "tui": 14
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/config.ts",
+          "message": "values of type '(entry: [string, unknown]) => entry is [string, string]' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, class"
+        }
+      },
+      {
+        "family": "branded-intersection",
+        "count": 30,
+        "codes": {
+          "SC2009": 30
+        },
+        "packages": {
+          "redcode": 30
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/message-v2.ts",
+          "message": "values of type '(string & Brand<\"MessageID\">) | undefined' cannot be compiled: the union shape is supported, but its arm 'string & Brand<\"MessageID\">' does not compile"
+        }
+      },
+      {
+        "family": "namespace-object-value",
+        "count": 28,
+        "codes": {
+          "SC1013": 16,
+          "SC1090": 12
+        },
+        "packages": {
+          "redcode": 22,
+          "tui": 6
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "constructing 'ResponseStreamError' (a namespace member with no class lowering) is not supported yet"
+        }
+      },
+      {
+        "family": "solid-idioms",
+        "count": 28,
+        "codes": {
+          "SC1090": 28
+        },
+        "packages": {
+          "redcode": 26,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run.ts",
+          "message": "object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet"
+        }
+      },
+      {
+        "family": "index-signature",
+        "count": 19,
+        "codes": {
+          "SC2006": 19
+        },
+        "packages": {
+          "redcode": 18,
+          "tui": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/transform.ts",
+          "message": "values of type 'string & Brand<\"ProviderV2.ID\">' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, "
+        }
+      },
+      {
+        "family": "SC1100",
+        "count": 15,
+        "codes": {
+          "SC1100": 15
+        },
+        "packages": {
+          "redcode": 15
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/error.ts",
+          "message": "switch statements on 'unknown' values are not supported yet"
+        }
+      },
+      {
+        "family": "SC2002",
+        "count": 15,
+        "codes": {
+          "SC2002": 15
+        },
+        "packages": {
+          "tui": 10,
+          "redcode": 5
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run/demo.ts",
+          "message": "record shapes must match exactly or width-coerce: expected '{ details: {}; permissions: number[]; questions: number[]; tabs: number[] }', got '{ details: { [key: string]: { commits: { interrupted: boo"
+        }
+      },
+      {
+        "family": "effect-generator-body",
+        "count": 14,
+        "codes": {
+          "SC2009": 14
+        },
+        "packages": {
+          "redcode": 14
+        },
+        "sample": {
+          "file": "packages/redcode/src/effect/bridge.ts",
+          "message": "values of type 'Generator<Effect<Context<never>, never, never> | Reference<InstanceContext | undefined> | Reference<(string & Brand<\"WorkspaceV2.ID\">) | undefined>, { ...; }, any>' cannot be compiled:"
+        }
+      },
+      {
+        "family": "intersection-shape",
+        "count": 11,
+        "codes": {
+          "SC2008": 11
+        },
+        "packages": {
+          "redcode": 11
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/message-v2.ts",
+          "message": "values of type 'EffectSQLiteDatabase<EmptyRelations> & { $client: SqlClient; }' cannot be compiled: this intersection resolves to no runtime shape"
+        }
+      },
+      {
+        "family": "SC1120",
+        "count": 11,
+        "codes": {
+          "SC1120": 11
+        },
+        "packages": {
+          "redcode": 8,
+          "tui": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/variable.ts",
+          "message": "function replacement values (replacements must be string templates) are not supported yet"
+        }
+      },
+      {
+        "family": "SC1031",
+        "count": 10,
+        "codes": {
+          "SC1031": 10
+        },
+        "packages": {
+          "redcode": 8,
+          "tui": 2
+        },
+        "sample": {
+          "file": "packages/redcode/src/provider/provider.ts",
+          "message": "rest bindings over index-signature shapes (the undeclared entries would need overflow packing) are not supported yet"
+        }
+      },
+      {
+        "family": "effect-typed-member",
+        "count": 9,
+        "codes": {
+          "SC2009": 9
+        },
+        "packages": {
+          "redcode": 9
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/retry.ts",
+          "message": "values of type '{ provider: string; parse: (error: unknown) => { name: string; data: unknown; }; set: (input: { attempt: number; message: string; action?: { reason: RetryReason; provider: string; titl"
+        }
+      },
+      {
+        "family": "SC2003",
+        "count": 9,
+        "codes": {
+          "SC2003": 9
+        },
+        "packages": {
+          "tui": 5,
+          "redcode": 4
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/codex.ts",
+          "message": "union types must match exactly: expected 'string | undefined', got '{ chatgpt_account_id: string | undefined; chatgpt_compute_residency: string | undefined; email: string | undefined; https://api.open"
+        }
+      },
+      {
+        "family": "SC1101",
+        "count": 8,
+        "codes": {
+          "SC1101": 8
+        },
+        "packages": {
+          "redcode": 8
+        },
+        "sample": {
+          "file": "packages/redcode/src/config/config.ts",
+          "message": "passing '(string, [string, unknown]) => string' function values into 'unknown' slots (a parameter or result type has no dynamic representation — only JSON-safe data, Uint8Array, undefined-armed unions"
+        }
+      },
+      {
+        "family": "SC0004",
+        "count": 4,
+        "codes": {
+          "SC0004": 4
+        },
+        "packages": {
+          "redcode": 4
+        },
+        "sample": {
+          "file": "packages/redcode/src/plugin/openai/ws.ts",
+          "message": "the TypeScript checker crashed answering a query here (an upstream typescript-go bug): panic: interface conversion: checker.TypeData is *checker.TypeReference, not *checker.TupleType"
+        }
+      },
+      {
+        "family": "SC1045",
+        "count": 3,
+        "codes": {
+          "SC1045": 3
+        },
+        "packages": {
+          "redcode": 3
+        },
+        "sample": {
+          "file": "packages/redcode/src/session/llm/ai-sdk.ts",
+          "message": "increment/decrement of record fields or elements in expression position is not supported yet"
+        }
+      },
+      {
+        "family": "SC1030",
+        "count": 1,
+        "codes": {
+          "SC1030": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/util/rpc.ts",
+          "message": "the reference to 'onmessage' above its 'var' declaration (a read there would be 'undefined', which the binding's type cannot hold — annotate it '| undefined' or move the declaration up) is not support"
+        }
+      },
+      {
+        "family": "SC1042",
+        "count": 1,
+        "codes": {
+          "SC1042": 1
+        },
+        "packages": {
+          "redcode": 1
+        },
+        "sample": {
+          "file": "packages/redcode/src/cli/cmd/run/tool.ts",
+          "message": "logical operators on mixed operand types are not supported yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "Array.isArray": 26,
+      "Bun.stringWidth": 18,
+      "Object.fromEntries": 9,
+      "new URL with 2 arguments": 8,
+      "ReadonlyMap<string, readonly ActiveBinding<Renderable, KeyEvent>[]>.get": 8,
+      "Array.from with this argument shape": 7,
+      "Object.entries": 7,
+      "crypto.getRandomValues": 5,
+      "new Headers": 5,
+      "new Map(entries)": 4,
+      "NumberFormat.format": 4,
+      "Promise<void> | undefined.catch": 4,
+      "Reflect.get": 4,
+      "BigInt": 3,
+      "Error.stack": 3,
+      "Number.prototype.toLocaleString without a locale": 3,
+      "RegExpExecArray.index": 3,
+      "Segmenter.segment": 3,
+      ".localeCompare with 3 arguments": 2,
+      ".values() outside an immediate array spread": 2,
+      "crypto.subtle.digest": 2,
+      "Date.prototype.toDateString": 2,
+      "JSON.stringify with replacer/space parameters": 2,
+      "Map<string, PoolEntry>.get": 2,
+      "Map<string, Semaphore>.get": 2,
+      "Map<string, Semaphore>.set": 2,
+      "new Set(values)": 2,
+      "ReadStream": 2,
+      "RegExpMatchArray | [].find": 2,
+      "RegExpMatchArray.index": 2,
+      "string.toLocaleLowerCase": 2,
+      "TextDecoder.decode": 2,
+      "TextEncoder.encode": 2,
+      "Uint16Array<ArrayBufferLike>": 2,
+      ".splice with 3 arguments": 1,
+      "{ directory: string; strategy?: string | undefined; }[] | undefined.toSorted": 1,
+      "address() where the result is not the {address, family, port} record": 1,
+      "BigIntStats | Stats.mtimeMs": 1,
+      "Bun": 1,
+      "ChildProcess.signalCode": 1,
+      "Date.prototype.toLocaleDateString": 1,
+      "Date.prototype.toLocaleTimeString with arguments": 1,
+      "fs.createWriteStream": 1,
+      "fs.readdir with 2 arguments": 1,
+      "GlobalBusEmitter.off": 1,
+      "GlobalBusEmitter.on": 1,
+      "Iterable<WithParts>": 1,
+      "Map<string & Brand<\"MessageID\">, number>.get": 1,
+      "Map<string & Brand<\"MessageID\">, number>.set": 1,
+      "Map<string, { payload: { readonly version: 1; readonly generated_at: string; readonly daemon?: { readonly pid: number; readonly daemon_version: string; readonly protocol_version: number; readonly started_at: string; } | undefined; ... 4 more ...; readonly workers: readonly { ...; }[]; }; at: string; }>.get": 1,
+      "Map<string, { payload: { readonly version: 1; readonly generated_at: string; readonly daemon?: { readonly pid: number; readonly daemon_version: string; readonly protocol_version: number; readonly started_at: string; } | undefined; ... 4 more ...; readonly workers: readonly { ...; }[]; }; at: string; }>.set": 1,
+      "Map<string, PoolEntry>.clear": 1,
+      "Map<string, PoolEntry>.delete": 1,
+      "Map<string, PoolEntry>.set": 1,
+      "Map<string, PoolEntry>.values": 1,
+      "Map<string, SelectableItem>.get": 1,
+      "never[] | Dirent<string>[].filter": 1,
+      "new Function": 1,
+      "new WeakSet": 1,
+      "Number of any values": 1,
+      "Number of number | string | undefined values": 1,
+      "Number of number | string values": 1,
+      "Number of string | undefined values": 1,
+      "Number of unknown values": 1,
+      "Object.getOwnPropertyNames": 1,
+      "Object.hasOwn": 1,
+      "Object.values": 1,
+      "pipeline over a ": 1,
+      "PlatformPath.normalize": 1,
+      "postMessage": 1,
+      "process.off(\"SIGUSR2\", ...)": 1,
+      "process.on(\"SIGUSR2\", ...)": 1,
+      "process.stdin": 1,
+      "Promise.all with this combined result type": 1,
+      "Promise.allSettled": 1,
+      "Promise.race with this combined result type": 1,
+      "Promise<A>.catch": 1,
+      "Promise<TuiPluginModule>.catch": 1,
+      "Promise<void> | undefined.then": 1,
+      "ReadableStreamDefaultReadResult<Uint8Array<ArrayBuffer>>.done": 1,
+      "ReadableStreamDefaultReadValueResult<Uint8Array<ArrayBuffer>>.value": 1,
+      "readonly [\"edit\", \"bash\", \"read\", \"task\", \"external\", \"doom\"].find": 1,
+      "readonly [\"multi\", \"single\", \"checklist\", \"custom\"].find": 1,
+      "requestAnimationFrame": 1,
+      "require": 1,
+      "Server.closeAllConnections": 1,
+      "spawn with this stdin slot": 1,
+      "string | null.includes": 1,
+      "string | null.toLowerCase": 1,
+      "typeof globalThis.fetch": 1,
+      "typeof realpathSync.native": 1,
+      "Uint8Array<ArrayBuffer>": 1,
+      "WeakMap<BaseRenderable, { frameID: number; previous: WeakMap<BaseRenderable, BaseRenderable | undefined>; }>.get": 1,
+      "WeakMap<BaseRenderable, BaseRenderable | undefined>": 1,
+      "WeakMap<BaseRenderable, BaseRenderable | undefined>.get": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.delete": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.get": 1,
+      "WeakMap<OpenTuiKeymap, { current(): string; push(mode: string): () => void; dispose(): void; }>.set": 1,
+      "WeakMap<Top, JSONSchema7>.get": 1,
+      "WeakMap<Top, JSONSchema7>.set": 1,
+      "WeakSet<object>.add": 1,
+      "WeakSet<object>.has": 1,
+      "WritableStream<Uint8Array<ArrayBufferLike>>": 1
+    }
+  },
+  "runtimeFences": 2,
+  "npmStatic": [
+    {
+      "package": "@reddb-io/redcode-schema",
+      "status": "static"
+    },
+    {
+      "package": "@reddb-io/redcode-tui",
+      "status": "static"
+    }
+  ],
+  "npmBuiltins": [
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]"
+  ],
+  "frontier": null,
+  "timing": {
+    "wallMs": 129304,
+    "phases": {
+      "ffi-validate": 712,
+      "reachable-emit": 49474
+    }
+  }
+}

@@ -1,19 +1,5 @@
 import { InternalCompilerError } from "../../errors.js";
-import {
-  DYN,
-  F64,
-  STRING,
-  UNDEFINED_T,
-  VOID,
-  type IrExpr,
-  type IrStmt,
-  type IrType,
-  type SrcLoc,
-  isUnitType,
-  typeEquals,
-  typeKey,
-  unionFuncSetArmsOk,
-} from "../../ir/nodes.js";
+import { DYN, F64, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import * as ts from "../ts7/adapter.js";
 import { isGenericCallableMemberType } from "../types.js";
@@ -233,8 +219,25 @@ export type FieldTarget =
       }
       return null;
     }
+    // A checker-union receiver whose VALUE is an island handle (under
+    // --dynamic a union of package-declared arms collapses to one jsval
+    // binding): the read is the engine's own property read, exiting to
+    // the member's static type when it has one.
+    if (value.type.kind === "jsval") {
+      const loc = locOf(expr);
+      const read: IrExpr = { kind: "jsOp", op: "getProp", name: expr.name.text, args: [value], type: JSVAL, loc };
+      const memberType = L.mapTypeOf(L.typeOf(expr));
+      if (memberType === null || memberType.kind === "jsval" || !canExitIslandToType(memberType, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return read;
+      return { kind: "jsExit", value: read, type: memberType, loc };
+    }
+    // Any other shape is a lowering the union table cannot serve; hand
+    // the chain back (the next lowerings fence by checker type) rather
+    // than crashing the whole analysis on one receiver.
     if (value.type.kind !== "union") {
-      throw new InternalCompilerError("lowerer bug: union-typed receiver lowered to a non-union");
+      if (process.env["SCRIPTC_TRACE_FENCE"]) {
+        process.stderr.write(`[union-prop] ${expr.name.text}: receiver lowered to ${value.type.kind}\n`);
+      }
+      return null;
     }
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new InternalCompilerError(`lowerer bug: unknown union ${value.type.unionId}`);

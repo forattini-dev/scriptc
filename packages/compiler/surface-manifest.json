@@ -4983,6 +4983,14 @@
       "note": "the lowered call form takes exactly 1 argument"
     },
     {
+      "id": "stdlib.string.codePointAt",
+      "kind": "stdlib",
+      "name": "string.prototype.codePointAt",
+      "status": "static",
+      "backends": "unknown",
+      "note": "the lowered call form takes exactly 1 argument"
+    },
+    {
       "id": "stdlib.string.endsWith",
       "kind": "stdlib",
       "name": "string.prototype.endsWith",
@@ -5770,9 +5778,33 @@
       "code": "SC1090"
     },
     {
+      "id": "syntax.jsx-elements",
+      "kind": "syntax",
+      "name": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)",
+      "status": "unsupported",
+      "backends": "unknown",
+      "code": "SC1090"
+    },
+    {
+      "id": "syntax.jsx-fragments",
+      "kind": "syntax",
+      "name": "JSX fragments (the .tsx surface resolves and types; the element tree has no lowering)",
+      "status": "unsupported",
+      "backends": "unknown",
+      "code": "SC1090"
+    },
+    {
       "id": "syntax.namespaces",
       "kind": "syntax",
       "name": "namespaces",
+      "status": "unsupported",
+      "backends": "unknown",
+      "code": "SC1090"
+    },
+    {
+      "id": "syntax.self-closing-jsx-elements",
+      "kind": "syntax",
+      "name": "self-closing JSX elements (the .tsx surface resolves and types; the element tree has no lowering)",
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC1090"

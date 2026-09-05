@@ -66,7 +66,7 @@ export const UNSUPPORTED_EXPR: Partial<Record<ts.SyntaxKind, { code: keyof typeo
   // but the element tree itself has no lowering — solid/preact/TUI trees
   // are a renderer slice of their own.
   [ts.SyntaxKind.JsxElement]: { code: "SC1090", feature: "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)" },
-  [ts.SyntaxKind.JsxSelfClosingElement]: { code: "SC1090", feature: "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)" },
+  [ts.SyntaxKind.JsxSelfClosingElement]: { code: "SC1090", feature: "self-closing JSX elements (the .tsx surface resolves and types; the element tree has no lowering)" },
   [ts.SyntaxKind.JsxFragment]: { code: "SC1090", feature: "JSX fragments (the .tsx surface resolves and types; the element tree has no lowering)" },
 };
 
