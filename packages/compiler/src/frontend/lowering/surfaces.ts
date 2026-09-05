@@ -389,6 +389,9 @@ export const STR_METHODS: Record<
 > = {
   charCodeAt: { method: "charCodeAt", result: F64, minArgs: 1, maxArgs: 1 },
   charAt: { method: "charAt", result: STRING, minArgs: 1, maxArgs: 1 },
+  // codePointAt: the full CODE POINT number at a UTF-16 index (surrogate
+  // pairs combine) — NaN out of range, like charCodeAt's NaN.
+  codePointAt: { method: "codePointAt", result: F64, minArgs: 1, maxArgs: 1 },
   // `at` uses relative UTF-16 indexing. The ambient override intentionally
   // narrows its result to string; out-of-range indices throw the existing
   // catchable TypeError divergence instead of producing undefined.

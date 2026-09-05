@@ -1283,6 +1283,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_str_utf16_len(${r.name})`);
           case "charCodeAt":
             return E.newTemp(e.type, `scr_str_char_code_at(${r.name}, ${args[0]!.name})`);
+          case "codePointAt":
+            return E.newTemp(e.type, `scr_str_code_point_at(${r.name}, ${args[0]!.name})`);
           case "charAt":
             return E.newTemp(e.type, `scr_str_char_at(${r.name}, ${args[0]!.name})`);
           case "at": {

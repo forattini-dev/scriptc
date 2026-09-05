@@ -631,6 +631,27 @@ double scr_str_char_code_at(ScrStr *s, double i) {
   return mid ? (double)(0xDC00 + (v & 0x3FF)) : (double)(0xD800 + (v >> 10));
 }
 
+/* String.prototype.codePointAt: the full CODE POINT at a UTF-16 index —
+ * the charCodeAt ladder WITHOUT the surrogate split (a lead surrogate
+ * combines with its trail into one number above BMP). NaN out of range,
+ * like charCodeAt. */
+double scr_str_code_point_at(ScrStr *s, double i) {
+  double idx = scr_to_integer_or_infinity(i);
+  if (!(idx >= 0)) return NAN;
+  ScrSidx *e = scr_sidx(s);
+  if (idx >= (double)e->u16len) return NAN;
+  bool mid;
+  size_t off = scr_u16_to_byte_c(s, e, (size_t)idx, &mid);
+  if (off >= s->len) return NAN;
+  size_t adv;
+  uint32_t cp = scr_utf8_decode(s->data + off, &adv);
+  if (cp < 0x10000) return (double)cp;
+  /* mid = the index lands on the TRAIL unit — Node answers the trail
+   * surrogate there (charCodeAt's same mid-swap, the cp ladder swapped). */
+  if (mid) return (double)(0xDC00 + ((cp - 0x10000) & 0x3FF));
+  return (double)cp;
+}
+
 double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex) {
   double pos = scr_to_integer_or_infinity(fromIndex);
   ScrSidx *e = scr_sidx(s);

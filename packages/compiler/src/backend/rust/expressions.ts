@@ -187,6 +187,9 @@ export class RustExpressionEmitter {
         if (expr.method === "charCodeAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_char_code_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }
+        if (expr.method === "codePointAt" && expr.args.length === 1 && expr.args[0] !== undefined) {
+          return `runtime::string_code_point_at(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
+        }
         if (expr.method === "repeat" && expr.args.length === 1 && expr.args[0] !== undefined) {
           return `runtime::string_repeat(&(${this.emitExpr(expr.receiver)}), ${this.emitExpr(expr.args[0])})`;
         }

@@ -10070,6 +10070,8 @@ class LlEmitter {
         return call("scr_str_utf16_len", "double (ptr)", `ptr ${r.name}`, "double", false);
       case "charCodeAt":
         return call("scr_str_char_code_at", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "double", false);
+      case "codePointAt":
+        return call("scr_str_code_point_at", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "double", false);
       case "charAt":
         return call("scr_str_char_at", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, "ptr", true);
       case "at": {

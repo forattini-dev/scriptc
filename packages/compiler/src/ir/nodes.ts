@@ -1613,6 +1613,9 @@ export type IrSetIntrinsicMethod =
 export type IrStrIntrinsicMethod =
   | "length"
   | "charCodeAt"
+  // codePointAt: the full code-POINT number at a UTF-16 index (surrogate
+  // pairs combine into one number above BMP) — NaN out of range.
+  | "codePointAt"
   | "charAt"
   | "at"
   | "indexOf"

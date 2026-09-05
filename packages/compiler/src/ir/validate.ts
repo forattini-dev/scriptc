@@ -31,6 +31,7 @@ export const STR_INTRINSIC_SIGS: Record<
 > = {
   length: { argTypes: [], minArgs: 0, result: F64 },
   charCodeAt: { argTypes: [F64], minArgs: 1, result: F64 },
+  codePointAt: { argTypes: [F64], minArgs: 1, result: F64 },
   charAt: { argTypes: [F64], minArgs: 1, result: STRING },
   at: { argTypes: [F64], minArgs: 1, result: STRING },
   indexOf: { argTypes: [STRING, F64], minArgs: 1, result: F64 },

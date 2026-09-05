@@ -620,6 +620,7 @@ double scr_str_utf16_len(ScrStr *s);
  * which half i addresses. NaN when ToIntegerOrInfinity(i) is outside
  * [0, length) — note charCodeAt(1.5) is index 1, matching Node. */
 double scr_str_char_code_at(ScrStr *s, double i);
+double scr_str_code_point_at(ScrStr *s, double i);
 
 /* indexOf(needle, fromIndex): UTF-16 index of the first occurrence at or
  * after fromIndex (clamped to [0, length]), or -1. Empty needle returns the

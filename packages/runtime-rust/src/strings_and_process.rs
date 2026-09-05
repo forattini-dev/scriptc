@@ -332,6 +332,32 @@ pub fn string_char_code_at(value: &JsString, index: f64) -> f64 {
         .map_or(f64::NAN, f64::from)
 }
 
+/// `String.prototype.codePointAt`: the full CODE POINT at a UTF-16 index
+/// (surrogate pairs combine into one number above BMP), NaN out of range —
+/// the spec's ToOrdBMP + pair combination over the runtime's well-formed
+/// storage.
+pub fn string_code_point_at(value: &JsString, index: f64) -> f64 {
+    let index = if index.is_nan() { 0.0 } else { index.trunc() };
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
+        return f64::NAN;
+    }
+    let index = index as usize;
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let first = match units.get(index) {
+        Some(u) => *u,
+        None => return f64::NAN,
+    };
+    if !(0xd800..=0xdbff).contains(&first) {
+        return f64::from(first);
+    }
+    match units.get(index + 1) {
+        Some(second) if (0xdc00..=0xdfff).contains(second) => {
+            65536.0 + ((f64::from(first) - 55296.0) * 1024.0) + (f64::from(*second) - 56320.0)
+        }
+        _ => f64::from(first),
+    }
+}
+
 fn relative_string_index(index: f64, len: usize) -> usize {
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
     if index == f64::NEG_INFINITY {
