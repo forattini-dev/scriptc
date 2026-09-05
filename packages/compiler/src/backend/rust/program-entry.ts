@@ -31,7 +31,21 @@ function targetConfigureLine(target: RustProgramEntryOptions["runtimeTarget"]): 
 /** Emit the process boundary separately from IR expression/statement emission. */
 export function emitRustProgramEntry(options: RustProgramEntryOptions): string[] {
   const lines = [
+    // The program runs on a thread with a generous stack: the island's
+    // parser is recursive-descent and overflows the 8 MB main-thread
+    // stack on generated validators (ajv-style nested conditionals);
+    // deep static recursion gets the same headroom. Everything — runtime
+    // init, the entry, the event loop, teardown — runs on that one thread
+    // (the runtime is thread-confined), and exits propagate as they did.
     "fn main() {",
+    "    let sc_program = std::thread::Builder::new()",
+    "        .name(\"scriptc-program\".to_owned())",
+    "        .stack_size(256 * 1024 * 1024)",
+    "        .spawn(sc_program_main)",
+    "        .expect(\"scriptc: could not start the program thread\");",
+    "    if sc_program.join().is_err() { std::process::exit(101); }",
+    "}",
+    "fn sc_program_main() {",
     "    runtime::init();",
     ...targetConfigureLine(options.runtimeTarget),
     ...(options.usesEmbeddedModules

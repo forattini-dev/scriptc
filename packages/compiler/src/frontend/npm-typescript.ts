@@ -19,11 +19,18 @@ export function setEmbedJsxOptions(options: { jsxImportSource?: string } | null)
  * function aborts the engine), so embedded sources that carry it, TS or
  * JS, downlevel to the ES2022 try/finally form the helpers implement. */
 const USES_EXPLICIT_RESOURCES = /\b(?:await\s+)?using\s+[A-Za-z_$]/;
+/** An export LIST (`export { a, b }`, no `from`): boa 0.22 refuses one
+ * that ends the file without a semicolon ("abrupt end" — ASI at EOF is
+ * not applied after the clause), a common shape in semicolon-free
+ * packages (fetch-blob). The TypeScript emitter normalizes semicolons,
+ * so such sources take the transpile path too. */
+const HAS_EXPORT_LIST = /\bexport\s*\{[^}]*\}(?!\s*from\b)/;
 
 export function npmExecutableSource(fileName: string, source: string): string {
   const typescript = /\.(ts|tsx|mts|cts)$/.test(fileName) && !fileName.endsWith(".d.ts");
   if (!typescript) {
-    if (!/\.(js|mjs|cjs|jsx)$/.test(fileName) || !USES_EXPLICIT_RESOURCES.test(source)) return source;
+    if (!/\.(js|mjs|cjs|jsx)$/.test(fileName)) return source;
+    if (!USES_EXPLICIT_RESOURCES.test(source) && !HAS_EXPORT_LIST.test(source)) return source;
     return ts.transpileModule(source, {
       fileName,
       compilerOptions: { module: ts.ModuleKind.Preserve, target: ts.ScriptTarget.ES2022, allowJs: true },

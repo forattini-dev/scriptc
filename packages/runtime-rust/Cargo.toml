@@ -45,3 +45,7 @@ getifaddrs = "=0.6.2"
 codegen-units = 1
 lto = "thin"
 strip = true
+
+[[example]]
+name = "island_parse"
+required-features = ["island-eval"]
