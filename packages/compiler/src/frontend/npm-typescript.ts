@@ -54,3 +54,19 @@ export function npmExecutableSource(fileName: string, source: string): string {
     },
   }).outputText;
 }
+
+/** True when a JavaScript source carries ES module syntax at its top
+ * level (import/export declarations, `export default`). A ".js" file in
+ * a CommonJS-typed package that spells these is not CommonJS whatever
+ * the package.json says — Node would refuse it outright, while the
+ * bundler-style "module" field resolution the embedder follows leads
+ * straight into such files (jsonc-parser's lib/esm/*.js). */
+export function hasEsmSyntax(fileName: string, source: string): boolean {
+  if (!/^\s*(?:import|export)\b/m.test(source)) return false;
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+  return sf.statements.some((statement) =>
+    ts.isImportDeclaration(statement) ||
+    ts.isExportDeclaration(statement) ||
+    ts.isExportAssignment(statement) ||
+    (ts.canHaveModifiers(statement) && (ts.getModifiers(statement) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)));
+}

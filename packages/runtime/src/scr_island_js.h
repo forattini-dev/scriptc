@@ -7304,6 +7304,11 @@ static const char isl_modules_bootstrap[] =
     "  }\n"
     "  if (globalThis.global === undefined) globalThis.global = globalThis;\n"
     "  globalThis.__scr_require = requireKey;\n"
+  /* A module-bound require for embedded ES modules that call `require`
+   * at top level (turndown's "module" build): Bun gives every ES module
+   * a require in scope; the compiler injects `const require =
+   * __scr_require_from(key)` under the bun target. */
+    "  globalThis.__scr_require_from = (key) => builtins.module().createRequire(key);\n"
     "  return (key, name) => {\n"
     "    const exports = requireKey(key);\n"
     "    if (name === 'default') return exports;\n"

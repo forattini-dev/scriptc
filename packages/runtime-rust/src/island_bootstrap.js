@@ -7122,6 +7122,7 @@ function makeQuerystring() {
   }
   if (globalThis.global === undefined) globalThis.global = globalThis;
   globalThis.__scr_require = requireKey;
+  globalThis.__scr_require_from = (key) => builtins.module().createRequire(key);
   return (key, name) => {
     const exports = requireKey(key);
     if (name === 'default') return exports;

@@ -90,7 +90,7 @@ import ts from "typescript5";
 import { cjsBunVisibleExportsOf } from "./cjs-bun-exports.js";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
-import { npmExecutableSource } from "./npm-typescript.js";
+import { hasEsmSyntax, npmExecutableSource } from "./npm-typescript.js";
 import { activeRuntimeConditions, activeRuntimeTarget } from "../compat/runtime-target.js";
 import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
 import { isNodeModulesPath, resolveEmbedPathAlias, resolveExports, resolvePackageImports } from "./resolve.js";
@@ -1538,7 +1538,10 @@ export class NpmGraphBuilder {
           target = fromExports;
         } else if (subpath !== ".") {
           target = subpath;
-        } else if (mode === "import" && typeof pkg.module === "string" && pkg.module !== "") {
+        } else if (mode === "import" && typeof pkg.module === "string" && pkg.module !== "" && activeRuntimeTarget().family !== "bun") {
+          // Bun's RUNTIME resolution (the bun target's oracle) ignores the
+          // "module" field like Node does — "main" answers; the ESM
+          // preference stays a Node-target embedding convenience.
           // No "exports": the "module" field names the ESM build (a
           // bundler convention Node itself ignores; embedding prefers the
           // real ES module over require-shimming the CJS "main").
@@ -1688,7 +1691,12 @@ export class NpmGraphBuilder {
       if (lazy) this.lazilyReached.add(key);
       return;
     }
-    const format = this.formatOf(key);
+    let format = this.formatOf(key);
+    // A ".js" file reached through a package's "module" (ESM build)
+    // field sits in a CommonJS-typed package: its relative imports are
+    // ESM by CONTENT (Node would refuse them as CJS; the embedder's
+    // bundler-style resolution reaches them on purpose).
+    if (format === "cjs" && key.endsWith(".js") && hasEsmSyntax(key, source)) format = "esm";
     let executableSource = npmExecutableSource(key, source);
     // Bun runtime modules under --target bun: the import declarations
     // become reads of the island's trap table (bun-island-rewrite.ts), so
@@ -1697,6 +1705,15 @@ export class NpmGraphBuilder {
       const rewritten = rewriteBunModuleImports(executableSource, key);
       for (const spec of rewritten.specifiers) this.noteBunTrap(spec, chain[chain.length - 1] ?? key);
       executableSource = rewritten.source;
+      // Bun scopes a `require` into every ES module; an ESM build that
+      // calls it at top level (turndown's, resolved through "module")
+      // gets a module-bound one, unless it declares its own.
+      if (format === "esm" && /\brequire\s*\(/.test(executableSource) && !/\b(?:const|let|var|function)\s+require\b|\bimport\s+require\b|\{[^}]*\brequire\b[^}]*\}\s*(?:=|from\b)/.test(executableSource)) {
+        const banner = `const require = globalThis.__scr_require_from(${JSON.stringify(key)});`;
+        executableSource = executableSource.startsWith("#!")
+          ? executableSource.replace(/^[^\n]*\n/, (line) => `${line}${banner}\n`)
+          : `${banner}\n${executableSource}`;
+      }
     }
     this.modules.set(key, { key, source: executableSource, format });
     if (lazy) this.lazilyReached.add(key);
