@@ -15,44 +15,28 @@
   "preflightFailed": false,
   "stats": {
     "statementsTotal": 450,
-    "statementsFailed": 8,
-    "statementsIsland": 209,
+    "statementsFailed": 2,
+    "statementsIsland": 214,
     "functionsSkipped": 0
   },
   "unreachedStats": {
     "statementsTotal": 739,
-    "statementsFailed": 3,
-    "statementsIsland": 84,
+    "statementsFailed": 0,
+    "statementsIsland": 87,
     "functionsSkipped": 0
   },
   "reached": {
-    "total": 8,
+    "total": 2,
     "byCode": {
-      "SC1013": 6,
       "SC1090": 2
     },
     "byFamily": {
-      "namespace-object-value": 6,
       "island-boundary-function": 2
     },
     "byPackage": {
-      "redcode": 8
+      "redcode": 2
     },
     "families": [
-      {
-        "family": "namespace-object-value",
-        "count": 6,
-        "codes": {
-          "SC1013": 6
-        },
-        "packages": {
-          "redcode": 6
-        },
-        "sample": {
-          "file": "packages/redcode/src/server/event.ts",
-          "message": "module namespace objects as first-class values (export 'Connected' of 'ServerEvent' has no static record representation; access 'ServerEvent' members directly: ServerEvent.<member>) are not supported "
-        }
-      },
       {
         "family": "island-boundary-function",
         "count": 2,
@@ -71,32 +55,11 @@
     "stdlibTail": {}
   },
   "unreached": {
-    "total": 3,
-    "byCode": {
-      "SC1013": 3
-    },
-    "byFamily": {
-      "namespace-object-value": 3
-    },
-    "byPackage": {
-      "redcode": 3
-    },
-    "families": [
-      {
-        "family": "namespace-object-value",
-        "count": 3,
-        "codes": {
-          "SC1013": 3
-        },
-        "packages": {
-          "redcode": 3
-        },
-        "sample": {
-          "file": "packages/redcode/src/cli/cmd/run/splash.ts",
-          "message": "module namespace objects as first-class values (export 'Locale' of 'Locale' has no static record representation; access 'Locale' members directly: Locale.<member>) are not supported yet"
-        }
-      }
-    ],
+    "total": 0,
+    "byCode": {},
+    "byFamily": {},
+    "byPackage": {},
+    "families": [],
     "stdlibTail": {}
   },
   "runtimeFences": 0,
@@ -583,6 +546,11 @@
       "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/xai.ts",
       "tier": "island",
       "reason": "pinned (scriptc.json): SC2020 'Number of unknown values' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/cerebras.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'PluginInput' cannot be compiled: the record shape is supported, but its member 'client' has type 'RedcodeClient', which does not compile"
     },
     {
       "module": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/snowflake-cortex.ts",
@@ -3051,10 +3019,10 @@
     }
   ],
   "timing": {
-    "wallMs": 109485,
+    "wallMs": 628822,
     "phases": {
-      "ffi-validate": 647,
-      "reachable-emit": 36697
+      "ffi-validate": 140,
+      "reachable-emit": 48964
     }
   }
 }
