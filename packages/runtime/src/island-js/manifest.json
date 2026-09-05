@@ -6,7 +6,7 @@
     "subset the boa island can serve honestly today: every part whose host",
     "surface the Rust bridge implements. A part missing from `rust` leaves",
     "its builtin unregistered, which is the island's does-not-provide",
-    "throw — an honest fence, not a silent wrong answer."
+    "throw \u2014 an honest fence, not a silent wrong answer."
   ],
   "c": [
     "01-prelude.js",
@@ -62,8 +62,10 @@
     "16-child-process.js",
     "17-async-hooks.js",
     "18-domain.js",
+    "19-worker-threads.js",
     "20-perf-hooks.js",
     "21-v8.js",
+    "22-dns.js",
     "23-readline.js",
     "24-punycode.js",
     "25-querystring.js",

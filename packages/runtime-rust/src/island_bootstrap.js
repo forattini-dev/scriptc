@@ -22,8 +22,10 @@
  *   16-child-process.js
  *   17-async-hooks.js
  *   18-domain.js
+ *   19-worker-threads.js
  *   20-perf-hooks.js
  *   21-v8.js
+ *   22-dns.js
  *   23-readline.js
  *   24-punycode.js
  *   25-querystring.js
@@ -352,6 +354,55 @@
     });
   };
   const bunTrapModules = Object.create(null);
+  if (typeof globalThis.Intl !== 'undefined' && typeof globalThis.Intl.NumberFormat === 'function') {
+    const Native = globalThis.Intl.NumberFormat;
+    let needsShim = false;
+    try {
+      needsShim = new Native('en-US', { style: 'currency', currency: 'USD' }).format(1) !== '$1.00'
+        || new Native('en-US', { style: 'percent' }).format(0.5) !== '50%';
+    } catch (e) {
+      needsShim = true;
+    }
+    if (needsShim) {
+      const symbols = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: 'CN¥', BRL: 'R$', INR: '₹', KRW: '₩', CAD: 'CA$', AUD: 'A$', MXN: 'MX$', CHF: 'CHF\u00a0', SEK: 'SEK\u00a0', NZD: 'NZ$', HKD: 'HK$', SGD: 'SGD\u00a0' };
+      const zeroDigit = new Set(['JPY', 'KRW', 'CLP', 'ISK', 'VND', 'HUF']);
+      function ShimNumberFormat(locales, options) {
+        const opts = Object.assign({}, options || {});
+        const style = opts.style || 'decimal';
+        if (style !== 'currency' && style !== 'percent') return new Native(locales, options);
+        const currency = style === 'currency' ? String(opts.currency || '').toUpperCase() : '';
+        if (style === 'currency' && currency === '') throw new TypeError('Currency code is required with currency style.');
+        const digits = style === 'currency' ? (zeroDigit.has(currency) ? 0 : 2) : 0;
+        const inner = Object.assign({}, opts);
+        delete inner.style; delete inner.currency; delete inner.currencyDisplay; delete inner.currencySign;
+        if (inner.minimumFractionDigits === undefined && inner.maximumFractionDigits === undefined) {
+          inner.minimumFractionDigits = digits;
+          inner.maximumFractionDigits = digits;
+        } else {
+          if (inner.minimumFractionDigits === undefined) inner.minimumFractionDigits = Math.min(digits, inner.maximumFractionDigits);
+          if (inner.maximumFractionDigits === undefined) inner.maximumFractionDigits = Math.max(digits, inner.minimumFractionDigits);
+        }
+        const decimal = new Native(locales, inner);
+        const symbol = style === 'currency' ? (symbols[currency] || currency + '\u00a0') : '';
+        const format = (value) => {
+          const n = Number(value);
+          if (style === 'percent') return decimal.format(n * 100) + '%';
+          const negative = n < 0 || Object.is(n, -0);
+          const body = decimal.format(Math.abs(n));
+          return (negative ? '-' : '') + symbol + body;
+        };
+        const self = Object.create(ShimNumberFormat.prototype);
+        Object.defineProperty(self, 'format', { value: format, configurable: true, writable: true });
+        Object.defineProperty(self, 'formatToParts', { value: (value) => [{ type: 'literal', value: format(value) }], configurable: true, writable: true });
+        Object.defineProperty(self, 'resolvedOptions', { value: () => Object.assign(decimal.resolvedOptions(), { style }, style === 'currency' ? { currency, currencyDisplay: 'symbol', currencySign: 'standard' } : {}), configurable: true, writable: true });
+        return self;
+      }
+      ShimNumberFormat.prototype = { constructor: ShimNumberFormat, [Symbol.toStringTag]: 'Intl.NumberFormat' };
+      ShimNumberFormat.supportedLocalesOf = Native.supportedLocalesOf.bind(Native);
+      Object.defineProperty(ShimNumberFormat, 'name', { value: 'NumberFormat' });
+      globalThis.Intl.NumberFormat = ShimNumberFormat;
+    }
+  }
   globalThis.__scr_bun_trap = (spec) => {
     const hit = bunTrapModules[spec];
     if (hit) return hit;
@@ -4910,6 +4961,23 @@ function makeUtil(env) {
     d.default = d;
     return d;
   });
+  builtins.worker_threads = memo(() => {
+    const MessagePort = globalThis.MessagePort;
+    const MessageChannel = globalThis.MessageChannel;
+    const receiveMessageOnPort = (port) => (port._queue.length > 0 ? port._queue.shift() : undefined);
+    class Worker {
+      constructor() { throw new Error("node:worker_threads 'Worker' is not supported in the scriptc island (the embedded engine has no worker runtime)"); }
+    }
+    const wt = {
+      isMainThread: true, parentPort: null, threadId: 0, workerData: null, resourceLimits: {},
+      MessageChannel, MessagePort, Worker, receiveMessageOnPort,
+      markAsUntransferable: () => {}, isMarkedAsUntransferable: () => false,
+      getEnvironmentData: () => undefined, setEnvironmentData: () => {},
+      SHARE_ENV: Symbol.for('nodejs.worker_threads.SHARE_ENV'),
+    };
+    wt.default = wt;
+    return wt;
+  });
   builtins.perf_hooks = memo(() => {
     const timeOrigin = Date.now();
     const performance = {
@@ -4981,6 +5049,50 @@ function makeUtil(env) {
     };
     v8.default = v8;
     return v8;
+  });
+  builtins.dns = memo(() => {
+    const fenceErr = (what) => {
+      const e = new Error("node:dns '" + what + "' is not supported in the scriptc island yet");
+      e.code = 'ENOTFOUND';
+      e.syscall = what;
+      return e;
+    };
+    const cbFence = (what) => (...args) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') { queueMicrotask(() => cb(fenceErr(what))); return; }
+      throw fenceErr(what);
+    };
+    const pFence = (what) => (...args) => Promise.reject(fenceErr(what));
+    const promises = {
+      lookup: pFence('lookup'), lookupService: pFence('lookupService'),
+      resolve: pFence('resolve'), resolve4: pFence('resolve4'), resolve6: pFence('resolve6'),
+      resolveCname: pFence('resolveCname'), resolveMx: pFence('resolveMx'),
+      resolveNs: pFence('resolveNs'), resolveSrv: pFence('resolveSrv'),
+      resolveTxt: pFence('resolveTxt'), reverse: pFence('reverse'),
+      getServers: () => [], setServers: () => {},
+    };
+    class Resolver {
+      constructor() {}
+      getServers() { return []; }
+      setServers() {}
+    }
+    for (const m of ['resolve', 'resolve4', 'resolve6', 'resolveCname', 'resolveMx', 'resolveNs', 'resolveSrv', 'resolveTxt', 'reverse']) {
+      Resolver.prototype[m] = cbFence(m);
+    }
+    const d = {
+      lookup: cbFence('lookup'), lookupService: cbFence('lookupService'),
+      resolve: cbFence('resolve'), resolve4: cbFence('resolve4'), resolve6: cbFence('resolve6'),
+      resolveCname: cbFence('resolveCname'), resolveMx: cbFence('resolveMx'),
+      resolveNs: cbFence('resolveNs'), resolveSrv: cbFence('resolveSrv'),
+      resolveTxt: cbFence('resolveTxt'), reverse: cbFence('reverse'),
+      getServers: () => [], setServers: () => {},
+      Resolver, promises,
+      ADDRCONFIG: 1024, V4MAPPED: 2048, ALL: 256,
+      NODATA: 'ENODATA', FORMERR: 'EFORMERR', SERVFAIL: 'ESERVFAIL',
+      NOTFOUND: 'ENOTFOUND', NOTIMP: 'ENOTIMP', REFUSED: 'EREFUSED',
+    };
+    d.default = d;
+    return d;
   });
   builtins.readline = memo(() => {
     const EventEmitter = builtins.events();

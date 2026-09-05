@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-island-eval = ["dep:boa_engine"]
+island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal"]
 
 [dependencies]
 boa_engine = { version = "=0.22.0", default-features = false, optional = true }
@@ -48,4 +48,8 @@ strip = true
 
 [[example]]
 name = "island_parse"
+required-features = ["island-eval"]
+
+[[example]]
+name = "island_eval"
 required-features = ["island-eval"]

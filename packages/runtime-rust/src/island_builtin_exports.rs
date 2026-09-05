@@ -9,7 +9,7 @@
 
 /// Named exports per shimmed builtin, mirroring the C island's
 /// `isl_builtins`.
-static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 40] = [
+static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 42] = [
     ("node:events", "EventEmitter,once,on,listenerCount,getEventListeners,setMaxListeners,defaultMaxListeners,errorMonitor,captureRejectionSymbol"),
     ("node:path", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
     ("node:path/posix", "sep,delimiter,basename,dirname,extname,join,resolve,normalize,relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"),
@@ -35,8 +35,10 @@ static ISLAND_BUILTIN_EXPORTS: [(&str, &str); 40] = [
     ("node:child_process", "spawn,spawnSync,exec,execSync,execFile,execFileSync,fork"),
     ("node:async_hooks", "AsyncLocalStorage,AsyncResource,executionAsyncId,triggerAsyncId,executionAsyncResource,createHook"),
     ("node:domain", "create,createDomain,Domain,active"),
+    ("node:worker_threads", "isMainThread,parentPort,threadId,workerData,resourceLimits,MessageChannel,MessagePort,Worker,receiveMessageOnPort,SHARE_ENV,markAsUntransferable,getEnvironmentData,setEnvironmentData"),
     ("node:perf_hooks", "performance,PerformanceObserver,monitorEventLoopDelay,constants"),
     ("node:v8", "startupSnapshot,cachedDataVersionTag,getHeapStatistics,getHeapSpaceStatistics,getHeapCodeStatistics,getCppHeapStatistics,setFlagsFromString,takeCoverage,stopCoverage,setHeapSnapshotNearHeapLimit,serialize,deserialize,writeHeapSnapshot,getHeapSnapshot,queryObjects,startCpuProfile,isStringOneByteRepresentation,promiseHooks,Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler"),
+    ("node:dns", "lookup,lookupService,resolve,resolve4,resolve6,resolveCname,resolveMx,resolveNs,resolveSrv,resolveTxt,reverse,getServers,setServers,Resolver,promises,ADDRCONFIG,V4MAPPED,ALL"),
     ("node:readline", "Interface,createInterface,clearLine,clearScreenDown,cursorTo,moveCursor,emitKeypressEvents"),
     ("node:punycode", "version,ucs2,decode,encode,toASCII,toUnicode"),
     ("node:querystring", "parse,stringify,decode,encode,escape,unescape,unescapeBuffer"),

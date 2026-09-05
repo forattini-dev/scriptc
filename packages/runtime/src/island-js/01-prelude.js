@@ -395,6 +395,68 @@
     });
   };
   const bunTrapModules = Object.create(null);
+  /* Intl.NumberFormat currency and percent styles over an engine whose
+   * NumberFormat formats decimals but not currencies (boa's `format`
+   * answers "unimplemented" for style: "currency"; percent formats as
+   * 0). Feature-detected, so an engine with full ICU (quickjs-ng builds
+   * without Intl take a different path entirely) keeps its own. The
+   * decimal formatting — grouping, rounding, fraction digits — stays the
+   * engine's; only the symbol, the percent scaling, and the currency's
+   * default digits are spelled here, for the en-style symbol-first
+   * pattern redcode's "$1,234.50" relies on. */
+  if (typeof globalThis.Intl !== 'undefined' && typeof globalThis.Intl.NumberFormat === 'function') {
+    const Native = globalThis.Intl.NumberFormat;
+    let needsShim = false;
+    try {
+      needsShim = new Native('en-US', { style: 'currency', currency: 'USD' }).format(1) !== '$1.00'
+        || new Native('en-US', { style: 'percent' }).format(0.5) !== '50%';
+    } catch (e) {
+      needsShim = true;
+    }
+    if (needsShim) {
+      const symbols = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: 'CN¥', BRL: 'R$', INR: '₹', KRW: '₩', CAD: 'CA$', AUD: 'A$', MXN: 'MX$', CHF: 'CHF\u00a0', SEK: 'SEK\u00a0', NZD: 'NZ$', HKD: 'HK$', SGD: 'SGD\u00a0' };
+      const zeroDigit = new Set(['JPY', 'KRW', 'CLP', 'ISK', 'VND', 'HUF']);
+      function ShimNumberFormat(locales, options) {
+        const opts = Object.assign({}, options || {});
+        const style = opts.style || 'decimal';
+        if (style !== 'currency' && style !== 'percent') return new Native(locales, options);
+        const currency = style === 'currency' ? String(opts.currency || '').toUpperCase() : '';
+        if (style === 'currency' && currency === '') throw new TypeError('Currency code is required with currency style.');
+        const digits = style === 'currency' ? (zeroDigit.has(currency) ? 0 : 2) : 0;
+        const inner = Object.assign({}, opts);
+        delete inner.style; delete inner.currency; delete inner.currencyDisplay; delete inner.currencySign;
+        if (inner.minimumFractionDigits === undefined && inner.maximumFractionDigits === undefined) {
+          inner.minimumFractionDigits = digits;
+          inner.maximumFractionDigits = digits;
+        } else {
+          if (inner.minimumFractionDigits === undefined) inner.minimumFractionDigits = Math.min(digits, inner.maximumFractionDigits);
+          if (inner.maximumFractionDigits === undefined) inner.maximumFractionDigits = Math.max(digits, inner.minimumFractionDigits);
+        }
+        const decimal = new Native(locales, inner);
+        const symbol = style === 'currency' ? (symbols[currency] || currency + '\u00a0') : '';
+        const format = (value) => {
+          const n = Number(value);
+          if (style === 'percent') return decimal.format(n * 100) + '%';
+          const negative = n < 0 || Object.is(n, -0);
+          const body = decimal.format(Math.abs(n));
+          return (negative ? '-' : '') + symbol + body;
+        };
+        /* Own data properties (the native prototype's `format` is a
+         * setter-less accessor, so an inheriting object could not assign
+         * it); the shim's prototype is its own, not the native one. */
+        const self = Object.create(ShimNumberFormat.prototype);
+        Object.defineProperty(self, 'format', { value: format, configurable: true, writable: true });
+        Object.defineProperty(self, 'formatToParts', { value: (value) => [{ type: 'literal', value: format(value) }], configurable: true, writable: true });
+        Object.defineProperty(self, 'resolvedOptions', { value: () => Object.assign(decimal.resolvedOptions(), { style }, style === 'currency' ? { currency, currencyDisplay: 'symbol', currencySign: 'standard' } : {}), configurable: true, writable: true });
+        return self;
+      }
+      ShimNumberFormat.prototype = { constructor: ShimNumberFormat, [Symbol.toStringTag]: 'Intl.NumberFormat' };
+      ShimNumberFormat.supportedLocalesOf = Native.supportedLocalesOf.bind(Native);
+      Object.defineProperty(ShimNumberFormat, 'name', { value: 'NumberFormat' });
+      globalThis.Intl.NumberFormat = ShimNumberFormat;
+    }
+  }
+
   globalThis.__scr_bun_trap = (spec) => {
     const hit = bunTrapModules[spec];
     if (hit) return hit;
