@@ -27,6 +27,7 @@ import { RustStreamModel } from "./stream-model.js";
 import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
 import { rustRuntimeFeatures } from "./runtime-features.js";
+import type { RustAsyncFrameExtra } from "./async-control.js";
 import { buildRustClassGraph } from "./class-graph.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
 import type { IrAwaitExpr, IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
@@ -70,6 +71,14 @@ class RustEmitter {
   private currentFunction: IrFunction | null = null;
   private currentAsyncResult: string | null = null;
   private currentAsyncLocals: Set<string> | null = null;
+  /** Raw locals of enclosing async helper frames that nested fn helpers
+   * take as parameters (RustAsyncFrameExtra). */
+  private readonly asyncFrameExtrasStack: RustAsyncFrameExtra[] = [];
+  private withAsyncFrameExtras<T>(extras: readonly RustAsyncFrameExtra[], emit: () => T): T {
+    const depth = this.asyncFrameExtrasStack.length;
+    this.asyncFrameExtrasStack.push(...extras);
+    try { return emit(); } finally { this.asyncFrameExtrasStack.length = depth; }
+  }
   private asyncProtectedReturnDepth = 0;
   private capturedReturnDepth = 0;
   private readonly loopTargets: {
@@ -184,6 +193,8 @@ class RustEmitter {
     currentFunction: () => this.currentFunction,
     currentAsyncLocals: () => this.currentAsyncLocals,
     setCurrentAsyncLocals: (locals) => { this.currentAsyncLocals = locals; },
+    asyncFrameExtras: () => this.asyncFrameExtrasStack,
+    withAsyncFrameExtras: (extras, emit) => this.withAsyncFrameExtras(extras, emit),
     adjustAsyncProtectedReturnDepth: (delta) => { this.asyncProtectedReturnDepth += delta; },
     emitExpr: (expr) => this.emitExpr(expr),
     emitExprWithValues: (expr, values) => this.expressionEmitter.emitExprWithValues(expr, values),
@@ -221,6 +232,7 @@ class RustEmitter {
   });
   private readonly asyncValueEmitter = new RustAsyncValueEmitter({
     records: this.records,
+    asyncFrameExtras: () => this.asyncFrameExtrasStack,
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
     popIndent: () => { this.indent -= 1; },

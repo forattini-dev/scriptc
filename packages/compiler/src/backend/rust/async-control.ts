@@ -5,6 +5,7 @@ import { asyncTrampolineCall } from "./async-trampoline.js";
 import { isRustAwaitExpr, type IrAwaitExpr } from "./model.js";
 import { rustAsyncExpressionOperands } from "./async-values.js";
 import { emitAsyncIf } from "./async-if.js";
+import { emitAsyncProtectedForOf } from "./async-protected-for-of.js";
 import { emitAsyncProtectedIf, emitAsyncProtectedWhile } from "./async-protected-loop.js";
 
 export interface RustAsyncHandlers {
@@ -23,7 +24,14 @@ interface RustAsyncLoopControl {
   continueLoop(): void;
 }
 
+/** A raw Rust local of an enclosing async helper frame (a for-of's array
+ * and index) that every nested fn helper must take as a parameter: fn
+ * items cannot capture, and loop continuations reference them. */
+export interface RustAsyncFrameExtra { name: string; rustType: string }
+
 export interface RustAsyncControlContext {
+  asyncFrameExtras(): readonly RustAsyncFrameExtra[];
+  withAsyncFrameExtras<T>(extras: readonly RustAsyncFrameExtra[], emit: () => T): T;
   readonly records: ReadonlyMap<string, IrRecordShape>;
   line(value: string): void;
   pushIndent(): void;
@@ -382,14 +390,17 @@ export class RustAsyncControlEmitter {
     const helper = this.context.nextName("sc_async_loop");
     const locals = [...loopLocals].map((localId) => this.context.local(localId, stmt.loc));
     const resultType = this.context.rustType(fn.returnType, stmt.loc);
+    const frameExtras = [...this.context.asyncFrameExtras()];
     const params = [
       `${result}: runtime::JsPromise<${resultType}>`,
+      ...frameExtras.map((extra) => `${extra.name}: ${extra.rustType}`),
       ...locals.map((local) =>
         `${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}>`
       ),
     ];
     const call = () => asyncTrampolineCall(this.context, helper, [
       `${result}.clone()`,
+      ...frameExtras.map((extra) => `${extra.name}.clone()`),
       ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
     ]);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
@@ -434,14 +445,17 @@ export class RustAsyncControlEmitter {
     const loopLocals = new Set(this.context.currentAsyncLocals() ?? []);
     const locals = [...loopLocals].map((localId) => this.context.local(localId, stmt.loc));
     const helper = this.context.nextName("sc_async_while");
+    const frameExtras = [...this.context.asyncFrameExtras()];
     const params = [
       `${result}: runtime::JsPromise<${this.context.rustType(fn.returnType, stmt.loc)}>`,
+      ...frameExtras.map((extra) => `${extra.name}: ${extra.rustType}`),
       ...locals.map((local) =>
         `${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}>`
       ),
     ];
     const args = [
       `${result}.clone()`,
+      ...frameExtras.map((extra) => `${extra.name}.clone()`),
       ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
     ];
     const call = stmt.cond.kind === "boolLit" && stmt.cond.value
@@ -501,8 +515,10 @@ export class RustAsyncControlEmitter {
     const helper = this.context.nextName("sc_async_for_of");
     const array = this.context.nextName("sc_async_for_of_array");
     const index = this.context.nextName("sc_async_for_of_index");
+    const frameExtras = [...this.context.asyncFrameExtras()];
     const params = [
       `${result}: runtime::JsPromise<${this.context.rustType(fn.returnType, stmt.loc)}>`,
+      ...frameExtras.map((extra) => `${extra.name}: ${extra.rustType}`),
       `${array}: ${this.context.rustType(stmt.iterable.type, stmt.loc)}`,
       `${index}: f64`,
       ...locals.map((candidate) =>
@@ -511,6 +527,7 @@ export class RustAsyncControlEmitter {
     ];
     const call = (nextIndex: string) => asyncTrampolineCall(this.context, helper, [
       `${result}.clone()`,
+      ...frameExtras.map((extra) => `${extra.name}.clone()`),
       `${array}.clone()`,
       nextIndex,
       ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
@@ -519,7 +536,11 @@ export class RustAsyncControlEmitter {
     this.context.line(`let ${array} = ${arrayValue ?? this.context.emitExpr(stmt.iterable)};`);
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
-    this.withAsyncLocals(new Set(loopLocals), () => {
+    const loopFrameExtras: RustAsyncFrameExtra[] = [
+      { name: array, rustType: this.context.rustType(stmt.iterable.type, stmt.loc) },
+      { name: index, rustType: "f64" },
+    ];
+    this.context.withAsyncFrameExtras(loopFrameExtras, () => this.withAsyncLocals(new Set(loopLocals), () => {
       this.context.line(`if ${index} < runtime::array_len(&${array}) {`);
       this.context.pushIndent();
       this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
@@ -537,7 +558,7 @@ export class RustAsyncControlEmitter {
       this.withAsyncLocals(new Set(loopLocals), () => this.emitAsyncStatements(remaining, onComplete));
       this.context.popIndent();
       this.context.line("}");
-    });
+    }));
     this.context.popIndent();
     this.context.line("}");
     this.context.line(call("0.0_f64"));
@@ -809,6 +830,16 @@ export class RustAsyncControlEmitter {
     for (const capture of captures) {
       this.context.line(`let ${capture.capture} = ${mangleLocal(capture.localId)}.clone();`);
     }
+    // Enclosing frames' raw locals (a for-of's array/index) cross the
+    // move closure through fresh clones too, so the enclosing segment
+    // keeps borrowing the originals (its other branches still use them).
+    const frameCaptures = this.context.asyncFrameExtras().map((extra) => ({
+      extra,
+      capture: this.context.nextName("sc_async_frame"),
+    }));
+    for (const capture of frameCaptures) {
+      this.context.line(`let ${capture.capture} = ${capture.extra.name}.clone();`);
+    }
     this.context.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
     this.context.pushIndent();
     this.context.line(`let ${guard} = ${nextResult}.clone();`);
@@ -817,6 +848,9 @@ export class RustAsyncControlEmitter {
     this.context.line(`let ${result} = ${nextResult};`);
     for (const capture of captures) {
       this.context.line(`let ${mangleLocal(capture.localId)} = ${capture.capture};`);
+    }
+    for (const capture of frameCaptures) {
+      this.context.line(`let ${capture.extra.name} = ${capture.capture};`);
     }
     this.context.line(`match ${outcome} {`);
     this.context.pushIndent();
@@ -966,75 +1000,7 @@ export class RustAsyncControlEmitter {
     loc: SrcLoc,
     arrayValue?: string,
   ): void {
-    const result = this.context.currentAsyncResult();
-    const fn = this.context.currentFunction();
-    if (result === null || fn?.async !== true) {
-      this.context.unsupported("protected async for-of outside an async function", stmt.loc);
-    }
-    if ((stmt.labels?.length ?? 0) > 0) this.context.unsupported("labeled protected async for-of", stmt.loc);
-    if (stmt.iterable.type.kind !== "array") this.context.unsupported("protected async for-of over a non-array", stmt.loc);
-    if (arrayValue === undefined && this.containsAsyncSuspension(stmt.iterable)) {
-      this.emitAsyncProtectedValue(stmt.iterable, exitLocals, handlers, (value) =>
-        this.emitAsyncProtectedForOf(stmt, remaining, exitLocals, handlers, loc, value));
-      return;
-    }
-    if (this.containsLoopControl(stmt.body)) {
-      this.context.unsupported("break or continue in a protected suspended async for-of", stmt.loc);
-    }
-
-    const loopLocals = new Set(this.context.currentAsyncLocals() ?? []);
-    const locals = [...loopLocals].map((localId) => this.context.local(localId, stmt.loc));
-    const local = this.context.local(stmt.localId, stmt.loc);
-    const helper = this.context.nextName("sc_async_protected_for_of");
-    const array = this.context.nextName("sc_async_for_of_array");
-    const index = this.context.nextName("sc_async_for_of_index");
-    const arrayType = this.context.rustType(stmt.iterable.type, stmt.loc);
-    const params = [
-      `${result}: runtime::JsPromise<${this.context.rustType(fn.returnType, stmt.loc)}>`,
-      `${array}: ${arrayType}`,
-      `${index}: f64`,
-      ...locals.map((candidate) =>
-        `${mangleLocal(candidate.id)}: runtime::JsCell<${this.context.rustType(candidate.type, stmt.loc)}>`
-      ),
-    ];
-    const call = (nextIndex: string) => `${helper}(${[
-      `${result}.clone()`,
-      `${array}.clone()`,
-      nextIndex,
-      ...locals.map((candidate) => `${mangleLocal(candidate.id)}.clone()`),
-    ].join(", ")});`;
-
-    this.context.line(`let ${array} = ${arrayValue ?? this.context.emitExpr(stmt.iterable)};`);
-    this.context.line(`fn ${helper}(${params.join(", ")}) {`);
-    this.context.pushIndent();
-    this.withAsyncLocals(new Set(loopLocals), () => {
-      this.context.line(`if ${index} < runtime::array_len(&${array}) {`);
-      this.context.pushIndent();
-      this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`);
-      const iterationLocals = new Set(loopLocals);
-      iterationLocals.add(local.id);
-      this.withAsyncLocals(iterationLocals, () => {
-        this.emitAsyncProtectedSequence(stmt.body, exitLocals, {
-          fallthrough: () => this.withAsyncLocals(new Set(loopLocals), () => {
-            this.context.line(call(`${index} + 1.0_f64`));
-            this.context.line("return;");
-          }),
-          returned: handlers.returned,
-          thrown: handlers.thrown,
-        }, loc);
-      });
-      this.context.popIndent();
-      this.context.line("} else {");
-      this.context.pushIndent();
-      this.withAsyncLocals(new Set(loopLocals), () => {
-        this.emitAsyncProtectedSequence(remaining, exitLocals, handlers, loc);
-      });
-      this.context.popIndent();
-      this.context.line("}");
-    });
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(call("0.0_f64"));
+    emitAsyncProtectedForOf(this, stmt, remaining, exitLocals, handlers, loc, arrayValue);
   }
 
   emitAsyncProtectedConsole(
@@ -1166,14 +1132,17 @@ export class RustAsyncControlEmitter {
     }
     const helper = this.context.nextName(`sc_async_${prefix}`);
     const locals = [...liveLocals].map((localId) => this.context.local(localId, loc));
+    const frameExtras = [...this.context.asyncFrameExtras()];
     const params = [
       `${result}: runtime::JsPromise<${this.context.rustType(fn.returnType, loc)}>`,
+      ...frameExtras.map((extra) => `${extra.name}: ${extra.rustType}`),
       ...locals.map((local) =>
         `${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, loc)}>`
       ),
     ];
     const call = `${helper}(${[
       `${result}.clone()`,
+      ...frameExtras.map((extra) => `${extra.name}.clone()`),
       ...locals.map((local) => `${mangleLocal(local.id)}.clone()`),
     ].join(", ")});`;
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);

@@ -7,6 +7,7 @@ import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustAsyncValueContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
+  asyncFrameExtras(): readonly { name: string; rustType: string }[];
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -466,12 +467,25 @@ export class RustAsyncValueEmitter {
     const value = this.context.nextName("sc_async_value");
     this.context.line(`let ${dependency} = ${dependencyExpr};`);
     this.context.line(`let ${nextResult} = ${result}.clone();`);
+    // Enclosing frames' raw locals (a for-of's array/index) cross the
+    // move closure through fresh clones, so an enclosing segment keeps
+    // borrowing the originals for its other branches.
+    const frameCaptures = this.context.asyncFrameExtras().map((extra) => ({
+      extra,
+      capture: this.context.nextName("sc_async_frame"),
+    }));
+    for (const capture of frameCaptures) {
+      this.context.line(`let ${capture.capture} = ${capture.extra.name}.clone();`);
+    }
     this.context.line(`runtime::promise_then(&${dependency}, Box::new(move |${outcome}| {`);
     this.context.pushIndent();
     this.context.line(`let ${guard} = ${nextResult}.clone();`);
     this.context.line(`runtime::promise_run_segment(&${guard}, move || {`);
     this.context.pushIndent();
     this.context.line(`let ${result} = ${nextResult};`);
+    for (const capture of frameCaptures) {
+      this.context.line(`let ${capture.extra.name} = ${capture.capture};`);
+    }
     this.context.line(`let ${value} = runtime::promise_unwrap(${outcome});`);
     consume(value);
     if (remaining !== null) this.context.emitAsyncStatements(remaining, onComplete);

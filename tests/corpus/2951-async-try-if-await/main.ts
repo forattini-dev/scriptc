@@ -36,6 +36,26 @@ async function choose(on: boolean): Promise<string> {
 }
 console.log(await choose(true), await choose(false));
 
+// The if under try inside a suspending for-of: the branch continuations
+// reach the loop's own frame.
+async function loop(items: number[]): Promise<string> {
+  let acc = "";
+  for (const item of items) {
+    try {
+      if (item % 2 === 0) {
+        acc += await pick(true);
+      } else {
+        acc += await pick(false);
+        if (item === 3) throw new Error("three");
+      }
+    } catch (e) {
+      acc += "!" + (e as Error).message;
+    }
+  }
+  return acc;
+}
+console.log(await loop([1, 2, 3, 4]));
+
 console.log(await run(true, false));
 console.log(await run(false, false));
 console.log(await run(false, true));
