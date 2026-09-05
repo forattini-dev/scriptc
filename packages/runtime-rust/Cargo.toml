@@ -57,3 +57,11 @@ required-features = ["island-eval"]
 [[example]]
 name = "island_module"
 required-features = ["island-eval"]
+
+# boa 0.22.0 with one fix (vendor/boa_engine/PATCHES.md): the property
+# inline cache paired the shape read after a getter with the slot recorded
+# before it, so a getter that redefines its own property (zod's lazy
+# `shape`) made every later read call the stored value. Pure Rust, no
+# network: the vendored copy is the registry crate plus that guard.
+[patch.crates-io]
+boa_engine = { path = "vendor/boa_engine" }
