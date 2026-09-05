@@ -1076,6 +1076,57 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return ctx.dynamic ? JSVAL : null;
   }
+  // PACKAGE-DECLARED INTERSECTIONS (effect Schema's container idioms —
+  // `brand<String, "X"> & { create: ... }`, `Struct<Fields> & ...`): an
+  // intersection the checker keeps anonymous carries no symbol, so the
+  // npm rule above never sees it. When EVERY constituent is
+  // package-declared (its own symbol, or — for anonymous parts — every
+  // property, lives in an npm declaration file that is neither stdlib
+  // nor --external-types-mapped), the value IS an npm object: under
+  // --dynamic an island handle; statically null (the lowerer's
+  // npmPackageOf intersection walk names the package). User-declared
+  // intersections keep their existing story (a part declared in the
+  // program or an external-type file fails the check).
+  if (widened.isIntersectionType()) {
+    const partNpm = (part: ts.Type): boolean => {
+      const partSym = part.getAliasSymbol() ?? part.getSymbol();
+      if (partSym) {
+        const decls = checker.declarationsOf(partSym);
+        if (decls.length > 0) {
+          return decls.every((d) => {
+            const sf = d.getSourceFile();
+            return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf);
+          });
+        }
+      }
+      const props = checker.getPropertiesOfType(part);
+      if (props.length === 0) return false;
+      return props.every((prop) => {
+        const decls = checker.declarationsOf(prop);
+        return decls.length > 0 &&
+          decls.every((d) => {
+            const sf = d.getSourceFile();
+            return sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf);
+          });
+      });
+    };
+    // A PLAIN OBJECT REFINEMENT part: no call/construct/index signatures —
+    // data decoration only (the refined-handle precedent). Primitives and
+    // class parts never qualify (primitives carry no properties; a
+    // `string & Brand<...>` stays STRING through the flag dispatch).
+    const partPlain = (part: ts.Type): boolean => {
+      const sym = part.getSymbol();
+      return (part.flags & ts.TypeFlags.Object) !== 0 &&
+        checker.getCallSignatures(part).length === 0 &&
+        checker.getConstructSignatures(part).length === 0 &&
+        checker.getIndexInfosOfType(part).length === 0 &&
+        (sym === undefined || (sym.flags & ts.SymbolFlags.Class) === 0);
+    };
+    const parts = ts.constituentTypes(widened);
+    if (parts.some(partNpm) && parts.every((part) => partNpm(part) || partPlain(part))) {
+      return ctx.dynamic ? JSVAL : null;
+    }
+  }
   // NOTE on module NAMESPACE types (`typeof import("./x.mjs")` — what a
   // dynamic import resolves to): non-stdlib ones fall under the rule
   // above (their declarations are the .d.ts SourceFiles themselves).

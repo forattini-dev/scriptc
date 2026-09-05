@@ -3456,6 +3456,17 @@ export function lowerStaticReadableStreamReaderCall(
         if (partPkg) return partPkg;
       }
     }
+    // PACKAGE-DECLARED INTERSECTIONS (types.ts's all-npm rule — effect
+    // Schema's `brand & {...}` containers): the anonymous intersection has
+    // no symbol, so the direct rule misses. The first constituent that
+    // names a package attributes the whole value — the runtime object
+    // comes from that package's implementation in the embedded engine.
+    if (type.isIntersectionType()) {
+      for (const part of ts.constituentTypes(type)) {
+        const partPkg = L.npmPackageOfSymbol(part.getAliasSymbol() ?? part.getSymbol());
+        if (partPkg) return partPkg;
+      }
+    }
     return null;
   }
 
