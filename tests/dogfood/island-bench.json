@@ -1,0 +1,81 @@
+{
+  "engine": "boa",
+  "project": "../redcode/packages/redcode",
+  "results": {
+    "effect-gen.ts": {
+      "build": {
+        "ms": 95276,
+        "ok": true,
+        "note": ""
+      },
+      "scriptc": {
+        "ms": 2384,
+        "code": 0,
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=644",
+        "stderr": ""
+      },
+      "node": {
+        "ms": 671,
+        "code": 0,
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=23",
+        "stderr": ""
+      },
+      "bun": {
+        "ms": 544,
+        "code": 0,
+        "stdout": "effect-gen 2000 fibers sum=95971 ms=40",
+        "stderr": ""
+      }
+    },
+    "solid-signals.ts": {
+      "build": {
+        "ms": 57015,
+        "ok": true,
+        "note": ""
+      },
+      "scriptc": {
+        "ms": 142,
+        "code": 1,
+        "stdout": "",
+        "stderr": "Uncaught Error: embedded module call argument is outside the JSON-safe island subset"
+      },
+      "node": {
+        "ms": 131,
+        "code": 0,
+        "stdout": "solid-signals 50000 updates observed=0 ms=2",
+        "stderr": ""
+      },
+      "bun": {
+        "ms": 50,
+        "code": 0,
+        "stdout": "solid-signals 50000 updates observed=0 ms=4",
+        "stderr": ""
+      }
+    },
+    "json-exit.ts": {
+      "build": {
+        "ms": 21045,
+        "ok": true,
+        "note": ""
+      },
+      "scriptc": {
+        "ms": 15,
+        "code": 0,
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=8",
+        "stderr": ""
+      },
+      "node": {
+        "ms": 161,
+        "code": 0,
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=6",
+        "stderr": ""
+      },
+      "bun": {
+        "ms": 47,
+        "code": 0,
+        "stdout": "json-exit 20000 rows total=1029907 echoed=59700 ms=6",
+        "stderr": ""
+      }
+    }
+  }
+}
