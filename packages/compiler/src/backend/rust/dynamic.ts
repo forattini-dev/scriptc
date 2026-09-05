@@ -7,6 +7,7 @@ import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import { emitRustDynamicInspect } from "./dynamic-inspect.js";
 import { emitRustDynamicIteration } from "./dynamic-iteration.js";
 import { emitRustDynamicScalarChecks } from "./dynamic-scalars.js";
+import { emitRustDynamicStringCoercion } from "./dynamic-string-coercion.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
@@ -839,42 +840,10 @@ export class RustDynamicEmitter {
     }
     emitRustDynamicHttp(this.context);
     emitRustDynamicAgent(this.context);
-    this.emitDynamicStringCoercion(boxedShapes);
+    emitRustDynamicStringCoercion(this.context, boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
-  }
-
-  private emitDynamicStringCoercion(boxedShapes: readonly RustClosureShape[]): void {
-    const name = this.context.dynTypeName();
-    const callable = boxedShapes
-      .map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`)
-      .join(" | ");
-    this.context.line(`fn sc_dyn_string_coerce_hook(receiver: &${name}, method: &${name}, method_name: &str) -> Option<runtime::JsString> {`);
-    this.context.pushIndent();
-    this.context.line("let result = match method {");
-    this.context.pushIndent();
-    if (callable.length > 0) {
-      const thisBinding = this.context.usesDynamicInvoke()
-        ? "let _this_guard = sc_dyn_this_push(receiver.clone());"
-        : "let _ = receiver;";
-      this.context.line(`${callable} => { ${thisBinding} sc_dyn_call(method, &[], method_name) },`);
-    }
-    this.context.line("_ => return None,");
-    this.context.popIndent();
-    this.context.line("};");
-    this.context.line(`match &result { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::Boolean(..) | ${name}::String(..) => Some(sc_dyn_to_string(&result)), _ => None, }`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_string_coerce_js(value: &${name}) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line(`let ${name}::Object(object) = value else { return sc_dyn_to_string(value); };`);
-    this.context.line(`if let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_string_coerce_hook(value, &to_string, "toString") { return result; } } else if !sc_dyn_is_null_proto(object) { return runtime::string("[object Object]"); }`);
-    this.context.line("if let Some(value_of) = runtime::map_get_by(object, &runtime::string(\"valueOf\"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_string_coerce_hook(value, &value_of, \"valueOf\") { return result; } }");
-    this.context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_strict_equal(left: &${name}, right: &${name}) -> bool { match (left, right) { (${name}::Number(left), ${name}::Number(right)) => left == right, (${name}::Promise(left), ${name}::Promise(right)) => runtime::promise_handle_identity(left) == runtime::promise_handle_identity(right), _ => sc_dyn_equal(left, right, false), } }`);
   }
 
   emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
@@ -929,6 +898,13 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> ${errorType} {`);
     this.context.pushIndent();
+    // A realm Error handle (a typed callback's `Error` parameter, the
+    // rejection of an engine promise): name and message copy out.
+    if (this.context.hasEmbeddedModules()) {
+      const caughtErrorTest = this.context.errorClassRoots().length === 0 ? "runtime::caught_is_error(&caught)" : "sc_caught_is_error_class(&caught, \"Error\")";
+      const caughtErrorValue = this.context.errorClassRoots().length === 0 ? "runtime::caught_error_value(&caught)" : "sc_caught_error_value(&caught)";
+      this.context.line(`if let ${name}::Island(handle) = &value { let caught = runtime::island_exit_error(handle); if ${caughtErrorTest} { return ${caughtErrorValue}; } return sc_dyn_check_fail("Error", &value); }`);
+    }
     this.context.line(`let ${name}::Object(object) = &value else { return sc_dyn_check_fail("Error", &value); };`);
     this.context.line("let identity = object.identity();");
     this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).map(|(_, error, _)| error.clone())).unwrap_or_else(|| sc_dyn_check_fail(\"Error\", &value))");

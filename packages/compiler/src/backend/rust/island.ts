@@ -81,13 +81,35 @@ function emitMarshal(
  *
  * Strict by kind, like the C island's typed adapters: the engine's value
  * is checked at the boundary, never coerced. */
-function hostArgument(type: IrType, args: string, index: number): string | null {
+function hostArgument(type: IrType, args: string, index: number, context: RustIslandContext): string | null {
   const extract = (helper: string): string => `runtime::${helper}(${args}, ${index})`;
+  const dyn = context.dynTypeName();
+  const handle = extract("island_host_argument_value");
   switch (type.kind) {
     case "string": return extract("island_host_argument_string");
     case "f64": return extract("island_host_argument_number");
     case "bool": return extract("island_host_argument_bool");
     case "bytes": return type.elem === "u8" ? extract("island_host_argument_bytes") : null;
+    // An 'unknown' parameter: the engine argument stays a handle inside
+    // the checked-dynamic value (typeof, comparisons, and reads ask the
+    // realm).
+    case "dyn": return `${dyn}::Island(${handle})`;
+    // An `Error` parameter: the realm's Error copies out as a native one.
+    case "object": return type.className === "%Error" ? `sc_dyn_error_unbox(${dyn}::Island(${handle}))` : null;
+    // Composites and undefined-armed unions: the jsExit pipeline —
+    // engine units normalize, an Error handle stays a handle for the
+    // unbox, everything else JSON round-trips into the typed check.
+    case "record":
+    case "array":
+    case "union": {
+      const argument = context.nextName("sc_island_host_arg");
+      const normalized = `match ${handle} { ` +
+        `sc_h if runtime::island_is_undefined(&sc_h) => ${dyn}::Undefined, ` +
+        `sc_h if runtime::island_is_null(&sc_h) => ${dyn}::Null, ` +
+        `sc_h if runtime::island_is_error(&sc_h) => ${dyn}::Island(sc_h), ` +
+        `sc_h => runtime::json_parse_typed::<${dyn}>(&runtime::island_json(&sc_h)), }`;
+      return `{ let ${argument} = ${normalized}; ${context.emitDynCheckValue(type, argument)} }`;
+    }
     default: return null;
   }
 }
@@ -129,7 +151,7 @@ function emitHostFunction(
   const argumentsName = context.nextName("sc_island_host_arguments");
   const args: string[] = [];
   for (const [index, param] of type.params.entries()) {
-    const argument = hostArgument(param, argumentsName, index);
+    const argument = hostArgument(param, argumentsName, index, context);
     if (argument === null) return null;
     args.push(argument);
   }

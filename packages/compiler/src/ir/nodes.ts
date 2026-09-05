@@ -5685,11 +5685,21 @@ export function isIslandCallbackParamType(
 ): boolean {
   if (t.kind === "jsval") return true;
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  // An 'unknown' parameter: the engine argument arrives as a handle
+  // inside the checked-dynamic value. An `Error` parameter: the realm's
+  // Error copies out as a native error (name and message) — the
+  // Node-style `(err, result)` callback shape.
+  if (t.kind === "dyn") return true;
+  if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "union") {
     // A bare undefined-armed union: every non-undefined arm must be
-    // JSON-safe (arms never nest unions, so plain isJsonSafeType applies).
+    // JSON-safe (arms never nest unions, so plain isJsonSafeType applies)
+    // or the Error class (`err: Error | undefined`).
     const def = getUnion(t.unionId);
-    return !!def && def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion));
+    return !!def && def.arms.every((a) =>
+      a.kind === "undefinedT" ||
+      (a.kind === "object" && a.className === "%Error") ||
+      isJsonSafeType(a, getRecord, getUnion));
   }
   return false;
 }

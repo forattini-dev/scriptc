@@ -247,6 +247,26 @@ pub fn island_is_undefined(value: &IslandValue) -> bool {
     value.0.is_undefined()
 }
 
+/// True for a realm Error instance (boa can read it as a native error).
+pub fn island_is_error(value: &IslandValue) -> bool {
+    value.0.is_object()
+        && with_island_state(|state| {
+            boa_engine::JsError::from_opaque(value.0.clone())
+                .try_native(&mut state.context)
+                .is_ok()
+        })
+}
+
+/// The engine's Error as a native `Caught` (name and message copied): a
+/// callback parameter typed `Error` receives the realm's error object.
+/// A non-error value answers a string-valued Caught, which the typed
+/// unbox rejects with the boundary's TypeError.
+pub fn island_exit_error(value: &IslandValue) -> Caught {
+    with_island_state(|state| {
+        island_error_caught(boa_engine::JsError::from_opaque(value.0.clone()), &mut state.context)
+    })
+}
+
 pub fn island_is_null(value: &IslandValue) -> bool {
     value.0.is_null()
 }
