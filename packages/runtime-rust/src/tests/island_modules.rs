@@ -1,6 +1,14 @@
 /* The embedded module/edge tables the island resolves against. */
 
-static TEST_MODULES: [IslandModule; 5] = [
+static TEST_MODULES: [IslandModule; 6] = [
+    IslandModule {
+        key: "/pkg/json.mjs",
+        source: b"export const bytes = new Uint8Array([1, 2, 3]);\nexport const custom = { toJSON() { return { n: 5 }; }, hidden: true };\nexport const nested = { a: [1, 'x', null], b: { c: true } };",
+        source_raw: 0,
+        format: IslandModuleFormat::Esm,
+        esm: None,
+        esm_raw: 0,
+    },
     IslandModule {
         key: "/pkg/timer.js",
         source: b"export function delay(ms, value) {\n  return new Promise((resolve) => setTimeout(() => resolve(value), ms));\n}\nexport function failLater(ms, message) {\n  return new Promise((_, reject) => setTimeout(() => reject(new TypeError(message)), ms));\n}\nexport function never() {\n  return new Promise(() => {});\n}",
@@ -519,6 +527,23 @@ fn island_import_star_answers_the_module_namespace() {
         let pending = island_call(&delay, &[island_value_number(1.0), island_value_number(9.0)]);
         assert_eq!(island_to_string(&island_await(&pending)).as_ref(), "9");
         assert_eq!(island_to_string(&island_get_property(&namespace, "missing")).as_ref(), "undefined");
+    });
+    island_eval_finish();
+}
+
+/// The JSON exit runs the realm's JSON.stringify: typed arrays keep their
+/// elements as index keys and `toJSON` is honored — the two forms boa's
+/// `JsValue::to_json` dropped.
+#[test]
+fn island_json_exit_keeps_typed_array_elements_and_honors_to_json() {
+    with_tables(|| {
+        let key = JsString::from("/pkg/json.mjs");
+        let bytes = island_import(&key, &JsString::from("bytes"));
+        assert_eq!(island_json(&bytes).as_ref(), "{\"0\":1,\"1\":2,\"2\":3}");
+        let custom = island_import(&key, &JsString::from("custom"));
+        assert_eq!(island_json(&custom).as_ref(), "{\"n\":5}");
+        let nested = island_import(&key, &JsString::from("nested"));
+        assert_eq!(island_json(&nested).as_ref(), "{\"a\":[1,\"x\",null],\"b\":{\"c\":true}}");
     });
     island_eval_finish();
 }

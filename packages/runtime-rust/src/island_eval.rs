@@ -911,16 +911,38 @@ pub fn island_opt_call_method(
     island_call_with_this(&member, receiver, name, args)
 }
 
+/// The realm's own `JSON.stringify` over an engine value — the
+/// serialization JavaScript sees: typed arrays as index objects, `toJSON`
+/// honored, accessors and proxies run. (`JsValue::to_json` runs no
+/// JavaScript: it serialized every typed array as `{}` and skipped
+/// `toJSON`, see docs/upstream/boa-to-json-drops-typed-array-elements.md.)
+/// `None` is `undefined` — a value JSON cannot spell (a function, a
+/// symbol).
+fn island_stringify_json(value: &JsValue, context: &mut Context) -> JsResult<Option<String>> {
+    let global = context.global_object();
+    let json = global.get(js_string!("JSON"), context)?;
+    let json = json.to_object(context)?;
+    let stringify = json.get(js_string!("stringify"), context)?;
+    let Some(stringify) = stringify.as_callable() else {
+        return Err(boa_engine::JsNativeError::typ()
+            .with_message("scriptc: JSON.stringify is not callable")
+            .into());
+    };
+    let text = stringify.call(&JsValue::undefined(), std::slice::from_ref(value), context)?;
+    if text.is_undefined() {
+        return Ok(None);
+    }
+    Ok(Some(text.to_string(context)?.to_std_string_lossy()))
+}
+
 pub fn island_json(value: &IslandValue) -> JsString {
     with_island_state(|state| {
-        let json = value
-            .0
-            .to_json(&mut state.context)
+        let json = island_stringify_json(&value.0, &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context))
             .unwrap_or_else(|| {
                 throw_type_error("Island value is not JSON-serializable".to_owned())
             });
-        string(&json.to_string())
+        string(&json)
     })
 }
 
