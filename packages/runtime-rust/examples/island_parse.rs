@@ -27,6 +27,19 @@ fn main() {
             context.eval(Source::from_bytes(b"void 0")).map(|_| ()).map_err(|_| ())
                 .and_then(|_| boa_engine::Script::parse(Source::from_bytes(&bytes), None, &mut context).map(|_| ()).map_err(|_| ()))
         };
+        // A script also COMPILES the way the require shim loads it — as a
+        // `new Function` body — so bytecompiler panics surface here too.
+        if !module_like && as_script.is_ok() {
+            let quoted = js_quote(&text);
+            let code = format!(
+                "new Function(\"exports\", \"require\", \"module\", \"__filename\", \"__dirname\", {quoted}); 0"
+            );
+            if let Err(error) = context.eval(Source::from_bytes(code.as_bytes())) {
+                failures += 1;
+                println!("{path}: compile: {error}");
+                continue;
+            }
+        }
         if as_module.is_err() && as_script.is_err() {
             failures += 1;
             let error = as_module.err().map(|e| e.to_string()).unwrap_or_default();
@@ -34,4 +47,26 @@ fn main() {
         }
     }
     println!("{failures} of {total} files refused");
+}
+
+/// Quote text as a JavaScript string literal (the JSON subset, plus the
+/// two line terminators JSON leaves raw).
+fn js_quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }

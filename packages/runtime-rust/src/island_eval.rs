@@ -612,6 +612,12 @@ fn island_module_evaluate(
     module: &Module,
     key: &str,
 ) -> Result<(), IslandImportFailure> {
+    // SCRIPTC_ISLAND_TRACE: name the module whose graph links and
+    // evaluates — an engine panic during compilation (boa's bytecompiler
+    // aborts the process) is otherwise unlocatable.
+    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
+        eprintln!("scriptc island: evaluate {key}");
+    }
     let promise = module.load_link_evaluate(&mut state.context);
     state
         .context

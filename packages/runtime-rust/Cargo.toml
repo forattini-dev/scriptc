@@ -63,5 +63,20 @@ required-features = ["island-eval"]
 # before it, so a getter that redefines its own property (zod's lazy
 # `shape`) made every later read call the stored value. Pure Rust, no
 # network: the vendored copy is the registry crate plus that guard.
+[dev-dependencies]
+# The island probes (examples/island_link.rs) read boa's AST directly.
+boa_ast = "=0.22.0"
+boa_parser = "=0.22.0"
+boa_interner = "=0.22.0"
+
 [patch.crates-io]
 boa_engine = { path = "vendor/boa_engine" }
+# boa_ast 0.22.0 with one fix (vendor/boa_ast/PATCHES.md): the scope
+# analyzer skipped a class method's COMPUTED name, so function expressions
+# inside it (TypeScript's private-field downlevel) had no analyzed scope
+# and panicked the bytecompiler.
+boa_ast = { path = "vendor/boa_ast" }
+
+[[example]]
+name = "island_link"
+required-features = ["island-eval"]

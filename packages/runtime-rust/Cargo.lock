@@ -71,8 +71,6 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 [[package]]
 name = "boa_ast"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9221b0a090572b4a118b46c5874c0781fe4bc9546b85f0a615b8bfb609ca4ed7"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -1596,7 +1594,10 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 name = "scriptc-runtime"
 version = "0.0.35"
 dependencies = [
+ "boa_ast",
  "boa_engine",
+ "boa_interner",
+ "boa_parser",
  "chrono",
  "flate2",
  "getifaddrs",
