@@ -56,12 +56,12 @@ fn imported_names(bytes: &[u8]) -> Result<Vec<JsString>, String> {
         .map_err(|e| e.to_string())?;
     let mut names = Vec::new();
     for item in parsed.items().items() {
-        if let ModuleItem::ImportDeclaration(decl) = item {
-            if let ImportKind::Named { names: list, .. } = decl.kind() {
-                for n in list {
-                    let text = scratch.interner().resolve_expect(n.export_name()).to_string();
-                    names.push(JsString::from(text.as_str()));
-                }
+        if let ModuleItem::ImportDeclaration(decl) = item
+            && let ImportKind::Named { names: list, .. } = decl.kind()
+        {
+            for n in list {
+                let text = scratch.interner().resolve_expect(n.export_name()).to_string();
+                names.push(JsString::from(text.as_str()));
             }
         }
     }
