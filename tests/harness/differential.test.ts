@@ -51,10 +51,14 @@ const files = shardSelect(
     ...globSync(join(corpusDir, `*/main.${ext}`)),
   ])
     .filter((f) => !DRIVER_FIXTURES.has(f.slice(corpusDir.length + 1)))
-    // `// @target <id>` programs other than the primary belong to the Rust
-    // lane (rust-differential.test.ts), the only backend that carries the
-    // runtime-target switches.
-    .filter((f) => !/^\/\/ @target\s+(?!node24\s*$)/m.test(readFileSync(f, "utf8").split("\n", 4).join("\n")))
+    // `// @target <id>` programs other than the primary, programs mixing
+    // tiers (`// @island-module:`), and `// @rust-only` programs (surface
+    // the frozen C/LLVM lanes do not carry) belong to the Rust lane
+    // (rust-differential.test.ts).
+    .filter((f) => {
+      const head = readFileSync(f, "utf8").split("\n", 4).join("\n");
+      return !/^\/\/ @target\s+(?!node24\s*$)/m.test(head) && !/^\/\/ @island-module:/m.test(head) && !/^\/\/ @rust-only\s*$/m.test(head);
+    })
     .sort(),
   (f) => f.slice(corpusDir.length + 1),
 );

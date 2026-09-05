@@ -59,6 +59,142 @@
       RuntimeError, CompileError, LinkError,
     };
   }
+    /* Explicit resource management (TC39 `using`): the engine compiles
+     * the declarations, and Effect-style code reaches for the
+     * DisposableStack/AsyncDisposableStack containers and SuppressedError.
+     * quickjs-ng ships them; boa does not yet, so the prelude carries a
+     * spec-shaped implementation where the engine has none (the `using`
+     * desugaring itself needs only Symbol.dispose/asyncDispose, which both
+     * engines define). Disposal runs LIFO; an error thrown while a previous
+     * error is in flight wraps both in SuppressedError. */
+  if (typeof globalThis.SuppressedError === 'undefined') {
+    class SuppressedError extends Error {
+      constructor(error, suppressed, message) {
+        super(message);
+        this.name = 'SuppressedError';
+        this.error = error;
+        this.suppressed = suppressed;
+      }
+    }
+    globalThis.SuppressedError = SuppressedError;
+  }
+  if (typeof Symbol.dispose === 'undefined') Symbol.dispose = Symbol('Symbol.dispose');
+  if (typeof Symbol.asyncDispose === 'undefined') Symbol.asyncDispose = Symbol('Symbol.asyncDispose');
+  if (typeof globalThis.DisposableStack === 'undefined') {
+    const disposeMethod = (value, sym, name) => {
+      if (value === null || value === undefined) return null;
+      const m = value[sym];
+      if (typeof m !== 'function') throw new TypeError(name + ': value is not disposable');
+      return () => m.call(value);
+    };
+    const runLifo = (stack) => {
+      let pending = false;
+      let error;
+      while (stack.length > 0) {
+        const fn = stack.pop();
+        try { fn(); } catch (e) {
+          error = pending ? new globalThis.SuppressedError(e, error, 'An error was suppressed during disposal') : e;
+          pending = true;
+        }
+      }
+      if (pending) throw error;
+    };
+    class DisposableStack {
+      #stack = [];
+      #disposed = false;
+      get disposed() { return this.#disposed; }
+      #check() { if (this.#disposed) throw new ReferenceError('DisposableStack already disposed'); }
+      use(value) {
+        this.#check();
+        const fn = disposeMethod(value, Symbol.dispose, 'DisposableStack.use');
+        if (fn !== null) this.#stack.push(fn);
+        return value;
+      }
+      adopt(value, onDispose) {
+        this.#check();
+        if (typeof onDispose !== 'function') throw new TypeError('DisposableStack.adopt: onDispose is not a function');
+        this.#stack.push(() => onDispose(value));
+        return value;
+      }
+      defer(onDispose) {
+        this.#check();
+        if (typeof onDispose !== 'function') throw new TypeError('DisposableStack.defer: onDispose is not a function');
+        this.#stack.push(onDispose);
+      }
+      move() {
+        this.#check();
+        const next = new DisposableStack();
+        next.#stack = this.#stack;
+        this.#stack = [];
+        this.#disposed = true;
+        return next;
+      }
+      dispose() {
+        if (this.#disposed) return;
+        this.#disposed = true;
+        const stack = this.#stack;
+        this.#stack = [];
+        runLifo(stack);
+      }
+      [Symbol.dispose]() { this.dispose(); }
+      get [Symbol.toStringTag]() { return 'DisposableStack'; }
+    }
+    class AsyncDisposableStack {
+      #stack = [];
+      #disposed = false;
+      get disposed() { return this.#disposed; }
+      #check() { if (this.#disposed) throw new ReferenceError('AsyncDisposableStack already disposed'); }
+      use(value) {
+        this.#check();
+        if (value === null || value === undefined) return value;
+        const asyncM = value[Symbol.asyncDispose];
+        const syncM = value[Symbol.dispose];
+        const m = typeof asyncM === 'function' ? asyncM : syncM;
+        if (typeof m !== 'function') throw new TypeError('AsyncDisposableStack.use: value is not disposable');
+        this.#stack.push(async () => { await m.call(value); });
+        return value;
+      }
+      adopt(value, onDispose) {
+        this.#check();
+        if (typeof onDispose !== 'function') throw new TypeError('AsyncDisposableStack.adopt: onDispose is not a function');
+        this.#stack.push(async () => { await onDispose(value); });
+        return value;
+      }
+      defer(onDispose) {
+        this.#check();
+        if (typeof onDispose !== 'function') throw new TypeError('AsyncDisposableStack.defer: onDispose is not a function');
+        this.#stack.push(async () => { await onDispose(); });
+      }
+      move() {
+        this.#check();
+        const next = new AsyncDisposableStack();
+        next.#stack = this.#stack;
+        this.#stack = [];
+        this.#disposed = true;
+        return next;
+      }
+      async disposeAsync() {
+        if (this.#disposed) return;
+        this.#disposed = true;
+        const stack = this.#stack;
+        this.#stack = [];
+        let pending = false;
+        let error;
+        while (stack.length > 0) {
+          const fn = stack.pop();
+          try { await fn(); } catch (e) {
+            error = pending ? new globalThis.SuppressedError(e, error, 'An error was suppressed during disposal') : e;
+            pending = true;
+          }
+        }
+        if (pending) throw error;
+      }
+      [Symbol.asyncDispose]() { return this.disposeAsync(); }
+      get [Symbol.toStringTag]() { return 'AsyncDisposableStack'; }
+    }
+    globalThis.DisposableStack = DisposableStack;
+    globalThis.AsyncDisposableStack = AsyncDisposableStack;
+  }
     /* V8's structured stack frames (Error.prepareStackTrace's CallSite
      * objects). quickjs-ng ships the CallSite class with only the six
      * accessors it needs for its own trace text — getFileName,

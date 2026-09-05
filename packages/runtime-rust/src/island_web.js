@@ -280,6 +280,7 @@
 
     append(name, value) {
       this._pairs.push([String(name), String(value)]);
+      if (this._url !== undefined) this._url.search = this.toString();
     }
 
     delete(name, value) {
@@ -291,6 +292,7 @@
         if (pairKey === key && (!hasValue || pairValue === expected)) this._pairs.splice(index, 1);
         else index += 1;
       }
+      if (this._url !== undefined) this._url.search = this.toString();
     }
 
     get(name) {
@@ -336,6 +338,7 @@
         } else this._pairs.splice(index, 1);
       }
       if (!found) this._pairs.push([key, replacement]);
+      if (this._url !== undefined) this._url.search = this.toString();
     }
 
     sort() {
@@ -344,6 +347,7 @@
         if (left[0] > right[0]) return 1;
         return 0;
       });
+      if (this._url !== undefined) this._url.search = this.toString();
     }
 
     toString() {
@@ -542,6 +546,80 @@
     return decoded;
   };
 
+  /* The WHATWG URL class over host.urlParse (the pinned `url` crate —
+   * the same parser the static tier's URL values use). Components are
+   * re-parsed from the rebuilt href on every setter, so invalid
+   * assignments leave the URL unchanged exactly like the spec's parser
+   * failure mode. `searchParams` answers a params object bound to the
+   * URL: mutating it rewrites `search`. */
+  class URL {
+    #parts;
+    #params = null;
+    constructor(input, base) {
+      const parsed = host.urlParse(String(input), base === undefined ? undefined : String(base));
+      if (parsed === null) {
+        const error = new TypeError('Invalid URL');
+        error.code = 'ERR_INVALID_URL';
+        error.input = String(input);
+        throw error;
+      }
+      this.#parts = parsed;
+    }
+    static canParse(input, base) {
+      return host.urlParse(String(input), base === undefined ? undefined : String(base)) !== null;
+    }
+    static parse(input, base) {
+      try { return new URL(input, base); } catch { return null; }
+    }
+    #reparse(href) {
+      const parsed = host.urlParse(href);
+      if (parsed !== null) { this.#parts = parsed; this.#params = null; }
+    }
+    #withParts(patch) {
+      const p = { ...this.#parts, ...patch };
+      const auth = p.username ? p.username + (p.password ? ':' + p.password : '') + '@' : '';
+      const slashes = p.host || /^(https?|wss?|ftp|file):$/.test(p.protocol) ? '//' : '';
+      this.#reparse(p.protocol + slashes + auth + p.host + p.pathname + p.search + p.hash);
+    }
+    get href() { return this.#parts.href; }
+    set href(value) {
+      const parsed = host.urlParse(String(value));
+      if (parsed === null) { const error = new TypeError('Invalid URL'); error.code = 'ERR_INVALID_URL'; throw error; }
+      this.#parts = parsed; this.#params = null;
+    }
+    get origin() { return this.#parts.origin; }
+    get protocol() { return this.#parts.protocol; }
+    set protocol(value) { const v = String(value).replace(/:.*$/, ''); if (v !== '') this.#withParts({ protocol: v + ':' }); }
+    get username() { return this.#parts.username; }
+    set username(value) { this.#withParts({ username: encodeURIComponent(String(value)) }); }
+    get password() { return this.#parts.password; }
+    set password(value) { this.#withParts({ password: encodeURIComponent(String(value)) }); }
+    get host() { return this.#parts.host; }
+    set host(value) { this.#withParts({ host: String(value) }); }
+    get hostname() { return this.#parts.hostname; }
+    set hostname(value) { this.#withParts({ host: String(value) + (this.#parts.port ? ':' + this.#parts.port : '') }); }
+    get port() { return this.#parts.port; }
+    set port(value) { const v = String(value).replace(/[^0-9].*$/, ''); this.#withParts({ host: this.#parts.hostname + (v ? ':' + v : '') }); }
+    get pathname() { return this.#parts.pathname; }
+    set pathname(value) { const v = String(value); this.#withParts({ pathname: v.startsWith('/') ? v : '/' + v }); }
+    get search() { return this.#parts.search; }
+    set search(value) { const v = String(value); this.#withParts({ search: v === '' || v === '?' ? '' : (v.startsWith('?') ? v : '?' + v) }); }
+    get hash() { return this.#parts.hash; }
+    set hash(value) { const v = String(value); this.#withParts({ hash: v === '' || v === '#' ? '' : (v.startsWith('#') ? v : '#' + v) }); }
+    get searchParams() {
+      if (this.#params === null) {
+        const params = new URLSearchParams(this.#parts.search);
+        params._url = this;
+        this.#params = params;
+      }
+      return this.#params;
+    }
+    toString() { return this.#parts.href; }
+    toJSON() { return this.#parts.href; }
+    get [Symbol.toStringTag]() { return 'URL'; }
+  }
+
+  global.URL = URL;
   global.TextEncoder = TextEncoder;
   global.TextDecoder = TextDecoder;
   global.TextDecoderStream = TextDecoderStream;

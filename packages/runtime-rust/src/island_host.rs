@@ -323,6 +323,59 @@ fn island_host_url_from_path(
     Ok(island_host_string(&url_href(&url_path_to_file_url(&value))))
 }
 
+/// `host.urlParse(input, base?)`: the WHATWG components of a URL as one
+/// engine object (island_web.js builds the `URL` class over it), or
+/// `null` when the input does not parse — the class throws Node's
+/// "Invalid URL" TypeError itself. The parser is the same pinned `url`
+/// crate the static tier's URL values use.
+fn island_host_url_parse(
+    _this: &JsValue,
+    arguments: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let input = island_host_arg_string(arguments, 0, context)?;
+    let base = island_host_arg(arguments, 1);
+    let parsed = if base.is_undefined() || base.is_null() {
+        url::Url::parse(&input).ok()
+    } else {
+        let base = island_host_arg_string(arguments, 1, context)?;
+        url::Url::parse(&base).ok().and_then(|b| b.join(&input).ok())
+    };
+    let Some(url) = parsed else {
+        return Ok(JsValue::null());
+    };
+    let text = |value: &str| JsValue::from(boa_engine::JsString::from(value));
+    let hostname = url.host_str().unwrap_or("");
+    let port = url.port().map(|p| p.to_string()).unwrap_or_default();
+    let host = if port.is_empty() { hostname.to_owned() } else { format!("{hostname}:{port}") };
+    let search = match url.query() {
+        Some(q) if !q.is_empty() => format!("?{q}"),
+        _ => String::new(),
+    };
+    let hash = match url.fragment() {
+        Some(f) if !f.is_empty() => format!("#{f}"),
+        _ => String::new(),
+    };
+    let origin = match url.origin() {
+        url::Origin::Tuple(..) => url.origin().ascii_serialization(),
+        url::Origin::Opaque(_) => "null".to_owned(),
+    };
+    let object = ObjectInitializer::new(context)
+        .property(js_string!("href"), text(url.as_str()), Attribute::all())
+        .property(js_string!("protocol"), text(&format!("{}:", url.scheme())), Attribute::all())
+        .property(js_string!("username"), text(url.username()), Attribute::all())
+        .property(js_string!("password"), text(url.password().unwrap_or("")), Attribute::all())
+        .property(js_string!("host"), text(&host), Attribute::all())
+        .property(js_string!("hostname"), text(hostname), Attribute::all())
+        .property(js_string!("port"), text(&port), Attribute::all())
+        .property(js_string!("pathname"), text(url.path()), Attribute::all())
+        .property(js_string!("search"), text(&search), Attribute::all())
+        .property(js_string!("hash"), text(&hash), Attribute::all())
+        .property(js_string!("origin"), text(&origin), Attribute::all())
+        .build();
+    Ok(object.into())
+}
+
 /* ── the bridge object ─────────────────────────────────────────────── */
 
 /// One `host` member: the JavaScript name, the Rust answer, and the
@@ -343,7 +396,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 66] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 67] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -365,6 +418,7 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 66] = [
     ("urlToPath", island_host_url_to_path, 1),
     ("urlFromPath", island_host_url_from_path, 1),
     ("urlResolve", island_host_url_resolve, 2),
+    ("urlParse", island_host_url_parse, 2),
     // The I/O bridge (island_host_io.rs): the arities match the C
     // island's registrations, because one body of JavaScript calls both.
     ("fs", island_host_fs, 4),
