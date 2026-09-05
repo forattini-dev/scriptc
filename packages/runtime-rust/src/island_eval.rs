@@ -1042,7 +1042,23 @@ fn island_state() -> IslandState {
                 &mut context,
             )
         }
-        .unwrap_or_else(|error| island_eval_error(error, &mut context));
+        .unwrap_or_else(|error| {
+            // A parse failure names the embedded module: the message
+            // alone ("expected ';'") says nothing about which of
+            // thousands of sources the engine choked on.
+            let message = match error.try_native(&mut context) {
+                Ok(native) => native.message().to_string(),
+                Err(_) => error.to_string(),
+            };
+            let head: String = island_module_source(embedded).chars().take(80).collect();
+            throw_error_code(
+                format!(
+                    "the island could not parse embedded module {}: {} (source begins: {:?})",
+                    embedded.key, message, head
+                ),
+                "SC3001",
+            )
+        });
         loader.insert(embedded.key, module.clone());
         modules.insert(embedded.key, module);
     }

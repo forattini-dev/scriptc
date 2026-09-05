@@ -93,7 +93,7 @@ import { npmExecutableSource } from "./npm-typescript.js";
 import { activeRuntimeConditions, activeRuntimeTarget } from "../compat/runtime-target.js";
 import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
 import { isNodeModulesPath, resolveEmbedPathAlias, resolveExports, resolvePackageImports } from "./resolve.js";
-import { workspacePackageOfPath } from "./shared.js";
+import { textAssetExtensionOf, workspacePackageOfPath } from "./shared.js";
 
 /** The embedded graph resolves with the ACTIVE RUNTIME TARGET's conditions
  * (node24/node26: node; bun: bun then node; plus --conditions) beside the
@@ -1664,6 +1664,19 @@ export class NpmGraphBuilder {
       });
       return;
     }
+    // A NON-CODE file reached by an embedded import (`import prompt from
+    // "./initialize.txt"`): under the bun target Bun's loaders apply —
+    // ".txt"/".md" are the file CONTENT (the text loader), any other
+    // extension is a PATH to the file (the file loader), exactly the
+    // static tier's asset rule; the Node targets keep Node's own
+    // ERR_UNKNOWN_FILE_EXTENSION at evaluation. Never raw text handed to
+    // the engine as JavaScript.
+    const assetSource = NpmGraphBuilder.assetModuleSource(key, source);
+    if (assetSource !== null) {
+      this.modules.set(key, { key, source: assetSource, format: "esm" });
+      if (lazy) this.lazilyReached.add(key);
+      return;
+    }
     const format = this.formatOf(key);
     let executableSource = npmExecutableSource(key, source);
     // Bun runtime modules under --target bun: the import declarations
@@ -1678,6 +1691,19 @@ export class NpmGraphBuilder {
     if (lazy) this.lazilyReached.add(key);
     if (format === "json") return;
     this.sweepEdges(key, executableSource, chain, lazy);
+  }
+
+  /** The ESM source of a non-code file's module, or null for code
+   * (.js/.mjs/.cjs/.json/.ts/.tsx/.mts/.cts). */
+  static assetModuleSource(key: string, content: string): string | null {
+    const ext = extname(key).toLowerCase();
+    if ([".js", ".mjs", ".cjs", ".json", ".ts", ".tsx", ".mts", ".cts", ".node"].includes(ext)) return null;
+    if (activeRuntimeTarget().family === "bun") {
+      if (textAssetExtensionOf(key) !== null) return `export default ${JSON.stringify(content)};\n`;
+      return `export default ${JSON.stringify(key)};\n`;
+    }
+    const msg = `Unknown file extension "${ext}" for ${key}`;
+    return `throw Object.assign(new TypeError(${JSON.stringify(msg)}), {code:"ERR_UNKNOWN_FILE_EXTENSION"});\n`;
   }
 
   /** moduleSpecifiersOf through the per-module cache (each module parses
