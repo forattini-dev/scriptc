@@ -14,168 +14,290 @@ static const struct {
   const char *exports;
 } isl_builtins[] = {
     {"node:events",
-     "EventEmitter,once,on,listenerCount,getEventListeners,"
-     "setMaxListeners,defaultMaxListeners,errorMonitor,"
-     "captureRejectionSymbol"},
+     "EventEmitter,EventEmitterAsyncResource,addAbortListener,"
+     "captureRejectionSymbol,captureRejections,defaultMaxListeners,"
+     "errorMonitor,getEventListeners,getMaxListeners,init,listenerCount,"
+     "on,once,setMaxListeners,usingDomains"},
     {"node:path",
-     "sep,delimiter,basename,dirname,extname,join,resolve,normalize,"
-     "relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"},
+     "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,"
+     "matchesGlob,normalize,parse,posix,relative,resolve,sep,"
+     "toNamespacedPath,win32"},
     {"node:path/posix",
-     "sep,delimiter,basename,dirname,extname,join,resolve,normalize,"
-     "relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"},
+     "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,"
+     "matchesGlob,normalize,parse,posix,relative,resolve,sep,"
+     "toNamespacedPath,win32"},
     {"node:path/win32",
-     "sep,delimiter,basename,dirname,extname,join,resolve,normalize,"
-     "relative,isAbsolute,toNamespacedPath,parse,format,posix,win32"},
+     "_makeLong,basename,delimiter,dirname,extname,format,isAbsolute,join,"
+     "matchesGlob,normalize,parse,posix,relative,resolve,sep,"
+     "toNamespacedPath,win32"},
     {"node:fs",
-     "readFileSync,writeFileSync,appendFileSync,existsSync,realpathSync,"
-     "mkdirSync,rmSync,rmdirSync,unlinkSync,readdirSync,statSync,"
-     "lstatSync,accessSync,mkdtempSync,chmodSync,copyFileSync,renameSync,"
-     "constants,Stats,Dirent,promises,readFile,writeFile,appendFile,"
-     "exists,realpath,mkdir,rm,rmdir,unlink,readdir,stat,lstat,access,"
-     "mkdtemp,chmod,copyFile,rename,readlink,readlinkSync,"
-     "createReadStream,createWriteStream,watch,watchFile,unwatchFile,"
-     "openSync,closeSync,fstatSync,readSync,writeSync,read,open"},
+     "Dir,Dirent,FileReadStream,FileWriteStream,ReadStream,Stats,"
+     "Utf8Stream,WriteStream,_toUnixTimestamp,access,accessSync,"
+     "appendFile,appendFileSync,chmod,chmodSync,chown,chownSync,close,"
+     "closeSync,constants,copyFile,copyFileSync,cp,cpSync,"
+     "createReadStream,createWriteStream,exists,existsSync,fchmod,"
+     "fchmodSync,fchown,fchownSync,fdatasync,fdatasyncSync,fstat,"
+     "fstatSync,fsync,fsyncSync,ftruncate,ftruncateSync,futimes,"
+     "futimesSync,glob,globSync,lchmod,lchmodSync,lchown,lchownSync,link,"
+     "linkSync,lstat,lstatSync,lutimes,lutimesSync,mkdir,mkdirSync,"
+     "mkdtemp,mkdtempDisposableSync,mkdtempSync,open,openAsBlob,openSync,"
+     "opendir,opendirSync,promises,read,readFile,readFileSync,readSync,"
+     "readdir,readdirSync,readlink,readlinkSync,readv,readvSync,realpath,"
+     "realpathSync,rename,renameSync,rm,rmSync,rmdir,rmdirSync,stat,"
+     "statSync,statfs,statfsSync,symlink,symlinkSync,truncate,"
+     "truncateSync,unlink,unlinkSync,unwatchFile,utimes,utimesSync,watch,"
+     "watchFile,write,writeFile,writeFileSync,writeSync,writev,writevSync"},
     {"node:fs/promises",
-     "readFile,writeFile,appendFile,realpath,mkdir,rm,rmdir,unlink,"
-     "readdir,stat,lstat,access,mkdtemp,chmod,copyFile,rename,readlink,"
-     "constants,open"},
+     "access,appendFile,chmod,chown,constants,copyFile,cp,glob,lchmod,"
+     "lchown,link,lstat,lutimes,mkdir,mkdtemp,mkdtempDisposable,open,"
+     "opendir,readFile,readdir,readlink,realpath,rename,rm,rmdir,stat,"
+     "statfs,symlink,truncate,unlink,utimes,watch,writeFile"},
     {"node:os",
-     "EOL,platform,arch,hostname,homedir,tmpdir,type,endianness,userInfo,"
-     "release,version,machine,cpus,availableParallelism,totalmem,freemem,"
-     "loadavg,uptime,networkInterfaces,constants"},
+     "EOL,arch,availableParallelism,constants,cpus,devNull,endianness,"
+     "freemem,getPriority,homedir,hostname,loadavg,machine,"
+     "networkInterfaces,platform,release,setPriority,tmpdir,totalmem,type,"
+     "uptime,userInfo,version"},
     {"node:tty",
-     "isatty,ReadStream,WriteStream"},
+     "ReadStream,WriteStream,isatty"},
     {"node:diagnostics_channel",
-     "channel,subscribe,unsubscribe,hasSubscribers,tracingChannel"},
+     "Channel,channel,hasSubscribers,subscribe,tracingChannel,unsubscribe"},
     {"node:module",
-     "createRequire,builtinModules,isBuiltin,syncBuiltinESMExports,"
-     "register,findSourceMap"},
+     "Module,SourceMap,_cache,_debug,_extensions,_findPath,_initPaths,"
+     "_load,_nodeModulePaths,_pathCache,_preloadModules,_resolveFilename,"
+     "_resolveLookupPaths,builtinModules,constants,createRequire,"
+     "enableCompileCache,findPackageJSON,findSourceMap,flushCompileCache,"
+     "getCompileCacheDir,getSourceMapsSupport,globalPaths,isBuiltin,"
+     "register,registerHooks,runMain,setSourceMapsSupport,"
+     "stripTypeScriptTypes,syncBuiltinESMExports"},
     {"node:url",
-     "URL,URLSearchParams,fileURLToPath,pathToFileURL,parse,format,"
-     "resolve,domainToASCII,domainToUnicode,urlToHttpOptions"},
+     "URL,URLPattern,URLSearchParams,Url,domainToASCII,domainToUnicode,"
+     "fileURLToPath,fileURLToPathBuffer,format,parse,pathToFileURL,"
+     "resolve,resolveObject,urlToHttpOptions"},
     {"node:buffer",
-     "Buffer,SlowBuffer,INSPECT_MAX_BYTES,kMaxLength,kStringMaxLength,"
-     "constants,isAscii,isUtf8,atob,btoa,Blob,File,transcode,"
-     "resolveObjectURL"},
+     "Blob,Buffer,File,INSPECT_MAX_BYTES,SlowBuffer,atob,btoa,constants,"
+     "isAscii,isUtf8,kMaxLength,kStringMaxLength,resolveObjectURL,"
+     "transcode"},
     {"node:string_decoder",
      "StringDecoder"},
     {"node:crypto",
-     "createHash,createHmac,hash,Hash,Hmac,randomBytes,randomFillSync,"
-     "randomFill,randomInt,randomUUID,getRandomValues,timingSafeEqual,"
-     "pbkdf2,pbkdf2Sync,getHashes,getCiphers,getCurves,webcrypto,subtle,"
-     "constants,KeyObject,createCipheriv,createDecipheriv,createSign,"
-     "createVerify,createDiffieHellman,createECDH,createPublicKey,"
-     "createPrivateKey,createSecretKey,diffieHellman,generateKeyPair,"
-     "generateKeyPairSync,generateKey,generateKeySync,sign,verify,"
-     "publicEncrypt,publicDecrypt,privateEncrypt,privateDecrypt,scrypt,"
-     "scryptSync,hkdf,hkdfSync,X509Certificate,Certificate,checkPrime,"
-     "checkPrimeSync,generatePrime,generatePrimeSync,secureHeapUsed,"
-     "setEngine,setFips,getFips"},
+     "Certificate,Cipheriv,Decipheriv,DiffieHellman,DiffieHellmanGroup,"
+     "ECDH,Hash,Hmac,KeyObject,Sign,Verify,X509Certificate,argon2,"
+     "argon2Sync,checkPrime,checkPrimeSync,constants,createCipheriv,"
+     "createDecipheriv,createDiffieHellman,createDiffieHellmanGroup,"
+     "createECDH,createHash,createHmac,createPrivateKey,createPublicKey,"
+     "createSecretKey,createSign,createVerify,decapsulate,diffieHellman,"
+     "encapsulate,generateKey,generateKeyPair,generateKeyPairSync,"
+     "generateKeySync,generatePrime,generatePrimeSync,getCipherInfo,"
+     "getCiphers,getCurves,getDiffieHellman,getFips,getHashes,"
+     "getRandomValues,hash,hkdf,hkdfSync,pbkdf2,pbkdf2Sync,privateDecrypt,"
+     "privateEncrypt,publicDecrypt,publicEncrypt,randomBytes,randomFill,"
+     "randomFillSync,randomInt,randomUUID,randomUUIDv7,scrypt,scryptSync,"
+     "secureHeapUsed,setEngine,setFips,sign,subtle,timingSafeEqual,verify,"
+     "webcrypto"},
     {"node:stream",
-     "Stream,Readable,Writable,Duplex,Transform,PassThrough,pipeline,"
-     "finished,addAbortSignal,promises,isErrored,isDestroyed,isReadable,"
-     "isWritable"},
+     "Duplex,PassThrough,Readable,Stream,Transform,Writable,"
+     "_isArrayBufferView,_isUint8Array,_uint8ArrayToBuffer,addAbortSignal,"
+     "compose,destroy,duplexPair,finished,getDefaultHighWaterMark,"
+     "isDestroyed,isDisturbed,isErrored,isReadable,isWritable,pipeline,"
+     "promises,setDefaultHighWaterMark"},
     {"node:stream/promises",
-     "pipeline,finished"},
+     "finished,pipeline"},
     {"node:stream/consumers",
-     "text,buffer,arrayBuffer,json,blob"},
+     "arrayBuffer,blob,buffer,bytes,json,text"},
     {"node:stream/web",
-     "ReadableStream,WritableStream,TransformStream,TextEncoderStream,"
-     "TextDecoderStream,CountQueuingStrategy,ByteLengthQueuingStrategy,"
-     "ReadableStreamDefaultReader,ReadableStreamDefaultController,"
-     "WritableStreamDefaultWriter"},
+     "ByteLengthQueuingStrategy,CompressionStream,CountQueuingStrategy,"
+     "DecompressionStream,ReadableByteStreamController,ReadableStream,"
+     "ReadableStreamBYOBReader,ReadableStreamBYOBRequest,"
+     "ReadableStreamDefaultController,ReadableStreamDefaultReader,"
+     "ReadableStreamTee,TextDecoderStream,TextEncoderStream,"
+     "TransformStream,TransformStreamDefaultController,WritableStream,"
+     "WritableStreamDefaultController,WritableStreamDefaultWriter"},
     {"node:assert",
-     "AssertionError,ok,fail,equal,notEqual,strictEqual,notStrictEqual,"
-     "deepEqual,notDeepEqual,deepStrictEqual,notDeepStrictEqual,throws,"
-     "doesNotThrow,rejects,doesNotReject,match,doesNotMatch,ifError,strict"},
+     "Assert,AssertionError,CallTracker,deepEqual,deepStrictEqual,"
+     "doesNotMatch,doesNotReject,doesNotThrow,equal,fail,ifError,match,"
+     "notDeepEqual,notDeepStrictEqual,notEqual,notStrictEqual,ok,"
+     "partialDeepStrictEqual,rejects,strict,strictEqual,throws"},
     {"node:assert/strict",
-     "AssertionError,ok,fail,equal,notEqual,strictEqual,notStrictEqual,"
-     "deepEqual,notDeepEqual,deepStrictEqual,notDeepStrictEqual,throws,"
-     "doesNotThrow,rejects,doesNotReject,match,doesNotMatch,ifError,strict"},
+     "Assert,AssertionError,CallTracker,deepEqual,deepStrictEqual,"
+     "doesNotMatch,doesNotReject,doesNotThrow,equal,fail,ifError,match,"
+     "notDeepEqual,notDeepStrictEqual,notEqual,notStrictEqual,ok,"
+     "partialDeepStrictEqual,rejects,strict,strictEqual,throws"},
     {"node:util",
-     "format,formatWithOptions,inspect,inherits,promisify,callbackify,"
-     "deprecate,debuglog,debug,types,isDeepStrictEqual,"
-     "stripVTControlCharacters,styleText,parseArgs,toUSVString,_extend,"
-     "TextEncoder,TextDecoder,isArray"},
+     "MIMEParams,MIMEType,TextDecoder,TextEncoder,_errnoException,"
+     "_exceptionWithHostPort,_extend,aborted,callbackify,"
+     "convertProcessSignalToExitCode,debug,debuglog,deprecate,diff,format,"
+     "formatWithOptions,getCallSites,getSystemErrorMap,"
+     "getSystemErrorMessage,getSystemErrorName,inherits,inspect,isArray,"
+     "isDeepStrictEqual,parseArgs,parseEnv,promisify,setTraceSigInt,"
+     "stripVTControlCharacters,styleText,toUSVString,"
+     "transferableAbortController,transferableAbortSignal,types"},
     {"node:util/types",
-     "isAnyArrayBuffer,isArrayBufferView,isArgumentsObject,isArrayBuffer,"
-     "isAsyncFunction,isBigInt64Array,isBigUint64Array,isBooleanObject,"
-     "isBoxedPrimitive,isBigIntObject,isCryptoKey,isDataView,isDate,"
+     "isAnyArrayBuffer,isArgumentsObject,isArrayBuffer,isArrayBufferView,"
+     "isAsyncFunction,isBigInt64Array,isBigIntObject,isBigUint64Array,"
+     "isBooleanObject,isBoxedPrimitive,isCryptoKey,isDataView,isDate,"
      "isExternal,isFloat16Array,isFloat32Array,isFloat64Array,"
-     "isGeneratorFunction,isGeneratorObject,isInt8Array,isInt16Array,"
-     "isInt32Array,isKeyObject,isMap,isMapIterator,"
-     "isModuleNamespaceObject,isNativeError,isNumberObject,isPromise,"
-     "isProxy,isRegExp,isSet,isSetIterator,isSharedArrayBuffer,"
-     "isStringObject,isSymbolObject,isTypedArray,isUint8Array,"
-     "isUint8ClampedArray,isUint16Array,isUint32Array,isWeakMap,isWeakSet"},
+     "isGeneratorFunction,isGeneratorObject,isInt16Array,isInt32Array,"
+     "isInt8Array,isKeyObject,isMap,isMapIterator,isModuleNamespaceObject,"
+     "isNativeError,isNumberObject,isPromise,isProxy,isRegExp,isSet,"
+     "isSetIterator,isSharedArrayBuffer,isStringObject,isSymbolObject,"
+     "isTypedArray,isUint16Array,isUint32Array,isUint8Array,"
+     "isUint8ClampedArray,isWeakMap,isWeakSet"},
     {"node:child_process",
-     "spawn,spawnSync,exec,execSync,execFile,execFileSync,fork"},
+     "ChildProcess,_forkChild,exec,execFile,execFileSync,execSync,fork,"
+     "spawn,spawnSync"},
     {"node:async_hooks",
-     "AsyncLocalStorage,AsyncResource,executionAsyncId,triggerAsyncId,"
-     "executionAsyncResource,createHook"},
+     "AsyncLocalStorage,AsyncResource,asyncWrapProviders,createHook,"
+     "executionAsyncId,executionAsyncResource,triggerAsyncId"},
     {"node:domain",
-     "create,createDomain,Domain,active"},
+     "Domain,_stack,active,create,createDomain"},
     {"node:worker_threads",
-     "isMainThread,parentPort,threadId,workerData,resourceLimits,"
-     "MessageChannel,MessagePort,Worker,receiveMessageOnPort,SHARE_ENV,"
-     "markAsUntransferable,getEnvironmentData,setEnvironmentData"},
+     "BroadcastChannel,MessageChannel,MessagePort,SHARE_ENV,Worker,"
+     "getEnvironmentData,isInternalThread,isMainThread,"
+     "isMarkedAsUntransferable,locks,markAsUncloneable,"
+     "markAsUntransferable,moveMessagePortToContext,parentPort,"
+     "postMessageToThread,receiveMessageOnPort,resourceLimits,"
+     "setEnvironmentData,threadId,threadName,workerData"},
     {"node:perf_hooks",
-     "performance,PerformanceObserver,monitorEventLoopDelay,constants"},
+     "Performance,PerformanceEntry,PerformanceMark,PerformanceMeasure,"
+     "PerformanceObserver,PerformanceObserverEntryList,"
+     "PerformanceResourceTiming,constants,createHistogram,"
+     "eventLoopUtilization,monitorEventLoopDelay,performance,timerify"},
     {"node:v8",
-     "startupSnapshot,cachedDataVersionTag,getHeapStatistics,"
-     "getHeapSpaceStatistics,getHeapCodeStatistics,getCppHeapStatistics,"
-     "setFlagsFromString,takeCoverage,stopCoverage,"
-     "setHeapSnapshotNearHeapLimit,serialize,deserialize,"
-     "writeHeapSnapshot,getHeapSnapshot,queryObjects,startCpuProfile,"
-     "isStringOneByteRepresentation,promiseHooks,Serializer,Deserializer,"
-     "DefaultSerializer,DefaultDeserializer,GCProfiler"},
+     "DefaultDeserializer,DefaultSerializer,Deserializer,GCProfiler,"
+     "Serializer,cachedDataVersionTag,deserialize,getCppHeapStatistics,"
+     "getHeapCodeStatistics,getHeapSnapshot,getHeapSpaceStatistics,"
+     "getHeapStatistics,isStringOneByteRepresentation,promiseHooks,"
+     "queryObjects,serialize,setFlagsFromString,"
+     "setHeapSnapshotNearHeapLimit,startCpuProfile,startupSnapshot,"
+     "stopCoverage,takeCoverage,writeHeapSnapshot"},
     {"node:dns",
-     "lookup,lookupService,resolve,resolve4,resolve6,resolveCname,"
-     "resolveMx,resolveNs,resolveSrv,resolveTxt,reverse,getServers,"
-     "setServers,Resolver,promises,ADDRCONFIG,V4MAPPED,ALL"},
+     "ADDRCONFIG,ADDRGETNETWORKPARAMS,ALL,BADFAMILY,BADFLAGS,BADHINTS,"
+     "BADNAME,BADQUERY,BADRESP,BADSTR,CANCELLED,CONNREFUSED,DESTRUCTION,"
+     "EOF,FILE,FORMERR,LOADIPHLPAPI,NODATA,NOMEM,NONAME,NOTFOUND,NOTIMP,"
+     "NOTINITIALIZED,REFUSED,Resolver,SERVFAIL,TIMEOUT,V4MAPPED,"
+     "getDefaultResultOrder,getServers,lookup,lookupService,promises,"
+     "resolve,resolve4,resolve6,resolveAny,resolveCaa,resolveCname,"
+     "resolveMx,resolveNaptr,resolveNs,resolvePtr,resolveSoa,resolveSrv,"
+     "resolveTlsa,resolveTxt,reverse,setDefaultResultOrder,setServers"},
     {"node:readline",
-     "Interface,createInterface,clearLine,clearScreenDown,cursorTo,"
-     "moveCursor,emitKeypressEvents"},
+     "Interface,clearLine,clearScreenDown,createInterface,cursorTo,"
+     "emitKeypressEvents,moveCursor,promises"},
     {"node:punycode",
-     "version,ucs2,decode,encode,toASCII,toUnicode"},
+     "decode,encode,toASCII,toUnicode,ucs2,version"},
     {"node:querystring",
-     "parse,stringify,decode,encode,escape,unescape,unescapeBuffer"},
+     "decode,encode,escape,parse,stringify,unescape,unescapeBuffer"},
     {"node:constants",
-     "F_OK,R_OK,W_OK,X_OK"},
+     "COPYFILE_EXCL,COPYFILE_FICLONE,COPYFILE_FICLONE_FORCE,"
+     "DH_CHECK_P_NOT_PRIME,DH_CHECK_P_NOT_SAFE_PRIME,"
+     "DH_NOT_SUITABLE_GENERATOR,DH_UNABLE_TO_CHECK_GENERATOR,E2BIG,EACCES,"
+     "EADDRINUSE,EADDRNOTAVAIL,EAFNOSUPPORT,EAGAIN,EALREADY,EBADF,EBADMSG,"
+     "EBUSY,ECANCELED,ECHILD,ECONNABORTED,ECONNREFUSED,ECONNRESET,EDEADLK,"
+     "EDESTADDRREQ,EDOM,EDQUOT,EEXIST,EFAULT,EFBIG,EHOSTUNREACH,EIDRM,"
+     "EILSEQ,EINPROGRESS,EINTR,EINVAL,EIO,EISCONN,EISDIR,ELOOP,EMFILE,"
+     "EMLINK,EMSGSIZE,EMULTIHOP,ENAMETOOLONG,ENETDOWN,ENETRESET,"
+     "ENETUNREACH,ENFILE,ENGINE_METHOD_ALL,ENGINE_METHOD_CIPHERS,"
+     "ENGINE_METHOD_DH,ENGINE_METHOD_DIGESTS,ENGINE_METHOD_DSA,"
+     "ENGINE_METHOD_EC,ENGINE_METHOD_NONE,ENGINE_METHOD_PKEY_ASN1_METHS,"
+     "ENGINE_METHOD_PKEY_METHS,ENGINE_METHOD_RAND,ENGINE_METHOD_RSA,"
+     "ENOBUFS,ENODATA,ENODEV,ENOENT,ENOEXEC,ENOLCK,ENOLINK,ENOMEM,ENOMSG,"
+     "ENOPROTOOPT,ENOSPC,ENOSR,ENOSTR,ENOSYS,ENOTCONN,ENOTDIR,ENOTEMPTY,"
+     "ENOTSOCK,ENOTSUP,ENOTTY,ENXIO,EOPNOTSUPP,EOVERFLOW,EPERM,EPIPE,"
+     "EPROTO,EPROTONOSUPPORT,EPROTOTYPE,ERANGE,EROFS,ESPIPE,ESRCH,ESTALE,"
+     "ETIME,ETIMEDOUT,ETXTBSY,EWOULDBLOCK,EXDEV,F_OK,"
+     "OPENSSL_VERSION_NUMBER,O_APPEND,O_CREAT,O_DIRECT,O_DIRECTORY,"
+     "O_DSYNC,O_EXCL,O_NOATIME,O_NOCTTY,O_NOFOLLOW,O_NONBLOCK,O_RDONLY,"
+     "O_RDWR,O_SYNC,O_TRUNC,O_WRONLY,POINT_CONVERSION_COMPRESSED,"
+     "POINT_CONVERSION_HYBRID,POINT_CONVERSION_UNCOMPRESSED,"
+     "PRIORITY_ABOVE_NORMAL,PRIORITY_BELOW_NORMAL,PRIORITY_HIGH,"
+     "PRIORITY_HIGHEST,PRIORITY_LOW,PRIORITY_NORMAL,RSA_NO_PADDING,"
+     "RSA_PKCS1_OAEP_PADDING,RSA_PKCS1_PADDING,RSA_PKCS1_PSS_PADDING,"
+     "RSA_PSS_SALTLEN_AUTO,RSA_PSS_SALTLEN_DIGEST,"
+     "RSA_PSS_SALTLEN_MAX_SIGN,RSA_SSLV23_PADDING,RSA_X931_PADDING,"
+     "RTLD_DEEPBIND,RTLD_GLOBAL,RTLD_LAZY,RTLD_LOCAL,RTLD_NOW,R_OK,"
+     "SIGABRT,SIGALRM,SIGBUS,SIGCHLD,SIGCONT,SIGFPE,SIGHUP,SIGILL,SIGINT,"
+     "SIGIO,SIGIOT,SIGKILL,SIGPIPE,SIGPOLL,SIGPROF,SIGPWR,SIGQUIT,SIGSEGV,"
+     "SIGSTKFLT,SIGSTOP,SIGSYS,SIGTERM,SIGTRAP,SIGTSTP,SIGTTIN,SIGTTOU,"
+     "SIGURG,SIGUSR1,SIGUSR2,SIGVTALRM,SIGWINCH,SIGXCPU,SIGXFSZ,"
+     "SSL_OP_ALL,SSL_OP_ALLOW_NO_DHE_KEX,"
+     "SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,"
+     "SSL_OP_CIPHER_SERVER_PREFERENCE,SSL_OP_CISCO_ANYCONNECT,"
+     "SSL_OP_COOKIE_EXCHANGE,SSL_OP_CRYPTOPRO_TLSEXT_BUG,"
+     "SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS,SSL_OP_LEGACY_SERVER_CONNECT,"
+     "SSL_OP_NO_COMPRESSION,SSL_OP_NO_ENCRYPT_THEN_MAC,"
+     "SSL_OP_NO_QUERY_MTU,SSL_OP_NO_RENEGOTIATION,"
+     "SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION,SSL_OP_NO_SSLv2,"
+     "SSL_OP_NO_SSLv3,SSL_OP_NO_TICKET,SSL_OP_NO_TLSv1,SSL_OP_NO_TLSv1_1,"
+     "SSL_OP_NO_TLSv1_2,SSL_OP_NO_TLSv1_3,SSL_OP_PRIORITIZE_CHACHA,"
+     "SSL_OP_TLS_ROLLBACK_BUG,S_IFBLK,S_IFCHR,S_IFDIR,S_IFIFO,S_IFLNK,"
+     "S_IFMT,S_IFREG,S_IFSOCK,S_IRGRP,S_IROTH,S_IRUSR,S_IRWXG,S_IRWXO,"
+     "S_IRWXU,S_IWGRP,S_IWOTH,S_IWUSR,S_IXGRP,S_IXOTH,S_IXUSR,"
+     "TLS1_1_VERSION,TLS1_2_VERSION,TLS1_3_VERSION,TLS1_VERSION,"
+     "UV_DIRENT_BLOCK,UV_DIRENT_CHAR,UV_DIRENT_DIR,UV_DIRENT_FIFO,"
+     "UV_DIRENT_FILE,UV_DIRENT_LINK,UV_DIRENT_SOCKET,UV_DIRENT_UNKNOWN,"
+     "UV_FS_COPYFILE_EXCL,UV_FS_COPYFILE_FICLONE,"
+     "UV_FS_COPYFILE_FICLONE_FORCE,UV_FS_O_FILEMAP,UV_FS_SYMLINK_DIR,"
+     "UV_FS_SYMLINK_JUNCTION,W_OK,X_OK,defaultCipherList,"
+     "defaultCoreCipherList"},
     {"node:console",
-     "Console,log,info,debug,warn,error,trace,dir,assert,count,countReset,"
-     "time,timeEnd,group,groupEnd,table,clear"},
+     "Console,assert,clear,context,count,countReset,createTask,debug,dir,"
+     "dirxml,error,group,groupCollapsed,groupEnd,info,log,profile,"
+     "profileEnd,table,time,timeEnd,timeLog,timeStamp,trace,warn"},
     {"node:timers",
-     "setTimeout,clearTimeout,setInterval,clearInterval,setImmediate,"
-     "clearImmediate"},
+     "clearImmediate,clearInterval,clearTimeout,promises,setImmediate,"
+     "setInterval,setTimeout"},
     {"node:timers/promises",
-     "setTimeout,setImmediate,setInterval,scheduler"},
+     "scheduler,setImmediate,setInterval,setTimeout"},
     {"node:zlib",
-     "deflateSync,inflateSync,deflateRawSync,inflateRawSync,gzipSync,"
-     "gunzipSync,unzipSync,deflate,inflate,deflateRaw,inflateRaw,gzip,"
-     "gunzip,unzip,Deflate,Inflate,DeflateRaw,InflateRaw,Gzip,Gunzip,"
-     "Unzip,BrotliCompress,BrotliDecompress,createDeflate,createInflate,"
-     "createDeflateRaw,createInflateRaw,createGzip,createGunzip,"
-     "createUnzip,createBrotliCompress,createBrotliDecompress,"
-     "brotliCompressSync,brotliDecompressSync,constants"},
+     "BrotliCompress,BrotliDecompress,Deflate,DeflateRaw,Gunzip,Gzip,"
+     "Inflate,InflateRaw,Unzip,ZstdCompress,ZstdDecompress,brotliCompress,"
+     "brotliCompressSync,brotliDecompress,brotliDecompressSync,codes,"
+     "constants,crc32,createBrotliCompress,createBrotliDecompress,"
+     "createDeflate,createDeflateRaw,createGunzip,createGzip,"
+     "createInflate,createInflateRaw,createUnzip,createZstdCompress,"
+     "createZstdDecompress,deflate,deflateRaw,deflateRawSync,deflateSync,"
+     "gunzip,gunzipSync,gzip,gzipSync,inflate,inflateRaw,inflateRawSync,"
+     "inflateSync,unzip,unzipSync,zstdCompress,zstdCompressSync,"
+     "zstdDecompress,zstdDecompressSync"},
     {"node:http",
-     "request,get,Agent,globalAgent,ClientRequest,IncomingMessage,"
-     "OutgoingMessage,ServerResponse,STATUS_CODES,METHODS,createServer,"
-     "Server"},
+     "Agent,ClientRequest,CloseEvent,IncomingMessage,METHODS,MessageEvent,"
+     "OutgoingMessage,STATUS_CODES,Server,ServerResponse,WebSocket,"
+     "_connectionListener,createServer,get,globalAgent,maxHeaderSize,"
+     "request,setGlobalProxyFromEnv,setMaxIdleHTTPParsers,"
+     "validateHeaderName,validateHeaderValue"},
     {"node:https",
-     "request,get,Agent,globalAgent,ClientRequest,IncomingMessage,"
-     "OutgoingMessage,ServerResponse,STATUS_CODES,METHODS,createServer,"
-     "Server"},
+     "Agent,ClientRequest,IncomingMessage,METHODS,OutgoingMessage,"
+     "STATUS_CODES,Server,ServerResponse,createServer,get,globalAgent,"
+     "request"},
     {"node:net",
-     "isIP,isIPv4,isIPv6,connect,createConnection,createServer,Socket,"
-     "Server"},
+     "BlockList,BoundSocket,Server,Socket,SocketAddress,Stream,"
+     "_createServerHandle,_normalizeArgs,connect,createConnection,"
+     "createServer,getDefaultAutoSelectFamily,"
+     "getDefaultAutoSelectFamilyAttemptTimeout,isIP,isIPv4,isIPv6,"
+     "setDefaultAutoSelectFamily,setDefaultAutoSelectFamilyAttemptTimeout"},
     {"node:tls",
-     "connect,createServer,createSecureContext,TLSSocket,rootCertificates"},
+     "CLIENT_RENEG_LIMIT,CLIENT_RENEG_WINDOW,DEFAULT_CIPHERS,"
+     "DEFAULT_ECDH_CURVE,DEFAULT_MAX_VERSION,DEFAULT_MIN_VERSION,"
+     "SecureContext,Server,TLSSocket,checkServerIdentity,connect,"
+     "convertALPNProtocols,createSecureContext,createServer,"
+     "getCACertificates,getCertificateCompressionAlgorithms,getCiphers,"
+     "rootCertificates,setDefaultCACertificates"},
     {"node:process",
-     "argv,env,platform,execPath,execArgv,version,versions,stdout,stderr,"
-     "stdin,cwd,exit,nextTick,hrtime,pid,ppid,title,argv0,release,config,"
-     "allowedNodeEnvironmentFlags,emitWarning,uptime,memoryUsage,umask,"
-     "exitCode,on,once,off,removeListener,emit"},
+     "_debugEnd,_debugProcess,_eval,_events,_eventsCount,_exiting,"
+     "_fatalException,_getActiveHandles,_getActiveRequests,_kill,"
+     "_linkedBinding,_maxListeners,_preload_modules,_rawDebug,"
+     "_startProfilerIdleNotifier,_stopProfilerIdleNotifier,_tickCallback,"
+     "abort,allowedNodeEnvironmentFlags,arch,argv,argv0,availableMemory,"
+     "binding,chdir,config,constrainedMemory,cpuUsage,cwd,debugPort,"
+     "dlopen,domain,emit,emitWarning,env,execArgv,execPath,execve,exit,"
+     "exitCode,features,finalization,getActiveResourcesInfo,"
+     "getBuiltinModule,getegid,geteuid,getgid,getgroups,getuid,"
+     "hasUncaughtExceptionCaptureCallback,hrtime,initgroups,kill,"
+     "loadEnvFile,memoryUsage,moduleLoadList,nextTick,off,on,once,"
+     "openStdin,pid,platform,ppid,reallyExit,ref,release,removeListener,"
+     "report,resourceUsage,setSourceMapsEnabled,"
+     "setUncaughtExceptionCaptureCallback,setegid,seteuid,setgid,"
+     "setgroups,setuid,sourceMapsEnabled,stderr,stdin,stdout,"
+     "threadCpuUsage,title,umask,unref,uptime,version,versions"},
 };
 
 #endif /* SCR_ISLAND_BUILTINS_H */

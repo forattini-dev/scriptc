@@ -41,6 +41,7 @@
     "30-net-http-tls.js",
     "30a-net-tls-load.js",
     "31-process.js",
+    "31a-surface.js",
     "32-epilogue.js"
   ],
   "rust": [
@@ -77,6 +78,7 @@
     "30a-net-tls-load.js",
     "30b-net-sockets.js",
     "31-process.js",
+    "31a-surface.js",
     "32-epilogue.js"
   ]
 }

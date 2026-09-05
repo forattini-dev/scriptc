@@ -1000,6 +1000,14 @@ fn island_state() -> IslandState {
         .module_loader(loader.clone())
         .build()
         .unwrap_or_else(|error| panic!("scriptc: cannot create island context: {error}"));
+    // boa's defaults (512 frames, a 10 240-slot value stack) are sized for
+    // embedders running snippets; a whole CLI's module graph (Effect's
+    // fiber runtime, deep initializers) needs Node-like headroom. The
+    // program thread carries a 256 MB stack for the same reason.
+    let mut limits = context.runtime_limits();
+    limits.set_recursion_limit(8_192);
+    limits.set_stack_size_limit(4 * 1024 * 1024);
+    context.set_runtime_limits(limits);
     let console = ObjectInitializer::new(&mut context)
         .function(
             NativeFunction::from_copy_closure(|this, arguments, context| {
@@ -1113,12 +1121,16 @@ fn island_error_caught(error: boa_engine::JsError, context: &mut Context) -> Cau
     }
 }
 
-/// A FATAL island failure (module evaluation, job draining): the thrown
-/// value carries boa's own rendering — the throw position (embedded
-/// module path, line and column) and the call stack — because an
-/// uncaught "not a callable function" is unlocatable without them, and
-/// Node prints a stack for uncaught errors too.
+/// An island failure thrown into static code. Under SCRIPTC_ISLAND_TRACE=1
+/// the thrown value carries boa's own rendering — the throw position
+/// (embedded module path, line and column) and the call stack — because
+/// an uncaught "not a callable function" is unlocatable without them.
 fn island_eval_error(error: boa_engine::JsError, context: &mut Context) -> ! {
+    // Only under SCRIPTC_ISLAND_TRACE: the same throw may be caught by
+    // static code, whose `error.message` must stay Node's (corpus 1100).
+    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_none() {
+        rethrow_caught(island_error_caught(error, context));
+    }
     let rendered = error.to_string();
     let name = match error.try_native(context) {
         Ok(native) => island_error_name(&error, context, &native.kind().to_string()),
