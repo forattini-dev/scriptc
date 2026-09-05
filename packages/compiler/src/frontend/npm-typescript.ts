@@ -1,4 +1,5 @@
 import ts from "typescript5";
+import { activeRuntimeTarget } from "../compat/runtime-target.js";
 
 /** The project's JSX posture for EMBEDDED .tsx modules (adopted from its
  * tsconfig by program.ts): the engine needs plain JavaScript, so
@@ -49,7 +50,12 @@ export function npmExecutableSource(fileName: string, source: string): string {
       // ES2022: `using` downlevels to try/finally (see above); every other
       // syntax the island's engines run is ES2022 or older already.
       target: ts.ScriptTarget.ES2022,
-      verbatimModuleSyntax: true,
+      // Bun's transpiler drops an import whose specifiers are all
+      // `type` (`import { type rpc } from "../tui/worker"`) even under
+      // verbatimModuleSyntax — the worker script behind it must not run
+      // in the main thread — while Node's type stripping keeps the
+      // side-effect import, as verbatimModuleSyntax specifies.
+      verbatimModuleSyntax: activeRuntimeTarget().family !== "bun",
       ...jsx,
     },
   }).outputText;
