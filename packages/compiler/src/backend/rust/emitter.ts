@@ -508,6 +508,10 @@ class RustEmitter {
         ? "#![forbid(unsafe_code)]"
         : "#![deny(unsafe_op_in_unsafe_fn)]",
     );
+    // Whole-program TUs expand large macro invocations (chunked
+    // thread_local! blocks, wide matches); the default limit of 128 is
+    // sized for hand-written crates.
+    this.line("#![recursion_limit = \"1024\"]");
     this.line("");
     this.line("use scriptc_runtime as runtime;");
     if (this.globals.size > 0 || this.internedClosureTargets.size > 0) {

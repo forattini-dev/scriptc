@@ -818,6 +818,20 @@ export class RustDefinitionEmitter {
 
   emitGlobals(): void {
     if (this.context.globals.size === 0 && this.context.internedClosureTargets.size === 0) return;
+    // `std::thread_local!` expands recursively per static: a program with
+    // hundreds of module globals (a whole CLI) blows rustc's recursion
+    // limit in one invocation, so the statics go out in chunks.
+    let emitted = 0;
+    const slot = (text: string): void => {
+      if (emitted > 0 && emitted % 48 === 0) {
+        this.context.popIndent();
+        this.context.line("}");
+        this.context.line("std::thread_local! {");
+        this.context.pushIndent();
+      }
+      this.context.line(text);
+      emitted += 1;
+    };
     this.context.line("std::thread_local! {");
     this.context.pushIndent();
     for (const global of this.context.globals.values()) {
@@ -825,16 +839,16 @@ export class RustDefinitionEmitter {
       switch (global.type.kind) {
         case "f64":
         case "date":
-          this.context.line(`static ${name}: Cell<f64> = const { Cell::new(0.0) };`);
+          slot(`static ${name}: Cell<f64> = const { Cell::new(0.0) };`);
           break;
         case "bool":
-          this.context.line(`static ${name}: Cell<bool> = const { Cell::new(false) };`);
+          slot(`static ${name}: Cell<bool> = const { Cell::new(false) };`);
           break;
         case "classval":
-          this.context.line(`static ${name}: Cell<usize> = const { Cell::new(0) };`);
+          slot(`static ${name}: Cell<usize> = const { Cell::new(0) };`);
           break;
         case "string":
-          this.context.line(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
+          slot(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
           break;
         case "array":
         case "bytes":
@@ -865,7 +879,7 @@ export class RustDefinitionEmitter {
         case "searchParams":
         case "dyn":
         case "jsval":
-          this.context.line(`static ${name}: RefCell<Option<${this.context.rustType(global.type)}>> = const { RefCell::new(None) };`);
+          slot(`static ${name}: RefCell<Option<${this.context.rustType(global.type)}>> = const { RefCell::new(None) };`);
           break;
         default:
           this.context.unsupported(`global type '${global.type.kind}'`);
@@ -874,7 +888,7 @@ export class RustDefinitionEmitter {
     for (const fnName of this.context.internedClosureTargets) {
       const shape = this.context.closureTargets.get(fnName);
       if (shape === undefined) this.context.unsupported(`missing interned closure shape '${fnName}'`);
-      this.context.line(`static ${mangleFnClosure(fnName)}: RefCell<Option<runtime::Gc<${this.context.closureName(shape)}>>> = const { RefCell::new(None) };`);
+      slot(`static ${mangleFnClosure(fnName)}: RefCell<Option<runtime::Gc<${this.context.closureName(shape)}>>> = const { RefCell::new(None) };`);
     }
     this.context.popIndent();
     this.context.line("}");
