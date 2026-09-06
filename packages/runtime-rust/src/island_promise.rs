@@ -105,3 +105,31 @@ fn island_promise_bridges_reset() {
     ISLAND_PROMISE_SETTLEMENTS.with(|slot| slot.borrow_mut().clear());
     ISLAND_PROMISE_SETTLEMENT_ID.with(|slot| slot.set(0));
 }
+
+/// A PENDING engine promise with its resolvers — the reverse bridge's
+/// anchor: generated code settles it from a native promise's continuation
+/// (a static async callback answering the island), marshaling the
+/// fulfillment like a call argument and the rejection as an engine Error.
+pub fn island_value_pending_promise() -> (IslandValue, IslandValue, IslandValue) {
+    with_island_state(|state| {
+        let (promise, resolvers) = BoaJsPromise::new_pending(&mut state.context);
+        (
+            IslandValue(promise.into()),
+            IslandValue(resolvers.resolve.into()),
+            IslandValue(resolvers.reject.into()),
+        )
+    })
+}
+
+/// The engine's view of a native promise's rejection reason: the same
+/// class-and-message conversion host functions use for a throw, so
+/// `e.message` and `e instanceof TypeError` read as they would in Node.
+pub fn island_value_error(caught: &Caught) -> IslandValue {
+    with_island_state(|state| {
+        let error = crate::island_host_error(caught, &mut state.context);
+        let value = error
+            .into_opaque(&mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(value)
+    })
+}

@@ -5724,7 +5724,14 @@ export function islandCallbackRet(
       : null;
   if (t.kind === "promise") {
     const tag = tagOf(t.inner);
-    return tag ? { async: true, tag } : null;
+    if (tag) return { async: true, tag };
+    // A promise of a checked-dynamic or JSON-safe composite (an async
+    // yargs middleware answering `{ extra }`): the Rust lane's reverse
+    // promise bridge settles an engine promise from the native one,
+    // marshaling the fulfillment like a call argument.
+    if (t.inner.kind === "dyn") return { async: true, tag: "dyn" };
+    if (isJsonSafeType(t.inner, getRecord, getUnion)) return { async: true, tag: "json" };
+    return null;
   }
   const tag = tagOf(t);
   if (tag) return { async: false, tag };

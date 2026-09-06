@@ -233,8 +233,15 @@ export function emitNpmEmbedding(E: CEmitter, out: string[]): void {
       const tagC = {
         void: "SCR_ISLP_VOID", f64: "SCR_ISLP_F64", bool: "SCR_ISLP_BOOL",
         string: "SCR_ISLP_STR", jsval: "SCR_ISLP_JSVAL",
-        json: "", dyn: "", // unreachable: islandCallbackRet never tags async json/dyn
+        json: "", dyn: "",
       }[ret.tag];
+      // The frozen C lane has no engine-promise tag for composites; the
+      // Rust lane's reverse promise bridge carries them.
+      if (tagC === "") {
+        throw new InternalCompilerError(
+          `the C backend cannot marshal an async island callback answering a ${ret.tag} value (build with --backend rust)`,
+        );
+      }
       body.push(
         `  ScrPromise *sc_r = ${call};`,
         `  if (!sc_r) return NULL;`,

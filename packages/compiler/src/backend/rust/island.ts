@@ -119,7 +119,25 @@ function hostArgument(type: IrType, args: string, index: number, context: RustIs
  * `record` rides the JSON path — the type-directed serializer, then the
  * realm's own parser: the deep copy the rest of this boundary already
  * performs for composites. */
-function hostResult(type: IrType, value: string): string | null {
+/** A typed value as an engine value, for a promise's fulfillment: the
+ * same domain hostResult marshals synchronously, plus dyn and handles. */
+function islandValueOfTyped(type: IrType, value: string, context: RustIslandContext): string | null {
+  switch (type.kind) {
+    case "void": return `{ let _ = ${value}; runtime::island_value_undefined() }`;
+    case "string": return `runtime::island_value_string(&(${value}))`;
+    case "f64": return `runtime::island_value_number(${value})`;
+    case "bool": return `runtime::island_value_boolean(${value})`;
+    case "bytes": return type.elem === "u8" ? `runtime::island_value_bytes(&(${value}))` : null;
+    case "record":
+    case "array":
+    case "union": return `runtime::island_value_json(&runtime::json_stringify(&(${value})))`;
+    case "dyn":
+    case "jsval": return `{ let sc_typed = ${value}; ${emitIslandValue("&sc_typed", context, 1)} }`;
+    default: return null;
+  }
+}
+
+function hostResult(type: IrType, value: string, context: RustIslandContext): string | null {
   const result = (variant: string, payload: string): string =>
     `runtime::IslandHostResult::${variant}(${payload})`;
   switch (type.kind) {
@@ -132,6 +150,19 @@ function hostResult(type: IrType, value: string): string | null {
         ? result("Bytes", `runtime::island_bytes_values(&(${value}))`)
         : null;
     case "record": return result("Json", `runtime::json_stringify(&(${value}))`);
+    // An async callback: the native promise crosses as a pending engine
+    // promise settled from its continuation (fulfillment marshaled by its
+    // static type, rejection as an engine Error with the reason's text).
+    case "promise": {
+      const fulfilled = islandValueOfTyped(type.inner, "sc_fulfilled", context);
+      if (fulfilled === null) return null;
+      return `{ let sc_native_promise = ${value}; ` +
+        `let (sc_island_promise, sc_island_resolve, sc_island_reject) = runtime::island_value_pending_promise(); ` +
+        `runtime::promise_then(&sc_native_promise, Box::new(move |sc_outcome| { match sc_outcome { ` +
+        `Ok(sc_fulfilled) => { let _ = runtime::island_call(&sc_island_resolve, &[${fulfilled}]); } ` +
+        `Err(sc_reason) => { let _ = runtime::island_call(&sc_island_reject, &[runtime::island_value_error(&sc_reason)]); } } })); ` +
+        `runtime::IslandHostResult::Island(sc_island_promise) }`;
+    }
     default: return null;
   }
 }
@@ -156,7 +187,7 @@ function emitHostFunction(
     args.push(argument);
   }
   const dispatch = context.emitClosureDispatch(closure, type, args, expr.loc);
-  const result = hostResult(type.ret, dispatch);
+  const result = hostResult(type.ret, dispatch, context);
   if (result === null) return null;
   return `{ let ${closure} = ${emitExpr(expr.value)}; ` +
     `${context.dynTypeName()}::Island(runtime::island_value_host_function(${args.length}, ` +
@@ -563,6 +594,20 @@ function emitIslandValue(value: string, context: RustIslandContext, depth = 0): 
     `${dyn}::Regex(sc_value) => runtime::island_value_regexp(` +
     `&runtime::regex_source(sc_value), &runtime::regex_flags(sc_value)), ` +
     `${dyn}::Island(sc_value) => sc_value.clone(), ` +
+    // A NATIVE promise (an async static callback's answer, a promise-
+    // valued dyn) crosses as a pending engine promise the native one
+    // settles: fulfillment marshals like an argument, rejection as an
+    // engine Error carrying the reason's text. One level: a promise's
+    // fulfillment is never itself a promise (JS flattens), so the nested
+    // marshal keeps the plain arms only.
+    (depth === 0
+      ? `${dyn}::Promise(sc_handle) => { let (sc_island_promise, sc_island_resolve, sc_island_reject) = runtime::island_value_pending_promise(); ` +
+        `let sc_native_promise = runtime::promise_from_handle::<${dyn}>(sc_handle); ` +
+        `runtime::promise_then(&sc_native_promise, Box::new(move |sc_outcome| { match sc_outcome { ` +
+        `Ok(sc_fulfilled) => { let _ = runtime::island_call(&sc_island_resolve, &[${emitIslandValue("&sc_fulfilled", context, depth + 1)}]); } ` +
+        `Err(sc_reason) => { let _ = runtime::island_call(&sc_island_reject, &[runtime::island_value_error(&sc_reason)]); } } })); ` +
+        `sc_island_promise }, `
+      : "") +
     `sc_value if sc_dyn_typeof(sc_value).as_ref() == "function" => ${callback}, ` +
     `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
     `}`;

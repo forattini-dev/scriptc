@@ -761,6 +761,7 @@ pub fn island_call(callee: &IslandValue, args: &[IslandValue]) -> IslandValue {
         let value = function
             .call(&JsValue::undefined(), &args, &mut state.context)
             .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        island_run_jobs(state);
         IslandValue(value)
     })
 }

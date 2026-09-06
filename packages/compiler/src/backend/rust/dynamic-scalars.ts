@@ -3,6 +3,7 @@ export interface RustDynamicScalarContext {
   pushIndent(): void;
   popIndent(): void;
   dynTypeName(): string;
+  hasEmbeddedModules(): boolean;
 }
 
 export function emitRustDynamicScalarChecks(context: RustDynamicScalarContext): void {
@@ -14,7 +15,12 @@ export function emitRustDynamicScalarChecks(context: RustDynamicScalarContext): 
   ] as const) {
     context.line(`fn sc_dyn_check_${expected}(value: ${name}) -> ${rustType} {`);
     context.pushIndent();
-    context.line(`match value { ${name}::${variant}(value) => value, value => sc_dyn_check_fail("${expected}", &value) }`);
+    // An island HANDLE holding the scalar exits strictly (a typed
+    // callback's parameter arriving through the dyn bridge).
+    const island = context.hasEmbeddedModules()
+      ? `${name}::Island(handle) => runtime::island_exit_${expected}(&handle), `
+      : "";
+    context.line(`match value { ${name}::${variant}(value) => value, ${island}value => sc_dyn_check_fail("${expected}", &value) }`);
     context.popIndent();
     context.line("}");
   }

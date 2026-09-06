@@ -128,3 +128,28 @@ fn island_host_result_value(result: IslandHostResult, context: &mut Context) -> 
         IslandHostResult::Island(value) => value.0,
     })
 }
+
+/// Strict scalar exits on a handle — the checked-dynamic scalar checks'
+/// island arms (a typed callback's `number` parameter arriving as a
+/// handle through the dyn bridge). Never coerced: a non-matching engine
+/// value is the boundary's TypeError.
+pub fn island_exit_number(value: &IslandValue) -> f64 {
+    match value.0.as_number() {
+        Some(number) => number,
+        None => throw_type_error(format!("expected number at $, got {}", value.0.type_of())),
+    }
+}
+
+pub fn island_exit_boolean(value: &IslandValue) -> bool {
+    match value.0.as_boolean() {
+        Some(boolean) => boolean,
+        None => throw_type_error(format!("expected boolean at $, got {}", value.0.type_of())),
+    }
+}
+
+pub fn island_exit_string(value: &IslandValue) -> JsString {
+    match value.0.as_string() {
+        Some(text) => string(&text.to_std_string_lossy()),
+        None => throw_type_error(format!("expected string at $, got {}", value.0.type_of())),
+    }
+}
