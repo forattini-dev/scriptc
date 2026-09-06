@@ -14,16 +14,6 @@ fn member(name: &'static str, arity: i32, body: HostBody) -> (&'static str, v8e:
     (name, function)
 }
 
-fn not_on_v8(name: &str) -> Result<v8e::HostResult, v8e::Error> {
-    Err(v8e::Error {
-        name: "Error".to_owned(),
-        message: format!("host.{name} is not available on the V8 island yet"),
-        code: Some("ERR_NOT_SUPPORTED".to_owned()),
-        stack: None,
-        value: None,
-    })
-}
-
 fn host_string(value: &JsString) -> Result<v8e::HostResult, v8e::Error> {
     Ok(v8e::HostResult::String(value.to_string()))
 }
@@ -159,8 +149,8 @@ fn v8_host_object() -> v8e::Value {
                 None => v8e::HostResult::Undefined,
             })
         }),
-        member("fetch", 4, |_| not_on_v8("fetch")),
-        member("cancelFetch", 1, |_| Ok(v8e::HostResult::Undefined)),
+        member("fetch", 4, host_fetch),
+        member("cancelFetch", 1, host_fetch_cancel),
         member("random", 1, |args| {
             let size = arg_number(args, 0)?;
             Ok(v8e::HostResult::Bytes(bytes_values(&v8_guard(|| crypto_random_bytes(size))?)))
@@ -188,39 +178,39 @@ fn v8_host_object() -> v8e::Value {
             Ok(v8e::HostResult::Number(timer_set_ref(id, referenced)))
         }),
         member("timerHasRef", 1, |args| Ok(v8e::HostResult::Bool(timer_has_ref(arg_number(args, 0)?)))),
-        member("zlib", 4, |_| not_on_v8("zlib")),
+        member("zlib", 4, host_zlib),
         member("arch", 0, |_| host_string(&process_arch())),
         member("hostname", 0, |_| host_string(&os_hostname())),
         member("homedir", 0, |_| host_string(&v8_guard(os_homedir)?)),
         member("tmpdir", 0, |_| host_string(&os_tmpdir())),
         member("ids", 0, |_| host_value(v8e::array(&[v8e::number(process_getuid()), v8e::number(process_getgid())]))),
         member("signals", 0, host_signals),
-        member("netConnect", 3, |_| not_on_v8("netConnect")),
-        member("netWrite", 2, |_| not_on_v8("netWrite")),
-        member("netEnd", 2, |_| not_on_v8("netEnd")),
-        member("netDestroy", 1, |_| not_on_v8("netDestroy")),
-        member("netFlow", 2, |_| not_on_v8("netFlow")),
-        member("netOption", 3, |_| not_on_v8("netOption")),
-        member("netPeer", 1, |_| not_on_v8("netPeer")),
-        member("netLocal", 1, |_| not_on_v8("netLocal")),
-        member("netServerCreate", 1, |_| not_on_v8("netServerCreate")),
-        member("netServerListen", 3, |_| not_on_v8("netServerListen")),
-        member("netServerAddress", 1, |_| not_on_v8("netServerAddress")),
-        member("netServerClose", 1, |_| not_on_v8("netServerClose")),
-        member("srvCreate", 1, |_| not_on_v8("srvCreate")),
-        member("srvListen", 3, |_| not_on_v8("srvListen")),
-        member("srvAddress", 1, |_| not_on_v8("srvAddress")),
-        member("srvPort", 1, |_| not_on_v8("srvPort")),
-        member("srvClose", 1, |_| not_on_v8("srvClose")),
-        member("srvResHead", 4, |_| not_on_v8("srvResHead")),
-        member("srvResWrite", 2, |_| not_on_v8("srvResWrite")),
-        member("srvResEnd", 2, |_| not_on_v8("srvResEnd")),
-        member("srvResDestroy", 1, |_| not_on_v8("srvResDestroy")),
-        member("httpStart", 8, |_| not_on_v8("httpStart")),
-        member("httpWrite", 2, |_| not_on_v8("httpWrite")),
-        member("httpEnd", 2, |_| not_on_v8("httpEnd")),
-        member("httpDestroy", 1, |_| not_on_v8("httpDestroy")),
-        member("httpSetTimeout", 2, |_| not_on_v8("httpSetTimeout")),
+        member("netConnect", 3, host_net_connect),
+        member("netWrite", 2, host_net_write),
+        member("netEnd", 2, host_net_end),
+        member("netDestroy", 1, host_net_destroy),
+        member("netFlow", 2, host_net_flow),
+        member("netOption", 3, host_net_option),
+        member("netPeer", 1, host_net_peer),
+        member("netLocal", 1, host_net_local),
+        member("netServerCreate", 1, host_net_server_create),
+        member("netServerListen", 3, host_net_server_listen),
+        member("netServerAddress", 1, host_net_server_address),
+        member("netServerClose", 1, host_net_server_close),
+        member("srvCreate", 1, host_srv_create),
+        member("srvListen", 3, host_net_server_listen),
+        member("srvAddress", 1, host_net_server_address),
+        member("srvPort", 1, host_srv_port),
+        member("srvClose", 1, host_net_server_close),
+        member("srvResHead", 4, host_srv_res_head),
+        member("srvResWrite", 2, host_srv_res_write),
+        member("srvResEnd", 2, host_srv_res_end),
+        member("srvResDestroy", 1, host_srv_res_destroy),
+        member("httpStart", 8, host_http_start),
+        member("httpWrite", 2, host_http_write),
+        member("httpEnd", 2, host_http_end),
+        member("httpDestroy", 1, host_http_destroy),
+        member("httpSetTimeout", 2, host_http_set_timeout),
     ];
     #[cfg(feature = "sqlite")]
     let members = {

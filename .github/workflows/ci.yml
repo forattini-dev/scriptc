@@ -289,7 +289,7 @@ jobs:
   runtime_rust:
     name: test (rust runtime crate)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: packages/runtime-rust
@@ -307,8 +307,12 @@ jobs:
       - run: cargo fetch --locked
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
-      - name: clippy with the island engine and the SQLite kernel
+      - name: clippy with the boa island engine and the SQLite kernel
         run: cargo clippy --all-targets --locked --features island-eval,sqlite -- -D warnings
+      - name: clippy with the V8 island engine (the default) and the SQLite kernel
+        run: cargo clippy --all-targets --locked --features island-v8,sqlite -- -D warnings
+      - name: the V8 engine crate's own tests
+        run: cargo test --locked --manifest-path ../island-v8/Cargo.toml -- --test-threads=1
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.3

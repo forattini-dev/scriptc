@@ -3,11 +3,14 @@ import { hasRustEmbeddedModules } from "./embedded-modules.js";
 
 export type RustRuntimeFeature = "island-eval" | "island-v8" | "sqlite";
 
-/** The island engine a build compiles in: boa (`island-eval`, the
- * default while the V8 lane comes up) or V8 (`island-v8`) under
- * SCRIPTC_ISLAND_ENGINE=v8. */
+/** The island engine a build compiles in: V8 (`island-v8`, the default —
+ * the JIT is what puts an embedded npm graph at Bun's speed) or boa
+ * (`island-eval`, pure Rust, no prebuilt archive) under
+ * SCRIPTC_ISLAND_ENGINE=boa. The V8 crate's build script fetches its
+ * prebuilt static library once and caches it under `~/.cargo/.rusty_v8`;
+ * an offline host points RUSTY_V8_ARCHIVE at that file. */
 export function islandEngineFeature(): "island-eval" | "island-v8" {
-  return process.env["SCRIPTC_ISLAND_ENGINE"] === "v8" ? "island-v8" : "island-eval";
+  return process.env["SCRIPTC_ISLAND_ENGINE"] === "boa" ? "island-eval" : "island-v8";
 }
 
 /** Whether a feature list carries an island engine at all. */

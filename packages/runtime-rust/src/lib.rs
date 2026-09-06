@@ -72,6 +72,8 @@ include!("island_host_sqlite.rs");
 include!("v8_island.rs");
 #[cfg(feature = "island-v8")]
 include!("v8_host.rs");
+#[cfg(feature = "island-v8")]
+include!("v8_host_net.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");

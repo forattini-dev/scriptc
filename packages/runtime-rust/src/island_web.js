@@ -1123,7 +1123,10 @@
     }
     ref() { this._refed = true; host.setTimerRef(this._id, true); return this; }
     unref() { this._refed = false; host.setTimerRef(this._id, false); return this; }
-    hasRef() { return host.timerHasRef(this._id); }
+    // Node's hasRef() is the ref FLAG, which survives the timer firing:
+    // a fired Timeout still answers true after ref(). The host's liveness
+    // account only knows armed timers, so the flag lives here.
+    hasRef() { return this._refed; }
     refresh() {
       host.clearTimer(this._id);
       this._id = host.setTimer(this._fn, this._delay, this._repeat);

@@ -255,6 +255,7 @@ fn island_eval_finish() {
     V8_HELPERS.with(|helpers| helpers.borrow_mut().clear());
     V8_EXTERNAL.with(|external| external.borrow_mut().clear());
     V8_CHILDREN.with(|children| children.borrow_mut().clear());
+    v8_net_reset();
     island_modules_reset();
     v8e::finish();
     V8_BOOTED.with(|flag| flag.set(false));
