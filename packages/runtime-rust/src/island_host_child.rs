@@ -168,6 +168,14 @@ fn island_host_child_spawn(
         &command, &args, stdin, stdout, stderr, stdout_fd, stderr_fd, detached, has_env, &env_pairs, &cwd,
     );
     let id = island_child_next_id();
+    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
+        eprintln!(
+            "scriptc island: spawn #{id} {command} {:?} (pid {:?}, exit {:?})",
+            args.with(|args| args.elements.iter().map(|value| value.to_string()).collect::<Vec<_>>()),
+            child_pid(&child),
+            child_exit_code(&child)
+        );
+    }
     ISLAND_CHILDREN.with(|children| {
         children.borrow_mut().insert(id, child.clone());
     });

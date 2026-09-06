@@ -1002,6 +1002,9 @@ fn island_timer_fire(callback: &boa_engine::JsObject) {
 }
 
 fn island_state() -> IslandState {
+    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
+        eprintln!("scriptc island: creating realm on {:?}", std::thread::current().name());
+    }
     let loader = Rc::new(IslandModuleLoader::default());
     let mut context = Context::builder()
         .module_loader(loader.clone())
@@ -1174,11 +1177,19 @@ fn island_error_name(error: &boa_engine::JsError, context: &mut Context, fallbac
 /// too, so `ISLAND_STATE` never survives to an uncontrolled thread-exit
 /// drop with the GC arena mid-mutation.
 fn island_eval_finish() {
+    // SCRIPTC_ISLAND_TRACE: a teardown that is not the end of the run is
+    // a panic crossing the realm; name where it came from.
+    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
+        eprintln!(
+            "scriptc island: teardown\n{}",
+            std::backtrace::Backtrace::force_capture()
+        );
+    }
     island_reentry_reset();
     ISLAND_LOADER.with(|slot| *slot.borrow_mut() = None);
     with_tables(|t| *t = IslandTables::default());
     island_net_reset();
-        island_child_reset();
+    island_child_reset();
     island_fetch_requests_reset();
     island_promise_bridges_reset();
     island_parked_panic_reset();
