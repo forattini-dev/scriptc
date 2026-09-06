@@ -480,16 +480,29 @@ export interface FileParts {
           // reached through the alias is a program-module import() like a
           // relative one.
           const modSym = L.checker.getSymbolAtLocation(node.arguments[0]);
-          const ownModule = modSym !== undefined && L.checker.declarationsOf(modSym).some(
-            (d) => ts.isSourceFile(d) && !d.isDeclarationFile,
-          );
+          const ownModuleFile = modSym === undefined
+            ? undefined
+            : L.checker.declarationsOf(modSym).find(
+              (d): d is ts.SourceFile => ts.isSourceFile(d) && !d.isDeclarationFile,
+            );
+          const ownModule = ownModuleFile !== undefined;
+          // An own module classified ISLAND is engine source like an npm
+          // module: it embeds through the entry a static import of an
+          // island module takes, and the site lowers to island.importDyn —
+          // the module evaluates in the engine on first import (red-dev's
+          // lazy-command shape: 389 import() sites of its own modules).
+          const islandOwn = ownModuleFile !== undefined && isIslandModulePath(ownModuleFile.fileName)
+            ? builder.addResolvedFileImport(sf.fileName, spec, ownModuleFile.fileName)
+            : null;
           // A tsconfig paths ALIAS (`import("@/effect/app-runtime")` —
           // bun-types' runtime shape): the symbol lookup misses the bare
           // specifier, so the adopted alias table answers — a compiled
           // program file is a program-module import() exactly like a
           // relative one. The resolved file rides the resolution (the
           // lowerer builds the namespace builder for it).
-          const res = ownModule
+          const res = islandOwn !== null
+            ? ({ kind: "module", key: islandOwn } as const)
+            : ownModule
             ? ({ kind: "program-module" } as const)
             : pathAliasesProgramModule(L.program, spec) !== null
               ? ({ kind: "program-module-aliased", from: spec } as const)

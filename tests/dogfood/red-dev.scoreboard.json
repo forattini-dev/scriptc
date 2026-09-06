@@ -11,59 +11,43 @@
   },
   "preflightFailed": false,
   "stats": {
-    "statementsTotal": 132,
-    "statementsFailed": 7,
-    "statementsIsland": 10,
+    "statementsTotal": 146,
+    "statementsFailed": 3,
+    "statementsIsland": 14,
     "functionsSkipped": 0
   },
   "unreachedStats": {
-    "statementsTotal": 1726,
-    "statementsFailed": 286,
-    "statementsIsland": 521,
+    "statementsTotal": 2098,
+    "statementsFailed": 29,
+    "statementsIsland": 914,
     "functionsSkipped": 0
   },
   "reached": {
-    "total": 7,
+    "total": 3,
     "byCode": {
-      "SC1090": 3,
-      "SC2004": 3,
+      "SC1090": 2,
       "SC2020": 1
     },
     "byFamily": {
-      "cascade": 3,
-      "syntax-other": 3,
+      "syntax-other": 2,
       "stdlib-tail": 1
     },
     "byPackage": {
-      "(other)": 7
+      "(other)": 3
     },
     "families": [
       {
-        "family": "cascade",
-        "count": 3,
-        "codes": {
-          "SC2004": 3
-        },
-        "packages": {
-          "(other)": 3
-        },
-        "sample": {
-          "file": "main.ts",
-          "message": "uses of 'handOffCrash' inherit the blocker on its declaration"
-        }
-      },
-      {
         "family": "syntax-other",
-        "count": 3,
+        "count": 2,
         "codes": {
-          "SC1090": 3
+          "SC1090": 2
         },
         "packages": {
-          "(other)": 3
+          "(other)": 2
         },
         "sample": {
           "file": "main.ts",
-          "message": "dynamic import of the program's own module './crash-handoff.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+          "message": "passing a value of type 'Date' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can c"
         }
       },
       {
@@ -86,58 +70,44 @@
     }
   },
   "unreached": {
-    "total": 286,
+    "total": 29,
     "byCode": {
-      "SC2004": 161,
-      "SC1090": 118,
-      "SC2020": 7
+      "SC1090": 19,
+      "SC2020": 8,
+      "SC2004": 2
     },
     "byFamily": {
-      "cascade": 161,
-      "syntax-other": 116,
-      "stdlib-tail": 7,
-      "island-boundary-function": 2
+      "syntax-other": 16,
+      "stdlib-tail": 8,
+      "island-boundary-function": 3,
+      "cascade": 2
     },
     "byPackage": {
-      "(other)": 286
+      "(other)": 29
     },
     "families": [
       {
-        "family": "cascade",
-        "count": 161,
-        "codes": {
-          "SC2004": 161
-        },
-        "packages": {
-          "(other)": 161
-        },
-        "sample": {
-          "file": "main.ts",
-          "message": "uses of 'sudoItemsFor' inherit the blocker on its declaration"
-        }
-      },
-      {
         "family": "syntax-other",
-        "count": 116,
+        "count": 16,
         "codes": {
-          "SC1090": 116
+          "SC1090": 16
         },
         "packages": {
-          "(other)": 116
+          "(other)": 16
         },
         "sample": {
           "file": "main.ts",
-          "message": "dynamic import of the program's own module './sudo-preflight.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+          "message": "passing a value of type '{ crashDumpDir: null | string; includeCrashDumps: boolean; livePids: Set<number>; stateRoot: string }' into dynamically-executed ('any'-typed) code (only numbers, strings, boo"
         }
       },
       {
         "family": "stdlib-tail",
-        "count": 7,
+        "count": 8,
         "codes": {
-          "SC2020": 7
+          "SC2020": 8
         },
         "packages": {
-          "(other)": 7
+          "(other)": 8
         },
         "sample": {
           "file": "main.ts",
@@ -146,21 +116,35 @@
       },
       {
         "family": "island-boundary-function",
+        "count": 3,
+        "codes": {
+          "SC1090": 3
+        },
+        "packages": {
+          "(other)": 3
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      },
+      {
+        "family": "cascade",
         "count": 2,
         "codes": {
-          "SC1090": 2
+          "SC2004": 2
         },
         "packages": {
           "(other)": 2
         },
         "sample": {
           "file": "main.ts",
-          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+          "message": "uses of 'rescue' inherit the blocker on its declaration"
         }
       }
     ],
     "stdlibTail": {
-      "process.stdout.columns as a plain number": 2,
+      "process.stdout.columns as a plain number": 3,
       "Bun.which": 1,
       "BunFile.size": 1,
       "BunFile.text": 1,
@@ -309,8 +293,8 @@
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-plugins.ts",
-      "tier": "island",
-      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './preferences.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+      "tier": "static",
+      "reason": "static"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
@@ -324,8 +308,8 @@
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/product-skill.ts",
-      "tier": "island",
-      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './transcript.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+      "tier": "static",
+      "reason": "static"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/owned-config.ts",
@@ -519,8 +503,8 @@
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/watch-schedule.ts",
-      "tier": "island",
-      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './bounded-command.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+      "tier": "static",
+      "reason": "static"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/puppeteer.ts",
@@ -834,8 +818,8 @@
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/emoji.ts",
-      "tier": "island",
-      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './bounded-command.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+      "tier": "static",
+      "reason": "static"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/emoji-view.ts",
@@ -929,10 +913,10 @@
     }
   ],
   "timing": {
-    "wallMs": 23044,
+    "wallMs": 30522,
     "phases": {
-      "ffi-validate": 36,
-      "reachable-emit": 2305
+      "ffi-validate": 48,
+      "reachable-emit": 3103
     }
   }
 }
