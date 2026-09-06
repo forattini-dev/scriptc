@@ -2,7 +2,7 @@
  * A violation is an internal compiler error (the frontend should never
  * produce invalid IR), but it still carries the user's source location:
  * an ICE that points at source is a gift to whoever debugs it.
- */
+ */ import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -1698,10 +1698,9 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       }
     }
   }
-  for (const fn of mod.functions) {
-    validateFunction(
-      fn,
-      functionsByName,
+  const familiesById = new Map((mod.families ?? []).map((family) => [family.id, family])); for (const fn of mod.functions) {
+    validateFunction(fn,
+      functionsByName, familiesById,
       ffiByName,
       classesByName,
       recordsById,
@@ -1715,7 +1714,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
 
 function validateFunction(
   fn: IrFunction,
-  functions: Map<string, IrFunction>,
+  functions: Map<string, IrFunction>, families: Map<string, IrFamily>,
   ffiByName: Map<string, NonNullable<IrModule["ffiImports"]>[number]>,
   classes: Map<string, IrClassDef>,
   records: Map<string, IrRecordShape>,
@@ -5218,6 +5217,7 @@ function validateFunction(
         }
         break;
       }
+      case "familyClosure": validateFamilyClosure(e, { families, locals, functions, err, expectType }); break; case "callFamily": { checkExpr(e.callee); for (const a of e.args) checkExpr(a); validateCallFamily(e, { families, locals, functions, err, expectType }); break; }
       default: {
         const _exhaustive: never = e;
         void _exhaustive;

@@ -1,9 +1,13 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
 import { mangleFunction, mangleGlobal, mangleLocal, mangleRecordStruct } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustValueContext {
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   readonly classes: ReadonlyMap<string, IrClassDef>;
   readonly globals: ReadonlyMap<string, IrGlobal>;
   readonly records: ReadonlyMap<string, IrRecordShape>;
@@ -89,7 +93,7 @@ export class RustValueEmitter {
       case "fileHandle": return "true";
       case "spawnRes": return "true";
       case "child": return "true";
-      case "effect": return "true";
+      case "effect": case "genericFunc": return "true";
       case "childStream": return "true";
       case "fsWatcher": return "true";
       case "netServer": return "true";
@@ -202,6 +206,7 @@ export class RustValueEmitter {
       case "spawnRes": return "runtime::JsSpawnResult";
       case "child": return "runtime::JsChild";
       case "effect": return "runtime::JsEffect";
+      case "genericFunc": return `runtime::Gc<${this.context.familyName(type.familyId, loc)}>`;
       case "childStream": return "runtime::JsChildStream";
       case "fsWatcher": return "runtime::JsFsWatcher";
       case "netServer": return "runtime::JsNetServer";
@@ -402,7 +407,7 @@ export class RustValueEmitter {
   }
 
   isTracedHandle(type: IrType): boolean {
-    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "child" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
+    return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
@@ -467,7 +472,7 @@ export class RustValueEmitter {
       case "func":
       case "promise":
       case "child":
-      case "effect":
+      case "effect": case "genericFunc":
       case "childStream":
       case "fsWatcher":
       case "netServer":

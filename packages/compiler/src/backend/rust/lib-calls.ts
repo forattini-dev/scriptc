@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
@@ -53,6 +54,9 @@ export interface RustLibCallContext {
   record(id: string, loc?: SrcLoc): IrRecordShape;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   stripCasts(expr: IrExpr): IrExpr;
   hasClassMeta(name: string): boolean;

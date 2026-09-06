@@ -25,7 +25,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, omittedArgFor } from "./lower-calls.js";
-import { mixinFnOfCallee } from "./lower-mixins.js";
+import { mixinFnOfCallee } from "./lower-mixins.js"; import { familyFnNodeOf, lowerFamilyImpl } from "./lower-families.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
@@ -7990,7 +7990,7 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
    *   those types cannot be found inside a JSON dyn. */
   /** `e as T` and the old-style assertion `<T>e` — one node shape (both
    * carry `.type` and `.expression`), one lowering. */
-  export function lowerAsExpression(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr {
+  export function lowerAsExpression(L: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr { const castFn = familyFnNodeOf(expr.expression); if (castFn !== null && (castFn.typeParameters?.length ?? 0) === 0) { const slot = L.checker.getTypeFromTypeNode(expr.type); const target = L.mapTypeOf(slot); if (target?.kind === "genericFunc") return lowerFamilyImpl(L, castFn, target.familyId, slot); } // a function expression cast INTO a generic signature (effect's `((input) => …) as Tags<C>["make"]`) implements that signature's closure family
     // `[] as const` — tsgo panics computing the expression's `readonly []`
     // type (the facade's fence answers `any`), but the syntax pins the
     // value exactly: the empty tuple, ridden as the unit-element array

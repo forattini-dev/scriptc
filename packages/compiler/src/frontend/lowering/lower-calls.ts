@@ -19,7 +19,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
-import { lowerEffectCall } from "./lower-effect.js";
+import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx } from "./lower-families.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
@@ -131,7 +131,7 @@ export interface GenericFnInfo {
    * parameters (typeParams stays empty): each call site's WIDENED argument
    * checker types key an instantiation, exactly the generic machinery —
    * the untyped params ARE the type parameters (see implicitCallInstance). */
-  implicitParams?: (ts.Symbol | null)[];
+  implicitParams?: (ts.Symbol | null)[]; /** CLOSURE FAMILY member (lower-families.ts): this function node is one implementation of a generic function VALUE. Its instances are demanded by the family's call sites (not by a call of this node), it lowers LIFTED over the captures recorded here, and the emitted body takes the family closure as `sc_self`; `cast` marks an implementation with no type parameters of its own (a plain arrow cast into a generic slot), which instantiates against the slot signature's parameters. */ family?: { id: string; captures: IrParam[]; captureSources: string[]; captureSymbols: ts.Symbol[]; origins: IrLocal[]; cast: boolean };
 }
 
 export interface GenericInstance {
@@ -1183,7 +1183,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
    * (`const f: (x: number) => number = identity`) reuse one compiled
    * instance. `makeBindings` runs only for a NEW key (binding inference
    * costs checker walks). */
-  function internGenericInstance(L: Lowerer, blame: ts.Node,
+  export function internGenericInstance(L: Lowerer, blame: ts.Node,
     info: GenericFnInfo,
     params: ParamShape[],
     returnType: IrType,
@@ -1523,8 +1523,8 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
     let bodyReturn = isGenerator
       ? L.genBodyReturnType(inst.returnType)
       : L.bodyReturnType(isAsync, inst.returnType);
-    const fnCtx = newFnCtx(false, null, null, bodyReturn);
-    fnCtx.isAsync = isAsync;
+    const fnCtx = newFnCtx(info.family !== undefined, null, null, bodyReturn);
+    fnCtx.isAsync = isAsync; if (info.family) prepareFamilyInstanceCtx(L, info, fnCtx); // family implementations lower LIFTED: the captures were taken when the value was built (the enclosing frame was live then)
     // Implicit-any instances whose declared return did not map lower in
     // return-INFERENCE mode: `return` statements record here bare, and the
     // post-pass (resolveInferredReturn) settles the type and wraps them.
@@ -1618,7 +1618,7 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
         loc: locOf(decl),
       };
       if (isAsync) fn.async = true;
-      if (fnCtx.generator) fn.generator = fnCtx.generator;
+      if (fnCtx.generator) fn.generator = fnCtx.generator; if (info.family) fn.captures = info.family.captures;
       return fn;
     } finally {
       L.fnStack.pop();
@@ -3687,7 +3687,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           };
         }
       }
-      const callee = L.lowerExpr(expr.expression);
+      const callee = L.lowerExpr(expr.expression); if (callee.type.kind === "genericFunc") return lowerFamilyCall(L, expr, callee); // a generic function VALUE: the body compiled for THIS instantiation (lower-families.ts)
       // A checker-`any` callee that LOWERED checked-dynamic (a dyn member
       // chain's stored function): the checked-dynamic tree's own call — dynCall reads and
       // calls the stored member with Node's is-not-a-function TypeError
@@ -4561,7 +4561,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // calls). tsc guarantees the callee is callable; anything that lowers to
     // a non-func IR type was already rejected while lowering the callee.
     // HYBRID (function-with-properties) values call through their %call slot.
-    let callee = L.lowerExpr(expr.expression);
+    let callee = L.lowerExpr(expr.expression); if (callee.type.kind === "genericFunc") return lowerFamilyCall(L, expr, callee); // a generic function VALUE: the body compiled for THIS instantiation (lower-families.ts)
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
     // A CHECKED-DYNAMIC callee — `fn(a, b)` where fn is an implicit-any
     // JS binding (the mustCall body's `fn(...args)`), a dyn capture, or a
@@ -6063,7 +6063,7 @@ const inliningPredicates = new Set<ts.Symbol>();
    * object-literal shorthand method to a module-level function and yields
    * the `closure` expression creating it. */
   export function lowerLambda(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): IrExpr {
-    const loc = locOf(node);
+    const loc = locOf(node); if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && (node.typeParameters?.length ?? 0) > 0) return lowerFamilyImpl(L, node, null); // a GENERIC arrow or function expression has no single signature to compile: it is one implementation of a closure family, compiled once per instantiation its call sites demand (lower-families.ts)
     const { shapes, funcType } = L.lambdaSignature(node);
     // A lambda IS a value: the exact-arity rule applies at birth. The
     // contextual (target) type decides — `(x?: number) => void` may flow
@@ -8930,7 +8930,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     const unit = nullishValueUnitOf(L, sym);
     if (unit === null) return null;
     const mapped = L.mapTypeOf(L.checker.getTypeOfSymbol(sym));
-    if (mapped !== null) {
+    if (mapped !== null) { if (mapped.kind === "genericFunc") return unit; // a generic function VALUE slot is the func case: no null inhabits it, and a family whose only "value" is a nullish binding is never built
       // Only the EMPTY interned shape qualifies among record mappings —
       // the all-generic-signature interface (`I<A & B>`) whose struct has
       // no slot at all. A record with DATA fields (`const value: { inner:

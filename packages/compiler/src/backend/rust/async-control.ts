@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
 import { emitAwaitDependency } from "./async-await.js";
@@ -93,6 +94,9 @@ export interface RustAsyncControlContext {
   rustType(type: IrType, loc?: SrcLoc): string;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }

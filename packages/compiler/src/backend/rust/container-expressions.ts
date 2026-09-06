@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 
@@ -12,6 +13,9 @@ export interface RustContainerExpressionContext {
   isUnit(type: IrType): boolean;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }

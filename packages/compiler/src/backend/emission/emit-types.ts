@@ -60,6 +60,8 @@ export function cType(t: IrType): string {
       return "ScrChild *";
     case "effect":
       throw new Error("the effect kernel needs --backend rust");
+    case "genericFunc":
+      throw new Error("generic function values need --backend rust");
     case "netServer":
       return "ScrNetServer *";
     case "netSocket":

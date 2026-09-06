@@ -3200,7 +3200,7 @@ class LlEmitter {
       case "stats":
       case "fileHandle":
       case "spawnRes":
-      case "child": case "effect":
+      case "child": case "effect": case "genericFunc":
       case "childStream":
       case "generator":
       case "fsWatcher": {
@@ -3297,7 +3297,7 @@ class LlEmitter {
             case "stats":
             case "fileHandle":
             case "spawnRes":
-            case "child": case "effect":
+            case "child": case "effect": case "genericFunc":
             case "childStream":
             case "generator":
             case "fsWatcher":
@@ -7932,7 +7932,7 @@ class LlEmitter {
         const v = this.emitExpr(e.value);
         this.moveTemp(v);
         return this.own({ name: v.name, type: e.type });
-      }
+      } case "familyClosure": case "callFamily": throw new Error("generic function values need --backend rust");
       default: {
         // Exhaustive: phase 6 claimed the last IR expression kinds.
         const _exhaustive: never = e;

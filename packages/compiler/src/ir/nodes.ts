@@ -133,7 +133,7 @@ export type IrType =
    * registry releases every listener at reap, so a listener capturing its own child never cycles past
    * reap — and every child IS reaped before loop exit, Node's keep-alive semantics). Lean allocation, no
    * trace: the pre-reap closure edges are guaranteed dropped. Same container rules as stats: union arms fine, arrays/maps/JSON fenced. */
-  | { kind: "child" }
+  | { kind: "child" } | { kind: "genericFunc"; familyId: string } // a GENERIC function VALUE (static builds): a closure FAMILY — one capture layout per implementation, one native body per demanded instantiation (IrModule.families)
   | { kind: "effect" } // the effect kernel's `Effect<A, E, R>` (static builds): an opaque refcounted description the native kernel runs; A/E are read from the checker at the boundaries
   /** A node:net server handle (scr_net.c — linked only when the IR uses
    * the net surface). Heap, refcounted, MUTABLE like child: the event
@@ -349,7 +349,7 @@ export const HANDLE_KINDS = irKindSet(HANDLE_KIND_LIST);
 
 /** The IR kinds represented as pointers in both native backends. */
 const POINTER_KIND_LIST = [
-  "string",
+  "string", "genericFunc",
   "array",
   "map",
   "set",
@@ -393,7 +393,7 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   stats: "scr_stats",
   fileHandle: "scr_file_handle",
   spawnRes: "scr_spawn_res",
-  child: "scr_child", effect: "scr_effect",
+  child: "scr_child", effect: "scr_effect", genericFunc: "scr_family",
   netServer: "scr_net_server",
   netSocket: "scr_net_sock",
   http2Session: "scr_http2_session",
@@ -443,7 +443,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // symbol is not a JS object, but every symbol is truthy — the same
   // constant-true answer.
   "symbol",
-  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect",
+  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect", "genericFunc",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
@@ -500,7 +500,7 @@ export function isUnitType(t: IrType): boolean {
  * otherwise-valid standalone type (Map, Set, dyn, opaque handles, ...). */
 export function isSupportedArrayElem(t: IrType): boolean {
   switch (t.kind) {
-    case "effect": case "f64": // effect: Effect.all's food, a refcounted kernel handle traced like any Gc element
+    case "effect": case "genericFunc": case "f64": // effect/genericFunc: refcounted handles traced like any Gc element
     case "bool":
     case "string":
     case "array":
@@ -695,7 +695,7 @@ export function typeKey(t: IrType): string {
     case "map":
       return `map<${typeKey(t.key)},${typeKey(t.value)}>`;
     case "set":
-      return `set<${typeKey(t.elem)}>`;
+      return `set<${typeKey(t.elem)}>`; case "genericFunc": return `genericFunc<${t.familyId}>`;
     case "func":
       return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
     case "object":
@@ -762,8 +762,7 @@ export function isRefCounted(t: IrType): boolean {
   return RUNTIME_RC_STEMS[t.kind] !== "" || t.kind === "object" || t.kind === "record";
 }
 
-/* ── module ────────────────────────────────────────────────────────────── */
-
+/* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
   irVersion: 6;
@@ -837,7 +836,7 @@ export interface IrModule {
    * structural dedup and that arms are pairwise-distinct IR types, none of
    * them void/func/union (the unit kinds undefinedT/nullT ARE valid arms —
    * union membership is the only place they exist). */
-  unions?: IrUnionDef[];
+  unions?: IrUnionDef[]; families?: IrFamily[]; // closure FAMILIES (generic function values): implementations with their capture layouts, and the demanded instantiations with one target function per implementation (the same order as `impls`)
   /** Name of the synthetic function holding top-level statements. */
   entry: string;
   /** Outbound native FFI declarations used by `ffiCall` expressions.
@@ -4759,7 +4758,8 @@ export type IrExpr =
    * itself retains each captured box. A reference to a top-level declared
    * function lowers to a zero-capture closure — backends must intern that
    * case so `f === f` is true (JS function identity). */
-  | { kind: "closure"; fnName: string; captures: string[]; type: IrType; loc: SrcLoc }
+  | { kind: "closure"; fnName: string; captures: string[]; type: IrType; loc: SrcLoc } | { kind: "familyClosure"; familyId: string; impl: string; captures: string[]; type: IrType; loc: SrcLoc }
+  | { kind: "callFamily"; callee: IrExpr; familyId: string; instKey: string; args: IrExpr[]; type: IrType; loc: SrcLoc } // a closure-FAMILY value (implementation `impl` over the enclosing frame's boxed locals, in capture order) and a call of one at instantiation `instKey`, whose body every implementation has (IrFamily.instances)
   /** Indirect call of a func-typed value. Args follow `call`'s convention
    * (callee owns its params, callers pass +1). The callee expression is an
    * ordinary owned temp, released at statement end. */
@@ -5630,7 +5630,7 @@ function isJsonSafeAt(
     // JSON null ↔ the nullT arm: null-armed unions stringify (`null`) and
     // validate (a JSON null matches exactly the nullT arm).
     case "nullT":
-      return true;
+      return true; case "genericFunc": return false;
     default: {
       const _exhaustive: never = t as Exclude<typeof t, HandleType>;
       void _exhaustive;
@@ -7043,7 +7043,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["awaitExpr", "await"],
   ["awaitUnionExpr", "await"],
   ["yieldExpr", "yield"],
-  ["child", "the child_process surface"], ["effect", "the effect kernel"],
+  ["child", "the child_process surface"], ["effect", "the effect kernel"], ["genericFunc", "generic function values"],
   ["spawnRes", "the child_process surface"],
   ["childStream", "the child_process surface"],
   ["netServer", "the node:net surface"],

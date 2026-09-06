@@ -3,10 +3,9 @@ import type {
   IrExpr,
   IrFunction,
   IrGlobal,
-  IrModule,
+  IrFamily, IrModule, IrType,
   IrRecordShape,
   IrStmt,
-  IrType,
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
@@ -58,6 +57,9 @@ class RustEmitter {
   private readonly unions = new Map<string, IrUnionDef>();
   private readonly closureShapes = new Map<string, RustClosureShape>();
   private readonly closureTargets = new Map<string, RustClosureShape>();
+  private readonly familyTargets = new Map<string, IrFamily>(); // family instance functions by name → their family (the `sc_self` type of a family body)
+  private familyName(id: string, loc?: SrcLoc): string { const index = (this.mod.families ?? []).findIndex((family) => family.id === id); if (index < 0) this.unsupported(`unknown closure family '${id}'`, loc); return `sc_family_${index}`; }
+  private familyOf(id: string, loc?: SrcLoc): IrFamily { const family = (this.mod.families ?? []).find((candidate) => candidate.id === id); if (family === undefined) this.unsupported(`unknown closure family '${id}'`, loc); return family; }
   private readonly dynBoxedFunctionShapes = new Set<string>();
   private readonly dynAdapterShapes = new Set<string>();
   private readonly emitterListenerShapes = new Map<string, RustClosureShape>();
@@ -112,7 +114,7 @@ class RustEmitter {
     isUnit: (type) => this.isUnit(type),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly dynamicEmitter = new RustDynamicEmitter({
@@ -145,7 +147,7 @@ class RustEmitter {
     rustType: (type, loc) => this.rustType(type, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly eventEmitter = new RustEventEmitterEmitter({
@@ -181,7 +183,7 @@ class RustEmitter {
     rustType: (type, loc) => this.rustType(type, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncControlEmitter = new RustAsyncControlEmitter({
@@ -228,7 +230,7 @@ class RustEmitter {
     rustType: (type, loc) => this.rustType(type, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncValueEmitter = new RustAsyncValueEmitter({
@@ -262,7 +264,7 @@ class RustEmitter {
     rustType: (type, loc) => this.rustType(type, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly expressionEmitter = new RustExpressionEmitter({
@@ -304,7 +306,7 @@ class RustEmitter {
     emitBinary: (expr) => this.emitBinary(expr),
     emitBytesNewValue: (expr, source) => this.emitBytesNewValue(expr, source),
     emitCallValue: (expr) => this.emitCallValue(expr),
-    emitClosure: (expr) => this.emitClosure(expr),
+    emitClosure: (expr) => this.emitClosure(expr), emitFamilyClosure: (expr) => this.emitFamilyClosure(expr), emitCallFamily: (expr) => this.emitCallFamily(expr),
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     emitEventEmitterCall: (expr) => this.eventEmitter.emitLibCall(expr),
     emitEventEmitterUpcast: (value, source, loc) => this.eventEmitter.emitUpcast(value, source, loc),
@@ -349,7 +351,7 @@ class RustEmitter {
     union: (id, loc) => this.union(id, loc),
     unionEqName: (id) => this.unionEqName(id),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
     virtualImplementation: (meta, slot) => this.virtualImplementation(meta, slot),
   });
@@ -372,7 +374,7 @@ class RustEmitter {
     rustString: (value) => this.rustString(value),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     emitContainerArrayIntrinsic: (expr) => this.containerExpressions.emitArrayIntrinsic(expr),
     emitContainerArrayGetValues: (expr, array, index) =>
       this.containerExpressions.emitArrayGetValues(expr, array, index),
@@ -419,11 +421,11 @@ class RustEmitter {
     local: (id, loc) => this.local(id, loc),
     union: (id, loc) => this.union(id, loc),
     unionName: (id) => this.unionName(id),
-    unionVariant: (tag) => this.unionVariant(tag),
+    unionVariant: (tag) => this.unionVariant(tag), familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly definitionEmitter = new RustDefinitionEmitter({
-    classMeta: this.classMeta,
+    classMeta: this.classMeta, families: () => this.mod.families ?? [],
     closureShapes: this.closureShapes,
     closureTargets: this.closureTargets,
     dynAdapterShapes: this.dynAdapterShapes,
@@ -474,6 +476,7 @@ class RustEmitter {
     union: (id, loc) => this.union(id, loc),
     unionEqName: (id) => this.unionEqName(id),
     unionName: (id) => this.unionName(id),
+    familyName: (id, loc) => this.familyName(id, loc), familyOf: (id, loc) => this.familyOf(id, loc), familyTargetOf: (name) => this.familyTargets.get(name),
     unionVariant: (tag) => this.unionVariant(tag),
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
@@ -533,10 +536,10 @@ class RustEmitter {
     this.line("");
     this.lines.push(...emitRustFfiDeclarations(this.mod.ffiImports ?? [], this.mod.lib?.callbacks ?? []));
     this.lines.push(...emitRustEmbeddedModules(this.mod, (value) => this.rustString(value)));
-    this.emitClosureDefinitions();
+    this.emitClosureDefinitions(); this.definitionEmitter.emitFamilyDefinitions();
     this.emitDynamicDefinition();
     this.eventEmitter.emitDefinition();
-    this.emitUnionDefinitions();
+    this.emitUnionDefinitions(); for (const family of this.mod.families ?? []) for (const inst of family.instances) for (const target of inst.targets) this.familyTargets.set(target, family);
     this.emitRecordDefinitions();
     this.emitClassDefinitions();
     this.emitErrorValueDefinition();
@@ -547,7 +550,7 @@ class RustEmitter {
     const collectAll = process.env["SCRIPTC_RUST_REFUSALS"] === "all";
     const refusals: RustUnsupportedError[] = [];
     for (const fn of this.mod.functions) {
-      if (fn.captures !== undefined && !this.closureTargets.has(fn.name)) continue;
+      if (fn.captures !== undefined && !this.closureTargets.has(fn.name) && !this.familyTargets.has(fn.name)) continue;
       // The frontend may intern this helper while probing process.env as a
       // receiver, even when every actual read becomes process.envGet. Its
       // indexed-record body is irrelevant unless a whole env value escapes.
@@ -992,6 +995,8 @@ class RustEmitter {
   private emitCallValue(expr: Extract<IrExpr, { kind: "callValue" }>): string {
     return this.functionValueEmitter.emitCallValue(expr);
   }
+
+  private emitFamilyClosure(expr: Extract<IrExpr, { kind: "familyClosure" }>): string { return this.functionValueEmitter.emitFamilyClosure(expr); } private emitCallFamily(expr: Extract<IrExpr, { kind: "callFamily" }>): string { return this.functionValueEmitter.emitCallFamily(expr); }
 
   private emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string {
     return this.functionValueEmitter.emitClosureDispatch(callee, type, args, loc);

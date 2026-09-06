@@ -774,6 +774,10 @@ export class RustExpressionEmitter {
         return this.context.emitClosure(expr);
       case "callValue":
         return this.context.emitCallValue(expr);
+      case "familyClosure":
+        return this.context.emitFamilyClosure(expr);
+      case "callFamily":
+        return this.context.emitCallFamily(expr);
       case "selfRef": {
         if (this.context.currentFunction()?.captures === undefined) {
           this.context.unsupported("selfRef outside a lifted closure", expr.loc);
@@ -958,6 +962,9 @@ export class RustExpressionEmitter {
           emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
           isEdgeValue: (type) => this.context.isEdgeValue(type),
           isUnit: (type) => this.context.isUnit(type),
+          familyName: (id, loc) => this.context.familyName(id, loc),
+          familyOf: (id, loc) => this.context.familyOf(id, loc),
+          familyTargetOf: (name) => this.context.familyTargetOf(name),
           emitDynCheckValue: (type, value, loc) => this.context.emitDynCheckValue(type, value, loc),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);

@@ -7971,7 +7971,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               ? "SCR_ISLP_JSVAL_ARR" // `any[]` fulfillment: the Array.isArray-gated by-reference exit at settle
               : "SCR_ISLP_JSVAL";
         return E.fallibleTemp(e.type, `scr_jsval_bridge_promise(${v.name}, ${payload})`);
-      }
+      } case "familyClosure": case "callFamily": throw new Error("generic function values need --backend rust");
       default: {
         const _exhaustive: never = e;
         void _exhaustive;

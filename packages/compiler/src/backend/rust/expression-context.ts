@@ -1,6 +1,7 @@
 // The context every Rust expression sub-emitter sees: the emitter's
 // surface as one interface (split from expressions.ts so the class and
 // its contract each stay under the file-line cap).
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrClassDef, IrExpr, IrFfiImport, IrFunction, IrLibCallback, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 export interface RustExpressionContext {
@@ -34,6 +35,8 @@ export interface RustExpressionContext {
   emitBytesNewValue(expr: Extract<IrExpr, { kind: "bytesNew" }>, source: string | null): string;
   emitCallValue(expr: Extract<IrExpr, { kind: "callValue" }>): string;
   emitClosure(expr: Extract<IrExpr, { kind: "closure" }>): string;
+  emitFamilyClosure(expr: Extract<IrExpr, { kind: "familyClosure" }>): string;
+  emitCallFamily(expr: Extract<IrExpr, { kind: "callFamily" }>): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
   emitEventEmitterCall(expr: Extract<IrExpr, { kind: "libCall" }>): string | null;
   emitEventEmitterUpcast(value: string, source: IrType, loc: SrcLoc): string | null;
@@ -75,6 +78,9 @@ export interface RustExpressionContext {
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionEqName(id: string): string;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
   virtualImplementation(meta: RustClassMeta, slot: RustVtSlot): IrFunction;

@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
@@ -21,6 +22,9 @@ export interface RustWritableContext {
   sourceLoc(): SrcLoc;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   rustType(type: IrType, loc?: SrcLoc): string;
   runtimeStreamBase(name: string): "%Readable" | "%Writable" | "%Duplex" | "%Transform" | null;

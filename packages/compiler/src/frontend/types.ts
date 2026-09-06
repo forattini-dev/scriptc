@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
@@ -505,7 +505,7 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     case "spawnRes":
       return "SpawnSyncReturns";
     case "child": return "ChildProcess";
-    case "effect": return "Effect"; // the effect kernel's opaque handle (static builds); A/E are read at the boundaries
+    case "effect": return "Effect"; case "genericFunc": return "generic function"; // opaque kernel handles (static builds): the effect handle's A/E are read at the boundaries, a family value's signature at its call sites
     case "netServer":
       return "Server";
     case "netSocket":
@@ -668,7 +668,7 @@ export interface TypeMapperCtx {
   shapes: ShapeRegistry;
   unions: UnionRegistry;
   classNamer: ClassNamer;
-  resolveTypeParam?: TypeParamResolver;
+  resolveTypeParam?: TypeParamResolver; noteFamily?: (id: string) => void; // a genericFunc mapping REGISTERS its closure family, so a family whose value is inert (declared, never built) still has a definition
   /** The ts-level twin of resolveTypeParam (bound CHECKER types), consulted
    * only where literal identity matters — indexed accesses (`T[K]`) inside
    * generic bodies whose K is bound to a literal key. */
@@ -2586,7 +2586,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const callSigs = checker.getCallSignatures(widened);
   if (callSigs.length === 1) {
     const sig = callSigs[0]!;
-    if (sig.getTypeParameters().length) return null;
+    if (sig.getTypeParameters().length) { const fid = ctx.dynamic ? null : familyIdOf(checker, widened); if (fid !== null) ctx.noteFamily?.(fid); return fid === null ? null : { kind: "genericFunc", familyId: fid }; } // a generic function VALUE rides its closure family (lower-families.ts)
     // A SYNTHESIZED rest param (tsc's JS inference for a function body
     // reading `arguments` — `(...args: any[]) => any` whose args symbol
     // has no declaration): the dotDotDot check below can't see it, and a

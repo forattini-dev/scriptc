@@ -25,7 +25,7 @@ function resetGlobal(global: IrGlobal, unsupported: (kind: string) => never): st
     case "fileHandle":
     case "spawnRes":
     case "child":
-    case "effect":
+    case "effect": case "genericFunc":
     case "childStream":
     case "fsWatcher":
     case "netServer":

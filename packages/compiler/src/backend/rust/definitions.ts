@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import {
@@ -15,6 +16,7 @@ import type { RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 export interface RustDefinitionContext {
+  families(): readonly IrFamily[];
   readonly classMeta: ReadonlyMap<string, RustClassMeta>;
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
   readonly closureTargets: ReadonlyMap<string, RustClosureShape>;
@@ -65,12 +67,59 @@ export interface RustDefinitionContext {
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionEqName(id: string): string;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
 
 export class RustDefinitionEmitter {
   constructor(private readonly context: RustDefinitionContext) {}
+
+  /** Closure FAMILIES: one enum per family (a variant per implementation over its boxed captures), traced and
+   * cleared like closure shapes; bodies are ordinary functions taking `sc_self` (the family) and the captures. */
+  emitFamilyDefinitions(): void {
+    this.context.families().forEach((family, familyIndex) => {
+      const name = `sc_family_${familyIndex}`;
+      this.context.line(`enum ${name} {`);
+      this.context.pushIndent();
+      family.impls.forEach((impl, index) => {
+        if (impl.captures.length === 0) this.context.line(`Impl${index},`);
+        else this.context.line(`Impl${index} { ${impl.captures.map((capture, i) => `${this.context.captureField(i)}: Option<runtime::JsCell<${this.context.rustType(capture.type)}>>`).join(", ")} },`);
+      });
+      this.context.popIndent();
+      this.context.line("}");
+      const capturing = family.impls.map((impl, index) => ({ impl, index })).filter(({ impl }) => impl.captures.length > 0);
+      const traits: [string, string, (field: string) => string][] = [
+        ["Trace", "fn trace(&self, tracer: &mut runtime::Tracer<'_>)", (field) => `if let Some(edge) = ${field} { tracer.edge(edge); }`],
+        ["ClearEdges", "fn clear_edges(&mut self)", (field) => `*${field} = None;`],
+      ];
+      for (const [trait, method, body] of traits) {
+        this.context.line(`impl runtime::${trait} for ${name} {`);
+        this.context.pushIndent();
+        this.context.line(`${method} {`);
+        this.context.pushIndent();
+        if (capturing.length === 0) {
+          if (trait === "Trace") this.context.line("let _ = tracer;");
+        } else {
+          this.context.line("match self {");
+          this.context.pushIndent();
+          for (const { impl, index } of capturing) {
+            const fields = impl.captures.map((_, i) => this.context.captureField(i));
+            this.context.line(`Self::Impl${index} { ${fields.join(", ")} } => { ${fields.map(body).join(" ")} },`);
+          }
+          this.context.line("_ => {},");
+          this.context.popIndent();
+          this.context.line("}");
+        }
+        this.context.popIndent();
+        this.context.line("}");
+        this.context.popIndent();
+        this.context.line("}");
+      }
+    });
+  }
 
   emitClosureDefinitions(): void {
     for (const shape of this.context.closureShapes.values()) {
@@ -371,7 +420,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
-        case "effect":
+        case "effect": case "genericFunc":
         case "childStream":
         case "fsWatcher":
         case "netServer":
@@ -861,7 +910,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
-        case "effect":
+        case "effect": case "genericFunc":
         case "childStream":
         case "fsWatcher":
         case "netServer":
@@ -908,8 +957,9 @@ export class RustDefinitionEmitter {
     const params: string[] = [];
     if (fn.captures !== undefined) {
       const shape = this.context.closureTargets.get(fn.name);
-      if (shape === undefined) this.context.unsupported(`missing closure shape for '${fn.name}'`, fn.loc);
-      params.push(`sc_self: runtime::Gc<${this.context.closureName(shape)}>`);
+      const family = shape === undefined ? this.context.familyTargetOf(fn.name) : undefined;
+      if (shape === undefined && family === undefined) this.context.unsupported(`missing closure shape for '${fn.name}'`, fn.loc);
+      params.push(`sc_self: runtime::Gc<${shape !== undefined ? this.context.closureName(shape) : this.context.familyName(family!.id, fn.loc)}>`);
       for (const capture of fn.captures) {
         params.push(`${mangleLocal(capture.localId)}: runtime::JsCell<${this.context.rustType(capture.type, fn.loc)}>`);
       }

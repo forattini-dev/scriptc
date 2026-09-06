@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFnClosure, mangleFunction, mangleLocal, mangleRecordStruct } from "../mangle.js";
@@ -28,6 +29,9 @@ export interface RustFunctionValueContext {
   local(id: string, loc: SrcLoc): IrFunction["locals"][number];
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
@@ -63,6 +67,44 @@ export class RustFunctionValueEmitter {
     const slot = mangleFnClosure(target.name);
     const value = this.context.nextName("sc_rt");
     return `${slot}.with(|slot| { let mut slot = slot.borrow_mut(); if let Some(value) = slot.as_ref() { value.clone() } else { let ${value} = ${allocated}; *slot = Some(${value}.clone()); ${value} } })`;
+  }
+
+  /** A family value: the implementation's variant over the enclosing frame's boxed locals (the closure rule). */
+  emitFamilyClosure(expr: Extract<IrExpr, { kind: "familyClosure" }>): string {
+    const family = this.context.familyOf(expr.familyId, expr.loc);
+    const index = family.impls.findIndex((impl) => impl.name === expr.impl);
+    if (index < 0) this.context.unsupported(`unknown family implementation '${expr.impl}'`, expr.loc);
+    const impl = family.impls[index]!;
+    if (impl.captures.length !== expr.captures.length) this.context.unsupported(`capture arity for family implementation '${expr.impl}'`, expr.loc);
+    const variant = `${this.context.familyName(expr.familyId, expr.loc)}::Impl${index}`;
+    if (impl.captures.length === 0) return `runtime::Gc::new(${variant})`;
+    const fields = impl.captures.map((_, i) => {
+      const localId = expr.captures[i]!;
+      const local = this.context.local(localId, expr.loc);
+      if (!local.boxed) this.context.unsupported(`unboxed capture '${local.name}'`, expr.loc);
+      return `${this.context.captureField(i)}: Some(${mangleLocal(localId)}.clone())`;
+    }).join(", ");
+    return `runtime::Gc::new(${variant} { ${fields} })`;
+  }
+
+  /** A call at one instantiation: every implementation's body for that key, dispatched on the variant. */
+  emitCallFamily(expr: Extract<IrExpr, { kind: "callFamily" }>): string {
+    const family = this.context.familyOf(expr.familyId, expr.loc);
+    const inst = family.instances.find((candidate) => candidate.key === expr.instKey);
+    if (inst === undefined) this.context.unsupported(`unknown family instantiation '${expr.instKey}'`, expr.loc);
+    const callee = this.context.nextName("sc_rt");
+    const args = expr.args.map(() => this.context.nextName("sc_rt"));
+    const bindings = [`let ${callee} = ${this.context.emitExpr(expr.callee)};`, ...expr.args.map((arg, i) => `let ${args[i]} = ${this.context.emitExpr(arg)};`)].join(" ");
+    const name = this.context.familyName(expr.familyId, expr.loc);
+    const arms = family.impls.map((impl, index) => {
+      const fields = impl.captures.map((_, i) => this.context.captureField(i));
+      const pattern = fields.length === 0 ? `${name}::Impl${index}` : `${name}::Impl${index} { ${fields.join(", ")} }`;
+      const callArgs = [`${callee}.clone()`, ...fields.map((field) => `${field}.as_ref().expect("scriptc: cleared live closure capture").clone()`), ...args];
+      const target = inst.targets[index];
+      if (target === undefined) this.context.unsupported(`family instantiation '${expr.instKey}' lacks a body for implementation ${index}`, expr.loc);
+      return `${pattern} => ${mangleFunction(target)}(${callArgs.join(", ")})`;
+    });
+    return `{ ${bindings} ${callee}.with(|closure| match closure { ${arms.join(", ")} }) }`;
   }
 
   emitCallValue(expr: Extract<IrExpr, { kind: "callValue" }>): string {

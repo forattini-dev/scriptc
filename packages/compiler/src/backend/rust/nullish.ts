@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import { typeEquals, type IrExpr, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/nodes.js";
 
 type NullishExpr = Extract<IrExpr, { kind: "nullish" }>;
@@ -8,6 +9,9 @@ export interface RustNullishContext {
   nextName(prefix: string): string;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }

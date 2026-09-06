@@ -1,3 +1,4 @@
+import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 import type { RustStreamModel } from "./stream-model.js";
@@ -18,6 +19,9 @@ export interface RustStreamPromiseContext {
   rustType(type: IrType, loc?: SrcLoc): string;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;
+  familyName(id: string, loc?: SrcLoc): string;
+  familyOf(id: string, loc?: SrcLoc): IrFamily;
+  familyTargetOf(name: string): IrFamily | undefined;
   unionVariant(tag: number): string;
   unsupported(kind: string, loc?: SrcLoc): never;
 }
