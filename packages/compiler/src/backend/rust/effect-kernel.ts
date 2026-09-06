@@ -287,6 +287,64 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.durationToMillis":
       if (first === undefined) break;
       return `runtime::effect_duration_to_millis(&${context.emitExpr(first)})`;
+    case "effect.refMake":
+    case "effect.refMakeUnsafe": {
+      if (first === undefined) break;
+      const made = box(context, first.type, context.emitExpr(first), expr.loc);
+      return `runtime::${expr.fn === "effect.refMake" ? "effect_ref_make" : "effect_ref_make_unsafe"}(${made})`;
+    }
+    case "effect.refGet":
+      if (first === undefined) break;
+      return `runtime::effect_ref_get(&${context.emitExpr(first)})`;
+    case "effect.refSet": {
+      const keepArg = expr.args[2];
+      if (first === undefined || second === undefined || keepArg === undefined) break;
+      return `runtime::effect_ref_set(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)}, ${context.emitExpr(keepArg)})`;
+    }
+    case "effect.refUpdate": {
+      // The third argument says which value the effect answers: 0 unit (update), 1 the previous (getAndSet), 2 the next (updateAndGet).
+      const third = expr.args[2];
+      if (first === undefined || second === undefined || third === undefined || second.type.kind !== "func") break;
+      const param = second.type.params[0];
+      const cell = context.nextTemporary();
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)};`;
+      return `{ let ${cell} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_ref_update(&${cell}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${box(context, second.type.ret, dispatch, expr.loc)} }), ${context.emitExpr(third)}, ${traced(context, keep)}) }`;
+    }
+    case "effect.refUpdateEffect": {
+      if (first === undefined || second === undefined || second.type.kind !== "func") break;
+      const param = second.type.params[0];
+      const cell = context.nextTemporary();
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)};`;
+      return `{ let ${cell} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_ref_update_effect(&${cell}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${dispatch} }), ${traced(context, keep)}) }`;
+    }
+    case "effect.deferredMake":
+      return "runtime::effect_deferred_make()";
+    case "effect.deferredAwait":
+      if (first === undefined) break;
+      return `runtime::effect_deferred_await(&${context.emitExpr(first)})`;
+    case "effect.deferredIsDone":
+      if (first === undefined) break;
+      return `runtime::effect_deferred_is_done(&${context.emitExpr(first)})`;
+    case "effect.deferredSettle": {
+      const okArg = expr.args[2];
+      if (first === undefined || second === undefined || okArg === undefined) break;
+      return `runtime::effect_deferred_settle(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)}, ${context.emitExpr(okArg)})`;
+    }
+    case "effect.semaphoreMake":
+    case "effect.semaphoreMakeUnsafe":
+      if (first === undefined) break;
+      return `runtime::${expr.fn === "effect.semaphoreMake" ? "effect_semaphore_make" : "effect_semaphore_make_unsafe"}(${context.emitExpr(first)})`;
+    case "effect.semaphoreWithPermits": {
+      const body = expr.args[2];
+      if (first === undefined || second === undefined || body === undefined) break;
+      return `runtime::effect_semaphore_with_permits(&${context.emitExpr(first)}, ${context.emitExpr(second)}, &${context.emitExpr(body)})`;
+    }
     case "effect.exitValue":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_exit_value(&${context.emitExpr(first)})`, expr.loc);

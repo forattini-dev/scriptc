@@ -498,6 +498,12 @@ function emitGeneratorSequence(
     const statement = statements[index];
     if (statement === undefined) break;
     if (statement.kind === "return") {
+      // `return yield* e` — the value suspends first, then the resumed value IS the return (the effect kernel's
+      // commonest tail: `return yield* Ref.get(cell)`).
+      if (statement.value !== null && containsYield(statement.value)) {
+        emitGeneratorValue(fn, statement.value, context, flow, (value) => { flow.emitReturn(`Some(${value})`); });
+        return;
+      }
       const value = statement.value === null ? "None" : `Some(${context.emitExpr(statement.value)})`;
       flow.emitReturn(value);
       return;

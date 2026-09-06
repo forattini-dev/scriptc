@@ -106,6 +106,7 @@ include!("child_stream.rs");
 include!("child_process_async.rs");
 include!("schema.rs");
 include!("effect.rs");
+include!("effect_state.rs");
 include!("windows_paths.rs");
 include!("json.rs");
 include!("number_format.rs");

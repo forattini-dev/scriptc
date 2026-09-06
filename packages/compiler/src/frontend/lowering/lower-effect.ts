@@ -272,6 +272,16 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     for (const step of expr.arguments) acc = applyPipeStep(L, acc, step, loc);
     return acc;
   }
+  // `semaphore.withPermits(n)(effect)`: the permit count curries, so the CALL of the call is the whole form.
+  if (!L.dynamic && ts.isCallExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && ts.isIdentifier(callee.expression.name) &&
+    callee.expression.name.text === "withPermits" && callee.arguments.length === 1 && expr.arguments.length === 1) {
+    const semaphore = L.lowerExpr(callee.expression.expression);
+    const permits = L.lowerExpr(callee.arguments[0]!);
+    const body = L.lowerExpr(expr.arguments[0]!);
+    if (semaphore.type.kind === "effect" && permits.type.kind === "f64" && body.type.kind === "effect") {
+      return lib("effect.semaphoreWithPermits", [semaphore, permits, body], EFFECT_T, loc);
+    }
+  }
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
   if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
@@ -298,8 +308,89 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "Duration") return lowerDurationMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Option") return lowerOptionMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+  if (ns === "Ref" || ns === "SynchronizedRef") return lowerRefMember(L, ns, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Deferred") return lowerDeferredMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Semaphore") return lowerSemaphoreMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+}
+
+/** `Ref` and `SynchronizedRef`: one mutable cell in the kernel. The runtime hands fibers off only at suspension
+ * points, so a synchronized ref IS the same cell — "synchronized" means effectful updates run one at a time, which
+ * sequential execution already gives. `modify`-shaped members (a callback answering `[result, next]`) stay refused:
+ * splitting the tuple needs a carrier the lowering does not emit yet. */
+function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${member} yet`);
+  switch (member) {
+    case "make":
+    case "makeUnsafe":
+      if (args.length !== 1) refused();
+      return lib(member === "make" ? "effect.refMake" : "effect.refMakeUnsafe", [at(0)], EFFECT_T, loc);
+    case "get":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib("effect.refGet", [at(0)], EFFECT_T, loc);
+    case "set":
+      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
+      return lib("effect.refSet", [at(0), at(1), numLit(0, loc)], EFFECT_T, loc);
+    case "update":
+    case "getAndSet":
+    case "updateAndGet": {
+      if (args.length !== 2) refused();
+      const cell = at(0);
+      const fn = at(1);
+      // `getAndSet(ref, value)` takes a VALUE, not a function: it is `update` with a constant.
+      if (member === "getAndSet" && fn.type.kind !== "func") return lib("effect.refSet", [cell, fn, numLit(1, loc)], EFFECT_T, loc);
+      if (cell.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1) refused();
+      const keep = member === "update" ? 0 : member === "getAndSet" ? 1 : 2;
+      return lib("effect.refUpdate", [cell, fn, numLit(keep, loc)], EFFECT_T, loc);
+    }
+    case "updateEffect": {
+      if (args.length !== 2) refused();
+      const cell = at(0);
+      const fn = at(1);
+      if (cell.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1 || fn.type.ret.kind !== "effect") refused();
+      return lib("effect.refUpdateEffect", [cell, fn], EFFECT_T, loc);
+    }
+    default:
+      return refused();
+  }
+}
+
+/** `Deferred`: a latch settled once, awaited by any number of fibers. `await` parks the fiber on the kernel's own
+ * waiter queue (the same machine `Effect.promise` suspends on), and the settling effect answers whether IT settled. */
+function lowerDeferredMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Deferred.${member} yet`);
+  switch (member) {
+    case "make":
+      if (args.length !== 0) refused();
+      return lib("effect.deferredMake", [], EFFECT_T, loc);
+    case "await":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib("effect.deferredAwait", [at(0)], EFFECT_T, loc);
+    case "succeed":
+    case "fail": {
+      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
+      return lib("effect.deferredSettle", [at(0), at(1), { kind: "boolLit", value: member === "succeed", type: { kind: "bool" }, loc }], EFFECT_T, loc);
+    }
+    case "isDone":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib("effect.deferredIsDone", [at(0)], EFFECT_T, loc);
+    default:
+      return refused();
+  }
+}
+
+/** `Semaphore`: permits over the same waiter queue. `withPermits(n)(effect)` takes n, runs, and releases however the
+ * effect ends — a released permit hands straight to the longest-waiting fiber. */
+function lowerSemaphoreMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Semaphore.${member} yet`);
+  if ((member === "make" || member === "makeUnsafe") && args.length === 1 && at(0).type.kind === "f64") {
+    return lib(member === "make" ? "effect.semaphoreMake" : "effect.semaphoreMakeUnsafe", [at(0)], EFFECT_T, loc);
+  }
+  return refused();
 }
 
 /** The SUCCESS type argument of an `Effect<A, E, R>` (or `Effect<…>[]`'s element's) TS type, or null. */
@@ -560,6 +651,11 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (fn.type.kind !== "func" || fn.type.params.length > 1 || fn.type.ret.kind !== "effect" || (fn.type.params.length === 1 && fn.type.params[0]!.kind !== "effect")) break;
         return lib("effect.addFinalizer", [fn], EFFECT_T, loc);
       }
+      case "uninterruptible":
+      case "interruptible":
+        // The kernel has no interruption yet: a fiber runs to its own end, so both wrappers are the identity.
+        if (total === 1 && at(0).type.kind === "effect") return at(0);
+        break;
       case "ensuring":
         if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.ensuring", [at(0), at(1)], EFFECT_T, loc);
         break;
