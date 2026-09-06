@@ -18,6 +18,10 @@ path = "src/lib.rs"
 [features]
 default = []
 sqlite = ["dep:rusqlite"]
+# The V8 island (rusty_v8): the JIT engine behind the same island surface
+# the boa lane serves. Prebuilt static library from the rusty_v8 releases
+# (RUSTY_V8_ARCHIVE points the build at a local copy).
+island-v8 = ["dep:v8"]
 island-eval = ["dep:boa_engine", "boa_engine/intl_bundled", "boa_engine/temporal", "boa_engine/annex-b"]
 
 [dependencies]
@@ -27,6 +31,7 @@ flate2 = { version = "=1.1.9", default-features = false, features = ["rust_backe
 getrandom = "=0.4.3"
 regress = { version = "0.12.0", features = ["prohibit-unsafe", "utf16"] }
 ring = "=0.17.14"
+v8 = { version = "=152.2.0", default-features = false, optional = true }
 rusqlite = { version = "=0.40.1", default-features = false, features = ["bundled", "serialize", "cache"], optional = true }
 rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "=2.2.0"
@@ -89,3 +94,7 @@ boa_parser = { path = "vendor/boa_parser" }
 [[example]]
 name = "island_link"
 required-features = ["island-eval"]
+
+[[example]]
+name = "v8_smoke"
+required-features = ["island-v8"]
