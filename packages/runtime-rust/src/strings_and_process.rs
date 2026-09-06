@@ -752,6 +752,8 @@ pub fn process_warning_report(
 pub fn process_exit(code: f64) -> ! {
     use std::io::Write;
     process_exit_begin();
+    #[cfg(feature = "island-v8")]
+    v8_code_cache_flush();
     terminal_finish();
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();

@@ -55,6 +55,7 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
       ? [
         "    runtime::island_register_modules(&SC_ISLAND_MODULES);",
         "    runtime::island_register_edges(&SC_ISLAND_EDGES);",
+        "    runtime::island_register_build_id(SC_ISLAND_BUILD_ID);",
       ]
       : []),
     "    let _sc_execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {",

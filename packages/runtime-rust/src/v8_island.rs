@@ -256,31 +256,172 @@ fn island_eval_finish() {
     V8_EXTERNAL.with(|external| external.borrow_mut().clear());
     V8_CHILDREN.with(|children| children.borrow_mut().clear());
     v8_net_reset();
+    v8_code_cache_flush();
     island_modules_reset();
     v8e::finish();
     V8_BOOTED.with(|flag| flag.set(false));
+}
+
+/* ── the V8 code cache ─────────────────────────────────────────────── */
+
+/* Compiling the embedded graph was ~40% of a redcode command's boot
+ * (V8 parses and bytecompiles every reached module on every run). A
+ * run persists the code cache of every module it compiled without one,
+ * in ONE file keyed by the build's identity and V8's cache version tag,
+ * and later runs of the same binary compile from it. The store is
+ * append-only within a file: a module loaded for the first time by a
+ * later command joins the file at that run's teardown. `SCRIPTC_V8_CODE_CACHE=0`
+ * disables both reading and writing. */
+
+struct V8CodeCache {
+    path: std::path::PathBuf,
+    entries: HashMap<String, Rc<Vec<u8>>>,
+}
+
+thread_local! {
+    static V8_CODE_CACHE: RefCell<Option<V8CodeCache>> = const { RefCell::new(None) };
+}
+
+const V8_CODE_CACHE_MAGIC: &[u8; 8] = b"SCV8CC01";
+
+fn v8_code_cache_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("SCRIPTC_CACHE_DIR")
+        && !dir.is_empty()
+    {
+        return Some(std::path::PathBuf::from(dir));
+    }
+    if let Ok(dir) = std::env::var("XDG_CACHE_HOME")
+        && !dir.is_empty()
+    {
+        return Some(std::path::PathBuf::from(dir).join("scriptc"));
+    }
+    let home = std::env::var("HOME").ok().filter(|home| !home.is_empty())?;
+    Some(std::path::PathBuf::from(home).join(".cache").join("scriptc"))
+}
+
+fn v8_code_cache_parse(bytes: &[u8]) -> Option<HashMap<String, Rc<Vec<u8>>>> {
+    let mut at = 0usize;
+    let take = |at: &mut usize, n: usize| -> Option<&[u8]> {
+        let slice = bytes.get(*at..*at + n)?;
+        *at += n;
+        Some(slice)
+    };
+    let read_u32 = |at: &mut usize| -> Option<usize> {
+        let raw = take(at, 4)?;
+        Some(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize)
+    };
+    if take(&mut at, 8)? != V8_CODE_CACHE_MAGIC {
+        return None;
+    }
+    if read_u32(&mut at)? != v8e::code_cache_version() as usize {
+        return None;
+    }
+    let count = read_u32(&mut at)?;
+    let mut entries = HashMap::with_capacity(count);
+    for _ in 0..count {
+        let key_len = read_u32(&mut at)?;
+        let key = std::str::from_utf8(take(&mut at, key_len)?).ok()?.to_owned();
+        let data_len = read_u32(&mut at)?;
+        let data = take(&mut at, data_len)?.to_vec();
+        entries.insert(key, Rc::new(data));
+    }
+    Some(entries)
+}
+
+fn v8_code_cache_serialize(entries: &HashMap<String, Rc<Vec<u8>>>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(entries.values().map(|data| data.len() + 64).sum());
+    out.extend_from_slice(V8_CODE_CACHE_MAGIC);
+    out.extend_from_slice(&v8e::code_cache_version().to_le_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (key, data) in entries {
+        out.extend_from_slice(&(key.len() as u32).to_le_bytes());
+        out.extend_from_slice(key.as_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    }
+    out
+}
+
+/// The store for this binary, opened (and read) on first use.
+fn v8_code_cache_open() {
+    V8_CODE_CACHE.with(|slot| {
+        if slot.borrow().is_some() {
+            return;
+        }
+        let build_id = island_build_id();
+        if build_id.is_empty() || std::env::var("SCRIPTC_V8_CODE_CACHE").is_ok_and(|v| v == "0") {
+            return;
+        }
+        let Some(dir) = v8_code_cache_dir() else { return };
+        let path = dir.join("v8-code-cache").join(format!("{build_id}-{}.bin", v8e::code_cache_version()));
+        let entries = std::fs::read(&path).ok().and_then(|bytes| v8_code_cache_parse(&bytes)).unwrap_or_default();
+        if v8_trace() {
+            eprintln!("scriptc island: code cache {} ({} modules)", path.display(), entries.len());
+        }
+        *slot.borrow_mut() = Some(V8CodeCache { path, entries });
+    });
+}
+
+fn v8_code_cache_get(key: &str) -> Option<Rc<Vec<u8>>> {
+    v8_code_cache_open();
+    V8_CODE_CACHE.with(|slot| slot.borrow().as_ref().and_then(|cache| cache.entries.get(key).cloned()))
+}
+
+/// Persist the caches of the modules this run compiled fresh. Runs at
+/// teardown and ahead of `process.exit`; a no-op when nothing was missed.
+fn v8_code_cache_flush() {
+    if !V8_BOOTED.with(Cell::get) {
+        return;
+    }
+    let open = V8_CODE_CACHE.with(|slot| slot.borrow().is_some());
+    if !open {
+        return;
+    }
+    let produced = v8e::module_code_caches();
+    if produced.is_empty() {
+        return;
+    }
+    V8_CODE_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(cache) = slot.as_mut() else { return };
+        let added = produced.len();
+        for (key, data) in produced {
+            cache.entries.insert(key, Rc::new(data));
+        }
+        let bytes = v8_code_cache_serialize(&cache.entries);
+        let written = cache.path.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && {
+            let temp = cache.path.with_extension(format!("tmp{}", std::process::id()));
+            std::fs::write(&temp, &bytes).is_ok() && std::fs::rename(&temp, &cache.path).is_ok()
+        };
+        if v8_trace() {
+            eprintln!(
+                "scriptc island: code cache {} +{added} modules, {} bytes{}",
+                cache.path.display(),
+                bytes.len(),
+                if written { "" } else { " (not written)" }
+            );
+        }
+    });
 }
 
 /* ── module resolution over the embedded tables ────────────────────── */
 
 fn v8_source_of(key: &str) -> Result<v8e::ModuleSource, String> {
     if let Some(module) = island_module_find(key) {
+        let json = module.format == IslandModuleFormat::Json;
         return Ok(v8e::ModuleSource {
             key: key.to_owned(),
-            source: if module.format == IslandModuleFormat::Json {
-                island_module_source(module).to_owned()
-            } else {
-                island_module_esm_source(module)
-            },
-            json: module.format == IslandModuleFormat::Json,
+            source: if json { island_module_source(module).to_owned() } else { island_module_esm_source(module) },
+            json,
+            code_cache: if json { None } else { v8_code_cache_get(key) },
         });
     }
     if key.starts_with("node:") {
-        return Ok(v8e::ModuleSource { key: key.to_owned(), source: island_builtin_wrapper(key), json: false });
+        return Ok(v8e::ModuleSource { key: key.to_owned(), source: island_builtin_wrapper(key), json: false, code_cache: None });
     }
     if V8_EXTERNAL.with(|external| external.borrow().contains(key)) {
         return match std::fs::read_to_string(key) {
-            Ok(source) => Ok(v8e::ModuleSource { key: key.to_owned(), source, json: key.ends_with(".json") }),
+            Ok(source) => Ok(v8e::ModuleSource { key: key.to_owned(), source, json: key.ends_with(".json"), code_cache: None }),
             Err(error) => Err(format!("could not open file `{key}`: {error}")),
         };
     }

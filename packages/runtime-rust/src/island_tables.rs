@@ -69,6 +69,19 @@ pub struct IslandEdge {
 thread_local! {
     static ISLAND_MODULES: RefCell<&'static [IslandModule]> = const { RefCell::new(&[]) };
     static ISLAND_EDGES: RefCell<&'static [IslandEdge]> = const { RefCell::new(&[]) };
+    /// Lookup indexes over the two tables, built on the first lookup after
+    /// a registration and dropped with the tables. A real graph has
+    /// thousands of modules and tens of thousands of edges, and every
+    /// import resolves through here: the linear scans were a fifth of
+    /// redcode's boot.
+    static ISLAND_MODULE_INDEX: RefCell<Option<HashMap<&'static str, usize>>> =
+        const { RefCell::new(None) };
+    static ISLAND_EDGE_INDEX: RefCell<Option<HashMap<&'static str, Vec<usize>>>> =
+        const { RefCell::new(None) };
+    /// The build's identity (a digest of every embedded source and edge),
+    /// which keys anything a run persists about this graph — the V8 code
+    /// cache above all.
+    static ISLAND_BUILD_ID: Cell<&'static str> = const { Cell::new("") };
     /// Inflated module texts, keyed by the stored slice's address. The
     /// tables are `&'static`, so a slice's address identifies its row for
     /// the process's life and `source`/`esm` of the same module never
@@ -131,11 +144,23 @@ pub(crate) fn island_module_esm(module: &IslandModule) -> Option<&'static str> {
 /// any generated code can reach the island.
 pub(crate) fn island_tables_register_modules(modules: &'static [IslandModule]) {
     ISLAND_MODULES.with(|slot| *slot.borrow_mut() = modules);
+    ISLAND_MODULE_INDEX.with(|slot| *slot.borrow_mut() = None);
 }
 
 /// Install the resolution edge table, alongside the module table.
 pub(crate) fn island_tables_register_edges(edges: &'static [IslandEdge]) {
     ISLAND_EDGES.with(|slot| *slot.borrow_mut() = edges);
+    ISLAND_EDGE_INDEX.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Install the build identity emitted next to the tables.
+pub fn island_register_build_id(id: &'static str) {
+    ISLAND_BUILD_ID.with(|slot| slot.set(id));
+}
+
+#[cfg(feature = "island-v8")]
+pub(crate) fn island_build_id() -> &'static str {
+    ISLAND_BUILD_ID.with(Cell::get)
 }
 
 pub(crate) fn island_registered_modules() -> &'static [IslandModule] {
@@ -143,9 +168,37 @@ pub(crate) fn island_registered_modules() -> &'static [IslandModule] {
 }
 
 pub(crate) fn island_module_find(key: &str) -> Option<&'static IslandModule> {
-    island_registered_modules()
-        .iter()
-        .find(|module| module.key == key)
+    let modules = island_registered_modules();
+    ISLAND_MODULE_INDEX.with(|slot| {
+        let mut index = slot.borrow_mut();
+        let index = index.get_or_insert_with(|| {
+            let mut map = HashMap::with_capacity(modules.len());
+            for (position, module) in modules.iter().enumerate() {
+                map.entry(module.key).or_insert(position);
+            }
+            map
+        });
+        index.get(key).map(|&position| &modules[position])
+    })
+}
+
+/// The edges leaving `from`, in table order.
+fn island_edges_from(from: &str) -> Vec<&'static IslandEdge> {
+    let edges = ISLAND_EDGES.with(|slot| *slot.borrow());
+    ISLAND_EDGE_INDEX.with(|slot| {
+        let mut index = slot.borrow_mut();
+        let index = index.get_or_insert_with(|| {
+            let mut map: HashMap<&'static str, Vec<usize>> = HashMap::new();
+            for (position, edge) in edges.iter().enumerate() {
+                map.entry(edge.from).or_default().push(position);
+            }
+            map
+        });
+        index
+            .get(from)
+            .map(|positions| positions.iter().map(|&position| &edges[position]).collect())
+            .unwrap_or_default()
+    })
 }
 
 /// Resolve `(from, specifier)` for one call form, mirroring the island's
@@ -165,8 +218,8 @@ pub(crate) fn island_edge_find(
     want: IslandEdgeKind,
 ) -> Option<&'static str> {
     let mut fallback = None;
-    for edge in ISLAND_EDGES.with(|slot| *slot.borrow()) {
-        if edge.from != from || edge.specifier != specifier {
+    for edge in island_edges_from(from) {
+        if edge.specifier != specifier {
             continue;
         }
         if edge.kind == IslandEdgeKind::Any || edge.kind == want {
@@ -184,6 +237,8 @@ pub(crate) fn island_edge_find(
 pub(crate) fn island_modules_reset() {
     ISLAND_MODULES.with(|slot| *slot.borrow_mut() = &[]);
     ISLAND_EDGES.with(|slot| *slot.borrow_mut() = &[]);
+    ISLAND_MODULE_INDEX.with(|slot| *slot.borrow_mut() = None);
+    ISLAND_EDGE_INDEX.with(|slot| *slot.borrow_mut() = None);
 }
 
 /* ── the ES module loader ──────────────────────────────────────────── */

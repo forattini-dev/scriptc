@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { NPM_COMPRESS_MIN, type IrModule } from "../../ir/nodes.js";
 
@@ -78,7 +79,26 @@ export function emitRustEmbeddedModules(
   }
   lines.push("];", "");
   lines.push(...emitRustEmbeddedEdges(mod, rustString));
+  lines.push(`static SC_ISLAND_BUILD_ID: &str = "${embeddedBuildId(mod)}";`, "");
   return lines;
+}
+
+/** The identity of the embedded graph: a digest of every module's key,
+ * format and text plus every edge. The runtime keys what it persists
+ * about the graph (the V8 code cache) by it, so a rebuild with any
+ * source change starts a fresh store. */
+export function embeddedBuildId(mod: IrModule): string {
+  const hash = createHash("sha256");
+  for (const module of mod.embedded?.modules ?? []) {
+    hash.update(module.key).update("\0").update(module.format).update("\0");
+    hash.update(module.source).update("\0");
+    if (module.esm !== undefined) hash.update(module.esm);
+    hash.update("\0");
+  }
+  for (const edge of mod.embedded?.edges ?? []) {
+    hash.update(edge.from).update("\0").update(edge.specifier).update("\0").update(edge.to).update("\0").update(edge.kind).update("\0");
+  }
+  return hash.digest("hex").slice(0, 32);
 }
 
 /** kind: the CALL FORM an edge resolved for — `Any` (relative files,

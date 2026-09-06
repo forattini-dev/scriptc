@@ -69,6 +69,10 @@ pub struct ModuleSource {
     /// A JSON module: `source` is the JSON text, the default export is
     /// the parsed value.
     pub json: bool,
+    /// V8 code cache bytes a previous run produced for exactly this
+    /// source (`module_code_caches`); consumed at compile, and a key whose
+    /// cache is missing or rejected is reported back for regeneration.
+    pub code_cache: Option<Rc<Vec<u8>>>,
 }
 
 /// `(referrer key, specifier)` → the module, or a message (raised as a
@@ -92,6 +96,8 @@ struct Engine {
     /// of a module still evaluating (top-level await) settles from it.
     module_promises: HashMap<String, v8::Global<v8::Promise>>,
     module_sources: HashMap<String, String>,
+    /// Keys compiled without a usable code cache this run, in order.
+    cache_misses: Vec<String>,
     resolver: Option<ModuleResolver>,
     host_fns: Vec<HostFn>,
     unhandled: Vec<(v8::Global<v8::Promise>, v8::Global<v8::Value>)>,
@@ -209,6 +215,7 @@ pub fn init() {
             module_keys: HashMap::new(),
             module_promises: HashMap::new(),
             module_sources: HashMap::new(),
+        cache_misses: Vec::new(),
             resolver: None,
             host_fns: Vec::new(),
             unhandled: Vec::new(),
@@ -906,8 +913,28 @@ fn module_for<'s>(scope: &mut v8::PinScope<'s, '_>, source: ModuleSource) -> Opt
     } else {
         let text = v8::String::new(scope, &source.source)?;
         let origin = v8::ScriptOrigin::new(scope, name.into(), 0, 0, false, 0, None, false, false, true, None);
-        let mut compiled = v8::script_compiler::Source::new(text, Some(&origin));
-        v8::script_compiler::compile_module(scope, &mut compiled)?
+        let (module, usable) = match &source.code_cache {
+            Some(bytes) => {
+                let cached = v8::script_compiler::CachedData::new(bytes.as_slice());
+                let mut compiled = v8::script_compiler::Source::new_with_cached_data(text, Some(&origin), cached);
+                let module = v8::script_compiler::compile_module2(
+                    scope,
+                    &mut compiled,
+                    v8::script_compiler::CompileOptions::ConsumeCodeCache,
+                    v8::script_compiler::NoCacheReason::NoReason,
+                )?;
+                let rejected = compiled.get_cached_data().is_none_or(|data| data.rejected());
+                (module, !rejected)
+            }
+            None => {
+                let mut compiled = v8::script_compiler::Source::new(text, Some(&origin));
+                (v8::script_compiler::compile_module(scope, &mut compiled)?, false)
+            }
+        };
+        if !usable {
+            with_engine(|engine| engine.cache_misses.push(source.key.clone()));
+        }
+        module
     };
     let global = v8::Global::new(scope, module);
     with_engine(|engine| {
@@ -1058,6 +1085,37 @@ pub fn module_namespace(key: &str) -> Option<Value> {
     Some(Value(v8::Global::new(scope, local.get_module_namespace())))
 }
 
+/// The version tag of the code cache format this V8 produces; a cache
+/// produced under another tag is rejected at compile, so callers key
+/// their store by it.
+pub fn code_cache_version() -> u32 {
+    v8::script_compiler::cached_data_version_tag()
+}
+
+/// Code caches for the modules compiled without a usable one this run,
+/// produced from their current state (after evaluation, so functions
+/// compiled lazily since are included). Each key is reported once.
+pub fn module_code_caches() -> Vec<(String, Vec<u8>)> {
+    if !is_initialized() {
+        return Vec::new();
+    }
+    enter!(scope);
+    let misses = with_engine(|engine| std::mem::take(&mut engine.cache_misses));
+    let mut caches = Vec::with_capacity(misses.len());
+    for key in misses {
+        let Some(module) = with_engine(|engine| engine.modules.get(&key).cloned()) else { continue };
+        let local = v8::Local::new(scope, &module);
+        if local.get_status() == v8::ModuleStatus::Errored || !local.is_source_text_module() {
+            continue;
+        }
+        let script = local.get_unbound_module_script(scope);
+        if let Some(data) = script.create_code_cache() {
+            caches.push((key, data.to_vec()));
+        }
+    }
+    caches
+}
+
 /// One deferred step of a dynamic import: evaluate the module now (the
 /// importer's own evaluation has returned by the time the microtask
 /// runs) and answer its namespace — or its evaluation promise chained to
@@ -1174,9 +1232,9 @@ mod tests {
     fn modules_static_and_dynamic() {
         setup();
         set_module_resolver(Rc::new(|referrer, specifier| match (referrer, specifier) {
-            (_, "main") => Ok(ModuleSource { key: "main".into(), source: "import { v } from './dep'; import data from './data.json'; export const out = v * 2 + data.n; export const lazy = import('./dep');".into(), json: false }),
-            ("main", "./dep") | ("", "./dep") => Ok(ModuleSource { key: "dep".into(), source: "export const v = 20;".into(), json: false }),
-            ("main", "./data.json") => Ok(ModuleSource { key: "data.json".into(), source: "{\"n\": 2}".into(), json: true }),
+            (_, "main") => Ok(ModuleSource { key: "main".into(), source: "import { v } from './dep'; import data from './data.json'; export const out = v * 2 + data.n; export const lazy = import('./dep');".into(), json: false, code_cache: None }),
+            ("main", "./dep") | ("", "./dep") => Ok(ModuleSource { key: "dep".into(), source: "export const v = 20;".into(), json: false, code_cache: None }),
+            ("main", "./data.json") => Ok(ModuleSource { key: "data.json".into(), source: "{\"n\": 2}".into(), json: true, code_cache: None }),
             (r, s) => Err(format!("cannot resolve {s} from {r}")),
         }));
         let namespace = import_module("main").unwrap().expect("settled");
@@ -1193,10 +1251,45 @@ mod tests {
     }
 
     #[test]
+    fn code_cache_round_trips_across_isolates() {
+        setup();
+        let source = "export function f(n) { return n * 3; } export const v = f(14);";
+        set_module_resolver(Rc::new(move |_, specifier| match specifier {
+            "cached" => Ok(ModuleSource { key: "cached".into(), source: source.into(), json: false, code_cache: None }),
+            other => Err(format!("no {other}")),
+        }));
+        let ns = import_module("cached").unwrap().unwrap();
+        assert_eq!(as_number(&get(&ns, "v").unwrap()), Some(42.0));
+        let caches = module_code_caches();
+        assert_eq!(caches.len(), 1);
+        assert_eq!(caches[0].0, "cached");
+        assert!(!caches[0].1.is_empty());
+        assert!(module_code_caches().is_empty(), "each miss is reported once");
+        let bytes = Rc::new(caches.into_iter().next().unwrap().1);
+        finish();
+        init();
+        set_module_resolver(Rc::new(move |_, specifier| match specifier {
+            "cached" => Ok(ModuleSource { key: "cached".into(), source: source.into(), json: false, code_cache: Some(bytes.clone()) }),
+            other => Err(format!("no {other}")),
+        }));
+        let ns = import_module("cached").unwrap().unwrap();
+        assert_eq!(as_number(&get(&ns, "v").unwrap()), Some(42.0));
+        assert!(module_code_caches().is_empty(), "the consumed cache was accepted");
+        let stale = Rc::new(vec![1u8, 2, 3, 4]);
+        set_module_resolver(Rc::new(move |_, specifier| match specifier {
+            "stale" => Ok(ModuleSource { key: "stale".into(), source: "export const s = 1;".into(), json: false, code_cache: Some(stale.clone()) }),
+            other => Err(format!("no {other}")),
+        }));
+        let ns = import_module("stale").unwrap().unwrap();
+        assert_eq!(as_number(&get(&ns, "s").unwrap()), Some(1.0));
+        assert_eq!(module_code_caches().len(), 1, "a rejected cache is regenerated");
+    }
+
+    #[test]
     fn import_meta_url_of_a_path_key() {
         setup();
         set_module_resolver(Rc::new(|_, specifier| match specifier {
-            "/tmp/scriptc meta/mod.js" => Ok(ModuleSource { key: specifier.into(), source: "export const u = import.meta.url;".into(), json: false }),
+            "/tmp/scriptc meta/mod.js" => Ok(ModuleSource { key: specifier.into(), source: "export const u = import.meta.url;".into(), json: false, code_cache: None }),
             other => Err(format!("no {other}")),
         }));
         let ns = import_module("/tmp/scriptc meta/mod.js").unwrap().unwrap();
@@ -1207,10 +1300,10 @@ mod tests {
     fn dynamic_import_of_pending_and_cyclic_modules() {
         setup();
         set_module_resolver(Rc::new(|_, specifier| match specifier {
-            "tla-root" => Ok(ModuleSource { key: "tla-root".into(), source: "export const later = import('./tla'); export const cyc = import('./cycle-a');".into(), json: false }),
-            "./tla" => Ok(ModuleSource { key: "tla".into(), source: "await Promise.resolve(); export const v = 'after await';".into(), json: false }),
-            "./cycle-a" => Ok(ModuleSource { key: "cycle-a".into(), source: "import './cycle-b'; export const a = 1;".into(), json: false }),
-            "./cycle-b" => Ok(ModuleSource { key: "cycle-b".into(), source: "export const b = import('./cycle-a');".into(), json: false }),
+            "tla-root" => Ok(ModuleSource { key: "tla-root".into(), source: "export const later = import('./tla'); export const cyc = import('./cycle-a');".into(), json: false, code_cache: None }),
+            "./tla" => Ok(ModuleSource { key: "tla".into(), source: "await Promise.resolve(); export const v = 'after await';".into(), json: false, code_cache: None }),
+            "./cycle-a" => Ok(ModuleSource { key: "cycle-a".into(), source: "import './cycle-b'; export const a = 1;".into(), json: false, code_cache: None }),
+            "./cycle-b" => Ok(ModuleSource { key: "cycle-b".into(), source: "export const b = import('./cycle-a');".into(), json: false, code_cache: None }),
             other => Err(format!("no {other}")),
         }));
         let ns = import_module("tla-root").unwrap().expect("root settles");
