@@ -148,8 +148,12 @@ export interface EmbeddedModule {
  * at facade evaluation (getters read once — a snapshot, like Node's
  * loop over the lexed set) and stays undefined otherwise (a lexed-but-
  * never-assigned name is a live binding of undefined, not an error;
- * inherited properties do NOT leak through, hence the hasOwnProperty
- * guard). Export names that aren't identifiers ("dash-name") use string
+ * inherited properties do NOT leak through, hence the own-descriptor
+ * guard). A NON-enumerable accessor is never read: neither runtime's
+ * facade touches it (Node's lexer does not list it; Bun enumerates
+ * own keys), and reading it would run the getter's side effects —
+ * ioredis warns from its `Promise` getter. Export names that aren't
+ * identifiers ("dash-name") use string
  * ModuleExportNames — every name does, uniformly; the locals are e0, e1, …
  * temps. */
 function cjsEsmFacadeSource(key: string, names: readonly string[]): string {
@@ -158,10 +162,10 @@ function cjsEsmFacadeSource(key: string, names: readonly string[]): string {
     `const m=globalThis.__scr_require(${JSON.stringify(key)});`,
     `export default m;`,
   ];
-  if (uniq.length > 0) parts.push(`const H=Object.prototype.hasOwnProperty;`);
+  if (uniq.length > 0) parts.push(`const D=Object.getOwnPropertyDescriptor;`);
   const bound = uniq.map((n, i) => {
     const name = JSON.stringify(n);
-    parts.push(`let e${i};if(H.call(m,${name}))e${i}=m[${name}];`);
+    parts.push(`let e${i};{const d=D(m,${name});if(d&&(!d.get||d.enumerable))e${i}=m[${name}];}`);
     return `,e${i} as ${name}`;
   });
   parts.push(`export{m as "module.exports"${bound.join("")}};`);

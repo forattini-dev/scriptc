@@ -1080,8 +1080,72 @@ declare module "node:fs" {
    * byte position without advancing it. Answers the byte count. */
   export function writeSync(fd: number, buffer: Uint8Array, offset: number, length: number, position?: number | null): number;
   export function writeSync(fd: number, string: string, position?: number | null, encoding?: "utf8" | "utf-8"): number;
+  export function readSync(
+    fd: number,
+    buffer: Uint8Array,
+    options?: { offset?: number; length?: number; position?: number | null },
+  ): number;
   /* statSync over an open fd — the same Stats snapshot. */
   export function fstatSync(fd: number): Stats;
+  export function ftruncateSync(fd: number, len?: number): void;
+  export function fsyncSync(fd: number): void;
+  /* The callback spellings of the descriptor ops — Effect's FileSystem
+   * drives files this way (open → positioned read/write → fstat → close).
+   * They lower in the island; the static tier fences them per member. */
+  export function open(path: string, callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void;
+  export function open(path: string, flags: string | number, callback: (err: NodeJS.ErrnoException | null, fd: number) => void): void;
+  export function open(
+    path: string,
+    flags: string | number,
+    mode: number | undefined,
+    callback: (err: NodeJS.ErrnoException | null, fd: number) => void,
+  ): void;
+  export function close(fd: number, callback?: (err: NodeJS.ErrnoException | null) => void): void;
+  export function fstat(fd: number, callback: (err: NodeJS.ErrnoException | null, stats: Stats) => void): void;
+  export function ftruncate(fd: number, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function ftruncate(fd: number, len: number | undefined, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function fsync(fd: number, callback: (err: NodeJS.ErrnoException | null) => void): void;
+  export function read<T extends Uint8Array>(
+    fd: number,
+    buffer: T,
+    offset: number,
+    length: number,
+    position: number | null,
+    callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: T) => void,
+  ): void;
+  export function read<T extends Uint8Array>(
+    fd: number,
+    options: { buffer?: T; offset?: number; length?: number; position?: number | null },
+    callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: T) => void,
+  ): void;
+  export function read(
+    fd: number,
+    callback: (err: NodeJS.ErrnoException | null, bytesRead: number, buffer: Buffer) => void,
+  ): void;
+  export function write<T extends Uint8Array>(
+    fd: number,
+    buffer: T,
+    offset: number | null | undefined,
+    length: number | null | undefined,
+    position: number | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, written: number, buffer: T) => void,
+  ): void;
+  export function write<T extends Uint8Array>(
+    fd: number,
+    buffer: T,
+    callback: (err: NodeJS.ErrnoException | null, written: number, buffer: T) => void,
+  ): void;
+  export function write(
+    fd: number,
+    string: string,
+    position: number | null | undefined,
+    callback: (err: NodeJS.ErrnoException | null, written: number, string: string) => void,
+  ): void;
+  export function write(
+    fd: number,
+    string: string,
+    callback: (err: NodeJS.ErrnoException | null, written: number, string: string) => void,
+  ): void;
   /* realpath(3) — resolves symlinks, `.`/`..`, throwing Node's fs error
    * shapes for missing paths. */
   export function realpathSync(path: string): string;
@@ -1170,8 +1234,10 @@ declare module "fs/promises" {
     writeFile(data: string | Uint8Array, encoding?: "utf8" | "utf-8" | null): Promise<void>;
     appendFile(data: string | Uint8Array, encoding?: "utf8" | "utf-8" | null): Promise<void>;
     stat(): Promise<import("node:fs").Stats>;
+    truncate(len?: number): Promise<void>;
+    sync(): Promise<void>;
   }
-  export function open(path: string, flags?: string, mode?: number): Promise<FileHandle>;
+  export function open(path: string, flags?: string | number, mode?: number): Promise<FileHandle>;
   export function readFile(path: string, encoding: "utf8" | "utf-8"): Promise<string>;
   export function readFile(path: string): Promise<Buffer>;
   export function writeFile(

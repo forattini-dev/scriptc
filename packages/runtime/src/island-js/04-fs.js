@@ -8,7 +8,29 @@
 function makeFs(env) {
   const Buffer = env.Buffer;
   const constants = env.fsConstants();
-  const call = env.fs;
+  /* The host's fs errors carry Node's message and `code`; the other
+   * Node fields — `syscall`, `path` (and `dest`), `errno` — are stamped
+   * here from that fixed message shape ("ENOENT: no such file or
+   * directory, open '/x'"), which is what Effect's FileSystem and the
+   * fs-extra family read to classify failures. */
+  const ERRNO = { EPERM: -1, ENOENT: -2, EIO: -5, EBADF: -9, EAGAIN: -11, EACCES: -13, EBUSY: -16, EEXIST: -17, EXDEV: -18, ENOTDIR: -20, EISDIR: -21, EINVAL: -22, EMFILE: -24, ENOSPC: -28, EPIPE: -32, ENOTEMPTY: -39, ELOOP: -40, ENAMETOOLONG: -36 };
+  const stampFsError = (e) => {
+    if (e === null || typeof e !== "object" || typeof e.code !== "string" || typeof e.message !== "string") return;
+    const m = /^([A-Z]+): .*?, ([a-z0-9_]+)(?: '((?:[^'\\]|\\.)*)'(?: -> '((?:[^'\\]|\\.)*)')?)?$/.exec(e.message);
+    if (!m) return;
+    if (e.syscall === undefined) e.syscall = m[2];
+    if (m[3] !== undefined && e.path === undefined) e.path = m[3];
+    if (m[4] !== undefined && e.dest === undefined) e.dest = m[4];
+    if (e.errno === undefined && ERRNO[e.code] !== undefined) e.errno = ERRNO[e.code];
+  };
+  const call = (...args) => {
+    try {
+      return env.fs(...args);
+    } catch (e) {
+      stampFsError(e);
+      throw e;
+    }
+  };
   const pathOf = (p) => {
     if (typeof p === "string") return p;
     if (p instanceof Uint8Array) return Buffer.from(p).toString("utf8");
@@ -133,7 +155,75 @@ function makeFs(env) {
   const readlinkSync = (p) => call("readlink", pathOf(p));
   const copyFileSync = (src, dest) => call("copyFile", pathOf(src), pathOf(dest));
   const renameSync = (src, dest) => call("rename", pathOf(src), pathOf(dest));
+  /* Descriptor ops: the host keeps the open files; the fd is a number
+   * the way Node hands it out. Numeric flags map onto Node's flag
+   * strings, which the host's open parses. */
+  const flagString = (flags) => {
+    if (flags === undefined || flags === null) return "r";
+    if (typeof flags === "string") return flags;
+    const O = constants;
+    const access = flags & (O.O_RDONLY | O.O_WRONLY | O.O_RDWR);
+    const plus = access === O.O_RDWR ? "+" : "";
+    const excl = (flags & O.O_EXCL) !== 0 ? "x" : "";
+    if ((flags & O.O_APPEND) !== 0) return "a" + excl + plus;
+    if ((flags & O.O_TRUNC) !== 0 || (flags & O.O_CREAT) !== 0) return "w" + excl + plus;
+    return access === O.O_RDONLY ? "r" : "r+";
+  };
+  const fdOf = (fd) => {
+    if (typeof fd !== "number") {
+      const e = new TypeError('The "fd" argument must be of type number. Received ' + (fd === null ? "null" : typeof fd === "object" ? "an instance of " + (fd.constructor && fd.constructor.name) : "type " + typeof fd));
+      e.code = "ERR_INVALID_ARG_TYPE";
+      throw e;
+    }
+    return fd;
+  };
+  const positionOf = (position) => (position === undefined || position === null ? -1 : Number(position));
+  const u8View = (buffer) => (buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
+  const openSync = (p, flags, mode) => call("open", pathOf(p), flagString(flags), mode === undefined ? -1 : mode);
+  const closeSync = (fd) => { call("close", fdOf(fd)); };
+  const fstatSync = (fd) => new Stats(call("fstat", fdOf(fd)));
+  const ftruncateSync = (fd, len) => { call("ftruncate", fdOf(fd), len === undefined ? 0 : len); };
+  const fsyncSync = (fd) => { call("fsync", fdOf(fd)); };
+  const readSync = (fd, buffer, offsetOrOptions, length, position) => {
+    let offset = offsetOrOptions;
+    if (offsetOrOptions !== null && typeof offsetOrOptions === "object") ({ offset, length, position } = offsetOrOptions);
+    if (offset === undefined || offset === null) offset = 0;
+    if (length === undefined || length === null) length = buffer.byteLength - offset;
+    if (length === 0) return 0;
+    const chunk = call("read", fdOf(fd), length, positionOf(position));
+    u8View(buffer).set(chunk, offset);
+    return chunk.length;
+  };
+  const writeSync = (fd, data, offsetOrOptions, length, position) => {
+    if (typeof data === "string") {
+      const encoded = Buffer.from(data, typeof length === "string" ? length : "utf8");
+      return call("write", fdOf(fd), u8View(encoded), positionOf(offsetOrOptions));
+    }
+    let offset = offsetOrOptions;
+    if (offsetOrOptions !== null && typeof offsetOrOptions === "object") ({ offset, length, position } = offsetOrOptions);
+    if (offset === undefined || offset === null) offset = 0;
+    if (length === undefined || length === null) length = data.byteLength - offset;
+    const view = u8View(data);
+    return call("write", fdOf(fd), new Uint8Array(view.buffer, view.byteOffset + offset, length), positionOf(position));
+  };
+  /* Node's read(fd, …) spellings: (buffer, offset, length, position),
+   * (buffer, {offset, length, position}), ({buffer, offset, length,
+   * position}), or nothing but the callback. */
+  const readArgs = (rest) => {
+    let buffer = rest[0], offset, length, position;
+    if (buffer === undefined || (buffer !== null && typeof buffer === "object" && !ArrayBuffer.isView(buffer))) {
+      const o = buffer || {};
+      buffer = o.buffer || Buffer.alloc(16384);
+      offset = o.offset; length = o.length; position = o.position;
+    } else if (rest.length >= 2 && rest[1] !== null && typeof rest[1] === "object") {
+      ({ offset, length, position } = rest[1]);
+    } else {
+      offset = rest[1]; length = rest[2]; position = rest[3];
+    }
+    return [buffer, offset, length, position];
+  };
   const sync = {
+    openSync, closeSync, fstatSync, ftruncateSync, fsyncSync, readSync, writeSync,
     readFileSync, writeFileSync, appendFileSync, existsSync, realpathSync,
     mkdirSync, rmSync, rmdirSync, unlinkSync, readdirSync, statSync,
     lstatSync, accessSync, mkdtempSync, chmodSync, copyFileSync, renameSync,
@@ -234,27 +324,80 @@ function makeFs(env) {
     watchFile: () => {
       throw new Error("fs.watchFile is not available in the scriptc island");
     },
-    openSync: () => {
-      throw new Error("fs.openSync is not available in the scriptc island (whole-file reads/writes only)");
+    open: (p, flags, mode, cb) => {
+      if (typeof flags === "function") { cb = flags; flags = undefined; mode = undefined; }
+      else if (typeof mode === "function") { cb = mode; mode = undefined; }
+      callbackify(openSync)(p, flags, mode, cb);
     },
-    closeSync: () => undefined,
-    fstatSync: () => {
-      throw new Error("fs.fstatSync is not available in the scriptc island (whole-file reads/writes only)");
+    close: callbackify(closeSync),
+    fstat: (fd, options, cb) => {
+      if (typeof options === "function") cb = options;
+      callbackify(fstatSync)(fd, cb);
     },
-    readSync: () => {
-      throw new Error("fs.readSync is not available in the scriptc island (whole-file reads/writes only)");
+    ftruncate: (fd, len, cb) => {
+      if (typeof len === "function") { cb = len; len = 0; }
+      callbackify(ftruncateSync)(fd, len, cb);
     },
-    writeSync: () => {
-      throw new Error("fs.writeSync is not available in the scriptc island (whole-file reads/writes only)");
+    fsync: callbackify(fsyncSync),
+    read: (fd, ...rest) => {
+      const cb = rest.pop();
+      const [buffer, offset, length, position] = readArgs(rest);
+      let n;
+      try {
+        n = readSync(fd, buffer, offset, length, position);
+      } catch (err) {
+        env.nextTick(() => cb(err));
+        return;
+      }
+      env.nextTick(() => cb(null, n, buffer));
     },
-    read: () => {
-      throw new Error("fs.read is not available in the scriptc island (whole-file reads/writes only)");
-    },
-    open: () => {
-      throw new Error("fs.open is not available in the scriptc island (whole-file reads/writes only)");
+    write: (fd, ...rest) => {
+      const cb = rest.pop();
+      let n;
+      try {
+        n = writeSync(fd, ...rest);
+      } catch (err) {
+        env.nextTick(() => cb(err));
+        return;
+      }
+      env.nextTick(() => cb(null, n, rest[0]));
     },
     unwatchFile: () => undefined,
   };
+  /* fs.promises.open: a FileHandle over the same descriptor bridge. */
+  class FileHandle {
+    constructor(fd) { this.fd = fd; }
+    read(...rest) {
+      const [buffer, offset, length, position] = readArgs(rest);
+      return promisify(readSync)(this.fd, buffer, offset, length, position).then((bytesRead) => ({ bytesRead, buffer }));
+    }
+    write(data, ...rest) {
+      return promisify(writeSync)(this.fd, data, ...rest).then((bytesWritten) => ({ bytesWritten, buffer: data }));
+    }
+    readFile(options) {
+      return promisify(() => {
+        const chunks = [];
+        for (;;) {
+          const chunk = call("read", fdOf(this.fd), 65536, -1);
+          if (chunk.length === 0) break;
+          chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.length));
+        }
+        const buf = Buffer.concat(chunks);
+        const enc = encodingOf(options, null);
+        return enc === null ? buf : buf.toString(enc);
+      })();
+    }
+    writeFile(data, options) {
+      return promisify(writeSync)(this.fd, dataToU8(data, options)).then(() => undefined);
+    }
+    stat() { return promisify(fstatSync)(this.fd); }
+    truncate(len) { return promisify(ftruncateSync)(this.fd, len); }
+    sync() { return promisify(fsyncSync)(this.fd); }
+    close() { return promisify(closeSync)(this.fd); }
+  }
+  if (typeof Symbol.asyncDispose === "symbol") {
+    FileHandle.prototype[Symbol.asyncDispose] = function () { return this.close(); };
+  }
   fs.promises = {
     readFile: promisify(readFileSync),
     writeFile: promisify(writeFileSync),
@@ -274,9 +417,7 @@ function makeFs(env) {
     rename: promisify(renameSync),
     readlink: promisify(readlinkSync),
     constants,
-    open: () => {
-      return Promise.reject(new Error("fs.promises.open is not available in the scriptc island (whole-file reads/writes only)"));
-    },
+    open: (p, flags, mode) => promisify(openSync)(p, flags, mode).then((fd) => new FileHandle(fd)),
   };
   return fs;
 }

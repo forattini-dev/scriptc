@@ -583,6 +583,25 @@ pub fn file_handle_stat(handle: &JsFileHandle) -> JsStats {
     stats_from_metadata(metadata, false)
 }
 
+/// `fs.fstatSync(fd)` on a runtime-owned descriptor (the island's fd
+/// bridge; the static lowering goes through `file_handle_stat`).
+pub fn fs_fstat(fd: f64) -> JsStats {
+    let metadata = with_open_file(fd, "fstat", |file| file.metadata());
+    stats_from_metadata(metadata, false)
+}
+
+/// `fs.ftruncateSync(fd, length)`: a negative length reads as 0, as in
+/// Node.
+pub fn fs_ftruncate(fd: f64, length: f64) {
+    let length = if length.is_finite() && length > 0.0 { length as u64 } else { 0 };
+    with_open_file(fd, "ftruncate", |file| file.set_len(length));
+}
+
+/// `fs.fsyncSync(fd)`.
+pub fn fs_fsync(fd: f64) {
+    with_open_file(fd, "fsync", |file| file.sync_all());
+}
+
 pub fn stats_is_file(stats: &JsStats) -> bool {
     stats.with(|stats| stats.is_file)
 }

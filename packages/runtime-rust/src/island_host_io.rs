@@ -117,6 +117,7 @@ fn island_host_bytes(bytes: &JsBytes<u8>, context: &mut Context) -> JsResult<JsV
 enum IslandFsAnswer {
     Nothing,
     Bool(bool),
+    Number(f64),
     Text(JsString),
     Bytes(JsBytes<u8>),
     Names(JsArray<JsString>),
@@ -170,9 +171,18 @@ fn island_host_fs(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let operation = island_host_arg_string(arguments, 0, context)?;
-    // Every op but `mkdtemp` takes a path first, and mkdtemp's prefix
-    // reads the same slot, so one conversion serves all of them.
-    let path: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    // Every path op takes the path first, and mkdtemp's prefix reads the
+    // same slot, so one conversion serves all of them; the descriptor ops
+    // carry the fd number there instead.
+    let fd_op = matches!(
+        operation.as_str(),
+        "close" | "read" | "write" | "fstat" | "ftruncate" | "fsync"
+    );
+    let path: JsString = if fd_op {
+        Rc::from("")
+    } else {
+        Rc::from(island_host_arg_string(arguments, 1, context)?.as_str())
+    };
     let number = |index: usize, context: &mut Context| island_host_arg_number(arguments, index, context);
 
     let answer = match operation.as_str() {
@@ -278,6 +288,61 @@ fn island_host_fs(
                 IslandFsAnswer::Nothing
             }, context)?
         }
+        // Descriptor ops — Effect's FileSystem (open → read/write at a
+        // position → fstat → close) drives files this way. The bytes of a
+        // read come back as a fresh Uint8Array the shim copies into the
+        // caller's buffer: the host argument copy is eager, so filling the
+        // argument in place would not reach the realm.
+        "open" => {
+            let flags: JsString = Rc::from(island_host_arg_string(arguments, 2, context)?.as_str());
+            island_host_run(|| IslandFsAnswer::Number(fs_open(&path, &flags)), context)?
+        }
+        "close" => {
+            let fd = number(1, context)?;
+            island_host_run(|| {
+                fs_close(fd);
+                IslandFsAnswer::Nothing
+            }, context)?
+        }
+        "read" => {
+            let fd = number(1, context)?;
+            let length = number(2, context)?;
+            let position = number(3, context)?;
+            island_host_run(|| {
+                let buffer = bytes_alloc::<u8>(length);
+                let read = fs_read_sync(fd, &buffer, 0.0, length, position);
+                let data: Vec<u8> = bytes_u8_values(&buffer)[..read as usize].to_vec();
+                IslandFsAnswer::Bytes(bytes_from_vec(data))
+            }, context)?
+        }
+        "write" => {
+            let fd = number(1, context)?;
+            let data = island_host_arg_bytes(arguments, 2, context)?;
+            let position = number(3, context)?;
+            island_host_run(|| {
+                let length = data.with(|data| data.length) as f64;
+                IslandFsAnswer::Number(fs_write_sync(fd, &data, 0.0, length, position))
+            }, context)?
+        }
+        "fstat" => {
+            let fd = number(1, context)?;
+            island_host_run(|| IslandFsAnswer::Stats(fs_fstat(fd)), context)?
+        }
+        "ftruncate" => {
+            let fd = number(1, context)?;
+            let length = number(2, context)?;
+            island_host_run(|| {
+                fs_ftruncate(fd, length);
+                IslandFsAnswer::Nothing
+            }, context)?
+        }
+        "fsync" => {
+            let fd = number(1, context)?;
+            island_host_run(|| {
+                fs_fsync(fd);
+                IslandFsAnswer::Nothing
+            }, context)?
+        }
         _ => {
             return Err(boa_engine::JsNativeError::reference()
                 .with_message("unknown island fs op")
@@ -288,6 +353,7 @@ fn island_host_fs(
     Ok(match answer {
         IslandFsAnswer::Nothing => JsValue::undefined(),
         IslandFsAnswer::Bool(value) => JsValue::from(value),
+        IslandFsAnswer::Number(value) => JsValue::from(value),
         IslandFsAnswer::Text(value) => island_host_string(&value),
         IslandFsAnswer::Bytes(value) => island_host_bytes(&value, context)?,
         IslandFsAnswer::Names(value) => island_host_string_array(&value, context),
