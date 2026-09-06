@@ -132,7 +132,8 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const recoverDispatch = context.emitClosureDispatch(recover, second.type, ["sc_arg"], expr.loc);
       return `{ let ${attempt} = ${context.emitExpr(first)}; let ${recover} = ${context.emitExpr(second)}; let ${keepAttempt} = ${attempt}.clone(); let ${keepRecover} = ${recover}.clone(); runtime::effect_try_promise(std::rc::Rc::new(move || runtime::promise_to_handle(&(${attemptDispatch}))), std::rc::Rc::new(move |sc_caught: runtime::Caught| { let sc_arg: ${context.rustType(reasonType, expr.loc)} = sc_dyn_from_caught(sc_caught); ${box(context, second.type.ret, recoverDispatch, expr.loc)} }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepAttempt}); sc_tracer.edge(&${keepRecover}); })) }`;
     }
-    case "effect.fn": {
+    case "effect.fn":
+    case "effect.fnPipe": {
       if (first === undefined || first.type.kind !== "func" || first.type.ret.kind !== "generator" || expr.type.kind !== "func") break;
       const ret = first.type.ret.retT;
       const retType = ret.kind === "void" || ret.kind === "undefinedT" ? "()" : context.rustType(ret, expr.loc);
@@ -142,7 +143,16 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const params = expr.type.params.map((type, index) => `sc_p${index}: ${context.rustType(type, expr.loc)}`).join(", ");
       const args = expr.type.params.map((_, index) => `sc_p${index}.clone()`);
       const dispatch = context.emitClosureDispatch("sc_body", first.type, args, expr.loc);
-      return `{ let ${body} = ${context.emitExpr(first)}; let ${keep} = ${body}.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { let sc_body = ${body}.clone(); let sc_keep = sc_body.clone(); runtime::effect_gen::<${retType}>(std::rc::Rc::new(move || ${dispatch}), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&sc_keep))) })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${keep}))) }) }`;
+      const generated = `runtime::effect_gen::<${retType}>(std::rc::Rc::new(move || ${dispatch}), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&sc_keep)))`;
+      if (second === undefined) {
+        return `{ let ${body} = ${context.emitExpr(first)}; let ${keep} = ${body}.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { let sc_body = ${body}.clone(); let sc_keep = sc_body.clone(); ${generated} })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${keep}))) }) }`;
+      }
+      // Pipeline steps: the lifted `(effect) => effect` runs over each call's generated effect.
+      if (second.type.kind !== "func") break;
+      const post = context.nextTemporary();
+      const keepPost = context.nextTemporary();
+      const applied = context.emitClosureDispatch("sc_post", second.type, ["sc_eff"], expr.loc);
+      return `{ let ${body} = ${context.emitExpr(first)}; let ${keep} = ${body}.clone(); let ${post} = ${context.emitExpr(second)}; let ${keepPost} = ${post}.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { let sc_body = ${body}.clone(); let sc_keep = sc_body.clone(); let sc_post = ${post}.clone(); let sc_eff = ${generated}; ${applied} })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keep}); sc_tracer.edge(&${keepPost}); })) }) }`;
     }
     case "effect.void":
       return "runtime::effect_succeed(runtime::effect_box(()))";
@@ -271,6 +281,12 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.dataMessage":
       if (first === undefined) break;
       return `runtime::schema_error_message(&${context.emitExpr(first)})`;
+    case "effect.durationMillis":
+      if (first === undefined) break;
+      return `runtime::effect_duration_millis(${context.emitExpr(first)})`;
+    case "effect.durationToMillis":
+      if (first === undefined) break;
+      return `runtime::effect_duration_to_millis(&${context.emitExpr(first)})`;
     case "effect.exitValue":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_exit_value(&${context.emitExpr(first)})`, expr.loc);

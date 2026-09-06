@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord } from "./kernel-types.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord } from "./kernel-types.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
@@ -1063,7 +1063,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
-  if (!ctx.dynamic && npmSym !== undefined && ["Effect", "Layer", "Exit", "Success", "Failure", "Cause", "Option", "Some", "None"].includes(npmSym.name) && npmDecls?.some((d) => (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) && /[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause|Option)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; if (!ctx.dynamic && npmDecls !== undefined && isKernelSchemaValueSymbol(npmDecls)) return EFFECT_T; // effects, layers, exits, causes, options, schema values, filters and SchemaError: the kernel's opaque handle
+  if (!ctx.dynamic && npmSym !== undefined && ["Effect", "Layer", "Exit", "Success", "Failure", "Cause", "Option", "Some", "None"].includes(npmSym.name) && npmDecls?.some((d) => (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) && /[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause|Option)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; if (!ctx.dynamic && npmDecls !== undefined && (isKernelSchemaValueSymbol(npmDecls) || isKernelHandleSymbol(npmDecls))) return EFFECT_T; // effects, layers, exits, causes, options, schema values, filters and SchemaError: the kernel's opaque handle
   if (
     npmDecls &&
     npmDecls.length > 0 &&

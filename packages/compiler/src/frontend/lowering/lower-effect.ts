@@ -6,8 +6,8 @@
  * object named `Effect` never matches. A member the kernel does not cover
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
-import type { Lowerer } from "./lowerer.js";
-import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
+import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
+import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js"; import { newFnCtx } from "./lowerer.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
@@ -68,6 +68,7 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
+  if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationMillis", [numLit(0, loc)], EFFECT_T, loc);
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
@@ -78,6 +79,25 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
     }
   }
   return null;
+}
+
+/** `Duration.member(...)`: a handle holding milliseconds — constructors by unit, `toMillis`/`toSeconds`. */
+function lowerDurationMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const units: Record<string, number | undefined> = { nanos: 1e-6, micros: 1e-3, millis: 1, seconds: 1000, minutes: 60_000, hours: 3_600_000, days: 86_400_000, weeks: 604_800_000 };
+  const first = args[0];
+  const unit = units[member];
+  if (unit !== undefined && first !== undefined && args.length === 1) {
+    const value = L.lowerExprExpecting(first, { kind: "f64" });
+    const millis: IrExpr = unit === 1 ? value : { kind: "bin", op: "*", left: value, right: numLit(unit, loc), type: { kind: "f64" }, loc };
+    return lib("effect.durationMillis", [millis], EFFECT_T, loc);
+  }
+  if ((member === "toMillis" || member === "toSeconds") && first !== undefined && args.length === 1) {
+    const handle = L.lowerExpr(first);
+    if (handle.type.kind !== "effect") L.unsupported("SC1090", first, `Duration.${member} over a non-Duration value`);
+    const millis = lib("effect.durationToMillis", [handle], { kind: "f64" }, loc);
+    return member === "toMillis" ? millis : { kind: "bin", op: "/", left: millis, right: numLit(1000, loc), type: { kind: "f64" }, loc };
+  }
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Duration.${member} in this call shape yet`);
 }
 
 /** `Exit.member(...)`: the opaque exit handle's constructors and tests. */
@@ -168,14 +188,38 @@ function lowerEffectFn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr
   const named = ts.isCallExpression(callee) && isFnMember(callee.expression) && callee.arguments.length <= 1 && (callee.arguments.length === 0 || ts.isStringLiteral(callee.arguments[0]!));
   if (!named && !isFnMember(callee)) return null;
   const body = expr.arguments[0];
-  if (expr.arguments.length !== 1 || body === undefined || !ts.isFunctionExpression(body) || body.asteriskToken === undefined) {
-    L.unsupported("SC1090", expr, "the effect kernel covers Effect.fn over one generator function (no pipeline arguments yet)");
+  if (body === undefined || !ts.isFunctionExpression(body) || body.asteriskToken === undefined) {
+    L.unsupported("SC1090", expr, "the effect kernel covers Effect.fn over a generator function (with optional pipeline steps)");
   }
   const lowered = L.lowerExpr(body);
   if (lowered.type.kind !== "func" || lowered.type.ret.kind !== "generator" || lowered.type.ret.yieldT.kind !== "effect") {
     L.unsupported("SC1090", expr, "the effect kernel covers Effect.fn over a generator body yielding effects");
   }
-  return lib("effect.fn", [lowered], { kind: "func", params: lowered.type.params, ret: EFFECT_T }, loc);
+  const type: IrType = { kind: "func", params: lowered.type.params, ret: EFFECT_T };
+  const steps = expr.arguments.slice(1);
+  if (steps.length === 0) return lib("effect.fn", [lowered], type, loc);
+  // `Effect.fn("name")(function* …, step, …)`: the steps apply to each call's effect — a lifted `(e) => e.pipe(steps)`
+  // function value the runtime callback runs over the generated effect (module-scope references only: the steps lower
+  // in their own function context).
+  const post = liftedPipeline(L, steps, loc);
+  return lib("effect.fnPipe", [lowered, post], type, loc);
+}
+
+/** The lifted post-processing function of an Effect.fn pipeline, as a closure value `(effect) => effect`. */
+function liftedPipeline(L: Lowerer, steps: ts.Expression[], loc: SrcLoc): IrExpr {
+  const name = `%effect.fnpost.${L.liftedFns.length}`;
+  const funcType: IrType = { kind: "func", params: [EFFECT_T], ret: EFFECT_T };
+  L.fnStack.push(newFnCtx(false, null, null, EFFECT_T));
+  try {
+    const local: IrLocal = { id: "e.0", name: "e", type: EFFECT_T, mutable: false };
+    L.ctx.locals.push(local);
+    let acc: IrExpr = { kind: "varRef", localId: local.id, type: EFFECT_T, loc };
+    for (const step of steps) acc = applyPipeStep(L, acc, step, loc);
+    L.liftedFns.push({ name, params: [{ localId: local.id, name: local.name, type: EFFECT_T }], returnType: EFFECT_T, locals: L.ctx.locals, body: [{ kind: "return", value: acc, loc }], loc });
+  } finally {
+    L.fnStack.pop();
+  }
+  return { kind: "closure", fnName: name, captures: [], type: funcType, loc };
 }
 
 /** One data-last combinator applied to an accumulated effect (`.pipe(Effect.map(f))`, `pipe(e, Effect.orDie)`): the
@@ -244,6 +288,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === null) return null;
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns === "Schema") return lowerSchemaMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Duration") return lowerDurationMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Option") return lowerOptionMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
@@ -494,6 +539,7 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "sleep": {
         if (total !== 1) break;
         const duration = at(0);
+        if (duration.type.kind === "effect") return lib("effect.sleep", [lib("effect.durationToMillis", [duration], { kind: "f64" }, loc)], EFFECT_T, loc);
         if (duration.type.kind !== "f64" && duration.type.kind !== "string") break;
         return lib("effect.sleep", [duration], EFFECT_T, loc);
       }

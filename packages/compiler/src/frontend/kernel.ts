@@ -100,3 +100,12 @@ export function withoutKernelBrands(checker: ts.TypeChecker, parts: readonly ts.
     return !(decls.length > 0 && decls.every((d) => BRAND_DIST.test(d.getSourceFile().fileName)));
   });
 }
+
+const HANDLE_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause|Option|Context|Scope|Fiber|Deferred|Ref|SynchronizedRef|Queue|PubSub|Stream|Sink|Channel|Duration|DateTime|Config|ConfigProvider|Schedule|Semaphore|Latch|ManagedRuntime|Clock|Random|Logger|Tracer|Metric|ScopedCache|Cache|RcMap|RcRef|LayerMap|FiberSet|FiberMap|FiberHandle|Mailbox|Result|Redacted|Encoding|Match|Runtime|Scheduler|Supervisor|TxRef|Micro|Console|Path|FileSystem|HttpClient|HttpClientRequest|HttpClientResponse|Socket|Terminal|Command|CommandExecutor|Worker|KeyValueStore|PlatformError|Url|UrlParams|Headers|Cookies|HttpApi[A-Za-z]*|Http[A-Za-z]*|Rpc[A-Za-z]*)\.d\.ts$/;
+
+/** An OPAQUE effect value type — the interfaces/classes of effect's runtime modules (Effect, Layer, Cause, Scope, Fiber,
+ * Deferred, Queue, Stream, Duration, Config, …): the kernel's handle in a static build. Type utilities (Types, Brand,
+ * Pipeable, Data, Struct, Array, …) stay structural; aliases resolve structurally too. */
+export function isKernelHandleSymbol(decls: readonly ts.Node[]): boolean {
+  return decls.length > 0 && decls.every((d) => HANDLE_DIST.test(d.getSourceFile().fileName)) && decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d));
+}

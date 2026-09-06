@@ -152,6 +152,8 @@ pub enum KernelData {
     Schema(Rc<SchemaNode>),
     /// A failed decode's SchemaError: the issue text.
     SchemaError(JsString),
+    /// A Duration, in milliseconds (effect's nanosecond precision is not observable here).
+    Duration(f64),
 }
 
 pub struct EffectData {
@@ -448,6 +450,17 @@ pub fn effect_exit_is_success(handle: &JsEffect) -> bool {
 }
 
 /// `_tag` of a kernel data handle: "Success"/"Failure" for an Exit, "Some"/"None" for an Option.
+pub fn effect_duration_millis(millis: f64) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Duration(millis)))
+}
+
+pub fn effect_duration_to_millis(handle: &JsEffect) -> f64 {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Duration(millis)) => *millis,
+        _ => throw_error("scriptc: a Duration handle was expected".to_owned()),
+    })
+}
+
 pub fn effect_data_tag(handle: &JsEffect) -> JsString {
     handle.with(|data| match &data.node {
         EffectNode::Data(KernelData::Exit(outcome)) => string(if outcome.is_ok() { "Success" } else { "Failure" }),
