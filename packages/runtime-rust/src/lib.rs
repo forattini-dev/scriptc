@@ -38,6 +38,8 @@ include!("generators.rs");
 include!("errors.rs");
 include!("ffi_callbacks.rs");
 include!("ffi_foreign.rs");
+#[cfg(all(feature = "island-eval", feature = "island-v8"))]
+compile_error!("scriptc-runtime: island-eval (boa) and island-v8 are mutually exclusive island engines");
 #[cfg(feature = "island-eval")]
 include!("island_boundary.rs");
 #[cfg(feature = "island-eval")]

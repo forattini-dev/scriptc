@@ -1,0 +1,20 @@
+[package]
+name = "scriptc-island-v8"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "The V8 island engine behind scriptc's runtime: an engine-neutral surface over rusty_v8"
+publish = false
+
+[lib]
+name = "scriptc_island_v8"
+path = "src/lib.rs"
+
+[dependencies]
+v8 = { version = "=152.2.0", default-features = false }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+strip = true
