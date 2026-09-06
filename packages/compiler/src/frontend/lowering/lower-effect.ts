@@ -10,7 +10,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
-import { applySchemaPipeStep, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest } from "./lower-schema.js";
+import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
@@ -195,7 +195,9 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
     if (stepNs === "Option") return lowerOptionMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
     if (stepNs === "Layer") return lowerLayerMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
   }
-  return L.unsupported("SC1090", step, "the effect kernel covers pipe steps that are Effect.* combinators");
+  const program = applyProgramPipeStep(L, source, step, loc);
+  if (program !== null) return program;
+  return L.unsupported("SC1090", step, "the effect kernel covers pipe steps that are Effect.* combinators or one-parameter function values");
 }
 
 /** `Effect.member(...)` → the kernel's lib call, or null when the callee
@@ -214,15 +216,19 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     for (const step of expr.arguments.slice(1)) acc = applyPipeStep(L, acc, step, loc);
     return acc;
   }
-  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === "pipe" && !callee.questionDotToken && L.mapTypeOf(L.typeOf(callee.expression))?.kind === "effect") {
-    let acc = L.lowerExpr(callee.expression);
+  if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name) && callee.name.text === "pipe" && !callee.questionDotToken && isSchemaLike(L, callee.expression)) {
+    let acc = unwrapSchema(L, L.lowerExpr(callee.expression), callee.expression, "pipe");
     for (const step of expr.arguments) acc = applyPipeStep(L, acc, step, loc);
     return acc;
   }
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
-  if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && L.mapTypeOf(L.typeOf(callee.expression))?.kind === "effect") {
+  if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && isSchemaLike(L, callee.expression)) {
     const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
     if (method !== null) return method;
+  }
+  if (!L.dynamic && !callee.questionDotToken && callee.name.text === "make") {
+    const made = lowerSchemaClassMake(L, callee.expression, expr, loc);
+    if (made !== null) return made;
   }
   if (callee.name.text === "of" && expr.arguments.length === 1 && !L.dynamic) {
     // `Service.of(impl)` on a kernel service key: effect's `of` is the identity over the service shape.

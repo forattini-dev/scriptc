@@ -23,7 +23,7 @@ import { lowerEffectCall } from "./lower-effect.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
-import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
+import { EMITTER_API_MEMBERS, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js"; import { lowerObjectAssignSchema } from "./lower-schema.js";
 import { emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -7941,7 +7941,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     // `Object.assign(fn, { props })` whose RESULT type maps to the hybrid
     // (function-with-properties) record: the chalk-shape CONSTRUCTOR.
-    if (member === "assign") {
+    if (member === "assign") { const decorated = lowerObjectAssignSchema(L, call); if (decorated) return decorated; // a schema with statics (lower-schema.ts)
       const hybrid = lowerObjectAssignHybrid(L, call);
       if (hybrid) return hybrid;
       // `Object.assign({}, lit)` — an EMPTY fresh-literal target and one

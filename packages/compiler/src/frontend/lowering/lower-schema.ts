@@ -8,6 +8,7 @@ import type { KernelSchemaClass } from "../kernel.js";
 import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf } from "../../ir/nodes.js";
 import { boolLit, numLit, strLit } from "../../ir/build.js";
 import { effectNamespaceOf } from "./lower-effect.js";
+import { SCHEMA_SLOT, isDecoratedSchema } from "../kernel-types.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { locOf } from "../program.js";
 
@@ -182,10 +183,65 @@ function wrap(kind: string, inner: IrExpr, loc: SrcLoc): IrExpr {
   return lib("schema.wrap", [strLit(kind, loc), inner], EFFECT_T, loc);
 }
 
+/** A schema HANDLE from a value: the handle itself, or a decorated schema record's hidden slot. */
+export function unwrapSchema(L: Lowerer, value: IrExpr, node: ts.Node, what: string): IrExpr {
+  if (value.type.kind === "effect") return value;
+  if (value.type.kind === "record" && isDecoratedSchema(L.shapes, value.type)) {
+    return { kind: "recordGet", obj: value, shapeId: value.type.shapeId, field: SCHEMA_SLOT, type: EFFECT_T, loc: value.loc };
+  }
+  return L.unsupported("SC1090", node, `${what} over a value that is not a schema handle`);
+}
+
+/** True when the expression's mapped type is a schema handle or a decorated schema record. */
+export function isSchemaLike(L: Lowerer, node: ts.Expression): boolean {
+  const type = L.mapTypeOf(L.typeOf(node));
+  return type !== null && (type.kind === "effect" || isDecoratedSchema(L.shapes, type));
+}
+
 function handleArg(L: Lowerer, node: ts.Expression, what: string): IrExpr {
-  const value = L.lowerExpr(node);
-  if (value.type.kind !== "effect") L.unsupported("SC1090", node, `${what} over a value that is not a schema handle`);
-  return value;
+  return unwrapSchema(L, L.lowerExpr(node), node, what);
+}
+
+/** `Object.assign(schema, statics)` whose result is a decorated schema record: the record, with the source's fields
+ * and the schema in the hidden slot. Null for any other Object.assign (the caller keeps its own rules). */
+export function lowerObjectAssignSchema(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const [targetNode, sourceNode] = call.arguments;
+  if (L.dynamic || targetNode === undefined || sourceNode === undefined || call.arguments.length !== 2 || !isSchemaLike(L, targetNode)) return null;
+  const type = L.mapTypeOf(L.typeOf(call));
+  if (type === null || type.kind !== "record" || !isDecoratedSchema(L.shapes, type)) return null;
+  const loc = locOf(call);
+  const shape = L.shapes.get(type.shapeId)!;
+  const target = handleArg(L, targetNode, "Object.assign");
+  const source = L.lowerExpr(sourceNode);
+  const fields = shape.fields.map((field) => {
+    if (field.name === SCHEMA_SLOT) return { name: field.name, value: target };
+    const literal = source.kind === "recordLit" ? source.fields.find((f) => f.name === field.name)?.value : undefined;
+    const value: IrExpr = literal ?? (source.type.kind === "record"
+      ? { kind: "recordGet", obj: source, shapeId: source.type.shapeId, field: field.name, type: field.type, loc }
+      : L.unsupported("SC1090", sourceNode, "Object.assign statics that are not a record"));
+    return { name: field.name, value: L.coerceInto(sourceNode, value, field.type) };
+  });
+  return { kind: "recordLit", fields, type, loc };
+}
+
+/** A pipe step that is a PROGRAM function value (`.pipe(statics((s) => …))`, `.pipe(withRetry)`): the call of that
+ * value with the accumulated source. Null when the step is not a one-parameter function. */
+export function applyProgramPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: SrcLoc): IrExpr | null {
+  const fn = L.lowerExpr(step);
+  const param = fn.type.kind === "func" ? fn.type.params[0] : undefined;
+  if (fn.type.kind !== "func" || param === undefined || fn.type.params.length !== 1 || fn.type.rest !== undefined) return null;
+  return { kind: "callValue", callee: fn, args: [L.coerceInto(step, source, param)], type: fn.type.ret, loc };
+}
+
+/** `Person.make(props)` on a schema CLASS: construction (effect's `make` is the constructor without `new`). */
+export function lowerSchemaClassMake(L: Lowerer, receiver: ts.Expression, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const sym = (ts.isIdentifier(receiver) ? L.resolveValueSymbol(receiver) : ts.isPropertyAccessExpression(receiver) ? L.checker.getSymbolAtLocation(receiver.name) : undefined) ?? undefined;
+  const aliased = sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0 ? L.checker.getAliasedSymbol(sym) : sym;
+  const info = aliased === undefined ? undefined : L.classBySymbol.get(aliased);
+  if (info === undefined || info.schema === undefined) return null;
+  L.noteEdge(`%${info.def.name}.constructor`);
+  const args = info.schema.propsType === null ? [] : L.completeArgs([...expr.arguments], info.ctorParams, loc, expr);
+  return { kind: "new", className: info.def.name, args, type: { kind: "object", className: info.def.name }, loc };
 }
 
 /** A decoder function value: `(input: unknown, …) => R` typed by the checker; the Option/Effect/Exit forms carry
@@ -210,6 +266,11 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
   const prim = SCHEMA_PRIMS[member];
   if (prim !== undefined && args.length === 0) return lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);
   if (member === "Defect" && args.length === 0) return lib("schema.prim", [strLit("defect", loc)], EFFECT_T, loc);
+  if (member === "tag" && first !== undefined && args.length === 1) {
+    const literal = L.lowerExpr(first);
+    if (literal.kind !== "strLit") L.unsupported("SC1090", first, "Schema.tag over a non-literal tag");
+    return wrap(`tag:${literal.value}`, lib("schema.prim", [strLit("unknown", loc)], EFFECT_T, loc), loc);
+  }
   const wrapKind = SCHEMA_WRAPS[member];
   if (wrapKind !== undefined && first !== undefined && args.length === 1) return wrap(wrapKind, handleArg(L, first, `Schema.${member}`), loc);
   if (member === "Literal" && first !== undefined && args.length === 1) {
@@ -227,8 +288,13 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
   if (member === "Struct" && first !== undefined && args.length === 1) {
     if (!ts.isObjectLiteralExpression(first)) L.unsupported("SC1090", first, "Schema.Struct over a non-literal fields object");
     const fields = L.lowerExpr(first);
-    if (fields.kind !== "recordLit" || fields.fields.some((f) => f.value.type.kind !== "effect" || f.overflow !== undefined || f.drop !== undefined)) L.unsupported("SC1090", first, "Schema.Struct fields that are not schema handles");
-    return lib("schema.struct", [fields], EFFECT_T, loc);
+    if (fields.kind !== "recordLit" || fields.fields.some((f) => f.overflow !== undefined || f.drop !== undefined)) L.unsupported("SC1090", first, "Schema.Struct fields that are not schema handles");
+    // The literal re-shapes over schema HANDLES (a decorated schema field unwraps to its slot): a fresh record whose
+    // every field is a handle, in the literal's declared order.
+    const order = fields.fields.map((f) => f.name);
+    const shapeId = L.shapes.intern([...order].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((name) => ({ name, type: EFFECT_T as IrType })), false, undefined, order);
+    const unwrapped: IrExpr = { kind: "recordLit", fields: fields.fields.map((f) => ({ name: f.name, value: unwrapSchema(L, f.value, first, "Schema.Struct") })), type: { kind: "record", shapeId }, loc };
+    return lib("schema.struct", [unwrapped], EFFECT_T, loc);
   }
   if (member === "Array" && first !== undefined && args.length === 1) return lib("schema.array", [handleArg(L, first, "Schema.Array")], EFFECT_T, loc);
   if (member === "Record" && first !== undefined && args[1] !== undefined && args.length <= 3) {
@@ -283,9 +349,10 @@ export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Express
  * `S.check(f, …)`. Null for any other member (the caller keeps its fences). */
 export function lowerSchemaHandleMethod(L: Lowerer, name: string, receiver: ts.Expression, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr | null {
   if (name === "make" && args.length >= 1 && args.length <= 2) {
+    // The props travel as a dynamic value so the Struct's constructor defaults (`Schema.tag`) apply; the result is the Type.
     const type = L.mapTypeOf(L.typeOf(expr));
     if (type === null) L.badType(expr, L.typeOf(expr));
-    return L.lowerExprExpecting(args[0]!, type);
+    return lib("schema.make", [handleArg(L, receiver, "make"), L.lowerExprExpecting(args[0]!, DYN)], type, loc);
   }
   if (name === "annotate" && args.length === 1) {
     // `annotate({ identifier: "X" })` names the schema in effect's messages; other annotations are not observable.

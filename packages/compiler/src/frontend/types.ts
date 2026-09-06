@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord } from "./kernel-types.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
@@ -1086,7 +1086,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // npmPackageOf intersection walk names the package). User-declared
   // intersections keep their existing story (a part declared in the
   // program or an external-type file fails the check).
-  if (widened.isIntersectionType()) { if (!ctx.dynamic) { const kept = withoutKernelBrands(checker, ts.constituentTypes(widened)); if (kept.length === 1 && kept[0] !== undefined) return mapType(kept[0], ctx); } // `string & Brand<"ID">`: the brand is type-level only
+  if (widened.isIntersectionType()) { if (!ctx.dynamic) { const kept = withoutKernelBrands(checker, ts.constituentTypes(widened)); if (kept.length === 1 && kept[0] !== undefined) return mapType(kept[0], ctx); const decorated = decoratedSchemaRecord(kept, ctx); if (decorated !== null) return decorated; } // `string & Brand<"ID">` is a string; `Schema & { statics }` a record with the schema slot (kernel-types.ts)
     const partNpm = (part: ts.Type): boolean => {
       const partSym = part.getAliasSymbol() ?? part.getSymbol();
       if (partSym) {
@@ -2904,7 +2904,7 @@ function mapBoundRecordIntersection(type: ts.Type, ctx: TypeMapperCtx): IrType |
 
   const fields = new Map<string, IrType>();
   const declaredOrder: string[] = [];
-  let indexValue: IrType | undefined;
+  let indexValue: IrType | undefined; let schemaSlot = false; // `S & M` with S a schema handle: the decorated record (kernel-types.ts)
   for (const part of parts) {
     let mapped: IrType | null;
     if (part.flags & ts.TypeFlags.TypeParameter) {
@@ -2919,7 +2919,7 @@ function mapBoundRecordIntersection(type: ts.Type, ctx: TypeMapperCtx): IrType |
     } else {
       mapped = mapType(part, ctx);
     }
-    if (mapped?.kind !== "record") return null;
+    if (mapped?.kind === "effect") { schemaSlot = true; continue; } if (mapped?.kind !== "record") return null;
     const shape = shapes.get(mapped.shapeId);
     if (!shape || shape.tuple) return null;
     for (const field of shape.fields) {
@@ -2936,7 +2936,7 @@ function mapBoundRecordIntersection(type: ts.Type, ctx: TypeMapperCtx): IrType |
       indexValue = shape.indexValue;
     }
   }
-  return {
+  if (schemaSlot) fields.set(SCHEMA_SLOT, EFFECT_T); return {
     kind: "record",
     shapeId: shapes.intern(
       [...fields]

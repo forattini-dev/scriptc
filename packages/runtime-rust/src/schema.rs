@@ -61,6 +61,8 @@ pub enum SchemaNode {
     Filter(SchemaFilter),
     /// `annotate({ identifier })`: the name the formatter uses for this schema.
     Named(JsString, Rc<SchemaNode>),
+    /// `Schema.tag("x")`: a required literal key that `make` fills in when absent.
+    Tag(SchemaLiteral),
 }
 
 fn schema_handle(node: SchemaNode) -> JsEffect {
@@ -121,6 +123,7 @@ pub fn schema_wrap(kind: &JsString, inner: &JsEffect) -> JsEffect {
         "optional" => schema_handle(SchemaNode::OptionalKey(Rc::new(SchemaNode::UndefinedOr(node)))),
         "optionalKey" => schema_handle(SchemaNode::OptionalKey(node)),
         named if named.starts_with("identifier:") => schema_handle(SchemaNode::Named(string(&named["identifier:".len()..]), node)),
+        tag if tag.starts_with("tag:") => schema_handle(SchemaNode::Tag(SchemaLiteral::Str(string(&tag["tag:".len()..])))),
         _ => inner.clone(),
     }
 }
@@ -249,6 +252,7 @@ fn expected_of(node: &SchemaNode) -> String {
         SchemaNode::OptionalKey(inner) | SchemaNode::Check(inner, _) => expected_of(inner),
         SchemaNode::Filter(_) => "unknown".to_owned(),
         SchemaNode::Named(name, _) => name.to_string(),
+        SchemaNode::Tag(literal) => render_literal(literal),
     }
 }
 
@@ -443,6 +447,7 @@ impl Decoder<'_> {
                 if filter_holds(filter, &value) { Ok(value) } else { Err(self.issue(&filter_expected(filter), &value)) }
             }
             SchemaNode::Filter(_) => Ok(input.clone()),
+            SchemaNode::Tag(literal) => self.decode(&SchemaNode::Literal(vec![literal.clone()]), input),
         }
     }
 }
@@ -453,4 +458,39 @@ pub fn schema_decode<T: ParseArgsValue + JsonValue>(schema: &JsEffect, input: &T
     let node = schema_node_of(schema);
     let mut decoder = Decoder { path: Vec::new(), _marker: std::marker::PhantomData };
     decoder.decode(&node, input).map_err(Rc::from)
+}
+
+/// `S.make(props)`: the props with a Struct's constructor defaults applied (a `tag` field absent from the props is
+/// filled with its literal); other schemas answer the props unchanged. The caller converts the result to the Type.
+pub fn schema_make<T: ParseArgsValue + JsonValue>(schema: &JsEffect, props: &T) -> T {
+    fn tag_value<T: ParseArgsValue>(literal: &SchemaLiteral) -> T {
+        match literal {
+            SchemaLiteral::Str(text) => T::parse_args_string_value(text.clone()),
+            SchemaLiteral::Num(n) => T::parse_args_number_value(*n),
+            SchemaLiteral::Bool(b) => T::parse_args_bool_value(*b),
+        }
+    }
+    let mut node = schema_node_of(schema);
+    while let SchemaNode::Named(_, inner) | SchemaNode::Check(inner, _) = &*node {
+        node = inner.clone();
+    }
+    let SchemaNode::Struct(fields) = &*node else { return props.clone() };
+    if props.parse_args_kind() != ParseArgsKind::Object {
+        return props.clone();
+    }
+    let entries = props.parse_args_object_entries().unwrap_or_default();
+    let output = T::parse_args_object_value();
+    for (name, value) in &entries {
+        output.parse_args_object_set(name.clone(), value.clone());
+    }
+    for field in fields {
+        if let SchemaNode::Tag(literal) = &*field.node {
+            // Absent, or present as `undefined` (a compiled record fills an optional key it was not given).
+            let given = entries.iter().any(|(name, value)| **name == *field.name && value.parse_args_kind() != ParseArgsKind::Undefined);
+            if !given {
+                output.parse_args_object_set(field.name.clone(), tag_value::<T>(literal));
+            }
+        }
+    }
+    output
 }

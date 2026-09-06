@@ -822,6 +822,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "schema.filter": ["c", "rust"],
   "schema.is": ["c", "rust"],
   "schema.literal": ["c", "rust"],
+  "schema.make": ["c", "rust"],
   "schema.prim": ["c", "rust"],
   "schema.record": ["c", "rust"],
   "schema.struct": ["c", "rust"],

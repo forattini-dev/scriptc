@@ -424,6 +424,10 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
     case "schema.test":
       if (first === undefined || second === undefined) break;
       return `runtime::schema_decode(&${context.emitExpr(first)}, &${context.emitExpr(second)}).is_ok()`;
+    case "schema.make":
+      // The props (as a dynamic value) with the Struct's constructor defaults applied, converted to the site's Type.
+      if (first === undefined || second === undefined) break;
+      return context.emitDynCheckValue(expr.type, `runtime::schema_make(&${context.emitExpr(first)}, &${context.emitExpr(second)})`, expr.loc);
     case "schema.decodeSync":
     case "schema.decodeOption":
     case "schema.decodeEffect":
