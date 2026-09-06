@@ -396,7 +396,7 @@ type IslandHostMember = (
 /// JavaScript calls but this table lacks is a TypeError at the CALL —
 /// which is exactly why the manifest lists only parts whose host surface
 /// is complete here.
-const ISLAND_HOST_MEMBERS: [IslandHostMember; 67] = [
+const ISLAND_HOST_MEMBERS: [IslandHostMember; 73] = [
     ("source", island_host_source, 1),
     ("resolve", island_host_resolve, 2),
     ("platform", island_host_platform, 0),
@@ -422,6 +422,13 @@ const ISLAND_HOST_MEMBERS: [IslandHostMember; 67] = [
     // The I/O bridge (island_host_io.rs): the arities match the C
     // island's registrations, because one body of JavaScript calls both.
     ("fs", island_host_fs, 4),
+    // The child-process bridge (island_host_child.rs).
+    ("childSpawn", island_host_child_spawn, 4),
+    ("childKill", island_host_child_kill, 2),
+    ("childStdinWrite", island_host_child_stdin_write, 2),
+    ("childStdinEnd", island_host_child_stdin_end, 1),
+    ("childUnref", island_host_child_unref, 1),
+    ("childSpawnSync", island_host_child_spawn_sync, 3),
     ("fsConstants", island_host_fs_constants, 0),
     ("digest", island_host_digest, 2),
     ("hmac", island_host_hmac, 3),

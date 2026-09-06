@@ -49,6 +49,8 @@ include!("island_host_io.rs");
 #[cfg(feature = "island-eval")]
 include!("island_host_net.rs");
 #[cfg(feature = "island-eval")]
+include!("island_host_child.rs");
+#[cfg(feature = "island-eval")]
 include!("island_host_http.rs");
 #[cfg(feature = "island-eval")]
 include!("island_fetch.rs");

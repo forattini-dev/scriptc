@@ -294,10 +294,10 @@ pub fn child_spawn_options(
     if !cwd.is_empty() {
         child_command.current_dir(cwd.as_ref());
     }
-    child_command.stdin(if stdin_mode == 1 {
-        Stdio::inherit()
-    } else {
-        Stdio::null()
+    child_command.stdin(match stdin_mode {
+        1 => Stdio::inherit(),
+        3 => Stdio::piped(),
+        _ => Stdio::null(),
     });
     child_command.stdout(match stdout_mode {
         1 => Stdio::inherit(),
@@ -318,6 +318,30 @@ pub fn child_spawn_options(
         stdout_mode == 3,
         stderr_mode == 3,
     )
+}
+
+/// Write to a piped stdin (mode 3). Blocking, in-thread: the pipe's own
+/// buffer absorbs a CLI's typical input; a producer that outruns a child
+/// which never reads is the documented limit. False when the child has
+/// no piped stdin (or it was already ended).
+pub fn child_stdin_write(child: &JsChild, bytes: &JsBytes<u8>) -> bool {
+    use std::io::Write;
+    let data = bytes_u8_values(bytes).to_vec();
+    child.with_mut(|child| {
+        let Some(stdin) = child.process.as_mut().and_then(|process| process.stdin.as_mut()) else {
+            return false;
+        };
+        stdin.write_all(&data).is_ok()
+    })
+}
+
+/// End a piped stdin: dropping the writer sends the child its EOF.
+pub fn child_stdin_end(child: &JsChild) {
+    child.with_mut(|child| {
+        if let Some(process) = child.process.as_mut() {
+            drop(process.stdin.take());
+        }
+    });
 }
 
 pub fn child_stdout(child: &JsChild) -> Option<JsChildStream> {

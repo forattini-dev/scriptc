@@ -1178,6 +1178,7 @@ fn island_eval_finish() {
     ISLAND_LOADER.with(|slot| *slot.borrow_mut() = None);
     with_tables(|t| *t = IslandTables::default());
     island_net_reset();
+        island_child_reset();
     island_fetch_requests_reset();
     island_promise_bridges_reset();
     island_parked_panic_reset();

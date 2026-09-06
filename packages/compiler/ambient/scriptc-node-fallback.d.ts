@@ -1644,9 +1644,13 @@ declare module "child_process" {
     on(event: "exit", listener: (code: number | null, signal: string | null) => void): void;
     on(event: "error", listener: (err: Error) => void): void;
     on(event: "close", listener: (code: number | null, signal: string | null) => void): void;
+    /* "spawn" fires once the child process has spawned (Node 15+); the
+     * island's child_process emits it, the static tier fences it. */
+    on(event: "spawn", listener: () => void): void;
     once(event: "exit", listener: (code: number | null, signal: string | null) => void): void;
     once(event: "error", listener: (err: Error) => void): void;
     once(event: "close", listener: (code: number | null, signal: string | null) => void): void;
+    once(event: "spawn", listener: () => void): void;
     /* The lifecycle members, Node's exact shapes: pid is undefined exactly
      * when the spawn failed; exitCode is null while running, the code
      * after a normal exit, null for a signal death, and -errno once a
@@ -1666,6 +1670,23 @@ declare module "child_process" {
      * stdio slot was "pipe" (Node's shape). */
     readonly stdout: NodeJS.ReadableStream | null;
     readonly stderr: NodeJS.ReadableStream | null;
+    /* The island's child_process serves the rest of Node's ChildProcess:
+     * a piped stdin, the stdio tuple, the signal that ended the child,
+     * the spawn record, ref. The static tier fences these per member. */
+    readonly stdin: import("stream").Writable | null;
+    readonly stdio: [import("stream").Writable | null, NodeJS.ReadableStream | null, NodeJS.ReadableStream | null];
+    readonly signalCode: string | null;
+    readonly spawnfile: string;
+    readonly spawnargs: string[];
+    ref(): void;
+  }
+  /* The error exec/execFile hand their callback on a non-zero exit or a
+   * spawn failure: Node's fields beside Error's. */
+  export interface ExecException extends Error {
+    code?: number | string;
+    killed?: boolean;
+    signal?: string | null;
+    cmd?: string;
   }
   interface SpawnOptions {
       /* The 3-tuple form admits number fds in the stdout/stderr slots —
@@ -1734,13 +1755,30 @@ declare module "child_process" {
     args?: string[] | null,
     options?: ExecSyncOptions,
   ): unknown;
+  /* The callback forms — the island's child_process serves them; the
+   * static tier fences a direct callback call at its site. */
+  export function execFile(
+    file: string,
+    callback: (error: ExecException | null, stdout: string, stderr: string) => void,
+  ): ChildProcess;
+  export function execFile(
+    file: string,
+    args: string[] | null,
+    callback: (error: ExecException | null, stdout: string, stderr: string) => void,
+  ): ChildProcess;
+  export function execFile(
+    file: string,
+    args: string[] | null,
+    options: ExecSyncOptions,
+    callback: (error: ExecException | null, stdout: string, stderr: string) => void,
+  ): ChildProcess;
   /* The async shell form — declared surface without full lowering (the
    * type-level tolerance story): harness code on paths tests don't reach
    * must typecheck; a reached call fences at its site. */
   export function exec(
     command: string,
-    options?: ExecSyncOptions | ((error: Error | null, stdout: string, stderr: string) => void),
-    callback?: (error: Error | null, stdout: string, stderr: string) => void,
+    options?: ExecSyncOptions | ((error: ExecException | null, stdout: string, stderr: string) => void),
+    callback?: (error: ExecException | null, stdout: string, stderr: string) => void,
   ): ChildProcess;
 }
 declare module "node:child_process" {

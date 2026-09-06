@@ -332,10 +332,14 @@ fn child_spawn_sync_core(
     stdout_mode: f64,
     stderr_mode: f64,
     env_pairs: Option<&JsArray<JsString>>,
+    cwd: &JsString,
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
     let mut child_command = Command::new(command.as_ref());
+    if !cwd.is_empty() {
+        child_command.current_dir(cwd.as_ref());
+    }
     if let Some(pairs) = env_pairs {
         child_command.env_clear();
         pairs.with(|pairs| {
@@ -436,6 +440,7 @@ pub fn child_spawn_sync(
         stdout_mode,
         stderr_mode,
         None,
+        &string(""),
     )
 }
 
@@ -459,6 +464,34 @@ pub fn child_spawn_sync_env(
         stdout_mode,
         stderr_mode,
         Some(env_pairs),
+        &string(""),
+    )
+}
+
+/// The island's spawnSync: every knob at once (cwd included), no throw
+/// on a non-zero exit — the result carries status/signal/error.
+#[allow(clippy::too_many_arguments)]
+pub fn child_spawn_sync_full(
+    command: &JsString,
+    arguments: &JsArray<JsString>,
+    timeout_ms: f64,
+    kill_signal: &JsString,
+    stdin_mode: f64,
+    stdout_mode: f64,
+    stderr_mode: f64,
+    env_pairs: Option<&JsArray<JsString>>,
+    cwd: &JsString,
+) -> JsSpawnResult {
+    child_spawn_sync_core(
+        command,
+        arguments,
+        timeout_ms,
+        kill_signal,
+        stdin_mode,
+        stdout_mode,
+        stderr_mode,
+        env_pairs,
+        cwd,
     )
 }
 
