@@ -35,6 +35,25 @@ fn v8_host_object() -> v8e::Value {
             };
             host_value(v8e::array(&[v8e::string(island_module_source(module)), v8e::number(format)]))
         }),
+        member("compileModule", 1, |args| {
+            // Node's CommonJS wrapper, compiled natively from the embedded
+            // text (no copy; the code cache carries it across runs) and
+            // named after the file, so stack traces read as Node's.
+            let key = arg_string(args, 0)?;
+            let Some(module) = island_module_find(&key) else { return Ok(v8e::HostResult::Undefined) };
+            if module.format != IslandModuleFormat::Cjs {
+                return Ok(v8e::HostResult::Undefined);
+            }
+            let cache_key = format!("cjs:{key}");
+            let function = v8e::compile_function_cached(
+                &cache_key,
+                std::borrow::Cow::Borrowed(island_module_source(module)),
+                &key,
+                &["exports", "require", "module", "__filename", "__dirname"],
+                v8_code_cache_get(&cache_key),
+            )?;
+            host_value(function)
+        }),
         member("resolve", 2, |args| {
             let from = arg_string(args, 0)?;
             let specifier = arg_string(args, 1)?;

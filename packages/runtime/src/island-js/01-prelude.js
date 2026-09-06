@@ -535,7 +535,11 @@
     if (parent !== undefined && !(key in parents)) parents[key] = parent;
     if (format === 2) { mod.exports = JSON.parse(src); return mod.exports; }
     if (format === 0) { delete cache[key]; throw new Error('require() of ES module ' + key); }
-    const fn = new Function('exports', 'require', 'module', '__filename', '__dirname', src);
+    /* A host that compiles natively (the V8 island: zero-copy source,
+     * code cache across runs, the file's name on the wrapper) answers the
+     * wrapper itself; the C island builds it here. */
+    const fn = (typeof host.compileModule === 'function' && host.compileModule(key)) ||
+      new Function('exports', 'require', 'module', '__filename', '__dirname', src);
     const req = (spec) => requireKey(resolveFrom(key, spec), key);
     req.cache = cache;
     const dir = key.slice(0, key.lastIndexOf('/')) || '/';

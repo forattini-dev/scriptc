@@ -101,6 +101,11 @@ struct Engine {
     module_sources: HashMap<String, String>,
     /// Keys compiled without a usable code cache this run, in order.
     cache_misses: Vec<String>,
+    /// Scripts (`eval_cached`) and functions (`compile_function_cached`)
+    /// compiled without a usable cache: their caches are produced at
+    /// `module_code_caches`, after they have run.
+    script_misses: Vec<(String, v8::Global<v8::UnboundScript>)>,
+    function_misses: Vec<(String, v8::Global<v8::Function>)>,
     resolver: Option<ModuleResolver>,
     host_fns: Vec<HostFn>,
     unhandled: Vec<(v8::Global<v8::Promise>, v8::Global<v8::Value>)>,
@@ -227,6 +232,8 @@ pub fn init() {
             module_promises: HashMap::new(),
             module_sources: HashMap::new(),
         cache_misses: Vec::new(),
+        script_misses: Vec::new(),
+        function_misses: Vec::new(),
             resolver: None,
             host_fns: Vec::new(),
             unhandled: Vec::new(),
@@ -1179,10 +1186,12 @@ impl ModuleSource {
     }
 }
 
-/// `eval` with a code cache: `cache` (from an earlier `eval_cached` of
-/// the same source) is consumed when V8 accepts it; when it is missing
-/// or rejected, the cache produced after the run comes back for storage.
-pub fn eval_cached(source: &'static str, name: &str, cache: Option<Rc<Vec<u8>>>) -> Result<(Value, Option<Vec<u8>>), Error> {
+/// `eval` with a code cache: `cache` (a cache `module_code_caches`
+/// reported under `key` in an earlier run) is consumed when V8 accepts
+/// it; otherwise the script is remembered and its cache — produced after
+/// it has run, so the functions it compiled lazily are included — comes
+/// out of `module_code_caches` under `key`.
+pub fn eval_cached(key: &str, source: &'static str, name: &str, cache: Option<Rc<Vec<u8>>>) -> Result<Value, Error> {
     enter!(scope);
     v8::tc_scope!(let tc, scope);
     let code = match source_string(tc, source, Some(source)) {
@@ -1212,12 +1221,79 @@ pub fn eval_cached(source: &'static str, name: &str, cache: Option<Rc<Vec<u8>>>)
     let Some(unbound) = script else {
         return Err(caught!(tc));
     };
+    if !usable {
+        let global = v8::Global::new(tc, unbound);
+        with_engine(|engine| engine.script_misses.push((key.to_owned(), global)));
+    }
     let script = unbound.bind_to_current_context(tc);
-    let Some(value) = script.run(tc) else {
+    match script.run(tc) {
+        Some(value) => Ok(Value(v8::Global::new(tc, value))),
+        None => Err(caught!(tc)),
+    }
+}
+
+/// A function compiled from `source` with `params` as its parameters —
+/// Node's CommonJS wrapper, without the `new Function` line offset —
+/// through the code cache like `eval_cached` (the cache is produced at
+/// `module_code_caches` after the function has run).
+pub fn compile_function_cached(
+    key: &str,
+    source: std::borrow::Cow<'static, str>,
+    name: &str,
+    params: &[&str],
+    cache: Option<Rc<Vec<u8>>>,
+) -> Result<Value, Error> {
+    enter!(scope);
+    v8::tc_scope!(let tc, scope);
+    let static_text = match &source {
+        std::borrow::Cow::Borrowed(text) => Some(*text),
+        std::borrow::Cow::Owned(_) => None,
+    };
+    let code = match source_string(tc, &source, static_text) {
+        Some(code) => code,
+        None => return Err(Error::text("RangeError", "source too large for the engine")),
+    };
+    let resource = v8::String::new(tc, name).unwrap_or_else(|| v8::String::empty(tc));
+    let origin = v8::ScriptOrigin::new(tc, resource.into(), 0, 0, false, 0, None, false, false, false, None);
+    let mut arguments = Vec::with_capacity(params.len());
+    for param in params {
+        let Some(param) = v8::String::new(tc, param) else {
+            return Err(Error::text("RangeError", "parameter name too large for the engine"));
+        };
+        arguments.push(param);
+    }
+    let (function, usable) = match cache {
+        Some(bytes) => {
+            let cached = v8::script_compiler::CachedData::new(bytes.as_slice());
+            let mut compiled = v8::script_compiler::Source::new_with_cached_data(code, Some(&origin), cached);
+            let function = v8::script_compiler::compile_function(
+                tc,
+                &mut compiled,
+                &arguments,
+                &[],
+                v8::script_compiler::CompileOptions::ConsumeCodeCache,
+                v8::script_compiler::NoCacheReason::NoReason,
+            );
+            let rejected = compiled.get_cached_data().is_none_or(|data| data.rejected());
+            (function, !rejected)
+        }
+        None => {
+            let mut compiled = v8::script_compiler::Source::new(code, Some(&origin));
+            (
+                v8::script_compiler::compile_function(tc, &mut compiled, &arguments, &[], v8::script_compiler::CompileOptions::NoCompileOptions, v8::script_compiler::NoCacheReason::NoReason),
+                false,
+            )
+        }
+    };
+    let Some(function) = function else {
         return Err(caught!(tc));
     };
-    let produced = if usable { None } else { unbound.create_code_cache().map(|data| data.to_vec()) };
-    Ok((Value(v8::Global::new(tc, value)), produced))
+    if !usable {
+        let global = v8::Global::new(tc, function);
+        with_engine(|engine| engine.function_misses.push((key.to_owned(), global)));
+    }
+    let value: v8::Local<v8::Value> = function.into();
+    Ok(Value(v8::Global::new(tc, value)))
 }
 
 /// The version tag of the code cache format this V8 produces; a cache
@@ -1236,7 +1312,19 @@ pub fn module_code_caches() -> Vec<(String, Vec<u8>)> {
     }
     enter!(scope);
     let misses = with_engine(|engine| std::mem::take(&mut engine.cache_misses));
-    let mut caches = Vec::with_capacity(misses.len());
+    let scripts = with_engine(|engine| std::mem::take(&mut engine.script_misses));
+    let functions = with_engine(|engine| std::mem::take(&mut engine.function_misses));
+    let mut caches = Vec::with_capacity(misses.len() + scripts.len() + functions.len());
+    for (key, script) in scripts {
+        if let Some(data) = v8::Local::new(scope, &script).create_code_cache() {
+            caches.push((key, data.to_vec()));
+        }
+    }
+    for (key, function) in functions {
+        if let Some(data) = v8::Local::new(scope, &function).create_code_cache() {
+            caches.push((key, data.to_vec()));
+        }
+    }
     for key in misses {
         let Some(module) = with_engine(|engine| engine.modules.get(&key).cloned()) else { continue };
         let local = v8::Local::new(scope, &module);
@@ -1418,6 +1506,38 @@ mod tests {
         let ns = import_module("stale").unwrap().unwrap();
         assert_eq!(as_number(&get(&ns, "s").unwrap()), Some(1.0));
         assert_eq!(module_code_caches().len(), 1, "a rejected cache is regenerated");
+    }
+
+    #[test]
+    fn script_and_function_caches_round_trip() {
+        setup();
+        let boot = eval_cached("boot", "(function (n) { return n + 1; })", "scriptc:test-boot", None).unwrap();
+        let wrapper = compile_function_cached("cjs:/m.js", "module.exports = exports.v = a * 2;".into(), "/m.js", &["exports", "module", "a"], None).unwrap();
+        let exports = object();
+        let module = object();
+        set(&module, "exports", &exports).unwrap();
+        call(&wrapper, None, &[exports.clone(), module.clone(), number(21.0)]).unwrap();
+        assert_eq!(as_number(&get(&module, "exports").unwrap()), Some(42.0));
+        assert_eq!(as_number(&get(&exports, "v").unwrap()), Some(42.0));
+        assert_eq!(as_number(&call(&boot, None, &[number(1.0)]).unwrap()), Some(2.0));
+        let caches = module_code_caches();
+        let keys: Vec<&str> = caches.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, vec!["boot", "cjs:/m.js"]);
+        let mut store: HashMap<String, Rc<Vec<u8>>> = HashMap::new();
+        for (key, data) in caches {
+            store.insert(key, Rc::new(data));
+        }
+        finish();
+        init();
+        let boot = eval_cached("boot", "(function (n) { return n + 1; })", "scriptc:test-boot", store.get("boot").cloned()).unwrap();
+        assert_eq!(as_number(&call(&boot, None, &[number(41.0)]).unwrap()), Some(42.0));
+        let wrapper = compile_function_cached("cjs:/m.js", "module.exports = exports.v = a * 2;".into(), "/m.js", &["exports", "module", "a"], store.get("cjs:/m.js").cloned()).unwrap();
+        let exports = object();
+        let module = object();
+        set(&module, "exports", &exports).unwrap();
+        call(&wrapper, None, &[exports, module.clone(), number(4.0)]).unwrap();
+        assert_eq!(as_number(&get(&module, "exports").unwrap()), Some(8.0));
+        assert!(module_code_caches().is_empty(), "both caches were accepted");
     }
 
     #[test]

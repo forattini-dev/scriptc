@@ -244,13 +244,8 @@ fn v8_ensure() {
         ("scriptc:web-globals", ISLAND_WEB_GLOBALS_BOOTSTRAP),
         ("scriptc:modules", ISLAND_MODULE_BOOTSTRAP),
     ] {
-        let boot = match v8e::eval_cached(source, name, v8_code_cache_get(name)) {
-            Ok((value, produced)) => {
-                if let Some(data) = produced {
-                    v8_code_cache_put(name, data);
-                }
-                value
-            }
+        let boot = match v8e::eval_cached(name, source, name, v8_code_cache_get(name)) {
+            Ok(value) => value,
             Err(error) => v8_throw(error),
         };
         if !v8e::is_function(&boot) {
@@ -294,9 +289,6 @@ fn island_eval_finish() {
 struct V8CodeCache {
     path: std::path::PathBuf,
     entries: HashMap<String, Rc<Vec<u8>>>,
-    /// Entries added since the file was read (bootstrap scripts compiled
-    /// fresh this run); the flush writes when there are any.
-    dirty: bool,
 }
 
 thread_local! {
@@ -401,16 +393,7 @@ fn v8_code_cache_open() {
         if v8_trace() {
             eprintln!("scriptc island: code cache {} ({} modules)", path.display(), entries.len());
         }
-        *slot.borrow_mut() = Some(V8CodeCache { path, entries, dirty: false });
-    });
-}
-
-fn v8_code_cache_put(key: &str, data: Vec<u8>) {
-    V8_CODE_CACHE.with(|slot| {
-        if let Some(cache) = slot.borrow_mut().as_mut() {
-            cache.entries.insert(key.to_owned(), Rc::new(data));
-            cache.dirty = true;
-        }
+        *slot.borrow_mut() = Some(V8CodeCache { path, entries });
     });
 }
 
@@ -430,8 +413,7 @@ fn v8_code_cache_flush() {
         return;
     }
     let produced = v8e::module_code_caches();
-    let dirty = V8_CODE_CACHE.with(|slot| slot.borrow().as_ref().is_some_and(|cache| cache.dirty));
-    if produced.is_empty() && !dirty {
+    if produced.is_empty() {
         return;
     }
     V8_CODE_CACHE.with(|slot| {
@@ -441,7 +423,6 @@ fn v8_code_cache_flush() {
         for (key, data) in produced {
             cache.entries.insert(key, Rc::new(data));
         }
-        cache.dirty = false;
         let bytes = v8_code_cache_serialize(&cache.entries);
         let written = cache.path.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && {
             let temp = cache.path.with_extension(format!("tmp{}", std::process::id()));

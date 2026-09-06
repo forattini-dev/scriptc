@@ -547,7 +547,11 @@ static const char isl_modules_bootstrap[] =
     "    if (parent !== undefined && !(key in parents)) parents[key] = parent;\n"
     "    if (format === 2) { mod.exports = JSON.parse(src); return mod.exports; }\n"
     "    if (format === 0) { delete cache[key]; throw new Error('require() of ES module ' + key); }\n"
-    "    const fn = new Function('exports', 'require', 'module', '__filename', '__dirname', src);\n"
+    /* A host that compiles natively (the V8 island: zero-copy source,
+     * code cache across runs, the file's name on the wrapper) answers the
+     * wrapper itself; the C island builds it here. */
+    "    const fn = (typeof host.compileModule === 'function' && host.compileModule(key)) ||\n"
+    "      new Function('exports', 'require', 'module', '__filename', '__dirname', src);\n"
     "    const req = (spec) => requireKey(resolveFrom(key, spec), key);\n"
     "    req.cache = cache;\n"
     "    const dir = key.slice(0, key.lastIndexOf('/')) || '/';\n"
