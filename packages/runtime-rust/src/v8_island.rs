@@ -244,7 +244,15 @@ fn v8_ensure() {
         ("scriptc:web-globals", ISLAND_WEB_GLOBALS_BOOTSTRAP),
         ("scriptc:modules", ISLAND_MODULE_BOOTSTRAP),
     ] {
-        let boot = ok(v8e::eval(source, name));
+        let boot = match v8e::eval_cached(source, name, v8_code_cache_get(name)) {
+            Ok((value, produced)) => {
+                if let Some(data) = produced {
+                    v8_code_cache_put(name, data);
+                }
+                value
+            }
+            Err(error) => v8_throw(error),
+        };
         if !v8e::is_function(&boot) {
             throw_type_error(format!("scriptc: island bootstrap {name} is not callable"));
         }
@@ -264,7 +272,11 @@ fn island_eval_finish() {
     v8_code_cache_flush();
     v8_trace_summary();
     island_modules_reset();
+    let started = std::time::Instant::now();
     v8e::finish();
+    if v8_trace() {
+        eprintln!("scriptc island: isolate disposed in {:.1} ms", started.elapsed().as_secs_f64() * 1e3);
+    }
     V8_BOOTED.with(|flag| flag.set(false));
 }
 
@@ -282,6 +294,9 @@ fn island_eval_finish() {
 struct V8CodeCache {
     path: std::path::PathBuf,
     entries: HashMap<String, Rc<Vec<u8>>>,
+    /// Entries added since the file was read (bootstrap scripts compiled
+    /// fresh this run); the flush writes when there are any.
+    dirty: bool,
 }
 
 thread_local! {
@@ -386,7 +401,16 @@ fn v8_code_cache_open() {
         if v8_trace() {
             eprintln!("scriptc island: code cache {} ({} modules)", path.display(), entries.len());
         }
-        *slot.borrow_mut() = Some(V8CodeCache { path, entries });
+        *slot.borrow_mut() = Some(V8CodeCache { path, entries, dirty: false });
+    });
+}
+
+fn v8_code_cache_put(key: &str, data: Vec<u8>) {
+    V8_CODE_CACHE.with(|slot| {
+        if let Some(cache) = slot.borrow_mut().as_mut() {
+            cache.entries.insert(key.to_owned(), Rc::new(data));
+            cache.dirty = true;
+        }
     });
 }
 
@@ -406,7 +430,8 @@ fn v8_code_cache_flush() {
         return;
     }
     let produced = v8e::module_code_caches();
-    if produced.is_empty() {
+    let dirty = V8_CODE_CACHE.with(|slot| slot.borrow().as_ref().is_some_and(|cache| cache.dirty));
+    if produced.is_empty() && !dirty {
         return;
     }
     V8_CODE_CACHE.with(|slot| {
@@ -416,6 +441,7 @@ fn v8_code_cache_flush() {
         for (key, data) in produced {
             cache.entries.insert(key, Rc::new(data));
         }
+        cache.dirty = false;
         let bytes = v8_code_cache_serialize(&cache.entries);
         let written = cache.path.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && {
             let temp = cache.path.with_extension(format!("tmp{}", std::process::id()));
@@ -439,17 +465,22 @@ fn v8_source_of(key: &str) -> Result<v8e::ModuleSource, String> {
         let json = module.format == IslandModuleFormat::Json;
         return Ok(v8e::ModuleSource {
             key: key.to_owned(),
-            source: if json { island_module_source(module).to_owned() } else { island_module_esm_source(module) },
+            source: if json { std::borrow::Cow::Borrowed(island_module_source(module)) } else { island_module_esm_text(module) },
             json,
             code_cache: if json { None } else { v8_code_cache_get(key) },
         });
     }
     if key.starts_with("node:") {
-        return Ok(v8e::ModuleSource { key: key.to_owned(), source: island_builtin_wrapper(key), json: false, code_cache: None });
+        return Ok(v8e::ModuleSource {
+            key: key.to_owned(),
+            source: std::borrow::Cow::Owned(island_builtin_wrapper(key)),
+            json: false,
+            code_cache: v8_code_cache_get(key),
+        });
     }
     if V8_EXTERNAL.with(|external| external.borrow().contains(key)) {
         return match std::fs::read_to_string(key) {
-            Ok(source) => Ok(v8e::ModuleSource { key: key.to_owned(), source, json: key.ends_with(".json"), code_cache: None }),
+            Ok(source) => Ok(v8e::ModuleSource { key: key.to_owned(), source: std::borrow::Cow::Owned(source), json: key.ends_with(".json"), code_cache: None }),
             Err(error) => Err(format!("could not open file `{key}`: {error}")),
         };
     }

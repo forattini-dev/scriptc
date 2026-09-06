@@ -65,7 +65,10 @@ pub type HostFn = Rc<dyn Fn(&[Value]) -> HostResult>;
 #[derive(Clone, Debug)]
 pub struct ModuleSource {
     pub key: String,
-    pub source: String,
+    /// The module text. A BORROWED text that is Latin-1 becomes a V8
+    /// external string (no copy into the heap): embedded graphs are tens
+    /// of megabytes, and their sources already live for the process.
+    pub source: std::borrow::Cow<'static, str>,
     /// A JSON module: `source` is the JSON text, the default export is
     /// the parsed value.
     pub json: bool,
@@ -191,6 +194,13 @@ macro_rules! enter {
 pub fn init() {
     STATS.with(|slot| slot.set(Stats::default()));
     PLATFORM.call_once(|| {
+        // Engine flags for experiments (`--prof`, `--single-threaded`,
+        // `--max-lazy`…); they must land before the platform starts.
+        if let Ok(flags) = std::env::var("SCRIPTC_V8_FLAGS")
+            && !flags.is_empty()
+        {
+            v8::V8::set_flags_from_string(&flags);
+        }
         let platform = v8::new_default_platform(0, false).make_shared();
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
@@ -909,11 +919,11 @@ fn module_for<'s>(scope: &mut v8::PinScope<'s, '_>, source: ModuleSource) -> Opt
     let module = if source.json {
         let export_names = [v8::String::new(scope, "default")?];
         with_engine(|engine| {
-            engine.module_sources.insert(source.key.clone(), source.source.clone());
+            engine.module_sources.insert(source.key.clone(), source.source.to_string());
         });
         v8::Module::create_synthetic_module(scope, name, &export_names, synthetic_json_steps)
     } else {
-        let text = v8::String::new(scope, &source.source)?;
+        let text = source_string(scope, &source.source, source.static_text())?;
         let origin = v8::ScriptOrigin::new(scope, name.into(), 0, 0, false, 0, None, false, false, true, None);
         let (module, usable) = match &source.code_cache {
             Some(bytes) => {
@@ -1147,6 +1157,67 @@ fn stats_update(update: impl FnOnce(&mut Stats)) {
 /// The counters since `init`.
 pub fn stats() -> Stats {
     STATS.with(Cell::get)
+}
+
+/// A V8 string for a source text: a borrowed ASCII text is wrapped as an
+/// external one-byte string (V8 reads the bytes in place for the
+/// isolate's life); anything else is copied in.
+fn source_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, static_text: Option<&'static str>) -> Option<v8::Local<'s, v8::String>> {
+    match static_text {
+        Some(text) if text.is_ascii() => v8::String::new_external_onebyte_static(scope, text.as_bytes()),
+        _ => v8::String::new(scope, text),
+    }
+}
+
+impl ModuleSource {
+    /// The text when it is borrowed for the process's life.
+    fn static_text(&self) -> Option<&'static str> {
+        match &self.source {
+            std::borrow::Cow::Borrowed(text) => Some(text),
+            std::borrow::Cow::Owned(_) => None,
+        }
+    }
+}
+
+/// `eval` with a code cache: `cache` (from an earlier `eval_cached` of
+/// the same source) is consumed when V8 accepts it; when it is missing
+/// or rejected, the cache produced after the run comes back for storage.
+pub fn eval_cached(source: &'static str, name: &str, cache: Option<Rc<Vec<u8>>>) -> Result<(Value, Option<Vec<u8>>), Error> {
+    enter!(scope);
+    v8::tc_scope!(let tc, scope);
+    let code = match source_string(tc, source, Some(source)) {
+        Some(code) => code,
+        None => return Err(Error::text("RangeError", "source too large for the engine")),
+    };
+    let resource = v8::String::new(tc, name).unwrap_or_else(|| v8::String::empty(tc));
+    let origin = v8::ScriptOrigin::new(tc, resource.into(), 0, 0, false, 0, None, false, false, false, None);
+    let (script, usable) = match cache {
+        Some(bytes) => {
+            let cached = v8::script_compiler::CachedData::new(bytes.as_slice());
+            let mut compiled = v8::script_compiler::Source::new_with_cached_data(code, Some(&origin), cached);
+            let script = v8::script_compiler::compile_unbound_script(
+                tc,
+                &mut compiled,
+                v8::script_compiler::CompileOptions::ConsumeCodeCache,
+                v8::script_compiler::NoCacheReason::NoReason,
+            );
+            let rejected = compiled.get_cached_data().is_none_or(|data| data.rejected());
+            (script, !rejected)
+        }
+        None => {
+            let mut compiled = v8::script_compiler::Source::new(code, Some(&origin));
+            (v8::script_compiler::compile_unbound_script(tc, &mut compiled, v8::script_compiler::CompileOptions::NoCompileOptions, v8::script_compiler::NoCacheReason::NoReason), false)
+        }
+    };
+    let Some(unbound) = script else {
+        return Err(caught!(tc));
+    };
+    let script = unbound.bind_to_current_context(tc);
+    let Some(value) = script.run(tc) else {
+        return Err(caught!(tc));
+    };
+    let produced = if usable { None } else { unbound.create_code_cache().map(|data| data.to_vec()) };
+    Ok((Value(v8::Global::new(tc, value)), produced))
 }
 
 /// The version tag of the code cache format this V8 produces; a cache

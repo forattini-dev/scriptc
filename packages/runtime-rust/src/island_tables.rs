@@ -277,11 +277,18 @@ pub(crate) fn island_builtin_wrapper(key: &str) -> String {
 /// plus the names the compiler's CJS lexer found), which is Node's
 /// interop exactly; a facade-less CJS or JSON file takes the
 /// default-only wrapper.
+#[cfg(feature = "island-eval")]
 pub(crate) fn island_module_esm_source(module: &IslandModule) -> String {
+    island_module_esm_text(module).into_owned()
+}
+
+/// `island_module_esm_source` without the copy: the embedded text is
+/// borrowed for the process's life, only a synthesized wrapper is owned.
+pub(crate) fn island_module_esm_text(module: &IslandModule) -> std::borrow::Cow<'static, str> {
     match module.format {
-        IslandModuleFormat::Esm => island_module_source(module).to_owned(),
+        IslandModuleFormat::Esm => std::borrow::Cow::Borrowed(island_module_source(module)),
         IslandModuleFormat::Cjs | IslandModuleFormat::Json => island_module_esm(module)
-            .map_or_else(|| island_builtin_wrapper(module.key), str::to_owned),
+            .map_or_else(|| std::borrow::Cow::Owned(island_builtin_wrapper(module.key)), std::borrow::Cow::Borrowed),
     }
 }
 
