@@ -8,7 +8,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isIslandModulePath } from "../tiering.js";
-import { isRelativeSpecifier, isRuntimeSourceFileName, isKernelModule } from "../shared.js";
+import { isRelativeSpecifier, isRuntimeSourceFileName, isKernelModule } from "../shared.js"; import { kernelServiceIdOf } from "../kernel.js";
 import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
@@ -50,7 +50,7 @@ export interface FileParts {
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
       for (const stmt of sf.statements) {
         if (ts.isFunctionDeclaration(stmt)) fp.fnDecls.push(stmt);
-        else if (ts.isClassDeclaration(stmt)) fp.classDecls.push(stmt);
+        else if (ts.isClassDeclaration(stmt)) { if (L.dynamic || kernelServiceIdOf(L.checker, stmt) === null) fp.classDecls.push(stmt); } // a kernel service key class is a value, not a class
         // Namespaces: ambient/type-only ones are zero-runtime and skip;
         // instantiated bodies FLATTEN into this file's parts (functions/
         // classes hoist under namespace-qualified names, statements join

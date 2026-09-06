@@ -11,7 +11,7 @@ function traced(context: RustLibCallContext, callback: string): string {
 }
 
 export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
-  if (!expr.fn.startsWith("effect.")) return null;
+  if (!expr.fn.startsWith("effect.") && !expr.fn.startsWith("layer.")) return null;
   const first = expr.args[0];
   const second = expr.args[1];
   switch (expr.fn) {
@@ -96,6 +96,28 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.andThenEffect":
       if (first === undefined || second === undefined) break;
       return `runtime::effect_zip_right(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.serviceKey":
+      if (first === undefined) break;
+      return `runtime::effect_service_key(&${context.emitExpr(first)})`;
+    case "effect.provideService":
+      if (first === undefined || second === undefined || expr.args[2] === undefined) break;
+      return `runtime::effect_provide_service(&${context.emitExpr(first)}, &${context.emitExpr(second)}, runtime::effect_box(${context.emitExpr(expr.args[2])}))`;
+    case "effect.provide":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_provide(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "layer.empty":
+      return "runtime::layer_empty()";
+    case "layer.succeed":
+      if (first === undefined || second === undefined) break;
+      return `runtime::layer_succeed(&${context.emitExpr(first)}, runtime::effect_box(${context.emitExpr(second)}))`;
+    case "layer.effect":
+    case "layer.provide":
+    case "layer.provideMerge":
+    case "layer.merge": {
+      if (first === undefined || second === undefined) break;
+      const runtimeFn = { "layer.effect": "layer_effect", "layer.provide": "layer_provide", "layer.provideMerge": "layer_provide_merge", "layer.merge": "layer_merge" }[expr.fn];
+      return `runtime::${runtimeFn}(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    }
     case "effect.fail":
     case "effect.die":
       if (first === undefined) break;

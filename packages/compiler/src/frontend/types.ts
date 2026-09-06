@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js";
+import * as ts from "./ts7/adapter.js"; import { kernelServiceIdOf } from "./kernel.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
@@ -1063,7 +1063,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
-  if (!ctx.dynamic && npmSym?.name === "Effect" && npmDecls?.some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T;
+  if (!ctx.dynamic && (npmSym?.name === "Effect" || npmSym?.name === "Layer") && npmDecls?.some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/](Effect|Layer)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; // effects and layers are the kernel's opaque handle
   if (
     npmDecls &&
     npmDecls.length > 0 &&
@@ -1136,16 +1136,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // `import * as path` member calls into the engine — dynamic imports of
   // builtins get their handles from the import lowering's IR type
   // instead.
-  // T[]: monomorphic arrays, recursively (number[][] works). An element type that doesn't map (never from a context-free
-  // `[]`) makes the whole array unsupported — null propagates. Record/object/union elements ride the runtime's REF element
-  // kind (per-array RC entry points, the map-value technique), and PROMISE elements ride it too (Promise<T>[] is Promise.all's
-  // food: refcounted, cycle-headered values with `_v` adapters like any other ref element — they just never JSON-serialize or
-  // cross the island boundary, which the safety predicates already refuse). FUNCTION elements ride REF too (closure `_v`
-  // adapters + scr_closure_trace_v — closures are cycle-headered): `f === f` identity through indexOf/includes is sound because
-  // a function VALUE is one ScrClosure for its whole life — top-level declarations intern one immortal closure, inner closures
-  // are allocated once at their definition's evaluation and flow by reference, exactly JS's function identity. map/set/regex/
-  // url/dyn, Date (scalar-backed but identity-bearing) and the other opaque handles stay unsupported as array elements; ordinary
-  // Date locals, params, fixed record/tuple fields, and promise payloads are supported.
+  // T[]: monomorphic arrays, recursively (number[][] works). An element type that doesn't map (never from a context-free `[]`)
+  // makes the whole array unsupported — null propagates. Record/object/union elements ride the runtime's REF element kind (per-array
+  // RC entry points, the map-value technique), PROMISE elements too (Promise<T>[] is Promise.all's food: refcounted, cycle-headered
+  // values with `_v` adapters — they just never JSON-serialize or cross the island boundary, which the safety predicates refuse), and
+  // FUNCTION elements (closure `_v` adapters + scr_closure_trace_v): `f === f` identity through indexOf/includes is sound because a
+  // function VALUE is one ScrClosure for its whole life (top-level declarations intern one immortal closure, inner closures allocate
+  // once at their definition's evaluation and flow by reference — JS's function identity). map/set/regex/url/dyn, Date (scalar-backed
+  // but identity-bearing) and the other opaque handles stay unsupported as array elements; ordinary Date locals, params, fixed record/tuple fields, and promise payloads are supported.
   if (checker.isArrayType(widened)) {
     const elemTs = checker.getTypeArguments(widened as ts.TypeReference)[0];
     if (!elemTs) return null;
@@ -1358,6 +1356,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // it maps to classval below.
   const widenedSym = widened.getSymbol();
   const classDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
+  if (!ctx.dynamic && classDecl && ts.isClassDeclaration(classDecl) && kernelServiceIdOf(checker, classDecl) !== null) return EFFECT_T; // a service key class: instance and static sides are the key handle
   if (
     classDecl &&
     (ts.isClassDeclaration(classDecl) || ts.isClassExpression(classDecl)) &&

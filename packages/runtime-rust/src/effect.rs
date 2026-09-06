@@ -74,10 +74,31 @@ enum EffectNode {
     Ignore(JsEffect),
     ZipRight(JsEffect, JsEffect),
     Gen(GenFn, TraceFn),
+    /// A service key: run, it looks the service up in the fiber's environment (`yield* Service`).
+    ServiceKey(Rc<str>),
+    /// `Effect.provideService` / a built layer's bundle provided to the inner effect.
+    ProvideBundle(JsEffect, Bundle),
+    /// `Effect.provide(e, layer)`: the layer builds (an effect answering its bundle), then provides.
+    ProvideLayer(JsEffect, JsEffect),
+    /// A layer description (`Layer<…>` values share the handle).
+    Layer(LayerNode),
     /// `Effect.promise`: a rejection is a defect.
     Promise(PromiseFn, TraceFn),
     /// `Effect.tryPromise`: a rejection becomes the failure `recover` answers.
     TryPromise(PromiseFn, RecoverFn, TraceFn),
+}
+
+/// The services a layer answers / a provide installs: `(key, value)` pairs, later entries shadowing earlier ones.
+pub type Bundle = Rc<Vec<(Rc<str>, EffectValue)>>;
+
+#[derive(Clone)]
+pub enum LayerNode {
+    Empty,
+    Succeed(Rc<str>, EffectValue),
+    Effect(Rc<str>, JsEffect),
+    /// `Layer.provide(outer, inner)`: inner's services feed outer's build and stay hidden; `provideMerge` keeps them.
+    Provide(JsEffect, JsEffect, bool),
+    Merge(JsEffect, JsEffect),
 }
 
 pub struct EffectData {
@@ -87,7 +108,20 @@ pub struct EffectData {
 impl Trace for EffectData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         match &self.node {
-            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) => {}
+            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::ServiceKey(_) => {}
+            EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
+            EffectNode::ProvideLayer(inner, layer) => {
+                tracer.edge(inner);
+                tracer.edge(layer);
+            }
+            EffectNode::Layer(layer) => match layer {
+                LayerNode::Empty | LayerNode::Succeed(..) => {}
+                LayerNode::Effect(_, effect) => tracer.edge(effect),
+                LayerNode::Provide(a, b, _) | LayerNode::Merge(a, b) => {
+                    tracer.edge(a);
+                    tracer.edge(b);
+                }
+            },
             EffectNode::Sync(_, trace) | EffectNode::Gen(_, trace) | EffectNode::Promise(_, trace) | EffectNode::TryPromise(_, _, trace) => trace(tracer),
             EffectNode::OrDie(inner) | EffectNode::As(inner, _) | EffectNode::Ignore(inner) => tracer.edge(inner),
             EffectNode::ZipRight(inner, next) => {
@@ -173,6 +207,107 @@ pub fn effect_try_promise(thunk: PromiseFn, recover: RecoverFn, trace: TraceFn) 
     effect_new(EffectNode::TryPromise(thunk, recover, trace))
 }
 
+fn key_of(handle: &JsEffect) -> Rc<str> {
+    handle.with(|data| match &data.node {
+        EffectNode::ServiceKey(key) => key.clone(),
+        _ => throw_error("scriptc: a service key was expected".to_owned()),
+    })
+}
+
+pub fn effect_service_key(id: &JsString) -> JsEffect {
+    effect_new(EffectNode::ServiceKey(Rc::from(id.as_ref())))
+}
+
+pub fn effect_provide_service(source: &JsEffect, key: &JsEffect, value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::ProvideBundle(source.clone(), Rc::new(vec![(key_of(key), value)])))
+}
+
+pub fn effect_provide(source: &JsEffect, layer: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::ProvideLayer(source.clone(), layer.clone()))
+}
+
+pub fn layer_empty() -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Empty))
+}
+
+pub fn layer_succeed(key: &JsEffect, value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Succeed(key_of(key), value)))
+}
+
+pub fn layer_effect(key: &JsEffect, effect: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Effect(key_of(key), effect.clone())))
+}
+
+pub fn layer_provide(outer: &JsEffect, inner: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Provide(outer.clone(), inner.clone(), false)))
+}
+
+pub fn layer_provide_merge(outer: &JsEffect, inner: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Provide(outer.clone(), inner.clone(), true)))
+}
+
+pub fn layer_merge(left: &JsEffect, right: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::Merge(left.clone(), right.clone())))
+}
+
+fn no_trace() -> TraceFn {
+    Box::new(|_| {})
+}
+
+fn bundle_of(value: &EffectValue) -> Bundle {
+    value.downcast_ref::<Bundle>().expect("scriptc: a service bundle was expected").clone()
+}
+
+fn bundle_join(left: &Bundle, right: &Bundle) -> EffectValue {
+    let mut joined: Vec<(Rc<str>, EffectValue)> = Vec::with_capacity(left.len() + right.len());
+    joined.extend(left.iter().cloned());
+    joined.extend(right.iter().cloned());
+    Rc::new(Rc::new(joined) as Bundle)
+}
+
+/// A layer's BUILD as an effect answering its bundle: succeed/effect are
+/// leaves, merge joins, provide feeds the inner bundle to the outer build
+/// (hiding it unless merged). No memoization yet: a layer referenced twice
+/// builds twice.
+fn layer_build(layer: &JsEffect) -> JsEffect {
+    let node = layer.with(|data| match &data.node {
+        EffectNode::Layer(node) => node.clone(),
+        _ => throw_error("scriptc: a layer was expected".to_owned()),
+    });
+    match node {
+        LayerNode::Empty => effect_succeed(Rc::new(Rc::new(Vec::new()) as Bundle)),
+        LayerNode::Succeed(key, value) => effect_succeed(Rc::new(Rc::new(vec![(key, value)]) as Bundle)),
+        LayerNode::Effect(key, effect) => effect_map(&effect, Rc::new(move |value| Rc::new(Rc::new(vec![(key.clone(), value)]) as Bundle)), no_trace()),
+        LayerNode::Merge(left, right) => {
+            let right_build = layer_build(&right);
+            effect_flat_map(
+                &layer_build(&left),
+                Rc::new(move |left_bundle| {
+                    let left_bundle = bundle_of(&left_bundle);
+                    effect_map(&right_build, Rc::new(move |right_bundle| bundle_join(&left_bundle, &bundle_of(&right_bundle))), no_trace())
+                }),
+                no_trace(),
+            )
+        }
+        LayerNode::Provide(outer, inner, merge) => {
+            let outer_build = layer_build(&outer);
+            effect_flat_map(
+                &layer_build(&inner),
+                Rc::new(move |inner_bundle| {
+                    let inner_bundle = bundle_of(&inner_bundle);
+                    let provided = effect_new(EffectNode::ProvideBundle(outer_build.clone(), inner_bundle.clone()));
+                    if merge {
+                        effect_map(&provided, Rc::new(move |outer_bundle| bundle_join(&inner_bundle, &bundle_of(&outer_bundle))), no_trace())
+                    } else {
+                        provided
+                    }
+                }),
+                no_trace(),
+            )
+        }
+    }
+}
+
 pub fn effect_gen<R: Clone + 'static>(make: Rc<dyn Fn() -> JsGenerator<JsEffect, R, JsEffect>>, trace: TraceFn) -> JsEffect {
     let erased: GenFn = Rc::new(move || Box::new(TypedGen(make())) as Box<dyn EffectGen>);
     effect_new(EffectNode::Gen(erased, trace))
@@ -190,6 +325,8 @@ enum Frame {
     Ignore,
     ZipRight(JsEffect),
     Gen(Box<dyn EffectGen>),
+    /// Leave a provide scope: drop this many environment entries.
+    PopEnv(usize),
 }
 
 type Outcome = Result<EffectValue, EffectValue>;
@@ -197,6 +334,10 @@ type Outcome = Result<EffectValue, EffectValue>;
 enum Step {
     Done(Outcome),
     Push(Frame, JsEffect),
+    /// Look a service up (`yield* Service`).
+    Lookup(Rc<str>),
+    /// Enter a provide scope with these services, then run the inner effect.
+    Enter(Bundle, JsEffect),
     Resume(Box<dyn EffectGen>),
     /// Suspend on a promise; `recover` (tryPromise) turns a rejection into
     /// a failure, its absence (promise) makes the rejection a defect.
@@ -221,13 +362,15 @@ pub struct EffectFiber {
     current: Option<JsEffect>,
     resumed: Option<Outcome>,
     frames: Vec<Frame>,
+    /// The services in scope, innermost provide last.
+    env: Vec<(Rc<str>, EffectValue)>,
     on_exit: Option<Box<dyn FnOnce(Outcome)>>,
 }
 
 type FiberRef = Rc<RefCell<EffectFiber>>;
 
 fn fiber_new(effect: &JsEffect, on_exit: Box<dyn FnOnce(Outcome)>) -> FiberRef {
-    Rc::new(RefCell::new(EffectFiber { current: Some(effect.clone()), resumed: None, frames: Vec::new(), on_exit: Some(on_exit) }))
+    Rc::new(RefCell::new(EffectFiber { current: Some(effect.clone()), resumed: None, frames: Vec::new(), env: Vec::new(), on_exit: Some(on_exit) }))
 }
 
 fn effect_step(effect: &JsEffect) -> Step {
@@ -245,6 +388,13 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Ignore(inner) => Step::Push(Frame::Ignore, inner.clone()),
         EffectNode::ZipRight(inner, next) => Step::Push(Frame::ZipRight(next.clone()), inner.clone()),
         EffectNode::Gen(make, _) => Step::Resume(make()),
+        EffectNode::ServiceKey(key) => Step::Lookup(key.clone()),
+        EffectNode::ProvideBundle(inner, bundle) => Step::Enter(bundle.clone(), inner.clone()),
+        EffectNode::ProvideLayer(inner, layer) => {
+            let inner = inner.clone();
+            Step::Push(Frame::FlatMap(Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle))))), layer_build(layer))
+        }
+        EffectNode::Layer(_) => throw_error("scriptc: a layer is not an effect (Effect.provide it)".to_owned()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
     })
@@ -268,6 +418,20 @@ fn fiber_drive(fiber: &FiberRef) {
                     continue;
                 }
                 Step::Done(outcome) => outcome,
+                Step::Lookup(key) => {
+                    let found = fiber.borrow().env.iter().rev().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+                    match found {
+                        Some(value) => Ok(value),
+                        None => throw_error(format!("Service not found: {key}")),
+                    }
+                }
+                Step::Enter(bundle, inner) => {
+                    let mut state = fiber.borrow_mut();
+                    state.env.extend(bundle.iter().cloned());
+                    state.frames.push(Frame::PopEnv(bundle.len()));
+                    state.current = Some(inner);
+                    continue;
+                }
                 // A fresh generator: the first resume's value is ignored (JS semantics).
                 Step::Resume(generator) => match generator.resume(effect_succeed(Rc::new(()))) {
                     EffectStep::Yielded(next) => {
@@ -330,6 +494,13 @@ fn fiber_drive(fiber: &FiberRef) {
                     None
                 }
                 (Frame::ZipRight(next), Ok(_)) => Some(next),
+                (Frame::PopEnv(count), passthrough) => {
+                    let mut state = fiber.borrow_mut();
+                    let keep = state.env.len().saturating_sub(count);
+                    state.env.truncate(keep);
+                    outcome = Some(passthrough);
+                    None
+                }
                 (Frame::Gen(generator), Ok(value)) => match generator.resume(effect_succeed(value)) {
                     EffectStep::Yielded(next) => {
                         fiber.borrow_mut().frames.push(Frame::Gen(generator));

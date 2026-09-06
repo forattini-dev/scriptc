@@ -1,0 +1,41 @@
+/* Kernel package recognition shared by the type mapper and the lowering:
+ * which program declarations the native kernels serve. */
+import * as ts from "./ts7/adapter.js";
+
+const EFFECT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
+
+/** The effect namespace (`Context`, `Effect`, …) an expression names, by the provenance of its alias target. */
+export function effectNamespaceOfNode(checker: ts.TypeChecker, node: ts.Expression): string | null {
+  if (!ts.isIdentifier(node)) return null;
+  let symbol = checker.getSymbolAtLocation(node);
+  if (symbol === undefined) return null;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+  for (const decl of checker.declarationsOf(symbol)) {
+    if (!ts.isSourceFile(decl)) continue;
+    const match = EFFECT_DIST.exec(decl.fileName);
+    if (match) return match[1]!;
+  }
+  return null;
+}
+
+/** `class Service extends Context.Service<Self, Shape>()("id") {}` — a kernel SERVICE KEY declaration: the class is the
+ * key (an effect that looks the service up), never a runtime class. Answers the id, or null for any other class. */
+export function kernelServiceIdOf(checker: ts.TypeChecker, decl: ts.ClassLikeDeclaration): string | null {
+  const heritage = decl.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)?.types[0];
+  if (heritage === undefined) return null;
+  const outer = heritage.expression;
+  if (!ts.isCallExpression(outer) || outer.arguments.length !== 1 || !ts.isStringLiteral(outer.arguments[0]!)) return null;
+  const inner = outer.expression;
+  if (!ts.isCallExpression(inner) || inner.arguments.length !== 0) return null;
+  const member = inner.expression;
+  if (!ts.isPropertyAccessExpression(member) || !ts.isIdentifier(member.name) || member.name.text !== "Service") return null;
+  return effectNamespaceOfNode(checker, member.expression) === "Context" ? outer.arguments[0]!.text : null;
+}
+
+/** The kernel service id a VALUE symbol names (the class, through import aliases), or null. */
+export function kernelServiceIdOfSymbol(checker: ts.TypeChecker, symbol: ts.Symbol | undefined): string | null {
+  if (symbol === undefined) return null;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+  const decl = checker.valueDeclarationOf(symbol);
+  return decl !== undefined && ts.isClassDeclaration(decl) ? kernelServiceIdOf(checker, decl) : null;
+}

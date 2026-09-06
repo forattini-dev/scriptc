@@ -7,8 +7,9 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { EFFECT_T, IrExpr, IrLibFn, IrType, SrcLoc } from "../../ir/nodes.js";
+import { EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
+import { kernelServiceIdOfSymbol } from "../kernel.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 
@@ -44,12 +45,26 @@ function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
   return { kind: "libCall", fn, args, type, loc };
 }
 
-/** `Effect.void` and the other VALUE members of the namespace (property
- * reads); null for anything else (the property chain keeps trying). */
+/** A reference to a kernel SERVICE KEY class (`Service`, `Config.Service` through a program namespace, an import alias):
+ * the key value — an effect that looks the service up. Null for anything else. */
+export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.PropertyAccessExpression): IrExpr | null {
+  if (L.dynamic) return null;
+  const id = kernelServiceIdOfSymbol(L.checker, L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name));
+  if (id === null) return null;
+  const loc = locOf(node);
+  return lib("effect.serviceKey", [{ kind: "strLit", value: id, type: STRING, loc }], EFFECT_T, loc);
+}
+
+/** `Effect.void`, `Layer.empty` and the other VALUE members of the namespaces (property reads), plus service key
+ * classes read through a namespace; null for anything else (the property chain keeps trying). */
 export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-  if (!ts.isIdentifier(expr.name) || effectNamespaceOf(L, expr.expression) !== "Effect") return null;
+  if (!ts.isIdentifier(expr.name)) return null;
+  const key = lowerServiceKeyRef(L, expr);
+  if (key !== null) return key;
+  const ns = effectNamespaceOf(L, expr.expression);
   const loc = locOf(expr);
-  if (expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
+  if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
+  if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
   return null;
 }
 
@@ -81,8 +96,10 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
     if (fn !== undefined) return lib(fn, [source], EFFECT_T, loc);
     L.unsupported("SC1090", step, `the effect kernel does not cover Effect.${step.name.text} as a pipe step yet`);
   }
-  if (ts.isCallExpression(step) && ts.isPropertyAccessExpression(step.expression) && ts.isIdentifier(step.expression.name) && effectNamespaceOf(L, step.expression.expression) === "Effect") {
-    return lowerEffectMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
+  if (ts.isCallExpression(step) && ts.isPropertyAccessExpression(step.expression) && ts.isIdentifier(step.expression.name)) {
+    const stepNs = effectNamespaceOf(L, step.expression.expression);
+    if (stepNs === "Effect") return lowerEffectMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
+    if (stepNs === "Layer") return lowerLayerMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
   }
   return L.unsupported("SC1090", step, "the effect kernel covers pipe steps that are Effect.* combinators");
 }
@@ -109,8 +126,50 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
   const ns = effectNamespaceOf(L, callee.expression);
   if (ns === null) return null;
+  if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+}
+
+/** One `Layer.member` call, the same shape as lowerEffectMember. Layers are kernel handles like effects. */
+function lowerLayerMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const total = pre.length + args.length;
+  const lowered = new Map<number, IrExpr>();
+  const at = (index: number): IrExpr => {
+    const hit = lowered.get(index);
+    if (hit !== undefined) return hit;
+    const value = index < pre.length ? pre[index]! : L.lowerExpr(args[index - pre.length]!);
+    lowered.set(index, value);
+    return value;
+  };
+  const handles = (count: number): boolean => total === count && Array.from({ length: count }, (_, i) => at(i).type.kind === "effect").every(Boolean);
+  switch (member) {
+    case "succeed":
+      if (total === 2 && at(0).type.kind === "effect") return lib("layer.succeed", [at(0), at(1)], EFFECT_T, loc);
+      break;
+    case "effect":
+      if (handles(2)) return lib("layer.effect", [at(0), at(1)], EFFECT_T, loc);
+      break;
+    case "provide":
+    case "provideMerge":
+    case "merge":
+      if (handles(2)) return lib(member === "provide" ? "layer.provide" : member === "provideMerge" ? "layer.provideMerge" : "layer.merge", [at(0), at(1)], EFFECT_T, loc);
+      break;
+    case "mergeAll": {
+      if (total === 0) break;
+      let acc = at(0);
+      if (acc.type.kind !== "effect") break;
+      for (let i = 1; i < total; i++) {
+        const next = at(i);
+        if (next.type.kind !== "effect") return L.unsupported("SC1090", expr, "Layer.mergeAll over non-layer arguments");
+        acc = lib("layer.merge", [acc, next], EFFECT_T, loc);
+      }
+      return acc;
+    }
+    default:
+      break;
+  }
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Layer.${member} in this call shape yet`);
 }
 
 /** One `Effect.member` call: `pre` are already-lowered leading arguments (a pipe's accumulated effect), `args` the
@@ -212,6 +271,15 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (next.type.kind !== "func" || next.type.params.length > 1) break;
         return lib(next.type.ret.kind === "effect" ? "effect.flatMap" : "effect.map", [source, next], EFFECT_T, loc);
       }
+      case "provide":
+        if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provide", [at(0), at(1)], EFFECT_T, loc);
+        break;
+      case "provideService":
+        if (total === 3 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provideService", [at(0), at(1), at(2)], EFFECT_T, loc);
+        break;
+      case "service":
+        if (total === 1 && at(0).type.kind === "effect") return at(0); // a key IS the effect that looks the service up
+        break;
       case "runSync":
       case "runPromise": {
         if (total !== 1) break;

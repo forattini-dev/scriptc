@@ -37,6 +37,7 @@
  * statement is not modeled — same as top-level const reads through early
  * calls). */
 import * as ts from "../ts7/adapter.js";
+import { kernelServiceIdOf } from "../kernel.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
@@ -124,7 +125,7 @@ export function collectNamespaceStmt(L: Lowerer, decl: ts.ModuleDeclaration, fp:
   L.nsBlocks.set(body, "flattened");
   for (const s of body.statements) {
     if (ts.isFunctionDeclaration(s)) fp.fnDecls.push(s);
-    else if (ts.isClassDeclaration(s)) fp.classDecls.push(s);
+    else if (ts.isClassDeclaration(s)) { if (L.dynamic || kernelServiceIdOf(L.checker, s) === null) fp.classDecls.push(s); }
     else if (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s)) continue;
     else if (ts.isModuleDeclaration(s)) collectNamespaceStmt(L, s, fp);
     // Everything else — member variables, side-effecting statements,
