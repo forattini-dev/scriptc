@@ -11,9 +11,9 @@
   },
   "preflightFailed": false,
   "stats": {
-    "statementsTotal": 146,
-    "statementsFailed": 3,
-    "statementsIsland": 14,
+    "statementsTotal": 147,
+    "statementsFailed": 1,
+    "statementsIsland": 15,
     "functionsSkipped": 0
   },
   "unreachedStats": {
@@ -23,51 +23,33 @@
     "functionsSkipped": 0
   },
   "reached": {
-    "total": 3,
+    "total": 1,
     "byCode": {
-      "SC1090": 2,
-      "SC2020": 1
+      "SC1090": 1
     },
     "byFamily": {
-      "syntax-other": 2,
-      "stdlib-tail": 1
+      "syntax-other": 1
     },
     "byPackage": {
-      "(other)": 3
+      "(other)": 1
     },
     "families": [
       {
         "family": "syntax-other",
-        "count": 2,
-        "codes": {
-          "SC1090": 2
-        },
-        "packages": {
-          "(other)": 2
-        },
-        "sample": {
-          "file": "main.ts",
-          "message": "passing a value of type 'Date' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can c"
-        }
-      },
-      {
-        "family": "stdlib-tail",
         "count": 1,
         "codes": {
-          "SC2020": 1
+          "SC1090": 1
         },
         "packages": {
           "(other)": 1
         },
         "sample": {
           "file": "main.ts",
-          "message": "'process.on(\"uncaughtException\", ...)' is part of the standard library types but has no scriptc lowering yet"
+          "message": "switch on non-primitive values are not supported yet"
         }
       }
     ],
-    "stdlibTail": {
-      "process.on(\"uncaughtException\", ...)": 1
-    }
+    "stdlibTail": {}
   },
   "unreached": {
     "total": 29,
@@ -913,10 +895,10 @@
     }
   ],
   "timing": {
-    "wallMs": 30522,
+    "wallMs": 39362,
     "phases": {
-      "ffi-validate": 48,
-      "reachable-emit": 3103
+      "ffi-validate": 69,
+      "reachable-emit": 4195
     }
   }
 }

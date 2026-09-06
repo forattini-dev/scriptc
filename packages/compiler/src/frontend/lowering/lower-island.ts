@@ -159,6 +159,10 @@ import {
       // have no JSON marshal but an honest per-field/per-element island
       // construction — the same lift the implicit coercion path uses.
       if (L.jsvalLiftable(e.type)) return L.jsvalLiftExpr(e, e.loc);
+      // A Date crossing INTO the island: a fresh engine Date at the same
+      // instant (identity does not cross; Node's would be the same object).
+      // Rust backend only.
+      if (e.type.kind === "date") return { kind: "jsMarshal", value: e, type: JSVAL, loc: e.loc };
       L.unsupported("SC1090", node, boundaryIntoIslandMsg(L.fmt(e.type)));
     }
     return { kind: "jsMarshal", value: e, type: JSVAL, loc: e.loc };

@@ -1127,6 +1127,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.onUnhandledRejection": { argTypes: [DYN, BOOL], result: VOID },
   "process.offUnhandledRejection": { argTypes: [DYN], result: VOID },
   "process.onRejectionHandled": { argTypes: [DYN, BOOL], result: VOID },
+  "process.onUncaughtException": { argTypes: [DYN, BOOL], result: VOID },
+  "process.offUncaughtException": { argTypes: [DYN], result: VOID },
   "process.offRejectionHandled": { argTypes: [DYN], result: VOID },
   "process.onWarning": { argTypes: [DYN], result: VOID },
   "process.offWarning": { argTypes: [DYN], result: VOID },
@@ -5129,6 +5131,7 @@ function validateFunction(
         if (
           src.kind !== "bytes" &&
           src.kind !== "url" &&
+          src.kind !== "date" && // a fresh engine Date at the same instant (Rust backend)
           src.kind !== "dyn" && // dyn values deep-copy in (data kinds; the runtime throws on boxes)
           // A STATIC promise crosses as a real engine thenable when its
           // fulfillment is in the reverse bridge's payload domain

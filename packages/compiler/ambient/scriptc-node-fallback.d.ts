@@ -278,21 +278,25 @@ declare var process: {
    * event, fired once when a delivered promise later gains a handler
    * (promise payload, Node's shape). */
   on(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
+  on(event: "uncaughtException", listener: (err: Error) => void): void;
   on(event: "rejectionHandled", listener: (promise: unknown) => void): void;
   once(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   once(event: "exit", listener: (code: number) => void): void;
   once(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
+  once(event: "uncaughtException", listener: (err: Error) => void): void;
   once(event: "rejectionHandled", listener: (promise: unknown) => void): void;
   off(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   off(event: "exit", listener: (code: number) => void): void;
   off(event: "warning", listener: (warning: Error & { code?: string }) => void): void;
   off(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
+  off(event: "uncaughtException", listener: (err: Error) => void): void;
   off(event: "rejectionHandled", listener: (promise: unknown) => void): void;
   /* removeListener IS off — Node aliases them; both lower identically. */
   removeListener(event: "SIGINT" | "SIGTERM" | "SIGWINCH", listener: () => void): void;
   removeListener(event: "exit", listener: (code: number) => void): void;
   removeListener(event: "warning", listener: (warning: Error & { code?: string }) => void): void;
   removeListener(event: "unhandledRejection", listener: (reason: unknown, promise: unknown) => void): void;
+  removeListener(event: "uncaughtException", listener: (err: Error) => void): void;
   removeListener(event: "rejectionHandled", listener: (promise: unknown) => void): void;
   /* emitWarning — Node's full grammar (string or Error warning; type/
    * ctor/options second; code/ctor third). */

@@ -190,6 +190,8 @@ export class RustEventEmitterEmitter {
         ? this.emitProcessExit(expr)
         : null;
       case "process.onUnhandledRejection": return this.emitProcessRejectionOn(expr, true);
+      case "process.onUncaughtException": return this.emitProcessUncaughtOn(expr);
+      case "process.offUncaughtException": return this.emitProcessUncaughtOff(expr);
       case "process.offUnhandledRejection": return this.emitProcessRejectionOff(expr, true);
       case "process.onRejectionHandled": return this.emitProcessRejectionOn(expr, false);
       case "process.offRejectionHandled": return this.emitProcessRejectionOff(expr, false);
@@ -518,6 +520,23 @@ export class RustEventEmitterEmitter {
     return `sc_process_rejection_on(${unhandled}, ${this.context.emitExpr(callback)}, ${this.context.emitExpr(once)})`;
   }
 
+  private emitProcessUncaughtOn(expr: RustLibCallExpr): string {
+    const [callback, once] = expr.args;
+    if (callback?.type.kind !== "dyn" || once?.type.kind !== "bool" || expr.args.length !== 2 ||
+      expr.type.kind !== "void") {
+      this.context.unsupported("process uncaughtException listener registration shape", expr.loc);
+    }
+    return `sc_process_uncaught_on(${this.context.emitExpr(callback)}, ${this.context.emitExpr(once)})`;
+  }
+
+  private emitProcessUncaughtOff(expr: RustLibCallExpr): string {
+    const [callback] = expr.args;
+    if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
+      this.context.unsupported("process uncaughtException listener removal shape", expr.loc);
+    }
+    return `sc_process_uncaught_off(${this.context.emitExpr(callback)})`;
+  }
+
   private emitProcessRejectionOff(expr: RustLibCallExpr, unhandled: boolean): string {
     const [callback] = expr.args;
     if (callback?.type.kind !== "dyn" || expr.args.length !== 1 || expr.type.kind !== "void") {
@@ -536,11 +555,12 @@ export class RustEventEmitterEmitter {
     this.context.line("static SC_PROCESS_UNHANDLED_REJECTION: std::cell::RefCell<Vec<ScProcessRejectionListener>> = const { std::cell::RefCell::new(Vec::new()) };");
     this.context.line("static SC_PROCESS_REJECTION_HANDLED: std::cell::RefCell<Vec<ScProcessRejectionListener>> = const { std::cell::RefCell::new(Vec::new()) };");
     this.context.line("static SC_PROCESS_REJECTION_REGISTRATION: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };");
+    this.context.line("static SC_PROCESS_UNCAUGHT: std::cell::RefCell<Vec<ScProcessRejectionListener>> = const { std::cell::RefCell::new(Vec::new()) };");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("fn sc_process_rejection_sync_hooks() {");
     this.context.pushIndent();
-    this.context.line(`if SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow().is_empty()) { runtime::promise_set_unhandled_rejection_handler(None); } else { runtime::promise_set_unhandled_rejection_handler(Some(std::rc::Rc::new(|reason, promise| sc_process_rejection_fire(true, vec![sc_dyn_from_caught(reason), ${dyn}::Promise(promise)])))); }`);
+    this.context.line(`if SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow().is_empty()) { if SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow().is_empty()) { runtime::promise_set_unhandled_rejection_handler(None); } else { runtime::promise_set_unhandled_rejection_handler(Some(std::rc::Rc::new(|reason, _promise| { sc_process_uncaught_fire(sc_dyn_from_caught(reason)); }))); } } else { runtime::promise_set_unhandled_rejection_handler(Some(std::rc::Rc::new(|reason, promise| sc_process_rejection_fire(true, vec![sc_dyn_from_caught(reason), ${dyn}::Promise(promise)])))); }`);
     this.context.line(`if SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow().is_empty()) { runtime::promise_set_rejection_handled_handler(None); } else { runtime::promise_set_rejection_handled_handler(Some(std::rc::Rc::new(|promise| sc_process_rejection_fire(false, vec![${dyn}::Promise(promise)])))); }`);
     this.context.popIndent();
     this.context.line("}");
@@ -567,8 +587,42 @@ export class RustEventEmitterEmitter {
     this.context.line("for listener in snapshot { if listener.once { if unhandled { SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow_mut().retain(|candidate| candidate.registration != listener.registration)); } else { SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow_mut().retain(|candidate| candidate.registration != listener.registration)); } sc_process_rejection_sync_hooks(); } let _ = sc_dyn_call(&listener.callback, &args, \"listener\"); }");
     this.context.popIndent();
     this.context.line("}");
+    // 'uncaughtException': its own registry over the same listener shape.
+    // sc_process_uncaught_fire answers whether anyone listened — the
+    // program entry then keeps the loop running instead of exiting 1.
+    this.context.line(`fn sc_process_uncaught_on(callback: ${dyn}, once: bool) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("let registration = SC_PROCESS_REJECTION_REGISTRATION.with(|next| { let value = next.get(); next.set(value.checked_add(1).expect(\"scriptc: process listener registrations overflowed\")); value });");
+    this.context.line("SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow_mut().push(ScProcessRejectionListener { registration, callback, identity, once }));");
+    this.context.line("sc_process_rejection_sync_hooks();");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_uncaught_off(callback: ${dyn}) {`);
+    this.context.pushIndent();
+    this.context.line("let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail(\"listener\", \"of type function\", &callback));");
+    this.context.line("SC_PROCESS_UNCAUGHT.with(|listeners| { let mut listeners = listeners.borrow_mut(); if let Some(index) = listeners.iter().rposition(|listener| listener.identity == identity) { listeners.remove(index); } });");
+    this.context.line("sc_process_rejection_sync_hooks();");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line(`fn sc_process_uncaught_fire(reason: ${dyn}) -> bool {`);
+    this.context.pushIndent();
+    this.context.line("let snapshot = SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow().clone());");
+    this.context.line("if snapshot.is_empty() { return false; }");
+    this.context.line("for listener in snapshot { if listener.once { SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow_mut().retain(|candidate| candidate.registration != listener.registration)); } let _ = sc_dyn_call(&listener.callback, &[reason.clone()], \"listener\"); }");
+    this.context.line("sc_process_rejection_sync_hooks();");
+    this.context.line("true");
+    this.context.popIndent();
+    this.context.line("}");
+    this.context.line("fn sc_process_uncaught_dispatch_caught(caught: runtime::Caught) -> bool {");
+    this.context.pushIndent();
+    this.context.line("if SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow().is_empty()) { drop(caught); return false; }");
+    this.context.line("sc_process_uncaught_fire(sc_dyn_from_caught(caught))");
+    this.context.popIndent();
+    this.context.line("}");
     this.context.line("fn sc_process_rejection_clear() {");
     this.context.pushIndent();
+    this.context.line("SC_PROCESS_UNCAUGHT.with(|listeners| listeners.borrow_mut().clear());");
     this.context.line("SC_PROCESS_UNHANDLED_REJECTION.with(|listeners| listeners.borrow_mut().clear());");
     this.context.line("SC_PROCESS_REJECTION_HANDLED.with(|listeners| listeners.borrow_mut().clear());");
     this.context.line("sc_process_rejection_sync_hooks();");

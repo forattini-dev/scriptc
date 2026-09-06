@@ -97,6 +97,7 @@ class RustEmitter {
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
   private usesProcessRejectionEvents = false;
+  private usesProcessUncaughtListeners = false;
   private usesProcessWarningEvents = false;
   private readonly streams = new RustStreamModel();
   private readonly containerExpressions = new RustContainerExpressionEmitter({
@@ -586,6 +587,7 @@ class RustEmitter {
       usesDynamicInvoke: this.usesDynamicInvoke,
       usesProcessExitListeners: this.usesProcessExitListeners,
       usesProcessRejectionEvents: this.usesProcessRejectionEvents,
+      usesProcessUncaughtListeners: this.usesProcessUncaughtListeners,
       usesProcessWarningEvents: this.usesProcessWarningEvents,
       usesEmbeddedModules: hasRustEmbeddedModules(this.mod),
       ...(this.mod.runtimeTarget === undefined ? {} : { runtimeTarget: this.mod.runtimeTarget }),
@@ -656,10 +658,11 @@ class RustEmitter {
         this.emitterListenerShapes.set(typeKey(callback.type), shape);
       }
       if (node.kind === "libCall" && typeof node.fn === "string" &&
-        ["process.onUnhandledRejection", "process.offUnhandledRejection", "process.onRejectionHandled", "process.offRejectionHandled", "process.onWarning", "process.offWarning", "process.emitWarning"].includes(node.fn)) {
+        ["process.onUnhandledRejection", "process.offUnhandledRejection", "process.onRejectionHandled", "process.offRejectionHandled", "process.onUncaughtException", "process.offUncaughtException", "process.onWarning", "process.offWarning", "process.emitWarning"].includes(node.fn)) {
         this.usesEventEmitter = true;
         if (node.fn.endsWith("Warning")) this.usesProcessWarningEvents = true;
         else this.usesProcessRejectionEvents = true;
+        if (node.fn.endsWith("UncaughtException")) this.usesProcessUncaughtListeners = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
         (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {

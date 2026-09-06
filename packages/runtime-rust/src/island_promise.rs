@@ -133,3 +133,15 @@ pub fn island_value_error(caught: &Caught) -> IslandValue {
         IslandValue(value)
     })
 }
+
+/// A native Date's epoch milliseconds as a fresh engine `Date` — the
+/// same instant, a new identity (SEMANTICS.md: identity never crosses).
+pub fn island_value_date(ms: f64) -> IslandValue {
+    with_island_state(|state| {
+        let constructor = state.context.intrinsics().constructors().date().constructor();
+        let value = constructor
+            .construct(&[JsValue::from(ms)], None, &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+        IslandValue(value.into())
+    })
+}

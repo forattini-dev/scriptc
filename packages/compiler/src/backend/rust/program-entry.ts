@@ -12,6 +12,9 @@ export interface RustProgramEntryOptions {
   readonly usesDynamicInvoke: boolean;
   readonly usesProcessExitListeners: boolean;
   readonly usesProcessRejectionEvents: boolean;
+  /** process.on("uncaughtException") listeners: a synchronous throw or the
+   * entry's rejection dispatches to them and the loop runs on. */
+  readonly usesProcessUncaughtListeners: boolean;
   readonly usesProcessWarningEvents: boolean;
   readonly usesEmbeddedModules: boolean;
   readonly runtimeTarget?: NonNullable<IrModule["runtimeTarget"]>;
@@ -77,14 +80,23 @@ export function emitRustProgramEntry(options: RustProgramEntryOptions): string[]
     "    }));",
     "    let (_sc_unhandled_rejection, _sc_uncaught, _sc_unsettled_tla) = match _sc_execution {",
     "        Ok((unhandled, async_error, unsettled)) => {",
+    ...(options.usesProcessUncaughtListeners
+      ? ["            let async_error = async_error.and_then(|caught: runtime::Caught| if sc_process_uncaught_dispatch_caught(caught.clone()) { drop(caught); runtime::run_event_loop(); None } else { Some(caught) });"]
+      : []),
     `            let message = async_error.map(|caught| { let message = ${options.hasErrorClasses ? "sc_caught_to_string" : "runtime::caught_to_string"}(&caught); drop(caught); message });`,
     "            (unhandled, message, unsettled)",
     "        },",
     "        Err(payload) => {",
     "            let caught = runtime::caught_from_panic(payload);",
+    ...(options.usesProcessUncaughtListeners
+      ? [
+        "            if sc_process_uncaught_dispatch_caught(caught.clone()) { drop(caught); let _sc_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(runtime::run_event_loop)); (runtime::had_unhandled_rejection(), _sc_after.err().map(|payload| { let caught = runtime::caught_from_panic(payload); let message = " + (options.hasErrorClasses ? "sc_caught_to_string" : "runtime::caught_to_string") + "(&caught); drop(caught); message }), false) } else {",
+      ]
+      : []),
     `            let message = ${options.hasErrorClasses ? "sc_caught_to_string" : "runtime::caught_to_string"}(&caught);`,
     "            drop(caught);",
     "            (false, Some(message), false)",
+    ...(options.usesProcessUncaughtListeners ? ["            }"] : []),
     "        },",
     "    };",
   );

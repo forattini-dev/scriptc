@@ -4127,6 +4127,8 @@ export type IrLibFn =
    * offWarning stance. Throws Node's ERR_INVALID_ARG_TYPE on a
    * non-function. */
   | "process.onUnhandledRejection"
+  | "process.onUncaughtException"
+  | "process.offUncaughtException"
   | "process.offUnhandledRejection"
   /** process.on/once/off('rejectionHandled', fn): the sibling registry.
    * A handler attached after unhandledRejection delivery fires the event
@@ -6513,6 +6515,7 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "async.awaitDyn", "timers.immediatePromise",
     "process.onUnhandledRejection", "process.offUnhandledRejection",
     "process.onRejectionHandled", "process.offRejectionHandled",
+    "process.onUncaughtException", "process.offUncaughtException",
     "process.onWarning", "process.offWarning", "process.emitWarning",
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
@@ -7246,6 +7249,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dc.tcTracePromise",
   "process.onUnhandledRejection",
   "process.onRejectionHandled",
+  "process.onUncaughtException",
   "async.awaitDyn",
   "als.run",
   "als.exitRun",

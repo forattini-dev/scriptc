@@ -6656,6 +6656,26 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       // registry's story. 'rejectionHandled' is the sibling registry:
       // a handler attached after delivery fires it once, synchronously
       // with the promise.
+      // 'uncaughtException': the listener crosses as a dyn function; the
+      // program entry dispatches a synchronous throw or the entry's
+      // rejection to it and keeps the loop running for the handler's own
+      // async work (Node continues unless the handler exits), and an
+      // unhandled rejection reaches it when no 'unhandledRejection'
+      // listener exists (Node's default --unhandled-rejections=throw).
+      // Rust backend only.
+      if (event === "uncaughtException") {
+        if (!ts.isExpressionStatement(call.parent)) {
+          L.unsupported(
+            "SC1090",
+            call,
+            "chaining process listener registration (the result is void here — register each listener as its own statement)",
+          );
+        }
+        const cb = dcSubscriberArg(L, call.arguments[1]!);
+        const onceArg: IrExpr = { kind: "boolLit", value: member === "once", type: BOOL, loc };
+        const fn: IrLibFn = isOff ? "process.offUncaughtException" : "process.onUncaughtException";
+        return { kind: "libCall", fn, args: isOff ? [cb] : [cb, onceArg], type: VOID, loc };
+      }
       if (event === "unhandledRejection" || event === "rejectionHandled") {
         if (!ts.isExpressionStatement(call.parent)) {
           L.unsupported(
@@ -6695,7 +6715,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           `process.${member}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
           call.arguments[0]!,
-          '"SIGINT", "SIGTERM", "SIGWINCH", "exit", "warning", "unhandledRejection", and "rejectionHandled" are the supported process events (as literals)',
+          '"SIGINT", "SIGTERM", "SIGWINCH", "exit", "warning", "unhandledRejection", "rejectionHandled", and "uncaughtException" are the supported process events (as literals)',
         );
       }
       if (!ts.isExpressionStatement(call.parent)) {

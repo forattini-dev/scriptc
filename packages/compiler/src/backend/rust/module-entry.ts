@@ -14,6 +14,7 @@ export interface RustModuleEntryOptions {
   readonly usesDynamicInvoke: boolean;
   readonly usesProcessExitListeners: boolean;
   readonly usesProcessRejectionEvents: boolean;
+  readonly usesProcessUncaughtListeners: boolean;
   readonly usesProcessWarningEvents: boolean;
   readonly usesEmbeddedModules: boolean;
   readonly runtimeTarget?: NonNullable<IrModule["runtimeTarget"]>;
@@ -50,6 +51,7 @@ export function emitRustModuleEntry(options: RustModuleEntryOptions): string[] {
     usesDynamicInvoke: options.usesDynamicInvoke,
     usesProcessExitListeners: options.usesProcessExitListeners,
     usesProcessRejectionEvents: options.usesProcessRejectionEvents,
+    usesProcessUncaughtListeners: options.usesProcessUncaughtListeners,
     usesProcessWarningEvents: options.usesProcessWarningEvents,
     usesEmbeddedModules: options.usesEmbeddedModules,
     ...(options.runtimeTarget === undefined ? {} : { runtimeTarget: options.runtimeTarget }),
