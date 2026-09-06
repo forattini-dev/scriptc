@@ -2,6 +2,7 @@ import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir
 import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
+import { emitRustEffectCall } from "./effect-kernel.js";
 import { emitRustHttpCall } from "./http.js";
 import { emitRustNetCall } from "./net.js";
 import { emitRustOsCall } from "./os.js";
@@ -79,6 +80,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (dynamicCall !== null) return dynamicCall;
   const childProcessCall = emitRustChildProcessCall(expr, context);
   if (childProcessCall !== null) return childProcessCall;
+  const effectCall = emitRustEffectCall(expr, context);
+  if (effectCall !== null) return effectCall;
   const dgramCall = emitRustDgramCall(expr, context);
   if (dgramCall !== null) return dgramCall;
   const tlsCall = emitRustTlsCall(expr, context);

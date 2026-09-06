@@ -130,12 +130,11 @@ export type IrType =
    * ONE mutable builtin value kind — the event loop reaps the child and
    * fires its registered listeners (scr_async.c polls at quiescence).
    * Holds closures until the terminal event fires, then drops them (the
-   * registry releases every listener at reap, so a listener capturing its
-   * own child never cycles past reap — and every child IS reaped before
-   * loop exit, Node's keep-alive semantics). Lean allocation, no trace:
-   * the pre-reap closure edges are guaranteed dropped. Same container
-   * rules as stats: union arms fine, arrays/maps/JSON fenced. */
+   * registry releases every listener at reap, so a listener capturing its own child never cycles past
+   * reap — and every child IS reaped before loop exit, Node's keep-alive semantics). Lean allocation, no
+   * trace: the pre-reap closure edges are guaranteed dropped. Same container rules as stats: union arms fine, arrays/maps/JSON fenced. */
   | { kind: "child" }
+  | { kind: "effect" } // the effect kernel's `Effect<A, E, R>` (static builds): an opaque refcounted description the native kernel runs; A/E are read from the checker at the boundaries
   /** A node:net server handle (scr_net.c — linked only when the IR uses
    * the net surface). Heap, refcounted, MUTABLE like child: the event
    * loop's net hook accepts connections and fires its listeners.
@@ -315,7 +314,7 @@ const POINTER_HANDLE_KINDS = [
   "stats",
   "fileHandle",
   "spawnRes",
-  "child",
+  "child", "effect",
   "netServer",
   "netSocket",
   "http2Session",
@@ -394,7 +393,7 @@ export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
   stats: "scr_stats",
   fileHandle: "scr_file_handle",
   spawnRes: "scr_spawn_res",
-  child: "scr_child",
+  child: "scr_child", effect: "scr_effect",
   netServer: "scr_net_server",
   netSocket: "scr_net_sock",
   http2Session: "scr_http2_session",
@@ -444,7 +443,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // symbol is not a JS object, but every symbol is truthy — the same
   // constant-true answer.
   "symbol",
-  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child",
+  "date", "array", "map", "set", "regex", "url", "searchParams", "stats", "fileHandle", "spawnRes", "child", "effect",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A generator object is a JS object: always truthy.
@@ -465,7 +464,7 @@ export const SYMBOL_T: IrType = { kind: "symbol" };
 export const STATS_T: IrType = { kind: "stats" };
 export const FILEHANDLE_T: IrType = { kind: "fileHandle" };
 export const SPAWNRES_T: IrType = { kind: "spawnRes" };
-export const CHILD_T: IrType = { kind: "child" };
+export const CHILD_T: IrType = { kind: "child" }; export const EFFECT_T: IrType = { kind: "effect" };
 export const NETSERVER_T: IrType = { kind: "netServer" };
 export const NETSOCKET_T: IrType = { kind: "netSocket" };
 export const HTTP2SESSION_T: IrType = { kind: "http2Session" };
@@ -513,7 +512,7 @@ export function isSupportedArrayElem(t: IrType): boolean {
     case "promise":
     case "jsval":
     case "regex":
-    case "child":
+    case "child": case "effect":
     case "netServer":
     case "symbol":
     case "classval":
@@ -1897,6 +1896,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
+  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runPromise" // the effect kernel (static builds; lower-effect.ts)
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers
    * consume the native body stream. AbortSignal and ReadableStream values
@@ -7043,7 +7043,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["awaitExpr", "await"],
   ["awaitUnionExpr", "await"],
   ["yieldExpr", "yield"],
-  ["child", "the child_process surface"],
+  ["child", "the child_process surface"], ["effect", "the effect kernel"],
   ["spawnRes", "the child_process surface"],
   ["childStream", "the child_process surface"],
   ["netServer", "the node:net surface"],

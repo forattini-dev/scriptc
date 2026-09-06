@@ -87,6 +87,12 @@ export function builtinDefaultImportModule(spec: string): string | null {
     : null;
 }
 
+/** Packages the compiler serves NATIVELY in static builds (no engine): imports bind to the kernel's lowering (lower-effect.ts), never to the package's JavaScript. */
+export const KERNEL_MODULES: ReadonlySet<string> = new Set(["effect"]);
+export function isKernelModule(spec: string): boolean {
+  return KERNEL_MODULES.has(spec);
+}
+
 /** Canonical (bare) name of a supported builtin-module specifier — "fs"
  * for both "fs" and "node:fs" — or null for everything else. The lowering
  * tables and the preflight allowlist share this one normalization. */

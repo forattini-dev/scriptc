@@ -367,6 +367,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
+        case "effect":
         case "childStream":
         case "fsWatcher":
         case "netServer":
@@ -856,6 +857,7 @@ export class RustDefinitionEmitter {
         case "fileHandle":
         case "spawnRes":
         case "child":
+        case "effect":
         case "childStream":
         case "fsWatcher":
         case "netServer":

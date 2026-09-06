@@ -58,6 +58,8 @@ export function cType(t: IrType): string {
       return "ScrSpawnRes *";
     case "child":
       return "ScrChild *";
+    case "effect":
+      throw new Error("the effect kernel needs --backend rust");
     case "netServer":
       return "ScrNetServer *";
     case "netSocket":

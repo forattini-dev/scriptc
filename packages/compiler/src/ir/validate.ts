@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DATE_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DATE_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -79,13 +79,9 @@ export const REGEX_INTRINSIC_SIGS: Record<
   split: { receiver: STRING, argTypes: [REGEX, F64], result: arrayOf(STRING) },
 };
 
-/** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts).
- * All argument positions are required — the surface has no optionals.
- * readFileSync's second argument is the (always-"utf8") encoding: it is
- * evaluated for JS-exact side-effect order and ignored by the runtime.
- * A `null` argument slot is program-dependent (a builtin-error receiver) —
- * the libCall case checks it specially, like process.envGet's result.
- * Exported for the frontend's lib-boundary pass (lib-boundary.ts). */
+/** Closed-union signature table for `libCall` (mirrors ambient/scriptc.d.ts). All argument positions are required — the
+ * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
+ * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
   "fetch.responseNew": { argTypes: [DYN, DYN], result: DYN },
@@ -723,6 +719,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The callback's func type is program-dependent (zero params, or the
   // `number | null` union / the %Error class) — the libCall case checks
   // the shape; the slot here only pins arity and the child receiver.
+  "effect.succeed": { argTypes: [null], result: EFFECT_T }, "effect.sync": { argTypes: [null], result: EFFECT_T }, "effect.map": { argTypes: [EFFECT_T, null], result: EFFECT_T },
+  "effect.flatMap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.runSync": { argTypes: [EFFECT_T], result: VOID }, "effect.runPromise": { argTypes: [EFFECT_T], result: VOID },
   "child.onExit": { argTypes: [CHILD_T, null], result: VOID },
   "child.onClose": { argTypes: [CHILD_T, null], result: VOID },
   "child.onError": { argTypes: [CHILD_T, null], result: VOID },
@@ -3828,6 +3826,8 @@ function validateFunction(
           }
           break;
         }
+        if (e.fn === "effect.runSync" || e.fn === "effect.runPromise") { // the effect's success channel: site-typed by the checker (the kernel unboxes with that type)
+          if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc); break; }
         if (e.fn === "process.envGet") {
           // Result is the module's interned `string | undefined` union.
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;

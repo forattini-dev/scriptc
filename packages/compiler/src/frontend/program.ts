@@ -75,8 +75,7 @@ import {
   isTrapRuntimeModule,
   tsgoPath,
   unsupportedModuleFeatureOf,
-  workspacePackageOfPath,
-} from "./shared.js";
+  workspacePackageOfPath, KERNEL_MODULES } from "./shared.js";
 import { trackedFileExists } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
@@ -1959,17 +1958,18 @@ function preflight7(load: LoadResult): {
       const spec = sf.text.slice(d.pos, d.end).replace(/^['"]|['"]$/g, "");
       return resolveRelativeAsset(sf.fileName, spec) !== null || resolveBareAsset(sf.fileName, spec) !== null;
     };
-    // TS2578 (unused '@ts-expect-error'): the directive is the AUTHOR'S
-    // claim about THEIR toolchain's behavior — scriptc's adopted type
-    // world diverges (their lib surface, their tsgo snapshot), so the
-    // expected error may legitimately not occur here. An unused directive
-    // never indicates a broken program (the code typechecks clean — that
-    // is what "unused" means), and the compiled binary is unaffected by a
-    // source comment. Noise, not a gate.
+    // TS2578 (unused '@ts-expect-error'): the directive is the AUTHOR'S claim about THEIR toolchain's
+    // behavior — scriptc's adopted type world diverges (their lib surface, their tsgo snapshot), so the
+    // expected error may legitimately not occur here. An unused directive never indicates a broken program
+    // (the code typechecks clean — that is what "unused" means), and the binary is unaffected. Noise, not a gate.
     const unusedExpectErrorSuppressed = (d: ts.Diagnostic): boolean => d.code === 2578;
+    // A KERNEL package's own .d.ts (effect's reach for DOM/esnext names under the fallback surface): the kernel maps the
+    // types it serves by provenance and never runs the package, so its internals are not the program's gate (scoped skipLibCheck).
+    const kernelDeclarationSuppressed = (d: ts.Diagnostic): boolean => d.fileName !== undefined && d.fileName.endsWith(".d.ts") && [...KERNEL_MODULES].some((name) => d.fileName!.includes(`/node_modules/${name}/`));
     return all.filter(
       (d) =>
         d.category === ts.DiagnosticCategory.Error &&
+        !kernelDeclarationSuppressed(d) &&
         !suppressedJsStrictness7(d) &&
         !npmStaticFileSuppressed(d) &&
         !nodeModulesJsSuppressed(d) &&

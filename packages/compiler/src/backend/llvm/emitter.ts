@@ -3200,7 +3200,7 @@ class LlEmitter {
       case "stats":
       case "fileHandle":
       case "spawnRes":
-      case "child":
+      case "child": case "effect":
       case "childStream":
       case "generator":
       case "fsWatcher": {
@@ -3297,7 +3297,7 @@ class LlEmitter {
             case "stats":
             case "fileHandle":
             case "spawnRes":
-            case "child":
+            case "child": case "effect":
             case "childStream":
             case "generator":
             case "fsWatcher":

@@ -2,7 +2,7 @@ import { InternalCompilerError } from "../errors.js";
 import * as ts from "./ts7/adapter.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
 import { accessorSlotProp } from "../ir/nodes.js";
@@ -504,8 +504,8 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
       return "FileHandle";
     case "spawnRes":
       return "SpawnSyncReturns";
-    case "child":
-      return "ChildProcess";
+    case "child": return "ChildProcess";
+    case "effect": return "Effect"; // the effect kernel's opaque handle (static builds); A/E are read at the boundaries
     case "netServer":
       return "Server";
     case "netSocket":
@@ -1058,11 +1058,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // surface, but the values behind it live in the embedded engine — under
   // --dynamic they are island handles (jsval), and every operation on them
   // rides the engine ops with validated exits at typed boundaries.
-  // Primitives/arrays/etc. REACHED THROUGH such types keep their
-  // structural mapping (they were handled above or recurse normally); this
-  // rule fires only when the type's own identity is declaration-file-
-  // declared — interfaces, classes, type literals, and aliases from the
-  // .d.ts. The standard library's declaration files are carved out (their
+  // Primitives/arrays/etc. REACHED THROUGH such types keep their structural mapping (handled above or
+  // recursed normally); this rule fires only when the type's own identity is declaration-file-declared —
+  // interfaces, classes, type literals, and aliases from the .d.ts. The standard library's declaration files are carved out (their
   // surfaces have static lowerings), as are declarations explicitly mapped
   // by --external-types: those describe project-owned structural data while
   // the Lowerer fences their imported runtime bindings. The program's own
@@ -1071,6 +1069,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // diagnostic for node_modules types and the generic story otherwise.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
+  if (!ctx.dynamic && npmSym?.name === "Effect" && npmDecls?.some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T;
   if (
     npmDecls &&
     npmDecls.length > 0 &&

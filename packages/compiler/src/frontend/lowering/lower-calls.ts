@@ -19,6 +19,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
+import { lowerEffectCall } from "./lower-effect.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerCompatReqStreamOptionalCall, lowerHttpClientFnCall } from "./lower-server.js";
@@ -4310,10 +4311,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     }
     if (ts.isPropertyAccessExpression(expr.expression)) {
       const intrinsic =
-        // Builtin namespace imports first (`fs.readFileSync(...)` where fs
-        // is `import * as fs from "node:fs"`): the same tables and fences
-        // as named builtin imports — before anything below tries to lower
-        // the namespace object itself as a receiver.
+        lowerEffectCall(L, expr, loc) ?? // the effect kernel (`Effect.succeed(...)` on the package's namespace binding, static builds) — lower-effect.ts
+        // Builtin namespace imports first (`fs.readFileSync(...)` where fs is `import * as fs from "node:fs"`): the same
+        // tables and fences as named builtin imports — before anything below tries to lower the namespace object itself as a receiver.
         L.lowerNamespaceBuiltinCall(expr, expr.expression) ??
         // The node:perf_hooks spoke: performance.now() and its
         // .bind(performance) function value over the runtime's
