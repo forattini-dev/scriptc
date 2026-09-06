@@ -5,6 +5,25 @@
  * checker already typed the effect's channels. Callbacks travel as the
  * runtime's traced closures (the child-listener pattern). */
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
+import { mangleField, mangleRecordStruct } from "../mangle.js";
+
+/** The collect closure a result carrier describes (see collectionCarrier in lower-effect.ts). */
+function collector(carrier: RustLibCallExpr["args"][number], context: RustLibCallContext, loc: RustLibCallExpr["loc"]): string {
+  if (carrier.kind === "strLit" && carrier.value === "discard") return "std::rc::Rc::new(|_sc_values: Vec<runtime::EffectValue>| runtime::effect_box(()))";
+  if (carrier.type.kind === "array") {
+    const elem = context.rustType(carrier.type.elem, loc);
+    return `std::rc::Rc::new(|sc_values: Vec<runtime::EffectValue>| runtime::effect_box(runtime::array_new(sc_values.iter().map(|sc_value| runtime::effect_unbox::<${elem}>(sc_value)).collect::<Vec<${elem}>>())))`;
+  }
+  if (carrier.kind === "strLit" && carrier.value.startsWith("record:")) {
+    const shape = context.record(carrier.value.slice("record:".length), loc);
+    const fields = shape.fields.map((field, index) => {
+      const value = `runtime::effect_unbox::<${context.rustType(field.type, loc)}>(&sc_values[${index}])`;
+      return `${mangleField(field.name)}: ${context.isEdgeValue(field.type) ? `Some(${value})` : value}`;
+    }).join(", ");
+    return `std::rc::Rc::new(|sc_values: Vec<runtime::EffectValue>| runtime::effect_box(runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })))`;
+  }
+  return context.unsupported("effect collection carrier", loc);
+}
 
 function traced(context: RustLibCallContext, callback: string): string {
   return `Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${callback}))`;
@@ -118,6 +137,20 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const runtimeFn = { "layer.effect": "layer_effect", "layer.provide": "layer_provide", "layer.provideMerge": "layer_provide_merge", "layer.merge": "layer_merge" }[expr.fn];
       return `runtime::${runtimeFn}(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
     }
+    case "effect.forEach": {
+      const carrier = expr.args[2];
+      if (first === undefined || second === undefined || carrier === undefined || first.type.kind !== "array" || second.type.kind !== "func") break;
+      const param = second.type.params[0];
+      if (param === undefined) break;
+      const items = context.nextTemporary();
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, second.type.params.length === 2 ? ["sc_arg", "sc_index"] : ["sc_arg"], expr.loc);
+      return `{ let ${items} = ${context.emitExpr(first)}; let sc_len = runtime::array_len(&${items}) as usize; let mut sc_boxed: Vec<runtime::EffectValue> = Vec::with_capacity(sc_len); for sc_i in 0..sc_len { sc_boxed.push(runtime::effect_box(runtime::array_get(&${items}, sc_i as f64))); } let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_for_each(sc_boxed, std::rc::Rc::new(move |sc_value: runtime::EffectValue, sc_index: f64| { let _ = sc_index; let sc_arg: ${context.rustType(param, expr.loc)} = runtime::effect_unbox(&sc_value); ${dispatch} }), ${collector(carrier, context, expr.loc)}, ${traced(context, keep)}) }`;
+    }
+    case "effect.all":
+      if (first === undefined || second === undefined || second.type.kind !== "array") break;
+      return `runtime::effect_all(&${context.emitExpr(second)}, ${collector(first, context, expr.loc)})`;
     case "effect.fail":
     case "effect.die":
       if (first === undefined) break;

@@ -57,6 +57,9 @@ impl<R: Clone + 'static> EffectGen for TypedGen<R> {
 
 type GenFn = Rc<dyn Fn() -> Box<dyn EffectGen>>;
 type PromiseFn = Rc<dyn Fn() -> JsPromiseHandle>;
+type ItemFn = Rc<dyn Fn(EffectValue, f64) -> JsEffect>;
+/// Rebuilds the program's typed collection from the kernel's boxed values (the emitter's carrier).
+type CollectFn = Rc<dyn Fn(Vec<EffectValue>) -> EffectValue>;
 type RecoverFn = Rc<dyn Fn(Caught) -> EffectValue>;
 
 enum EffectNode {
@@ -82,6 +85,9 @@ enum EffectNode {
     ProvideLayer(JsEffect, JsEffect),
     /// A layer description (`Layer<…>` values share the handle).
     Layer(LayerNode),
+    /// `Effect.forEach(items, f)` / `Effect.all(effects)`: sequential, collected by the carrier's closure.
+    ForEach(Vec<EffectValue>, ItemFn, CollectFn, TraceFn),
+    All(JsArray<JsEffect>, CollectFn),
     /// `Effect.promise`: a rejection is a defect.
     Promise(PromiseFn, TraceFn),
     /// `Effect.tryPromise`: a rejection becomes the failure `recover` answers.
@@ -110,6 +116,8 @@ impl Trace for EffectData {
         match &self.node {
             EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::ServiceKey(_) => {}
             EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
+            EffectNode::ForEach(_, _, _, trace) => trace(tracer),
+            EffectNode::All(effects, _) => tracer.edge(effects),
             EffectNode::ProvideLayer(inner, layer) => {
                 tracer.edge(inner);
                 tracer.edge(layer);
@@ -250,6 +258,14 @@ pub fn layer_merge(left: &JsEffect, right: &JsEffect) -> JsEffect {
     effect_new(EffectNode::Layer(LayerNode::Merge(left.clone(), right.clone())))
 }
 
+pub fn effect_for_each(items: Vec<EffectValue>, f: ItemFn, collect: CollectFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::ForEach(items, f, collect, trace))
+}
+
+pub fn effect_all(effects: &JsArray<JsEffect>, collect: CollectFn) -> JsEffect {
+    effect_new(EffectNode::All(effects.clone(), collect))
+}
+
 fn no_trace() -> TraceFn {
     Box::new(|_| {})
 }
@@ -327,6 +343,28 @@ enum Frame {
     Gen(Box<dyn EffectGen>),
     /// Leave a provide scope: drop this many environment entries.
     PopEnv(usize),
+    /// A collection in progress: the next index to run, the values so far, the source and the collector.
+    Collect(usize, Vec<EffectValue>, CollectSource, CollectFn),
+}
+
+enum CollectSource {
+    Items(Vec<EffectValue>, ItemFn),
+    Effects(JsArray<JsEffect>),
+}
+
+impl CollectSource {
+    fn len(&self) -> usize {
+        match self {
+            CollectSource::Items(items, _) => items.len(),
+            CollectSource::Effects(effects) => array_len(effects) as usize,
+        }
+    }
+    fn effect_at(&self, index: usize) -> JsEffect {
+        match self {
+            CollectSource::Items(items, f) => f(items[index].clone(), index as f64),
+            CollectSource::Effects(effects) => array_get(effects, index as f64),
+        }
+    }
 }
 
 type Outcome = Result<EffectValue, EffectValue>;
@@ -338,6 +376,8 @@ enum Step {
     Lookup(Rc<str>),
     /// Enter a provide scope with these services, then run the inner effect.
     Enter(Bundle, JsEffect),
+    /// Start a collection over its source.
+    Collect(CollectSource, CollectFn),
     Resume(Box<dyn EffectGen>),
     /// Suspend on a promise; `recover` (tryPromise) turns a rejection into
     /// a failure, its absence (promise) makes the rejection a defect.
@@ -395,6 +435,8 @@ fn effect_step(effect: &JsEffect) -> Step {
             Step::Push(Frame::FlatMap(Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle))))), layer_build(layer))
         }
         EffectNode::Layer(_) => throw_error("scriptc: a layer is not an effect (Effect.provide it)".to_owned()),
+        EffectNode::ForEach(items, f, collect, _) => Step::Collect(CollectSource::Items(items.clone(), f.clone()), collect.clone()),
+        EffectNode::All(effects, collect) => Step::Collect(CollectSource::Effects(effects.clone()), collect.clone()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
     })
@@ -423,6 +465,17 @@ fn fiber_drive(fiber: &FiberRef) {
                     match found {
                         Some(value) => Ok(value),
                         None => throw_error(format!("Service not found: {key}")),
+                    }
+                }
+                Step::Collect(source, collect) => {
+                    if source.len() == 0 {
+                        Ok(collect(Vec::new()))
+                    } else {
+                        let first = source.effect_at(0);
+                        let mut state = fiber.borrow_mut();
+                        state.frames.push(Frame::Collect(1, Vec::new(), source, collect));
+                        state.current = Some(first);
+                        continue;
                     }
                 }
                 Step::Enter(bundle, inner) => {
@@ -494,6 +547,17 @@ fn fiber_drive(fiber: &FiberRef) {
                     None
                 }
                 (Frame::ZipRight(next), Ok(_)) => Some(next),
+                (Frame::Collect(next, mut done, source, collect), Ok(value)) => {
+                    done.push(value);
+                    if next < source.len() {
+                        let effect = source.effect_at(next);
+                        fiber.borrow_mut().frames.push(Frame::Collect(next + 1, done, source, collect));
+                        Some(effect)
+                    } else {
+                        outcome = Some(Ok(collect(done)));
+                        None
+                    }
+                }
                 (Frame::PopEnv(count), passthrough) => {
                     let mut state = fiber.borrow_mut();
                     let keep = state.env.len().saturating_sub(count);

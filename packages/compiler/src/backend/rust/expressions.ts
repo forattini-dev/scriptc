@@ -956,6 +956,7 @@ export class RustExpressionEmitter {
             return `sc_closure_identity_${shape.index}(${borrowed ? value : `&${value}`})`;
           },
           emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
+          isEdgeValue: (type) => this.context.isEdgeValue(type),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);
             return this.context.classSubtree(meta).map((candidate) =>

@@ -500,7 +500,7 @@ export function isUnitType(t: IrType): boolean {
  * otherwise-valid standalone type (Map, Set, dyn, opaque handles, ...). */
 export function isSupportedArrayElem(t: IrType): boolean {
   switch (t.kind) {
-    case "f64":
+    case "effect": case "f64": // effect: Effect.all's food, a refcounted kernel handle traced like any Gc element
     case "bool":
     case "string":
     case "array":
@@ -1896,7 +1896,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" // the effect kernel (static builds; lower-effect.ts)
+  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" | "effect.forEach" | "effect.all" // the effect kernel (static builds; lower-effect.ts)
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers
    * consume the native body stream. AbortSignal and ReadableStream values

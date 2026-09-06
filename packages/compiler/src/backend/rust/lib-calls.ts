@@ -71,6 +71,7 @@ export interface RustLibCallContext {
   functionIdentity(value: string, type: IrFuncType, loc: SrcLoc, borrowed?: boolean): string;
   emitEventEmitterCall(expr: RustLibCallExpr): string | null;
   classNameArms(className: string, loc?: SrcLoc): string;
+  isEdgeValue(type: IrType): boolean;
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {

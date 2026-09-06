@@ -7,7 +7,7 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc } from "../../ir/nodes.js";
+import { EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 
@@ -129,6 +129,38 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+}
+
+/** The SUCCESS type argument of an `Effect<A, E, R>` (or `Effect<…>[]`'s element's) TS type, or null. */
+function effectSuccessOf(L: Lowerer, type: ts.Type): ts.Type | null {
+  const sym = type.getAliasSymbol() ?? type.getSymbol();
+  if (sym?.name !== "Effect") return null;
+  return L.checker.getTypeArguments(type as ts.TypeReference)[0] ?? null;
+}
+
+/** The RESULT CARRIER of a collection combinator: an expression whose TYPE tells the emitter how to rebuild the typed
+ * result from the kernel's boxed values — an empty array literal of the element type, a `record:<shape>` string for a
+ * tuple/record, the undefined unit for `discard`. */
+function collectionCarrier(L: Lowerer, success: IrType | null, discard: boolean, expr: ts.Node, loc: SrcLoc): IrExpr {
+  if (discard) return { kind: "strLit", value: "discard", type: STRING, loc };
+  if (success?.kind === "array") {
+    if (!isSupportedArrayElem(success.elem)) L.unsupported("SC1090", expr, `the effect kernel cannot collect '${L.fmt(success.elem)}' elements`);
+    return { kind: "arrayLit", elems: [], type: success, loc };
+  }
+  if (success?.kind === "record") return { kind: "strLit", value: `record:${success.shapeId}`, type: STRING, loc };
+  return L.unsupported("SC1090", expr, "the effect kernel collects into arrays, tuples and records");
+}
+
+/** `{ discard: true }` in a combinator's options literal (concurrency is accepted and ignored: the kernel runs sequentially). */
+function discardOption(L: Lowerer, options: ts.Expression | undefined, expr: ts.Node): boolean {
+  if (options === undefined) return false;
+  if (!ts.isObjectLiteralExpression(options)) return L.unsupported("SC1090", expr, "the effect kernel reads combinator options from an object literal");
+  for (const property of options.properties) {
+    if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return L.unsupported("SC1090", expr, "combinator option shape");
+    if (property.name.text === "discard") return property.initializer.kind === ts.SyntaxKind.TrueKeyword;
+    if (property.name.text !== "concurrency") return L.unsupported("SC1090", expr, `the effect kernel does not honor the '${property.name.text}' option yet`);
+  }
+  return false;
 }
 
 /** One `Layer.member` call, the same shape as lowerEffectMember. Layers are kernel handles like effects. */
@@ -274,6 +306,47 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "provide":
         if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provide", [at(0), at(1)], EFFECT_T, loc);
         break;
+      case "forEach": {
+        // `Effect.forEach(items, (a, i) => effect, { discard })`: sequential; the result array's element type is the callback's success type.
+        if (pre.length !== 0 || total < 2 || total > 3) break;
+        const items = at(0);
+        const fn = at(1);
+        if (items.type.kind !== "array" || fn.type.kind !== "func" || fn.type.params.length === 0 || fn.type.params.length > 2 || fn.type.ret.kind !== "effect") break;
+        const signature = L.checker.getCallSignatures(L.typeOf(args[1]!))[0];
+        const success = signature === undefined ? null : effectSuccessOf(L, L.checker.getReturnTypeOfSignature(signature));
+        const discard = discardOption(L, args[2], expr);
+        const carrier = collectionCarrier(L, discard || success === null ? null : arrayOf(L.mapTypeOf(success) ?? L.badType(args[1]!, success)), discard, expr, loc);
+        return lib("effect.forEach", [items, fn, carrier], EFFECT_T, loc);
+      }
+      case "all": {
+        // `Effect.all([e1, e2])` (tuple), `Effect.all(effects)` (array), `Effect.all({ a: e1, b: e2 })` (record), `{ discard }`.
+        if (pre.length !== 0 || total < 1 || total > 2) break;
+        const source = args[0]!;
+        const discard = discardOption(L, args[1], expr);
+        const successTs = effectSuccessOf(L, L.typeOf(expr));
+        const success = successTs === null ? null : L.mapTypeOf(successTs);
+        let effects: IrExpr;
+        if (ts.isArrayLiteralExpression(source)) {
+          const elems = source.elements.map((element) => L.lowerExpr(element));
+          if (elems.some((e) => e.type.kind !== "effect")) break;
+          effects = { kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc };
+        } else if (ts.isObjectLiteralExpression(source)) {
+          if (success?.kind !== "record") break;
+          const shape = L.shapes.get(success.shapeId);
+          const byName = new Map<string, ts.Expression>();
+          for (const property of source.properties) {
+            if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return L.unsupported("SC1090", expr, "Effect.all over a record of plain properties");
+            byName.set(property.name.text, property.initializer);
+          }
+          const elems = (shape?.fields ?? []).map((field) => { const init = byName.get(field.name); return init === undefined ? L.unsupported("SC1090", expr, `Effect.all record field '${field.name}'`) : L.lowerExpr(init); });
+          if (elems.some((e) => e.type.kind !== "effect")) break;
+          effects = { kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc };
+        } else {
+          effects = at(0);
+          if (effects.type.kind !== "array" || effects.type.elem.kind !== "effect") break;
+        }
+        return lib("effect.all", [collectionCarrier(L, success, discard, expr, loc), effects], EFFECT_T, loc);
+      }
       case "provideService":
         if (total === 3 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provideService", [at(0), at(1), at(2)], EFFECT_T, loc);
         break;
