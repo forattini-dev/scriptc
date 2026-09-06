@@ -45,7 +45,7 @@ getifaddrs = "=0.6.2"
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+lto = "fat"
 strip = true
 
 [[example]]

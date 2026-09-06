@@ -69,8 +69,8 @@ impl Default for GcConfig {
             // and each later threshold is twice the surviving heap —
             // roughly a third of the collections of the 1 MB / 70% policy
             // for the same program, each one a full mark-sweep.
-            threshold: 64 * 1024 * 1024,
-            used_space_percentage: 50,
+            threshold: 256 * 1024 * 1024,
+            used_space_percentage: 25,
         }
     }
 }
