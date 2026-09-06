@@ -46,6 +46,7 @@ export function collectSchemaClass(L: Lowerer, decl: ts.ClassLikeDeclaration, sc
     const tsType = L.checker.getTypeOfSymbolAtLocation(member, decl);
     const type = L.mapTypeOf(tsType);
     if (type === null) L.badType(prop, tsType);
+    if (type.kind === "dyn") L.unsupported("SC1090", prop, `the schema prop '${name}' typed unknown (a dynamic class field has no native slot yet)`);
     if (isError && (name === "cause" || name === "name" || name === "stack")) L.unsupported("SC1090", prop, `the schema error field '${name}' (an Error slot the kernel does not carry)`);
     if (isError && name === "message") {
       if (type.kind !== "string") L.unsupported("SC1090", prop, "a non-string 'message' schema field");
@@ -301,9 +302,20 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
     return lib("schema.record", [handleArg(L, first, "Schema.Record"), handleArg(L, args[1], "Schema.Record")], EFFECT_T, loc);
   }
   if (member === "Union" && first !== undefined && args.length <= 2) {
-    if (!ts.isArrayLiteralExpression(first)) L.unsupported("SC1090", first, "Schema.Union over a non-literal member array");
-    const elems = first.elements.map((e) => handleArg(L, e, "Schema.Union"));
-    return lib("schema.union", [{ kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc }], EFFECT_T, loc);
+    if (ts.isArrayLiteralExpression(first)) {
+      const elems = first.elements.map((e) => handleArg(L, e, "Schema.Union"));
+      return lib("schema.union", [{ kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc }], EFFECT_T, loc);
+    }
+    // A member ARRAY value (`Schema.Union(Definitions)`): an array of handles, or a tuple record of (decorated) handles.
+    const members = L.lowerExpr(first);
+    if (members.type.kind === "array" && members.type.elem.kind === "effect") return lib("schema.union", [members], EFFECT_T, loc);
+    const shape = members.type.kind === "record" ? L.shapes.get(members.type.shapeId) : undefined;
+    if (members.type.kind === "record" && shape?.tuple === true) {
+      const shapeId = members.type.shapeId;
+      const elems = shape.fields.map((field) => unwrapSchema(L, { kind: "recordGet", obj: members, shapeId, field: field.name, type: field.type, loc }, first, "Schema.Union"));
+      return lib("schema.union", [{ kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc }], EFFECT_T, loc);
+    }
+    L.unsupported("SC1090", first, "Schema.Union over a value that is not an array or tuple of schemas");
   }
   if (SCHEMA_FILTERS_TEXT.has(member) && first !== undefined) {
     const text = L.lowerExprExpecting(first, STRING);
@@ -341,6 +353,7 @@ export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Express
   if (!ts.isCallExpression(step) || !ts.isPropertyAccessExpression(step.expression) || !ts.isIdentifier(step.expression.name) || effectNamespaceOf(L, step.expression.expression) !== "Schema") return null;
   const name = step.expression.name.text;
   if (name === "brand" && step.arguments.length === 1) return wrap("brand", source, loc);
+  if (name === "toTaggedUnion" && step.arguments.length === 1) return source; // the union itself; its `cases`/`is*` helpers are not covered
   if (name === "check") return step.arguments.reduce<IrExpr>((acc, filter) => lib("schema.check", [acc, handleArg(L, filter, "Schema.check")], EFFECT_T, loc), source);
   return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${name} as a pipe step yet`);
 }

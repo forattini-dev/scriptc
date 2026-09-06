@@ -425,8 +425,9 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
       return `runtime::schema_record(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
     case "schema.union": {
       const members = handles(first);
-      if (members === null) break;
-      return `runtime::schema_union(vec![${members.join(", ")}])`;
+      if (members !== null) return `runtime::schema_union(vec![${members.join(", ")}])`;
+      if (first === undefined || first.type.kind !== "array" || first.type.elem.kind !== "effect") break;
+      return `runtime::schema_union(runtime::array_values(&${context.emitExpr(first)}))`;
     }
     case "schema.wrap":
       if (first === undefined || second === undefined) break;

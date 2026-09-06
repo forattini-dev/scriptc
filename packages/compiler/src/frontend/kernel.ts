@@ -85,8 +85,10 @@ const SCHEMA_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/](Schema|SchemaAST
  * a Filter, SchemaError): the kernel's opaque handle in a static build. Type aliases (`Struct.Type<F>`) stay structural. */
 export function isKernelSchemaValueSymbol(decls: readonly ts.Node[]): boolean {
   // `Struct` merges a function, an interface and a namespace: every declaration lives in a Schema module and at least
-  // one is the interface/class that types the VALUE.
-  return decls.length > 0 && decls.every((d) => SCHEMA_DIST.test(d.getSourceFile().fileName)) && decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d));
+  // one is the interface/class that types the VALUE. A top-level lowercase type ALIAS (`toTaggedUnion<…>`, effect's
+  // combinator-result naming) is a value type too; `Struct.Type<F>`-style aliases inside namespaces stay structural.
+  if (decls.length === 0 || !decls.every((d) => SCHEMA_DIST.test(d.getSourceFile().fileName))) return false;
+  return decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d) || (ts.isTypeAliasDeclaration(d) && ts.isSourceFile(d.parent) && /^[a-z]/.test(d.name.text)));
 }
 
 const BRAND_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]Brand\.d\.ts$/;

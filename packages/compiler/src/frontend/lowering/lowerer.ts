@@ -3347,7 +3347,7 @@ export class Lowerer {
         !this.dynamic &&
         !(widened.flags & ts.TypeFlags.Any) &&
         mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
-      ) {
+      ) { const detail = describeRecordMemberBlocker(widened, this.typeCtx); if (detail !== null) { this.pushDiag(componentTypeDiag(this.checker.typeToString(type), detail, locOf(node))); throw new PoisonError(); } // the STATIC reason first: the member that blocks the shape names the kernel gap
         this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
         throw new PoisonError();
       }

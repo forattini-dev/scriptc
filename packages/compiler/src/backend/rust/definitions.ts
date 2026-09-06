@@ -297,7 +297,11 @@ export class RustDefinitionEmitter {
         this.context.pushIndent();
         this.context.line("fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {");
         this.context.pushIndent();
-        union.arms.forEach((arm, tag) => {
+        // Record arms try MOST SPECIFIC first (more fields): a smaller shape accepts a superset object (excess keys are
+        // ignored), so `{ type, id } | { type, id, hard }` must offer the wider arm before the narrower one.
+        const fieldCount = (arm: IrType): number => arm.kind === "record" ? (this.context.records.get(arm.shapeId)?.fields.length ?? 0) : 0;
+        const ordered = union.arms.map((arm, tag) => ({ arm, tag })).sort((a, b) => fieldCount(b.arm) - fieldCount(a.arm));
+        ordered.forEach(({ arm, tag }) => {
           const variant = `Self::${this.context.unionVariant(tag)}`;
           if (arm.kind === "nullT") {
             this.context.line(`if matches!(node, runtime::JsonNode::Null) { return Ok(${variant}); }`);

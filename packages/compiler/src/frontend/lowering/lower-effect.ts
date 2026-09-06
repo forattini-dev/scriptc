@@ -188,6 +188,13 @@ function lowerEffectFn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr
   const named = ts.isCallExpression(callee) && isFnMember(callee.expression) && callee.arguments.length <= 1 && (callee.arguments.length === 0 || ts.isStringLiteral(callee.arguments[0]!));
   if (!named && !isFnMember(callee)) return null;
   const body = expr.arguments[0];
+  if (body !== undefined && (ts.isArrowFunction(body) || (ts.isFunctionExpression(body) && body.asteriskToken === undefined))) {
+    // `Effect.fn("name")((input) => effect)`: the function IS the value (the span is not observable natively).
+    const plain = L.lowerExpr(body);
+    if (plain.type.kind !== "func" || plain.type.ret.kind !== "effect") L.unsupported("SC1090", expr, "the effect kernel covers Effect.fn over a function returning an effect");
+    if (expr.arguments.length === 1) return plain;
+    L.unsupported("SC1090", expr, "the effect kernel covers pipeline steps after a generator body only");
+  }
   if (body === undefined || !ts.isFunctionExpression(body) || body.asteriskToken === undefined) {
     L.unsupported("SC1090", expr, "the effect kernel covers Effect.fn over a generator function (with optional pipeline steps)");
   }
