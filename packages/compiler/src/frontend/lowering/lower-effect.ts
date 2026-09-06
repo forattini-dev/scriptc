@@ -7,9 +7,10 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
+import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
+import { lowerConsoleInspectArg } from "./lower-inspect.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 
@@ -65,7 +66,38 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   const loc = locOf(expr);
   if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
+  // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
+  if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
+    if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
+    if (expr.name.text === "value") {
+      const valueT = L.mapTypeOf(L.typeOf(expr));
+      if (valueT !== null) return lib("effect.exitValue", [L.lowerExpr(expr.expression)], valueT, loc);
+    }
+  }
   return null;
+}
+
+/** `Exit.member(...)`: the opaque exit handle's constructors and tests. */
+function lowerExitMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const first = args[0];
+  if (first !== undefined && args.length === 1) {
+    if (member === "succeed") return lib("effect.exitSucceed", [L.lowerExpr(first)], EFFECT_T, loc);
+    if (member === "fail") return lib("effect.exitFail", [L.lowerExpr(first)], EFFECT_T, loc);
+    if (member === "isSuccess" || member === "isFailure") {
+      const exit = L.lowerExpr(first);
+      if (exit.type.kind === "effect") return lib(member === "isSuccess" ? "effect.exitIsSuccess" : "effect.exitIsFailure", [exit], BOOL, loc);
+    }
+  }
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Exit.${member} in this call shape yet`);
+}
+
+/** A logger message argument as the text effect's default logger prints: strings as they are, numbers and booleans
+ * through ToString, everything else through Node's inspect at console depth. */
+function logPart(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
+  const value = L.lowerExpr(node);
+  if (value.type.kind === "string") return value;
+  if (value.type.kind === "f64" || value.type.kind === "bool") return { kind: "toString", operand: value, type: STRING, loc };
+  return lowerConsoleInspectArg(L, node, value, "Effect.log", loc);
 }
 
 /** `Effect.fn("name")(function* (a, b) { … })`, `Effect.fn(function* …)`, `Effect.fnUntraced(…)`: a function whose
@@ -127,6 +159,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const ns = effectNamespaceOf(L, callee.expression);
   if (ns === null) return null;
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+  if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
@@ -232,7 +265,7 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (total !== 2) break;
         const source = at(0);
         const fn = at(1);
-        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length !== 1) break;
+        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1) break;
         if (member === "flatMap" && fn.type.ret.kind !== "effect") break;
         return lib(member === "map" ? "effect.map" : "effect.flatMap", [source, fn], EFFECT_T, loc);
       }
@@ -306,6 +339,61 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "provide":
         if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.provide", [at(0), at(1)], EFFECT_T, loc);
         break;
+      case "log": case "logInfo": case "logWarning": case "logError": case "logDebug": case "logTrace": {
+        if (pre.length !== 0) break;
+        const level = { log: "INFO", logInfo: "INFO", logWarning: "WARN", logError: "ERROR", logDebug: "DEBUG", logTrace: "TRACE" }[member]!;
+        const parts: IrExpr = { kind: "arrayLit", elems: args.map((node) => logPart(L, node, loc)), type: arrayOf(STRING), loc };
+        return lib("effect.log", [{ kind: "strLit", value: level, type: STRING, loc }, parts], EFFECT_T, loc);
+      }
+      case "tap":
+      case "tapError": {
+        if (total !== 2 || at(0).type.kind !== "effect") break;
+        const fn = at(1);
+        if (fn.type.kind !== "func" || fn.type.params.length > 1) break;
+        return lib(member === "tap" ? "effect.tap" : "effect.tapError", [at(0), fn], EFFECT_T, loc);
+      }
+      case "suspend": {
+        if (total !== 1) break;
+        const thunk = at(0);
+        if (thunk.type.kind !== "func" || thunk.type.params.length !== 0 || thunk.type.ret.kind !== "effect") break;
+        return lib("effect.suspend", [thunk], EFFECT_T, loc);
+      }
+      case "withSpan": // tracing spans are not observable natively: the effect passes through
+        if ((total === 2 || total === 3) && at(0).type.kind === "effect") return at(0);
+        break;
+      case "sleep": {
+        if (total !== 1) break;
+        const duration = at(0);
+        if (duration.type.kind !== "f64" && duration.type.kind !== "string") break;
+        return lib("effect.sleep", [duration], EFFECT_T, loc);
+      }
+      case "scoped":
+      case "exit":
+        if (total === 1 && at(0).type.kind === "effect") return lib(member === "scoped" ? "effect.scoped" : "effect.exit", [at(0)], EFFECT_T, loc);
+        break;
+      case "addFinalizer": {
+        if (total !== 1) break;
+        const fn = at(0);
+        if (fn.type.kind !== "func" || fn.type.params.length > 1 || fn.type.ret.kind !== "effect" || (fn.type.params.length === 1 && fn.type.params[0]!.kind !== "effect")) break;
+        return lib("effect.addFinalizer", [fn], EFFECT_T, loc);
+      }
+      case "ensuring":
+        if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.ensuring", [at(0), at(1)], EFFECT_T, loc);
+        break;
+      case "acquireRelease": {
+        if (total !== 2 || at(0).type.kind !== "effect") break;
+        const release = at(1);
+        if (release.type.kind !== "func" || release.type.params.length === 0 || release.type.params.length > 2 || release.type.ret.kind !== "effect") break;
+        return lib("effect.acquireRelease", [at(0), release], EFFECT_T, loc);
+      }
+      case "acquireUseRelease": {
+        if (total !== 3 || at(0).type.kind !== "effect") break;
+        const use = at(1);
+        const release = at(2);
+        if (use.type.kind !== "func" || use.type.params.length !== 1 || use.type.ret.kind !== "effect") break;
+        if (release.type.kind !== "func" || release.type.params.length === 0 || release.type.params.length > 2 || release.type.ret.kind !== "effect") break;
+        return lib("effect.acquireUseRelease", [at(0), use, release], EFFECT_T, loc);
+      }
       case "forEach": {
         // `Effect.forEach(items, (a, i) => effect, { discard })`: sequential; the result array's element type is the callback's success type.
         if (pre.length !== 0 || total < 2 || total > 3) break;

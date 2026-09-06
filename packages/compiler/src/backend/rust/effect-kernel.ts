@@ -151,6 +151,80 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.all":
       if (first === undefined || second === undefined || second.type.kind !== "array") break;
       return `runtime::effect_all(&${context.emitExpr(second)}, ${collector(first, context, expr.loc)})`;
+    case "effect.log":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_log(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.tap":
+    case "effect.tapError": {
+      if (first === undefined || second === undefined || second.type.kind !== "func") break;
+      const param = second.type.params[0];
+      const source = context.nextTemporary();
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = runtime::effect_unbox(&sc_value);`;
+      const body = second.type.ret.kind === "effect" ? dispatch : `{ let _ = ${dispatch}; runtime::effect_succeed(runtime::effect_box(())) }`;
+      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tap" ? "effect_tap" : "effect_tap_error"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
+    }
+    case "effect.suspend": {
+      if (first === undefined || first.type.kind !== "func") break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, first.type, [], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_suspend(std::rc::Rc::new(move || ${dispatch}), ${traced(context, keep)}) }`;
+    }
+    case "effect.sleep":
+      if (first === undefined) break;
+      return first.type.kind === "string" ? `runtime::effect_sleep_text(&${context.emitExpr(first)})` : `runtime::effect_sleep(${context.emitExpr(first)})`;
+    case "effect.scoped":
+    case "effect.exit":
+      if (first === undefined) break;
+      return `runtime::${expr.fn === "effect.scoped" ? "effect_scoped" : "effect_exit"}(&${context.emitExpr(first)})`;
+    case "effect.addFinalizer": {
+      if (first === undefined || first.type.kind !== "func") break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, first.type, first.type.params.length === 1 ? ["sc_exit"] : [], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_add_finalizer(std::rc::Rc::new(move |sc_exit: runtime::JsEffect| { let _ = &sc_exit; ${dispatch} }), ${traced(context, keep)}) }`;
+    }
+    case "effect.ensuring":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_ensuring(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.acquireRelease":
+    case "effect.acquireUseRelease": {
+      const release = expr.fn === "effect.acquireRelease" ? second : expr.args[2];
+      if (first === undefined || release === undefined || release.type.kind !== "func") break;
+      const resource = release.type.params[0];
+      if (resource === undefined) break;
+      const acquire = context.nextTemporary();
+      const releaseFn = context.nextTemporary();
+      const keepRelease = context.nextTemporary();
+      const releaseDispatch = context.emitClosureDispatch(releaseFn, release.type, release.type.params.length === 2 ? ["sc_arg", "sc_exit"] : ["sc_arg"], expr.loc);
+      const releaseClosure = `std::rc::Rc::new(move |sc_value: runtime::EffectValue, sc_exit: runtime::JsEffect| { let _ = &sc_exit; let sc_arg: ${context.rustType(resource, expr.loc)} = runtime::effect_unbox(&sc_value); ${releaseDispatch} })`;
+      if (expr.fn === "effect.acquireRelease") {
+        return `{ let ${acquire} = ${context.emitExpr(first)}; let ${releaseFn} = ${context.emitExpr(release)}; let ${keepRelease} = ${releaseFn}.clone(); runtime::effect_acquire_release(&${acquire}, ${releaseClosure}, ${traced(context, keepRelease)}) }`;
+      }
+      if (second === undefined || second.type.kind !== "func" || second.type.params[0] === undefined) break;
+      const useFn = context.nextTemporary();
+      const keepUse = context.nextTemporary();
+      const useDispatch = context.emitClosureDispatch(useFn, second.type, ["sc_arg"], expr.loc);
+      const useClosure = `std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${context.rustType(second.type.params[0], expr.loc)} = runtime::effect_unbox(&sc_value); ${useDispatch} })`;
+      return `{ let ${acquire} = ${context.emitExpr(first)}; let ${useFn} = ${context.emitExpr(second)}; let ${keepUse} = ${useFn}.clone(); let ${releaseFn} = ${context.emitExpr(release)}; let ${keepRelease} = ${releaseFn}.clone(); runtime::effect_acquire_use_release(&${acquire}, ${useClosure}, ${releaseClosure}, Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepUse}); sc_tracer.edge(&${keepRelease}); })) }`;
+    }
+    case "effect.exitSucceed":
+    case "effect.exitFail":
+      if (first === undefined) break;
+      return `runtime::${expr.fn === "effect.exitSucceed" ? "effect_exit_succeed" : "effect_exit_fail"}(runtime::effect_box(${context.emitExpr(first)}))`;
+    case "effect.exitIsSuccess":
+    case "effect.exitIsFailure":
+      if (first === undefined) break;
+      return `${expr.fn === "effect.exitIsFailure" ? "!" : ""}runtime::effect_exit_is_success(&${context.emitExpr(first)})`;
+    case "effect.dataTag":
+      if (first === undefined) break;
+      return `runtime::effect_data_tag(&${context.emitExpr(first)})`;
+    case "effect.exitValue":
+      if (first === undefined) break;
+      return `runtime::effect_unbox::<${context.rustType(expr.type, expr.loc)}>(&runtime::effect_exit_value(&${context.emitExpr(first)}))`;
     case "effect.fail":
     case "effect.die":
       if (first === undefined) break;

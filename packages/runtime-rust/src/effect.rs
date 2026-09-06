@@ -58,6 +58,10 @@ impl<R: Clone + 'static> EffectGen for TypedGen<R> {
 type GenFn = Rc<dyn Fn() -> Box<dyn EffectGen>>;
 type PromiseFn = Rc<dyn Fn() -> JsPromiseHandle>;
 type ItemFn = Rc<dyn Fn(EffectValue, f64) -> JsEffect>;
+/// A finalizer: the scope's exit (as a data handle) → the effect to run.
+type FinalizerFn = Rc<dyn Fn(JsEffect) -> JsEffect>;
+/// `acquireRelease`'s release: the resource and the exit → the effect to run.
+type ReleaseFn = Rc<dyn Fn(EffectValue, JsEffect) -> JsEffect>;
 /// Rebuilds the program's typed collection from the kernel's boxed values (the emitter's carrier).
 type CollectFn = Rc<dyn Fn(Vec<EffectValue>) -> EffectValue>;
 type RecoverFn = Rc<dyn Fn(Caught) -> EffectValue>;
@@ -88,6 +92,21 @@ enum EffectNode {
     /// `Effect.forEach(items, f)` / `Effect.all(effects)`: sequential, collected by the carrier's closure.
     ForEach(Vec<EffectValue>, ItemFn, CollectFn, TraceFn),
     All(JsArray<JsEffect>, CollectFn),
+    /// The default logger's line: level and the message parts.
+    Log(JsString, JsArray<JsString>),
+    Tap(JsEffect, EffectFn, TraceFn),
+    TapError(JsEffect, EffectFn, TraceFn),
+    Suspend(Rc<dyn Fn() -> JsEffect>, TraceFn),
+    Sleep(f64),
+    Scoped(JsEffect),
+    AddFinalizer(FinalizerFn, TraceFn),
+    Ensuring(JsEffect, JsEffect),
+    AcquireRelease(JsEffect, ReleaseFn, TraceFn),
+    AcquireUseRelease(JsEffect, EffectFn, ReleaseFn, TraceFn),
+    /// `Effect.exit`: the inner effect's exit as a data handle.
+    Exit(JsEffect),
+    /// Kernel DATA riding the handle: an Exit today.
+    Data(KernelData),
     /// `Effect.promise`: a rejection is a defect.
     Promise(PromiseFn, TraceFn),
     /// `Effect.tryPromise`: a rejection becomes the failure `recover` answers.
@@ -107,6 +126,11 @@ pub enum LayerNode {
     Merge(JsEffect, JsEffect),
 }
 
+#[derive(Clone)]
+pub enum KernelData {
+    Exit(Outcome),
+}
+
 pub struct EffectData {
     node: EffectNode,
 }
@@ -118,6 +142,18 @@ impl Trace for EffectData {
             EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
+            EffectNode::Log(_, parts) => tracer.edge(parts),
+            EffectNode::Sleep(_) | EffectNode::Data(_) => {}
+            EffectNode::Scoped(inner) | EffectNode::Exit(inner) => tracer.edge(inner),
+            EffectNode::Tap(inner, _, trace) | EffectNode::TapError(inner, _, trace) | EffectNode::AcquireRelease(inner, _, trace) | EffectNode::AcquireUseRelease(inner, _, _, trace) => {
+                tracer.edge(inner);
+                trace(tracer);
+            }
+            EffectNode::Suspend(_, trace) | EffectNode::AddFinalizer(_, trace) => trace(tracer),
+            EffectNode::Ensuring(inner, finalizer) => {
+                tracer.edge(inner);
+                tracer.edge(finalizer);
+            }
             EffectNode::ProvideLayer(inner, layer) => {
                 tracer.edge(inner);
                 tracer.edge(layer);
@@ -266,6 +302,129 @@ pub fn effect_all(effects: &JsArray<JsEffect>, collect: CollectFn) -> JsEffect {
     effect_new(EffectNode::All(effects.clone(), collect))
 }
 
+pub fn effect_log(level: &JsString, parts: &JsArray<JsString>) -> JsEffect {
+    effect_new(EffectNode::Log(level.clone(), parts.clone()))
+}
+
+pub fn effect_tap(source: &JsEffect, f: EffectFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::Tap(source.clone(), f, trace))
+}
+
+pub fn effect_tap_error(source: &JsEffect, f: EffectFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::TapError(source.clone(), f, trace))
+}
+
+pub fn effect_suspend(thunk: Rc<dyn Fn() -> JsEffect>, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::Suspend(thunk, trace))
+}
+
+pub fn effect_sleep(millis: f64) -> JsEffect {
+    effect_new(EffectNode::Sleep(millis))
+}
+
+/// `Effect.sleep("2 seconds")`: Duration's text input — `<number> <unit>` with millis/seconds/minutes/hours/days.
+pub fn effect_sleep_text(text: &JsString) -> JsEffect {
+    let mut words = text.split_whitespace();
+    let amount: f64 = words.next().and_then(|w| w.parse().ok()).unwrap_or(0.0);
+    let unit = words.next().unwrap_or("millis");
+    let scale = match unit.trim_end_matches('s') {
+        "milli" | "millisecond" | "ms" => 1.0,
+        "second" | "sec" => 1_000.0,
+        "minute" | "min" => 60_000.0,
+        "hour" | "hr" => 3_600_000.0,
+        "day" => 86_400_000.0,
+        _ => 1.0,
+    };
+    effect_new(EffectNode::Sleep(amount * scale))
+}
+
+pub fn effect_scoped(source: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Scoped(source.clone()))
+}
+
+pub fn effect_add_finalizer(finalizer: FinalizerFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::AddFinalizer(finalizer, trace))
+}
+
+pub fn effect_ensuring(source: &JsEffect, finalizer: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Ensuring(source.clone(), finalizer.clone()))
+}
+
+pub fn effect_acquire_release(acquire: &JsEffect, release: ReleaseFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::AcquireRelease(acquire.clone(), release, trace))
+}
+
+pub fn effect_acquire_use_release(acquire: &JsEffect, use_fn: EffectFn, release: ReleaseFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::AcquireUseRelease(acquire.clone(), use_fn, release, trace))
+}
+
+pub fn effect_exit(source: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Exit(source.clone()))
+}
+
+fn exit_handle(outcome: Outcome) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Exit(outcome)))
+}
+
+pub fn effect_exit_succeed(value: EffectValue) -> JsEffect {
+    exit_handle(Ok(value))
+}
+
+pub fn effect_exit_fail(error: EffectValue) -> JsEffect {
+    exit_handle(Err(error))
+}
+
+fn exit_of(handle: &JsEffect) -> Outcome {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Exit(outcome)) => outcome.clone(),
+        _ => throw_error("scriptc: an Exit was expected".to_owned()),
+    })
+}
+
+pub fn effect_exit_is_success(handle: &JsEffect) -> bool {
+    exit_of(handle).is_ok()
+}
+
+/// `_tag` of a kernel data handle ("Success"/"Failure" for an Exit).
+pub fn effect_data_tag(handle: &JsEffect) -> JsString {
+    string(if exit_of(handle).is_ok() { "Success" } else { "Failure" })
+}
+
+/// `exit.value` — Effect's Success carries it; reading it off a Failure is a TypeError like a missing property would be.
+pub fn effect_exit_value(handle: &JsEffect) -> EffectValue {
+    match exit_of(handle) {
+        Ok(value) => value,
+        Err(_) => throw_error("Exit.value read on a Failure".to_owned()),
+    }
+}
+
+thread_local! {
+    static EFFECT_FIBER_IDS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The default logger's line: `[HH:MM:SS.mmm] LEVEL (#fiber): message parts` on stdout.
+fn effect_log_line(level: &JsString, parts: &JsArray<JsString>, fiber_id: u64) {
+    let now = date_now();
+    let stamp = match date_local_parts(now) {
+        Some(parts) => format!("{:02}:{:02}:{:02}.{:03}", parts.hours, parts.minutes, parts.seconds, parts.milliseconds),
+        None => "00:00:00.000".to_owned(),
+    };
+    let mut line = format!("[{stamp}] {level} (#{fiber_id})");
+    let count = array_len(parts) as usize;
+    for index in 0..count {
+        line.push(if index == 0 { ':' } else { ' ' });
+        if index == 0 {
+            line.push(' ');
+        }
+        line.push_str(array_get(parts, index as f64).as_ref());
+    }
+    if count == 0 {
+        line.push(':');
+    }
+    line.push('\n');
+    process_stdout_write(&string(&line));
+}
+
 fn no_trace() -> TraceFn {
     Box::new(|_| {})
 }
@@ -345,6 +504,24 @@ enum Frame {
     PopEnv(usize),
     /// A collection in progress: the next index to run, the values so far, the source and the collector.
     Collect(usize, Vec<EffectValue>, CollectSource, CollectFn),
+    /// `tap`: run the callback's effect, then restore the value; `tapError` the same on the failure.
+    Tap(EffectFn),
+    TapError(EffectFn),
+    /// Restore an earlier outcome once a side effect (tap, finalizer) succeeded; its own failure wins.
+    Restore(Outcome),
+    /// Leave a scope: run its finalizers (LIFO) with the exit, then restore the outcome.
+    CloseScope,
+    /// Finalizers still to run for an exit, then the outcome to restore.
+    Finalize(Vec<FinalizerFn>, Outcome),
+    Ensuring(JsEffect),
+    /// `acquireRelease`: the resource arrived — register the release, answer the resource.
+    Acquired(ReleaseFn),
+    /// `acquireUseRelease`: the resource arrived — use it, then release with the use's exit.
+    AcquiredUse(EffectFn, ReleaseFn),
+    /// The resource and its release, waiting for `use`'s outcome.
+    Using(EffectValue, ReleaseFn),
+    /// `Effect.exit`: any outcome becomes a success carrying it.
+    CaptureExit,
 }
 
 enum CollectSource {
@@ -378,6 +555,14 @@ enum Step {
     Enter(Bundle, JsEffect),
     /// Start a collection over its source.
     Collect(CollectSource, CollectFn),
+    /// Print a log line (needs the fiber's id).
+    Log(JsString, JsArray<JsString>),
+    /// Continue with another effect (suspend's thunk answered it).
+    Run(JsEffect),
+    /// Open a scope around the inner effect.
+    OpenScope(JsEffect),
+    /// Register a finalizer in the innermost scope.
+    Finalizer(FinalizerFn),
     Resume(Box<dyn EffectGen>),
     /// Suspend on a promise; `recover` (tryPromise) turns a rejection into
     /// a failure, its absence (promise) makes the rejection a defect.
@@ -404,13 +589,20 @@ pub struct EffectFiber {
     frames: Vec<Frame>,
     /// The services in scope, innermost provide last.
     env: Vec<(Rc<str>, EffectValue)>,
+    /// Open scopes' finalizers, innermost last (each in registration order).
+    scopes: Vec<Vec<FinalizerFn>>,
+    id: u64,
     on_exit: Option<Box<dyn FnOnce(Outcome)>>,
 }
 
 type FiberRef = Rc<RefCell<EffectFiber>>;
 
 fn fiber_new(effect: &JsEffect, on_exit: Box<dyn FnOnce(Outcome)>) -> FiberRef {
-    Rc::new(RefCell::new(EffectFiber { current: Some(effect.clone()), resumed: None, frames: Vec::new(), env: Vec::new(), on_exit: Some(on_exit) }))
+    let id = EFFECT_FIBER_IDS.with(|ids| {
+        ids.set(ids.get() + 1);
+        ids.get()
+    });
+    Rc::new(RefCell::new(EffectFiber { current: Some(effect.clone()), resumed: None, frames: Vec::new(), env: Vec::new(), scopes: Vec::new(), id, on_exit: Some(on_exit) }))
 }
 
 fn effect_step(effect: &JsEffect) -> Step {
@@ -436,6 +628,18 @@ fn effect_step(effect: &JsEffect) -> Step {
         }
         EffectNode::Layer(_) => throw_error("scriptc: a layer is not an effect (Effect.provide it)".to_owned()),
         EffectNode::ForEach(items, f, collect, _) => Step::Collect(CollectSource::Items(items.clone(), f.clone()), collect.clone()),
+        EffectNode::Log(level, parts) => Step::Log(level.clone(), parts.clone()),
+        EffectNode::Tap(inner, f, _) => Step::Push(Frame::Tap(f.clone()), inner.clone()),
+        EffectNode::TapError(inner, f, _) => Step::Push(Frame::TapError(f.clone()), inner.clone()),
+        EffectNode::Suspend(thunk, _) => Step::Run(thunk()),
+        EffectNode::Sleep(millis) => Step::Await(promise_to_handle(&promise_timeout(*millis)), None),
+        EffectNode::Scoped(inner) => Step::OpenScope(inner.clone()),
+        EffectNode::AddFinalizer(finalizer, _) => Step::Finalizer(finalizer.clone()),
+        EffectNode::Ensuring(inner, finalizer) => Step::Push(Frame::Ensuring(finalizer.clone()), inner.clone()),
+        EffectNode::AcquireRelease(acquire, release, _) => Step::Push(Frame::Acquired(release.clone()), acquire.clone()),
+        EffectNode::AcquireUseRelease(acquire, use_fn, release, _) => Step::Push(Frame::AcquiredUse(use_fn.clone(), release.clone()), acquire.clone()),
+        EffectNode::Exit(inner) => Step::Push(Frame::CaptureExit, inner.clone()),
+        EffectNode::Data(_) => throw_error("scriptc: a kernel data handle (an Exit) is not an effect".to_owned()),
         EffectNode::All(effects, collect) => Step::Collect(CollectSource::Effects(effects.clone()), collect.clone()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
@@ -465,6 +669,33 @@ fn fiber_drive(fiber: &FiberRef) {
                     match found {
                         Some(value) => Ok(value),
                         None => throw_error(format!("Service not found: {key}")),
+                    }
+                }
+                Step::Run(next) => {
+                    fiber.borrow_mut().current = Some(next);
+                    continue;
+                }
+                Step::Log(level, parts) => {
+                    let id = fiber.borrow().id;
+                    effect_log_line(&level, &parts, id);
+                    Ok(Rc::new(()))
+                }
+                Step::OpenScope(inner) => {
+                    let mut state = fiber.borrow_mut();
+                    state.scopes.push(Vec::new());
+                    state.frames.push(Frame::CloseScope);
+                    state.current = Some(inner);
+                    continue;
+                }
+                Step::Finalizer(finalizer) => {
+                    let mut state = fiber.borrow_mut();
+                    match state.scopes.last_mut() {
+                        Some(scope) => {
+                            scope.push(finalizer);
+                            drop(state);
+                            Ok(Rc::new(()))
+                        }
+                        None => throw_error("Effect.addFinalizer outside a scope (Effect.scoped is missing)".to_owned()),
                     }
                 }
                 Step::Collect(source, collect) => {
@@ -557,6 +788,61 @@ fn fiber_drive(fiber: &FiberRef) {
                         outcome = Some(Ok(collect(done)));
                         None
                     }
+                }
+                (Frame::Tap(f), Ok(value)) => {
+                    fiber.borrow_mut().frames.push(Frame::Restore(Ok(value.clone())));
+                    Some(f(value))
+                }
+                (Frame::TapError(f), Err(error)) => {
+                    fiber.borrow_mut().frames.push(Frame::Restore(Err(error.clone())));
+                    Some(f(error))
+                }
+                (Frame::Restore(stored), Ok(_)) => {
+                    outcome = Some(stored);
+                    None
+                }
+                (Frame::CloseScope, exit) => {
+                    let finalizers = fiber.borrow_mut().scopes.pop().unwrap_or_default();
+                    fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit));
+                    outcome = Some(Ok(Rc::new(())));
+                    None
+                }
+                (Frame::Finalize(mut finalizers, exit), Ok(_)) => match finalizers.pop() {
+                    Some(finalizer) => {
+                        let next = finalizer(exit_handle(exit.clone()));
+                        fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit));
+                        Some(next)
+                    }
+                    None => {
+                        outcome = Some(exit);
+                        None
+                    }
+                },
+                (Frame::Ensuring(finalizer), exit) => {
+                    fiber.borrow_mut().frames.push(Frame::Restore(exit));
+                    Some(finalizer)
+                }
+                (Frame::Acquired(release), Ok(resource)) => {
+                    let mut state = fiber.borrow_mut();
+                    let value = resource.clone();
+                    match state.scopes.last_mut() {
+                        Some(scope) => scope.push(Rc::new(move |exit| release(value.clone(), exit))),
+                        None => throw_error("Effect.acquireRelease outside a scope (Effect.scoped is missing)".to_owned()),
+                    }
+                    outcome = Some(Ok(resource));
+                    None
+                }
+                (Frame::AcquiredUse(use_fn, release), Ok(resource)) => {
+                    fiber.borrow_mut().frames.push(Frame::Using(resource.clone(), release));
+                    Some(use_fn(resource))
+                }
+                (Frame::Using(resource, release), exit) => {
+                    fiber.borrow_mut().frames.push(Frame::Restore(exit.clone()));
+                    Some(release(resource, exit_handle(exit)))
+                }
+                (Frame::CaptureExit, exit) => {
+                    outcome = Some(Ok(Rc::new(exit_handle(exit))));
+                    None
                 }
                 (Frame::PopEnv(count), passthrough) => {
                     let mut state = fiber.borrow_mut();

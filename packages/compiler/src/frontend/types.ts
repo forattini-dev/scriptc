@@ -1063,7 +1063,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
-  if (!ctx.dynamic && (npmSym?.name === "Effect" || npmSym?.name === "Layer") && npmDecls?.some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/](Effect|Layer)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; // effects and layers are the kernel's opaque handle
+  if (!ctx.dynamic && npmSym !== undefined && ["Effect", "Layer", "Exit", "Success", "Failure", "Cause"].includes(npmSym.name) && npmDecls?.some((d) => (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d)) && /[\\/]effect[\\/]dist[\\/](Effect|Layer|Exit|Cause)\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T; // effects, layers, exits and causes are the kernel's opaque handle
   if (
     npmDecls &&
     npmDecls.length > 0 &&
