@@ -70,6 +70,8 @@ include!("sqlite.rs");
 include!("island_host_sqlite.rs");
 #[cfg(feature = "island-v8")]
 include!("v8_island.rs");
+#[cfg(feature = "island-v8")]
+include!("v8_host.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");
