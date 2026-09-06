@@ -79,7 +79,7 @@ import {
 import { trackedFileExists } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
-import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js";
+import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
   strict: true,
@@ -1252,7 +1252,7 @@ function inTypePosition7(node: ts.Node): boolean {
 function nonInertTopLevel7(
   program: ts.Program,
   sf: ts.SourceFile,
-  cycleMembers: ReadonlySet<ts.SourceFile>,
+  cycleMembers: ReadonlySet<ts.SourceFile>, reachesCluster: (sf: ts.SourceFile) => boolean,
 ): ts.Node | null {
   const checker = program.getTypeChecker();
   const PRIM =
@@ -1278,7 +1278,7 @@ function nonInertTopLevel7(
    * calls are runtime-implemented, never user code. */
   const dtsRooted = (e: ts.Expression): boolean => {
     let root: ts.Expression = e;
-    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root) || ts.isCallExpression(root) || ts.isNonNullExpression(root) || ts.isParenthesizedExpression(root)) root = root.expression; // through dts-rooted CALL results too
     if (ts.isMetaProperty(root)) return true; // import.meta
     if (!ts.isIdentifier(root)) return false;
     let sym = checker.getSymbolAtLocation(root);
@@ -1287,7 +1287,7 @@ function nonInertTopLevel7(
     const decls = checker.declarationsOf(sym);
     return decls.length > 0 && decls.every((d) => d.getSourceFile().isDeclarationFile);
   };
-  const hasDecorator = (n: ts.Node): boolean =>
+  const hoistedMemo = new Map<ts.Node, boolean>(); const hasDecorator = (n: ts.Node): boolean =>
     ((n as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator);
   /** No function-like node anywhere in the subtree — arguments to builtin
    * calls must not smuggle a callback the builtin could invoke. */
@@ -1357,7 +1357,7 @@ function nonInertTopLevel7(
       return inert(e.expression);
     }
     if (ts.isPropertyAccessExpression(e)) {
-      return dtsRooted(e) || isPreinitializedDataPropertyRead(checker, e, cycleMembers);
+      return dtsRooted(e) || isPreinitializedDataPropertyRead(checker, e, cycleMembers) || isNamespaceMemberRead(checker, e);
     }
     if (ts.isElementAccessExpression(e)) {
       return (
@@ -1395,20 +1395,17 @@ function nonInertTopLevel7(
       });
     }
     if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
-      if (!dtsRooted(e.expression) || !ts.isIdentifier(chainRoot7(e.expression))) return false;
-      const args = e.arguments ?? [];
+      const inertFn = isInertHoistedFunctionCallee(checker, e.expression, cycleMembers, hoistedMemo); if (!inertFn && !dtsRooted(e.expression) && !isDtsMemberCall(checker, e.expression, inert) && !isOutsideClusterProgramCallee(checker, e.expression, cycleMembers, reachesCluster)) return false;
+      if (!inertFn && !calleeChainInert(e.expression, inert)) return false; // every CALL along the chain is held to this rule
+      const args = e.arguments ?? []; const holdsCallbacks = inertFn || kernelCallHoldsCallbacks(checker, e.expression); // stored, never run
       // A CALLABLE argument is admissible when it is itself dts-rooted:
       // a builtin-owned function value (the `promisify(fs.readFile)`
       // at every cycle member's top level) is runtime-implemented — even
       // if the builtin callee invokes it, no user code runs and no
       // cluster binding is observable. Function literals and user
       // callables keep the refusal.
-      return args.every(
-        (a) =>
-          inert(a) &&
-          !containsFunctionLike(a) &&
-          (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 || dtsRooted(a)),
-      );
+      return args.every((a) => inert(a) &&
+        (holdsCallbacks || (!containsFunctionLike(a) && (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 || dtsRooted(a)))));
     }
     return false;
   };
@@ -1456,12 +1453,6 @@ function nonInertTopLevel7(
 }
 
 /** The head of a property/element-access chain. */
-function chainRoot7(e: ts.Expression): ts.Expression {
-  let root: ts.Expression = e;
-  while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
-  return root;
-}
-
 /** Identifier occurrences a binding-identity preflight scan will query.
  * Gathered without checker traffic so managed deferred bodies can be
  * warmed in one exact symbol batch before the semantic walk. */
@@ -1496,7 +1487,7 @@ function backEdgeUseOffence7(
   }
   for (const bindingName of bindingNames) {
     const sym = checker.getSymbolAtLocation(bindingName);
-    if (sym === undefined) continue;
+    if (sym === undefined || isHoistedFunctionBinding(checker, sym)) continue; // a hoisted function never meets a TDZ
     checker.prefetchSymbolNodesExact(identifierOccurrences7(sf, bindingName.text));
     let offence: { name: string; node: ts.Node } | null = null;
     const visit = (node: ts.Node): void => {
@@ -1608,16 +1599,16 @@ export function makeCycleAdmission(
     }
     if (!sccVerdict.has(comp)) {
       let reason: string | null = null;
-      const cycleMembers = new Set(comp);
+      const cycleMembers = new Set(comp); const reachesCluster = makeReachesCluster(edgesOf, cycleMembers);
       for (const m of comp) {
         if (isCjsJsFile7(m)) {
           reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
           break;
         }
-        const off = nonInertTopLevel7(program, m, cycleMembers);
+        const off = nonInertTopLevel7(program, m, cycleMembers, reachesCluster);
         if (off !== null) {
-          reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
-          break;
+          reason ??= `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
+          if (process.env.SCRIPTC_CYCLE_DEBUG === undefined) break; else console.error(`scriptc cycle-debug: ${lineOf(off)}`); // every offender of the cluster
         }
       }
       sccVerdict.set(comp, reason);
@@ -2254,9 +2245,11 @@ function preflight7(load: LoadResult): {
       // __createRequire(import.meta.url) prologue) feed the returned
       // require COMPUTED specifiers at module INIT, so a static compile
       // would fence at load where the island runs the package as shipped.
+      // A WORKSPACE package's TypeScript sources are not a bundle: its
+      // createRequire sites meet the per-statement fences like program code.
       if (canonicalBuiltinModule(spec) === "module") {
         const pkg = npmStaticPackageOfPath(sf.fileName);
-        if (pkg !== null) {
+        if (pkg !== null && !isWorkspacePackageName(pkg)) {
           reportNpmStaticOffender(pkg, "it imports node:module (bundler banners drive createRequire's require with computed specifiers; the island serves the package)");
         }
       }
