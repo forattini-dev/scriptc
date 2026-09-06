@@ -20,3 +20,10 @@ export async function withArgv(middleware: (argv: unknown) => Promise<unknown>):
   const patch = (await middleware(argv)) as { extra?: number };
   return JSON.stringify(Object.assign(argv, patch));
 }
+
+// The callback arrives through an `any` parameter (yargs' `.middleware(cb)`
+// shape): it crosses as a dyn function, and its async answer must still
+// cross as a promise the island awaits.
+export function viaAny(cb: any): Promise<string> {
+  return cb(4).then((v: string) => v + "!");
+}

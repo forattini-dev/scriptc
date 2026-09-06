@@ -599,8 +599,10 @@ function emitIslandValue(value: string, context: RustIslandContext, depth = 0): 
     // settles: fulfillment marshals like an argument, rejection as an
     // engine Error carrying the reason's text. One level: a promise's
     // fulfillment is never itself a promise (JS flattens), so the nested
-    // marshal keeps the plain arms only.
-    (depth === 0
+    // marshal keeps the plain arms only. Depth counts FUNCTION nesting:
+    // a dyn callback's own answer (depth 1, the yargs middleware shape)
+    // may be a promise; that promise's fulfillment (depth 2) may not.
+    (depth <= 1
       ? `${dyn}::Promise(sc_handle) => { let (sc_island_promise, sc_island_resolve, sc_island_reject) = runtime::island_value_pending_promise(); ` +
         `let sc_native_promise = runtime::promise_from_handle::<${dyn}>(sc_handle); ` +
         `runtime::promise_then(&sc_native_promise, Box::new(move |sc_outcome| { match sc_outcome { ` +
