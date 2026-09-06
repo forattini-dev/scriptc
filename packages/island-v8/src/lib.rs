@@ -62,6 +62,7 @@ pub type HostFn = Rc<dyn Fn(&[Value]) -> HostResult>;
 
 /// One module source the resolver answers: `key` names it uniquely (the
 /// engine caches by key and reports it as the referrer of its imports).
+#[derive(Clone, Debug)]
 pub struct ModuleSource {
     pub key: String,
     pub source: String,
@@ -87,6 +88,9 @@ struct Engine {
     context: v8::Global<v8::Context>,
     modules: HashMap<String, v8::Global<v8::Module>>,
     module_keys: HashMap<i32, String>,
+    /// The promise `Module::evaluate` answered, per key: a later `import()`
+    /// of a module still evaluating (top-level await) settles from it.
+    module_promises: HashMap<String, v8::Global<v8::Promise>>,
     module_sources: HashMap<String, String>,
     resolver: Option<ModuleResolver>,
     host_fns: Vec<HostFn>,
@@ -95,7 +99,46 @@ struct Engine {
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
+    /// How many engine entries are on the stack (a host callback calling
+    /// back in nests them).
     static DEPTH: Cell<u32> = const { Cell::new(0) };
+    /// A Rust unwind that reached a host callback: it must not cross the
+    /// engine's C++ frames, so the trampoline parks it here, throws a
+    /// JavaScript sentinel for V8 to unwind with, and the OUTERMOST entry
+    /// re-raises it on the way out (`EntryGuard`).
+    static PARKED: RefCell<Option<Box<dyn std::any::Any + Send>>> = const { RefCell::new(None) };
+}
+
+/// Counts an engine entry; on the outermost exit, re-raises a parked
+/// unwind (never while another unwind is already in flight).
+struct EntryGuard;
+
+impl EntryGuard {
+    fn enter() -> Self {
+        DEPTH.with(|depth| depth.set(depth.get() + 1));
+        EntryGuard
+    }
+}
+
+impl Drop for EntryGuard {
+    fn drop(&mut self) {
+        let remaining = DEPTH.with(|depth| {
+            let value = depth.get().saturating_sub(1);
+            depth.set(value);
+            value
+        });
+        if remaining == 0 && !std::thread::panicking()
+            && let Some(payload) = PARKED.with(|slot| slot.borrow_mut().take())
+        {
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
+/// True while a host callback's unwind is parked (its JavaScript
+/// sentinel is unwinding the engine's frames).
+pub fn unwind_parked() -> bool {
+    PARKED.with(|slot| slot.borrow().is_some())
 }
 
 static PLATFORM: Once = Once::new();
@@ -122,6 +165,7 @@ fn context_global() -> v8::Global<v8::Context> {
 /// callback opens a callback scope beneath the engine's own frames.
 macro_rules! enter {
     ($scope:ident) => {
+        let _entry_guard = EntryGuard::enter();
         let __ptr = isolate_ptr();
         let __context = context_global();
         // SAFETY: the isolate is created once per thread, boxed, and only
@@ -147,6 +191,7 @@ pub fn init() {
     let mut isolate = Box::new(v8::Isolate::new(v8::CreateParams::default()));
     isolate.set_host_import_module_dynamically_callback(dynamic_import_callback);
     isolate.set_promise_reject_callback(promise_reject_callback);
+    isolate.set_host_initialize_import_meta_object_callback(import_meta_callback);
     let ptr: *mut v8::Isolate = &mut **isolate;
     let context = {
         // SAFETY: as in `enter!` — the boxed isolate has a stable address.
@@ -162,6 +207,7 @@ pub fn init() {
             context,
             modules: HashMap::new(),
             module_keys: HashMap::new(),
+            module_promises: HashMap::new(),
             module_sources: HashMap::new(),
             resolver: None,
             host_fns: Vec::new(),
@@ -663,9 +709,16 @@ fn host_trampoline(
     for i in 0..args.length() {
         values.push(Value(v8::Global::new(scope, args.get(i))));
     }
-    let depth = DEPTH.with(|d| { let v = d.get(); d.set(v + 1); v });
-    let result = host(&values);
-    DEPTH.with(|d| d.set(depth));
+    let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| host(&values))) {
+        Ok(result) => result,
+        Err(payload) => {
+            PARKED.with(|slot| *slot.borrow_mut() = Some(payload));
+            let message = v8::String::new(scope, "scriptc: a host function is unwinding (parked)").unwrap();
+            let exception = v8::Exception::error(scope, message);
+            scope.throw_exception(exception);
+            return;
+        }
+    };
     match result {
         HostResult::Undefined => rv.set_undefined(),
         HostResult::Null => rv.set_null(),
@@ -772,6 +825,7 @@ pub fn promise_then(value: &Value, on_fulfilled: HostFn, on_rejected: HostFn) ->
 
 /// Runs every queued microtask.
 pub fn run_microtasks() {
+    let _entry_guard = EntryGuard::enter();
     let ptr = isolate_ptr();
     // SAFETY: as in `enter!`.
     let isolate: &mut v8::Isolate = unsafe { &mut *ptr };
@@ -863,6 +917,43 @@ fn module_for<'s>(scope: &mut v8::PinScope<'s, '_>, source: ModuleSource) -> Opt
     Some(module)
 }
 
+/// `import.meta.url` for a module whose key is an absolute path: its
+/// file URL (a key that is not a path — `node:x`, a synthetic name —
+/// gets no `url`, as in Node for non-file modules).
+extern "C" fn import_meta_callback(
+    context: v8::Local<v8::Context>,
+    module: v8::Local<v8::Module>,
+    meta: v8::Local<v8::Object>,
+) {
+    v8::callback_scope!(unsafe scope, context);
+    let Some(key) = with_engine(|engine| engine.module_keys.get(&module.get_identity_hash().get()).cloned()) else {
+        return;
+    };
+    let path = std::path::Path::new(&key);
+    if !path.is_absolute() {
+        return;
+    }
+    let mut url = String::from("file://");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir => {}
+            std::path::Component::Normal(part) => {
+                url.push('/');
+                for byte in part.to_string_lossy().bytes() {
+                    match byte {
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' => url.push(byte as char),
+                        _ => url.push_str(&format!("%{byte:02X}")),
+                    }
+                }
+            }
+            _ => return,
+        }
+    }
+    if let (Some(name), Some(value)) = (v8::String::new(scope, "url"), v8::String::new(scope, &url)) {
+        meta.set(scope, name.into(), value.into());
+    }
+}
+
 fn resolve_module_callback<'s>(
     context: v8::Local<'s, v8::Context>,
     specifier: v8::Local<'s, v8::String>,
@@ -883,38 +974,66 @@ fn resolve_module_callback<'s>(
     }
 }
 
-/// Instantiates and evaluates `module`; Ok(namespace) once evaluation
-/// settled (microtasks drained), Err on a link or evaluation failure, and
-/// Ok(None) while a top-level await keeps it pending.
-fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, module: v8::Local<'s, v8::Module>) -> Result<Option<v8::Local<'s, v8::Value>>, Error> {
+/// How far a module's evaluation got.
+enum Evaluation<'s> {
+    /// Evaluated: its namespace.
+    Done(v8::Local<'s, v8::Value>),
+    /// A top-level await keeps it pending: the evaluation promise.
+    Pending(v8::Local<'s, v8::Promise>),
+    /// Still inside its own synchronous evaluation (a cycle reached
+    /// through `import()`): usable once the current evaluation returns.
+    Cycle,
+}
+
+/// Instantiates and evaluates `module` (once — a module never evaluates
+/// twice, and no namespace is read below `EvaluatingAsync`, which V8
+/// checks fatally), draining microtasks; Err on a link or evaluation
+/// failure.
+fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::Local<'s, v8::Module>) -> Result<Evaluation<'s>, Error> {
     v8::tc_scope!(let tc, scope);
     if module.get_status() == v8::ModuleStatus::Uninstantiated
         && module.instantiate_module(tc, resolve_module_callback).is_none()
     {
         return Err(caught!(tc));
     }
-    if matches!(module.get_status(), v8::ModuleStatus::Instantiated) {
+    if module.get_status() == v8::ModuleStatus::Instantiated {
         let Some(promise_value) = module.evaluate(tc) else {
             return Err(caught!(tc));
         };
-        let _ = promise_value;
+        if let Ok(promise) = v8::Local::<v8::Promise>::try_from(promise_value) {
+            let global = v8::Global::new(tc, promise);
+            with_engine(|engine| {
+                engine.module_promises.insert(key.to_owned(), global);
+            });
+        }
     }
     // SAFETY: as in `enter!`.
     let isolate: &mut v8::Isolate = unsafe { &mut *isolate_ptr() };
     isolate.perform_microtask_checkpoint();
     match module.get_status() {
-        v8::ModuleStatus::Evaluated => Ok(Some(module.get_module_namespace())),
+        // The API folds "evaluating async" (a top-level await in flight)
+        // into Evaluated: the evaluation promise's state tells them apart.
+        v8::ModuleStatus::Evaluated => {
+            let stored = with_engine(|engine| engine.module_promises.get(key).cloned());
+            if let Some(promise) = stored {
+                let promise = v8::Local::new(tc, &promise);
+                if promise.state() == v8::PromiseState::Pending {
+                    return Ok(Evaluation::Pending(promise));
+                }
+            }
+            Ok(Evaluation::Done(module.get_module_namespace()))
+        }
         v8::ModuleStatus::Errored => {
             let exception = module.get_exception();
             Err(error_of(tc, exception))
         }
-        _ => Ok(None),
+        _ => Ok(Evaluation::Cycle),
     }
 }
 
 /// Imports the module named `key` (through the resolver, with an empty
 /// referrer), evaluating it and everything it reaches. Ok(None) when a
-/// top-level await left it pending.
+/// top-level await (or a cycle in progress) left it pending.
 pub fn import_module(key: &str) -> Result<Option<Value>, Error> {
     enter!(scope);
     let source = resolve_source("", key).map_err(|message| Error::text("ReferenceError", message))?;
@@ -922,9 +1041,9 @@ pub fn import_module(key: &str) -> Result<Option<Value>, Error> {
         v8::tc_scope!(let tc, scope);
         return Err(caught!(tc));
     };
-    match evaluate_module(scope, module)? {
-        Some(namespace) => Ok(Some(Value(v8::Global::new(scope, namespace)))),
-        None => Ok(None),
+    match evaluate_module(scope, key, module)? {
+        Evaluation::Done(namespace) => Ok(Some(Value(v8::Global::new(scope, namespace)))),
+        Evaluation::Pending(_) | Evaluation::Cycle => Ok(None),
     }
 }
 
@@ -939,6 +1058,45 @@ pub fn module_namespace(key: &str) -> Option<Value> {
     Some(Value(v8::Global::new(scope, local.get_module_namespace())))
 }
 
+/// One deferred step of a dynamic import: evaluate the module now (the
+/// importer's own evaluation has returned by the time the microtask
+/// runs) and answer its namespace — or its evaluation promise chained to
+/// a namespace getter while a top-level await keeps it pending.
+fn import_step(source: &ModuleSource) -> HostResult {
+    enter!(scope);
+    let key = source.key.as_str();
+    let Some(module) = module_for(scope, source.clone()) else {
+        v8::tc_scope!(let tc, scope);
+        return HostResult::Throw(caught!(tc));
+    };
+    match evaluate_module(scope, key, module) {
+        Err(error) => HostResult::Throw(error),
+        Ok(Evaluation::Done(namespace)) => HostResult::Value(Value(v8::Global::new(scope, namespace))),
+        Ok(Evaluation::Pending(promise)) => {
+            let owned = key.to_owned();
+            let getter = host_function("namespaceOf", 0, Rc::new(move |_| match module_namespace(&owned) {
+                Some(namespace) => HostResult::Value(namespace),
+                None => HostResult::Throw(Error::text("Error", format!("module '{owned}' did not finish evaluating"))),
+            }));
+            let Some(text) = v8::String::new(scope, "(p, get) => p.then(() => get())") else {
+                return HostResult::Throw(Error::text("Error", "engine string"));
+            };
+            let Some(helper) = v8::Script::compile(scope, text, None).and_then(|script| script.run(scope)) else {
+                return HostResult::Throw(Error::text("Error", "engine helper"));
+            };
+            let Ok(helper) = v8::Local::<v8::Function>::try_from(helper) else {
+                return HostResult::Throw(Error::text("Error", "engine helper"));
+            };
+            let getter_local = v8::Local::new(scope, &getter.0);
+            match helper.call(scope, v8::undefined(scope).into(), &[promise.into(), getter_local]) {
+                Some(chained) => HostResult::Value(Value(v8::Global::new(scope, chained))),
+                None => HostResult::Throw(Error::text("Error", "engine helper call")),
+            }
+        }
+        Ok(Evaluation::Cycle) => HostResult::Throw(Error::text("Error", format!("module '{key}' did not finish evaluating"))),
+    }
+}
+
 fn dynamic_import_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     _host_defined_options: v8::Local<'s, v8::Data>,
@@ -946,53 +1104,29 @@ fn dynamic_import_callback<'s>(
     specifier: v8::Local<'s, v8::String>,
     _import_attributes: v8::Local<'s, v8::FixedArray>,
 ) -> Option<v8::Local<'s, v8::Promise>> {
-    let resolver = v8::PromiseResolver::new(scope)?;
-    let promise = resolver.get_promise(scope);
     let referrer = if resource_name.is_string() { resource_name.to_rust_string_lossy(scope) } else { String::new() };
     let spec = specifier.to_rust_string_lossy(scope);
-    let reject_with = |scope: &mut v8::PinScope<'s, '_>, error: &Error| {
-        let value = error_value(scope, error);
-        resolver.reject(scope, value);
+    // Resolution happens now (the specifier is judged at the call site);
+    // evaluation waits for a microtask, after the importer's own
+    // evaluation has returned — V8 forbids evaluating a graph that is
+    // mid-evaluation, and a cycle reached through import() is exactly
+    // that.
+    let source = match resolve_source(&referrer, &spec) {
+        Ok(source) => source,
+        Err(message) => {
+            let resolver = v8::PromiseResolver::new(scope)?;
+            let value = error_value(scope, &Error::text("ReferenceError", message));
+            resolver.reject(scope, value);
+            return Some(resolver.get_promise(scope));
+        }
     };
-    match resolve_source(&referrer, &spec) {
-        Err(message) => reject_with(scope, &Error::text("ReferenceError", message)),
-        Ok(source) => match module_for(scope, source) {
-            None => {
-                v8::tc_scope!(let tc, scope);
-                let error = caught!(tc);
-                reject_with(tc, &error);
-            }
-            Some(module) => match evaluate_module(scope, module) {
-                Err(error) => reject_with(scope, &error),
-                Ok(Some(namespace)) => {
-                    resolver.resolve(scope, namespace);
-                }
-                Ok(None) => {
-                    // A top-level await keeps the module pending: settle the
-                    // import with the namespace once evaluation completes.
-                    let namespace = module.get_module_namespace();
-                    let text = v8::String::new(scope, "(p, ns, resolve, reject) => p.then(() => resolve(ns), reject)")?;
-                    let helper = v8::Script::compile(scope, text, None)?.run(scope)?;
-                    let helper = v8::Local::<v8::Function>::try_from(helper).ok()?;
-                    let evaluation: v8::Local<v8::Value> = module.evaluate(scope)?;
-                    let resolve_fn = resolver.get_promise(scope);
-                    let _ = resolve_fn;
-                    let settle_text = v8::String::new(scope, "(r) => [(v) => r.resolve(v), (e) => r.reject(e)]")?;
-                    let _ = settle_text;
-                    let resolve_local: v8::Local<v8::Value> = v8::Local::<v8::Value>::from(resolver);
-                    let _ = resolve_local;
-                    let args: [v8::Local<v8::Value>; 4] = [
-                        evaluation,
-                        namespace,
-                        v8::undefined(scope).into(),
-                        v8::undefined(scope).into(),
-                    ];
-                    let _ = helper.call(scope, v8::undefined(scope).into(), &args);
-                }
-            },
-        },
-    }
-    Some(promise)
+    let step = host_function("importStep", 0, Rc::new(move |_| import_step(&source)));
+    let step_local = v8::Local::new(scope, &step.0);
+    let text = v8::String::new(scope, "(step) => Promise.resolve().then(() => step())")?;
+    let helper = v8::Script::compile(scope, text, None)?.run(scope)?;
+    let helper = v8::Local::<v8::Function>::try_from(helper).ok()?;
+    let promise = helper.call(scope, v8::undefined(scope).into(), &[step_local])?;
+    v8::Local::<v8::Promise>::try_from(promise).ok()
 }
 
 #[cfg(test)]
@@ -1059,6 +1193,41 @@ mod tests {
     }
 
     #[test]
+    fn import_meta_url_of_a_path_key() {
+        setup();
+        set_module_resolver(Rc::new(|_, specifier| match specifier {
+            "/tmp/scriptc meta/mod.js" => Ok(ModuleSource { key: specifier.into(), source: "export const u = import.meta.url;".into(), json: false }),
+            other => Err(format!("no {other}")),
+        }));
+        let ns = import_module("/tmp/scriptc meta/mod.js").unwrap().unwrap();
+        assert_eq!(as_string(&get(&ns, "u").unwrap()).as_deref(), Some("file:///tmp/scriptc%20meta/mod.js"));
+    }
+
+    #[test]
+    fn dynamic_import_of_pending_and_cyclic_modules() {
+        setup();
+        set_module_resolver(Rc::new(|_, specifier| match specifier {
+            "tla-root" => Ok(ModuleSource { key: "tla-root".into(), source: "export const later = import('./tla'); export const cyc = import('./cycle-a');".into(), json: false }),
+            "./tla" => Ok(ModuleSource { key: "tla".into(), source: "await Promise.resolve(); export const v = 'after await';".into(), json: false }),
+            "./cycle-a" => Ok(ModuleSource { key: "cycle-a".into(), source: "import './cycle-b'; export const a = 1;".into(), json: false }),
+            "./cycle-b" => Ok(ModuleSource { key: "cycle-b".into(), source: "export const b = import('./cycle-a');".into(), json: false }),
+            other => Err(format!("no {other}")),
+        }));
+        let ns = import_module("tla-root").unwrap().expect("root settles");
+        run_microtasks();
+        run_microtasks();
+        match promise_state(&get(&ns, "later").unwrap()).unwrap() {
+            PromiseState::Fulfilled(tla) => assert_eq!(as_string(&get(&tla, "v").unwrap()).as_deref(), Some("after await")),
+            PromiseState::Rejected(reason) => panic!("rejected: {}", to_string(&reason).unwrap()),
+            PromiseState::Pending => panic!("tla import pending"),
+        }
+        let cyc = get(&ns, "cyc").unwrap();
+        let cyc_ns = match promise_state(&cyc).unwrap() { PromiseState::Fulfilled(v) => v, _ => panic!("cycle import did not settle") };
+        let inner = get(&cyc_ns, "a").unwrap();
+        assert_eq!(as_number(&inner), Some(1.0));
+    }
+
+    #[test]
     fn promises_bytes_and_json() {
         setup();
         let (promise, resolver) = promise_new();
@@ -1082,5 +1251,17 @@ mod tests {
         run_microtasks();
         let rejections = take_unhandled_rejections();
         assert_eq!(rejections.len(), 1);
+    }
+
+    #[test]
+    fn host_unwind_is_parked_and_reraised() {
+        setup();
+        let bomb = host_function("bomb", 0, Rc::new(|_| -> HostResult { std::panic::resume_unwind(Box::new("scriptc-unwind")) }));
+        set(&global(), "bomb", &bomb).unwrap();
+        let outcome = std::panic::catch_unwind(|| eval("try { bomb() } catch (e) { 'swallowed' }", "test.js"));
+        let payload = outcome.expect_err("the unwind must come back out");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"scriptc-unwind"));
+        assert!(!unwind_parked());
+        assert_eq!(as_number(&eval("1 + 1", "after.js").unwrap()), Some(2.0));
     }
 }

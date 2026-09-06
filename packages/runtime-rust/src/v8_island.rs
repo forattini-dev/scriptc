@@ -71,10 +71,14 @@ fn v8_caught(error: &v8e::Error) -> Caught {
 
 /// An engine failure thrown into static code.
 fn v8_throw(error: v8e::Error) -> ! {
-    if v8_trace()
-        && let Some(stack) = &error.stack
-    {
-        eprintln!("scriptc island (v8): {}", stack);
+    if v8_trace() {
+        match &error.stack {
+            Some(stack) => eprintln!("scriptc island (v8): {stack}"),
+            None => eprintln!(
+                "scriptc island (v8): {}: {} (code {:?}, no stack)",
+                error.name, error.message, error.code
+            ),
+        }
     }
     rethrow_caught(v8_caught(&error))
 }
