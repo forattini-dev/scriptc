@@ -11,71 +11,42 @@
   },
   "preflightFailed": false,
   "stats": {
-    "statementsTotal": 147,
-    "statementsFailed": 1,
-    "statementsIsland": 15,
+    "statementsTotal": 1523,
+    "statementsFailed": 28,
+    "statementsIsland": 868,
     "functionsSkipped": 0
   },
   "unreachedStats": {
-    "statementsTotal": 2098,
-    "statementsFailed": 29,
-    "statementsIsland": 914,
+    "statementsTotal": 769,
+    "statementsFailed": 0,
+    "statementsIsland": 76,
     "functionsSkipped": 0
   },
   "reached": {
-    "total": 1,
+    "total": 28,
     "byCode": {
-      "SC1090": 1
-    },
-    "byFamily": {
-      "syntax-other": 1
-    },
-    "byPackage": {
-      "(other)": 1
-    },
-    "families": [
-      {
-        "family": "syntax-other",
-        "count": 1,
-        "codes": {
-          "SC1090": 1
-        },
-        "packages": {
-          "(other)": 1
-        },
-        "sample": {
-          "file": "main.ts",
-          "message": "switch on non-primitive values are not supported yet"
-        }
-      }
-    ],
-    "stdlibTail": {}
-  },
-  "unreached": {
-    "total": 29,
-    "byCode": {
-      "SC1090": 19,
+      "SC1090": 18,
       "SC2020": 8,
       "SC2004": 2
     },
     "byFamily": {
-      "syntax-other": 16,
+      "syntax-other": 15,
       "stdlib-tail": 8,
       "island-boundary-function": 3,
       "cascade": 2
     },
     "byPackage": {
-      "(other)": 29
+      "(other)": 28
     },
     "families": [
       {
         "family": "syntax-other",
-        "count": 16,
+        "count": 15,
         "codes": {
-          "SC1090": 16
+          "SC1090": 15
         },
         "packages": {
-          "(other)": 16
+          "(other)": 15
         },
         "sample": {
           "file": "main.ts",
@@ -93,7 +64,7 @@
         },
         "sample": {
           "file": "main.ts",
-          "message": "'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet"
+          "message": "'BunFile.size' is typed by @types/node but has no scriptc lowering yet"
         }
       },
       {
@@ -133,6 +104,14 @@
       "Map<string, CatalogueLine>.get": 1,
       "new Map(entries)": 1
     }
+  },
+  "unreached": {
+    "total": 0,
+    "byCode": {},
+    "byFamily": {},
+    "byPackage": {},
+    "families": [],
+    "stdlibTail": {}
   },
   "runtimeFences": 0,
   "npmStatic": [],
@@ -646,7 +625,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/completion.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC1090 narrowing '.filter' with a hand-written type predicate (a written 'x is T' is an unchecked assertion nothing validates at runtime — keep the receiver's element type instead — annotate the callback's return ': boolean' (the checker then skips the predicate) or annotate the result with the receiver's own element type — and narrow the elements after) is not supported yet"
+      "reason": "auto: round 1: SC1090 spreading 'Map<string, string[]>' into a '[string, string[]][]' literal (only a same-element-type array spreads) is not supported yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/privileged.ts",
@@ -686,7 +665,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/report.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC2020 'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet"
+      "reason": "auto: round 1: SC2020 'new Set(values)' is part of the standard library types but has no scriptc lowering yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/failure-clipboard.ts",
@@ -701,7 +680,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC2020 'openSync with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/update-order.ts",
@@ -776,7 +755,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/uninstall.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/catalogue.ts",
@@ -786,7 +765,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/keys.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC2020 'readonly [\"alacritty\", \"x-terminal-emulator\", \"gnome-terminal\", \"xterm\"].find' is part of the standard library types but has no scriptc lowering yet"
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/keys-view.ts",
@@ -846,7 +825,7 @@
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/statusline-command.ts",
       "tier": "island",
-      "reason": "auto: round 1: SC2020 'process.stdin' is typed by @types/node but has no scriptc lowering yet"
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
     },
     {
       "module": "/home/cyber/Work/reddb.io/red-dev/src/herdr.ts",
@@ -895,10 +874,10 @@
     }
   ],
   "timing": {
-    "wallMs": 39362,
+    "wallMs": 46350,
     "phases": {
-      "ffi-validate": 69,
-      "reachable-emit": 4195
+      "ffi-validate": 63,
+      "reachable-emit": 4394
     }
   }
 }

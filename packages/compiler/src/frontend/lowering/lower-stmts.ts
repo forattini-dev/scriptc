@@ -3685,6 +3685,28 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // point — labeled jumps naming this switch fence at the jump).
     const labels = L.takeLabels();
     const disc = L.lowerExpr(stmt.expression);
+    // A scrutinee that is an island HANDLE under a static checker type
+    // (`switch (inv.command)` where `inv` came out of an island module,
+    // typed `string | null`): exit it once, validated against that type,
+    // into a fresh const the tests re-read (the union desugar needs a
+    // plain read), then dispatch like any static switch:
+    // `{ const t = <exit>; switch (t) {...} }`. A handle whose type has
+    // no validated exit keeps the fence below.
+    if (disc.type.kind === "jsval") {
+      const mapped = L.mapTypeOf(L.typeOf(stmt.expression));
+      if (mapped !== null && mapped.kind !== "jsval" && mapped.kind !== "dyn" && L.boundaryExitSafe(mapped)) {
+        const exited = L.coerceToExpected(disc, mapped);
+        const local = L.declareLocal(stmt.expression, "%switch.disc", exited.type, false);
+        const decl: IrStmt = { kind: "varDecl", localId: local.id, init: exited, loc: locOf(stmt.expression) };
+        const ref: IrExpr = { kind: "varRef", localId: local.id, type: exited.type, loc: locOf(stmt.expression) };
+        return { kind: "block", body: [decl, lowerSwitchOn(L, stmt, labels, ref)], loc: locOf(stmt) };
+      }
+    }
+    return lowerSwitchOn(L, stmt, labels, disc);
+  }
+
+  /** The switch proper, over an already-lowered discriminant. */
+  function lowerSwitchOn(L: Lowerer, stmt: ts.SwitchStatement, labels: string[] | undefined, disc: IrExpr): IrStmt {
     const dk = disc.type.kind;
     if (dk === "dyn") {
       L.unsupported("SC1100", stmt.expression, "switch statements on 'unknown' values");
@@ -3780,14 +3802,23 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
         }
       }
     }
+    // A clause exits when its last statement does — or when that last
+    // statement is a BLOCK whose own last statement returns/throws/
+    // continues (`case "x": { const m = await import(...); return m.run(); }`,
+    // the lazy-command idiom). A break inside such a block is a nested
+    // break, not the chain's droppable trailing one, so it does not count.
     const exits = (clause: ts.CaseOrDefaultClause): boolean => {
       const last = clause.statements[clause.statements.length - 1];
+      if (!last) return false;
+      if (ts.isBlock(last)) {
+        const inner = last.statements[last.statements.length - 1];
+        return !!inner && (ts.isReturnStatement(inner) || ts.isThrowStatement(inner) || ts.isContinueStatement(inner));
+      }
       return (
-        !!last &&
-        ((ts.isBreakStatement(last) && !last.label) ||
-          ts.isReturnStatement(last) ||
-          ts.isThrowStatement(last) ||
-          ts.isContinueStatement(last))
+        (ts.isBreakStatement(last) && !last.label) ||
+        ts.isReturnStatement(last) ||
+        ts.isThrowStatement(last) ||
+        ts.isContinueStatement(last)
       );
     };
     // The whole case-body sequence is ONE lexical scope, like the real
