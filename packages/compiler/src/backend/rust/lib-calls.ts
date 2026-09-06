@@ -72,6 +72,7 @@ export interface RustLibCallContext {
   emitEventEmitterCall(expr: RustLibCallExpr): string | null;
   classNameArms(className: string, loc?: SrcLoc): string;
   isEdgeValue(type: IrType): boolean;
+  isUnit(type: IrType): boolean;
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {

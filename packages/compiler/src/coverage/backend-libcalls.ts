@@ -212,6 +212,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "effect.asVoid": ["c", "rust"],
   "effect.catchAll": ["c", "rust"],
   "effect.catchIf": ["c", "rust"],
+  "effect.catchTag": ["c", "rust"],
   "effect.dataTag": ["c", "rust"],
   "effect.die": ["c", "rust"],
   "effect.ensuring": ["c", "rust"],

@@ -40,6 +40,13 @@ function channelUndefined(L: Lowerer, channel: IrType, loc: SrcLoc): IrExpr | nu
   return null;
 }
 
+/** A kernel schema ERROR class instance (or a union of them): yieldable in Effect.gen as its own failure. */
+function isYieldableError(L: Lowerer, type: IrType): boolean {
+  if (type.kind === "union") return (L.unions.get(type.unionId)?.arms ?? []).every((arm) => isYieldableError(L, arm));
+  const form = type.kind === "object" ? L.classes.get(type.className)?.schema?.form : undefined;
+  return form === "error" || form === "taggedError";
+}
+
 /** `yield e` / `yield;` — only inside a generator body the signature
  * collection accepted (L.ctx.generator carries the channels). `yield*`
  * lowers in STATEMENT position only (lowerYieldStarStatement — the value
@@ -56,7 +63,9 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
   if (expr.asteriskToken && gen.yieldT.kind === "effect" && expr.expression !== undefined) {
     // `yield* effect` in an Effect.gen body: the kernel runs the effect and resumes the generator with its value (as a
     // succeeded effect); the site reads the value with the checker's type — `never` (a failing effect) is statement-only.
-    const value = L.lowerExpr(expr.expression);
+    let value = L.lowerExpr(expr.expression);
+    // `yield* new NotFound({…})` — a yieldable schema error: the failure itself.
+    if (value.type.kind !== "effect" && isYieldableError(L, value.type)) value = { kind: "libCall", fn: "effect.fail", args: [value], type: EFFECT_T, loc };
     if (value.type.kind !== "effect") L.unsupported("SC1071", expr, "yield* of a non-Effect value inside Effect.gen");
     const tsType = L.typeOf(expr);
     const result = (tsType.flags & ts.TypeFlags.Never) !== 0 ? VOID : L.mapTypeOf(tsType);

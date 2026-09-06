@@ -38,7 +38,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, canConvertToDyn, canDynCheckTo, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
-import type { ClassInfo } from "./lower-classes.js";
+import type { ClassInfo } from "./lower-classes.js"; import { schemaInspectBody } from "./lower-schema.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 
@@ -289,7 +289,7 @@ function inspectExpr(
     case "jsval":
       return { kind: "libCall", fn: "insp.jsval", args: [value, recurse, depth], type: STRING, loc };
     case "object":
-      if (isErrorClass(L, t.className)) {
+      if (isErrorClass(L, t.className) && L.classes.get(t.className)?.schema === undefined) {
         const info = L.classes.get(t.className)!;
         if (!info.builtinError) {
           return { kind: "call", callee: userErrorInspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
@@ -701,6 +701,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // IR name's module qualifier (`m0.Timer` is the frontend's spelling
       // for a class declared in a non-entry module).
       const display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
+      if (info.schema !== undefined) { body = schemaInspectBody(L, t, info, loc, { depthGate, begin, entry, child, end, ret, v, key: inspectKey }); break; }
       // #private fields never render: they are not properties in any
       // observable way — Node's inspect omits them entirely (verified),
       // so a class whose only fields are private prints as `C {}`.
@@ -828,6 +829,7 @@ function userErrorInspectHelper(L: Lowerer, t: IrType & { kind: "object" }, loc:
   L.inspectHelpers.set(key, helperName);
   const info = L.classes.get(t.className);
   if (!info) throw new InternalCompilerError(`inspect of unknown class ${t.className}`);
+  if (info.schema !== undefined) return inspectHelper(L, t, loc); // a schema error prints its toJSON object
   const display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
 
   const v = (): IrExpr => varRef("v.0", t, loc);
@@ -861,8 +863,6 @@ function userErrorInspectHelper(L: Lowerer, t: IrType & { kind: "object" }, loc:
   const child = (elemT: IrType, value: IrExpr): IrExpr => inspectExpr(L, elemT, value, rPlus1(), d(), loc);
   const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
 
-  // The bracket base reads the LIVE name/message slots — a constructor
-  // that reassigns `this.name` prints the override, like Node.
   // The bracket base reads the LIVE name/message slots — a constructor
   // that reassigns `this.name` prints the override, like Node.
   const header = (): IrExpr => ({

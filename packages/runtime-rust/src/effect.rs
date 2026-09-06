@@ -23,8 +23,20 @@ pub fn effect_box<T: 'static>(value: T) -> EffectValue {
 pub fn effect_unbox<T: Clone + 'static>(value: &EffectValue) -> T {
     value
         .downcast_ref::<T>()
-        .unwrap_or_else(|| panic!("scriptc: effect value is not a {}", std::any::type_name::<T>()))
+        .unwrap_or_else(|| effect_unbox_mismatch(std::any::type_name::<T>()))
         .clone()
+}
+
+/// A union site found neither the union nor any of its arms in the box (the emitter's arm-wise unbox).
+pub fn effect_unbox_mismatch(expected: &str) -> ! {
+    panic!("scriptc: effect value is not a {expected}")
+}
+
+/// The unit arms of a union, boxed distinguishably (`undefined` vs `null`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EffectUnit {
+    Undefined,
+    Null,
 }
 
 type TraceFn = Box<dyn Fn(&mut Tracer<'_>)>;
@@ -621,9 +633,12 @@ fn effect_defect(defect: EffectValue) -> ! {
     let message = defect
         .downcast_ref::<JsString>()
         .map(|text| text.to_string())
-        .or_else(|| defect.downcast_ref::<f64>().map(|n| number_to_string(*n).to_string()))
-        .unwrap_or_else(|| "Effect defect".to_owned());
-    throw_error(message)
+        .or_else(|| defect.downcast_ref::<f64>().map(|n| number_to_string(*n).to_string()));
+    match message {
+        Some(message) => throw_error(message),
+        // A program value (a schema error instance, a record): thrown as itself, like Effect's yieldable errors.
+        None => rethrow_caught(caught_from_any(defect)),
+    }
 }
 
 /// One running effect: the node being evaluated (or the outcome a
@@ -967,14 +982,14 @@ pub fn effect_run_sync(effect: &JsEffect) -> EffectValue {
 }
 
 /// `Effect.runPromise`: a promise of the site's type, settled by the fiber's exit.
-pub fn effect_run_promise<T: HeapValue>(effect: &JsEffect) -> JsPromise<T> {
+pub fn effect_run_promise<T: HeapValue>(effect: &JsEffect, unbox: Rc<dyn Fn(&EffectValue) -> T>) -> JsPromise<T> {
     let promise = promise_new::<T>();
     let target = promise.clone();
     let fiber = fiber_new(
         effect,
         Box::new(move |outcome| match outcome {
             Ok(value) => {
-                let _ = promise_fulfill(&target, effect_unbox::<T>(&value));
+                let _ = promise_fulfill(&target, unbox(&value));
             }
             Err(error) => {
                 let _ = promise_reject(&target, caught_from_any(error));

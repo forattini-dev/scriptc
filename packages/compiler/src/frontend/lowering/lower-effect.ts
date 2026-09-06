@@ -384,6 +384,15 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (handler.type.kind !== "func" || handler.type.params.length > 1 || handler.type.ret.kind !== "effect") break;
         return lib("effect.catchIf", [at(0), predicate, handler], EFFECT_T, loc);
       }
+      case "catchTag": {
+        // `Effect.catchTag("Tag", (e) => …)` — the failure whose `_tag` is the literal; the handler's parameter is the checker's narrowing (the class the tag names).
+        if (total !== 3 || at(0).type.kind !== "effect") break;
+        const tag = at(1);
+        const handler = at(2);
+        if (tag.kind !== "strLit") L.unsupported("SC1090", expr, "Effect.catchTag with a non-literal tag");
+        if (handler.type.kind !== "func" || handler.type.params.length !== 1 || handler.type.ret.kind !== "effect") break;
+        return lib("effect.catchTag", [at(0), tag, handler], EFFECT_T, loc);
+      }
       case "tryPromise": {
         // `Effect.tryPromise({ try: () => promise, catch: (reason) => error })` — the two callbacks lower separately; the
         // rejection reason reaches `catch` as the program's dynamic value (its type is `unknown`).
@@ -530,6 +539,11 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "service":
         if (total === 1 && at(0).type.kind === "effect") return at(0); // a key IS the effect that looks the service up
         break;
+      case "runSyncExit": {
+        // `Effect.runSyncExit(e)` = `Effect.runSync(Effect.exit(e))`: the Exit handle of a synchronous run.
+        if (total !== 1 || at(0).type.kind !== "effect") break;
+        return lib("effect.runSync", [lib("effect.exit", [at(0)], EFFECT_T, loc)], EFFECT_T, loc);
+      }
       case "runSync":
       case "runPromise": {
         if (total !== 1) break;

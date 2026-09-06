@@ -957,6 +957,7 @@ export class RustExpressionEmitter {
           },
           emitEventEmitterCall: (value) => this.context.emitEventEmitterCall(value),
           isEdgeValue: (type) => this.context.isEdgeValue(type),
+          isUnit: (type) => this.context.isUnit(type),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);
             return this.context.classSubtree(meta).map((candidate) =>
