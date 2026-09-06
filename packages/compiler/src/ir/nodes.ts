@@ -820,6 +820,11 @@ export interface IrModule {
      * "import" edge AND its CJS entry behind a "require" edge; "any"
      * serves both lookups (relative files, builtins). */
     edges: { from: string; specifier: string; to: string; kind: "any" | "import" | "require" }[];
+    /** Bun runtime modules (`bun:sqlite`, `bun:ffi`, `bun`) embedded code
+     * imports under --target bun: the island answers each from its bun
+     * table (a kernel-backed facade or a trap), and the Rust runtime's
+     * feature set follows this list (`bun:sqlite` → the `sqlite` kernel). */
+    bunRuntimeModules?: string[];
   };
   /** Record shapes, in first-seen (`r0`, `r1`, ...) order. Fields are in
    * CANONICAL order (sorted by name) — the shape's identity; a `recordLit`'s

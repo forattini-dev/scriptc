@@ -504,5 +504,15 @@ pub(crate) fn island_host_object(context: &mut Context) -> boa_engine::JsObject 
             arity,
         );
     }
+    // The SQLite bridge exists only with the `sqlite` feature; the
+    // bun:sqlite facade feature-detects it and keeps the trap otherwise.
+    #[cfg(feature = "sqlite")]
+    host.function(
+        NativeFunction::from_copy_closure(|this, arguments, context| {
+            island_boundary(context, |context| island_host_sqlite(this, arguments, context))
+        }),
+        boa_engine::JsString::from("sqlite"),
+        6,
+    );
     host.build()
 }

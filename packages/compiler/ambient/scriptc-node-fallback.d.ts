@@ -3662,3 +3662,62 @@ declare module "node:stream/consumers" {
   import streamConsumers = require("stream/consumers");
   export = streamConsumers;
 }
+
+/* bun:sqlite — Bun's SQLite module, for projects without @types/bun (a
+ * project carrying bun-types uses its own, richer surface). The shape
+ * is the one the island's facade over the runtime's SQLite kernel
+ * serves under --target bun; the static tier traps it on call. */
+declare module "bun:sqlite" {
+  export type SQLQueryBindings = string | number | bigint | boolean | null | Uint8Array | ArrayBuffer | Record<string, string | number | bigint | boolean | null | Uint8Array | ArrayBuffer>;
+  export interface Changes {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  }
+  export class Statement<ReturnType = unknown, ParamsType extends SQLQueryBindings[] = SQLQueryBindings[]> {
+    readonly native: Statement<ReturnType, ParamsType>;
+    readonly columnNames: string[];
+    readonly paramsCount: number;
+    all(...params: ParamsType): ReturnType[];
+    get(...params: ParamsType): ReturnType | null;
+    values(...params: ParamsType): unknown[][];
+    run(...params: ParamsType): Changes;
+    iterate(...params: ParamsType): IterableIterator<ReturnType>;
+    safeIntegers(enabled?: boolean): this;
+    as<T>(Class: new (...args: never[]) => T): Statement<T, ParamsType>;
+    finalize(): void;
+    toString(): string;
+    [Symbol.iterator](): IterableIterator<ReturnType>;
+  }
+  export interface DatabaseOptions {
+    readonly?: boolean;
+    create?: boolean;
+    readwrite?: boolean;
+    safeIntegers?: boolean;
+    strict?: boolean;
+  }
+  export class Database {
+    constructor(filename?: string, options?: number | DatabaseOptions);
+    static open(filename: string, options?: number | DatabaseOptions): Database;
+    static deserialize(serialized: Uint8Array, isReadOnly?: boolean): Database;
+    static setCustomSQLite(path: string): boolean;
+    readonly filename: string;
+    readonly inTransaction: boolean;
+    query<ReturnType = unknown, ParamsType extends SQLQueryBindings[] = SQLQueryBindings[]>(sql: string): Statement<ReturnType, ParamsType>;
+    prepare<ReturnType = unknown, ParamsType extends SQLQueryBindings[] = SQLQueryBindings[]>(sql: string, params?: ParamsType): Statement<ReturnType, ParamsType>;
+    run(sql: string, ...params: SQLQueryBindings[]): Changes;
+    exec(sql: string, ...params: SQLQueryBindings[]): Changes;
+    transaction<F extends (...args: never[]) => unknown>(fn: F): F & { deferred: F; immediate: F; exclusive: F };
+    serialize(name?: string): Buffer;
+    loadExtension(name: string, entryPoint?: string): void;
+    fileControl(op: number, arg?: number | Uint8Array): number;
+    close(throwOnError?: boolean): void;
+  }
+  export class SQLiteError extends Error {
+    readonly name: "SQLiteError";
+    readonly code: string;
+    readonly errno: number;
+    readonly byteOffset: number;
+  }
+  export const constants: Record<string, number>;
+  export default Database;
+}

@@ -58,6 +58,10 @@ include!("island_eval.rs");
 include!("island_host_functions.rs");
 #[cfg(feature = "island-eval")]
 include!("island_promise.rs");
+#[cfg(feature = "sqlite")]
+include!("sqlite.rs");
+#[cfg(all(feature = "island-eval", feature = "sqlite"))]
+include!("island_host_sqlite.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");

@@ -429,7 +429,12 @@ export interface FileParts {
       for (const fp of parts) collectCreateRequires(L, builder, fp.sf);
       const graph = builder.finish();
       if (graph.modules.length > 0) {
-        L.npmEmbedded = { modules: graph.modules, edges: graph.edges };
+        const bunRuntimeModules = graph.lazyTraps.filter((t) => t.bunTrap).map((t) => t.specifier).sort();
+        L.npmEmbedded = {
+          modules: graph.modules,
+          edges: graph.edges,
+          ...(bunRuntimeModules.length > 0 ? { bunRuntimeModules } : {}),
+        };
       }
       if (graph.builtins.length > 0) L.npmBuiltins = graph.builtins;
       if (graph.lazyTraps.length > 0) L.npmLazyTraps = graph.lazyTraps;

@@ -307,6 +307,8 @@ jobs:
       - run: cargo fetch --locked
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: clippy with the island engine and the SQLite kernel
+        run: cargo clippy --all-targets --locked --features island-eval,sqlite -- -D warnings
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.3

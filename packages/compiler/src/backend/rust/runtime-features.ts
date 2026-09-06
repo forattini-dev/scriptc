@@ -1,7 +1,7 @@
 import type { IrModule } from "../../ir/nodes.js";
 import { hasRustEmbeddedModules } from "./embedded-modules.js";
 
-export type RustRuntimeFeature = "island-eval";
+export type RustRuntimeFeature = "island-eval" | "sqlite";
 
 /** Select heavyweight runtime facilities from the lowered IR, never source text. */
 export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
@@ -30,5 +30,9 @@ export function rustRuntimeFeatures(mod: IrModule): RustRuntimeFeature[] {
     for (const child of Object.values(value)) visit(child);
   };
   visit(mod);
-  return islandEval ? ["island-eval"] : [];
+  if (!islandEval) return [];
+  // The SQLite kernel compiles (bundled amalgamation) only for graphs that
+  // reach `bun:sqlite`; every other island build keeps the trap.
+  const sqlite = mod.embedded?.bunRuntimeModules?.includes("bun:sqlite") === true;
+  return sqlite ? ["island-eval", "sqlite"] : ["island-eval"];
 }
