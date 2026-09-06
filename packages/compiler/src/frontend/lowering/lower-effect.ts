@@ -59,6 +59,32 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
         if (member === "flatMap" && fn.type.ret.kind !== "effect") break;
         return lib(member === "map" ? "effect.map" : "effect.flatMap", [source, fn], EFFECT_T, loc);
       }
+      case "gen": {
+        if (args.length !== 1) break;
+        const body = L.lowerExpr(args[0]!);
+        if (body.type.kind !== "func" || body.type.params.length !== 0 || body.type.ret.kind !== "generator" || body.type.ret.yieldT.kind !== "effect") break;
+        return lib("effect.gen", [body], EFFECT_T, loc);
+      }
+      case "fail":
+      case "die":
+        if (args.length === 1) return lib(member === "fail" ? "effect.fail" : "effect.die", [L.lowerExpr(args[0]!)], EFFECT_T, loc);
+        break;
+      case "catch": // effect 4's name for catchAll (v3's spelling is kept for programs written against it)
+      case "catchAll":
+      case "mapError": {
+        if (args.length !== 2) break;
+        const source = L.lowerExpr(args[0]!);
+        const fn = L.lowerExpr(args[1]!);
+        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length !== 1) break;
+        if (member !== "mapError" && fn.type.ret.kind !== "effect") break;
+        return lib(member === "mapError" ? "effect.mapError" : "effect.catchAll", [source, fn], EFFECT_T, loc);
+      }
+      case "orDie": {
+        if (args.length !== 1) break;
+        const source = L.lowerExpr(args[0]!);
+        if (source.type.kind !== "effect") break;
+        return lib("effect.orDie", [source], EFFECT_T, loc);
+      }
       case "runSync":
       case "runPromise": {
         if (args.length !== 1) break;

@@ -1896,7 +1896,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runPromise" // the effect kernel (static builds; lower-effect.ts)
+  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" // the effect kernel (static builds; lower-effect.ts)
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers
    * consume the native body stream. AbortSignal and ReadableStream values

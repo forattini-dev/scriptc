@@ -127,6 +127,26 @@ function emitGeneratorValue(
     });
     return;
   }
+  if (expr.kind === "libCall" && expr.args.some(containsYield)) {
+    // A lib call over yields (the effect kernel's `yield* e` reads the resumed effect's value through effect.runSync):
+    // the arguments suspend in order, then the call runs over their resumed values.
+    const resolved: (readonly [IrExpr, string])[] = [];
+    const step = (index: number): void => {
+      const arg = expr.args[index];
+      if (arg === undefined) {
+        consume(context.emitExprWithValues(expr, resolved));
+        return;
+      }
+      emitGeneratorValue(fn, arg, context, flow, (value) => {
+        const held = context.nextName("sc_generator_arg");
+        context.line(`let ${held} = ${value};`);
+        resolved.push([arg, held]);
+        step(index + 1);
+      });
+    };
+    step(0);
+    return;
+  }
   if (containsYield(expr)) context.unsupported("nested generator value in the Rust state-machine subset", expr.loc);
   consume(context.emitExpr(expr));
 }

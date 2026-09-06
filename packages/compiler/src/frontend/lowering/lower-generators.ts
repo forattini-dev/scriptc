@@ -9,7 +9,7 @@ import { InternalCompilerError } from "../../errors.js";
  * g.next()` binds and reads flow. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, IrExpr, IrStmt, IrType, SrcLoc, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, IrStmt, IrType, SrcLoc, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { genResultRecord } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
@@ -52,6 +52,17 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
     // A yield in a body this compiler did not lower as a generator (an
     // async generator's, a comptime callback's) — the blanket fence.
     L.unsupported("SC1071", expr);
+  }
+  if (expr.asteriskToken && gen.yieldT.kind === "effect" && expr.expression !== undefined) {
+    // `yield* effect` in an Effect.gen body: the kernel runs the effect and resumes the generator with its value (as a
+    // succeeded effect); the site reads the value with the checker's type — `never` (a failing effect) is statement-only.
+    const value = L.lowerExpr(expr.expression);
+    if (value.type.kind !== "effect") L.unsupported("SC1071", expr, "yield* of a non-Effect value inside Effect.gen");
+    const tsType = L.typeOf(expr);
+    const result = (tsType.flags & ts.TypeFlags.Never) !== 0 ? VOID : L.mapTypeOf(tsType);
+    if (result === null) L.badType(expr, tsType);
+    const resumed: IrExpr = { kind: "yieldExpr", value, type: EFFECT_T, loc };
+    return { kind: "libCall", fn: "effect.runSync", args: [resumed], type: result, loc };
   }
   if (expr.asteriskToken) {
     L.unsupported(
@@ -374,6 +385,8 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
   if (!gen) L.unsupported("SC1071", expr);
+  // An Effect.gen body: the expression form (lowerYield) serves statement position too — the value is dropped.
+  if (gen.yieldT.kind === "effect") return { kind: "exprStmt", expr: lowerYield(L, expr), loc: locOf(expr) };
   if (!expr.expression) L.unsupported("SC1071", expr, "'yield*' with no operand");
   const loc = locOf(expr);
   const delegate = L.lowerExpr(expr.expression);
