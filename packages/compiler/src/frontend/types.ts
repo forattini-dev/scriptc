@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord } from "./kernel-types.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
@@ -3757,7 +3757,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // its data fields, and calls of the member monomorphize per call
       // site against the defining object literal's declaration.
       if (isGenericCallableMemberType(fieldTs, checker)) continue;
-      let pt = mapType(fieldTs, ctx);
+      let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.
@@ -4061,7 +4061,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     }
     const fieldTs = checker.getTypeOfSymbol(p);
     if (isGenericCallableMemberType(fieldTs, checker)) continue;
-    let pt = mapType(fieldTs, ctx);
+    let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;

@@ -35,3 +35,13 @@ export function decoratedSchemaRecord(parts: readonly ts.Type[], ctx: TypeMapper
 export function isDecoratedSchema(shapes: { get(id: string): IrRecordShape | undefined }, type: IrType): boolean {
   return type.kind === "record" && (shapes.get(type.shapeId)?.fields.some((f) => f.name === SCHEMA_SLOT) ?? false);
 }
+
+/** A record member whose `any` comes from a TYPE PARAMETER instantiation (`tag?: T` with `T = any` — effect's phantom
+ * slots, redcode's `Node<unknown, unknown, any>`): declared through a type parameter, never spelled `any`. */
+export function isPhantomAnyMember(checker: ts.TypeChecker, member: ts.Symbol): boolean {
+  const decl = checker.valueDeclarationOf(member);
+  const typeNode = decl !== undefined && (ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)) ? decl.type : undefined;
+  if (typeNode === undefined || !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)) return false;
+  const sym = checker.getSymbolAtLocation(typeNode.typeName);
+  return sym !== undefined && (sym.flags & ts.SymbolFlags.TypeParameter) !== 0;
+}
