@@ -194,18 +194,67 @@ const ISLAND_MODULE_BOOTSTRAP: &str = include_str!("island_bootstrap.js");
 /// Resolves imports against the embedded edge table instead of the
 /// filesystem, and synthesizes the `node:*` wrappers on demand.
 ///
-/// Every embedded module is parsed into its ES form at realm boot and
-/// inserted here by key; the loader itself never reaches back into
-/// `ISLAND_STATE` (the engine holds the context borrow while it calls).
+/// Every embedded module is registered here by key at realm boot and
+/// PARSED ON FIRST LOAD — a whole CLI embeds thousands of modules, and a
+/// command reaches a fraction of them; parsing all of them up front cost
+/// redcode 17 s of every start. The loader itself never reaches back
+/// into `ISLAND_STATE` (the engine holds the context borrow while it
+/// calls).
 #[derive(Default)]
 pub(crate) struct IslandModuleLoader {
     modules: RefCell<HashMap<String, Module>>,
+    pending: RefCell<HashMap<String, &'static IslandModule>>,
     external: RefCell<HashSet<String>>,
 }
 
 impl IslandModuleLoader {
     pub(crate) fn insert(&self, key: &str, module: Module) {
         self.modules.borrow_mut().insert(key.to_owned(), module);
+    }
+
+    /// Register an embedded module for on-demand parsing.
+    pub(crate) fn insert_pending(&self, module: &'static IslandModule) {
+        self.pending.borrow_mut().insert(module.key.to_owned(), module);
+    }
+
+    /// Whether `key` names an embedded module (parsed or not yet).
+    pub(crate) fn has_embedded(&self, key: &str) -> bool {
+        self.modules.borrow().contains_key(key) || self.pending.borrow().contains_key(key)
+    }
+
+    /// Parse one embedded module into its ES form. A JSON module keeps its
+    /// native parse for the ES graph; CJS files enter through their
+    /// build-time facade over __scr_require. A parse failure names the
+    /// module: the message alone ("expected ';'") says nothing about which
+    /// of thousands of sources the engine choked on.
+    fn parse_embedded(&self, embedded: &'static IslandModule, context: &mut Context) -> JsResult<Module> {
+        let parsed = if embedded.format == IslandModuleFormat::Json {
+            Module::parse_json(
+                boa_engine::JsString::from(island_module_source(embedded)),
+                context,
+            )
+        } else {
+            let source = island_module_esm_source(embedded);
+            let mut bytes = source.as_bytes();
+            Module::parse(
+                Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
+                None,
+                context,
+            )
+        };
+        let module = parsed.map_err(|error| {
+            let message = match error.try_native(context) {
+                Ok(native) => native.message().to_string(),
+                Err(_) => error.to_string(),
+            };
+            let head: String = island_module_source(embedded).chars().take(80).collect();
+            boa_engine::JsNativeError::syntax().with_message(format!(
+                "the island could not parse embedded module {}: {} (source begins: {:?})",
+                embedded.key, message, head
+            ))
+        })?;
+        self.insert(embedded.key, module.clone());
+        Ok(module)
     }
 
     pub(crate) fn load_external(
@@ -263,9 +312,13 @@ impl IslandModuleLoader {
             .into())
     }
 
-    fn load(&self, key: &str, context: &mut Context) -> JsResult<Module> {
+    pub(crate) fn load(&self, key: &str, context: &mut Context) -> JsResult<Module> {
         if let Some(module) = self.modules.borrow().get(key) {
             return Ok(module.clone());
+        }
+        let pending = self.pending.borrow_mut().remove(key);
+        if let Some(embedded) = pending {
+            return self.parse_embedded(embedded, context);
         }
         if self.external.borrow().contains(key) {
             return self.load_external(Path::new(key), context);

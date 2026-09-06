@@ -62,7 +62,9 @@ async function compileRustUnbounded(options: RustCompileOptions): Promise<void> 
     // The runtime rlib carries std's debug sections; without stripping they
     // dominate a small executable. Library archives keep their symbols for
     // the nm/ld localization pass, so this applies to executables only.
-    ...(options.optimization === "dev" ? [] : ["-C", "strip=symbols"]),
+    // SCRIPTC_KEEP_SYMBOLS=1 keeps the symbol table in a release binary so
+    // perf/gdb can attribute time to runtime and engine functions.
+    ...(options.optimization === "dev" || process.env.SCRIPTC_KEEP_SYMBOLS === "1" ? [] : ["-C", "strip=symbols"]),
     ...(options.linkInputs ?? []).flatMap((input) => ["-C", `link-arg=${input}`]),
     ...(options.systemLibraries ?? []).flatMap((name) => ["-l", name]),
     "-o", options.outPath,

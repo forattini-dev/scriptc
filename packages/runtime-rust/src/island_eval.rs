@@ -502,7 +502,6 @@ struct IslandState {
 /// borrow that never spans an engine call.
 #[derive(Default)]
 struct IslandTables {
-    modules: HashMap<&'static str, Module>,
     evaluated: HashSet<String>,
     /// `node:` wrappers synthesized on demand for `import()`. Keyed by
     /// specifier because builtin keys are not in the embedded table.
@@ -557,7 +556,7 @@ fn island_module_namespace(
     state: &mut IslandState,
     key: &str,
 ) -> Result<JsValue, IslandImportFailure> {
-    let Some((module_key, module)) = with_tables(|t| t.modules.get_key_value(key).map(|(k, m)| (*k, m.clone()))) else {
+    if !state.loader.has_embedded(key) {
         // A `node:` specifier is never in the embedded table — the build
         // embeds npm sources, not builtins — so it takes the same
         // synthesized wrapper the ES loader hands the static graph.
@@ -568,13 +567,17 @@ fn island_module_namespace(
             format!("Cannot find embedded module '{key}'"),
             "ERR_MODULE_NOT_FOUND",
         ));
-    };
-    if !with_tables(|t| t.evaluated.contains(module_key)) {
+    }
+    let loader = state.loader.clone();
+    let module = loader
+        .load(key, &mut state.context)
+        .map_err(IslandImportFailure::Engine)?;
+    if !with_tables(|t| t.evaluated.contains(key)) {
         island_module_evaluate(state, &module, key)?;
         // Cache only a successful lifecycle. Marking before evaluation
         // made a rejected first import expose an unevaluated namespace on
         // the second import instead of rejecting with the module failure.
-        with_tables(|t| t.evaluated.insert(module_key.to_owned()));
+        with_tables(|t| t.evaluated.insert(key.to_owned()));
     }
     Ok(module.namespace(&mut state.context).into())
 }
@@ -1042,46 +1045,12 @@ fn island_state() -> IslandState {
     // shared require/builtin bootstrap before parsing either graph.
     island_modules_boot(&mut context)
         .unwrap_or_else(|error| island_eval_error(error, &mut context));
-    let embedded_modules = island_registered_modules();
-    let mut modules = HashMap::new();
-    for embedded in embedded_modules {
-        // A JSON module keeps its native parse for the ES graph; CJS
-        // files enter through their build-time facade over __scr_require.
-        let module = if embedded.format == IslandModuleFormat::Json {
-            Module::parse_json(
-                boa_engine::JsString::from(island_module_source(embedded)),
-                &mut context,
-            )
-        } else {
-            let source = island_module_esm_source(embedded);
-            let mut bytes = source.as_bytes();
-            Module::parse(
-                Source::from_reader(&mut bytes, Some(Path::new(embedded.key))),
-                None,
-                &mut context,
-            )
-        }
-        .unwrap_or_else(|error| {
-            // A parse failure names the embedded module: the message
-            // alone ("expected ';'") says nothing about which of
-            // thousands of sources the engine choked on.
-            let message = match error.try_native(&mut context) {
-                Ok(native) => native.message().to_string(),
-                Err(_) => error.to_string(),
-            };
-            let head: String = island_module_source(embedded).chars().take(80).collect();
-            throw_error_code(
-                format!(
-                    "the island could not parse embedded module {}: {} (source begins: {:?})",
-                    embedded.key, message, head
-                ),
-                "SC3001",
-            )
-        });
-        loader.insert(embedded.key, module.clone());
-        modules.insert(embedded.key, module);
+    // Embedded modules parse on first load (IslandModuleLoader::load), so
+    // a start only pays for the graph the command reaches.
+    for embedded in island_registered_modules() {
+        loader.insert_pending(embedded);
     }
-    with_tables(|t| *t = IslandTables { modules, evaluated: HashSet::new(), builtins: HashMap::new() });
+    with_tables(|t| *t = IslandTables { evaluated: HashSet::new(), builtins: HashMap::new() });
     ISLAND_LOADER.with(|slot| *slot.borrow_mut() = Some(loader.clone()));
     IslandState { context, loader }
 }
