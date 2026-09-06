@@ -69,6 +69,10 @@ enum EffectNode {
     CatchAll(JsEffect, EffectFn, TraceFn),
     MapError(JsEffect, ValueFn, TraceFn),
     OrDie(JsEffect),
+    /// `Effect.as`/`asVoid`: the inner value replaced; `ignore`: any exit becomes unit; `andThen(e, next)`: next after e.
+    As(JsEffect, EffectValue),
+    Ignore(JsEffect),
+    ZipRight(JsEffect, JsEffect),
     Gen(GenFn, TraceFn),
     /// `Effect.promise`: a rejection is a defect.
     Promise(PromiseFn, TraceFn),
@@ -85,7 +89,11 @@ impl Trace for EffectData {
         match &self.node {
             EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) => {}
             EffectNode::Sync(_, trace) | EffectNode::Gen(_, trace) | EffectNode::Promise(_, trace) | EffectNode::TryPromise(_, _, trace) => trace(tracer),
-            EffectNode::OrDie(inner) => tracer.edge(inner),
+            EffectNode::OrDie(inner) | EffectNode::As(inner, _) | EffectNode::Ignore(inner) => tracer.edge(inner),
+            EffectNode::ZipRight(inner, next) => {
+                tracer.edge(inner);
+                tracer.edge(next);
+            }
             EffectNode::Map(inner, _, trace)
             | EffectNode::FlatMap(inner, _, trace)
             | EffectNode::CatchAll(inner, _, trace)
@@ -145,6 +153,18 @@ pub fn effect_or_die(source: &JsEffect) -> JsEffect {
     effect_new(EffectNode::OrDie(source.clone()))
 }
 
+pub fn effect_as(source: &JsEffect, value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::As(source.clone(), value))
+}
+
+pub fn effect_ignore(source: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Ignore(source.clone()))
+}
+
+pub fn effect_zip_right(source: &JsEffect, next: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::ZipRight(source.clone(), next.clone()))
+}
+
 pub fn effect_promise(thunk: PromiseFn, trace: TraceFn) -> JsEffect {
     effect_new(EffectNode::Promise(thunk, trace))
 }
@@ -166,6 +186,9 @@ enum Frame {
     CatchAll(EffectFn),
     MapError(ValueFn),
     OrDie,
+    As(EffectValue),
+    Ignore,
+    ZipRight(JsEffect),
     Gen(Box<dyn EffectGen>),
 }
 
@@ -218,6 +241,9 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::CatchAll(inner, f, _) => Step::Push(Frame::CatchAll(f.clone()), inner.clone()),
         EffectNode::MapError(inner, f, _) => Step::Push(Frame::MapError(f.clone()), inner.clone()),
         EffectNode::OrDie(inner) => Step::Push(Frame::OrDie, inner.clone()),
+        EffectNode::As(inner, value) => Step::Push(Frame::As(value.clone()), inner.clone()),
+        EffectNode::Ignore(inner) => Step::Push(Frame::Ignore, inner.clone()),
+        EffectNode::ZipRight(inner, next) => Step::Push(Frame::ZipRight(next.clone()), inner.clone()),
         EffectNode::Gen(make, _) => Step::Resume(make()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
@@ -295,6 +321,15 @@ fn fiber_drive(fiber: &FiberRef) {
                     None
                 }
                 (Frame::OrDie, Err(error)) => effect_defect(error),
+                (Frame::As(value), Ok(_)) => {
+                    outcome = Some(Ok(value));
+                    None
+                }
+                (Frame::Ignore, _) => {
+                    outcome = Some(Ok(Rc::new(())));
+                    None
+                }
+                (Frame::ZipRight(next), Ok(_)) => Some(next),
                 (Frame::Gen(generator), Ok(value)) => match generator.resume(effect_succeed(value)) {
                     EffectStep::Yielded(next) => {
                         fiber.borrow_mut().frames.push(Frame::Gen(generator));

@@ -31,15 +31,16 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.mapError": {
       if (first === undefined || second === undefined || second.type.kind !== "func") break;
       const param = second.type.params[0];
-      if (param === undefined) break;
       const source = context.nextTemporary();
       const callback = context.nextTemporary();
       const keep = context.nextTemporary();
-      const dispatch = context.emitClosureDispatch(callback, second.type, ["sc_arg"], expr.loc);
+      // A thunk (andThen's `() => …`) ignores the value; a one-parameter callback reads it with its own type.
+      const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = runtime::effect_unbox(&sc_value);`;
       const answersEffect = expr.fn === "effect.flatMap" || expr.fn === "effect.catchAll";
       const body = answersEffect ? dispatch : `runtime::effect_box(${dispatch})`;
       const runtimeFn = { "effect.map": "effect_map", "effect.flatMap": "effect_flat_map", "effect.catchAll": "effect_catch_all", "effect.mapError": "effect_map_error" }[expr.fn];
-      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${runtimeFn}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${context.rustType(param, expr.loc)} = runtime::effect_unbox(&sc_value); ${body} }), ${traced(context, keep)}) }`;
+      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${runtimeFn}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${body} }), ${traced(context, keep)}) }`;
     }
     case "effect.gen": {
       if (first === undefined || first.type.kind !== "func" || first.type.ret.kind !== "generator") break;
@@ -69,6 +70,32 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const recoverDispatch = context.emitClosureDispatch(recover, second.type, ["sc_arg"], expr.loc);
       return `{ let ${attempt} = ${context.emitExpr(first)}; let ${recover} = ${context.emitExpr(second)}; let ${keepAttempt} = ${attempt}.clone(); let ${keepRecover} = ${recover}.clone(); runtime::effect_try_promise(std::rc::Rc::new(move || runtime::promise_to_handle(&(${attemptDispatch}))), std::rc::Rc::new(move |sc_caught: runtime::Caught| { let sc_arg: ${context.rustType(reasonType, expr.loc)} = sc_dyn_from_caught(sc_caught); runtime::effect_box(${recoverDispatch}) }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepAttempt}); sc_tracer.edge(&${keepRecover}); })) }`;
     }
+    case "effect.fn": {
+      if (first === undefined || first.type.kind !== "func" || first.type.ret.kind !== "generator" || expr.type.kind !== "func") break;
+      const ret = first.type.ret.retT;
+      const retType = ret.kind === "void" || ret.kind === "undefinedT" ? "()" : context.rustType(ret, expr.loc);
+      const body = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const shape = context.rustType(expr.type, expr.loc).replace(/^runtime::Gc<|>$/g, "");
+      const params = expr.type.params.map((type, index) => `sc_p${index}: ${context.rustType(type, expr.loc)}`).join(", ");
+      const args = expr.type.params.map((_, index) => `sc_p${index}.clone()`);
+      const dispatch = context.emitClosureDispatch("sc_body", first.type, args, expr.loc);
+      return `{ let ${body} = ${context.emitExpr(first)}; let ${keep} = ${body}.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { let sc_body = ${body}.clone(); let sc_keep = sc_body.clone(); runtime::effect_gen::<${retType}>(std::rc::Rc::new(move || ${dispatch}), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&sc_keep))) })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&${keep}))) }) }`;
+    }
+    case "effect.void":
+      return "runtime::effect_succeed(runtime::effect_box(()))";
+    case "effect.as":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_as(&${context.emitExpr(first)}, runtime::effect_box(${context.emitExpr(second)}))`;
+    case "effect.asVoid":
+      if (first === undefined) break;
+      return `runtime::effect_as(&${context.emitExpr(first)}, runtime::effect_box(()))`;
+    case "effect.ignore":
+      if (first === undefined) break;
+      return `runtime::effect_ignore(&${context.emitExpr(first)})`;
+    case "effect.andThenEffect":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_zip_right(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
     case "effect.fail":
     case "effect.die":
       if (first === undefined) break;

@@ -644,6 +644,11 @@ class RustEmitter {
         (type) => this.registerDynBoxedFunction(type))) {
         this.usesEventEmitter = true;
       }
+      if (node.kind === "libCall" && node.fn === "effect.fn") {
+        const type = node.type as IrType | undefined;
+        if (type?.kind !== "func") this.unsupported("malformed effect.fn IR");
+        this.ensureClosureShape(type).runtimeCallback = true;
+      }
       if (node.kind === "libCall" && node.fn === "net.serverCloseBind") {
         const type = node.type as IrType | undefined;
         if (type?.kind !== "func") this.unsupported("malformed net.serverCloseBind IR");

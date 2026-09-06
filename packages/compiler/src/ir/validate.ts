@@ -719,8 +719,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The callback's func type is program-dependent (zero params, or the
   // `number | null` union / the %Error class) — the libCall case checks
   // the shape; the slot here only pins arity and the child receiver.
-  "effect.succeed": { argTypes: [null], result: EFFECT_T }, "effect.sync": { argTypes: [null], result: EFFECT_T }, "effect.map": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.flatMap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.runSync": { argTypes: [EFFECT_T], result: VOID }, "effect.runPromise": { argTypes: [EFFECT_T], result: VOID },
-  "effect.gen": { argTypes: [null], result: EFFECT_T }, "effect.fail": { argTypes: [null], result: EFFECT_T }, "effect.die": { argTypes: [null], result: EFFECT_T }, "effect.orDie": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.catchAll": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.mapError": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.promise": { argTypes: [null], result: EFFECT_T }, "effect.tryPromise": { argTypes: [null, null], result: EFFECT_T },
+  "effect.succeed": { argTypes: [null], result: EFFECT_T }, "effect.sync": { argTypes: [null], result: EFFECT_T }, "effect.map": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.flatMap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.runSync": { argTypes: [EFFECT_T], result: VOID }, "effect.runPromise": { argTypes: [EFFECT_T], result: VOID }, "effect.gen": { argTypes: [null], result: EFFECT_T }, "effect.fail": { argTypes: [null], result: EFFECT_T }, "effect.die": { argTypes: [null], result: EFFECT_T }, "effect.orDie": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.catchAll": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.mapError": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.promise": { argTypes: [null], result: EFFECT_T }, "effect.tryPromise": { argTypes: [null, null], result: EFFECT_T }, "effect.fn": { argTypes: [null], result: VOID }, "effect.void": { argTypes: [], result: EFFECT_T }, "effect.as": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.asVoid": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.ignore": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.andThenEffect": { argTypes: [EFFECT_T, EFFECT_T], result: EFFECT_T },
   "child.onExit": { argTypes: [CHILD_T, null], result: VOID },
   "child.onClose": { argTypes: [CHILD_T, null], result: VOID },
   "child.onError": { argTypes: [CHILD_T, null], result: VOID },
@@ -3826,8 +3825,9 @@ function validateFunction(
           }
           break;
         }
-        if (e.fn === "effect.runSync" || e.fn === "effect.runPromise") { // the effect's success channel: site-typed by the checker (the kernel unboxes with that type)
-          if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc); break; }
+        if (e.fn === "effect.runSync" || e.fn === "effect.runPromise" || e.fn === "effect.fn") { // site-typed: the success channel (runSync/runPromise), the function value (fn)
+          if (e.fn === "effect.runPromise" && e.type.kind !== "promise") err("libCall effect.runPromise must be promise-typed", e.loc);
+          if (e.fn === "effect.fn" && e.type.kind !== "func") err("libCall effect.fn must be function-typed", e.loc); break; }
         if (e.fn === "process.envGet") {
           // Result is the module's interned `string | undefined` union.
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;

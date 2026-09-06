@@ -9,7 +9,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, posix } from "node:path";
 import type { Lowerer } from "./lowerer.js";
 import { trapUseThrowExpr } from "./lowerer.js";
-import { trapModuleOf } from "./lower-builtins.js";
+import { trapModuleOf } from "./lower-builtins.js"; import { lowerEffectProperty } from "./lower-effect.js";
 import { wasiGuestPath } from "../../wasi-paths.js";
 import { BOOL, CAUGHT, DYN, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLibFn, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, canExitIslandToType, funcOf, isJsonSafeType, isUnitType, jsOpResultKind, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
@@ -2080,7 +2080,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // Builtin namespace imports (`path.sep`, `os.EOL`,
         // `fs.constants.R_OK` where the root is `import * as ...`): the
         // same constants and per-member fences as named builtin imports.
-        L.lowerNamespaceBuiltinProperty(expr) ??
+        lowerEffectProperty(L, expr) ?? L.lowerNamespaceBuiltinProperty(expr) ??
         L.lowerJsonProperty(expr) ??
         L.lowerErrorCodeProperty(expr) ??
         L.lowerNumberStaticProperty(expr) ??

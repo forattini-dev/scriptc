@@ -5,6 +5,7 @@ import { InternalCompilerError } from "../../errors.js";
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { isKernelModule } from "../shared.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { invalidJsonModuleDiag, requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
@@ -3498,12 +3499,11 @@ export function lowerStaticReadableStreamReaderCall(
     throw new PoisonError();
   }
 
-/** The npm package a SYMBOL is declared by, or null. The symbol half of
-   * npmPackageOf, also asked directly for import-alias bindings (whose
-   * aliased symbol is the package's export). */
+/** The npm package a SYMBOL is declared by, or null. The symbol half of npmPackageOf, also asked directly for
+   * import-alias bindings (whose aliased symbol is the package's export). A KERNEL package answers null in a static build. */
   export function npmPackageOfSymbol(L: Lowerer, sym: ts.Symbol | undefined): string | null {
     const decls = sym ? L.checker.declarationsOf(sym) : undefined;
     if (!decls || decls.length === 0) return null;
     if (!decls.every((d) => L.isNpmFile(d.getSourceFile()))) return null;
-    return npmPackageNameOf(decls[0]!.getSourceFile().fileName);
+    const pkg = npmPackageNameOf(decls[0]!.getSourceFile().fileName); return pkg !== null && !L.dynamic && isKernelModule(pkg) ? null : pkg;
   }

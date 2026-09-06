@@ -1052,21 +1052,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       return hasStr ? STRING : F64;
     }
   }
-  // Types DECLARED by a shipped .d.ts — an npm package's, or a LOCAL
-  // declaration file describing sibling JS the program loads dynamically
-  // (an Emscripten factory's .d.mts): the .d.ts is trusted as the type
-  // surface, but the values behind it live in the embedded engine — under
-  // --dynamic they are island handles (jsval), and every operation on them
-  // rides the engine ops with validated exits at typed boundaries.
-  // Primitives/arrays/etc. REACHED THROUGH such types keep their structural mapping (handled above or
-  // recursed normally); this rule fires only when the type's own identity is declaration-file-declared —
-  // interfaces, classes, type literals, and aliases from the .d.ts. The standard library's declaration files are carved out (their
-  // surfaces have static lowerings), as are declarations explicitly mapped
-  // by --external-types: those describe project-owned structural data while
-  // the Lowerer fences their imported runtime bindings. The program's own
-  // compiled modules are never declaration files. Without --dynamic this
-  // stays unmapped; badType reports the per-package requires-dynamic
-  // diagnostic for node_modules types and the generic story otherwise.
+  // Types DECLARED by a shipped .d.ts — an npm package's, or a LOCAL declaration file describing sibling JS the program
+  // loads dynamically (an Emscripten factory's .d.mts): the .d.ts is trusted as the type surface, but the values behind it
+  // live in the embedded engine — under --dynamic they are island handles (jsval), every operation rides the engine ops with
+  // validated exits at typed boundaries. Primitives/arrays/etc. REACHED THROUGH such types keep their structural mapping;
+  // this rule fires only when the type's own identity is declaration-file-declared (interfaces, classes, type literals,
+  // aliases). Carved out: the standard library's declaration files (static lowerings) and --external-types declarations
+  // (project-owned structural data; the Lowerer fences their imported runtime bindings). The program's own compiled modules
+  // are never declaration files. Without --dynamic this stays unmapped; badType reports the per-package requires-dynamic
+  // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
   if (!ctx.dynamic && npmSym?.name === "Effect" && npmDecls?.some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName))) return EFFECT_T;
@@ -1076,7 +1070,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     npmDecls.every((d) => {
       const sf = d.getSourceFile();
       return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
-    })
+    }) &&
+    (ctx.dynamic || !npmDecls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName)))
   ) {
     return ctx.dynamic ? JSVAL : null;
   }
@@ -1097,6 +1092,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (partSym) {
         const decls = checker.declarationsOf(partSym);
         if (decls.length > 0) {
+          if (!ctx.dynamic && decls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName))) return false; // kernel: structural
           return decls.every((d) => {
             const sf = d.getSourceFile();
             return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
@@ -1140,24 +1136,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // `import * as path` member calls into the engine — dynamic imports of
   // builtins get their handles from the import lowering's IR type
   // instead.
-  // T[]: monomorphic arrays, recursively (number[][] works). An element type
-  // that doesn't map (never from a context-free `[]`) makes the whole array
-  // unsupported — null propagates. Record/object/union elements ride the
-  // runtime's REF element kind (per-array RC entry points, the map-value
-  // technique), and PROMISE elements ride it too (Promise<T>[] is
-  // Promise.all's food: promises are refcounted, cycle-headered values
-  // with `_v` adapters like any other ref element — they just never
-  // JSON-serialize or cross the island boundary, which the safety
-  // predicates already refuse). FUNCTION elements ride REF too (closure
-  // `_v` adapters + scr_closure_trace_v — closures are cycle-headered):
-  // `f === f` identity through indexOf/includes is sound because a
-  // function VALUE is one ScrClosure for its whole life — top-level
-  // declarations intern one immortal closure, and inner closures are
-  // allocated once at their definition's evaluation and flow by
-  // reference, exactly JS's function identity. map/set/regex/url/dyn and
-  // Date (scalar-backed but identity-bearing in JS) and the other opaque
-  // handles stay unsupported as array elements; ordinary Date locals,
-  // params, fixed record/tuple fields, and promise payloads are supported.
+  // T[]: monomorphic arrays, recursively (number[][] works). An element type that doesn't map (never from a context-free
+  // `[]`) makes the whole array unsupported — null propagates. Record/object/union elements ride the runtime's REF element
+  // kind (per-array RC entry points, the map-value technique), and PROMISE elements ride it too (Promise<T>[] is Promise.all's
+  // food: refcounted, cycle-headered values with `_v` adapters like any other ref element — they just never JSON-serialize or
+  // cross the island boundary, which the safety predicates already refuse). FUNCTION elements ride REF too (closure `_v`
+  // adapters + scr_closure_trace_v — closures are cycle-headered): `f === f` identity through indexOf/includes is sound because
+  // a function VALUE is one ScrClosure for its whole life — top-level declarations intern one immortal closure, inner closures
+  // are allocated once at their definition's evaluation and flow by reference, exactly JS's function identity. map/set/regex/
+  // url/dyn, Date (scalar-backed but identity-bearing) and the other opaque handles stay unsupported as array elements; ordinary
+  // Date locals, params, fixed record/tuple fields, and promise payloads are supported.
   if (checker.isArrayType(widened)) {
     const elemTs = checker.getTypeArguments(widened as ts.TypeReference)[0];
     if (!elemTs) return null;
@@ -2242,10 +2230,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // Mixed dyn/concrete channels stay unmapped: the shared result record's value slot would need a dyn union arm, which does not exist.
   if (isStdlibInterface("Generator") || isStdlibInterface("IterableIterator")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
-    // An Effect.gen body (static builds): `Generator<Effect<…> | …, A, never>` yields kernel effects and is resumed by the kernel
-    // with the yielded effect's value (as an effect) — both channels are the opaque handle; the return channel is A (void-like → VOID).
+    // An Effect.gen/fn body (static builds): `Generator<Effect<…> | …, A, never>` (or a never-yielding body keeping the contextual `never` NEXT channel — a plain generator infers `unknown`) is resumed by the kernel with each yielded effect's value: both channels are the opaque handle; the return channel is A (void-like → VOID).
     const isEffectRef = (t: ts.Type): boolean => { const sym = t.getAliasSymbol() ?? t.getSymbol(); return sym?.name === "Effect" && checker.declarationsOf(sym).some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName)); };
-    if (!ctx.dynamic && args[0] !== undefined && args[1] !== undefined && (isEffectRef(args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every(isEffectRef)))) {
+    if (!ctx.dynamic && args[0] !== undefined && args[1] !== undefined && (((args[0].flags & ts.TypeFlags.Never) !== 0 && args[2] !== undefined && (args[2].flags & ts.TypeFlags.Never) !== 0) || isEffectRef(args[0]) || (args[0].isUnionType() && ts.constituentTypes(args[0]).every(isEffectRef)))) {
       const retT = (args[1].flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !== 0 ? VOID : mapType(args[1], ctx);
       return retT === null ? null : { kind: "generator", yieldT: EFFECT_T, retT, nextT: EFFECT_T };
     }
@@ -2609,8 +2596,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // signature's own declaration; unmappable like spelled rest.
     {
       const sigDecl = checker.signatureDeclaration(sig);
-      const declParams = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.parameters : undefined;
-      if (declParams !== undefined && declParams.length !== sig.getParameters().length) {
+      // `this` parameters are not slots and a declared rest is a tuple-instantiated slot below: neither is the synthesized-rest tell.
+      const declParams = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.parameters.filter((p) => !(ts.isIdentifier(p.name) && p.name.text === "this")) : undefined;
+      if (declParams !== undefined && declParams.length !== sig.getParameters().length && !declParams.some((p) => p.dotDotDotToken !== undefined)) {
         return null;
       }
       // tsgo never SYNTHESIZES that rest param into the inferred signature
@@ -2624,6 +2612,18 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     let dynamicRest = false;
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
+      const pType = checker.getTypeOfSymbol(p);
+      // A rest parameter instantiated at a REQUIRED-ONLY tuple (`(...args: Args) => …` from effect's `fn`, Args = [n: number]) is
+      // a fixed-arity signature: each element is one slot (the empty tuple — a zero-argument body — carries no flags on the facade's
+      // shape: zero slots). Optional/rest elements keep the variadic fence below.
+      if (decl && ts.isParameter(decl) && decl.dotDotDotToken && checker.isTupleType(pType)) {
+        const ref = pType as ts.TupleTypeReference;
+        const flags = ((ref.elementFlags as ts.ElementFlags[] | undefined) !== undefined ? ref : (ref.getTarget() as ts.TupleType | undefined))?.elementFlags;
+        if (checker.getTypeArguments(ref).length === 0 || (flags !== undefined && flags.every((flag) => (flag & ts.ElementFlags.Required) !== 0))) {
+          for (const element of checker.getTypeArguments(ref)) { const et = mapType(element, ctx); if (!et) return null; if (et.kind !== "void") params.push(et); }
+          continue;
+        }
+      }
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
         // `(...args: never[])` is an uninhabited rest surface: every
         // type-correct invocation supplies zero arguments. Its runtime ABI

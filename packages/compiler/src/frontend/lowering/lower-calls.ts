@@ -3116,7 +3116,7 @@ export function lowerFfiCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     const loc = locOf(expr);
-
+    if (ts.isCallExpression(expr.expression)) { const effectFn = lowerEffectCall(L, expr, loc); if (effectFn !== null) return effectFn; } // Effect.fn("name")(function* …): the kernel's function value
     // A call of a runtime-TRAPPED module binding (bun:sqlite/bun:ffi/v8):
     // the whole call IS the runtime throw — arguments never lower, typed
     // by the use site (nodeThrowExpr; the ledger entry joins
@@ -3126,8 +3126,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (tm !== null) {
         return trapUseThrowExpr(L, tm, expr, L.mapTypeOf(L.typeOf(expr)), loc);
       }
+      const effectPipe = lowerEffectCall(L, expr, loc); if (effectPipe !== null) return effectPipe; // effect's `pipe(e, …)`
     }
-
     // A call whose chain ROOTS at an ambient-undefined name (`declare
     // const value: Y | undefined; value?.foo("a")`, `declare function
     // chain...; chain(o).mapValues(f).value()`, a trap binding's read):
