@@ -26,3 +26,26 @@ const sh = def.shape;
 Object.defineProperty(def, "shape", { get: () => { const n = { ...sh }; Object.defineProperty(def, "shape", { value: n }); return n; } });
 read(def); read(def); // second call threw before the fix
 ```
+
+## Compiled-pattern cache in `RegExp` (src/builtins/regexp/mod.rs)
+
+Every evaluation of a regex literal — and every `new RegExp(...)` — reaches
+`compile_native_regexp`, which hands the pattern to `regress` to parse and
+optimize from scratch. A literal inside a hot function is therefore
+recompiled on every call: yargs' help layout (`cliui` → `string-width` →
+`emoji-regex`, a multi-kilobyte pattern, plus `ansi-regex`) spent 56 of 60
+profiler samples inside `compile_native_regexp`, 67 seconds for one
+`--help`. The compiled `regress::Regex` is immutable and `Clone`, so the
+patch keeps a bounded thread-local map from `(source, flags)` to the
+compiled matcher and clones it on later evaluations; the `RegExp` object
+(lastIndex, identity) is still fresh per evaluation, as the spec requires.
+
+Reproduce with `cargo run --example island_eval --features island-eval`:
+
+```js
+let n = 0;
+for (let i = 0; i < 20000; i++) n += "a😀b".replace(/\p{Emoji_Presentation}/gu, "").length;
+n
+```
+
+Unpatched, the loop takes seconds; patched, milliseconds.

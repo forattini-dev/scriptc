@@ -28,6 +28,19 @@ use boa_parser::lexer::regex::RegExpFlags;
 use regress::{Flags, Range, Regex};
 use std::str::FromStr;
 
+// scriptc: a compiled-pattern cache (see PATCHES.md). Every evaluation of
+// a regex literal (and every `new RegExp`) reaches compile_native_regexp,
+// and regress parses and optimizes the pattern from scratch each time;
+// code that evaluates a literal inside a hot loop — string-width's
+// emoji-regex, ansi-regex, yargs' help layout — spent most of its time
+// recompiling. The compiled matcher is immutable and Clone, so one
+// compilation per (source, flags) serves every later evaluation.
+thread_local! {
+    static COMPILED_PATTERNS: std::cell::RefCell<rustc_hash::FxHashMap<(JsString, u8), Regex>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+}
+const COMPILED_PATTERNS_LIMIT: usize = 4096;
+
 use super::{BuiltInBuilder, BuiltInConstructor, IntrinsicObject};
 
 mod regexp_string_iterator;
@@ -355,6 +368,16 @@ impl RegExp {
         let full_unicode =
             flags.contains(RegExpFlags::UNICODE) || flags.contains(RegExpFlags::UNICODE_SETS);
 
+        let cache_key = (p.clone(), flags.bits());
+        if let Some(matcher) = COMPILED_PATTERNS.with(|cache| cache.borrow().get(&cache_key).cloned()) {
+            return Ok(RegExp {
+                matcher,
+                flags,
+                original_source: p,
+                original_flags: f,
+            });
+        }
+
         let matcher = if full_unicode {
             // Unicode mode (u/v flag) OR pattern has named groups:
             // compile as full Unicode codepoints.
@@ -393,6 +416,13 @@ impl RegExp {
         //     [[CapturingGroupsCount]]: capturingGroupsCount }.
         // 20. Set obj.[[RegExpRecord]] to rer.
         // 21. Set obj.[[RegExpMatcher]] to CompilePattern of parseResult with argument rer.
+        COMPILED_PATTERNS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() >= COMPILED_PATTERNS_LIMIT {
+                cache.clear();
+            }
+            cache.insert(cache_key, matcher.clone());
+        });
         Ok(RegExp {
             matcher,
             flags,
