@@ -7209,7 +7209,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // .name string (+1 — a no-op retain on the interned immortal).
             return finish(`scr_classobj_name(${arg(0)})`);
           case "process.onUncaughtException":
-          case "process.offUncaughtException": case "effect.succeed": case "effect.sync": case "effect.map": case "effect.flatMap": case "effect.runSync": case "effect.runPromise": case "effect.gen": case "effect.fail": case "effect.die": case "effect.orDie": case "effect.catchAll": case "effect.mapError":
+          case "process.offUncaughtException": case "effect.succeed": case "effect.sync": case "effect.map": case "effect.flatMap": case "effect.runSync": case "effect.runPromise": case "effect.gen": case "effect.fail": case "effect.die": case "effect.orDie": case "effect.catchAll": case "effect.mapError": case "effect.promise": case "effect.tryPromise":
             // Rust backend only (the program entry's dispatch and the
             // rejection-to-uncaught routing live in the Rust emitter; the effect kernel is Rust-only).
             throw new InternalCompilerError(`${fn.startsWith("effect.") ? "the effect kernel" : "process.on('uncaughtException')"} needs --backend rust`);

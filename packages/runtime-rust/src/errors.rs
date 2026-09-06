@@ -163,6 +163,11 @@ pub struct Caught {
     value: Rc<dyn Any>,
 }
 
+/// A caught value from an already type-erased payload (the effect kernel's failure channel).
+pub fn caught_from_any(value: Rc<dyn Any>) -> Caught {
+    Caught { value }
+}
+
 pub fn caught_value<T: 'static>(value: T) -> Caught {
     Caught {
         value: Rc::new(value),

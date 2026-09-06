@@ -50,6 +50,25 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const dispatch = context.emitClosureDispatch(callback, first.type, [], expr.loc);
       return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_gen::<${retType}>(std::rc::Rc::new(move || ${dispatch}), ${traced(context, keep)}) }`;
     }
+    case "effect.promise": {
+      if (first === undefined || first.type.kind !== "func" || first.type.ret.kind !== "promise") break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, first.type, [], expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_promise(std::rc::Rc::new(move || runtime::promise_to_handle(&(${dispatch}))), ${traced(context, keep)}) }`;
+    }
+    case "effect.tryPromise": {
+      if (first === undefined || second === undefined || first.type.kind !== "func" || second.type.kind !== "func") break;
+      const reasonType = second.type.params[0];
+      if (reasonType === undefined || reasonType.kind !== "dyn") break;
+      const attempt = context.nextTemporary();
+      const recover = context.nextTemporary();
+      const keepAttempt = context.nextTemporary();
+      const keepRecover = context.nextTemporary();
+      const attemptDispatch = context.emitClosureDispatch(attempt, first.type, [], expr.loc);
+      const recoverDispatch = context.emitClosureDispatch(recover, second.type, ["sc_arg"], expr.loc);
+      return `{ let ${attempt} = ${context.emitExpr(first)}; let ${recover} = ${context.emitExpr(second)}; let ${keepAttempt} = ${attempt}.clone(); let ${keepRecover} = ${recover}.clone(); runtime::effect_try_promise(std::rc::Rc::new(move || runtime::promise_to_handle(&(${attemptDispatch}))), std::rc::Rc::new(move |sc_caught: runtime::Caught| { let sc_arg: ${context.rustType(reasonType, expr.loc)} = sc_dyn_from_caught(sc_caught); runtime::effect_box(${recoverDispatch}) }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepAttempt}); sc_tracer.edge(&${keepRecover}); })) }`;
+    }
     case "effect.fail":
     case "effect.die":
       if (first === undefined) break;

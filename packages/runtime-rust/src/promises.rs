@@ -124,6 +124,14 @@ pub fn promise_handle_catch(
     (handle.catch)(callback)
 }
 
+/// A type-erased settlement callback (what `PromiseObserveHook` receives).
+pub type PromiseObserveCallback = Box<dyn FnOnce(Result<Box<dyn Any>, Caught>)>;
+
+/// Observe a handle's settlement once, type-erased (the effect kernel's async seam).
+pub fn promise_handle_observe(handle: &JsPromiseHandle, callback: PromiseObserveCallback) {
+    (handle.observe)(callback);
+}
+
 pub fn promise_handle_trace(handle: &JsPromiseHandle, tracer: &mut Tracer<'_>) {
     (handle.trace)(tracer);
 }

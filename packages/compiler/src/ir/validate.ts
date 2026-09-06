@@ -720,7 +720,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // `number | null` union / the %Error class) — the libCall case checks
   // the shape; the slot here only pins arity and the child receiver.
   "effect.succeed": { argTypes: [null], result: EFFECT_T }, "effect.sync": { argTypes: [null], result: EFFECT_T }, "effect.map": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.flatMap": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.runSync": { argTypes: [EFFECT_T], result: VOID }, "effect.runPromise": { argTypes: [EFFECT_T], result: VOID },
-  "effect.gen": { argTypes: [null], result: EFFECT_T }, "effect.fail": { argTypes: [null], result: EFFECT_T }, "effect.die": { argTypes: [null], result: EFFECT_T }, "effect.orDie": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.catchAll": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.mapError": { argTypes: [EFFECT_T, null], result: EFFECT_T },
+  "effect.gen": { argTypes: [null], result: EFFECT_T }, "effect.fail": { argTypes: [null], result: EFFECT_T }, "effect.die": { argTypes: [null], result: EFFECT_T }, "effect.orDie": { argTypes: [EFFECT_T], result: EFFECT_T }, "effect.catchAll": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.mapError": { argTypes: [EFFECT_T, null], result: EFFECT_T }, "effect.promise": { argTypes: [null], result: EFFECT_T }, "effect.tryPromise": { argTypes: [null, null], result: EFFECT_T },
   "child.onExit": { argTypes: [CHILD_T, null], result: VOID },
   "child.onClose": { argTypes: [CHILD_T, null], result: VOID },
   "child.onError": { argTypes: [CHILD_T, null], result: VOID },

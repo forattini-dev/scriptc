@@ -79,6 +79,30 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
         if (member !== "mapError" && fn.type.ret.kind !== "effect") break;
         return lib(member === "mapError" ? "effect.mapError" : "effect.catchAll", [source, fn], EFFECT_T, loc);
       }
+      case "promise": {
+        if (args.length !== 1) break;
+        const thunk = L.lowerExpr(args[0]!);
+        if (thunk.type.kind !== "func" || thunk.type.params.length !== 0 || thunk.type.ret.kind !== "promise") break;
+        return lib("effect.promise", [thunk], EFFECT_T, loc);
+      }
+      case "tryPromise": {
+        // `Effect.tryPromise({ try: () => promise, catch: (reason) => error })` — the two callbacks lower separately; the
+        // rejection reason reaches `catch` as the program's dynamic value (its type is `unknown`).
+        const options = args[0];
+        if (args.length !== 1 || options === undefined || !ts.isObjectLiteralExpression(options)) break;
+        const property = (name: string): ts.Expression | null => {
+          const found = options.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name);
+          return found !== undefined && ts.isPropertyAssignment(found) ? found.initializer : null;
+        };
+        const tryNode = property("try");
+        const catchNode = property("catch");
+        if (tryNode === null || catchNode === null || options.properties.length !== 2) break;
+        const attempt = L.lowerExpr(tryNode);
+        const recover = L.lowerExpr(catchNode);
+        if (attempt.type.kind !== "func" || attempt.type.params.length !== 0 || attempt.type.ret.kind !== "promise") break;
+        if (recover.type.kind !== "func" || recover.type.params.length !== 1 || recover.type.params[0]!.kind !== "dyn") break;
+        return lib("effect.tryPromise", [attempt, recover], EFFECT_T, loc);
+      }
       case "orDie": {
         if (args.length !== 1) break;
         const source = L.lowerExpr(args[0]!);
