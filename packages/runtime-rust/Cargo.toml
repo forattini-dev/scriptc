@@ -78,6 +78,13 @@ boa_engine = { path = "vendor/boa_engine" }
 # inside it (TypeScript's private-field downlevel) had no analyzed scope
 # and panicked the bytecompiler.
 boa_ast = { path = "vendor/boa_ast" }
+# boa_gc 0.22.0 with a collection policy for long-lived heaps
+# (vendor/boa_gc/PATCHES.md): the first collection waits for 64 MB and
+# each later threshold is twice the surviving heap.
+boa_gc = { path = "vendor/boa_gc" }
+# boa_parser 0.22.0 with an ASCII fast path in the lexer's identifier
+# character tests (vendor/boa_parser/PATCHES.md).
+boa_parser = { path = "vendor/boa_parser" }
 
 [[example]]
 name = "island_link"

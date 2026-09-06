@@ -33,10 +33,12 @@ use std::str::FromStr;
 // and regress parses and optimizes the pattern from scratch each time;
 // code that evaluates a literal inside a hot loop — string-width's
 // emoji-regex, ansi-regex, yargs' help layout — spent most of its time
-// recompiling. The compiled matcher is immutable and Clone, so one
-// compilation per (source, flags) serves every later evaluation.
+// recompiling. The compiled matcher is immutable and SHARED (an Rc: a
+// large pattern such as emoji-regex compiles to megabytes, and cloning it
+// per evaluation allocated gigabytes), so one compilation per (source,
+// flags) serves every later evaluation.
 thread_local! {
-    static COMPILED_PATTERNS: std::cell::RefCell<rustc_hash::FxHashMap<(JsString, u8), Regex>> =
+    static COMPILED_PATTERNS: std::cell::RefCell<rustc_hash::FxHashMap<(JsString, u8), std::rc::Rc<Regex>>> =
         std::cell::RefCell::new(rustc_hash::FxHashMap::default());
 }
 const COMPILED_PATTERNS_LIMIT: usize = 4096;
@@ -53,8 +55,8 @@ mod tests;
 // Safety: `RegExp` does not contain any objects which needs to be traced, so this is safe.
 #[boa_gc(unsafe_empty_trace)]
 pub struct RegExp {
-    /// Regex matcher.
-    matcher: Regex,
+    /// Regex matcher (shared with the compiled-pattern cache; scriptc).
+    matcher: std::rc::Rc<Regex>,
     flags: RegExpFlags,
     original_source: JsString,
     original_flags: JsString,
@@ -416,6 +418,7 @@ impl RegExp {
         //     [[CapturingGroupsCount]]: capturingGroupsCount }.
         // 20. Set obj.[[RegExpRecord]] to rer.
         // 21. Set obj.[[RegExpMatcher]] to CompilePattern of parseResult with argument rer.
+        let matcher = std::rc::Rc::new(matcher);
         COMPILED_PATTERNS.with(|cache| {
             let mut cache = cache.borrow_mut();
             if cache.len() >= COMPILED_PATTERNS_LIMIT {

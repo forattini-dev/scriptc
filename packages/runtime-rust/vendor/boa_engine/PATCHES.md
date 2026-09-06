@@ -37,7 +37,7 @@ recompiled on every call: yargs' help layout (`cliui` → `string-width` →
 profiler samples inside `compile_native_regexp`, 67 seconds for one
 `--help`. The compiled `regress::Regex` is immutable and `Clone`, so the
 patch keeps a bounded thread-local map from `(source, flags)` to the
-compiled matcher and clones it on later evaluations; the `RegExp` object
+compiled matcher (an `Rc` — a large pattern such as emoji-regex compiles to megabytes, and cloning it per evaluation allocated gigabytes during yargs' help) and shares it on later evaluations; the `RegExp` object
 (lastIndex, identity) is still fresh per evaluation, as the spec requires.
 
 Reproduce with `cargo run --example island_eval --features island-eval`:
