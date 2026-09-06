@@ -12,7 +12,14 @@
   "files": [
     "Cargo.lock",
     "Cargo.toml",
-    "src"
+    "island-v8/Cargo.lock",
+    "island-v8/Cargo.toml",
+    "island-v8/src",
+    "src",
+    "vendor/boa_ast",
+    "vendor/boa_engine",
+    "vendor/boa_gc",
+    "vendor/boa_parser"
   ],
   "publishConfig": {
     "access": "public"

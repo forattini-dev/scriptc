@@ -13,6 +13,19 @@ export function islandEngineFeature(): "island-eval" | "island-v8" {
   return process.env["SCRIPTC_ISLAND_ENGINE"] === "boa" ? "island-eval" : "island-v8";
 }
 
+/** The island text store a build embeds with (CompileOptions.islandSourceStore):
+ * raw on the V8 lane (the code cache makes the text a demand-paged
+ * backstop, and the engine reads it in place), deflate on the boa lane. */
+export function resolveIslandSourceStore(explicit: "raw" | "deflate" | undefined): "raw" | "deflate" {
+  return explicit ?? (islandEngineFeature() === "island-v8" ? "raw" : "deflate");
+}
+
+/** Stamp the embedded graph with the store the build embeds with. */
+export function withIslandStore(mod: IrModule, explicit: "raw" | "deflate" | undefined): IrModule {
+  if (mod.embedded !== undefined) mod.embedded.store = resolveIslandSourceStore(explicit);
+  return mod;
+}
+
 /** Whether a feature list carries an island engine at all. */
 export function featuresEmbedIsland(features: readonly RustRuntimeFeature[]): boolean {
   return features.includes("island-eval") || features.includes("island-v8");

@@ -6,7 +6,7 @@ import { emitModule } from "./backend/emission/emitter.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { compileRust, compileRustLibrary, RustCompileError } from "./backend/rust/compile.js";
 import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
-import { rustRuntimeFeatures } from "./backend/rust/runtime-features.js";
+import { resolveIslandSourceStore, rustRuntimeFeatures, withIslandStore } from "./backend/rust/runtime-features.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
 import { rebaseLibrarySourceComments, replaceLibraryIdentity, stripLibraryIdentity, stripLibrarySourceComments } from "./backend/library-identity.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -211,11 +211,11 @@ export interface CompileOptions {
   /** Extra runtime export/imports conditions (--conditions), matched after
    * the target's own. */
   conditions?: readonly string[];
-  /** --island-module: globs naming program modules that embed as engine
-   * source (the island tier) instead of lowering statically; static code
-   * binds their exports as engine handles. Requires --dynamic. See
-   * frontend/tiering.ts. */
+  /** --island-module: globs naming program modules that embed as engine source (the
+   * island tier) instead of lowering statically; static code binds their exports as
+   * engine handles. Requires --dynamic. See frontend/tiering.ts. */
   islandModules?: readonly string[];
+  islandSourceStore?: "raw" | "deflate"; // --island-store: raw (V8's default) or deflate (boa's)
   /** Output executable path. Default: <outDir>/<stem>. */
   outPath: string;
   /** Where intermediates (program.c, program.ir.json) land. */
@@ -1219,7 +1219,7 @@ async function compileTracked(
         : { path: opts.ffiProfilePath, bytes: ffiProfileBytes },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}`,
     runtimeTarget: activeRuntimeTargetKey(),
-    islandModules: [...islandModulePatterns()],
+    islandModules: [...islandModulePatterns()], islandSourceStore: resolveIslandSourceStore(opts.islandSourceStore),
     compiler: rustBackend ? ["rustc"] : [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment: rustBackend
       ? `rustc:${process.env["RUSTUP_TOOLCHAIN"] ?? "default"}`
@@ -1382,7 +1382,7 @@ async function compileTracked(
     }
     let rustSource: string;
     try {
-      rustSource = emitRustModule(lowered.module!);
+      rustSource = emitRustModule(withIslandStore(lowered.module!, opts.islandSourceStore));
     } catch (error) {
       if (!(error instanceof RustUnsupportedError)) throw error;
       return { ok: false, diagnostics: rustRefusalDiags(error, entryPath), sourceTexts };
@@ -2560,7 +2560,7 @@ async function compileLibraryTracked(
   if (profile.emission === "rust") {
     let rustSource: string;
     try {
-      rustSource = emitRustModule(mod);
+      rustSource = emitRustModule(withIslandStore(mod, undefined));
     } catch (error) {
       if (!(error instanceof RustUnsupportedError)) throw error;
       return fail(rustRefusalDiags(error, entryPath));

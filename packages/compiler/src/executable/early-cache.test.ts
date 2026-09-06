@@ -88,6 +88,7 @@ async function fixture(): Promise<{
       target: "test",
       runtimeTarget: "node24:{}:node,import,default",
       islandModules: [],
+      islandSourceStore: "deflate",
       compiler: ["clang"],
       nativeEnvironment: "test-native-environment",
       nodeVersion: "v24-test",

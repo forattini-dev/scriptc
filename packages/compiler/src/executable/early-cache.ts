@@ -93,6 +93,8 @@ export interface EarlyExecutableCacheOptions {
   runtimeTarget: string;
   /** --island-module globs, in order. */
   islandModules: readonly string[];
+  /** How island texts are embedded (CompileOptions.islandSourceStore, resolved). */
+  islandSourceStore: "raw" | "deflate";
   compiler: string[];
   nativeEnvironment: string;
   nodeVersion: string;
@@ -196,6 +198,7 @@ function cacheKey(options: EarlyExecutableCacheOptions): string {
     options.target,
     options.runtimeTarget,
     JSON.stringify(options.islandModules),
+    options.islandSourceStore,
     options.compiler.join("\x1f"),
     options.nativeEnvironment,
     options.nodeVersion,
@@ -226,6 +229,7 @@ function routeKey(options: EarlyExecutableRouteOptions): string {
     .update(options.target).update("\0")
     .update(options.runtimeTarget).update("\0")
     .update(JSON.stringify(options.islandModules)).update("\0")
+    .update(options.islandSourceStore).update("\0")
     .update(options.compiler.join("\x1f")).update("\0")
     .update(options.nativeEnvironment).update("\0")
     .update(options.nodeVersion).update("\0");

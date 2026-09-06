@@ -23,9 +23,9 @@ const MODULE_FORMAT = { esm: "Esm", cjs: "Cjs", json: "Json" } as const;
  * THE dominant binary-size term. The C lane has compressed since it
  * gained npm embedding; the Rust lane shipped the text raw, so its
  * binaries ran 3-4x larger for the same program. */
-function storedText(text: string): { bytes: Buffer; raw: number } {
+function storedText(text: string, store: "raw" | "deflate"): { bytes: Buffer; raw: number } {
   const plain = Buffer.from(text, "utf8");
-  if (text.length < NPM_COMPRESS_MIN) return { bytes: plain, raw: 0 };
+  if (store === "raw" || text.length < NPM_COMPRESS_MIN) return { bytes: plain, raw: 0 };
   const deflated = deflateRawSync(plain, { level: 9 });
   return deflated.length < plain.length
     ? { bytes: deflated, raw: plain.length }
@@ -61,12 +61,13 @@ export function emitRustEmbeddedModules(
 ): string[] {
   const modules = mod.embedded?.modules ?? [];
   if (!hasRustEmbeddedModules(mod)) return [];
+  const store = mod.embedded?.store ?? "deflate";
   const lines = [
     `static SC_ISLAND_MODULES: [runtime::IslandModule; ${modules.length}] = [`,
   ];
   for (const module of modules) {
-    const source = storedText(module.source);
-    const esm = module.esm !== undefined ? storedText(module.esm) : undefined;
+    const source = storedText(module.source, store);
+    const esm = module.esm !== undefined ? storedText(module.esm, store) : undefined;
     lines.push(
       "    runtime::IslandModule { " +
         `key: "${rustString(module.key)}", ` +

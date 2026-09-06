@@ -205,6 +205,10 @@ async function main(): Promise<number> {
   const target = runtimeTarget.profile.id;
   const conditions = (values.conditions ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter((v) => v !== "");
   const islandModules = (values["island-module"] ?? []).flatMap((v) => v.split(",")).map((v) => v.trim()).filter((v) => v !== "");
+  const islandStore = values["island-store"];
+  if (islandStore !== undefined && islandStore !== "raw" && islandStore !== "deflate") {
+    fail(`--island-store takes raw or deflate, not '${islandStore}'`);
+  }
   if (islandModules.length > 0 && !values.dynamic) {
     fail(`--island-module runs program modules in the embedded engine and needs --dynamic\n\n${USAGE}`);
   }
@@ -282,6 +286,7 @@ async function main(): Promise<number> {
       target,
       ...(conditions.length > 0 ? { conditions } : {}),
       ...(islandModules.length > 0 ? { islandModules } : {}),
+      ...(islandStore === "raw" || islandStore === "deflate" ? { islandSourceStore: islandStore } : {}),
       outPath,
       outDir,
       emitIr: values["emit-ir"],

@@ -40,6 +40,11 @@ Options:
                      island module's reason. A scriptc.json beside the
                      entry's package.json pins its "tiers.island" modules
                      without a fixpoint
+      --island-store <raw|deflate>
+                     how island module texts are embedded: raw (plain
+                     bytes, no inflate at boot; the V8 engine's default) or
+                     deflate (3-4x smaller binaries; the boa engine's
+                     default)
       --write-tiers  after an --island-module auto build or coverage run,
                      persist the frontier into that scriptc.json so later
                      builds skip the fixpoint
@@ -95,6 +100,7 @@ export const CLI_OPTIONS = {
   target: { type: "string" },
   conditions: { type: "string", multiple: true },
   "island-module": { type: "string", multiple: true },
+  "island-store": { type: "string" },
   "write-tiers": { type: "boolean", default: false },
   optimization: { type: "string" },
   "from-c": { type: "boolean", default: false },

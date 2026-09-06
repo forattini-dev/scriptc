@@ -131,6 +131,9 @@ async function tryFastPath(): Promise<number | null> {
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${arch}`,
     runtimeTarget,
     islandModules,
+    islandSourceStore: startup.resolveIslandSourceStore(
+      values["island-store"] === "raw" || values["island-store"] === "deflate" ? values["island-store"] : undefined,
+    ),
     compiler: [process.env["SCRIPTC_CC"] ?? "clang"],
     nativeEnvironment,
     nodeVersion: process.version,

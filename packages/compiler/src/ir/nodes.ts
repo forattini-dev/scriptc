@@ -822,9 +822,9 @@ export interface IrModule {
     edges: { from: string; specifier: string; to: string; kind: "any" | "import" | "require" }[];
     /** Bun runtime modules (`bun:sqlite`, `bun:ffi`, `bun`) embedded code
      * imports under --target bun: the island answers each from its bun
-     * table (a kernel-backed facade or a trap), and the Rust runtime's
-     * feature set follows this list (`bun:sqlite` → the `sqlite` kernel). */
+     * table (a kernel-backed facade or a trap); the Rust runtime's feature set follows it (`bun:sqlite` → `sqlite`). */
     bunRuntimeModules?: string[];
+    store?: "raw" | "deflate"; // Rust-lane text store: raw (V8's default) or deflate (boa's)
   };
   /** Record shapes, in first-seen (`r0`, `r1`, ...) order. Fields are in
    * CANONICAL order (sorted by name) — the shape's identity; a `recordLit`'s

@@ -4,6 +4,7 @@
 export { readRoutedExecutableCache } from "./executable/early-cache.js";
 export type { EarlyExecutableRouteOptions } from "./executable/early-cache.js";
 export { isRuntimeTargetId, resolveRuntimeTarget, runtimeTargetKey } from "./compat/runtime-target.js";
+export { resolveIslandSourceStore } from "./backend/rust/runtime-features.js";
 export {
   executableNativeEnvironmentFingerprint,
   prepareBuildCacheRoot,
