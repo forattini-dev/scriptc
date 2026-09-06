@@ -345,6 +345,33 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       if (first === undefined || second === undefined || body === undefined) break;
       return `runtime::effect_semaphore_with_permits(&${context.emitExpr(first)}, ${context.emitExpr(second)}, &${context.emitExpr(body)})`;
     }
+    case "effect.queueMake":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_queue_make(${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+    case "effect.queueTake":
+      if (first === undefined) break;
+      return `runtime::effect_queue_take(&${context.emitExpr(first)})`;
+    case "effect.queueSize":
+      if (first === undefined) break;
+      return `runtime::effect_queue_size(&${context.emitExpr(first)})`;
+    case "effect.queueShutdown":
+      if (first === undefined) break;
+      return `runtime::effect_queue_shutdown(&${context.emitExpr(first)})`;
+    case "effect.queueOffer":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_queue_offer(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)})`;
+    case "effect.pubsubMake":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_pubsub_make(${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+    case "effect.pubsubSubscribe":
+      if (first === undefined) break;
+      return `runtime::effect_pubsub_subscribe(&${context.emitExpr(first)})`;
+    case "effect.pubsubShutdown":
+      if (first === undefined) break;
+      return `runtime::effect_pubsub_shutdown(&${context.emitExpr(first)})`;
+    case "effect.pubsubPublish":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_pubsub_publish(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)})`;
     case "effect.exitValue":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_exit_value(&${context.emitExpr(first)})`, expr.loc);

@@ -129,6 +129,8 @@ enum EffectNode {
     TryPromise(PromiseFn, RecoverFn, TraceFn),
     /// `Deferred.await(d)` / a semaphore permit: park until the latch answers.
     Park(Rc<RefCell<Latch>>),
+    /// A queue operation that may park: `None` takes, `Some(value)` offers.
+    Queue(Rc<RefCell<QueueState>>, Option<EffectValue>),
 }
 
 /// The services a layer answers / a provide installs: `(key, value)` pairs, later entries shadowing earlier ones.
@@ -164,6 +166,10 @@ pub enum KernelData {
     /// waiter queue). Both are the kernel's Latch.
     Deferred(Rc<RefCell<Latch>>),
     Semaphore(Rc<RefCell<Latch>>),
+    /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
+    Queue(Rc<RefCell<QueueState>>),
+    /// A `PubSub`: the subscriber queues a publish broadcasts into.
+    PubSub(Rc<RefCell<PubSubState>>),
 }
 
 pub struct EffectData {
@@ -178,7 +184,7 @@ impl Trace for EffectData {
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
             EffectNode::Log(_, parts) => tracer.edge(parts),
-            EffectNode::Sleep(_) | EffectNode::Data(_) | EffectNode::Park(_) => {}
+            EffectNode::Sleep(_) | EffectNode::Data(_) | EffectNode::Park(_) | EffectNode::Queue(_, _) => {}
             EffectNode::Scoped(inner) | EffectNode::Exit(inner) => tracer.edge(inner),
             EffectNode::Tap(inner, _, trace) | EffectNode::TapError(inner, _, trace) | EffectNode::AcquireRelease(inner, _, trace) | EffectNode::AcquireUseRelease(inner, _, _, trace) => {
                 tracer.edge(inner);
@@ -663,6 +669,8 @@ enum Step {
     /// Suspend on a kernel LATCH — a Deferred's completion, a Semaphore's permits: either the value is already
     /// there (resume now) or the fiber joins the latch's waiter list and the completer drives it.
     Park(Rc<RefCell<Latch>>),
+    /// A queue operation: `None` takes (parking while empty), `Some(value)` offers (parking while full).
+    Queue(Rc<RefCell<QueueState>>, Option<EffectValue>),
 }
 
 /// The waiting half of Deferred and Semaphore: a value once settled, and the fibers queued for it. A waiter is
@@ -780,6 +788,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::CatchIf(inner, predicate, recover, _) => Step::Push(Frame::CatchIf(predicate.clone(), recover.clone()), inner.clone()),
         EffectNode::All(effects, collect) => Step::Collect(CollectSource::Effects(effects.clone()), collect.clone()),
         EffectNode::Park(latch) => Step::Park(latch.clone()),
+        EffectNode::Queue(queue, value) => Step::Queue(queue.clone(), value.clone()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
     })
@@ -882,6 +891,13 @@ fn fiber_drive(fiber: &FiberRef) {
                             }));
                             return;
                         }
+                    }
+                }
+                Step::Queue(queue, value) => {
+                    let resumed = fiber.clone();
+                    match queue_step(&queue, value, Box::new(move |outcome| { resumed.borrow_mut().resumed = Some(outcome); fiber_drive(&resumed); })) {
+                        Some(outcome) => { fiber.borrow_mut().resumed = Some(outcome); continue; }
+                        None => return,
                     }
                 }
                 Step::Await(handle, recover) => {

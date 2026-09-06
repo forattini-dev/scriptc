@@ -132,3 +132,175 @@ fn effect_semaphore_release(latch: &Rc<RefCell<Latch>>, permits: f64) -> JsEffec
         effect_box(())
     }), Box::new(|_| {}))
 }
+
+/// A `Queue`: items with the fibers waiting to take them and the fibers waiting for room to offer. `capacity` is
+/// infinite for an unbounded queue; `strategy` says what a full BOUNDED queue does with a new item — 0 parks the
+/// offering fiber, 1 drops the item (`Queue.dropping`), 2 evicts the oldest (`Queue.sliding`).
+/// A fiber waiting on a queue: the callback that resumes it with the operation's outcome.
+type QueueWaiter = Box<dyn FnOnce(Outcome)>;
+
+pub struct QueueState {
+    items: std::collections::VecDeque<EffectValue>,
+    capacity: f64,
+    strategy: u8,
+    takers: std::collections::VecDeque<QueueWaiter>,
+    offerers: std::collections::VecDeque<(EffectValue, QueueWaiter)>,
+    shutdown: bool,
+}
+
+fn queue_new(capacity: f64, strategy: u8) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Queue(Rc::new(RefCell::new(QueueState {
+        items: std::collections::VecDeque::new(), capacity, strategy,
+        takers: std::collections::VecDeque::new(), offerers: std::collections::VecDeque::new(), shutdown: false,
+    })))))
+}
+
+fn queue_of(handle: &JsEffect) -> Rc<RefCell<QueueState>> {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Queue(queue)) => queue.clone(),
+        _ => throw_error("scriptc: a Queue handle was expected".to_owned()),
+    })
+}
+
+/// One queue operation for the fiber driver: the outcome when it completes at once, or None when `waiter` was
+/// queued (the fiber that completes the other half drives this one).
+fn queue_step(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waiter: QueueWaiter) -> Option<Outcome> {
+    let mut state = queue.borrow_mut();
+    match value {
+        // TAKE: an item, else the oldest parked offer (which frees its fiber), else park.
+        None => {
+            if let Some(item) = state.items.pop_front() {
+                if let Some((offered, offerer)) = state.offerers.pop_front() {
+                    state.items.push_back(offered);
+                    drop(state);
+                    offerer(Ok(effect_box(true)));
+                } 
+                return Some(Ok(item));
+            }
+            if let Some((offered, offerer)) = state.offerers.pop_front() {
+                drop(state);
+                offerer(Ok(effect_box(true)));
+                return Some(Ok(offered));
+            }
+            if state.shutdown {
+                return Some(Err(effect_box("Queue is shut down".to_owned())));
+            }
+            state.takers.push_back(waiter);
+            None
+        }
+        // OFFER: hand it to a waiting taker, else store it, else follow the full-queue strategy.
+        Some(item) => {
+            if state.shutdown {
+                return Some(Ok(effect_box(false)));
+            }
+            if let Some(taker) = state.takers.pop_front() {
+                drop(state);
+                taker(Ok(item));
+                return Some(Ok(effect_box(true)));
+            }
+            if (state.items.len() as f64) < state.capacity {
+                state.items.push_back(item);
+                return Some(Ok(effect_box(true)));
+            }
+            match state.strategy {
+                1 => Some(Ok(effect_box(false))),
+                2 => { state.items.pop_front(); state.items.push_back(item); Some(Ok(effect_box(true))) }
+                _ => { state.offerers.push_back((item, waiter)); None }
+            }
+        }
+    }
+}
+
+/// `Queue.unbounded()` / `bounded(n)` / `dropping(n)` / `sliding(n)`: an effect answering a FRESH queue.
+pub fn effect_queue_make(capacity: f64, strategy: f64) -> JsEffect {
+    let strategy = strategy as u8;
+    effect_sync(Rc::new(move || effect_box(queue_new(capacity, strategy))), Box::new(|_| {}))
+}
+
+pub fn effect_queue_take(handle: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Queue(queue_of(handle), None))
+}
+
+pub fn effect_queue_offer(handle: &JsEffect, value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::Queue(queue_of(handle), Some(value)))
+}
+
+pub fn effect_queue_size(handle: &JsEffect) -> JsEffect {
+    let queue = queue_of(handle);
+    effect_sync(Rc::new(move || effect_box(queue.borrow().items.len() as f64)), Box::new(|_| {}))
+}
+
+/// `Queue.shutdown`: later offers answer false, and a take on an empty shut-down queue FAILS with "Queue is shut
+/// down" (effect interrupts the taking fiber there; the kernel has no interruption yet — a failure is the closest
+/// observable, and it keeps the runtime going).
+pub fn effect_queue_shutdown(handle: &JsEffect) -> JsEffect {
+    let queue = queue_of(handle);
+    effect_sync(Rc::new(move || {
+        let mut state = queue.borrow_mut();
+        state.shutdown = true;
+        let takers = std::mem::take(&mut state.takers);
+        drop(state);
+        for taker in takers {
+            taker(Err(effect_box("Queue is shut down".to_owned())));
+        }
+        effect_box(())
+    }), Box::new(|_| {}))
+}
+
+/// A `PubSub`: every subscriber gets its own queue, and a publish copies the value into each of them (the
+/// broadcast semantics effect gives). A subscription is a Dequeue handle — the same Queue the kernel already
+/// runs — so takes, sizes and shutdowns work on it unchanged. Divergence: a subscription lives as long as the
+/// PubSub (effect unsubscribes when the subscribing scope closes; the kernel has no scope hook for it yet).
+pub struct PubSubState {
+    subscribers: Vec<Rc<RefCell<QueueState>>>,
+    capacity: f64,
+    strategy: u8,
+    shutdown: bool,
+}
+
+fn pubsub_of(handle: &JsEffect) -> Rc<RefCell<PubSubState>> {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::PubSub(state)) => state.clone(),
+        _ => throw_error("scriptc: a PubSub handle was expected".to_owned()),
+    })
+}
+
+pub fn effect_pubsub_make(capacity: f64, strategy: f64) -> JsEffect {
+    let strategy = strategy as u8;
+    effect_sync(Rc::new(move || effect_box(effect_new(EffectNode::Data(KernelData::PubSub(Rc::new(RefCell::new(
+        PubSubState { subscribers: Vec::new(), capacity, strategy, shutdown: false },
+    ))))))), Box::new(|_| {}))
+}
+
+/// `PubSub.publish(hub, a)`: the value reaches every subscriber's queue (a full one follows its own strategy).
+pub fn effect_pubsub_publish(handle: &JsEffect, value: EffectValue) -> JsEffect {
+    let hub = pubsub_of(handle);
+    effect_sync(Rc::new(move || {
+        let state = hub.borrow();
+        if state.shutdown {
+            return effect_box(false);
+        }
+        let queues: Vec<Rc<RefCell<QueueState>>> = state.subscribers.clone();
+        drop(state);
+        for queue in queues {
+            queue_step(&queue, Some(value.clone()), Box::new(|_| {}));
+        }
+        effect_box(true)
+    }), Box::new(|_| {}))
+}
+
+/// `PubSub.subscribe(hub)`: a fresh queue registered with the hub, answered as a Dequeue handle.
+pub fn effect_pubsub_subscribe(handle: &JsEffect) -> JsEffect {
+    let hub = pubsub_of(handle);
+    effect_sync(Rc::new(move || {
+        let (capacity, strategy) = { let state = hub.borrow(); (state.capacity, state.strategy) };
+        let queue = queue_new(capacity, strategy);
+        hub.borrow_mut().subscribers.push(queue_of(&queue));
+        effect_box(queue)
+    }), Box::new(|_| {}))
+}
+
+pub fn effect_pubsub_shutdown(handle: &JsEffect) -> JsEffect {
+    let hub = pubsub_of(handle);
+    effect_sync(Rc::new(move || { hub.borrow_mut().shutdown = true; effect_box(()) }), Box::new(|_| {}))
+}

@@ -311,6 +311,8 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "Ref" || ns === "SynchronizedRef") return lowerRefMember(L, ns, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Deferred") return lowerDeferredMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Semaphore") return lowerSemaphoreMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Queue") return lowerQueueMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
@@ -391,6 +393,70 @@ function lowerSemaphoreMember(L: Lowerer, member: string, args: ts.Expression[],
     return lib(member === "make" ? "effect.semaphoreMake" : "effect.semaphoreMakeUnsafe", [at(0)], EFFECT_T, loc);
   }
   return refused();
+}
+
+/** `Queue`: items with the fibers waiting to take and the fibers waiting for room. `unbounded` never blocks;
+ * `bounded(n)` parks the offering fiber when full, `dropping(n)` refuses the item, `sliding(n)` evicts the oldest. */
+function lowerQueueMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Queue.${member} yet`);
+  const INF = Number.MAX_SAFE_INTEGER;
+  switch (member) {
+    case "unbounded":
+      if (args.length > 1) refused();
+      return lib("effect.queueMake", [numLit(INF, loc), numLit(0, loc)], EFFECT_T, loc);
+    case "bounded":
+    case "dropping":
+    case "sliding": {
+      if (args.length !== 1 || at(0).type.kind !== "f64") refused();
+      const strategy = member === "bounded" ? 0 : member === "dropping" ? 1 : 2;
+      return lib("effect.queueMake", [at(0), numLit(strategy, loc)], EFFECT_T, loc);
+    }
+    case "take":
+    case "size":
+    case "shutdown":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib(member === "take" ? "effect.queueTake" : member === "size" ? "effect.queueSize" : "effect.queueShutdown", [at(0)], EFFECT_T, loc);
+    case "offer":
+      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
+      return lib("effect.queueOffer", [at(0), at(1)], EFFECT_T, loc);
+    default:
+      return refused();
+  }
+}
+
+/** `PubSub`: a publish copies the value into every subscriber's own queue, and a subscription IS a queue handle
+ * (takes and sizes work on it unchanged). A subscription lives as long as the hub — effect drops it when the
+ * subscribing scope closes, which the kernel has no hook for yet. */
+function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover PubSub.${member} yet`);
+  const INF = Number.MAX_SAFE_INTEGER;
+  switch (member) {
+    case "unbounded":
+      if (args.length > 1) refused();
+      return lib("effect.pubsubMake", [numLit(INF, loc), numLit(0, loc)], EFFECT_T, loc);
+    case "bounded":
+    case "dropping":
+    case "sliding": {
+      if (args.length !== 1 || at(0).type.kind !== "f64") refused();
+      return lib("effect.pubsubMake", [at(0), numLit(member === "bounded" ? 0 : member === "dropping" ? 1 : 2, loc)], EFFECT_T, loc);
+    }
+    case "subscribe":
+    case "shutdown":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib(member === "subscribe" ? "effect.pubsubSubscribe" : "effect.pubsubShutdown", [at(0)], EFFECT_T, loc);
+    // A Subscription IS the kernel's queue, so its own take and size are the queue's.
+    case "take":
+    case "size":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib(member === "take" ? "effect.queueTake" : "effect.queueSize", [at(0)], EFFECT_T, loc);
+    case "publish":
+      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
+      return lib("effect.pubsubPublish", [at(0), at(1)], EFFECT_T, loc);
+    default:
+      return refused();
+  }
 }
 
 /** The SUCCESS type argument of an `Effect<A, E, R>` (or `Effect<…>[]`'s element's) TS type, or null. */
