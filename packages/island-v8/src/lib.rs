@@ -189,6 +189,7 @@ macro_rules! enter {
 /// Creates this thread's engine. `stack_size` is the size of the thread
 /// the engine runs on (its stack limit is set 64 KiB below the top).
 pub fn init() {
+    STATS.with(|slot| slot.set(Stats::default()));
     PLATFORM.call_once(|| {
         let platform = v8::new_default_platform(0, false).make_shared();
         v8::V8::initialize_platform(platform);
@@ -904,6 +905,7 @@ fn module_for<'s>(scope: &mut v8::PinScope<'s, '_>, source: ModuleSource) -> Opt
         return Some(v8::Local::new(scope, &existing));
     }
     let name = v8::String::new(scope, &source.key)?;
+    let compile_started = std::time::Instant::now();
     let module = if source.json {
         let export_names = [v8::String::new(scope, "default")?];
         with_engine(|engine| {
@@ -934,8 +936,13 @@ fn module_for<'s>(scope: &mut v8::PinScope<'s, '_>, source: ModuleSource) -> Opt
         if !usable {
             with_engine(|engine| engine.cache_misses.push(source.key.clone()));
         }
+        stats_update(|stats| {
+            stats.compiles += 1;
+            stats.cache_hits += u32::from(usable);
+        });
         module
     };
+    stats_update(|stats| stats.compile_ns += compile_started.elapsed().as_nanos());
     let global = v8::Global::new(scope, module);
     with_engine(|engine| {
         engine.modules.insert(source.key.clone(), global);
@@ -1016,15 +1023,42 @@ enum Evaluation<'s> {
 /// twice, and no namespace is read below `EvaluatingAsync`, which V8
 /// checks fatally), draining microtasks; Err on a link or evaluation
 /// failure.
+struct PhaseDepthGuard;
+
+impl Drop for PhaseDepthGuard {
+    fn drop(&mut self) {
+        PHASE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
 fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::Local<'s, v8::Module>) -> Result<Evaluation<'s>, Error> {
     v8::tc_scope!(let tc, scope);
-    if module.get_status() == v8::ModuleStatus::Uninstantiated
-        && module.instantiate_module(tc, resolve_module_callback).is_none()
-    {
-        return Err(caught!(tc));
+    // Only a ROOT call (not one nested through a host callback) accounts
+    // its phases, so dependencies compiled during instantiate and
+    // modules evaluated during evaluate are not double-counted.
+    let root = PHASE_DEPTH.with(|depth| {
+        let outer = depth.get() == 0;
+        depth.set(depth.get() + 1);
+        outer
+    });
+    let _depth_guard = PhaseDepthGuard;
+    if module.get_status() == v8::ModuleStatus::Uninstantiated {
+        let started = std::time::Instant::now();
+        let instantiated = module.instantiate_module(tc, resolve_module_callback).is_some();
+        if root {
+            stats_update(|stats| stats.instantiate_ns += started.elapsed().as_nanos());
+        }
+        if !instantiated {
+            return Err(caught!(tc));
+        }
     }
     if module.get_status() == v8::ModuleStatus::Instantiated {
-        let Some(promise_value) = module.evaluate(tc) else {
+        let started = std::time::Instant::now();
+        let evaluated = module.evaluate(tc);
+        if root {
+            stats_update(|stats| stats.evaluate_ns += started.elapsed().as_nanos());
+        }
+        let Some(promise_value) = evaluated else {
             return Err(caught!(tc));
         };
         if let Ok(promise) = v8::Local::<v8::Promise>::try_from(promise_value) {
@@ -1083,6 +1117,36 @@ pub fn module_namespace(key: &str) -> Option<Value> {
         return None;
     }
     Some(Value(v8::Global::new(scope, local.get_module_namespace())))
+}
+
+/// Where an engine's time went, for the runtime's trace: module
+/// compiles (count and time, cache hits and misses), the root
+/// instantiate and evaluate phases (nested calls are not double-counted).
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Stats {
+    pub compiles: u32,
+    pub cache_hits: u32,
+    pub compile_ns: u128,
+    pub instantiate_ns: u128,
+    pub evaluate_ns: u128,
+}
+
+thread_local! {
+    static STATS: Cell<Stats> = const { Cell::new(Stats { compiles: 0, cache_hits: 0, compile_ns: 0, instantiate_ns: 0, evaluate_ns: 0 }) };
+    static PHASE_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+fn stats_update(update: impl FnOnce(&mut Stats)) {
+    STATS.with(|slot| {
+        let mut stats = slot.get();
+        update(&mut stats);
+        slot.set(stats);
+    });
+}
+
+/// The counters since `init`.
+pub fn stats() -> Stats {
+    STATS.with(Cell::get)
 }
 
 /// The version tag of the code cache format this V8 produces; a cache

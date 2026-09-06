@@ -215,7 +215,12 @@ fn v8_ensure() {
         eprintln!("scriptc island: creating realm (v8) on {:?}", std::thread::current().name());
     }
     v8e::init();
-    v8e::set_module_resolver(Rc::new(v8_resolve));
+    v8e::set_module_resolver(Rc::new(|referrer, specifier| {
+        let started = std::time::Instant::now();
+        let answer = v8_resolve(referrer, specifier);
+        V8_RESOLVE_NS.with(|slot| slot.set(slot.get() + started.elapsed().as_nanos()));
+        answer
+    }));
     let global = v8e::global();
     let console = v8e::object();
     let log = v8e::host_function("log", 0, Rc::new(|args| {
@@ -257,6 +262,7 @@ fn island_eval_finish() {
     V8_CHILDREN.with(|children| children.borrow_mut().clear());
     v8_net_reset();
     v8_code_cache_flush();
+    v8_trace_summary();
     island_modules_reset();
     v8e::finish();
     V8_BOOTED.with(|flag| flag.set(false));
@@ -280,6 +286,28 @@ struct V8CodeCache {
 
 thread_local! {
     static V8_CODE_CACHE: RefCell<Option<V8CodeCache>> = const { RefCell::new(None) };
+    /// Time spent answering the engine's resolver (table lookups plus
+    /// inflating embedded sources), for the trace summary.
+    static V8_RESOLVE_NS: Cell<u128> = const { Cell::new(0) };
+}
+
+/// The boot summary `SCRIPTC_ISLAND_TRACE=1` prints at teardown.
+fn v8_trace_summary() {
+    if !v8_trace() {
+        return;
+    }
+    let stats = v8e::stats();
+    let ms = |ns: u128| ns as f64 / 1e6;
+    eprintln!(
+        "scriptc island: {} modules compiled ({} from the code cache) in {:.1} ms; resolve+inflate {:.1} ms; root instantiate {:.1} ms; root evaluate {:.1} ms; process {:.1} ms",
+        stats.compiles,
+        stats.cache_hits,
+        ms(stats.compile_ns),
+        ms(V8_RESOLVE_NS.with(Cell::get)),
+        ms(stats.instantiate_ns),
+        ms(stats.evaluate_ns),
+        process_elapsed().as_secs_f64() * 1e3,
+    );
 }
 
 const V8_CODE_CACHE_MAGIC: &[u8; 8] = b"SCV8CC01";
