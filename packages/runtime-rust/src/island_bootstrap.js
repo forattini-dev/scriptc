@@ -320,7 +320,8 @@
       def('isPromiseAll', function () { return false; });
       def('getPromiseIndex', function () { return null; });
       def('isToplevel', function () { return !this.getFunctionName(); });
-      Object.defineProperty(proto, 'toString', {
+      const own = Object.getOwnPropertyDescriptor(proto, 'toString');
+      if (!own || own.configurable) Object.defineProperty(proto, 'toString', {
         writable: true,
         configurable: true,
         value: function () {

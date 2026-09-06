@@ -358,7 +358,10 @@ static const char isl_modules_bootstrap[] =
     /* A frame with no function name is the module/script body — Node's
      * isToplevel() for exactly those. */
     "      def('isToplevel', function () { return !this.getFunctionName(); });\n"
-    "      Object.defineProperty(proto, 'toString', {\n"
+      /* V8 ships a complete CallSite whose toString is not configurable;
+       * only an engine that lacks it (boa) gets Node's rendering. */
+    "      const own = Object.getOwnPropertyDescriptor(proto, 'toString');\n"
+    "      if (!own || own.configurable) Object.defineProperty(proto, 'toString', {\n"
     "        writable: true,\n"
     "        configurable: true,\n"
     "        value: function () {\n"

@@ -345,7 +345,10 @@
     /* A frame with no function name is the module/script body — Node's
      * isToplevel() for exactly those. */
       def('isToplevel', function () { return !this.getFunctionName(); });
-      Object.defineProperty(proto, 'toString', {
+      /* V8 ships a complete CallSite whose toString is not configurable;
+       * only an engine that lacks it (boa) gets Node's rendering. */
+      const own = Object.getOwnPropertyDescriptor(proto, 'toString');
+      if (!own || own.configurable) Object.defineProperty(proto, 'toString', {
         writable: true,
         configurable: true,
         value: function () {

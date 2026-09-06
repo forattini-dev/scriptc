@@ -26,7 +26,7 @@ import { RustEventEmitterEmitter } from "./event-emitter.js";
 import { RustStreamModel } from "./stream-model.js";
 import { emitRustModuleEntry } from "./module-entry.js";
 import { emitRustEmbeddedModules, hasRustEmbeddedModules } from "./embedded-modules.js";
-import { rustRuntimeFeatures } from "./runtime-features.js";
+import { rustRuntimeFeatures, featuresEmbedIsland } from "./runtime-features.js";
 import type { RustAsyncFrameExtra } from "./async-control.js";
 import { buildRustClassGraph } from "./class-graph.js";
 import { emitRustFfiDeclarations } from "./ffi.js";
@@ -136,7 +136,7 @@ class RustEmitter {
     emitClosureDispatch: (callee, type, args, loc) => this.emitClosureDispatch(callee, type, args, loc),
     errorClassRoots: () => this.errorClassRoots(),
     errorValueName: () => this.errorValueName(),
-    hasEmbeddedModules: () => rustRuntimeFeatures(this.mod).includes("island-eval"),
+    hasEmbeddedModules: () => featuresEmbedIsland(rustRuntimeFeatures(this.mod)),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),
@@ -331,7 +331,7 @@ class RustEmitter {
     errorValueName: () => this.errorValueName(),
     errorValueVariant: (meta) => this.errorValueVariant(meta),
     hierarchyFields: (root) => this.hierarchyFields(root),
-    hasEmbeddedModules: () => rustRuntimeFeatures(this.mod).includes("island-eval"),
+    hasEmbeddedModules: () => featuresEmbedIsland(rustRuntimeFeatures(this.mod)),
     isEdgeValue: (type) => this.isEdgeValue(type),
     isRustJsonCompatible: (type, visiting) => this.isRustJsonCompatible(type, visiting),
     isUnit: (type) => this.isUnit(type),

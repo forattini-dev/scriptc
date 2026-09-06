@@ -22,9 +22,6 @@ thread_local! {
     static ISLAND_HOST_CALLBACK_ID: Cell<u64> = const { Cell::new(0) };
 }
 
-const ISLAND_WEB_BOOTSTRAP: &str = include_str!("island_web.js");
-const ISLAND_STREAM_BOOTSTRAP: &str = include_str!("island_streams.js");
-const ISLAND_WEB_GLOBALS_BOOTSTRAP: &str = include_str!("island_web_globals.js");
 
 #[derive(Clone)]
 pub struct IslandValue(JsValue);

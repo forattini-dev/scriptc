@@ -42,6 +42,8 @@ include!("ffi_foreign.rs");
 compile_error!("scriptc-runtime: island-eval (boa) and island-v8 are mutually exclusive island engines");
 #[cfg(feature = "island-eval")]
 include!("island_boundary.rs");
+#[cfg(any(feature = "island-eval", feature = "island-v8"))]
+include!("island_tables.rs");
 #[cfg(feature = "island-eval")]
 include!("island_modules.rs");
 #[cfg(feature = "island-eval")]
@@ -66,6 +68,8 @@ include!("island_promise.rs");
 include!("sqlite.rs");
 #[cfg(all(feature = "island-eval", feature = "sqlite"))]
 include!("island_host_sqlite.rs");
+#[cfg(feature = "island-v8")]
+include!("v8_island.rs");
 include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");
