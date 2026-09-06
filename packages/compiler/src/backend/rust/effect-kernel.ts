@@ -72,6 +72,7 @@ function traced(context: RustLibCallContext, callback: string): string {
 }
 
 export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallContext): string | null {
+  if (expr.fn.startsWith("schema.")) return emitRustSchemaCall(expr, context);
   if (!expr.fn.startsWith("effect.") && !expr.fn.startsWith("layer.") && !expr.fn.startsWith("option.")) return null;
   const first = expr.args[0];
   const second = expr.args[1];
@@ -171,6 +172,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "layer.succeed":
       if (first === undefined || second === undefined) break;
       return `runtime::layer_succeed(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)})`;
+    case "layer.effectDiscard":
+      if (first === undefined) break;
+      return `runtime::layer_effect_discard(&${context.emitExpr(first)})`;
     case "layer.effect":
     case "layer.provide":
     case "layer.provideMerge":
@@ -264,6 +268,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.dataTag":
       if (first === undefined) break;
       return `runtime::effect_data_tag(&${context.emitExpr(first)})`;
+    case "effect.dataMessage":
+      if (first === undefined) break;
+      return `runtime::schema_error_message(&${context.emitExpr(first)})`;
     case "effect.exitValue":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_exit_value(&${context.emitExpr(first)})`, expr.loc);
@@ -362,4 +369,105 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       break;
   }
   return context.unsupported(`${expr.fn} argument shape`, expr.loc);
+}
+
+/** The Schema kernel's lib calls (runtime/schema.rs): descriptors are kernel handles built from literal shapes; the
+ * decoders are runtime-callback closures over the program's dynamic value whose result converts to the site's type. */
+function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const first = expr.args[0];
+  const second = expr.args[1];
+  const handles = (arg: RustLibCallExpr["args"][number] | undefined): string[] | null =>
+    arg !== undefined && arg.kind === "arrayLit" && arg.spreads === undefined && arg.elems.every((e) => e.type.kind === "effect") ? arg.elems.map((e) => context.emitExpr(e)) : null;
+  switch (expr.fn) {
+    case "schema.prim":
+      if (first === undefined) break;
+      return `runtime::schema_prim(&${context.emitExpr(first)})`;
+    case "schema.literal": {
+      if (first === undefined || first.kind !== "arrayLit" || first.spreads !== undefined) break;
+      const literals = first.elems.map((e) => {
+        const value = context.emitExpr(e);
+        if (e.type.kind === "string") return `runtime::SchemaLiteral::Str(${value})`;
+        if (e.type.kind === "f64") return `runtime::SchemaLiteral::Num(${value})`;
+        if (e.type.kind === "bool") return `runtime::SchemaLiteral::Bool(${value})`;
+        return context.unsupported("Schema.Literal over this literal kind", expr.loc);
+      });
+      return `runtime::schema_literal(vec![${literals.join(", ")}])`;
+    }
+    case "schema.struct": {
+      if (first === undefined || first.kind !== "recordLit") break;
+      const fields = first.fields.map((field) => {
+        if (field.value.type.kind !== "effect") return context.unsupported("Schema.Struct over a non-schema field", expr.loc);
+        return `(runtime::string("${context.rustString(field.name)}"), ${context.emitExpr(field.value)})`;
+      });
+      return `runtime::schema_struct(vec![${fields.join(", ")}])`;
+    }
+    case "schema.array":
+      if (first === undefined) break;
+      return `runtime::schema_array(&${context.emitExpr(first)})`;
+    case "schema.record":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_record(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "schema.union": {
+      const members = handles(first);
+      if (members === null) break;
+      return `runtime::schema_union(vec![${members.join(", ")}])`;
+    }
+    case "schema.wrap":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_wrap(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "schema.filter":
+      if (first === undefined || second === undefined || expr.args[2] === undefined) break;
+      return `runtime::schema_filter(&${context.emitExpr(first)}, ${context.emitExpr(second)}, &${context.emitExpr(expr.args[2])})`;
+    case "schema.check":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_check(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "schema.test":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_decode(&${context.emitExpr(first)}, &${context.emitExpr(second)}).is_ok()`;
+    case "schema.decodeSync":
+    case "schema.decodeOption":
+    case "schema.decodeEffect":
+    case "schema.decodeExit":
+    case "schema.is":
+    case "schema.encodeSync": {
+      if (first === undefined || expr.type.kind !== "func" || expr.type.params[0] === undefined) break;
+      const input = expr.type.params[0];
+      const ret = expr.type.ret;
+      const shape = context.rustType(expr.type, expr.loc).replace(/^runtime::Gc<|>$/g, "");
+      const params = expr.type.params.map((type, index) => `sc_p${index}: ${context.rustType(type, expr.loc)}`).join(", ");
+      const unused = expr.type.params.map((_, index) => (index === 0 ? "" : `let _ = &sc_p${index};`)).join(" ");
+      let body: string;
+      if (expr.fn === "schema.encodeSync") {
+        if (!typeEquals(input, ret)) return context.unsupported("Schema.encodeSync over a transforming schema", expr.loc);
+        body = "sc_p0.clone()";
+      } else {
+        if (input.kind !== "dyn") return context.unsupported("a schema decoder whose input is not unknown", expr.loc);
+        const decoded = `runtime::schema_decode(&sc_schema, &sc_p0)`;
+        if (expr.fn === "schema.is") body = `${decoded}.is_ok()`;
+        else {
+          // The decoded dynamic value converts to the site's type (the schema's `Type`, as the checker knows it).
+          const valueType = ret.kind === "effect" && expr.fn !== "schema.decodeSync" ? decodeValueType(context, expr) : ret;
+          const typed = context.emitDynCheckValue(valueType, "sc_v", expr.loc);
+          const boxed = box(context, valueType, typed, expr.loc);
+          body = expr.fn === "schema.decodeSync" ? `match ${decoded} { Ok(sc_v) => ${typed}, Err(sc_m) => runtime::schema_throw(sc_m) }`
+            : expr.fn === "schema.decodeOption" ? `match ${decoded} { Ok(sc_v) => runtime::option_some(${boxed}), Err(_) => runtime::option_none() }`
+            : expr.fn === "schema.decodeEffect" ? `match ${decoded} { Ok(sc_v) => runtime::effect_succeed(${boxed}), Err(sc_m) => runtime::effect_fail(runtime::effect_box(runtime::schema_error_handle(sc_m))) }`
+            : `match ${decoded} { Ok(sc_v) => runtime::effect_exit_succeed(${boxed}), Err(sc_m) => runtime::effect_exit_fail(runtime::effect_box(runtime::schema_error_handle(sc_m))) }`;
+        }
+      }
+      return `{ let sc_schema = ${context.emitExpr(first)}; let sc_keep = sc_schema.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { ${unused} ${body} })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| sc_tracer.edge(&sc_keep))) }) }`;
+    }
+    default:
+      break;
+  }
+  return context.unsupported(`${expr.fn} argument shape`, expr.loc);
+}
+
+/** The decoded VALUE type of an Option/Effect/Exit-returning decoder: the lowering stamps it as the call's second
+ * argument — an empty array literal of that element type (the collection-carrier precedent) — since the func type
+ * only says "handle". */
+function decodeValueType(context: RustLibCallContext, expr: RustLibCallExpr): IrType {
+  const carrier = expr.args[1];
+  if (carrier === undefined || carrier.type.kind !== "array") return context.unsupported("a schema decoder without its value carrier", expr.loc);
+  return carrier.type.elem;
 }

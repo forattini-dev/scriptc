@@ -10,6 +10,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
+import { applySchemaPipeStep, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest } from "./lower-schema.js";
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
@@ -66,9 +67,11 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   const loc = locOf(expr);
   if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
+  if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);
+    if (expr.name.text === "message") return lib("effect.dataMessage", [L.lowerExpr(expr.expression)], STRING, loc);
     if (expr.name.text === "value") {
       const valueT = L.mapTypeOf(L.typeOf(expr));
       if (valueT !== null) return lib("effect.exitValue", [L.lowerExpr(expr.expression)], valueT, loc);
@@ -178,6 +181,8 @@ function lowerEffectFn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr
 /** One data-last combinator applied to an accumulated effect (`.pipe(Effect.map(f))`, `pipe(e, Effect.orDie)`): the
  * combinator call with the effect prepended lowers through the data-first table. */
 function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: SrcLoc): IrExpr {
+  const schemaStep = applySchemaPipeStep(L, source, step, loc);
+  if (schemaStep !== null) return schemaStep;
   if (ts.isPropertyAccessExpression(step) && ts.isIdentifier(step.name) && effectNamespaceOf(L, step.expression) === "Effect") {
     const bare: Record<string, IrLibFn | undefined> = { asVoid: "effect.asVoid", ignore: "effect.ignore", orDie: "effect.orDie" };
     const fn = bare[step.name.text];
@@ -199,6 +204,8 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   const callee = expr.expression;
   const asFn = lowerEffectFn(L, expr, loc);
   if (asFn !== null) return asFn;
+  const test = L.dynamic ? null : lowerSchemaTest(L, expr, loc);
+  if (test !== null) return test;
   // `pipe(effect, step, …)` (effect's Function.pipe) and `effect.pipe(step, …)` fold the steps left to right.
   const free = effectExportOf(L, callee);
   if (free !== null && free.module === "Function" && free.name === "pipe" && expr.arguments.length >= 1) {
@@ -213,9 +220,24 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
     return acc;
   }
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.name)) return null;
+  if (!L.dynamic && !callee.questionDotToken && (callee.name.text === "make" || callee.name.text === "annotate" || callee.name.text === "check") && L.mapTypeOf(L.typeOf(callee.expression))?.kind === "effect") {
+    const method = lowerSchemaHandleMethod(L, callee.name.text, callee.expression, [...expr.arguments], expr, loc);
+    if (method !== null) return method;
+  }
+  if (callee.name.text === "of" && expr.arguments.length === 1 && !L.dynamic) {
+    // `Service.of(impl)` on a kernel service key: effect's `of` is the identity over the service shape.
+    const recv = callee.expression;
+    const sym = ts.isIdentifier(recv) ? L.resolveValueSymbol(recv) : ts.isPropertyAccessExpression(recv) ? L.checker.getSymbolAtLocation(recv.name) : undefined;
+    if (kernelServiceIdOfSymbol(L.checker, sym ?? undefined) !== null) {
+      const shape = L.mapTypeOf(L.typeOf(expr));
+      if (shape === null) L.badType(expr, L.typeOf(expr));
+      return L.lowerExprExpecting(expr.arguments[0]!, shape);
+    }
+  }
   const ns = effectNamespaceOf(L, callee.expression);
   if (ns === null) return null;
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
+  if (ns === "Schema") return lowerSchemaMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Option") return lowerOptionMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
@@ -267,6 +289,10 @@ function lowerLayerMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Ex
   };
   const handles = (count: number): boolean => total === count && Array.from({ length: count }, (_, i) => at(i).type.kind === "effect").every(Boolean);
   switch (member) {
+    case "effectDiscard": {
+      if (total !== 1 || at(0).type.kind !== "effect") break;
+      return lib("layer.effectDiscard", [at(0)], EFFECT_T, loc);
+    }
     case "succeed":
       if (total === 2 && at(0).type.kind === "effect") return lib("layer.succeed", [at(0), at(1)], EFFECT_T, loc);
       break;

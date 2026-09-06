@@ -73,6 +73,7 @@ export interface RustLibCallContext {
   classNameArms(className: string, loc?: SrcLoc): string;
   isEdgeValue(type: IrType): boolean;
   isUnit(type: IrType): boolean;
+  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {

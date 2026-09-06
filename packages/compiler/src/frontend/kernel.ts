@@ -78,3 +78,25 @@ export function kernelSchemaClassOf(checker: ts.TypeChecker, decl: ts.ClassLikeD
   }
   return null;
 }
+
+const SCHEMA_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/](Schema|SchemaAST|SchemaIssue|SchemaGetter|SchemaTransformation|SchemaCheck|SchemaParser|internal[\\/]schema[\\/][A-Za-z]+)\.d\.ts$/;
+
+/** A Schema VALUE type — the interfaces and classes of effect's Schema modules (`Struct<…>`, `String`, `optional<…>`,
+ * a Filter, SchemaError): the kernel's opaque handle in a static build. Type aliases (`Struct.Type<F>`) stay structural. */
+export function isKernelSchemaValueSymbol(decls: readonly ts.Node[]): boolean {
+  // `Struct` merges a function, an interface and a namespace: every declaration lives in a Schema module and at least
+  // one is the interface/class that types the VALUE.
+  return decls.length > 0 && decls.every((d) => SCHEMA_DIST.test(d.getSourceFile().fileName)) && decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d));
+}
+
+const BRAND_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]Brand\.d\.ts$/;
+
+/** The parts of an intersection that are NOT effect's `Brand<…>` marker (`string & Brand<"ID">` is a string at
+ * runtime; the brand is type-level only). */
+export function withoutKernelBrands(checker: ts.TypeChecker, parts: readonly ts.Type[]): readonly ts.Type[] {
+  return parts.filter((part) => {
+    const sym = part.getAliasSymbol() ?? part.getSymbol();
+    const decls = sym === undefined ? [] : checker.declarationsOf(sym);
+    return !(decls.length > 0 && decls.every((d) => BRAND_DIST.test(d.getSourceFile().fileName)));
+  });
+}

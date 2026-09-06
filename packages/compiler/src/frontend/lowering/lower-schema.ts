@@ -5,8 +5,9 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import type { KernelSchemaClass } from "../kernel.js";
-import { BOOL, IrExpr, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T } from "../../ir/nodes.js";
-import { boolLit, strLit } from "../../ir/build.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf } from "../../ir/nodes.js";
+import { boolLit, numLit, strLit } from "../../ir/build.js";
+import { effectNamespaceOf } from "./lower-effect.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { locOf } from "../program.js";
 
@@ -149,4 +150,154 @@ export function returnOfFailingYield(L: Lowerer, node: ts.Expression, loc: SrcLo
   if (!ts.isYieldExpression(node) || !node.asteriskToken || L.ctx.generator?.yieldT.kind !== "effect" || (L.typeOf(node).flags & ts.TypeFlags.Never) === 0) return null;
   const value = L.lowerExpr(node);
   return { kind: "block", body: [{ kind: "exprStmt", expr: value, loc }, { kind: "throw", value: strLit("scriptc: unreachable after a failing yield", loc), loc }], loc };
+}
+
+/* ── Schema VALUES ─────────────────────────────────────────────────────────────────────────────────────────────────
+ * `Schema.String`, `Schema.Struct({…})`, `Schema.optional(…)`, filters and the decoders: the kernel's opaque handle
+ * holding a descriptor (runtime/schema.rs); decoders are function values typed by the checker whose decoded dynamic
+ * value converts to the site's `Type`. Kernel-typed method calls on handles (`S.make`, `S.annotate`, `S.check`,
+ * `S.pipe(Schema.optional)`) are the identity or a wrap. */
+
+function lib(fn: IrLibFn, args: IrExpr[], type: IrType, loc: SrcLoc): IrExpr {
+  return { kind: "libCall", fn, args, type, loc };
+}
+
+const SCHEMA_PRIMS: Record<string, string | undefined> = {
+  String: "string", Number: "number", Boolean: "boolean", Unknown: "unknown", Any: "any", Finite: "finite", Int: "int",
+  Null: "null", Undefined: "undefined", NumberFromString: "numberFromString",
+};
+const SCHEMA_WRAPS: Record<string, string | undefined> = {
+  NullOr: "nullOr", UndefinedOr: "undefinedOr", optional: "optional", optionalKey: "optionalKey", mutable: "mutable", mutableKey: "mutableKey",
+};
+const SCHEMA_FILTERS_TEXT = new Set(["isStartsWith", "isEndsWith", "isIncludes"]);
+const SCHEMA_FILTERS_NUMBER = new Set(["isGreaterThanOrEqualTo", "isLessThanOrEqualTo", "isGreaterThan", "isLessThan", "isMinLength", "isMaxLength"]);
+
+/** `Schema.String` and the other primitive schema constants. */
+export function lowerSchemaProperty(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+  const prim = SCHEMA_PRIMS[expr.name.text];
+  return prim === undefined ? null : lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);
+}
+
+function wrap(kind: string, inner: IrExpr, loc: SrcLoc): IrExpr {
+  return lib("schema.wrap", [strLit(kind, loc), inner], EFFECT_T, loc);
+}
+
+function handleArg(L: Lowerer, node: ts.Expression, what: string): IrExpr {
+  const value = L.lowerExpr(node);
+  if (value.type.kind !== "effect") L.unsupported("SC1090", node, `${what} over a value that is not a schema handle`);
+  return value;
+}
+
+/** A decoder function value: `(input: unknown, …) => R` typed by the checker; the Option/Effect/Exit forms carry
+ * the decoded value type as an empty array literal of it (the emitter reads the element type). */
+function decoder(L: Lowerer, fn: IrLibFn, schema: IrExpr, schemaNode: ts.Expression, expr: ts.Node, loc: SrcLoc): IrExpr {
+  // The decoded value type is the schema's `Type` member (`S["Type"]`), as the checker resolves it.
+  const typeMember = L.checker.getPropertyOfType(L.typeOf(schemaNode), "Type");
+  const valueTs = typeMember === undefined ? undefined : L.checker.getTypeOfSymbolAtLocation(typeMember, schemaNode);
+  const valueType = valueTs === undefined ? null : L.mapTypeOf(valueTs);
+  if (valueType === null) L.unsupported("SC1090", expr, `a schema decoder whose decoded type '${valueTs === undefined ? "?" : L.checker.typeToString(valueTs)}' has no static shape`);
+  // `Schema.is` answers a generic type predicate; the compiled value is one `(unknown) => boolean`.
+  const type: IrType | null = fn === "schema.is" ? { kind: "func", params: [DYN], ret: BOOL } : L.mapTypeOf(L.typeOf(expr));
+  if (type === null || type.kind !== "func") L.badType(expr, L.typeOf(expr));
+  const args = [schema];
+  if (fn === "schema.decodeOption" || fn === "schema.decodeEffect" || fn === "schema.decodeExit") args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });
+  return lib(fn, args, type, loc);
+}
+
+/** `Schema.member(...)`: constructors, combinators, filters and decoders. */
+export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const first = args[0];
+  const prim = SCHEMA_PRIMS[member];
+  if (prim !== undefined && args.length === 0) return lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);
+  if (member === "Defect" && args.length === 0) return lib("schema.prim", [strLit("defect", loc)], EFFECT_T, loc);
+  const wrapKind = SCHEMA_WRAPS[member];
+  if (wrapKind !== undefined && first !== undefined && args.length === 1) return wrap(wrapKind, handleArg(L, first, `Schema.${member}`), loc);
+  if (member === "Literal" && first !== undefined && args.length === 1) {
+    const value = L.lowerExpr(first);
+    if (value.kind !== "strLit" && value.kind !== "numLit" && value.kind !== "boolLit") L.unsupported("SC1090", first, "Schema.Literal over a non-literal value");
+    return lib("schema.literal", [{ kind: "arrayLit", elems: [value], type: arrayOf(value.type), loc }], EFFECT_T, loc);
+  }
+  if (member === "Literals" && first !== undefined && args.length === 1) {
+    // The argument is a tuple to the checker: its elements lower one by one (a tuple literal is a record).
+    if (!ts.isArrayLiteralExpression(first)) L.unsupported("SC1090", first, "Schema.Literals over a non-literal array");
+    const elems = first.elements.map((e) => L.lowerExpr(e));
+    if (elems.some((e) => e.kind !== "strLit" && e.kind !== "numLit" && e.kind !== "boolLit")) L.unsupported("SC1090", first, "Schema.Literals over non-literal members");
+    return lib("schema.literal", [{ kind: "arrayLit", elems, type: arrayOf(elems[0]?.type ?? STRING), loc }], EFFECT_T, loc);
+  }
+  if (member === "Struct" && first !== undefined && args.length === 1) {
+    if (!ts.isObjectLiteralExpression(first)) L.unsupported("SC1090", first, "Schema.Struct over a non-literal fields object");
+    const fields = L.lowerExpr(first);
+    if (fields.kind !== "recordLit" || fields.fields.some((f) => f.value.type.kind !== "effect" || f.overflow !== undefined || f.drop !== undefined)) L.unsupported("SC1090", first, "Schema.Struct fields that are not schema handles");
+    return lib("schema.struct", [fields], EFFECT_T, loc);
+  }
+  if (member === "Array" && first !== undefined && args.length === 1) return lib("schema.array", [handleArg(L, first, "Schema.Array")], EFFECT_T, loc);
+  if (member === "Record" && first !== undefined && args[1] !== undefined && args.length <= 3) {
+    return lib("schema.record", [handleArg(L, first, "Schema.Record"), handleArg(L, args[1], "Schema.Record")], EFFECT_T, loc);
+  }
+  if (member === "Union" && first !== undefined && args.length <= 2) {
+    if (!ts.isArrayLiteralExpression(first)) L.unsupported("SC1090", first, "Schema.Union over a non-literal member array");
+    const elems = first.elements.map((e) => handleArg(L, e, "Schema.Union"));
+    return lib("schema.union", [{ kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc }], EFFECT_T, loc);
+  }
+  if (SCHEMA_FILTERS_TEXT.has(member) && first !== undefined) {
+    const text = L.lowerExprExpecting(first, STRING);
+    return lib("schema.filter", [strLit(member, loc), numLit(0, loc), text], EFFECT_T, loc);
+  }
+  if (SCHEMA_FILTERS_NUMBER.has(member) && first !== undefined) {
+    const number = L.lowerExprExpecting(first, { kind: "f64" });
+    return lib("schema.filter", [strLit(member, loc), number, strLit("", loc)], EFFECT_T, loc);
+  }
+  if (member === "isInt" || member === "isFinite") return lib("schema.filter", [strLit(member, loc), numLit(0, loc), strLit("", loc)], EFFECT_T, loc);
+  const decoders: Record<string, IrLibFn | undefined> = {
+    decodeUnknownSync: "schema.decodeSync", decodeUnknownOption: "schema.decodeOption", decodeUnknownEffect: "schema.decodeEffect",
+    decodeUnknownExit: "schema.decodeExit", is: "schema.is", encodeSync: "schema.encodeSync", encodeUnknownSync: "schema.encodeSync",
+  };
+  const fn = decoders[member];
+  if (fn !== undefined && first !== undefined && args.length <= 2) return decoder(L, fn, handleArg(L, first, `Schema.${member}`), first, expr, loc);
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Schema.${member} in this call shape yet`);
+}
+
+/** `Schema.is(S)(value)` called at once: one boolean, no predicate value (effect's predicate is a generic signature). */
+export function lowerSchemaTest(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const inner = expr.expression;
+  if (!ts.isCallExpression(inner) || !ts.isPropertyAccessExpression(inner.expression) || !ts.isIdentifier(inner.expression.name) || inner.expression.name.text !== "is") return null;
+  if (effectNamespaceOf(L, inner.expression.expression) !== "Schema" || inner.arguments.length !== 1 || expr.arguments.length !== 1) return null;
+  return lib("schema.test", [handleArg(L, inner.arguments[0]!, "Schema.is"), L.lowerExprExpecting(expr.arguments[0]!, DYN)], BOOL, loc);
+}
+
+/** `S.pipe(Schema.optional)`, `S.pipe(Schema.brand("x"))`, `S.pipe(Schema.check(f))`, `S.pipe(Schema.mutable)`. */
+export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: SrcLoc): IrExpr | null {
+  if (ts.isPropertyAccessExpression(step) && ts.isIdentifier(step.name) && effectNamespaceOf(L, step.expression) === "Schema") {
+    const kind = SCHEMA_WRAPS[step.name.text];
+    if (kind !== undefined) return wrap(kind, source, loc);
+    return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${step.name.text} as a pipe step yet`);
+  }
+  if (!ts.isCallExpression(step) || !ts.isPropertyAccessExpression(step.expression) || !ts.isIdentifier(step.expression.name) || effectNamespaceOf(L, step.expression.expression) !== "Schema") return null;
+  const name = step.expression.name.text;
+  if (name === "brand" && step.arguments.length === 1) return wrap("brand", source, loc);
+  if (name === "check") return step.arguments.reduce<IrExpr>((acc, filter) => lib("schema.check", [acc, handleArg(L, filter, "Schema.check")], EFFECT_T, loc), source);
+  return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${name} as a pipe step yet`);
+}
+
+/** Methods on a schema handle: `S.make(props)` (the identity over the checker's Type), `S.annotate(…)` (the handle),
+ * `S.check(f, …)`. Null for any other member (the caller keeps its fences). */
+export function lowerSchemaHandleMethod(L: Lowerer, name: string, receiver: ts.Expression, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr | null {
+  if (name === "make" && args.length >= 1 && args.length <= 2) {
+    const type = L.mapTypeOf(L.typeOf(expr));
+    if (type === null) L.badType(expr, L.typeOf(expr));
+    return L.lowerExprExpecting(args[0]!, type);
+  }
+  if (name === "annotate" && args.length === 1) {
+    // `annotate({ identifier: "X" })` names the schema in effect's messages; other annotations are not observable.
+    const literal = args[0]!;
+    const identifier = ts.isObjectLiteralExpression(literal)
+      ? literal.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "identifier")
+      : undefined;
+    const source = handleArg(L, receiver, "annotate");
+    if (identifier === undefined) return source;
+    if (!ts.isStringLiteral(identifier.initializer)) L.unsupported("SC1090", identifier, "a non-literal schema identifier");
+    return wrap(`identifier:${identifier.initializer.text}`, source, loc);
+  }
+  if (name === "check") return args.reduce<IrExpr>((acc, filter) => lib("schema.check", [acc, handleArg(L, filter, "check")], EFFECT_T, loc), handleArg(L, receiver, "check"));
+  return null;
 }

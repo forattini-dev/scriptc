@@ -137,6 +137,8 @@ pub enum LayerNode {
     Empty,
     Succeed(Rc<str>, EffectValue),
     Effect(Rc<str>, JsEffect),
+    /// `Layer.effectDiscard(effect)`: runs the effect for its effects, provides nothing.
+    EffectDiscard(JsEffect),
     /// `Layer.provide(outer, inner)`: inner's services feed outer's build and stay hidden; `provideMerge` keeps them.
     Provide(JsEffect, JsEffect, bool),
     Merge(JsEffect, JsEffect),
@@ -146,6 +148,10 @@ pub enum LayerNode {
 pub enum KernelData {
     Exit(Outcome),
     Option(Option<EffectValue>),
+    /// A Schema descriptor (schema.rs).
+    Schema(Rc<SchemaNode>),
+    /// A failed decode's SchemaError: the issue text.
+    SchemaError(JsString),
 }
 
 pub struct EffectData {
@@ -181,7 +187,7 @@ impl Trace for EffectData {
             }
             EffectNode::Layer(layer) => match layer {
                 LayerNode::Empty | LayerNode::Succeed(..) => {}
-                LayerNode::Effect(_, effect) => tracer.edge(effect),
+                LayerNode::Effect(_, effect) | LayerNode::EffectDiscard(effect) => tracer.edge(effect),
                 LayerNode::Provide(a, b, _) | LayerNode::Merge(a, b) => {
                     tracer.edge(a);
                     tracer.edge(b);
@@ -301,6 +307,10 @@ pub fn layer_succeed(key: &JsEffect, value: EffectValue) -> JsEffect {
 
 pub fn layer_effect(key: &JsEffect, effect: &JsEffect) -> JsEffect {
     effect_new(EffectNode::Layer(LayerNode::Effect(key_of(key), effect.clone())))
+}
+
+pub fn layer_effect_discard(effect: &JsEffect) -> JsEffect {
+    effect_new(EffectNode::Layer(LayerNode::EffectDiscard(effect.clone())))
 }
 
 pub fn layer_provide(outer: &JsEffect, inner: &JsEffect) -> JsEffect {
@@ -442,6 +452,7 @@ pub fn effect_data_tag(handle: &JsEffect) -> JsString {
     handle.with(|data| match &data.node {
         EffectNode::Data(KernelData::Exit(outcome)) => string(if outcome.is_ok() { "Success" } else { "Failure" }),
         EffectNode::Data(KernelData::Option(value)) => string(if value.is_some() { "Some" } else { "None" }),
+        EffectNode::Data(KernelData::SchemaError(_)) => string("SchemaError"),
         _ => throw_error("scriptc: a kernel data handle was expected".to_owned()),
     })
 }
@@ -509,6 +520,7 @@ fn layer_build(layer: &JsEffect) -> JsEffect {
         LayerNode::Empty => effect_succeed(Rc::new(Rc::new(Vec::new()) as Bundle)),
         LayerNode::Succeed(key, value) => effect_succeed(Rc::new(Rc::new(vec![(key, value)]) as Bundle)),
         LayerNode::Effect(key, effect) => effect_map(&effect, Rc::new(move |value| Rc::new(Rc::new(vec![(key.clone(), value)]) as Bundle)), no_trace()),
+        LayerNode::EffectDiscard(effect) => effect_map(&effect, Rc::new(|_| Rc::new(Rc::new(Vec::new()) as Bundle)), no_trace()),
         LayerNode::Merge(left, right) => {
             let right_build = layer_build(&right);
             effect_flat_map(
