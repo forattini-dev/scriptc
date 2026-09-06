@@ -1,0 +1,209 @@
+{
+  "name": "red-skills-brain",
+  "entry": "../red-skills/apps/brain/src/cli.ts",
+  "options": {
+    "dynamic": true,
+    "target": null,
+    "npmStatic": [],
+    "islandModules": [
+      "auto"
+    ]
+  },
+  "preflightFailed": false,
+  "stats": {
+    "statementsTotal": 167,
+    "statementsFailed": 5,
+    "statementsIsland": 93,
+    "functionsSkipped": 0
+  },
+  "unreachedStats": {
+    "statementsTotal": 4,
+    "statementsFailed": 0,
+    "statementsIsland": 0,
+    "functionsSkipped": 0
+  },
+  "reached": {
+    "total": 5,
+    "byCode": {
+      "SC1090": 4,
+      "SC2020": 1
+    },
+    "byFamily": {
+      "solid-idioms": 2,
+      "syntax-other": 2,
+      "stdlib-tail": 1
+    },
+    "byPackage": {
+      "(other)": 5
+    },
+    "families": [
+      {
+        "family": "solid-idioms",
+        "count": 2,
+        "codes": {
+          "SC1090": 2
+        },
+        "packages": {
+          "(other)": 2
+        },
+        "sample": {
+          "file": "cli.ts",
+          "message": "object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet"
+        }
+      },
+      {
+        "family": "syntax-other",
+        "count": 2,
+        "codes": {
+          "SC1090": 2
+        },
+        "packages": {
+          "(other)": 2
+        },
+        "sample": {
+          "file": "cli.ts",
+          "message": "a checked cast of 'any' to 'string | undefined' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported "
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 1,
+        "codes": {
+          "SC2020": 1
+        },
+        "packages": {
+          "(other)": 1
+        },
+        "sample": {
+          "file": "cli.ts",
+          "message": "'Buffer.isBuffer of 'Uint8Array' values' is part of the standard library types but has no scriptc lowering yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "Buffer.isBuffer of ": 1
+    }
+  },
+  "unreached": {
+    "total": 0,
+    "byCode": {},
+    "byFamily": {},
+    "byPackage": {},
+    "families": [],
+    "stdlibTail": {}
+  },
+  "runtimeFences": 0,
+  "npmStatic": [],
+  "npmBuiltins": [
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]"
+  ],
+  "frontier": [
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/channel-bridge.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'ChannelBridgeProcess' cannot be compiled: the record shape is supported, but its member 'stderr' has type 'number | Stream | IOType | undefined', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/auto-linker.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1100 passing 'unknown' values where 'any[]' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/config.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread into '{ [key: string]: string }' from these source shapes (spread sources must be index-signature records whose value type is, or lifts into, the target's) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/resident-brain.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 library functions as values (call 'existsSync' directly) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/hash.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/kpi-query.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 narrowing '.filter' with a hand-written type predicate (a written 'x is T' is an unchecked assertion nothing validates at runtime — keep the receiver's element type instead — annotate the callback's return ': boolean' (the checker then skips the predicate) or annotate the result with the receiver's own element type — and narrow the elements after) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/model-tier-bandit.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/schema.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/store.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Number of unknown values' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/runtime.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'Promise<BrainRuntime>' cannot be compiled: the Promise shape is supported, but its value type 'BrainRuntime' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/hook-runtime.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type '(runtime: BrainRuntime) => Promise<ResolvedBrainConfig>' cannot be compiled: the function shape is supported, but its parameter 'runtime' has type 'BrainRuntime', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/event-artifact-mapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Array.from with this argument shape' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/ingest-events.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'IngestEventsInput' cannot be compiled: the record shape is supported, but its member 'store' has type 'BrainStoreLike', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/brain-act.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'BrainActOptions' cannot be compiled: the record shape is supported, but its member 'connect' has type 'ChannelBridgeConnector | undefined', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/dashboard.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Server.off' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/scheduled-ingestion.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'ScheduledIngestInput' cannot be compiled: the record shape is supported, but its member 'store' has type 'BrainStoreLike', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/cli-args.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/cli.ts",
+      "tier": "static",
+      "reason": "static"
+    }
+  ],
+  "timing": {
+    "wallMs": 6840,
+    "phases": {
+      "ffi-validate": 5,
+      "reachable-emit": 1134
+    }
+  }
+}

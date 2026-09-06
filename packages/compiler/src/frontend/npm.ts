@@ -141,6 +141,15 @@ export interface EmbeddedModule {
  * the port is the single source of truth for program CJS files and
  * embedded npm modules alike. */
 
+/** TypeScript's extension substitution table: the extension a source
+ * writes → the source extensions it may stand for (in TypeScript's
+ * probe order). */
+const TS_EXTENSION_SUBSTITUTIONS: readonly (readonly [string, readonly string[]])[] = [
+  [".js", [".ts", ".tsx"]],
+  [".mjs", [".mts"]],
+  [".cjs", [".cts"]],
+];
+
 /** The ESM facade for an embedded CommonJS module, matching Node's interop
  * exactly (verified against Node 24): `default` IS module.exports;
  * "module.exports" is a named alias for it (Node ships that export name);
@@ -1389,6 +1398,18 @@ export class NpmGraphBuilder {
   private resolveFile(path: string, depth = 0): string | null {
     if (depth > 8) return null; // a "main" cycle — refuse quietly
     if (this.host.isFile(path)) return path;
+    // TypeScript's extension substitution (moduleResolution node16/
+    // nodenext/bundler): a relative `./runtime.js` names `runtime.ts`
+    // when no `.js` exists — the NodeNext idiom of TypeScript projects
+    // whose modules land in the island (red-skills). Bun resolves it the
+    // same way at runtime.
+    for (const [written, sources] of TS_EXTENSION_SUBSTITUTIONS) {
+      if (!path.endsWith(written)) continue;
+      const stem = path.slice(0, -written.length);
+      for (const source of sources) {
+        if (this.host.isFile(stem + source)) return stem + source;
+      }
+    }
     // TypeScript targets resolve too (the workspace-monorepo package
     // shape: exports point at ./src/*.ts with no shipped dist):
     // npmExecutableSource transpiles the reached file at embed time.

@@ -1,0 +1,938 @@
+{
+  "name": "red-dev",
+  "entry": "../red-dev/src/main.ts",
+  "options": {
+    "dynamic": true,
+    "target": "bun",
+    "npmStatic": [],
+    "islandModules": [
+      "auto"
+    ]
+  },
+  "preflightFailed": false,
+  "stats": {
+    "statementsTotal": 132,
+    "statementsFailed": 7,
+    "statementsIsland": 10,
+    "functionsSkipped": 0
+  },
+  "unreachedStats": {
+    "statementsTotal": 1726,
+    "statementsFailed": 286,
+    "statementsIsland": 521,
+    "functionsSkipped": 0
+  },
+  "reached": {
+    "total": 7,
+    "byCode": {
+      "SC1090": 3,
+      "SC2004": 3,
+      "SC2020": 1
+    },
+    "byFamily": {
+      "cascade": 3,
+      "syntax-other": 3,
+      "stdlib-tail": 1
+    },
+    "byPackage": {
+      "(other)": 7
+    },
+    "families": [
+      {
+        "family": "cascade",
+        "count": 3,
+        "codes": {
+          "SC2004": 3
+        },
+        "packages": {
+          "(other)": 3
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "uses of 'handOffCrash' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "syntax-other",
+        "count": 3,
+        "codes": {
+          "SC1090": 3
+        },
+        "packages": {
+          "(other)": 3
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "dynamic import of the program's own module './crash-handoff.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 1,
+        "codes": {
+          "SC2020": 1
+        },
+        "packages": {
+          "(other)": 1
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "'process.on(\"uncaughtException\", ...)' is part of the standard library types but has no scriptc lowering yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "process.on(\"uncaughtException\", ...)": 1
+    }
+  },
+  "unreached": {
+    "total": 286,
+    "byCode": {
+      "SC2004": 161,
+      "SC1090": 118,
+      "SC2020": 7
+    },
+    "byFamily": {
+      "cascade": 161,
+      "syntax-other": 116,
+      "stdlib-tail": 7,
+      "island-boundary-function": 2
+    },
+    "byPackage": {
+      "(other)": 286
+    },
+    "families": [
+      {
+        "family": "cascade",
+        "count": 161,
+        "codes": {
+          "SC2004": 161
+        },
+        "packages": {
+          "(other)": 161
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "uses of 'sudoItemsFor' inherit the blocker on its declaration"
+        }
+      },
+      {
+        "family": "syntax-other",
+        "count": 116,
+        "codes": {
+          "SC1090": 116
+        },
+        "packages": {
+          "(other)": 116
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "dynamic import of the program's own module './sudo-preflight.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 7,
+        "codes": {
+          "SC2020": 7
+        },
+        "packages": {
+          "(other)": 7
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet"
+        }
+      },
+      {
+        "family": "island-boundary-function",
+        "count": 2,
+        "codes": {
+          "SC1090": 2
+        },
+        "packages": {
+          "(other)": 2
+        },
+        "sample": {
+          "file": "main.ts",
+          "message": "functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any'"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "process.stdout.columns as a plain number": 2,
+      "Bun.which": 1,
+      "BunFile.size": 1,
+      "BunFile.text": 1,
+      "Map<string, CatalogueLine>.get": 1,
+      "new Map(entries)": 1
+    }
+  },
+  "runtimeFences": 0,
+  "npmStatic": [],
+  "npmBuiltins": [
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]"
+  ],
+  "frontier": [
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/brand.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'unknown' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/themes.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 spreading '[string, string, string, string, string, string]' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 spreading '[string, string, string, string]' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/transcript.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'void | undefined' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/crash.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'CrashCaptureDeps' cannot be compiled: the record shape is supported, but its member 'at' has type 'Date | undefined', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/log.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'console.log' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/platform.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1043 comparing non-number, non-string values are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type '(repo: string, asset: string, ...silentArgs: string[]) => Provider' cannot be compiled: the function shape is supported, but its rest parameter 'silentArgs' has no compiled calling convention yet (a compiled signature is fixed-arity)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/plan.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 spreading 'any' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/temp.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/apt-upgrade.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'FullUpgradePlan' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/checksum.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/unattended.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-root.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'Pick<typeof import(\"node:fs\"), \"existsSync\" | \"lstatSync\" | \"mkdirSync\" | \"readdirSync\" | \"readlinkSync\" | \"renameSync\" | \"rmSync\" | \"symlinkSync\" | \"unlinkSync\">' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/agents.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/mise-config.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/github-token.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '{ (command: string): SpawnSyncReturns<NonSharedBuffer>; (command: string, options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<...>; (command: string, options: SpawnSyncOptionsWithBufferEncoding): SpawnSyncReturns<...>; (command: string, options?: SpawnSyncOptions | undefined): SpawnSyncReturns<...>; (comm...' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/process-heartbeat.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/rights.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/providers.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any' — or parameters convertible at the boundary (number, string, boolean, JSON-safe records/arrays/unions, 'T | undefined'), and return 'any', void, number, string, boolean, a JSON-safe composite, or a Promise of the primitive kinds) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/preferences.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/ui.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread after explicit properties (or mixed with a conditional spread) in an 'any'-typed object literal — spreads must come first are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/trigger.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/runtimes.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'number[]' values where 'string[]' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-plugins.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './preferences.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'fs.cpSync' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'spawnSync option 'cwd'' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/product-skill.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './transcript.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/owned-config.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'unknown' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/owned-state.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/zellij-layer.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-companions.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2002 record shapes must match exactly or width-coerce: expected 'number[]', got '{ argv: string[]; optional: boolean | undefined }[]'"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-ext.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'delete' of required record fields (a monomorphic shape cannot remove its slot — only optional fields delete, becoming the undefined arm) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/agents.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/apps.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/capture.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/panels.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/terminal.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/terminal-surfaces.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/types.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/input.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/reserved.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/validate.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/actions/index.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/shared-root.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.file' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/terminal-surfaces.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-registration.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-hosts.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2003 union types must match exactly: expected '{ name: string; state: string } | { name: string; reason: string; state: string }', got '{ name: string; reason: string | undefined; state: string }' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-adopt.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'fs.cpSync' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/workload-policy.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/blesh.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/terminal-cursor.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/wsl.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '{ (path: string | URL, options?: BlobPropertyBag | undefined): BunFile; (path: Uint8Array<ArrayBuffer> | ArrayBufferLike, options?: BlobPropertyBag | undefined): BunFile; (fileDescriptor: number, options?: BlobPropertyBag | undefined): BunFile; }' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-output.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'new TextDecoder' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/alacritty.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/theme-apply.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 passing a value of type '{ inUse: () => Promise<null | string> | undefined; now: () => Date | undefined; show: (string) => Promise<boolean> | undefined; state: () => Promise<{ address: null | string; agent: null | { provider: string; updatedAtMs: number; windows: { kind: string; remainingPercent: number; resetsAtMs: number | null; usedPercent: number }[] } | undefined; attention: null | { count: number | null; kind: string } | undefined; capacity: number | null | undefined; github: null | { app: null | { api: number; graphql: number }; pat: null | { api: number; graphql: number } } | undefined; queued: number | null | undefined; version: null | string | undefined; workers: number | null }> | undefined }' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can cross the boundary) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/blender.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-checkout.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1100 passing 'unknown' values where '{ version: unknown }' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-mise-plugin.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 using an 'any' value where '(string) => void' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/claude-keybindings.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/codex-statusline.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/bounded-command.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 Promise.race entries of inner type 'null | undefined' under a 'null | string' result (every entry must be the result type, one of its arms, or a sub-union of it) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall-hook.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'readonly [\"worker-birth\", \"worker-death\", \"worker-budget-kill\"].flatMap' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/watch-schedule.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './bounded-command.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/puppeteer.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 spreading 'any' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/ssh-server.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/hotkeys.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/gnome-keys.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/wsl-provision.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/wsl-sync.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-path.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '.splice with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/sudo-preflight.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/linux-host.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Number.isFinite' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/statusline-health.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '.localeCompare with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/host-health.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Date.parse' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/host-report.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/retention.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/reclaim.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 passing a value of type 'Stats' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can cross the boundary) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/shadowed.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawnSync' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/shadow-repair.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/drift.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 reading 'probeSshServer' from a value of type 'typeof import(\"/home/cyber/Work/reddb.io/red-dev/src/ssh-server\")' is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/staged-update.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'readonly [\"acquisition\", \"hosts\", \"companions\", \"lock\"].filter' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/workstation-lock.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '.localeCompare with 2 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/offline-depot.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 '.localeCompare with 2 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/workstation-rollback.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2002 record shapes must match exactly or width-coerce: expected '{ active: { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; pending: null | undefined; previous: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; rolledBackFrom: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; schema: number }', got '{ active: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; pending: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; previous: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; rolledBackFrom: null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }; schema: number }' — field 'pending': 'null | { activatedAt: string; apps: { id: string; surface: string; version: string }[]; depot: null | string; key: string; lockDigest: string; lockPath: string; packageSet: { digest: string; key: string; sourceCommit: string; version: string }; target: string }' does not lift into 'null | undefined'"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/agent-usage.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'unknown' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/default-agent.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/agent-posture.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 '??' where the result cannot represent every non-nullish arm (left is '(string) => null | string | undefined' but the whole expression is '(string, string | undefined) => null | string') is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/rescue.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 '.find' on 'null | string'-element arrays (the found element would need a union re-tag that is not supported yet — loop and test instead) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/cache-policy.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1100 passing 'unknown' values where '{ target_directory: unknown; workspace_root: unknown }' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/firstrun.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/ssh-access.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 constructing values other than classes declared in the program is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/legacy-install.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/vscode-extension.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 using an 'any' value where '({ arch: string; caps: { apt: boolean; flatpak: boolean; gui: boolean; systemd: boolean; winget: boolean }; codename: null | string; distro: null | string; env: string; os: string; version: null | string }) => string' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/completion.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 narrowing '.filter' with a hand-written type predicate (a written 'x is T' is an unchecked assertion nothing validates at runtime — keep the receiver's element type instead — annotate the callback's return ': boolean' (the checker then skips the predicate) or annotate the result with the receiver's own element type — and narrow the elements after) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/privileged.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 reading 'windowsSshServerScript' from a value of type 'typeof import(\"/home/cyber/Work/reddb.io/red-dev/src/ssh-server\")' is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/verify-install.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1120 function replacement values (replacements must be string templates) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/converge.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 '.filter' narrowing '{ kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; pkg: string } | { id: string; kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined } | { alias: string | undefined; kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; spec: string; version: string | undefined } | { args: string[] | undefined; kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; note: string; url: string } | { asset: string; bin: string | undefined; kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; repo: string; silentArgs: string[] | undefined; version: string | undefined } | { kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; pkgs: string[]; ppa: string } | { entry: string; group: string | undefined; keyUrl: string; keyring: string; kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; pkgs: string[] } | { kind: string; name: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined } | { kind: string; needsAdmin: boolean | undefined; needsSudo: boolean | undefined; reason: string }' elements to the multi-arm '{ kind: string; pkg: string }' (only a SINGLE arm re-tags — keep the receiver's element type instead — annotate the callback's return ': boolean' (the checker then skips the predicate) or annotate the result with the receiver's own element type — and narrow the elements after) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui-theme.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui-chrome.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'TuiChild[]' cannot be compiled: the array shape is supported, but 'TuiChild' elements have no array representation yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-console-mode.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui-install.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 functions with this signature crossing into dynamically-executed code (a callback passed to a package/'any' API may take 'any' parameters — leave them unannotated so contextual typing keeps them 'any' — or parameters convertible at the boundary (number, string, boolean, JSON-safe records/arrays/unions, 'T | undefined'), and return 'any', void, number, string, boolean, a JSON-safe composite, or a Promise of the primitive kinds) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/report.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/failure-clipboard.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 spreading 'any' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/self-update.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC2001 values of type '(repo: string, asset: string) => Promise<string | null>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'openSync with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/update-order.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/png.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-hidden.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.write' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/github-rate.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/lan-address.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall-bin.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'in' with computed (non-literal) keys (a const whose type is one string literal folds; a string-typed key answers over index-signature record receivers) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall-font.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall-charset.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 spreading 'unknown' into a 'string[]' literal (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/ttf.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/typeset.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'new Float64Array' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall-render.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'new Date with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/redwall.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Promise.all over this argument shape' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/webapps.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/uninstall.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/catalogue.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/keys.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'readonly [\"alacritty\", \"x-terminal-emulator\", \"gnome-terminal\", \"xterm\"].find' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/keys-view.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'ViewerIo | undefined' cannot be compiled: the union shape is supported, but its arm 'ViewerIo' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/emoji-table.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/emoji.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 dynamic import of the program's own module './bounded-command.ts' (this module is not part of the compiled module graph — import it statically) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/emoji-view.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'PickerIo | undefined' cannot be compiled: the union shape is supported, but its arm 'PickerIo' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/learn.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 using an 'any' value where '{ applies: ({ arch: string; caps: { apt: boolean; flatpak: boolean; gui: boolean; systemd: boolean; winget: boolean }; codename: null | string; distro: null | string; env: string; os: string; version: null | string }) => boolean; available: ((string) => string[]) => boolean | undefined; choices: { answer: string | undefined; key: string; label: string; marker: string | undefined; note: string; recommended: boolean | undefined; selectable: boolean | undefined }[]; choicesFrom: ((string) => string[]) => { answer: string | undefined; key: string; label: string; marker: string | undefined; note: string; recommended: boolean | undefined; selectable: boolean | undefined }[] | undefined; description: string; id: string; multi: boolean; preset: string[]; title: string }' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'unknown' to 'Error' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/agent-launch.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/agent-update.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2002 record shapes must match exactly or width-coerce: expected '{ MISE_SKIP_RESHIM: string }', got '{ [key: string]: string }' — 'MISE_SKIP_RESHIM' is not a declared field of the source, and the source's index signature could hold it at runtime (a completed undefined would drop that value)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/menu.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 spreading 'any' into a 'string[]' rest parameter (only a same-element-type array spreads) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/crash-handoff.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 using an 'any' value where '(string) => null | string' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/statusline-command.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.stdin' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/herdr.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 passing a value of type '{ bytes: string; file: string; guard: RegExp; marker: string }' into dynamically-executed ('any'-typed) code (only numbers, strings, booleans, typed arrays, URLs, undefined/null-armed unions, and JSON-safe records/arrays/unions can cross the boundary) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-env.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'BunFile.text' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/theme-editors.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/windows-theme.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.spawn' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/docker.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Bun.which' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/red-family.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC1090 spread arguments are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/wsl-tuning.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 this property form in an 'any'-typed object literal (only `name: value`, shorthand names, methods, and get accessors are supported) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "tier": "static",
+      "reason": "static"
+    }
+  ],
+  "timing": {
+    "wallMs": 23044,
+    "phases": {
+      "ffi-validate": 36,
+      "reachable-emit": 2305
+    }
+  }
+}

@@ -1,0 +1,426 @@
+{
+  "name": "red-skills-rsp",
+  "entry": "../red-skills/apps/rsp/src/cli.ts",
+  "options": {
+    "dynamic": true,
+    "target": null,
+    "npmStatic": [],
+    "islandModules": [
+      "auto"
+    ]
+  },
+  "preflightFailed": false,
+  "stats": {
+    "statementsTotal": 31,
+    "statementsFailed": 2,
+    "statementsIsland": 2,
+    "functionsSkipped": 0
+  },
+  "unreachedStats": {
+    "statementsTotal": 100,
+    "statementsFailed": 0,
+    "statementsIsland": 5,
+    "functionsSkipped": 0
+  },
+  "reached": {
+    "total": 2,
+    "byCode": {
+      "SC1063": 1,
+      "SC2020": 1
+    },
+    "byFamily": {
+      "SC1063": 1,
+      "stdlib-tail": 1
+    },
+    "byPackage": {
+      "(other)": 2
+    },
+    "families": [
+      {
+        "family": "SC1063",
+        "count": 1,
+        "codes": {
+          "SC1063": 1
+        },
+        "packages": {
+          "(other)": 1
+        },
+        "sample": {
+          "file": "cli.ts",
+          "message": "this use of a catch binding is not supported yet"
+        }
+      },
+      {
+        "family": "stdlib-tail",
+        "count": 1,
+        "codes": {
+          "SC2020": 1
+        },
+        "packages": {
+          "(other)": 1
+        },
+        "sample": {
+          "file": "cli.ts",
+          "message": "'process.stdout.write of non-string data' is part of the standard library types but has no scriptc lowering yet"
+        }
+      }
+    ],
+    "stdlibTail": {
+      "process.stdout.write of non-string data": 1
+    }
+  },
+  "unreached": {
+    "total": 0,
+    "byCode": {},
+    "byFamily": {},
+    "byPackage": {},
+    "families": [],
+    "stdlibTail": {}
+  },
+  "runtimeFences": 0,
+  "npmStatic": [],
+  "npmBuiltins": [
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]",
+    "[object Object]"
+  ],
+  "frontier": [
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/structured-error.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/args.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'typeof' catch-binding tests against \"object\" (only \"string\"/\"number\"/\"boolean\" narrow a catch binding; use 'instanceof' for objects) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/output-levers.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a conditional spread mixed with plain spreads in an 'any'-typed object literal is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/overhead-budget.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.hrtime.bigint' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-protocol.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-client.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'RspMintMeta' cannot be compiled: the record shape is supported, but its member 'loss' has type 'RspLossMeta', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/pricing.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/stats.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'unknown' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/dashboard.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/telemetry/schema.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/telemetry/helpers.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/telemetry/spool.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'appendFileSync with 3 arguments' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/command-classifier.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/gh-etag-cache.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'number[]' values where 'string[]' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/config.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 library functions as values (call 'existsSync' directly) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/elision-store/public.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/elision-store/helpers.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 compound assignment to fields of computed receivers are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/elision-store/store.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'StoreDocument' cannot be compiled: the record shape is supported, but its member 'records' has type 'Record<string, StoredRecord>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/elision-store.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/telemetry/reports.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/telemetry.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/passthrough.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread after explicit properties (spreads must come first — a later spread would overwrite them with JS semantics the desugar does not model) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/doctor.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'unknown' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/fast-git.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'spawnSync with a non-utf8 encoding' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/help.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/invocation-telemetry.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/store-lifecycle.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'Promise<ElisionStoreLike> | undefined' cannot be compiled: the union shape is supported, but its arm 'Promise<ElisionStoreLike>' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/main.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.hrtime.bigint' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-store.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/model.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/process-tree.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'ChildProcess.signalCode' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/args.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 'in' with computed (non-literal) keys (a const whose type is one string literal folds; a string-typed key answers over index-signature record receivers) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/paths.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/registry.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'unknown' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/json.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/delivery.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 object spread after explicit properties (or mixed with a conditional spread) in an 'any'-typed object literal — spreads must come first are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/completion.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'unknown' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/capture.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'WriteStream | null' cannot be compiled: the union shape is supported, but its arm 'WriteStream' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/capture-store.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'WaitCaptureStore' cannot be compiled: the record shape is supported, but its member 'mint' has type '(bytes: Buffer<ArrayBufferLike>, meta: { command: string; loss: { level: RspLossLevel; bytes_elided: number; }; }) => Promise<string>', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/lifecycle.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'spawn with a non-literal detached option' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/gh-conditional.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.hrtime.bigint' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/github.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Buffer.from with this argument shape' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/probes.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1100 passing 'unknown' values where 'any[]' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/help.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/webhook-forwarder.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 extending classes not declared in the program ('SharedWebhookForwarder') is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/webhook-wake-source.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'WebhookWakeSource' cannot be compiled: the record shape is supported, but its member 'removeAllListeners' has type '(eventName?: string | symbol | undefined) => WebhookWakeSource', which does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/wait/index.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/rsp-cli.ts",
+      "tier": "static",
+      "reason": "static"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/proxy.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.hrtime.bigint' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/anomaly-scorer.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 Math methods as values (call 'abs' directly) are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/git-wrapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/normalize.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 '??' where the result cannot represent every non-nullish arm (left is '(unknown) => string | undefined' but the whole expression is 'any') is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/exec-wrapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'any' to 'any' (an 'any' value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/intercept.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'process.hrtime.bigint' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/gh-batch.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 spread arguments are not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/gh-wrapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2001 values of type 'unknown' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/test-wrapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1100 passing 'unknown' values where 'any[]' is expected is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cat-wrapper.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Number of string | undefined values' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/setup.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'fs/promises.copyFile' is typed by @types/node but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/mcp-server.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC1090 a checked cast of 'unknown' to '{ id: number | null | string | undefined; jsonrpc: string | undefined; method: string | undefined; params: unknown }' (a dynamic value can only be validated against JSON-representable types: number, string, boolean, records, arrays, and unions of those) is not supported yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/shell-init.ts",
+      "tier": "island",
+      "reason": "auto: round 2: SC2009 values of type 'Map<string, RspWrapperCapability[]>' cannot be compiled: the Map shape is supported, but 'RspWrapperCapability[]' values have no Map slot yet (functions, promises, and nested Maps stay out)"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-brain.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2020 'Number of unknown values' is part of the standard library types but has no scriptc lowering yet"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-server.ts",
+      "tier": "island",
+      "reason": "auto: round 1: SC2009 values of type 'ResidentStoreState' cannot be compiled: the union shape is supported, but its arm '{ kind: \"opening\"; startedAt: bigint; }' does not compile"
+    },
+    {
+      "module": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli.ts",
+      "tier": "static",
+      "reason": "static"
+    }
+  ],
+  "timing": {
+    "wallMs": 12417,
+    "phases": {
+      "ffi-validate": 14,
+      "reachable-emit": 978
+    }
+  }
+}
