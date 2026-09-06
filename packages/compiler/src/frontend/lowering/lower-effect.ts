@@ -91,6 +91,62 @@ function lowerExitMember(L: Lowerer, member: string, args: ts.Expression[], expr
   return L.unsupported("SC1090", expr, `the effect kernel does not cover Exit.${member} in this call shape yet`);
 }
 
+/** `Option.member(...)`: the opaque option handle's constructors, tests and reads (site-typed by the checker). */
+function lowerOptionMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const total = pre.length + args.length;
+  const at = (index: number): IrExpr => index < pre.length ? pre[index]! : L.lowerExpr(args[index - pre.length]!);
+  const result = (): IrType => L.mapTypeOf(L.typeOf(expr)) ?? L.badType(expr, L.typeOf(expr));
+  switch (member) {
+    case "some":
+      if (total === 1) return lib("option.some", [at(0)], EFFECT_T, loc);
+      break;
+    case "none":
+      if (total === 0) return lib("option.none", [], EFFECT_T, loc);
+      break;
+    case "isSome":
+    case "isNone":
+      if (total === 1 && at(0).type.kind === "effect") {
+        const test = lib("option.isSome", [at(0)], BOOL, loc);
+        return member === "isSome" ? test : { kind: "unary", op: "!", operand: test, type: BOOL, loc };
+      }
+      break;
+    case "getOrUndefined":
+      if (total === 1 && at(0).type.kind === "effect") return lib("option.getOrUndefined", [at(0)], result(), loc);
+      break;
+    case "getOrElse": {
+      if (total !== 2 || at(0).type.kind !== "effect") break;
+      const orElse = at(1);
+      if (orElse.type.kind !== "func" || orElse.type.params.length !== 0) break;
+      return lib("option.getOrElse", [at(0), orElse], result(), loc);
+    }
+    case "map": {
+      if (total !== 2 || at(0).type.kind !== "effect") break;
+      const fn = at(1);
+      if (fn.type.kind !== "func" || fn.type.params.length !== 1) break;
+      return lib("option.map", [at(0), fn], EFFECT_T, loc);
+    }
+    case "match": {
+      // `Option.match(o, { onNone: () => B, onSome: (a) => B })`
+      const options = args[total - 1 - pre.length + (pre.length === 0 ? 0 : 0)];
+      if (total !== 2 || at(0).type.kind !== "effect" || options === undefined || !ts.isObjectLiteralExpression(options)) break;
+      const property = (name: string): ts.Expression | null => {
+        const found = options.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name);
+        return found !== undefined && ts.isPropertyAssignment(found) ? found.initializer : null;
+      };
+      const onNone = property("onNone");
+      const onSome = property("onSome");
+      if (onNone === null || onSome === null || options.properties.length !== 2) break;
+      const none = L.lowerExpr(onNone);
+      const some = L.lowerExpr(onSome);
+      if (none.type.kind !== "func" || none.type.params.length !== 0 || some.type.kind !== "func" || some.type.params.length !== 1) break;
+      return lib("option.match", [at(0), none, some], result(), loc);
+    }
+    default:
+      break;
+  }
+  return L.unsupported("SC1090", expr, `the effect kernel does not cover Option.${member} in this call shape yet`);
+}
+
 /** A logger message argument as the text effect's default logger prints: strings as they are, numbers and booleans
  * through ToString, everything else through Node's inspect at console depth. */
 function logPart(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr {
@@ -131,6 +187,7 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
   if (ts.isCallExpression(step) && ts.isPropertyAccessExpression(step.expression) && ts.isIdentifier(step.expression.name)) {
     const stepNs = effectNamespaceOf(L, step.expression.expression);
     if (stepNs === "Effect") return lowerEffectMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
+    if (stepNs === "Option") return lowerOptionMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
     if (stepNs === "Layer") return lowerLayerMember(L, step.expression.name.text, [source], [...step.arguments], step, loc);
   }
   return L.unsupported("SC1090", step, "the effect kernel covers pipe steps that are Effect.* combinators");
@@ -160,6 +217,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === null) return null;
   if (ns === "Layer") return lowerLayerMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns === "Exit") return lowerExitMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Option") return lowerOptionMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
@@ -294,6 +352,37 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         const thunk = at(0);
         if (thunk.type.kind !== "func" || thunk.type.params.length !== 0 || thunk.type.ret.kind !== "promise") break;
         return lib("effect.promise", [thunk], EFFECT_T, loc);
+      }
+      case "try": {
+        // `Effect.try({ try: () => value, catch: (reason) => error })` — the throw reaches `catch` as the program's dynamic value.
+        const options = args[0];
+        if (pre.length !== 0 || total !== 1 || options === undefined || !ts.isObjectLiteralExpression(options)) break;
+        const property = (name: string): ts.Expression | null => {
+          const found = options.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name);
+          return found !== undefined && ts.isPropertyAssignment(found) ? found.initializer : null;
+        };
+        const tryNode = property("try");
+        const catchNode = property("catch");
+        if (tryNode === null || catchNode === null || options.properties.length !== 2) break;
+        const attempt = L.lowerExpr(tryNode);
+        const recover = L.lowerExpr(catchNode);
+        if (attempt.type.kind !== "func" || attempt.type.params.length !== 0) break;
+        if (recover.type.kind !== "func" || recover.type.params.length > 1 || (recover.type.params.length === 1 && recover.type.params[0]!.kind !== "dyn")) break;
+        return lib("effect.try", [attempt, recover], EFFECT_T, loc);
+      }
+      case "orElseSucceed": {
+        if (total !== 2 || at(0).type.kind !== "effect") break;
+        const orElse = at(1);
+        if (orElse.type.kind !== "func" || orElse.type.params.length !== 0) break;
+        return lib("effect.orElseSucceed", [at(0), orElse], EFFECT_T, loc);
+      }
+      case "catchIf": {
+        if (total !== 3 || at(0).type.kind !== "effect") break;
+        const predicate = at(1);
+        const handler = at(2);
+        if (predicate.type.kind !== "func" || predicate.type.params.length !== 1 || predicate.type.ret.kind !== "bool") break;
+        if (handler.type.kind !== "func" || handler.type.params.length > 1 || handler.type.ret.kind !== "effect") break;
+        return lib("effect.catchIf", [at(0), predicate, handler], EFFECT_T, loc);
       }
       case "tryPromise": {
         // `Effect.tryPromise({ try: () => promise, catch: (reason) => error })` — the two callbacks lower separately; the

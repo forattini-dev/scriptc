@@ -105,8 +105,12 @@ enum EffectNode {
     AcquireUseRelease(JsEffect, EffectFn, ReleaseFn, TraceFn),
     /// `Effect.exit`: the inner effect's exit as a data handle.
     Exit(JsEffect),
-    /// Kernel DATA riding the handle: an Exit today.
+    /// Kernel DATA riding the handle: an Exit or an Option.
     Data(KernelData),
+    /// `Effect.try({ try, catch })`: the thunk's throw becomes the failure `recover` answers.
+    Try(Rc<dyn Fn() -> EffectValue>, RecoverFn, TraceFn),
+    OrElseSucceed(JsEffect, Rc<dyn Fn() -> EffectValue>, TraceFn),
+    CatchIf(JsEffect, Rc<dyn Fn(EffectValue) -> bool>, EffectFn, TraceFn),
     /// `Effect.promise`: a rejection is a defect.
     Promise(PromiseFn, TraceFn),
     /// `Effect.tryPromise`: a rejection becomes the failure `recover` answers.
@@ -129,6 +133,7 @@ pub enum LayerNode {
 #[derive(Clone)]
 pub enum KernelData {
     Exit(Outcome),
+    Option(Option<EffectValue>),
 }
 
 pub struct EffectData {
@@ -149,7 +154,11 @@ impl Trace for EffectData {
                 tracer.edge(inner);
                 trace(tracer);
             }
-            EffectNode::Suspend(_, trace) | EffectNode::AddFinalizer(_, trace) => trace(tracer),
+            EffectNode::Suspend(_, trace) | EffectNode::AddFinalizer(_, trace) | EffectNode::Try(_, _, trace) => trace(tracer),
+            EffectNode::OrElseSucceed(inner, _, trace) | EffectNode::CatchIf(inner, _, _, trace) => {
+                tracer.edge(inner);
+                trace(tracer);
+            }
             EffectNode::Ensuring(inner, finalizer) => {
                 tracer.edge(inner);
                 tracer.edge(finalizer);
@@ -374,6 +383,37 @@ pub fn effect_exit_fail(error: EffectValue) -> JsEffect {
     exit_handle(Err(error))
 }
 
+pub fn effect_try(attempt: Rc<dyn Fn() -> EffectValue>, recover: RecoverFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::Try(attempt, recover, trace))
+}
+
+pub fn effect_or_else_succeed(source: &JsEffect, or_else: Rc<dyn Fn() -> EffectValue>, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::OrElseSucceed(source.clone(), or_else, trace))
+}
+
+pub fn effect_catch_if(source: &JsEffect, predicate: Rc<dyn Fn(EffectValue) -> bool>, recover: EffectFn, trace: TraceFn) -> JsEffect {
+    effect_new(EffectNode::CatchIf(source.clone(), predicate, recover, trace))
+}
+
+pub fn option_some(value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Option(Some(value))))
+}
+
+pub fn option_none() -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Option(None)))
+}
+
+pub fn option_get(handle: &JsEffect) -> Option<EffectValue> {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Option(value)) => value.clone(),
+        _ => throw_error("scriptc: an Option was expected".to_owned()),
+    })
+}
+
+pub fn option_is_some(handle: &JsEffect) -> bool {
+    option_get(handle).is_some()
+}
+
 fn exit_of(handle: &JsEffect) -> Outcome {
     handle.with(|data| match &data.node {
         EffectNode::Data(KernelData::Exit(outcome)) => outcome.clone(),
@@ -385,17 +425,21 @@ pub fn effect_exit_is_success(handle: &JsEffect) -> bool {
     exit_of(handle).is_ok()
 }
 
-/// `_tag` of a kernel data handle ("Success"/"Failure" for an Exit).
+/// `_tag` of a kernel data handle: "Success"/"Failure" for an Exit, "Some"/"None" for an Option.
 pub fn effect_data_tag(handle: &JsEffect) -> JsString {
-    string(if exit_of(handle).is_ok() { "Success" } else { "Failure" })
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Exit(outcome)) => string(if outcome.is_ok() { "Success" } else { "Failure" }),
+        EffectNode::Data(KernelData::Option(value)) => string(if value.is_some() { "Some" } else { "None" }),
+        _ => throw_error("scriptc: a kernel data handle was expected".to_owned()),
+    })
 }
 
-/// `exit.value` — Effect's Success carries it; reading it off a Failure is a TypeError like a missing property would be.
+/// `.value` of a Success or a Some; the other arm has no value, which the checker's narrowing guards.
 pub fn effect_exit_value(handle: &JsEffect) -> EffectValue {
-    match exit_of(handle) {
-        Ok(value) => value,
-        Err(_) => throw_error("Exit.value read on a Failure".to_owned()),
-    }
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Exit(Ok(value))) | EffectNode::Data(KernelData::Option(Some(value))) => value.clone(),
+        _ => throw_error("value read on a Failure/None".to_owned()),
+    })
 }
 
 thread_local! {
@@ -522,6 +566,8 @@ enum Frame {
     Using(EffectValue, ReleaseFn),
     /// `Effect.exit`: any outcome becomes a success carrying it.
     CaptureExit,
+    OrElse(Rc<dyn Fn() -> EffectValue>),
+    CatchIf(Rc<dyn Fn(EffectValue) -> bool>, EffectFn),
 }
 
 enum CollectSource {
@@ -639,7 +685,21 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::AcquireRelease(acquire, release, _) => Step::Push(Frame::Acquired(release.clone()), acquire.clone()),
         EffectNode::AcquireUseRelease(acquire, use_fn, release, _) => Step::Push(Frame::AcquiredUse(use_fn.clone(), release.clone()), acquire.clone()),
         EffectNode::Exit(inner) => Step::Push(Frame::CaptureExit, inner.clone()),
-        EffectNode::Data(_) => throw_error("scriptc: a kernel data handle (an Exit) is not an effect".to_owned()),
+        EffectNode::Data(_) => throw_error("scriptc: a kernel data handle (an Exit or Option) is not an effect".to_owned()),
+        EffectNode::Try(attempt, recover, _) => {
+            let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| attempt()));
+            Step::Done(match attempted {
+                Ok(value) => Ok(value),
+                Err(payload) => {
+                    if !is_scriptc_unwind(payload.as_ref()) {
+                        std::panic::resume_unwind(payload);
+                    }
+                    Err(recover(caught_from_panic(payload)))
+                }
+            })
+        }
+        EffectNode::OrElseSucceed(inner, or_else, _) => Step::Push(Frame::OrElse(or_else.clone()), inner.clone()),
+        EffectNode::CatchIf(inner, predicate, recover, _) => Step::Push(Frame::CatchIf(predicate.clone(), recover.clone()), inner.clone()),
         EffectNode::All(effects, collect) => Step::Collect(CollectSource::Effects(effects.clone()), collect.clone()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
@@ -839,6 +899,18 @@ fn fiber_drive(fiber: &FiberRef) {
                 (Frame::Using(resource, release), exit) => {
                     fiber.borrow_mut().frames.push(Frame::Restore(exit.clone()));
                     Some(release(resource, exit_handle(exit)))
+                }
+                (Frame::OrElse(or_else), Err(_)) => {
+                    outcome = Some(Ok(or_else()));
+                    None
+                }
+                (Frame::CatchIf(predicate, recover), Err(error)) => {
+                    if predicate(error.clone()) {
+                        Some(recover(error))
+                    } else {
+                        outcome = Some(Err(error));
+                        None
+                    }
                 }
                 (Frame::CaptureExit, exit) => {
                     outcome = Some(Ok(Rc::new(exit_handle(exit))));
