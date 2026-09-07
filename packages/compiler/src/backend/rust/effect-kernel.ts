@@ -564,6 +564,12 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
     case "schema.wrap":
       if (first === undefined || second === undefined) break;
       return `runtime::schema_wrap(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "schema.filterPattern":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_filter_pattern(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "schema.filterBetween":
+      if (first === undefined || second === undefined) break;
+      return `runtime::schema_filter_between(${context.emitExpr(first)}, ${context.emitExpr(second)})`;
     case "schema.filter":
       if (first === undefined || second === undefined || expr.args[2] === undefined) break;
       return `runtime::schema_filter(&${context.emitExpr(first)}, ${context.emitExpr(second)}, &${context.emitExpr(expr.args[2])})`;

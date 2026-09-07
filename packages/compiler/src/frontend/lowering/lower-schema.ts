@@ -344,6 +344,26 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
     const number = L.lowerExprExpecting(first, { kind: "f64" });
     return lib("schema.filter", [strLit(member, loc), number, strLit("", loc)], EFFECT_T, loc);
   }
+  // `Schema.isPattern(/re/)`: the literal's source and flags travel to the runtime's own regex engine.
+  if (member === "isPattern" && first !== undefined) {
+    const literal = ts.isRegularExpressionLiteral(first) ? first.text : null;
+    if (literal === null) L.unsupported("SC1090", first, "Schema.isPattern over a value that is not a regular-expression literal");
+    const lastSlash = literal.lastIndexOf("/");
+    return lib("schema.filterPattern", [strLit(literal.slice(1, lastSlash), loc), strLit(literal.slice(lastSlash + 1), loc)], EFFECT_T, loc);
+  }
+  // `Schema.isBetween({ minimum, maximum })`: the inclusive range (the exclusive flags are not covered).
+  if (member === "isBetween" && first !== undefined && ts.isObjectLiteralExpression(first)) {
+    const numberOf = (name: string): IrExpr | null => {
+      const found = first.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === name);
+      return found !== undefined && ts.isPropertyAssignment(found) ? L.lowerExprExpecting(found.initializer, { kind: "f64" }) : null;
+    };
+    const minimum = numberOf("minimum");
+    const maximum = numberOf("maximum");
+    if (minimum === null || maximum === null || first.properties.length !== 2) {
+      L.unsupported("SC1090", first, "Schema.isBetween outside the inclusive { minimum, maximum } form");
+    }
+    return lib("schema.filterBetween", [minimum, maximum], EFFECT_T, loc);
+  }
   if (member === "isInt" || member === "isFinite") return lib("schema.filter", [strLit(member, loc), numLit(0, loc), strLit("", loc)], EFFECT_T, loc);
   const decoders: Record<string, IrLibFn | undefined> = {
     decodeUnknownSync: "schema.decodeSync", decodeUnknownOption: "schema.decodeOption", decodeUnknownEffect: "schema.decodeEffect",

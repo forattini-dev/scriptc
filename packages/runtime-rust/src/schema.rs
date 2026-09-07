@@ -38,6 +38,10 @@ pub enum SchemaFilter {
     MaxLength(f64),
     Int,
     Finite,
+    /// `Schema.isPattern(re)`: the source and flags of the program's regular expression.
+    Pattern(JsString, JsString),
+    /// `Schema.isBetween({ minimum, maximum })`: an inclusive range.
+    Between(f64, f64),
 }
 
 pub struct SchemaField {
@@ -170,6 +174,16 @@ pub fn schema_wrap(kind: &JsString, inner: &JsEffect) -> JsEffect {
         tag if tag.starts_with("tag:") => schema_handle(SchemaNode::Tag(SchemaLiteral::Str(string(&tag["tag:".len()..])))),
         _ => inner.clone(),
     }
+}
+
+/// `Schema.isPattern(re)`: the pattern's source and flags, tested with the runtime's own regex engine.
+pub fn schema_filter_pattern(source: &JsString, flags: &JsString) -> JsEffect {
+    schema_handle(SchemaNode::Filter(SchemaFilter::Pattern(source.clone(), flags.clone())))
+}
+
+/// `Schema.isBetween({ minimum, maximum })`: an inclusive range.
+pub fn schema_filter_between(minimum: f64, maximum: f64) -> JsEffect {
+    schema_handle(SchemaNode::Filter(SchemaFilter::Between(minimum, maximum)))
 }
 
 pub fn schema_filter(kind: &JsString, number: f64, text: &JsString) -> JsEffect {
@@ -325,6 +339,8 @@ fn filter_expected(filter: &SchemaFilter) -> String {
         SchemaFilter::MaxLength(n) => format!("a value with a length of at most {}", format_number(*n)),
         SchemaFilter::Int => "an integer".to_owned(),
         SchemaFilter::Finite => "a finite number".to_owned(),
+        SchemaFilter::Pattern(source, _) => format!("a string matching the RegExp {source}"),
+        SchemaFilter::Between(min, max) => format!("a value between {} and {}", format_number(*min), format_number(*max)),
     }
 }
 
@@ -348,6 +364,8 @@ fn filter_holds<T: ParseArgsValue>(filter: &SchemaFilter, value: &T) -> bool {
         SchemaFilter::MaxLength(n) => length() <= *n,
         SchemaFilter::Int => number().fract() == 0.0 && number().is_finite(),
         SchemaFilter::Finite => number().is_finite(),
+        SchemaFilter::Pattern(source, flags) => regex_test(&regex_new(source, flags), &string(&text())),
+        SchemaFilter::Between(min, max) => number() >= *min && number() <= *max,
     }
 }
 
