@@ -155,6 +155,33 @@ acquireUseRelease callbacks with omitted resource/exit parameters; the final
 witness supplies both and reproduces the intended runtime failure before
 the fix. Full repository validation remains separate and red.
 
+## Finalizer service context
+
+Finalizers previously looked up services in the context closing the scope.
+Corpus 3022 reproduced releases reading `outer` instead of the service
+provided at registration/acquisition, then failing when the service existed
+only during registration.
+
+Effect.addFinalizer and acquireRelease now capture their registration service
+context. Cleanup temporarily replaces the fiber's service environment with
+that snapshot and restores the prior environment on success, failure,
+defect or interruption. The snapshot persists across suspension and retains
+service references until cleanup completes. This implements the installed
+Effect 4 registration behavior without changing provideService's normal
+lexical behavior.
+
+Corpus 3022 covers independent finalizer/acquisition contexts, suspension,
+registration-only services and restoration after a failed cleanup. Runtime
+tests verify release of captured service payloads and that a captured empty
+context cannot inherit services introduced only at cleanup.
+
+Validation: 159 runtime tests and Clippy pass on Rust 1.98.0. Corpus 3022
+plus 2976, 2978, 2981, 3009, 3010, 3016, 3020 and 3021 match Node in all nine
+selected differential programs, with heap auditing enabled. Source-size
+checks pass. This checkpoint changes only runtime behavior and its tests;
+the preceding compiler build remains applicable. Full repository validation
+is still not green.
+
 ## Remaining work
 
 This fixes specific ownership paths, not all memory retention in Effect.

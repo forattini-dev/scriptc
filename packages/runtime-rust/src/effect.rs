@@ -99,6 +99,8 @@ enum EffectNode {
     ServiceKey(Rc<str>),
     /// `Effect.provideService` / a built layer's bundle provided to the inner effect.
     ProvideBundle(JsEffect, Bundle),
+    /// Restore the exact service context captured by a finalizer.
+    WithContext(JsEffect, Bundle),
     /// `Effect.provide(e, layer)`: the layer builds (an effect answering its bundle), then provides.
     ProvideLayer(JsEffect, JsEffect),
     /// A layer description (`Layer<…>` values share the handle).
@@ -188,7 +190,7 @@ impl Trace for EffectData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         match &self.node {
             EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::Interrupt | EffectNode::FailCause(_) | EffectNode::ServiceKey(_) => {}
-            EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
+            EffectNode::ProvideBundle(inner, _) | EffectNode::WithContext(inner, _) => tracer.edge(inner),
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
             EffectNode::Log(_, parts) => tracer.edge(parts),
@@ -611,6 +613,7 @@ enum Frame {
     Gen(Box<dyn EffectGen>),
     /// Leave a provide scope: drop this many environment entries.
     PopEnv(usize),
+    RestoreEnv(Vec<(Rc<str>, EffectValue)>),
     /// A collection in progress: the next index to run, the values so far, the source and the collector.
     Collect(usize, Vec<EffectValue>, CollectSource, CollectFn),
     /// `tap`: run the callback's effect, then restore the value; `tapError` the same on the failure.
@@ -665,6 +668,7 @@ enum Step {
     Lookup(Rc<str>),
     /// Enter a provide scope with these services, then run the inner effect.
     Enter(Bundle, JsEffect),
+    ReplaceEnv(Bundle, JsEffect),
     /// Start a collection over its source.
     Collect(CollectSource, CollectFn),
     /// Print a log line (needs the fiber's id).
@@ -745,6 +749,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Gen(make, _) => Step::Resume(make()),
         EffectNode::ServiceKey(key) => Step::Lookup(key.clone()),
         EffectNode::ProvideBundle(inner, bundle) => Step::Enter(bundle.clone(), inner.clone()),
+        EffectNode::WithContext(inner, bundle) => Step::ReplaceEnv(bundle.clone(), inner.clone()),
         EffectNode::ProvideLayer(inner, layer) => {
             let inner = inner.clone();
             Step::Push(Frame::FlatMap(Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle))))), layer_build(layer))
@@ -828,6 +833,7 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                 }
                 Step::Finalizer(finalizer) => {
                     let mut state = fiber.borrow_mut();
+                    let finalizer = capture_finalizer_context(finalizer, &state.env);
                     match state.scopes.last_mut() {
                         Some(scope) => {
                             scope.push(finalizer);
@@ -852,6 +858,13 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     let mut state = fiber.borrow_mut();
                     state.env.extend(bundle.iter().cloned());
                     state.frames.push(Frame::PopEnv(bundle.len()));
+                    state.current = Some(inner);
+                    continue;
+                }
+                Step::ReplaceEnv(bundle, inner) => {
+                    let mut state = fiber.borrow_mut();
+                    let previous = std::mem::replace(&mut state.env, bundle.as_ref().clone());
+                    state.frames.push(Frame::RestoreEnv(previous));
                     state.current = Some(inner);
                     continue;
                 }
@@ -1001,8 +1014,9 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                 (Frame::Acquired(release), Ok(resource)) => {
                     let mut state = fiber.borrow_mut();
                     let value = resource.clone();
+                    let finalizer = capture_finalizer_context(Rc::new(move |exit| release(value.clone(), exit)), &state.env);
                     match state.scopes.last_mut() {
-                        Some(scope) => scope.push(Rc::new(move |exit| release(value.clone(), exit))),
+                        Some(scope) => scope.push(finalizer),
                         None => throw_error("Effect.acquireRelease outside a scope (Effect.scoped is missing)".to_owned()),
                     }
                     outcome = Some(Ok(resource));
@@ -1036,6 +1050,11 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     let mut state = fiber.borrow_mut();
                     let keep = state.env.len().saturating_sub(count);
                     state.env.truncate(keep);
+                    outcome = Some(passthrough);
+                    None
+                }
+                (Frame::RestoreEnv(previous), passthrough) => {
+                    fiber.borrow_mut().env = previous;
                     outcome = Some(passthrough);
                     None
                 }
