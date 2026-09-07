@@ -540,6 +540,12 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
       if (first === undefined || first.type.kind !== "array" || first.type.elem.kind !== "effect") break;
       return `runtime::schema_union(runtime::array_values(&${context.emitExpr(first)}))`;
     }
+    case "schema.tuple": {
+      const elements = handles(first);
+      if (elements !== null) return `runtime::schema_tuple(vec![${elements.join(", ")}])`;
+      if (first === undefined || first.type.kind !== "array" || first.type.elem.kind !== "effect") break;
+      return `runtime::schema_tuple(runtime::array_values(&${context.emitExpr(first)}))`;
+    }
     case "schema.wrap":
       if (first === undefined || second === undefined) break;
       return `runtime::schema_wrap(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;

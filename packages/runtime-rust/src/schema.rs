@@ -63,6 +63,34 @@ pub enum SchemaNode {
     Named(JsString, Rc<SchemaNode>),
     /// `Schema.tag("x")`: a required literal key that `make` fills in when absent.
     Tag(SchemaLiteral),
+    /// `Schema.fromJsonString(S)`: the input is JSON TEXT — parse it, then decode the result against S.
+    FromJsonString(Rc<SchemaNode>),
+    /// `Schema.Tuple([A, B])`: an array of exactly these element schemas, in order.
+    Tuple(Vec<Rc<SchemaNode>>),
+}
+
+/// A parsed JSON document as the decoder's own value type: the generic constructors of ParseArgsValue rebuild it.
+fn json_node_to_value<T: ParseArgsValue>(node: &JsonNode) -> T {
+    match node {
+        JsonNode::Null => T::parse_args_undefined(),
+        JsonNode::Bool(value) => T::parse_args_bool_value(*value),
+        JsonNode::Number(value) => T::parse_args_number_value(*value),
+        JsonNode::String(text) => T::parse_args_string_value(text.clone()),
+        JsonNode::Array(items) => {
+            let array = T::parse_args_array_value();
+            for item in items {
+                array.parse_args_array_push(json_node_to_value(item));
+            }
+            array
+        }
+        JsonNode::Object(entries) => {
+            let object = T::parse_args_object_value();
+            for (key, value) in entries {
+                object.parse_args_object_set(string(key), json_node_to_value(value));
+            }
+            object
+        }
+    }
 }
 
 fn schema_handle(node: SchemaNode) -> JsEffect {
@@ -114,7 +142,13 @@ pub fn schema_union(members: Vec<JsEffect>) -> JsEffect {
     schema_handle(SchemaNode::Union(members.iter().map(schema_node_of).collect()))
 }
 
-/// `nullOr` / `undefinedOr` / `optional` / `optionalKey`; `mutable`, `mutableKey` and `brand` answer the inner schema.
+/// `Schema.Tuple([A, B])`: an array of exactly these element schemas.
+pub fn schema_tuple(elements: Vec<JsEffect>) -> JsEffect {
+    schema_handle(SchemaNode::Tuple(elements.iter().map(schema_node_of).collect()))
+}
+
+/// `nullOr` / `undefinedOr` / `optional` / `optionalKey` / `fromJsonString`; `mutable`, `mutableKey` and `brand`
+/// answer the inner schema.
 pub fn schema_wrap(kind: &JsString, inner: &JsEffect) -> JsEffect {
     let node = schema_node_of(inner);
     match &**kind {
@@ -122,6 +156,7 @@ pub fn schema_wrap(kind: &JsString, inner: &JsEffect) -> JsEffect {
         "undefinedOr" => schema_handle(SchemaNode::UndefinedOr(node)),
         "optional" => schema_handle(SchemaNode::OptionalKey(Rc::new(SchemaNode::UndefinedOr(node)))),
         "optionalKey" => schema_handle(SchemaNode::OptionalKey(node)),
+        "fromJsonString" => schema_handle(SchemaNode::FromJsonString(node)),
         named if named.starts_with("identifier:") => schema_handle(SchemaNode::Named(string(&named["identifier:".len()..]), node)),
         tag if tag.starts_with("tag:") => schema_handle(SchemaNode::Tag(SchemaLiteral::Str(string(&tag["tag:".len()..])))),
         _ => inner.clone(),
@@ -245,6 +280,8 @@ fn expected_of(node: &SchemaNode) -> String {
             None => "{}".to_owned(),
         },
         SchemaNode::Array(_) => "array".to_owned(),
+        SchemaNode::FromJsonString(_) => "string".to_owned(),
+        SchemaNode::Tuple(_) => "array".to_owned(),
         SchemaNode::Record(_, _) => "object".to_owned(),
         SchemaNode::Union(members) => members.iter().map(|m| expected_of(m)).collect::<Vec<_>>().join(" | "),
         SchemaNode::NullOr(inner) => format!("{} | null", expected_of(inner)),
@@ -333,6 +370,40 @@ impl Decoder<'_> {
                 }
                 _ => Err(self.issue(&expected_of(node), input)),
             },
+            SchemaNode::FromJsonString(inner) => {
+                if kind != ParseArgsKind::String {
+                    return Err(self.issue("string", input));
+                }
+                let text = input.parse_args_string().unwrap_or_else(empty_string);
+                match json_parse_node(&text) {
+                    Ok(parsed) => self.decode(inner, &json_node_to_value::<T>(&parsed)),
+                    Err(message) => Err(self.at(message)),
+                }
+            }
+            SchemaNode::Tuple(elements) => {
+                let Some(len) = input.parse_args_array_len() else {
+                    return Err(self.issue("array", input));
+                };
+                // effect reports a SHORT tuple as a missing key at the index and a LONG one as an unexpected key.
+                if len > elements.len() {
+                    let extra = input.parse_args_array_get(elements.len()).unwrap_or_else(T::parse_args_undefined);
+                    self.path.push(PathSeg::Index(elements.len()));
+                    let message = self.at(format!("Unexpected key with value {}", render_actual(&extra)));
+                    self.path.pop();
+                    return Err(message);
+                }
+                let out = T::parse_args_array_value();
+                for (index, element) in elements.iter().enumerate() {
+                    self.path.push(PathSeg::Index(index));
+                    let decoded = match input.parse_args_array_get(index) {
+                        Some(item) => self.decode(element, &item),
+                        None => Err(self.at("Missing key".to_owned())),
+                    };
+                    self.path.pop();
+                    out.parse_args_array_push(decoded?);
+                }
+                Ok(out)
+            }
             SchemaNode::Literal(values) => {
                 let matches = values.iter().any(|literal| match literal {
                     SchemaLiteral::Str(text) => input.parse_args_string().is_some_and(|s| *s == **text),

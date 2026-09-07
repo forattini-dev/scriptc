@@ -857,6 +857,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "schema.record": ["c", "rust"],
   "schema.struct": ["c", "rust"],
   "schema.test": ["c", "rust"],
+  "schema.tuple": ["c", "rust"],
   "schema.union": ["c", "rust"],
   "schema.wrap": ["c", "rust"],
   "sp.append": ["c", "llvm", "rust"],

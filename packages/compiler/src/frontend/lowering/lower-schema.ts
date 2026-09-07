@@ -5,7 +5,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import type { KernelSchemaClass } from "../kernel.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf } from "../../ir/nodes.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
 import { boolLit, numLit, strLit } from "../../ir/build.js";
 import { effectNamespaceOf } from "./lower-effect.js";
 import { SCHEMA_SLOT, isDecoratedSchema } from "../kernel-types.js";
@@ -176,6 +176,10 @@ const SCHEMA_FILTERS_NUMBER = new Set(["isGreaterThanOrEqualTo", "isLessThanOrEq
 
 /** `Schema.String` and the other primitive schema constants. */
 export function lowerSchemaProperty(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+  // `Schema.UnknownFromJsonString`: JSON text in, the parsed value out.
+  if (expr.name.text === "UnknownFromJsonString") {
+    return lib("schema.wrap", [strLit("fromJsonString", loc), lib("schema.prim", [strLit("unknown", loc)], EFFECT_T, loc)], EFFECT_T, loc);
+  }
   const prim = SCHEMA_PRIMS[expr.name.text];
   return prim === undefined ? null : lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);
 }
@@ -257,7 +261,14 @@ function decoder(L: Lowerer, fn: IrLibFn, schema: IrExpr, schemaNode: ts.Express
   const type: IrType | null = fn === "schema.is" ? { kind: "func", params: [DYN], ret: BOOL } : L.mapTypeOf(L.typeOf(expr));
   if (type === null || type.kind !== "func") L.badType(expr, L.typeOf(expr));
   const args = [schema];
-  if (fn === "schema.decodeOption" || fn === "schema.decodeEffect" || fn === "schema.decodeExit") args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });
+  if (fn === "schema.decodeOption" || fn === "schema.decodeEffect" || fn === "schema.decodeExit") {
+    // The carrier stamps the decoded type as an empty array literal's element, so the type must be one an array can
+    // hold — a checked-dynamic result (`Schema.Unknown`) has no such carrier yet.
+    if (!isSupportedArrayElem(valueType)) {
+      L.unsupported("SC1090", expr, `a schema decoder answering an Option/Effect/Exit of '${L.fmt(valueType)}' (the decoded type has no value carrier yet)`);
+    }
+    args.push({ kind: "arrayLit", elems: [], type: arrayOf(valueType), loc });
+  }
   return lib(fn, args, type, loc);
 }
 
@@ -300,6 +311,14 @@ export function lowerSchemaMember(L: Lowerer, member: string, args: ts.Expressio
   if (member === "Array" && first !== undefined && args.length === 1) return lib("schema.array", [handleArg(L, first, "Schema.Array")], EFFECT_T, loc);
   if (member === "Record" && first !== undefined && args[1] !== undefined && args.length <= 3) {
     return lib("schema.record", [handleArg(L, first, "Schema.Record"), handleArg(L, args[1], "Schema.Record")], EFFECT_T, loc);
+  }
+  if (member === "Tuple" && first !== undefined && args.length === 1 && ts.isArrayLiteralExpression(first)) {
+    const elems = first.elements.map((e) => handleArg(L, e, "Schema.Tuple"));
+    return lib("schema.tuple", [{ kind: "arrayLit", elems, type: arrayOf(EFFECT_T), loc }], EFFECT_T, loc);
+  }
+  // `Schema.fromJsonString(S)`: the input is JSON TEXT, parsed before S validates it.
+  if (member === "fromJsonString" && first !== undefined && args.length === 1) {
+    return lib("schema.wrap", [strLit("fromJsonString", loc), handleArg(L, first, "Schema.fromJsonString")], EFFECT_T, loc);
   }
   if (member === "Union" && first !== undefined && args.length <= 2) {
     if (ts.isArrayLiteralExpression(first)) {
