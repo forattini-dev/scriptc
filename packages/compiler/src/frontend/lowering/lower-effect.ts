@@ -235,9 +235,11 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
   const schemaStep = applySchemaPipeStep(L, source, step, loc);
   if (schemaStep !== null) return schemaStep;
   if (ts.isPropertyAccessExpression(step) && ts.isIdentifier(step.name) && effectNamespaceOf(L, step.expression) === "Effect") {
-    const bare: Record<string, IrLibFn | undefined> = { asVoid: "effect.asVoid", ignore: "effect.ignore", orDie: "effect.orDie" };
+    const bare: Record<string, IrLibFn | undefined> = { asVoid: "effect.asVoid", ignore: "effect.ignore", orDie: "effect.orDie", scoped: "effect.scoped", exit: "effect.exit" };
     const fn = bare[step.name.text];
     if (fn !== undefined) return lib(fn, [source], EFFECT_T, loc);
+    // No interruption in the kernel: both wrappers are the identity, as a bare step too.
+    if (step.name.text === "uninterruptible" || step.name.text === "interruptible") return source;
     L.unsupported("SC1090", step, `the effect kernel does not cover Effect.${step.name.text} as a pipe step yet`);
   }
   if (ts.isCallExpression(step) && ts.isPropertyAccessExpression(step.expression) && ts.isIdentifier(step.expression.name)) {
@@ -792,6 +794,23 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         // The kernel has no interruption yet: a fiber runs to its own end, so both wrappers are the identity.
         if (total === 1 && at(0).type.kind === "effect") return at(0);
         break;
+      case "delay": {
+        // `Effect.delay(e, duration)`: sleep first, then run — the kernel's sequential zip.
+        if (total !== 2) break;
+        const source = at(0);
+        const duration = at(1);
+        if (source.type.kind !== "effect") break;
+        const sleep = lib("effect.sleep", [duration], EFFECT_T, loc);
+        return lib("effect.andThenEffect", [sleep, source], EFFECT_T, loc);
+      }
+      case "tapCause": {
+        // The failure is observed as a Cause and then re-raised: catchCause running the callback and failing again.
+        if (total !== 2) break;
+        const source = at(0);
+        const fn = at(1);
+        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1 || fn.type.ret.kind !== "effect") break;
+        return lib("effect.tapErrorCause", [source, fn], EFFECT_T, loc);
+      }
       case "ensuring":
         if (total === 2 && at(0).type.kind === "effect" && at(1).type.kind === "effect") return lib("effect.ensuring", [at(0), at(1)], EFFECT_T, loc);
         break;

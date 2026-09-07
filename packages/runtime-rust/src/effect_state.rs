@@ -343,3 +343,19 @@ pub fn effect_cause_has(handle: &JsEffect, what: f64) -> bool {
 pub fn effect_catch_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
     effect_new(EffectNode::CatchCause(source.clone(), f, trace))
 }
+
+/// `Effect.tapCause(e, f)`: the failure is observed as a Cause and then re-raised unchanged.
+pub fn effect_tap_error_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
+    effect_catch_cause(source, Rc::new(move |cause| {
+        let failure = effect_fail(effect_cause_squash_value(&cause));
+        effect_zip_right(&f(cause), &failure)
+    }), trace)
+}
+
+/// The error a Cause carries, read from the BOXED handle the catch frame hands the callback.
+fn effect_cause_squash_value(boxed: &EffectValue) -> EffectValue {
+    match boxed.downcast_ref::<JsEffect>() {
+        Some(handle) => effect_cause_squash(handle),
+        None => throw_error("scriptc: a Cause handle was expected".to_owned()),
+    }
+}

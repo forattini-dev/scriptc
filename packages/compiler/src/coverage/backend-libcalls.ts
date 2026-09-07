@@ -276,6 +276,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "effect.sync": ["c", "rust"],
   "effect.tap": ["c", "rust"],
   "effect.tapError": ["c", "rust"],
+  "effect.tapErrorCause": ["c", "rust"],
   "effect.try": ["c", "rust"],
   "effect.tryPromise": ["c", "rust"],
   "effect.tryPromiseUnknown": ["c", "rust"],

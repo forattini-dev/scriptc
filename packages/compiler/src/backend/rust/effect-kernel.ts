@@ -388,6 +388,7 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.causeHas":
       if (first === undefined || second === undefined) break;
       return `runtime::effect_cause_has(&${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+    case "effect.tapErrorCause":
     case "effect.catchCause": {
       if (first === undefined || second === undefined || second.type.kind !== "func") break;
       const source = context.nextTemporary();
@@ -396,7 +397,7 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const param = second.type.params[0];
       const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
       const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)};`;
-      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_catch_cause(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${dispatch} }), ${traced(context, keep)}) }`;
+      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::${expr.fn === "effect.tapErrorCause" ? "effect_tap_error_cause" : "effect_catch_cause"}(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${dispatch} }), ${traced(context, keep)}) }`;
     }
     case "effect.exitValue":
       if (first === undefined) break;
