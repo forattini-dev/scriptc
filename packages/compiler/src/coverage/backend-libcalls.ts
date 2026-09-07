@@ -265,6 +265,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "effect.refUpdateEffect": ["c", "rust"],
   "effect.runPromise": ["c", "rust"],
   "effect.runSync": ["c", "rust"],
+  "effect.runSyncExit": ["c", "rust"],
   "effect.scoped": ["c", "rust"],
   "effect.semaphoreMake": ["c", "rust"],
   "effect.semaphoreMakeUnsafe": ["c", "rust"],

@@ -379,7 +379,11 @@ pub fn effect_suspend(thunk: Rc<dyn Fn() -> JsEffect>, trace: TraceFn) -> JsEffe
 }
 
 pub fn effect_sleep(millis: f64) -> JsEffect {
-    effect_new(EffectNode::Sleep(millis))
+    if millis.partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater) {
+        effect_new(EffectNode::Sleep(millis))
+    } else {
+        effect_succeed(effect_box(()))
+    }
 }
 
 /// `Effect.sleep("2 seconds")`: Duration's text input — `<number> <unit>` with millis/seconds/minutes/hours/days.
@@ -395,7 +399,7 @@ pub fn effect_sleep_text(text: &JsString) -> JsEffect {
         "day" => 86_400_000.0,
         _ => 1.0,
     };
-    effect_new(EffectNode::Sleep(amount * scale))
+    effect_sleep(amount * scale)
 }
 
 pub fn effect_scoped(source: &JsEffect) -> JsEffect {
@@ -1084,38 +1088,4 @@ fn fiber_drive_inner(fiber: &FiberRef) {
             }
         }
     }
-}
-
-/// `Effect.runSync`: the value; a failure throws; an asynchronous
-/// boundary is Effect's own refusal.
-pub fn effect_run_sync(effect: &JsEffect) -> EffectValue {
-    let exit: Rc<RefCell<Option<Outcome>>> = Rc::new(RefCell::new(None));
-    let slot = exit.clone();
-    let fiber = fiber_new(effect, Box::new(move |outcome| *slot.borrow_mut() = Some(outcome)));
-    fiber_drive(&fiber);
-    let outcome = exit.borrow_mut().take();
-    match outcome {
-        Some(Ok(value)) => value,
-        Some(Err(error)) => effect_defect(error.into_value()),
-        None => throw_error("Fiber cannot be resolved synchronously. This is caused by using runSync on an effect that performs an asynchronous operation".to_owned()),
-    }
-}
-
-/// `Effect.runPromise`: a promise of the site's type, settled by the fiber's exit.
-pub fn effect_run_promise<T: HeapValue>(effect: &JsEffect, unbox: Rc<dyn Fn(&EffectValue) -> T>) -> JsPromise<T> {
-    let promise = promise_new::<T>();
-    let target = promise.clone();
-    let fiber = fiber_new(
-        effect,
-        Box::new(move |outcome| match outcome {
-            Ok(value) => {
-                let _ = promise_fulfill(&target, unbox(&value));
-            }
-            Err(error) => {
-                let _ = promise_reject(&target, caught_from_any(error.into_value()));
-            }
-        }),
-    );
-    fiber_drive(&fiber);
-    promise
 }

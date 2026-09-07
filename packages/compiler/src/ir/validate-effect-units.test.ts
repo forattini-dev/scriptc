@@ -20,6 +20,17 @@ test("boxed Effect units validate and survive serialization", () => {
   expect(validateModule(deserializeModule(serializeModule(module)))).toEqual([]);
 });
 
+test("runSyncExit requires an Effect input and retains its Exit handle type", () => {
+  const source: IrExpr = { kind: "libCall", fn: "effect.succeed", args: [nil], type: { kind: "effect" }, loc };
+  const runner: IrExpr = { kind: "libCall", fn: "effect.runSyncExit", args: [source], type: { kind: "effect" }, loc };
+  const module = moduleWith(runner);
+  expect(validateModule(module)).toEqual([]);
+  expect(deserializeModule(serializeModule(module))).toEqual(module);
+  expect(validateModule(moduleWith({ ...runner, args: [] }))).not.toEqual([]);
+  expect(validateModule(moduleWith({ ...runner, args: [{ kind: "numLit", value: 1, type: { kind: "f64" }, loc }] }))).not.toEqual([]);
+  expect(validateModule(moduleWith({ ...runner, type: { kind: "f64" } }))).not.toEqual([]);
+});
+
 test("boxing does not excuse a unit literal with the wrong type", () => {
   const module = moduleWith({ kind: "libCall", fn: "effect.fail",
     args: [{ kind: "unitLit", unit: "null", type: { kind: "undefinedT" }, loc }], type: { kind: "effect" }, loc });

@@ -497,6 +497,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.runSync":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_run_sync(&${context.emitExpr(first)})`, expr.loc);
+    case "effect.runSyncExit":
+      if (first === undefined) break;
+      return `runtime::effect_run_sync_exit(&${context.emitExpr(first)})`;
     case "effect.runPromise":
       if (first === undefined || expr.type.kind !== "promise") break;
       return `runtime::effect_run_promise::<${context.rustType(expr.type.inner, expr.loc)}>(&${context.emitExpr(first)}, std::rc::Rc::new(|sc_boxed: &runtime::EffectValue| ${unbox(context, expr.type.inner, "sc_boxed", expr.loc)}))`;

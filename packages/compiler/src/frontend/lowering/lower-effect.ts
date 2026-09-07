@@ -886,9 +886,9 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (total === 1 && at(0).type.kind === "effect") return at(0); // a key IS the effect that looks the service up
         break;
       case "runSyncExit": {
-        // `Effect.runSyncExit(e)` = `Effect.runSync(Effect.exit(e))`: the Exit handle of a synchronous run.
+        // A pending fiber becomes a Failure Exit; runSync(exit(e)) would throw.
         if (total !== 1 || at(0).type.kind !== "effect") break;
-        return lib("effect.runSync", [lib("effect.exit", [at(0)], EFFECT_T, loc)], EFFECT_T, loc);
+        return lib("effect.runSyncExit", [at(0)], EFFECT_T, loc);
       }
       case "runSync":
       case "runPromise": {

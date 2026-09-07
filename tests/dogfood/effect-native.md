@@ -182,6 +182,37 @@ checks pass. This checkpoint changes only runtime behavior and its tests;
 the preceding compiler build remains applicable. Full repository validation
 is still not green.
 
+## Synchronous runner snapshots
+
+The installed Effect 4.0.0-beta.83 does not cancel pending fibers when a
+synchronous runner encounters asynchronous work. `runSyncExit` returns a
+Failure snapshot; `runSync` throws `AsyncFiberError` with the message
+`An asynchronous Effect was executed with Effect.runSync`. Pending work may
+still resume and run its finalizers after the runner returns or throws.
+
+Previously, native `runSyncExit` lowered to `runSync(exit(effect))`, which
+threw on suspension instead of returning an Exit. Corpus 3023 reproduced
+this as an empty native stdout where Node printed the failed snapshot and
+then resumed the Deferred-backed work. A dedicated IR operation and runtime
+runner now preserve that distinction. Nonpositive and NaN sleep durations
+also complete synchronously, including text durations such as `0 millis`.
+
+The regression covers both runners, delayed finalization, immutable failure
+snapshots, synchronous values, typed failures, defects and thrown callbacks.
+Runtime tests additionally verify that pending work retains cleanup payloads
+and releases them after exactly one completion. The diagnostic currently
+models Error name/message; the Effect AsyncFiberError object's fiber and
+type-id inspection APIs are not implemented by this checkpoint.
+
+Validation: 162 runtime tests and Clippy pass on Rust 1.98.0. Corpus 3023
+and 11 related scope, cause, service and asynchronous regressions match
+Node, with native heap auditing enabled. All four Effect unit/runner IR
+tests pass, including serialization and rejection of malformed runner
+arguments/results. Workspace build, generated-libcall freshness and source-size
+checks pass; focused ESLint reports zero errors and 471 warnings across the
+selected compiler files. These focused checks do not establish a green full
+repository gate.
+
 ## Remaining work
 
 This fixes specific ownership paths, not all memory retention in Effect.
@@ -193,8 +224,8 @@ Gc once per alias can overcount internal edges and clear reachable objects.
 A minimal cyclic-value witness and rooted/shared-owner tests must precede
 that change.
 
-Other pending semantics include general fiber cancellation and interruption masks, runSync
-cleanup after asynchronous refusal, real bounded/unbounded collection
+Other pending semantics include general fiber cancellation and interruption masks,
+real bounded/unbounded collection
 concurrency, and PubSub backpressure. The cause model does not yet expose
 reason iteration, annotations, equality or fiber identity APIs. General typed record/class payload widening to
 unknown and dynamic-mode native Effect integration also remain unfinished.

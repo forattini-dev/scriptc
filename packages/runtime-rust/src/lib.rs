@@ -108,6 +108,7 @@ include!("schema.rs");
 include!("effect.rs");
 include!("effect_failure.rs");
 include!("effect_context.rs");
+include!("effect_runners.rs");
 include!("effect_latch.rs");
 include!("effect_refs.rs");
 include!("effect_state.rs");
@@ -151,6 +152,7 @@ mod tests {
     include!("effect_state.test.rs");
     include!("effect_failure.test.rs");
     include!("effect_context.test.rs");
+    include!("effect_runners.test.rs");
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");
