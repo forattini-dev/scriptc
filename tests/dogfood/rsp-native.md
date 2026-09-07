@@ -217,12 +217,77 @@ Evidence: `/tmp/scriptc-error-message-before.log`,
 `/tmp/scriptc-parser-after-error-coercion.json`, and
 `/tmp/scriptc-rsp-after-error-coercion.json`.
 
+## Bundled parser class inheritance checkpoint
+
+The parser publishes its Error hierarchy as `var Base = class ...` followed
+by `var Derived = class extends Base ...`. Class-value resolution admitted
+const bindings only; changing just the declaration keyword reproduced the
+refusal for both var and let. It now recognizes top-level class-expression
+bindings with one initializer and no writes. The existing assignment scan
+covers closures, destructuring and loop targets; initialized redeclarations
+and references above the initializer remain excluded. General mutable
+aliases to declared classes retain their previous boundary.
+
+Exact class-binding resolution was extracted into `lower-class-bindings.ts`,
+reducing the frozen size of `lower-classes.ts` from 5,656 to 5,621 lines.
+The differential regression covers three Error inheritance levels, inherited
+fields, `instanceof`, throwing/catching, and writes to each class's own
+static storage. Reading a static field shadowed by a subclass still has an
+explicit refusal; that separate limitation is pinned in an API test.
+
+Two adapters importing the **original installed `cli-args-parser@1.0.6`**
+now compile and execute as Rust-only native binaries: eight `looksLikeValue`
+inputs and all seven exported Error classes. Both report `engine: none`,
+`externalFfi: false` and no runtime fences. Stdout, stderr and exit status
+match Node byte-for-byte, including Error messages, codes, details and
+inheritance checks. No consumer or installed package source was rewritten.
+This establishes these package contracts, not full argument parsing or RSP
+command acceptance. No performance claim follows from this run.
+
+Reproduce after `pnpm build`, supplying the original consumer checkout:
+
+```bash
+SCRIPTC_CACHE_DIR=/home/cyber/.cache/scriptc-rust-native-gate \
+CARGO_TARGET_DIR=/home/cyber/.cache/scriptc/cargo-target \
+pnpm limit -- env -u LD_LIBRARY_PATH node tests/dogfood/rsp-parser-native.mjs \
+  /home/cyber/Work/reddb.io/red-skills
+```
+
+The runner retains both binaries, generated Rust, adapter sources and
+`evidence.json` in the printed disposable directory. It asserts compilation
+mode and byte parity, returning a nonzero exit on failure.
+
+The final original-RSP survey reaches 1,689 statements (previously 1,665),
+with 250 failures (previously 256), 194 diagnostics and zero island
+statements. The six parser subclasses are now admitted. The one SDK
+engine-import diagnostic remains. RSP itself still does not compile.
+
+Validation: 47 plain checks pass: 33 differential executions across Rust,
+C and LLVM, 12 class-binding API checks and two diagnostics snapshots.
+The same 11 corpus programs pass both C/LLVM sanitized lanes (22 checks).
+The 15 original-package scenarios pass in the reusable dogfood runner.
+Workspace build, source-size, runner syntax and diff checks pass; focused
+ESLint reports zero errors and 94 warnings. The new corpus entry's preflight
+and evaluation order were checked directly and its baseline alone was added.
+The full repository gate was not rerun and remains pending/red.
+
+Evidence: `/tmp/scriptc-var-class-before.log`,
+`/tmp/scriptc-var-class-boundaries-before.log`,
+`/tmp/scriptc-var-class-final-plain.log`,
+`/tmp/scriptc-var-class-final-sanitized.log`,
+`/tmp/scriptc-var-class-final-build.log`,
+`/tmp/scriptc-var-class-final-lint.log`,
+`/tmp/scriptc-parser-native-final.log`, and
+`/tmp/scriptc-rsp-after-class-bindings.json`. The final package evidence is
+`/home/cyber/.cache/scriptc-test-tmp/scriptc-rsp-parser-native-FNg7gZ/evidence.json`.
+These paths are retained workstation artifacts; the runner is the portable
+reproduction entrypoint.
+
 ## Next acceptance work
 
-1. Repair class-expression base registration for the parser's Error
-   subclasses, using the original utility probe as the acceptance witness.
-2. Repair the SDK export-surface fallback, the remaining engine-import
+1. Repair the SDK export-surface fallback, the remaining engine-import
    diagnostic. Preserve honest fallback for unsupported declaration graphs.
+2. Extend the original parser contracts to tokenization and full flag parsing.
 3. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.
 4. Address recursive JSON and generic flag-schema record coercions, Promise

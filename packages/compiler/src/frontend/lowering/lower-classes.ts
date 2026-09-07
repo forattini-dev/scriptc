@@ -27,6 +27,8 @@ import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUn
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
 import { errorWithCause } from "./lower-error-message.js";
+import { exactClassOfReceiver } from "./lower-class-bindings.js";
+export { exactClassOfReceiver } from "./lower-class-bindings.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -2911,43 +2913,6 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
     }
     return classValueRef(L, lowerClassExpressionInfo(L, expr), expr);
-  }
-
-/** The EXACT class a receiver expression is statically known to BE (not
-   * merely be typed by): the class name itself, or a `const` binding
-   * whose initializer is a class expression / class name. Such receivers
-   * can never hold a subclass at runtime, so static WRITES through them
-   * hit the declaring class's storage exactly (the shadowing hazards of
-   * general class values don't arise). Null for everything else. */
-  export function exactClassOfReceiver(L: Lowerer, expr: ts.Expression): ClassInfo | null {
-    if (!ts.isIdentifier(expr)) return null;
-    const symbol = L.resolveValueSymbol(expr);
-    if (!symbol) return null;
-    const direct = L.classBySymbol.get(symbol);
-    // A rebindable decorated name is NOT exactly its class — the binding
-    // may hold a replacing decorator's result (a subclass value), where a
-    // static write would create an own property in JS. The general
-    // class-value write fence answers instead.
-    if (direct) return direct.classDecorators?.valueGlobalId !== undefined ? null : direct;
-    const decl = L.checker.valueDeclarationOf(symbol);
-    if (
-      !decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
-      !ts.isVariableDeclarationList(decl.parent) ||
-      (decl.parent.flags & ts.NodeFlags.Const) === 0
-    ) {
-      return null;
-    }
-    let init: ts.Expression = decl.initializer;
-    while (ts.isParenthesizedExpression(init)) init = init.expression;
-    if (ts.isClassExpression(init)) return L.exprClassInfoByNode.get(init) ?? null;
-    if (ts.isIdentifier(init)) {
-      const initSym = L.resolveValueSymbol(init);
-      const aliased = initSym ? (L.classBySymbol.get(initSym) ?? null) : null;
-      // `const X = C` over a rebindable decorated name: X holds the
-      // decoration result — not exactly C (see the direct case above).
-      return aliased?.classDecorators?.valueGlobalId !== undefined ? null : aliased;
-    }
-    return null;
   }
 
 /** The class a PROPERTY-ASSIGNMENT binding pins — the salsa/CJS

@@ -5718,6 +5718,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3031-js-var-error-inheritance.js": {
+   "order": [
+    "<repo>/tests/corpus/3031-js-var-error-inheritance.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/304-compound-incdec.ts": {
    "order": [
     "<repo>/tests/corpus/304-compound-incdec.ts"
