@@ -304,3 +304,12 @@ pub fn effect_pubsub_shutdown(handle: &JsEffect) -> JsEffect {
     let hub = pubsub_of(handle);
     effect_sync(Rc::new(move || { hub.borrow_mut().shutdown = true; effect_box(()) }), Box::new(|_| {}))
 }
+
+/// `Effect.tryPromise(() => promise)` — the single-thunk form: a rejection becomes effect's `UnknownError`, a
+/// kernel data handle with effect's own tag and message.
+pub fn effect_try_promise_unknown(thunk: Rc<dyn Fn() -> JsPromiseHandle>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
+    effect_try_promise(thunk, Rc::new(|reason| {
+        let _ = &reason; // effect keeps the reason in the error's `cause`, which the kernel does not model yet
+        effect_box(effect_new(EffectNode::Data(KernelData::Unknown(string("An error occurred in Effect.tryPromise")))))
+    }), trace)
+}

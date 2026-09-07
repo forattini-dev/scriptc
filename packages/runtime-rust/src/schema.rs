@@ -167,7 +167,7 @@ pub fn schema_error_handle(message: JsString) -> JsEffect {
 
 pub fn schema_error_message(handle: &JsEffect) -> JsString {
     handle.with(|data| match &data.node {
-        EffectNode::Data(KernelData::SchemaError(message)) => message.clone(),
+        EffectNode::Data(KernelData::SchemaError(message)) | EffectNode::Data(KernelData::Unknown(message)) => message.clone(),
         _ => throw_error("scriptc: a SchemaError handle was expected".to_owned()),
     })
 }

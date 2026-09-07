@@ -168,6 +168,10 @@ pub enum KernelData {
     Semaphore(Rc<RefCell<Latch>>),
     /// A `Queue` (and the per-subscriber queue a `PubSub` hands out): items with waiting takers and offerers.
     Queue(Rc<RefCell<QueueState>>),
+    /// The failure `Effect.tryPromise(thunk)` builds from a rejection: effect's `UnknownError`, whose message is
+    /// fixed ("An error occurred in Effect.tryPromise" — the reason itself rides effect's `cause`, which the kernel
+    /// does not model yet).
+    Unknown(JsString),
     /// A `PubSub`: the subscriber queues a publish broadcasts into.
     PubSub(Rc<RefCell<PubSubState>>),
 }
@@ -482,6 +486,7 @@ pub fn effect_data_tag(handle: &JsEffect) -> JsString {
         EffectNode::Data(KernelData::Exit(outcome)) => string(if outcome.is_ok() { "Success" } else { "Failure" }),
         EffectNode::Data(KernelData::Option(value)) => string(if value.is_some() { "Some" } else { "None" }),
         EffectNode::Data(KernelData::SchemaError(_)) => string("SchemaError"),
+        EffectNode::Data(KernelData::Unknown(_)) => string("UnknownError"),
         _ => throw_error("scriptc: a kernel data handle was expected".to_owned()),
     })
 }

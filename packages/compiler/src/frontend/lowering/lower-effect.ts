@@ -634,7 +634,30 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (handler.type.kind !== "func" || handler.type.params.length !== 1 || handler.type.ret.kind !== "effect") break;
         return lib("effect.catchTag", [at(0), tag, handler], EFFECT_T, loc);
       }
+      case "isEffect": {
+        // A value the checker already types as an Effect IS one; a union with an effect arm tests its tag.
+        if (total !== 1) break;
+        const value = at(0);
+        if (value.type.kind === "effect") return { kind: "boolLit", value: true, type: { kind: "bool" }, loc };
+        if (value.type.kind === "union") {
+          const union = L.unions.get(value.type.unionId);
+          const tag = union?.arms.findIndex((arm) => arm.kind === "effect") ?? -1;
+          if (union !== undefined && tag >= 0) {
+            return { kind: "unionIsTag", unionId: value.type.unionId, tag, negated: false, value, type: { kind: "bool" }, loc };
+          }
+        }
+        break;
+      }
       case "tryPromise": {
+        // The single-thunk form: a rejection becomes effect's UnknownException (a kernel data handle whose
+        // `_tag` and `message` read like effect's).
+        if (pre.length === 0 && total === 1 && args[0] !== undefined && !ts.isObjectLiteralExpression(args[0]!)) {
+          const attempt = at(0);
+          if (attempt.type.kind === "func" && attempt.type.params.length === 0 && attempt.type.ret.kind === "promise") {
+            return lib("effect.tryPromiseUnknown", [attempt], EFFECT_T, loc);
+          }
+          break;
+        }
         // `Effect.tryPromise({ try: () => promise, catch: (reason) => error })` — the two callbacks lower separately; the
         // rejection reason reaches `catch` as the program's dynamic value (its type is `unknown`).
         const options = args[0];

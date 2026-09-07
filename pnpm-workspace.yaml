@@ -4,6 +4,7 @@ minimumReleaseAgeExclude:
   - "vercel@58.1.0"
 allowBuilds:
   esbuild: true
+  msgpackr-extract: false
 overrides:
   "@napi-rs/wasm-runtime": "1.1.6"
 patchedDependencies:

@@ -132,6 +132,13 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       const recoverDispatch = context.emitClosureDispatch(recover, second.type, ["sc_arg"], expr.loc);
       return `{ let ${attempt} = ${context.emitExpr(first)}; let ${recover} = ${context.emitExpr(second)}; let ${keepAttempt} = ${attempt}.clone(); let ${keepRecover} = ${recover}.clone(); runtime::effect_try_promise(std::rc::Rc::new(move || runtime::promise_to_handle(&(${attemptDispatch}))), std::rc::Rc::new(move |sc_caught: runtime::Caught| { let sc_arg: ${context.rustType(reasonType, expr.loc)} = sc_dyn_from_caught(sc_caught); ${box(context, second.type.ret, recoverDispatch, expr.loc)} }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepAttempt}); sc_tracer.edge(&${keepRecover}); })) }`;
     }
+    case "effect.tryPromiseUnknown": {
+      if (first === undefined || first.type.kind !== "func") break;
+      const attempt = context.nextTemporary();
+      const keepAttempt = context.nextTemporary();
+      const attemptDispatch = context.emitClosureDispatch(attempt, first.type, [], expr.loc);
+      return `{ let ${attempt} = ${context.emitExpr(first)}; let ${keepAttempt} = ${attempt}.clone(); runtime::effect_try_promise_unknown(std::rc::Rc::new(move || runtime::promise_to_handle(&(${attemptDispatch}))), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepAttempt}); })) }`;
+    }
     case "effect.fn":
     case "effect.fnPipe": {
       if (first === undefined || first.type.kind !== "func" || first.type.ret.kind !== "generator" || expr.type.kind !== "func") break;
