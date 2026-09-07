@@ -7,7 +7,8 @@ const server = http.createServer((_request, response) => {
 
 async function request(port: number): Promise<void> {
   const response = await fetch(`http://127.0.0.1:${port}/notification`);
-  console.log(response.status, response.body === null, (await response.text()).length);
+  const text = await response.text();
+  console.log(response.status, response.body === null, text.length);
   server.close();
 }
 

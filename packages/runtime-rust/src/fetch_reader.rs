@@ -51,6 +51,15 @@ fn fetch_reader_finish(reader: &JsFetchReader, failed: bool) {
     }
 }
 
+// The callback owns the edge. Its tracing companion must not own another
+// unreported strong reference, which would look like an external GC root.
+fn fetch_reader_trace(reader: &JsFetchReader) -> NetTrace {
+    let reader = reader.downgrade();
+    Rc::new(move |tracer| {
+        if let Some(reader) = reader.upgrade() { tracer.edge(&reader); }
+    })
+}
+
 pub fn fetch_body_get_reader(request: &JsHttpRequest) -> JsFetchReader {
     request.with_mut(|request| {
         if request.fetch_body_locked { throw_type_error("ReadableStream is locked".to_owned()); }
@@ -64,15 +73,12 @@ pub fn fetch_body_get_reader(request: &JsHttpRequest) -> JsFetchReader {
         failed: request.with(|request| request.aborted),
     });
     let ended = reader.clone();
-    let trace = reader.clone();
     http_request_on_end(request, Rc::new(move || fetch_reader_finish(&ended, false)),
-        Rc::new(move |tracer| tracer.edge(&trace)), true);
+        fetch_reader_trace(&reader), true);
     let aborted = reader.clone();
-    let trace = reader.clone();
     http_request_on_aborted(request, Rc::new(move || fetch_reader_finish(&aborted, true)),
-        Rc::new(move |tracer| tracer.edge(&trace)), true);
+        fetch_reader_trace(&reader), true);
     let data = reader.clone();
-    let trace = reader.clone();
     http_request_on_data(request, Rc::new(move |chunk, _| {
         let (pending, pause) = data.with_mut(|reader| {
             (reader.pending.pop_front(), reader.pending.is_empty())
@@ -81,7 +87,7 @@ pub fn fetch_body_get_reader(request: &JsHttpRequest) -> JsFetchReader {
             http_request_pause(&request);
         }
         if let Some(promise) = pending { let _ = promise_fulfill(&promise, Some(chunk)); }
-    }), Rc::new(move |tracer| tracer.edge(&trace)), false);
+    }), fetch_reader_trace(&reader), false);
     reader
 }
 

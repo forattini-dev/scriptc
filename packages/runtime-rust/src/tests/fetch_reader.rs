@@ -1,4 +1,13 @@
 #[test]
+fn fetch_reader_abandoned_cycle_is_collectable() {
+    let request = fetch_response_new_text(&string("unread"));
+    let reader = fetch_body_get_reader(&request);
+    drop((request, reader));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
 fn fetch_reader_preserves_demand_and_collects_cycles() {
     let request = fetch_response_new_text(&string("bytes"));
     let reader = fetch_body_get_reader(&request);
