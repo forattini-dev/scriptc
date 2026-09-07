@@ -131,6 +131,8 @@ enum EffectNode {
     Park(Rc<RefCell<Latch>>),
     /// A queue operation that may park: `None` takes, `Some(value)` offers.
     Queue(Rc<RefCell<QueueState>>, Option<EffectValue>),
+    /// `Effect.catchCause(e, f)`: the failure reaches `f` as a Cause handle.
+    CatchCause(JsEffect, EffectFn, TraceFn),
 }
 
 /// The services a layer answers / a provide installs: `(key, value)` pairs, later entries shadowing earlier ones.
@@ -172,6 +174,9 @@ pub enum KernelData {
     /// fixed ("An error occurred in Effect.tryPromise" — the reason itself rides effect's `cause`, which the kernel
     /// does not model yet).
     Unknown(JsString),
+    /// A `Cause`: why an effect ended. The kernel models the FAILURE channel (`Cause.fail`) and a die built from a
+    /// defect value; interruption has no kernel meaning yet, so every `hasInterrupts` answers false.
+    Cause(bool, EffectValue),
     /// A `PubSub`: the subscriber queues a publish broadcasts into.
     PubSub(Rc<RefCell<PubSubState>>),
 }
@@ -222,6 +227,7 @@ impl Trace for EffectData {
                 tracer.edge(next);
             }
             EffectNode::Map(inner, _, trace)
+            | EffectNode::CatchCause(inner, _, trace)
             | EffectNode::FlatMap(inner, _, trace)
             | EffectNode::CatchAll(inner, _, trace)
             | EffectNode::MapError(inner, _, trace) => {
@@ -596,6 +602,8 @@ enum Frame {
     Map(ValueFn),
     FlatMap(EffectFn),
     CatchAll(EffectFn),
+    /// `catchCause`: like CatchAll, but the recovery reads a Cause handle instead of the raw error.
+    CatchCause(EffectFn),
     MapError(ValueFn),
     OrDie,
     As(EffectValue),
@@ -751,6 +759,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Map(inner, f, _) => Step::Push(Frame::Map(f.clone()), inner.clone()),
         EffectNode::FlatMap(inner, f, _) => Step::Push(Frame::FlatMap(f.clone()), inner.clone()),
         EffectNode::CatchAll(inner, f, _) => Step::Push(Frame::CatchAll(f.clone()), inner.clone()),
+        EffectNode::CatchCause(inner, f, _) => Step::Push(Frame::CatchCause(f.clone()), inner.clone()),
         EffectNode::MapError(inner, f, _) => Step::Push(Frame::MapError(f.clone()), inner.clone()),
         EffectNode::OrDie(inner) => Step::Push(Frame::OrDie, inner.clone()),
         EffectNode::As(inner, value) => Step::Push(Frame::As(value.clone()), inner.clone()),
@@ -943,6 +952,9 @@ fn fiber_drive(fiber: &FiberRef) {
                 }
                 (Frame::FlatMap(f), Ok(value)) => Some(f(value)),
                 (Frame::CatchAll(f), Err(error)) => Some(f(error)),
+                // The failure becomes a Cause the handler reads (a kernel Fail cause; the kernel raises defects as
+                // throws, which never reach a frame).
+                (Frame::CatchCause(f), Err(error)) => Some(f(effect_box(effect_cause_new(false, error)))),
                 (Frame::MapError(f), Err(error)) => {
                     outcome = Some(Err(f(error)));
                     None

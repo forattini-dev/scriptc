@@ -379,6 +379,25 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.pubsubPublish":
       if (first === undefined || second === undefined) break;
       return `runtime::effect_pubsub_publish(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)})`;
+    case "effect.causeFail":
+      if (first === undefined) break;
+      return `runtime::effect_cause_new(false, ${box(context, first.type, context.emitExpr(first), expr.loc)})`;
+    case "effect.causeSquash":
+      if (first === undefined) break;
+      return unbox(context, expr.type, `&runtime::effect_cause_squash(&${context.emitExpr(first)})`, expr.loc);
+    case "effect.causeHas":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_cause_has(&${context.emitExpr(first)}, ${context.emitExpr(second)})`;
+    case "effect.catchCause": {
+      if (first === undefined || second === undefined || second.type.kind !== "func") break;
+      const source = context.nextTemporary();
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const param = second.type.params[0];
+      const dispatch = context.emitClosureDispatch(callback, second.type, param === undefined ? [] : ["sc_arg"], expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)};`;
+      return `{ let ${source} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_catch_cause(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let _ = &sc_value; ${bind} ${dispatch} }), ${traced(context, keep)}) }`;
+    }
     case "effect.exitValue":
       if (first === undefined) break;
       return unbox(context, expr.type, `&runtime::effect_exit_value(&${context.emitExpr(first)})`, expr.loc);

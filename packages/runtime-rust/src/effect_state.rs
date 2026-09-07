@@ -313,3 +313,33 @@ pub fn effect_try_promise_unknown(thunk: Rc<dyn Fn() -> JsPromiseHandle>, trace:
         effect_box(effect_new(EffectNode::Data(KernelData::Unknown(string("An error occurred in Effect.tryPromise")))))
     }), trace)
 }
+
+/// A `Cause`: why an effect ended. `die` marks a defect cause; the value is the error (or the defect).
+pub fn effect_cause_new(die: bool, value: EffectValue) -> JsEffect {
+    effect_new(EffectNode::Data(KernelData::Cause(die, value)))
+}
+
+fn cause_of(handle: &JsEffect) -> (bool, EffectValue) {
+    handle.with(|data| match &data.node {
+        EffectNode::Data(KernelData::Cause(die, value)) => (*die, value.clone()),
+        _ => throw_error("scriptc: a Cause handle was expected".to_owned()),
+    })
+}
+
+/// `Cause.squash(cause)`: the error a failure carries, or the defect a die carries.
+pub fn effect_cause_squash(handle: &JsEffect) -> EffectValue {
+    cause_of(handle).1
+}
+
+/// `Cause.hasDies` / `hasInterrupts` / `hasInterruptsOnly`: the kernel has no interruption, so only dies answer.
+pub fn effect_cause_has(handle: &JsEffect, what: f64) -> bool {
+    let (die, _) = cause_of(handle);
+    match what as i32 {
+        0 => die,
+        _ => false,
+    }
+}
+
+pub fn effect_catch_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
+    effect_new(EffectNode::CatchCause(source.clone(), f, trace))
+}

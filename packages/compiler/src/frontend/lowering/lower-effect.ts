@@ -7,7 +7,7 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
-import { BOOL, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js"; import { newFnCtx } from "./lowerer.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js"; import { newFnCtx } from "./lowerer.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
@@ -313,6 +313,7 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   if (ns === "Semaphore") return lowerSemaphoreMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "Queue") return lowerQueueMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns === "PubSub") return lowerPubSubMember(L, callee.name.text, [...expr.arguments], expr, loc);
+  if (ns === "Cause") return lowerCauseMember(L, callee.name.text, [...expr.arguments], expr, loc);
   if (ns !== "Effect") L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${callee.name.text} yet`);
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
@@ -459,6 +460,43 @@ function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], ex
   }
 }
 
+/** `Cause`: why an effect ended. The kernel models the failure channel and a die built from a defect value;
+ * interruption has no kernel meaning yet, so `hasInterrupts`/`hasInterruptsOnly` answer false. */
+function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
+  const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
+  const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Cause.${member} yet`);
+  switch (member) {
+    case "fail":
+      if (args.length !== 1) refused();
+      return lib("effect.causeFail", [at(0)], EFFECT_T, loc);
+    case "squash": {
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      // The value comes out with the ERROR channel's type (`Cause<E>`'s E — what the kernel boxed at the failure);
+      // effect types the result `unknown`, so the site's own checked-dynamic slot takes it from there.
+      const causeTs = L.typeOf(args[0]!);
+      const errorTs = L.checker.getTypeArguments(causeTs as ts.TypeReference)[0];
+      const carried = errorTs === undefined ? null : L.mapTypeOf(errorTs);
+      if (carried === null || carried.kind === "void") refused();
+      const squashed = lib("effect.causeSquash", [at(0)], carried as IrType, loc);
+      const site = L.mapTypeOf(L.typeOf(expr));
+      if (site === null || site.kind !== "dyn") return squashed;
+      // effect types the result `unknown`: the value rides the site's checked-dynamic slot, which only takes what
+      // the dynamic tier can hold (a class instance cannot cross it).
+      if (!canConvertToDyn(carried as IrType, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+        L.unsupported("SC1090", expr, `Cause.squash into a checked-dynamic slot for the '${L.fmt(carried as IrType)}' failure channel (only values the dynamic tier holds cross it)`);
+      }
+      return { kind: "dynFrom", value: squashed, type: DYN, loc };
+    }
+    case "hasDies":
+    case "hasInterrupts":
+    case "hasInterruptsOnly":
+      if (args.length !== 1 || at(0).type.kind !== "effect") refused();
+      return lib("effect.causeHas", [at(0), numLit(member === "hasDies" ? 0 : 1, loc)], { kind: "bool" }, loc);
+    default:
+      return refused();
+  }
+}
+
 /** The SUCCESS type argument of an `Effect<A, E, R>` (or `Effect<…>[]`'s element's) TS type, or null. */
 function effectSuccessOf(L: Lowerer, type: ts.Type): ts.Type | null {
   const sym = type.getAliasSymbol() ?? type.getSymbol();
@@ -578,6 +616,15 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
       case "die":
         if (total === 1) return lib(member === "fail" ? "effect.fail" : "effect.die", [at(0)], EFFECT_T, loc);
         break;
+      case "catchCause": {
+        // The failure reaches the handler as a Cause. A DEFECT still unwinds the program: the kernel raises defects
+        // as throws, which never reach a frame (effect would answer a Die cause here).
+        if (total !== 2) break;
+        const source = at(0);
+        const fn = at(1);
+        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1 || fn.type.ret.kind !== "effect") break;
+        return lib("effect.catchCause", [source, fn], EFFECT_T, loc);
+      }
       case "catch": // effect 4's name for catchAll (v3's spelling is kept for programs written against it)
       case "catchAll":
       case "mapError": {
