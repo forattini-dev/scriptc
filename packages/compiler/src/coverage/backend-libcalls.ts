@@ -274,6 +274,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "effect.succeed": ["c", "rust"],
   "effect.suspend": ["c", "rust"],
   "effect.sync": ["c", "rust"],
+  "effect.syncRefMake": ["c", "rust"],
+  "effect.syncRefMakeUnsafe": ["c", "rust"],
   "effect.tap": ["c", "rust"],
   "effect.tapError": ["c", "rust"],
   "effect.tapErrorCause": ["c", "rust"],

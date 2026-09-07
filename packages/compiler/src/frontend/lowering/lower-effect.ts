@@ -320,10 +320,9 @@ export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc
   return lowerEffectMember(L, callee.name.text, [], [...expr.arguments], expr, loc);
 }
 
-/** `Ref` and `SynchronizedRef`: one mutable cell in the kernel. The runtime hands fibers off only at suspension
- * points, so a synchronized ref IS the same cell — "synchronized" means effectful updates run one at a time, which
- * sequential execution already gives. `modify`-shaped members (a callback answering `[result, next]`) stay refused:
- * splitting the tuple needs a carrier the lowering does not emit yet. */
+/** Synchronized refs serialize every write across effect suspension. Ref keeps
+ * its ordinary synchronous cell behavior. Tuple-returning modify operations
+ * still need their own carrier and remain refused. */
 function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
   const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover ${ns}.${member} yet`);
@@ -331,7 +330,7 @@ function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Express
     case "make":
     case "makeUnsafe":
       if (args.length !== 1) refused();
-      return lib(member === "make" ? "effect.refMake" : "effect.refMakeUnsafe", [at(0)], EFFECT_T, loc);
+      return lib(ns === "SynchronizedRef" ? (member === "make" ? "effect.syncRefMake" : "effect.syncRefMakeUnsafe") : (member === "make" ? "effect.refMake" : "effect.refMakeUnsafe"), [at(0)], EFFECT_T, loc);
     case "get":
       if (args.length !== 1 || at(0).type.kind !== "effect") refused();
       return lib("effect.refGet", [at(0)], EFFECT_T, loc);

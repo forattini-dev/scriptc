@@ -295,10 +295,13 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       if (first === undefined) break;
       return `runtime::effect_duration_to_millis(&${context.emitExpr(first)})`;
     case "effect.refMake":
-    case "effect.refMakeUnsafe": {
+    case "effect.refMakeUnsafe":
+    case "effect.syncRefMake":
+    case "effect.syncRefMakeUnsafe": {
       if (first === undefined) break;
       const made = box(context, first.type, context.emitExpr(first), expr.loc);
-      return `runtime::${expr.fn === "effect.refMake" ? "effect_ref_make" : "effect_ref_make_unsafe"}(${made})`;
+      const sync = expr.fn.startsWith("effect.syncRef") ? "effect_sync_ref" : "effect_ref";
+      return `runtime::${sync}_${expr.fn.endsWith("Unsafe") ? "make_unsafe" : "make"}(${made})`;
     }
     case "effect.refGet":
       if (first === undefined) break;

@@ -160,10 +160,8 @@ pub enum KernelData {
     SchemaError(JsString),
     /// A Duration, in milliseconds (effect's nanosecond precision is not observable here).
     Duration(f64),
-    /// A `Ref`/`SynchronizedRef` cell. The runtime is single-threaded and fibers hand off only at suspension
-    /// points, so a synchronized ref is the same cell — the "synchronized" part is about effectful updates
-    /// running one at a time, which sequential execution already gives.
-    Ref(Rc<RefCell<EffectValue>>),
+    /// A mutable ref, with a write permit for synchronized references.
+    Ref(Rc<EffectRefState>),
     /// A `Deferred` (settled once, every awaiting fiber resumes) or a `Semaphore` (a permit count with the same
     /// waiter queue). Both are the kernel's Latch.
     Deferred(Rc<RefCell<Latch>>),
@@ -691,12 +689,12 @@ enum Step {
 pub struct Latch {
     settled: Option<Outcome>,
     permits: f64,
-    waiters: Vec<Box<dyn FnOnce(Outcome)>>,
+    waiters: VecDeque<Box<dyn FnOnce(Outcome)>>,
 }
 
 impl Latch {
     fn new(permits: f64) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Latch { settled: None, permits, waiters: Vec::new() }))
+        Rc::new(RefCell::new(Latch { settled: None, permits, waiters: VecDeque::new() }))
     }
     /// Settle a Deferred: every waiting fiber resumes with the same outcome, and later awaits answer at once.
     fn settle(&mut self, outcome: Outcome) -> bool {
@@ -899,7 +897,7 @@ fn fiber_drive(fiber: &FiberRef) {
                         }
                         None => {
                             let resumed = fiber.clone();
-                            latch.borrow_mut().waiters.push(Box::new(move |outcome| {
+                            latch.borrow_mut().waiters.push_back(Box::new(move |outcome| {
                                 resumed.borrow_mut().resumed = Some(outcome);
                                 fiber_drive(&resumed);
                             }));

@@ -1,61 +1,4 @@
-/* The kernel's stateful primitives: `Ref`/`SynchronizedRef` (one mutable cell), `Deferred` (a latch settled once,
- * awaited by any number of fibers) and `Semaphore` (permits over the same waiter queue). The waiting half is the
- * `Latch` of effect.rs, which the fiber driver parks on exactly as it suspends on a promise. */
-
-/// The cell behind a `Ref`/`SynchronizedRef` handle.
-fn ref_cell_of(handle: &JsEffect) -> Rc<RefCell<EffectValue>> {
-    handle.with(|data| match &data.node {
-        EffectNode::Data(KernelData::Ref(cell)) => cell.clone(),
-        _ => throw_error("scriptc: a Ref handle was expected".to_owned()),
-    })
-}
-
-/// `Ref.makeUnsafe(a)` / `SynchronizedRef.makeUnsafe(a)`: the cell itself, outside any effect.
-pub fn effect_ref_make_unsafe(value: EffectValue) -> JsEffect {
-    effect_new(EffectNode::Data(KernelData::Ref(Rc::new(RefCell::new(value)))))
-}
-
-/// `Ref.make(a)`: an effect answering a FRESH cell each time it runs.
-pub fn effect_ref_make(value: EffectValue) -> JsEffect {
-    effect_sync(Rc::new(move || effect_box(effect_ref_make_unsafe(value.clone()))), Box::new(|_| {}))
-}
-
-pub fn effect_ref_get(handle: &JsEffect) -> JsEffect {
-    let cell = ref_cell_of(handle);
-    effect_sync(Rc::new(move || cell.borrow().clone()), Box::new(|_| {}))
-}
-
-/// `Ref.set(ref, a)` and, with `keep`, `Ref.getAndSet(ref, a)`: which value the effect answers (0 unit, 1 previous).
-pub fn effect_ref_set(handle: &JsEffect, value: EffectValue, keep: f64) -> JsEffect {
-    let cell = ref_cell_of(handle);
-    effect_sync(Rc::new(move || {
-        let previous = cell.borrow().clone();
-        *cell.borrow_mut() = value.clone();
-        if keep as i32 == 1 { previous } else { effect_box(()) }
-    }), Box::new(|_| {}))
-}
-
-/// `Ref.update(ref, f)` — and, with `keep`, `getAndSet`/`updateAndGet`: which of the two values the effect answers.
-pub fn effect_ref_update(handle: &JsEffect, f: Rc<dyn Fn(EffectValue) -> EffectValue>, keep: f64, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
-    let cell = ref_cell_of(handle);
-    effect_sync(Rc::new(move || {
-        let previous = cell.borrow().clone();
-        let next = f(previous.clone());
-        *cell.borrow_mut() = next.clone();
-        match keep as i32 { 1 => previous, 2 => next, _ => effect_box(()) }
-    }), trace)
-}
-
-/// `SynchronizedRef.updateEffect(ref, f)`: the update runs as an effect, sequentially (one fiber at a time is the
-/// runtime's own discipline), and the ref holds its success.
-pub fn effect_ref_update_effect(handle: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
-    let cell = ref_cell_of(handle);
-    let read = effect_ref_get(handle);
-    effect_flat_map(&read, Rc::new(move |previous| {
-        let cell = cell.clone();
-        effect_map(&f(previous), Rc::new(move |next| { *cell.borrow_mut() = next.clone(); effect_box(()) }), Box::new(|_| {}))
-    }), trace)
-}
+/* Deferred, Semaphore, Queue and PubSub suspension primitives. */
 
 fn latch_of(handle: &JsEffect, what: &str) -> Rc<RefCell<Latch>> {
     handle.with(|data| match &data.node {
@@ -122,7 +65,7 @@ fn effect_semaphore_release(latch: &Rc<RefCell<Latch>>, permits: f64) -> JsEffec
         let mut state = latch.borrow_mut();
         let mut freed = permits;
         while freed >= 1.0 {
-            match state.waiters.pop() {
+            match state.waiters.pop_front() {
                 // A queued fiber takes the permit straight from the release (no count round-trip).
                 Some(waiter) => { drop(state); waiter(Ok(Rc::new(()) as EffectValue)); state = latch.borrow_mut(); }
                 None => state.permits += 1.0,
