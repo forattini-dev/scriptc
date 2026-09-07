@@ -360,10 +360,61 @@ Evidence: `/tmp/scriptc-sdk-rsp-preflight-before.json`,
 `/tmp/scriptc-rsp-after-sdk-admission.json`, and
 `/tmp/scriptc-sdk-original-result.json`.
 
+## SDK runtime-capability guards
+
+The original SDK 1.23.1 evaluates `typeof globalThis.Bun !== 'undefined' &&
+typeof globalThis.Bun.spawn === 'function'` and the analogous Deno guard at
+module initialization. Native lowering previously deferred both statements.
+The isolated Rust corpus reproduced empty stdout instead of the Node/Bun
+oracle's detection results.
+
+`lower-typeof.ts` now handles native capability queries according to the
+selected target: Bun is absent for Node24/Node26 and an object for Bun;
+Bun.spawn is a function on Bun; Deno is absent for all supported targets.
+The same builtin query runs before generic dyn/union comparison lowering.
+Boolean literal guards in value position now short-circuit before lowering
+the unreachable operand, matching the existing condition-position rule.
+Local declarations named globalThis retain normal lowering. Mutation,
+unsupported calls such as Bun.spawn, and unguarded absent member reads retain
+native refusals. Engine-enabled compilation does not use the new runtime
+capability constants, because its globals can be mutable. Existing builtin
+typeof handling was extracted without expanding the frozen source ceiling
+(lower-exprs.ts: 11,232 to 11,188 lines).
+
+Corpus 3032/3033 pins the SDK expressions, Node/Bun target differences,
+short-circuit side effects, and a local globalThis parameter. Eleven API
+checks cover all three target selections and the refusal boundaries.
+The original SDK parseUri adapter, with the installed package symlinked and
+no source rewriting, now has 21 refusals instead of 23: exactly the Bun/Deno
+initializers disappeared. URL/URLSearchParams conversions and ParsedUri
+records remain unsupported; no SDK utility binary is accepted yet.
+
+The original RSP survey on the same consumer revision reaches 1,701
+statements, with 250 failed (previously 252), zero island statements,
+193 diagnostics (unchanged), and 99 runtime fences (previously 101).
+All five npm packages still enter the static graph. This is removal of two
+initialization barriers, not full RSP executable acceptance.
+
+Validation: the eleven API checks and 26 selected differential checks pass.
+The corpus selection covers 3032/3033, 2281/2282, 2712, 2795–2797 and both
+2848 fixtures. Node-target programs run through C, LLVM and Rust; Bun-target
+programs use the Rust harness. The same eight Node-target programs pass
+16 C/LLVM checks with sanitizers, using the corrected SCRIPTC_SAN forwarding.
+These focused passes do not replace the pending/red full repository gate.
+The workspace build and source-size/diff checks pass; focused ESLint reports zero errors and 96 warnings.
+
+Evidence: `/tmp/scriptc-capabilities-before.log`,
+`/tmp/scriptc-capabilities-fixed.log`,
+`/tmp/scriptc-capabilities-regressions.log`,
+`/tmp/scriptc-capabilities-sanitized.log`,
+`/tmp/scriptc-sdk-before-capability-result.json`,
+`/tmp/scriptc-sdk-after-capability-result.json`, and
+`/tmp/scriptc-rsp-after-capability-survey.json`.
+
 ## Next acceptance work
 
-1. Implement the SDK's host-capability probes and native URL/URLSearchParams
-   boundaries, retaining Node/Bun target semantics and observable errors.
+1. Implement the SDK's native URL/URLSearchParams boundaries, retaining
+   object identity, shared searchParams mutation and observable errors.
 2. Extend the original parser contracts to tokenization and full flag parsing.
 3. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.

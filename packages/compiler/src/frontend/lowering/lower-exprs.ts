@@ -41,6 +41,7 @@ import {
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
+import { lowerBuiltinTypeof, lowerBuiltinTypeofTest } from "./lower-typeof.js";
 import { lowerDynamicGlobalIdentifier } from "../ambient-values.js";
 import { templateRawTextOf } from "./lower-templates.js";
 export {
@@ -883,60 +884,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
-      if (
-        ts.isIdentifier(expr.expression) &&
-        expr.expression.text === "navigator" &&
-        L.isStdlibSymbol(L.checker.getSymbolAtLocation(expr.expression))
-      ) {
-        return { kind: "strLit", value: "object", type: STRING, loc };
-      }
-      // UMD bundles probe browser/loader globals that do not exist on the
-      // Node compatibility targets. The shipped ambient declarations let
-      // the checker describe the dead branches; this provenance-checked
-      // fold gives `typeof` Node's non-throwing "undefined" answer before
-      // an ordinary identifier read can become a ReferenceError.
-      if (
-        ts.isIdentifier(expr.expression) &&
-        (expr.expression.text === "define" ||
-          expr.expression.text === "window" ||
-          expr.expression.text === "self") &&
-        L.isStdlibSymbol(L.checker.getSymbolAtLocation(expr.expression))
-      ) {
-        return { kind: "strLit", value: "undefined", type: STRING, loc };
-      }
-      // The POSIX identity methods are linked native capabilities on every
-      // host scriptc supports. Their optional Node declarations exist for
-      // Windows, but the compiled target's direct and optional calls both
-      // already lower to the runtime functions; the matching capability
-      // probe must therefore answer "function" without materializing a
-      // bound method value.
-      if (ts.isPropertyAccessExpression(expr.expression)) {
-        const processMember = L.stdlibGlobalMember(expr.expression, "process");
-        if (processMember === "getuid" || processMember === "getgid") {
-          return { kind: "strLit", value: "function", type: STRING, loc };
-        }
-      }
-      // `typeof queueMicrotask` / `typeof DOMException` on a STDLIB global
-      // whose declared type is callable or constructable: folds to
-      // "function" BEFORE the operand lowers — the identity-token story
-      // (JS files) deliberately represents these values as strings, and
-      // the TS-file fence would name a value the program never needs; an
-      // identifier read has no side effects to preserve. Node's answer for
-      // every function and constructor global is "function" (the harness's
-      // `typeof queueMicrotask === 'function'` probes). Shadowing locals
-      // have non-stdlib symbols and keep the ordinary path.
-      if (ts.isIdentifier(expr.expression)) {
-        const sym = L.checker.getSymbolAtLocation(expr.expression);
-        if (L.isStdlibSymbol(sym)) {
-          const t = L.typeOf(expr.expression);
-          if (
-            L.checker.getCallSignatures(t).length > 0 ||
-            L.checker.getConstructSignatures(t).length > 0
-          ) {
-            return { kind: "strLit", value: "function", type: STRING, loc };
-          }
-        }
-      }
+      const builtin = lowerBuiltinTypeof(L, expr, loc);
+      if (builtin !== null) return builtin;
       // Island values ask the engine; static primitives constant-fold to
       // the JS answer (the operand still evaluates — JS evaluates typeof
       // operands too — but primitives here are side-effect-free varRefs/
@@ -8511,6 +8460,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // also what tsc's type says, modulo literal-union collapsing that
       // mapType already handles). Mixed kinds (`n && s`) stay rejected.
       const left = lowerAbsenceProbe(L, expr.left) ?? L.lowerExpr(expr.left);
+      // Boolean capability guards in value position must be as lazy as
+      // conditions: never lower an unreachable member of an absent global.
+      if (left.kind === "boolLit" && L.mapTypeOf(L.typeOf(expr))?.kind === "bool") {
+        const takeRight = op === ts.SyntaxKind.AmpersandAmpersandToken ? left.value : !left.value;
+        return takeRight ? L.lowerExpr(expr.right) : left;
+      }
       const right = L.lowerExpr(expr.right);
       // A LITERAL-unit left operand (a compile-time undefined/null — the
       // capability-probe members: `process.features.inspector ||
@@ -8689,6 +8644,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       op === ts.SyntaxKind.ExclamationEqualsEqualsToken
     ) {
       const test =
+        lowerBuiltinTypeofTest(L, expr, loc) ??
         lowerErrorCodeTypeofTest(L, expr, loc) ??
         L.lowerCaughtTypeofTest(expr, loc) ??
         lowerDynTypeofTest(L, expr, loc) ??
