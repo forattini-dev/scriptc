@@ -107,6 +107,7 @@ include!("child_process_async.rs");
 include!("schema.rs");
 include!("effect.rs");
 include!("effect_failure.rs");
+include!("effect_latch.rs");
 include!("effect_refs.rs");
 include!("effect_state.rs");
 include!("windows_paths.rs");

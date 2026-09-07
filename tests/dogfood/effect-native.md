@@ -9,7 +9,7 @@ The first correction gives SynchronizedRef a dedicated write permit,
 shared by set, update and updateEffect. An effectful update holds it across
 suspension and releases it on success or typed failure. Reads observe the
 last committed value without acquiring the permit. Ref retains its ordinary
-cell behavior. Deferred/Semaphore waiters now use FIFO order.
+cell behavior. Waiting writes retain arrival order.
 
 Corpus 3009 reproduced lost updates before the fix: Node returned 2 and 22,
 while native Rust returned 1 and 2. After the fix it matches Node, including
@@ -36,8 +36,23 @@ identity against Node. The 20 other selected Effect regressions pass;
 11 IR tests cover ordinary validation, serialization, boxed units and
 rejection of malformed units and null callbacks.
 
+The third correction acquires a Semaphore request atomically: a waiter for
+multiple permits does not consume a partial request while suspended. Smaller
+eligible requests can proceed, and zero and fractional permit counts retain
+Effect's numeric accounting. Corpus 3012 previously returned holder,large,small
+and then stalled at zero permits; it now matches Node's holder,small,large,
+including zero/fractional acquisition and release after a defect.
+
+Deferred settlement publishes its outcome and releases the mutable borrow
+before resuming waiters. Corpus 3013 previously panicked when a resumed fiber
+queried and awaited the same Deferred; it now matches Node, including a
+repeated settlement returning false. Both new programs and regressions 2988,
+3009 and 3010 pass differential validation. All 151 runtime tests and Clippy
+pass on Rust 1.98.0. This checkpoint does not make the full repository gate
+green; the immutable Redwall gate still has failures under investigation.
+
 Remaining semantics work includes multiple failing finalizers and combined causes,
-interruption and shutdown, semaphore multi-permit acquisition, bounded
+interruption and shutdown, bounded
 concurrency, PubSub scope cleanup, and tracing of boxed heap values.
 Single-threaded execution alone does not provide atomicity across awaits.
 Do not interpret API admission or the existing sequential corpus as proof

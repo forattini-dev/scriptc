@@ -128,7 +128,7 @@ enum EffectNode {
     /// `Effect.tryPromise`: a rejection becomes the failure `recover` answers.
     TryPromise(PromiseFn, RecoverFn, TraceFn),
     /// `Deferred.await(d)` / a semaphore permit: park until the latch answers.
-    Park(Rc<RefCell<Latch>>),
+    Park(Rc<RefCell<Latch>>, f64),
     /// A queue operation that may park: `None` takes, `Some(value)` offers.
     Queue(Rc<RefCell<QueueState>>, Option<EffectValue>),
     /// `Effect.catchCause(e, f)`: the failure reaches `f` as a Cause handle.
@@ -191,7 +191,7 @@ impl Trace for EffectData {
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
             EffectNode::Log(_, parts) => tracer.edge(parts),
-            EffectNode::Sleep(_) | EffectNode::Data(_) | EffectNode::Park(_) | EffectNode::Queue(_, _) => {}
+            EffectNode::Sleep(_) | EffectNode::Data(_) | EffectNode::Park(..) | EffectNode::Queue(_, _) => {}
             EffectNode::Scoped(inner) | EffectNode::Exit(inner) => tracer.edge(inner),
             EffectNode::Tap(inner, _, trace) | EffectNode::TapError(inner, _, trace) | EffectNode::AcquireRelease(inner, _, trace) | EffectNode::AcquireUseRelease(inner, _, _, trace) => {
                 tracer.edge(inner);
@@ -679,34 +679,9 @@ enum Step {
     Await(JsPromiseHandle, Option<RecoverFn>),
     /// Suspend on a kernel LATCH — a Deferred's completion, a Semaphore's permits: either the value is already
     /// there (resume now) or the fiber joins the latch's waiter list and the completer drives it.
-    Park(Rc<RefCell<Latch>>),
+    Park(Rc<RefCell<Latch>>, f64),
     /// A queue operation: `None` takes (parking while empty), `Some(value)` offers (parking while full).
     Queue(Rc<RefCell<QueueState>>, Option<EffectValue>),
-}
-
-/// The waiting half of Deferred and Semaphore: a value once settled, and the fibers queued for it. A waiter is
-/// a callback so the two shapes (a settled outcome, a freed permit) share one queue.
-pub struct Latch {
-    settled: Option<Outcome>,
-    permits: f64,
-    waiters: VecDeque<Box<dyn FnOnce(Outcome)>>,
-}
-
-impl Latch {
-    fn new(permits: f64) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Latch { settled: None, permits, waiters: VecDeque::new() }))
-    }
-    /// Settle a Deferred: every waiting fiber resumes with the same outcome, and later awaits answer at once.
-    fn settle(&mut self, outcome: Outcome) -> bool {
-        if self.settled.is_some() {
-            return false;
-        }
-        self.settled = Some(outcome.clone());
-        for waiter in std::mem::take(&mut self.waiters) {
-            waiter(outcome.clone());
-        }
-        true
-    }
 }
 
 /// A defect (`Effect.die`, `orDie` over a failure, a rejected
@@ -799,7 +774,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::OrElseSucceed(inner, or_else, _) => Step::Push(Frame::OrElse(or_else.clone()), inner.clone()),
         EffectNode::CatchIf(inner, predicate, recover, _) => Step::Push(Frame::CatchIf(predicate.clone(), recover.clone()), inner.clone()),
         EffectNode::All(effects, collect) => Step::Collect(CollectSource::Effects(effects.clone()), collect.clone()),
-        EffectNode::Park(latch) => Step::Park(latch.clone()),
+        EffectNode::Park(latch, permits) => Step::Park(latch.clone(), *permits),
         EffectNode::Queue(queue, value) => Step::Queue(queue.clone(), value.clone()),
         EffectNode::Promise(thunk, _) => Step::Await(thunk(), None),
         EffectNode::TryPromise(thunk, recover, _) => Step::Await(thunk(), Some(recover.clone())),
@@ -886,23 +861,15 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     }
                     EffectStep::Returned(value) => Ok(value),
                 },
-                Step::Park(latch) => {
-                    // Already settled (or a permit free): resume on this turn; otherwise queue and let the
-                    // completer drive this fiber.
-                    let ready = { let mut state = latch.borrow_mut(); match state.settled.clone() { Some(outcome) => Some(outcome), None => if state.permits >= 1.0 { state.permits -= 1.0; Some(Ok(Rc::new(()) as EffectValue)) } else { None } } };
+                Step::Park(latch, permits) => {
+                    let resumed = fiber.clone();
+                    let ready = latch_park(&latch, permits, Box::new(move |outcome| {
+                        resumed.borrow_mut().resumed = Some(outcome);
+                        fiber_drive(&resumed);
+                    }));
                     match ready {
-                        Some(outcome) => {
-                            fiber.borrow_mut().resumed = Some(outcome);
-                            continue;
-                        }
-                        None => {
-                            let resumed = fiber.clone();
-                            latch.borrow_mut().waiters.push_back(Box::new(move |outcome| {
-                                resumed.borrow_mut().resumed = Some(outcome);
-                                fiber_drive(&resumed);
-                            }));
-                            return;
-                        }
+                        Some(outcome) => { fiber.borrow_mut().resumed = Some(outcome); continue; }
+                        None => return,
                     }
                 }
                 Step::Queue(queue, value) => {

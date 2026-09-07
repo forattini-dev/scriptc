@@ -14,7 +14,7 @@ pub fn effect_deferred_make() -> JsEffect {
 
 /// `Deferred.await(d)`: park until the latch settles (a failure resumes as this fiber's failure).
 pub fn effect_deferred_await(handle: &JsEffect) -> JsEffect {
-    effect_new(EffectNode::Park(latch_of(handle, "Deferred")))
+    effect_new(EffectNode::Park(latch_of(handle, "Deferred"), 1.0))
 }
 
 /// `Deferred.succeed(d, a)` / `Deferred.fail(d, e)`: settle once — the effect answers whether THIS call did it.
@@ -22,7 +22,7 @@ pub fn effect_deferred_settle(handle: &JsEffect, value: EffectValue, ok: bool) -
     let latch = latch_of(handle, "Deferred");
     effect_sync(Rc::new(move || {
         let outcome = if ok { Ok(value.clone()) } else { Err(EffectFailure::Fail(value.clone())) };
-        effect_box(latch.borrow_mut().settle(outcome))
+        effect_box(Latch::settle(&latch, outcome))
     }), Box::new(|_| {}))
 }
 
@@ -46,34 +46,6 @@ pub fn effect_semaphore_with_permits(handle: &JsEffect, permits: f64, body: &JsE
     let take = effect_semaphore_take(&latch, permits);
     let release = effect_semaphore_release(&latch, permits);
     effect_zip_right(&take, &effect_ensuring(body, &release))
-}
-
-fn effect_semaphore_take(latch: &Rc<RefCell<Latch>>, permits: f64) -> JsEffect {
-    // One permit per park: n permits are n parks, which is exactly effect's own fairness for a sequential runtime.
-    let mut taken = effect_new(EffectNode::Park(latch.clone()));
-    let mut remaining = permits - 1.0;
-    while remaining >= 1.0 {
-        taken = effect_zip_right(&taken, &effect_new(EffectNode::Park(latch.clone())));
-        remaining -= 1.0;
-    }
-    taken
-}
-
-fn effect_semaphore_release(latch: &Rc<RefCell<Latch>>, permits: f64) -> JsEffect {
-    let latch = latch.clone();
-    effect_sync(Rc::new(move || {
-        let mut state = latch.borrow_mut();
-        let mut freed = permits;
-        while freed >= 1.0 {
-            match state.waiters.pop_front() {
-                // A queued fiber takes the permit straight from the release (no count round-trip).
-                Some(waiter) => { drop(state); waiter(Ok(Rc::new(()) as EffectValue)); state = latch.borrow_mut(); }
-                None => state.permits += 1.0,
-            }
-            freed -= 1.0;
-        }
-        effect_box(())
-    }), Box::new(|_| {}))
 }
 
 /// A `Queue`: items with the fibers waiting to take them and the fibers waiting for room to offer. `capacity` is
