@@ -148,9 +148,11 @@ export class Ts7Host {
      * `readFile` may answer REPLACEMENT content for a real file (a
      * types-stripped package.json) and `hideFile` may shadow a real file
      * out of existence (an opted-in package's shipped .d.ts). Virtual
-     * files always win; unshadowed paths fall through to the real FS. */
+     * files always win; `fileExists` can admit compiler-owned copies of
+     * erased types. Unshadowed paths fall through to the real FS. */
     fsShadow?: {
       readFile: (path: string) => string | undefined;
+      fileExists?: (path: string) => boolean;
       hideFile: (path: string) => boolean;
     } | null;
   }) {
@@ -177,6 +179,7 @@ export class Ts7Host {
         },
         fileExists: (fileName: string) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
+          if (shadow?.fileExists?.(fileName)) return true;
           if (shadow !== null && shadow.hideFile(fileName)) return false;
           return trackedFileExists(fileName);
         },

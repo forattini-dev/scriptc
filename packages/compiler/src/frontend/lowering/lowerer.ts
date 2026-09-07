@@ -1,5 +1,6 @@
 import { fsConstantValue } from "./fs-constants.js";
 import { InternalCompilerError } from "../../errors.js";
+import { isNpmStaticTypeFile } from "../npm-static-types.js";
 import { activeRuntimeTarget, runtimeTargetIr } from "../../compat/runtime-target.js";
 import { isIslandModulePath, islandModuleReason, type ModuleTierRow } from "../tiering.js";
 /* AST + checker → IR.
@@ -8460,8 +8461,7 @@ export class Lowerer {
    * node_modules segment — shared.ts). The provenance half of the npm
    * typing rule (package types are island handles) and of the per-package
    * requires-dynamic attribution. */
-  readonly isNpmFile = (sf: ts.SourceFile): boolean =>
-    sf.isDeclarationFile &&
+  readonly isNpmFile = (sf: ts.SourceFile): boolean => sf.isDeclarationFile && !isNpmStaticTypeFile(sf.fileName) &&
     (sf.fileName.includes("/node_modules/") || workspacePackageOfPath(sf.fileName) !== null) &&
     !this.isStdlibFile(sf);
 

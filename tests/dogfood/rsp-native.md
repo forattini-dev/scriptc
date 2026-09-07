@@ -59,14 +59,61 @@ Local evidence is retained in `/tmp/scriptc-rsp-before-numeric-open.json`,
 `/tmp/scriptc-rsp-npm-auto-native-survey.json`, and the
 `/tmp/scriptc-rsp-open-*.log` validation logs.
 
+## TOON type-only exports checkpoint
+
+TOON's fallback came from erased declaration-only exports: `JsonValue`,
+`JsonObject`, `ToonlLineEmitter` and `ToonlRecord` disappeared when static
+resolution hid its `.d.ts`. The ESM bridge now appends JSDoc type aliases
+that reference compiler-owned, in-memory declaration copies. It preserves
+the runtime JavaScript's inferred signatures and original source offsets.
+Only those registered copies receive structural type lowering; an arbitrary
+declaration filename does not bypass the npm engine boundary.
+
+This first slice supports self-contained, directly exported, non-generic
+interfaces and type aliases, including recursion, merged interfaces and
+interface inheritance. Exact package exports, legacy main/types mappings,
+internal declaration siblings and workspace symlinks are covered. Declared
+functions, classes and variables do not become runtime exports. Declaration
+imports/reexports, generic exports, runtime export-star barrels, nested or
+pattern-based type mappings and ambiguous type surfaces remain unsupported.
+Names already mentioned by the implementation or its JSDoc are preserved.
+All declaration reads are tracked for cache invalidation, with state reset
+between loads; no consumer or installed package files are rewritten.
+
+The original RSP survey now admits `@reddb-io/toon` as static. It reaches
+1,374 statements versus 696 before this step, with 206 failed statements
+and 202 diagnostics. The unchanged diagnostic total includes newly reached
+failures, so it is not a count of independent blockers removed. The reached
+analysis contains zero island statements; that still does not establish a
+successful native build. SDK remains in fallback, and `cli-args-parser`
+remains outside auto admission. Reached TOON implementation diagnostics now
+include an optional Error message; consumer sites also expose recursive JSON
+record-coercion gaps.
+
+Validation: 51 focused tests pass across npm-static regression coverage,
+input tracking and the new type bridge. A subsequent focused sanitized run
+passes 45 tests, including four additional admission cases and C/LLVM
+Node differential executions (the Rust case was already verified in the
+plain run). The native fixture covers records, `Readonly`, intersections
+and recursive records; stdout, stderr and exit status match Node in Rust,
+C and LLVM with `allowEngine: false`. Workspace build and source-size
+checks pass; focused ESLint reports zero errors and 124 warnings in the selected files.
+The full repository gate has not been rerun for this checkpoint.
+
+Evidence: `/tmp/scriptc-rsp-before-toon-types.json`,
+`/tmp/scriptc-rsp-after-toon-types.json`,
+`/tmp/scriptc-rsp-preflight-before-toon-types.json`, and
+`/tmp/scriptc-toon-types-*.log`. The failing regression before implementation
+is retained in `/tmp/scriptc-toon-types-before.log`.
+
 ## Next acceptance work
 
-1. Reproduce the TOON/SDK export-surface fallbacks and native admission of
-   the transitive CLI parser; repair the causes before changing fallback policy.
+1. Admit the transitive CLI parser and repair the SDK export-surface fallback;
+   preserve honest fallback for unsupported declaration graphs.
 2. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.
-3. Address generic flag-schema records, Promise payload widening and typed
-   ChildProcess values crossing unknown boundaries, guided by consumer diagnostics.
+3. Address recursive JSON and generic flag-schema record coercions, Promise
+   payload widening and typed ChildProcess values crossing unknown boundaries.
 4. Fill the remaining Node API gaps, including appendFileSync options.
 5. Compile the original entrypoint and run real CLI contracts for usage/errors,
    passthrough stdout/stderr/exit behavior, then resident/store operations in

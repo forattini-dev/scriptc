@@ -22,6 +22,9 @@ const TS5_ISLANDS = [
   // BEFORE the 7.0.2 program reads the file — a text→text parser island
   // beside cjs-lexer.ts (only strings cross its boundary).
   "packages/compiler/src/frontend/npm-static-rewrite.ts",
+  // Type-only ESM bridge: parses declaration text, emits JSDoc text; no
+  // parser nodes or enums cross into the checker/lowering world.
+  "packages/compiler/src/frontend/npm-static-types.ts",
   // Semantic cache validation parses source text only to identify exact
   // regex spans and syntax errors; its boundary is strings, offsets, and
   // booleans, so no 5.9.3 AST value enters the 7.0.2 program world.

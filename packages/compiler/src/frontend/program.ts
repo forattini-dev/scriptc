@@ -575,11 +575,11 @@ export function loadProgram(
   // Two fs shadows compose: --npm-static's per-package hiding, and the
   // always-on project declaration-TWIN hiding (a .d.ts beside runtime JS
   // outside node_modules — the classic typed-JS-library entry — must not exist for
-  // the checker, so its resolution lands on the JS Node actually loads;
-  // resolve.ts answers the same sibling for scriptc's own edges).
+  // the checker; resolve.ts answers the same runtime sibling).
   const npmShadow = npmStaticFsShadow();
   const fsShadow = {
     readFile: (path: string) => npmShadow?.readFile(path),
+    fileExists: (path: string) => npmShadow?.fileExists(path) ?? false,
     hideFile: (path: string) =>
       (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
   };

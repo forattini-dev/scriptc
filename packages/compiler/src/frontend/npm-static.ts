@@ -11,7 +11,9 @@
  * silent trust). The .d.ts is deliberately DROPPED from the opted-in
  * package's resolution: a declaration is a CLAIM about the body, and the
  * compiled artifact must be built from what the body provably is, not
- * from what the declaration says it should be. Program-side use sites
+ * from what the declaration says it should be. Self-contained type-only
+ * exports can return through npm-static-types.ts's JSDoc bridge, without
+ * replacing executable signatures. Program-side use sites
  * therefore typecheck against the INFERRED export surface; where the
  * package's own JSDoc (usually written against that same .d.ts) types a
  * boundary, the declared types flow in through inference and the runtime
@@ -56,6 +58,7 @@
 
 import { dirname } from "node:path";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
+import { NpmStaticTypeBridge, resetNpmStaticTypes } from "./npm-static-types.js";
 import { isTsSourceFileName, npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./shared.js";
 import { trackedExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
@@ -74,6 +77,7 @@ export function setNpmStaticPackages(packages: Iterable<string>): void {
   activePackages = new Set(packages);
   offenders.clear();
   rewriteCache.clear();
+  resetNpmStaticTypes();
   untypedPkgCache.clear();
   realpathProbed.clear();
 }
@@ -325,6 +329,8 @@ export interface NpmStaticFsShadow {
   /** Shadowed CONTENT for a real path (the types-stripped package.json),
    * or undefined (no shadow — fall through). */
   readFile: (path: string) => string | undefined;
+  /** Compiler-owned declaration copies, separate from runtime resolution. */
+  fileExists: (path: string) => boolean;
   /** True when the path must not exist for the type-checker's resolution
    * (an opted-in package's shipped .d.ts, or its @types twin whole). */
   hideFile: (path: string) => boolean;
@@ -334,8 +340,12 @@ export interface NpmStaticFsShadow {
  * flag is off, so flagless compiles keep the exact host behavior. */
 export function npmStaticFsShadow(): NpmStaticFsShadow | null {
   if (!npmStaticActive()) return null;
+  const types = new NpmStaticTypeBridge();
   return {
+    fileExists: (path) => types.fileExists(path),
     readFile: (path) => {
+      const virtual = types.readFile(path);
+      if (virtual !== undefined) return virtual;
       const target = shadowTargetOf(path);
       /* NON-OPTED node_modules JS: maxNodeModuleJsDepth (set only on
        * --npm-static loads) admits third-party JS the flagless build never
@@ -376,7 +386,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
       // recognizers cannot finish) marks the PACKAGE an offender with the
       // reason — the fallback loop islands it, never a failed build — and
       // the file serves untouched for the doomed load.
-      if (path.endsWith(".js") || path.endsWith(".cjs")) {
+      if (path.endsWith(".js") || path.endsWith(".cjs") || path.endsWith(".mjs")) {
         const hit = rewriteCache.get(path);
         if (hit !== undefined) return hit ?? undefined;
         let rewritten: string | null = null;
@@ -387,7 +397,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
             if (answer !== null && typeof answer === "object") {
               reportNpmStaticOffender(target.pkg, answer.degrade);
             } else {
-              rewritten = answer;
+              rewritten = path.endsWith(".cjs") ? answer : types.append(path, answer ?? source, target.pkg);
             }
           }
         } catch {
@@ -399,6 +409,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
       return undefined;
     },
     hideFile: (path) => {
+      if (types.fileExists(path)) return false;
       const target = shadowTargetOf(path);
       if (!target) return false;
       if (target.viaTypes) return true; // the @types twin hides whole

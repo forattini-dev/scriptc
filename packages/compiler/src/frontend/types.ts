@@ -3,7 +3,7 @@ import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelS
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
-
+import { isNpmStaticTypeFile } from "./npm-static-types.js";
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
 import { accessorSlotProp } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
@@ -1072,7 +1072,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     npmDecls.length > 0 &&
     npmDecls.every((d) => {
       const sf = d.getSourceFile();
-      return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
+      return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
     }) &&
     (ctx.dynamic || !npmDecls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName)))
   ) {
@@ -1098,7 +1098,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           if (!ctx.dynamic && decls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName))) return false; // kernel: structural
           return decls.every((d) => {
             const sf = d.getSourceFile();
-            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
           });
         }
       }
@@ -1109,7 +1109,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return decls.length > 0 &&
           decls.every((d) => {
             const sf = d.getSourceFile();
-            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf)) || ctx.isIslandModuleFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
           });
       });
     };
@@ -3430,7 +3430,7 @@ function recordProvenanceOk(t: ts.Type, ctx: TypeMapperCtx): boolean {
   if (!decls || decls.length === 0) return false;
   return !decls.some((d) => {
     const sf = d.getSourceFile();
-    return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf);
+    return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
   });
 }
 
@@ -3732,7 +3732,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         computed &&
         checker.declarationsOf(p).some((d) => {
           const sf = d.getSourceFile();
-          return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf);
+          return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
         })
       ) {
         return null;
@@ -4051,7 +4051,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       computed &&
       checker.declarationsOf(p).some((d) => {
         const sf = d.getSourceFile();
-        return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf);
+        return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
       })
     ) {
       return null;
