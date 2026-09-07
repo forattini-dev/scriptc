@@ -66,24 +66,9 @@ beforeAll(async () => {
     proxyUrl.replace("http://", "http://proxy-user:proxy-pass@");
   secureAuthenticatedProxyUrl =
     secureProxyUrl.replace("https://", "https://proxy-user:proxy-pass@");
-
-  // Every child below inherits POISONED proxy env pointing at the refused
-  // port: Node's fetch ignores http_proxy/https_proxy without the
-  // NODE_USE_ENV_PROXY=1 opt-in, and the embedded runtime must match
-  // (libcurl's default is to honor them) — so every case in this file
-  // doubles as the regression test for that parity, and any fixture that
-  // DID consult the env would fail loudly instead of leaving the machine.
-  process.env["http_proxy"] = refusedUrl;
-  process.env["https_proxy"] = refusedUrl;
-  process.env["HTTP_PROXY"] = refusedUrl;
-  process.env["HTTPS_PROXY"] = refusedUrl;
 });
 
 afterAll(async () => {
-  delete process.env["http_proxy"];
-  delete process.env["https_proxy"];
-  delete process.env["HTTP_PROXY"];
-  delete process.env["HTTPS_PROXY"];
   await servers.close();
 });
 
@@ -95,10 +80,23 @@ interface RunResult {
   exitCode: number;
 }
 
+function fixtureEnv(): NodeJS.ProcessEnv {
+  // Only the executed programs inherit the refused proxy. Cargo and other
+  // build tools must retain the host environment for dependency downloads.
+  // Without NODE_USE_ENV_PROXY, Node and the native runtime must ignore it.
+  return {
+    ...process.env,
+    http_proxy: refusedUrl,
+    https_proxy: refusedUrl,
+    HTTP_PROXY: refusedUrl,
+    HTTPS_PROXY: refusedUrl,
+  };
+}
+
 async function runBinary(
   cmd: string,
   args: string[],
-  env?: NodeJS.ProcessEnv,
+  env: NodeJS.ProcessEnv = fixtureEnv(),
   timeout?: number,
 ): Promise<RunResult> {
   try {
@@ -162,7 +160,7 @@ test.skipIf(sanitize)("Rust dynamic fetch remains callable when injected as a va
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -176,7 +174,7 @@ test.skipIf(sanitize)("Rust dynamic Headers.getSetCookie returns the response co
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -191,7 +189,7 @@ test.skipIf(sanitize)("Rust dynamic Headers.forEach normalizes response fields",
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -206,7 +204,7 @@ test.skipIf(sanitize)("Rust dynamic Headers iterator normalizes response fields"
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -221,7 +219,7 @@ test.skipIf(sanitize)("Rust dynamic fetch accepts a constructed Request", async 
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -236,7 +234,7 @@ test.skipIf(sanitize)("Rust dynamic fetch applies a constructed RequestInit", as
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -251,7 +249,7 @@ test.skipIf(sanitize)("Rust dynamic fetch rejects a pre-aborted signal", async (
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -266,7 +264,7 @@ test.skipIf(sanitize)("Rust dynamic AbortController rejects fetch after abort", 
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -281,7 +279,7 @@ test.skipIf(sanitize)("Rust dynamic AbortSignal.timeout aborts asynchronously", 
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -296,7 +294,7 @@ test.skipIf(sanitize)("Rust dynamic AbortSignal.any adopts the first abort", asy
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry]),
     runBinary(binary, [], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -311,7 +309,7 @@ test.skipIf(sanitize)("Rust dynamic AbortSignal.any respects pre-aborted iterabl
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry]),
     runBinary(binary, [], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -326,7 +324,7 @@ test.skipIf(sanitize)("Rust dynamic AbortController notifies abort listeners", a
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -341,7 +339,7 @@ test.skipIf(sanitize)("Rust dynamic fetch rejects when timeout fires in flight",
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -355,7 +353,7 @@ test.skipIf(sanitize)("Rust dynamic abort closes the in-flight host transport", 
   const binary = await build(entry, "rust", "dev");
   const nodeRes = await runBinary(oracleExecutable, [entry, baseUrl]);
   const nativeRes = await runBinary(binary, [baseUrl], {
-    ...process.env,
+    ...fixtureEnv(),
     SCRIPTC_RUST_HEAP_AUDIT: "1",
   });
   expect(nativeRes.exitCode, nativeRes.stderr.toString("utf8")).toBe(nodeRes.exitCode);
@@ -369,7 +367,7 @@ test.skipIf(sanitize)("Rust dynamic fetch inherits a Request dependent signal", 
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, baseUrl]),
     runBinary(binary, [baseUrl], {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -385,7 +383,7 @@ test.skipIf(sanitize)("Rust dynamic fetch matches the package fetch suite", asyn
   const [nodeRes, nativeRes] = await Promise.all([
     runBinary(oracleExecutable, [entry, ...argv]),
     runBinary(binary, argv, {
-      ...process.env,
+      ...fixtureEnv(),
       SCRIPTC_RUST_HEAP_AUDIT: "1",
     }),
   ]);
@@ -507,7 +505,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
         const binary = await buildStatic(entry, backend, "https-extra-ca");
         const argv = [`https://localhost:${address.port}`];
         const env = {
-          ...process.env,
+          ...fixtureEnv(),
           NODE_EXTRA_CA_CERTS: join(certs, "ca.pem"),
         };
         const [nodeRes, nativeRes] = await Promise.all([
@@ -565,7 +563,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
           `https://localhost:${address.port}`,
           join(certs, "ca.pem"),
         ];
-        const env: NodeJS.ProcessEnv = { ...process.env };
+        const env: NodeJS.ProcessEnv = { ...fixtureEnv() };
         for (const key of [
           "NODE_USE_ENV_PROXY",
           "NODE_EXTRA_CA_CERTS",
@@ -621,7 +619,7 @@ describe(`static fetch differential${sanitize ? " (sanitized)" : ""}`, () => {
         const binary = await buildStatic(entry, backend, "ipv6");
         const argv = [`http://[::1]:${address.port}`];
         const env = {
-          ...process.env,
+          ...fixtureEnv(),
           NODE_USE_ENV_PROXY: "1",
           http_proxy: proxyUrl,
           HTTP_PROXY: proxyUrl,
@@ -765,7 +763,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
     async (proxyVariable) => {
       const entry = join(fixturesRoot, "vercel-env-proxy/main.mts");
       const binary = await build(entry);
-      const env: NodeJS.ProcessEnv = { ...process.env };
+      const env: NodeJS.ProcessEnv = { ...fixtureEnv() };
       for (const key of [
         "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
         "all_proxy", "ALL_PROXY", "NODE_USE_ENV_PROXY",
@@ -793,7 +791,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
     const binary = await build(entry);
     const argv = [baseUrl, refusedUrl];
     const env = {
-      ...process.env,
+      ...fixtureEnv(),
       NODE_USE_ENV_PROXY: "1",
       http_proxy: authenticatedProxyUrl,
       HTTP_PROXY: authenticatedProxyUrl,
@@ -821,7 +819,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
       const entry = join(fixturesRoot, "static-proxy/main.mts");
       const binary = await buildStatic(entry, backend, "proxy-optin");
       const env = {
-        ...process.env,
+        ...fixtureEnv(),
         NODE_USE_ENV_PROXY: "1",
         http_proxy: authenticatedProxyUrl,
         HTTP_PROXY: authenticatedProxyUrl,
@@ -854,7 +852,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
           ? await build(entry)
           : await buildStatic(entry, lane, "proxy-https");
       const env = {
-        ...process.env,
+        ...fixtureEnv(),
         NODE_EXTRA_CA_CERTS: join(
           fixturesRoot,
           "../server/certs/ca.pem",
@@ -917,7 +915,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
         ]);
         const argv = [`https://localhost:${address.port}`];
         const env = {
-          ...process.env,
+          ...fixtureEnv(),
           NODE_EXTRA_CA_CERTS: join(certs, "ca.pem"),
           NODE_USE_ENV_PROXY: "1",
           https_proxy: refusedUrl,
@@ -954,7 +952,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
           ? await build(entry)
           : await buildStatic(entry, lane, "proxy-invalid");
       const env = {
-        ...process.env,
+        ...fixtureEnv(),
         NODE_USE_ENV_PROXY: "1",
         http_proxy: "not a valid proxy URL",
         HTTP_PROXY: "not a valid proxy URL",
@@ -977,7 +975,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
     const binary = await build(entry);
     const argv = ["http://sub.example.invalid", refusedUrl];
     const env = {
-      ...process.env,
+      ...fixtureEnv(),
       NODE_USE_ENV_PROXY: "1",
       http_proxy: proxyUrl,
       HTTP_PROXY: proxyUrl,
@@ -1003,7 +1001,7 @@ describe(`proxy env opt-in (NODE_USE_ENV_PROXY${sanitize ? ", sanitized" : ""})`
       const binary = await buildStatic(entry, backend, "proxy-wildcard");
       const argv = ["http://sub.example.invalid/path"];
       const env = {
-        ...process.env,
+        ...fixtureEnv(),
         NODE_USE_ENV_PROXY: "1",
         http_proxy: proxyUrl,
         HTTP_PROXY: proxyUrl,
@@ -1053,7 +1051,7 @@ test(`dynamic fetch runtime fences computed unsupported RequestInit${sanitize ? 
   const entry = join(fixturesRoot, "unsupported-init-dynamic/main.mts");
   const binary = await build(entry);
   const result = await runBinary(binary, [], {
-    ...process.env,
+    ...fixtureEnv(),
     NODE_USE_ENV_PROXY: "1",
   });
   expect(result.stdout.toString("utf8")).toBe(
