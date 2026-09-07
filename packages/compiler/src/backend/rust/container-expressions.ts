@@ -9,7 +9,7 @@ export interface RustContainerExpressionContext {
   mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string;
   mapStoredKey(value: string, type: IrType): string;
   dynTypeName(): string;
-  rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string;
+  rustBytesElement(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string;
   isUnit(type: IrType): boolean;
   union(id: string, loc?: SrcLoc): IrUnionDef;
   unionName(id: string): string;

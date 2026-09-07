@@ -1065,7 +1065,7 @@ class RustEmitter {
     return this.valueEmitter.localIsBoxed(local);
   }
 
-  private rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
+  private rustBytesElement(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string {
     return this.valueEmitter.rustBytesElement(elem);
   }
 

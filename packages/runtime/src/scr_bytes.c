@@ -26,7 +26,7 @@ static void scr_bytes_oom(void) {
 }
 
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
-  return elem == SCR_BYTES_U8 ? 1 : 4;
+  return elem == SCR_BYTES_U8 ? 1 : elem == SCR_BYTES_F64 ? 8 : 4;
 }
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
@@ -144,6 +144,11 @@ double scr_bytes_get(const ScrBytes *b, double i) {
       memcpy(&v, b->data + idx * 4, 4);
       return (double)v;
     }
+    case SCR_BYTES_F64: {
+      double v;
+      memcpy(&v, b->data + idx * 8, 8);
+      return v;
+    }
     case SCR_BYTES_F32: {
       float v;
       memcpy(&v, b->data + idx * 4, 4);
@@ -169,6 +174,9 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       memcpy(b->data + idx * 4, &u, 4);
       break;
     }
+    case SCR_BYTES_F64:
+      memcpy(b->data + idx * 8, &v, 8);
+      break;
     case SCR_BYTES_F32: {
       float f = (float)v; /* round-to-nearest-even, exactly Float32Array */
       memcpy(b->data + idx * 4, &f, 4);
@@ -1598,6 +1606,9 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
         memcpy(b->data + i * 4, &u, 4);
         break;
       }
+      case SCR_BYTES_F64:
+        memcpy(b->data + i * 8, &v, 8);
+        break;
       case SCR_BYTES_F32: {
         float f = (float)v;
         memcpy(b->data + i * 4, &f, 4);

@@ -5292,14 +5292,13 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
 
 /* ── typed arrays / Buffer ─────────────────────────────────────────────── */
 
-/** The typed-array constructors with a runtime representation, by lib
- * interface name. The other TypedArray flavors (Int8Array, Float64Array,
- * DataView, ...) fall through to the generic stdlib-constructor fence. */
+/** Typed-array constructors with a native runtime representation. */
 const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Uint8Array: "u8",
   Uint32Array: "u32",
   Int32Array: "i32",
   Float32Array: "f32",
+  Float64Array: "f64",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`
@@ -5360,7 +5359,7 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
               "erases into the view): drop the options bag",
           );
         }
-        const elemSize = elem === "u8" ? 1 : 4;
+        const elemSize = elem === "u8" ? 1 : elem === "f64" ? 8 : 4;
         const lenArg = argNode.arguments?.length === 1 ? argNode.arguments[0] : undefined;
         const lenT = lenArg ? L.typeOf(lenArg) : null;
         const byteLen = lenT?.isNumberLiteralType() ? lenT.value : null;

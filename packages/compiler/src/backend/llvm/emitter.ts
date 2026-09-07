@@ -974,8 +974,8 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   "timers.queueMicrotaskDyn", "timers.setImmediateFnValue", "timers.immediatePromise",
 ]);
 
-/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32. */
-const BYTES_ELEM_NUM: Record<"u8" | "u32" | "f32" | "i32", number> = { u8: 0, u32: 1, f32: 2, i32: 3 };
+/** ScrBytesElem (scr_runtime.h): U8, U32, F32, I32, F64. */
+const BYTES_ELEM_NUM: Record<IrBytesElem, number> = { u8: 0, u32: 1, f32: 2, i32: 3, f64: 4 };
 
 /** ScrBytesNumKind + littleEndian per readNum/writeNum kind token —
  * emit-types.ts's BYTES_NUM_KIND_C with the enum values spelled out
@@ -10819,7 +10819,7 @@ class LlEmitter {
     B.line(`${p} = getelementptr inbounds %ScrBytes, ptr ${receiver}, i64 0, i32 1`);
     B.line(`${len} = load ${this.sizeType}, ptr ${p}`);
     const count = bytes && elem !== "u8" ? B.tmp() : len;
-    if (count !== len) B.line(`${count} = shl ${this.sizeType} ${len}, 2`);
+    if (count !== len) B.line(`${count} = shl ${this.sizeType} ${len}, ${elem === "f64" ? 3 : 2}`);
     const out = B.tmp();
     B.line(`${out} = uitofp ${this.sizeType} ${count} to double`);
     return { name: out, type: F64 };
@@ -10841,13 +10841,13 @@ class LlEmitter {
       B.line(`${out} = uitofp i32 ${wide} to double`);
       return { name: out, type: F64 };
     }
-    if (elem === "f32") {
+    if (elem === "f32" || elem === "f64") {
       const raw = B.tmp();
       const out = B.tmp();
-      B.line(`${p} = getelementptr inbounds float, ptr ${data}, ${this.sizeType} ${idx}`);
-      B.line(`${raw} = load float, ptr ${p}, align 1`);
-      B.line(`${out} = fpext float ${raw} to double`);
-      return { name: out, type: F64 };
+      B.line(`${p} = getelementptr inbounds ${elem === "f64" ? "double" : "float"}, ptr ${data}, ${this.sizeType} ${idx}`);
+      B.line(`${raw} = load ${elem === "f64" ? "double" : "float"}, ptr ${p}, align 1`);
+      if (elem === "f32") B.line(`${out} = fpext float ${raw} to double`);
+      return { name: elem === "f64" ? raw : out, type: F64 };
     }
     const raw = B.tmp();
     const out = B.tmp();
@@ -10932,7 +10932,7 @@ class LlEmitter {
   private emitBytesSet(elem: IrBytesElem, receiver: string, index: string, value: string, integerIndex = false): void {
     const B = this.B;
     const idx = this.emitBytesIndex(receiver, index, integerIndex);
-    const stored = elem === "f32" ? null : this.emitBytesU32(value);
+    const stored = elem === "f32" || elem === "f64" ? null : this.emitBytesU32(value);
     const data = this.emitBytesData(receiver);
     const p = B.tmp();
     if (elem === "u8") {
@@ -10942,11 +10942,11 @@ class LlEmitter {
       B.line(`store i8 ${byte}, ptr ${p}, align 1`);
       return;
     }
-    if (elem === "f32") {
+    if (elem === "f32" || elem === "f64") {
       const narrowed = B.tmp();
-      B.line(`${narrowed} = fptrunc double ${value} to float`);
-      B.line(`${p} = getelementptr inbounds float, ptr ${data}, ${this.sizeType} ${idx}`);
-      B.line(`store float ${narrowed}, ptr ${p}, align 1`);
+      if (elem === "f32") B.line(`${narrowed} = fptrunc double ${value} to float`);
+      B.line(`${p} = getelementptr inbounds ${elem === "f64" ? "double" : "float"}, ptr ${data}, ${this.sizeType} ${idx}`);
+      B.line(`store ${elem === "f64" ? `double ${value}` : `float ${narrowed}`}, ptr ${p}, align 1`);
       return;
     }
     B.line(`${p} = getelementptr inbounds i32, ptr ${data}, ${this.sizeType} ${idx}`);

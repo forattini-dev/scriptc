@@ -323,8 +323,8 @@ export function elemKindC(elem: IrType): string {
 }
 
 /** The runtime's element-kind tag for a bytes (typed array) type. */
-export function bytesElemKindC(elem: "u8" | "u32" | "i32" | "f32"): string {
-  return elem === "u8" ? "SCR_BYTES_U8" : elem === "u32" ? "SCR_BYTES_U32" : elem === "i32" ? "SCR_BYTES_I32" : "SCR_BYTES_F32";
+export function bytesElemKindC(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string {
+  return elem === "u8" ? "SCR_BYTES_U8" : elem === "u32" ? "SCR_BYTES_U32" : elem === "i32" ? "SCR_BYTES_I32" : elem === "f32" ? "SCR_BYTES_F32" : "SCR_BYTES_F64";
 }
 
 /** The runtime's ScrBytesNumKind tag + littleEndian flag per readNum/

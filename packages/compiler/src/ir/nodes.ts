@@ -26,9 +26,9 @@ export interface SrcLoc {
 
 /** The typed-array element kinds with a runtime representation: exactly
  * the constructors real CLI code reaches (Uint8Array/Buffer, Uint32Array,
- * Int32Array — the Atomics.wait sleep idiom's array — Float32Array). The
+ * Int32Array — the Atomics.wait sleep idiom's array — Float32Array/Float64Array). The
  * other TypedArray flavors stay frontend-fenced. */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32";
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64";
 
 export type IrType =
   | { kind: "f64" }
@@ -65,7 +65,7 @@ export type IrType =
    * elements, no map keys/values, no union arms (a regex arm would have no
    * narrowing test), not JSON-safe. */
   | { kind: "regex" }
-  /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array;
+  /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array/Float64Array;
    * Buffer IS a Uint8Array subclass and shares the u8 kind) — heap,
    * refcounted, MUTABLE, fixed-length, with ONE runtime representation
    * (ScrBytes) that OWNS its storage: no views exist — subarray()/slice()

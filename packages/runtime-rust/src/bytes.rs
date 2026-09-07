@@ -11,6 +11,7 @@ pub enum ByteBacking {
     U32(Rc<RefCell<Vec<u32>>>),
     I32(Rc<RefCell<Vec<i32>>>),
     F32(Rc<RefCell<Vec<f32>>>),
+    F64(Rc<RefCell<Vec<f64>>>),
 }
 
 impl ByteBacking {
@@ -20,6 +21,7 @@ impl ByteBacking {
             Self::U32(storage) => storage.borrow().len() * 4,
             Self::I32(storage) => storage.borrow().len() * 4,
             Self::F32(storage) => storage.borrow().len() * 4,
+            Self::F64(storage) => storage.borrow().len() * 8,
         }
     }
 
@@ -31,6 +33,7 @@ impl ByteBacking {
             Self::U32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
             Self::I32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
             Self::F32(storage) => storage.borrow()[element].to_ne_bytes()[byte],
+            Self::F64(storage) => storage.borrow()[index / 8].to_ne_bytes()[index % 8],
         }
     }
 
@@ -56,6 +59,12 @@ impl ByteBacking {
                 let mut bytes = storage[element].to_ne_bytes();
                 bytes[byte] = value;
                 storage[element] = f32::from_ne_bytes(bytes);
+            }
+            Self::F64(storage) => {
+                let mut storage = storage.borrow_mut();
+                let mut bytes = storage[index / 8].to_ne_bytes();
+                bytes[index % 8] = value;
+                storage[index / 8] = f64::from_ne_bytes(bytes);
             }
         }
     }
@@ -121,6 +130,21 @@ impl ByteElement for f32 {
     }
 }
 
+impl ByteElement for f64 {
+    fn from_number(value: f64) -> Self {
+        value
+    }
+    fn to_number(self) -> f64 {
+        self
+    }
+    fn same_bits(self, other: Self) -> bool {
+        self.to_bits() == other.to_bits()
+    }
+    fn byte_backing(storage: &Rc<RefCell<Vec<Self>>>) -> ByteBacking {
+        ByteBacking::F64(storage.clone())
+    }
+}
+
 pub struct BytesData<T: ByteElement> {
     storage: Rc<RefCell<Vec<T>>>,
     backing: Option<ByteBacking>,
@@ -154,6 +178,7 @@ pub enum JsTypedBytes {
     U32(JsBytes<u32>),
     I32(JsBytes<i32>),
     F32(JsBytes<f32>),
+    F64(JsBytes<f64>),
 }
 
 macro_rules! with_typed_bytes {
@@ -162,6 +187,7 @@ macro_rules! with_typed_bytes {
             JsTypedBytes::U32($bytes) => $body,
             JsTypedBytes::I32($bytes) => $body,
             JsTypedBytes::F32($bytes) => $body,
+            JsTypedBytes::F64($bytes) => $body,
         }
     };
 }
@@ -176,6 +202,10 @@ pub fn typed_bytes_i32_copy(value: &JsBytes<i32>) -> JsTypedBytes {
 
 pub fn typed_bytes_f32_copy(value: &JsBytes<f32>) -> JsTypedBytes {
     JsTypedBytes::F32(bytes_copy(value))
+}
+
+pub fn typed_bytes_f64_copy(value: &JsBytes<f64>) -> JsTypedBytes {
+    JsTypedBytes::F64(bytes_copy(value))
 }
 
 pub fn typed_bytes_trace(value: &JsTypedBytes, tracer: &mut Tracer<'_>) {
@@ -203,6 +233,7 @@ pub fn typed_bytes_name(value: &JsTypedBytes) -> &'static str {
         JsTypedBytes::U32(_) => "Uint32Array",
         JsTypedBytes::I32(_) => "Int32Array",
         JsTypedBytes::F32(_) => "Float32Array",
+        JsTypedBytes::F64(_) => "Float64Array",
     }
 }
 
@@ -215,6 +246,7 @@ pub fn typed_bytes_copy(value: &JsTypedBytes) -> JsTypedBytes {
         JsTypedBytes::U32(value) => typed_bytes_u32_copy(value),
         JsTypedBytes::I32(value) => typed_bytes_i32_copy(value),
         JsTypedBytes::F32(value) => typed_bytes_f32_copy(value),
+        JsTypedBytes::F64(value) => typed_bytes_f64_copy(value),
     }
 }
 
@@ -223,6 +255,7 @@ pub fn typed_bytes_slice(value: &JsTypedBytes, start: f64, end: f64) -> JsTypedB
         JsTypedBytes::U32(value) => JsTypedBytes::U32(bytes_slice(value, start, end, false)),
         JsTypedBytes::I32(value) => JsTypedBytes::I32(bytes_slice(value, start, end, false)),
         JsTypedBytes::F32(value) => JsTypedBytes::F32(bytes_slice(value, start, end, false)),
+        JsTypedBytes::F64(value) => JsTypedBytes::F64(bytes_slice(value, start, end, false)),
     }
 }
 
@@ -231,6 +264,7 @@ pub fn typed_bytes_ptr_eq(left: &JsTypedBytes, right: &JsTypedBytes) -> bool {
         (JsTypedBytes::U32(left), JsTypedBytes::U32(right)) => left.ptr_eq(right),
         (JsTypedBytes::I32(left), JsTypedBytes::I32(right)) => left.ptr_eq(right),
         (JsTypedBytes::F32(left), JsTypedBytes::F32(right)) => left.ptr_eq(right),
+        (JsTypedBytes::F64(left), JsTypedBytes::F64(right)) => left.ptr_eq(right),
         _ => false,
     }
 }
@@ -240,6 +274,7 @@ pub fn typed_bytes_deep_equals(left: &JsTypedBytes, right: &JsTypedBytes) -> boo
         (JsTypedBytes::U32(left), JsTypedBytes::U32(right)) => bytes_deep_equals(left, right),
         (JsTypedBytes::I32(left), JsTypedBytes::I32(right)) => bytes_deep_equals(left, right),
         (JsTypedBytes::F32(left), JsTypedBytes::F32(right)) => bytes_deep_equals(left, right),
+        (JsTypedBytes::F64(left), JsTypedBytes::F64(right)) => bytes_deep_equals(left, right),
         _ => false,
     }
 }

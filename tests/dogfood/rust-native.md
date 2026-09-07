@@ -66,3 +66,26 @@ Known limits relevant to subsequent work:
   can remove that periodic wakeup in a later measured event-loop change.
 - Broader Fetch conformance, including redirects and HTTPS, needs separate
   coverage beyond the sidecar's loopback/manual-redirect contracts.
+
+The first Redwall compatibility slice adds Float64Array throughout the IR,
+frontend, C/LLVM/Rust emitters and both runtimes. Eight-byte backing views
+retain shared storage and full f64 precision. The focused C and LLVM
+Node/native differential checks passed; the Rust differential is pending.
+All 149 Rust runtime tests and Clippy passed on 1.98.0. Compiler/CLI builds
+and lint passed. Re-analysis of the unchanged renderer reaches 755
+statements with 11 diagnostics; it still does not compile end to end.
+
+`scripts/native-benchmark.mjs` measures fresh Linux processes with GNU time.
+Pass `--spec cases.json --out results --runs 7 --warmup 2`. The spec contains
+`cases: [{name, command: [absoluteExecutable, ...args], cwd, artifacts: []}]`
+and optional `inputs: [sourceOrAssetPaths]`. Paths are relative to the spec,
+except artifacts are relative to each case's cwd. All candidates and warmups
+must produce identical stdout, stderr, exit status, and artifact bytes.
+Artifacts must be refreshed each run. An optional case `acceptance` path
+checks the executable hash against an engine-free native-acceptance report.
+The report records raw samples, executable/input hashes, CPU seconds, peak
+RSS in KiB, elapsed time, and min/median/max excluding warmups. Run under the
+same resource limits on an otherwise idle host; elapsed time includes launch
+cost and reflects any cgroup throttling. Four harness tests cover equivalent
+runs, output mismatch, artifact mismatch/staleness, and command failure.
+No consumer performance measurements have been recorded with this tool yet.

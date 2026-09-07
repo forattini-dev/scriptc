@@ -1763,7 +1763,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             return E.newTemp(
               e.type,
-              `(double)(${r.name}->len * ${e.receiver.type.elem === "u8" ? "1" : "4"})`,
+              `(double)(${r.name}->len * ${e.receiver.type.elem === "u8" ? "1" : e.receiver.type.elem === "f64" ? "8" : "4"})`,
             );
           case "get":
             // Any invalid index traps (the array runtime's discipline).

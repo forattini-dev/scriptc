@@ -433,7 +433,7 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     case "bytes":
       // The u8 kind reads as Uint8Array (Buffer maps here too — one
       // runtime representation; the message stays honest either way).
-      return t.elem === "u8" ? "Uint8Array" : t.elem === "u32" ? "Uint32Array" : t.elem === "i32" ? "Int32Array" : "Float32Array";
+      return t.elem === "u8" ? "Uint8Array" : t.elem === "u32" ? "Uint32Array" : t.elem === "i32" ? "Int32Array" : t.elem === "f32" ? "Float32Array" : "Float64Array";
     case "map":
       return `Map<${formatIrType(t.key, shapes, unions, seen)}, ${formatIrType(t.value, shapes, unions, seen)}>`;
     case "set":
@@ -1746,12 +1746,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("RegExp")) {
     return { kind: "regex" };
   }
-  // Typed arrays: references to the lib's Uint8Array/Uint32Array/
-  // Float32Array interfaces (provenance, not names). The es2022+ lib
-  // declares them generic over the backing buffer (`Uint8Array<ArrayBuffer>`
-  // in error text) — the type argument is irrelevant here: no views exist,
-  // every value owns its storage. The other TypedArray flavors stay
-  // unmapped (the record path's index-signature check rejects them).
+  // Typed arrays are mapped by stdlib provenance, including generic backing
+  // buffer declarations. Views retain their owner in the native runtime.
   // RegExpMatchArray (s.match's result) IS a string[] here — the honest
   // slice: [whole match, ...captures] (a nonparticipating capture reads
   // "" — SEMANTICS.md). The `.index`/`.input`/`.groups` extras fence per
@@ -1786,6 +1782,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // SharedArrayBuffer, and the i32 semantics hold for every other use.
   if (isStdlibInterface("Int32Array")) return bytesOf("i32");
   if (isStdlibInterface("Float32Array")) return bytesOf("f32");
+  if (isStdlibInterface("Float64Array")) return bytesOf("f64");
   // DataView: the ONE view kind — a u8 bytes value whose runtime
   // representation borrows (aliases) its owner's storage, so reads through
   // it see writes to the source exactly like JS. The checker keeps the

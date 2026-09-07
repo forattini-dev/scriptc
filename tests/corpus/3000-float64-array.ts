@@ -1,0 +1,25 @@
+// Float64Array must preserve JS number precision and eight-byte view offsets.
+const exact = 1 + 2 ** -40;
+const values = new Float64Array([exact, -0, Infinity, -Infinity, NaN, 1e100]);
+console.log(values.length, values.byteLength, values[0] === exact);
+console.log(1 / values[1], values[2], values[3], Number.isNaN(values[4]), values[5] === 1e100);
+const coverage = new Float64Array(3);
+for (let i = 0; i < 100; i++) coverage[1] = coverage[1] + 2 ** -40;
+console.log(coverage[0], coverage[1] === 100 * 2 ** -40, coverage[2]);
+const shared = values.subarray(1, 3);
+const copy = values.slice(1, 3);
+shared[0] = exact;
+console.log(shared.byteLength, values[1] === exact, 1 / copy[0]);
+const view = new DataView(values.buffer);
+console.log(view.byteLength, view.getFloat64(0, true) === exact);
+view.setFloat64(8, -exact, true);
+console.log(values[1] === -exact);
+const offset = new DataView(shared.buffer, 8, 8);
+console.log(offset.getFloat64(0, true) === -exact);
+const cloned = new Float64Array(values);
+cloned[0] = 3;
+console.log(values[0] === exact, cloned[0]);
+coverage.set(new Float64Array([exact, -exact]), 1);
+console.log(coverage[1] === exact, coverage[2] === -exact);
+const fresh = new Float64Array(new ArrayBuffer(24));
+console.log(fresh.length, fresh.byteLength);

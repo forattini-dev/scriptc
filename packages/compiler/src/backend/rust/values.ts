@@ -183,7 +183,7 @@ export class RustValueEmitter {
       || this.context.currentFunction()?.generator !== undefined;
   }
 
-  rustBytesElement(elem: "u8" | "u32" | "i32" | "f32"): string {
+  rustBytesElement(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string {
     return elem;
   }
 

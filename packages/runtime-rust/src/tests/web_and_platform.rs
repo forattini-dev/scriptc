@@ -593,6 +593,32 @@
     }
 
     #[test]
+    fn float64_views_preserve_precision_and_alias_eight_byte_elements() {
+        let baseline = live_heap_objects();
+        {
+            let exact = 1.0 + 2_f64.powi(-40);
+            let source = bytes_from_array::<f64>(&array_new(vec![exact, -0.0, f64::NAN]));
+            let shared = bytes_slice(&source, 1.0, 3.0, true);
+            let copy = bytes_slice(&source, 1.0, 3.0, false);
+            assert_eq!(bytes_byte_len(&source), 24.0);
+            assert_eq!(bytes_byte_len(&shared), 16.0);
+            assert_eq!(bytes_get(&source, 0.0), exact);
+            assert_eq!(bytes_get(&copy, 0.0).to_bits(), (-0.0_f64).to_bits());
+            let view = data_view_new(&source, 0.0, false, 0.0);
+            assert_eq!(data_view_get(&view, "f64", 0.0, cfg!(target_endian = "little")), exact);
+            data_view_set(&view, "f64", 8.0, -exact, cfg!(target_endian = "little"));
+            assert_eq!(bytes_get(&shared, 0.0), -exact);
+            assert_eq!(bytes_get(&copy, 0.0).to_bits(), (-0.0_f64).to_bits());
+            let dynamic = typed_bytes_f64_copy(&source);
+            assert_eq!(typed_bytes_name(&dynamic), "Float64Array");
+            assert_eq!(typed_bytes_byte_len(&dynamic), 24.0);
+            assert!(typed_bytes_deep_equals(&dynamic, &typed_bytes_copy(&dynamic)));
+            assert!(typed_bytes_get(&dynamic, 2.0).is_nan());
+        }
+        assert_eq!(live_heap_objects(), baseline);
+    }
+
+    #[test]
     fn data_views_share_typed_storage_and_recover_the_full_buffer() {
         let floats = bytes_alloc::<f32>(2.0);
         bytes_set(&floats, 0.0, 1.5);
