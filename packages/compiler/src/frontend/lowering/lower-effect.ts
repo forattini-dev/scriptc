@@ -517,16 +517,29 @@ function collectionCarrier(L: Lowerer, success: IrType | null, discard: boolean,
   return L.unsupported("SC1090", expr, "the effect kernel collects into arrays, tuples and records");
 }
 
-/** `{ discard: true }` in a combinator's options literal (concurrency is accepted and ignored: the kernel runs sequentially). */
+/** Collection options must be fully checked: ignoring concurrency can deadlock
+ * effects that depend on one another, and skipping expressions loses effects. */
 function discardOption(L: Lowerer, options: ts.Expression | undefined, expr: ts.Node): boolean {
   if (options === undefined) return false;
   if (!ts.isObjectLiteralExpression(options)) return L.unsupported("SC1090", expr, "the effect kernel reads combinator options from an object literal");
+  let discard = false;
   for (const property of options.properties) {
     if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return L.unsupported("SC1090", expr, "combinator option shape");
-    if (property.name.text === "discard") return property.initializer.kind === ts.SyntaxKind.TrueKeyword;
-    if (property.name.text !== "concurrency") return L.unsupported("SC1090", expr, `the effect kernel does not honor the '${property.name.text}' option yet`);
+    const value = property.initializer;
+    if (property.name.text === "discard") {
+      if (value.kind !== ts.SyntaxKind.TrueKeyword && value.kind !== ts.SyntaxKind.FalseKeyword) {
+        return L.unsupported("SC1090", value, "the effect kernel requires a literal boolean discard option");
+      }
+      discard = value.kind === ts.SyntaxKind.TrueKeyword;
+    } else if (property.name.text === "concurrency") {
+      if (!ts.isNumericLiteral(value) || Number(value.text) !== 1) {
+        return L.unsupported("SC1090", value, "the effect kernel supports only literal concurrency: 1; concurrent and inherited execution are not implemented yet");
+      }
+    } else {
+      return L.unsupported("SC1090", property, `the effect kernel does not honor the '${property.name.text}' option yet`);
+    }
   }
-  return false;
+  return discard;
 }
 
 /** One `Layer.member` call, the same shape as lowerEffectMember. Layers are kernel handles like effects. */

@@ -59,6 +59,18 @@ Corpus 3014 now matches Node and proves replacement does not call the function;
 2987 and 3009 also pass. Workspace build and focused ESLint pass (0 errors;
 28 existing warnings in the lowering module).
 
+Collection options now refuse unsupported concurrency explicitly. The current
+kernel accepts omitted concurrency or literal concurrency: 1; bounded,
+unbounded, inherited and computed options remain unfinished. The compiler
+checks the entire options object, including members after discard, and
+requires a literal boolean for discard so it cannot erase side effects in
+an option expression. Before this correction 13 admission regressions failed;
+all 15 admission cases now pass, including two sequential controls. Corpus
+3015 verifies explicit sequential options across suspension against Node;
+2977 and 2987 also pass. The compiler build and focused ESLint pass. The
+first 3015 draft hit the existing refusal for console.log of a void call;
+the final fixture observes discard through the callback's side effects.
+
 Remaining semantics work includes multiple failing finalizers and combined causes,
 interruption and shutdown, bounded
 concurrency, PubSub scope cleanup, and tracing of boxed heap values.
