@@ -35,11 +35,11 @@ import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.
 import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesAssert, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesLegacyTextDecoder, moduleUsesNet, moduleUsesNodeTest, moduleUsesParseArgs, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesStream, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesZlib, type IrFfiImport, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
-import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
-import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
+import { checkPreflight, loadProgram } from "./frontend/program.js";
+import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
-import { clearResolveCaches, resolveBareModule } from "./frontend/resolve.js";
-import { isRelativeSpecifier, isRuntimeSourceFileName } from "./frontend/shared.js";
+import { clearResolveCaches } from "./frontend/resolve.js";
+import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
@@ -254,7 +254,7 @@ export interface CompileOptions {
   /** --npm-static: package names whose shipped, unminified JS compiles
    * STATICALLY as program modules (inference types the bodies; statements
    * the lowering cannot prove become runtime fences). "auto" opts in every
-   * directly-imported package passing the eligibility heuristics (own
+   * reachable package passing the eligibility heuristics (own
    * .d.ts, unminified JS, no build-transform markers). A package whose
    * preflight refuses marks itself an offender and falls back to the
    * island (--dynamic) or the requires-dynamic diagnostic (static builds)
@@ -465,96 +465,6 @@ interface Frontend {
   dispose: () => void;
 }
 
-/** --npm-static=auto (and library mode's mandatory twin): one throwaway
- * load finds every bare npm import the program's own modules make, then
- * the eligibility heuristics (npm-static.ts) pick the packages whose
- * shipped JS is worth attempting. Rejected candidates report their reason
- * so the coverage output says why auto skipped them.
- *
- * "lib" widens the scan to the STATIC-OR-REFUSE posture (a fallback
- * status is a build-stopping SC4020 there, never an island note):
- *   - opted-in packages' OWN files are scanned too — import statements
- *     and top-level requires alike — so runFrontend's fixpoint loop
- *     judges every bare edge the growing graph exposes (the executable
- *     lane leaves a package's deps to the island; the library lane has
- *     no island);
- *   - a bare specifier no TYPES resolution answers but whose runtime JS
- *     resolves (a package with no own .d.ts) is judged instead of
- *     skipped — it fails the bar by name, not as a generic import fence;
- *   - `judged` dedups across fixpoint iterations and `sites` records
- *     each package's first import site, the SC4020 anchor. */
-function detectAutoPackages(
-  load: LoadResult,
-  statuses: NpmStaticStatus[],
-  mode: "auto" | "lib" = "auto",
-  judged?: Set<string>,
-  sites?: Map<string, SrcLoc>,
-): string[] {
-  // package → the resolved types file AND the file whose import found it:
-  // the runtime-JS probe below must resolve from the SAME importing file,
-  // or a package visible only to a nested package.json realm (a pnpm
-  // monorepo's packages/*/node_modules, unreachable from the entry's own
-  // walk-up) answers "no runtime JS" for perfectly ordinary installs.
-  const seen = new Map<string, { typesFile: string; fromFile: string }>();
-  for (const sf of [...load.moduleOrder, load.entry]) {
-    if (mode === "auto" && sf.fileName.includes("/node_modules/")) continue;
-    const edges: { spec: string; loc: SrcLoc }[] = [];
-    for (const stmt of sf.statements) {
-      if (ts7IsImportWithStringSpec(stmt)) {
-        edges.push({ spec: (stmt as { moduleSpecifier: { text: string } }).moduleSpecifier.text, loc: locOf(stmt) });
-      } else if (mode === "lib") {
-        // CJS packages spell their dep edges as top-level requires; the
-        // import-statement scan alone would miss every one of them.
-        for (const req of requiresOf(stmt)) edges.push({ spec: req.spec, loc: locOf(req.node) });
-      }
-    }
-    for (const { spec, loc } of edges) {
-      if (isRelativeSpecifier(spec) || spec.startsWith("node:") || spec.startsWith("#")) continue;
-      // Bare builtin names ("fs", "path") are the builtin machinery's
-      // business (and the SC4005 async_free gate's, in library mode) —
-      // never npm candidates. Auto keeps its original path (the
-      // @types/node answer skips them below), byte-for-byte.
-      if (mode === "lib" && canonicalBuiltinModule(spec) !== null) continue;
-      const npm = resolveNpmImport(sf.fileName, spec);
-      if (npm !== null && isNodeTypesPath(npm.typesFile)) continue;
-      if (npm === null) {
-        if (mode !== "lib") continue;
-        const js = resolveBareModule(sf.fileName, spec, "js-only");
-        if (js === null || judged!.has(js.packageName)) continue;
-        judged!.add(js.packageName);
-        sites!.set(js.packageName, loc);
-        statuses.push({ package: js.packageName, status: "fallback", detail: "it ships no own .d.ts declaration surface" });
-        continue;
-      }
-      if (judged?.has(npm.packageName)) continue;
-      if (!seen.has(npm.packageName)) {
-        seen.set(npm.packageName, { typesFile: npm.typesFile, fromFile: sf.fileName });
-        sites?.set(npm.packageName, loc);
-      }
-    }
-  }
-  const chosen: string[] = [];
-  for (const [pkg, { typesFile, fromFile }] of seen) {
-    judged?.add(pkg);
-    const jsEntry = resolveBareModule(fromFile, pkg, "js-only");
-    const reason = npmStaticIneligibleReason(
-      pkg,
-      typesFile,
-      jsEntry !== null && isRuntimeSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
-    );
-    if (reason === null) chosen.push(pkg);
-    else statuses.push({ package: pkg, status: "fallback", detail: mode === "lib" ? reason : `auto: ${reason}` });
-  }
-  return chosen;
-}
-
-/** Duck-typed import-declaration test (the ts7 AST types stay inside the
- * frontend; this file only needs the specifier text). */
-function ts7IsImportWithStringSpec(stmt: unknown): stmt is { moduleSpecifier: { text: string } } {
-  const s = stmt as { kind?: unknown; moduleSpecifier?: { text?: unknown } };
-  return typeof s.moduleSpecifier?.text === "string";
-}
-
 /** The opted-in packages a consumer-anchored tsc message NAMES: module
  * specifiers in `Module '"spec"'` phrasings, and resolved file paths in
  * `import("…")` type spellings — the two ways the checker points at an
@@ -574,21 +484,13 @@ function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set
   return hits;
 }
 
-/** The package-wide --npm-static name containing an exact bare specifier.
- * External mappings are exact (subpaths included), while npm-static owns a
- * whole package, so any mapped subpath conflicts with that package opt-in. */
-function packageNameOfBareSpecifier(specifier: string): string {
-  const parts = specifier.split("/");
-  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
-}
-
 /** The one frontend, three npm postures: `undefined`/explicit package
  * lists and `"auto"` are the executable lane's (--npm-static; fallback =
  * island). `"lib"` is library mode's mandatory auto twin — the same
  * eligibility bar and the same opt-in machinery, but every fallback
  * status the shared loops record becomes compileLibrary's SC4020
- * static-or-refuse teaching, and the detection closes over the opted-in
- * packages' own bare edges (no island exists to serve a dep from). */
+ * static-or-refuse teaching. Both auto modes close over the opted-in
+ * packages' own bare edges; explicit lists retain their named scope. */
 function runFrontend(
   entryPath: string,
   npmStatic?: readonly string[] | "auto" | "lib",
@@ -610,10 +512,7 @@ function runFrontend(
     let retained = false;
     try {
       const scoutPreflight = checkPreflight(scout);
-      requested =
-        npmStatic === "lib"
-          ? detectAutoPackages(scout, statuses, "lib", judged, npmSites)
-          : detectAutoPackages(scout, statuses);
+      requested = detectAutoPackages(scout, statuses, npmStatic, judged, npmSites);
       // With no package to opt in, the scout already IS the final frontend:
       // same roots, resolution posture, preflight, and module order. Retain it
       // instead of spawning a second tsgo server and checking the whole graph
@@ -635,25 +534,7 @@ function runFrontend(
   // package-wide --npm-static program graph. External wins; retain the
   // ordinary npm-static fallback record so explicit and auto requests both
   // explain why the package did not compile statically.
-  if (requested.length > 0 && externalTypes !== undefined) {
-    const externalSpecifiersByPackage = new Map<string, string[]>();
-    for (const specifier of Object.keys(externalTypes)) {
-      const pkg = packageNameOfBareSpecifier(specifier);
-      const specs = externalSpecifiersByPackage.get(pkg) ?? [];
-      specs.push(specifier);
-      externalSpecifiersByPackage.set(pkg, specs);
-    }
-    requested = requested.filter((pkg) => {
-      const specs = externalSpecifiersByPackage.get(pkg);
-      if (specs === undefined) return true;
-      statuses.push({
-        package: pkg,
-        status: "fallback",
-        detail: `mapped as an external host module by --external-types (${specs.map((s) => JSON.stringify(s)).join(", ")})`,
-      });
-      return false;
-    });
-  }
+  requested = filterExternalNpmPackages(requested, statuses, externalTypes);
 
   // The all-or-nothing fallback loop: a preflight diagnostic ANCHORED in
   // an opted-in package's files (an unsupported require form, a builtin
@@ -676,16 +557,18 @@ function runFrontend(
   // attempt, not a broken build.
   let load = reusableScout ?? loadProgram(entryPath, { npmStatic: requested, externalTypes });
   let preflight = reusablePreflight ?? checkPreflight(load);
-  // Library mode's fixpoint: the opted-in packages' files joined the
+  // Automatic admission's fixpoint: opted-in packages' files joined the
   // program just now, and THEIR bare edges (import statements and
   // top-level requires) name packages the scout could not see. Judge each
   // by the same bar — eligible ones join the set and the frontend
-  // reloads; ineligible ones record the fallback status compileLibrary
-  // refuses on. Bounded by the dependency count (every iteration settles
+  // reloads; ineligible ones record fallback (a refusal in library mode).
+  // Bounded by the dependency count (every iteration settles
   // at least one new package for good).
-  if (npmStatic === "lib") {
+  if (npmStatic === "auto" || npmStatic === "lib") {
     for (;;) {
-      const grown = detectAutoPackages(load, statuses, "lib", judged, npmSites);
+      const grown = filterExternalNpmPackages(
+        detectAutoPackages(load, statuses, npmStatic, judged, npmSites), statuses, externalTypes,
+      );
       if (grown.length === 0) break;
       requested = [...requested, ...grown];
       load.dispose();
@@ -732,10 +615,10 @@ function runFrontend(
   // chaining shape, or a .d.ts type-GUARD an inferred JS function cannot
   // reproduce, so every catch-clause narrowing site reports "'err' is of
   // type 'unknown'"). Those SC0001s anchor in USER files no offender or
-  // message attribution reaches, so each remaining package is probed
-  // ALONE-dropped (n is the opt-in count — a handful of extra analysis
-  // loads); culprits whose removal clears the errors fall back with a
-  // note, and if no subset typechecks, everything drops. Explicit opt-ins
+  // message attribution reaches. First try removing one package while
+  // retaining its peers; otherwise use conservative SOLO attribution.
+  // Survivors must pass a full preflight or they all fall back with a
+  // note. Explicit opt-ins
   // degrade the same way — the ratified stance for bundle-shaped dists is
   // graceful per-package degradation, never a failed gate the user cannot
   // act on (the note carries the why).
@@ -753,11 +636,12 @@ function runFrontend(
               : "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase) — the package serves from the island instead",
       });
     };
-    // Attribute per package by probing each SOLO (culprits are almost
-    // always independent — each package's inferred surface breaks its own
-    // import sites), then reload with the survivors; interaction effects
-    // that still fail drop everything left.
-    for (const p of [...effective]) {
+    // First preserve the interacting graph if removing one package clears
+    // the errors. Otherwise retain the conservative SOLO fallback, followed
+    // by a full consumer recheck before admitting any survivors.
+    const single = findSingleNpmSurfaceOffender(entryPath, effective, externalTypes);
+    if (single !== null) dropWithNote(single);
+    else for (const p of [...effective]) {
       const probe = loadProgram(entryPath, { npmStatic: [p], externalTypes });
       const probeDiags = checkPreflight(probe);
       probe.dispose();

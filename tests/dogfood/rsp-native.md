@@ -106,10 +106,73 @@ Evidence: `/tmp/scriptc-rsp-before-toon-types.json`,
 `/tmp/scriptc-toon-types-*.log`. The failing regression before implementation
 is retained in `/tmp/scriptc-toon-types-before.log`.
 
+## CLI parser admission checkpoint
+
+The original installed `cli-args-parser@1.0.6` reproduces missing `Token`
+and `OptionDefinition` exports when selected statically. Its declaration
+bundle defines these types locally and publishes them through
+`export { type Token, type OptionDefinition, ... }`. The type bridge now
+admits these local export lists, including renamed types and whole-list
+`export type` syntax. Exported classes, variables, functions, generic types,
+external reexports and private local names remain outside this bridge.
+Native fixture coverage checks that declared value signatures still cannot
+replace JavaScript inference.
+
+`npmStatic: auto` now discovers transitive imports, reexports and top-level
+CommonJS requires from selected runtime packages, using the importing
+package's resolution realm. The same fixed-point process already used by
+library mode judges each package once. Explicit package lists retain their
+named scope, ineligible packages retain fallback, and external host mappings
+take precedence for every newly discovered package, including mappings of
+one of its subpaths. Discovery/fallback helpers were extracted from the
+compiler entrypoint, reducing its frozen source-size debt from 2,677 to
+2,561 lines.
+
+A third blocker was fallback attribution: an unrelated SDK type error
+triggered SOLO probes that discarded the parser when its companion packages
+were no longer selected. Before those conservative probes, the compiler now
+checks whether removing one package lets the remaining graph typecheck
+together. A fresh full preflight still validates the retained set. The
+regression demonstrates an unrelated type-guard failure no longer discarding
+a parent whose inferred types depend on its selected child.
+
+The original RSP survey now keeps `cli-args-parser` static. Its SC2013 engine
+diagnostics fall from 25 to one, for SDK. Reached statements increase from
+1,374 to 1,665, with 259 failed statements and 199 diagnostics overall.
+These totals include newly exposed failures and cascades, not independent
+compiler bugs. The survey contains zero island statements but does not
+establish a successful RSP build.
+
+A separate disposable entry imports the original parser's `looksLikeValue`
+and its exported types. Preflight now passes, but native compilation still
+refuses `ParseError`'s `super(message)`, whose message is inferred as
+`unknown`. No original-parser executable or performance result is claimed.
+This and TOON's optional Error message are the next shared runtime boundary
+to reproduce and implement with Node's exact conversion semantics. Native
+binding lowering for bare cross-package reexports also remains incomplete;
+the discovery test explicitly preserves the no-engine refusal for that path.
+
+Validation: 60 focused plain tests, 43 sanitized tests (the two Rust cases
+were already verified in the plain run), and 18 library/external-boundary
+checks pass. Both native fixtures match Node in Rust, C and LLVM without
+an engine, including stdout, stderr and exit status. Workspace build,
+source-size and diff checks pass; focused ESLint reports zero errors and
+35 warnings. The full repository gate was not rerun and remains pending.
+
+Validation evidence is retained in `/tmp/scriptc-parser-types-before.log`,
+`/tmp/scriptc-parser-auto-before.log`, `/tmp/scriptc-parser-fallback-before.log`,
+`/tmp/scriptc-parser-final-plain.log`, `/tmp/scriptc-parser-boundaries.log`,
+`/tmp/scriptc-parser-final-sanitized.log`, `/tmp/scriptc-parser-build.log`
+and `/tmp/scriptc-parser-lint.log`. Consumer evidence is in
+`/tmp/scriptc-parser-original-before.json`,
+`/tmp/scriptc-parser-original-result.json`,
+`/tmp/scriptc-rsp-parser-preflight-after.json` and
+`/tmp/scriptc-rsp-after-parser-admission.json`.
+
 ## Next acceptance work
 
-1. Admit the transitive CLI parser and repair the SDK export-surface fallback;
-   preserve honest fallback for unsupported declaration graphs.
+1. Repair the SDK export-surface fallback, the remaining engine-import
+   diagnostic. Preserve honest fallback for unsupported declaration graphs.
 2. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.
 3. Address recursive JSON and generic flag-schema record coercions, Promise

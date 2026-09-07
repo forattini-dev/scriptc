@@ -44,6 +44,41 @@ test("static JS keeps declared type-only exports while inferring executable sign
   });
 });
 
+test("bundled declaration export lists preserve local and renamed types, not declared values", () => {
+  fixture((dir, pkg) => {
+    writeFileSync(join(pkg, "index.d.ts"), `
+      interface Token { value: number }
+      type OptionDefinition = { name: string };
+      declare function run(): string;
+      declare class Ghost { value: number }
+      export { type Token, type OptionDefinition as Option, run, type Ghost };
+    `);
+    expect(preflight(dir, `
+      import { run, type Token, type Option } from "type-exports";
+      const token: Token = { value: run() }; const option: Option = { name: "help" };
+    `)).toEqual([]);
+    expect(preflight(dir, 'import type { Ghost } from "type-exports";'))
+      .toContain("Module '\"type-exports\"' has no exported member 'Ghost'.");
+  });
+});
+
+test("local export lists do not expose private names, generic declarations or merged value identities", () => {
+  fixture((dir, pkg) => {
+    writeFileSync(join(pkg, "index.d.ts"), `
+      interface Private { value: number }
+      interface Box<T> { value: T }
+      interface Merged { value: number }
+      declare const Merged: number;
+      export type { Private as Public, Box, Merged };
+    `);
+    expect(preflight(dir, 'import type { Public } from "type-exports"; const s: Public = { value: 7 };')).toEqual([]);
+    const messages = preflight(dir, 'import type { Private, Box, Merged } from "type-exports";');
+    for (const name of ["Private", "Box", "Merged"]) {
+      expect(messages.some((m) => m.includes(`'${name}'`))).toBe(true);
+    }
+  });
+});
+
 test("declared value signatures still cannot override JS inference", () => {
   fixture((dir) => {
     expect(preflight(dir, 'import { run } from "type-exports"; const s: string = run();'))

@@ -2,7 +2,7 @@
  * This syntactic bridge appends JSDoc aliases to ESM runtime sources; the
  * checker and lowerer still share the original inferred executable surface.
  * Copies of self-contained declarations exist only in the host overlay.
- * Declaration imports/reexports, generic exports, export-star runtime barrels
+ * Declaration imports/external reexports, generic exports, export-star runtime barrels
  * and ambiguous names are deliberately left to the normal fallback path. */
 import { dirname, resolve } from "node:path";
 import ts from "typescript5";
@@ -66,19 +66,38 @@ function typeOnlyNames(path: string, text: string): string[] {
   let selfContained = true;
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node) ||
-        ts.isImportTypeNode(node) || ts.isExportDeclaration(node) ||
+        ts.isImportTypeNode(node) || (ts.isExportDeclaration(node) &&
+          (node.moduleSpecifier !== undefined || node.exportClause === undefined || !ts.isNamedExports(node.exportClause))) ||
         ts.isModuleDeclaration(node) || ts.isExportAssignment(node)) selfContained = false;
     ts.forEachChild(node, visit);
   };
   visit(source);
   if (!selfContained) return [];
-  return source.statements.flatMap((statement) => {
-    if (!(ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) ||
-        statement.typeParameters?.length ||
-        !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ||
-        statement.modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) return [];
-    return /^[A-Za-z_$][\w$]*$/.test(statement.name.text) ? [statement.name.text] : [];
-  });
+  const localTypes = new Set<string>();
+  const valueNames = new Set<string>();
+  const exports: { local: string; public: string }[] = [];
+  for (const statement of source.statements) {
+    if ((ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) &&
+        !statement.typeParameters?.length) {
+      localTypes.add(statement.name.text);
+      if (statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) &&
+          !statement.modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        exports.push({ local: statement.name.text, public: statement.name.text });
+      }
+    } else if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+      for (const member of statement.exportClause.elements) {
+        exports.push({ local: (member.propertyName ?? member.name).text, public: member.name.text });
+      }
+    } else if ((ts.isClassDeclaration(statement) || ts.isFunctionDeclaration(statement) || ts.isEnumDeclaration(statement)) && statement.name) {
+      valueNames.add(statement.name.text);
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) valueNames.add(declaration.name.text);
+      }
+    }
+  }
+  return exports.filter((entry) => localTypes.has(entry.local) && !valueNames.has(entry.local) &&
+    entry.public !== "default" && /^[A-Za-z_$][\w$]*$/.test(entry.public)).map((entry) => entry.public);
 }
 
 export class NpmStaticTypeBridge {
