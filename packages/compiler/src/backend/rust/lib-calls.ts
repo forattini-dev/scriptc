@@ -78,6 +78,7 @@ export interface RustLibCallContext {
   isEdgeValue(type: IrType): boolean;
   isUnit(type: IrType): boolean;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc): string;
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {

@@ -67,6 +67,10 @@ pub enum SchemaNode {
     FromJsonString(Rc<SchemaNode>),
     /// `Schema.Tuple([A, B])`: an array of exactly these element schemas, in order.
     Tuple(Vec<Rc<SchemaNode>>),
+    /// `source.pipe(Schema.decodeTo(target, { decode: SchemaGetter.transform(f) }))`: decode against `source`, run
+    /// the program's `f` over the result, then decode THAT against `target`. The transform crosses as a boxed value
+    /// (`Rc<dyn Any>`) so one node serves every decoder value type.
+    DecodeTo(Rc<SchemaNode>, Rc<SchemaNode>, Rc<dyn Fn(EffectValue) -> EffectValue>),
 }
 
 /// A parsed JSON document as the decoder's own value type: the generic constructors of ParseArgsValue rebuild it.
@@ -143,6 +147,11 @@ pub fn schema_union(members: Vec<JsEffect>) -> JsEffect {
 }
 
 /// `Schema.Tuple([A, B])`: an array of exactly these element schemas.
+/// `Schema.decodeTo(target, { decode })` applied to a source schema.
+pub fn schema_decode_to(source: &JsEffect, target: &JsEffect, transform: Rc<dyn Fn(EffectValue) -> EffectValue>) -> JsEffect {
+    schema_handle(SchemaNode::DecodeTo(schema_node_of(source), schema_node_of(target), transform))
+}
+
 pub fn schema_tuple(elements: Vec<JsEffect>) -> JsEffect {
     schema_handle(SchemaNode::Tuple(elements.iter().map(schema_node_of).collect()))
 }
@@ -281,6 +290,7 @@ fn expected_of(node: &SchemaNode) -> String {
         },
         SchemaNode::Array(_) => "array".to_owned(),
         SchemaNode::FromJsonString(_) => "string".to_owned(),
+        SchemaNode::DecodeTo(source, _, _) => expected_of(source),
         SchemaNode::Tuple(_) => "array".to_owned(),
         SchemaNode::Record(_, _) => "object".to_owned(),
         SchemaNode::Union(members) => members.iter().map(|m| expected_of(m)).collect::<Vec<_>>().join(" | "),
@@ -370,6 +380,14 @@ impl Decoder<'_> {
                 }
                 _ => Err(self.issue(&expected_of(node), input)),
             },
+            SchemaNode::DecodeTo(source, target, transform) => {
+                let decoded = self.decode(source, input)?;
+                let transformed = transform(Rc::new(decoded) as EffectValue);
+                match transformed.downcast_ref::<T>() {
+                    Some(value) => self.decode(target, value),
+                    None => Err(self.at("scriptc: a schema transform answered a foreign value".to_owned())),
+                }
+            }
             SchemaNode::FromJsonString(inner) => {
                 if kind != ParseArgsKind::String {
                     return Err(self.issue("string", input));

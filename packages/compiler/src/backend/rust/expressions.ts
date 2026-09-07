@@ -965,7 +965,7 @@ export class RustExpressionEmitter {
           familyName: (id, loc) => this.context.familyName(id, loc),
           familyOf: (id, loc) => this.context.familyOf(id, loc),
           familyTargetOf: (name) => this.context.familyTargetOf(name),
-          emitDynCheckValue: (type, value, loc) => this.context.emitDynCheckValue(type, value, loc),
+          emitDynCheckValue: (type, value, loc) => this.context.emitDynCheckValue(type, value, loc), emitDynFromValue: (type, value, loc) => this.context.emitDynFromValue(type, value, loc),
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);
             return this.context.classSubtree(meta).map((candidate) =>

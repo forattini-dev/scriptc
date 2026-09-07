@@ -647,7 +647,7 @@ class RustEmitter {
         (type) => this.registerDynBoxedFunction(type))) {
         this.usesEventEmitter = true;
       }
-      if (node.kind === "libCall" && (node.fn === "effect.fn" || node.fn === "effect.fnPipe" || String(node.fn).startsWith("schema.decode") || node.fn === "schema.is" || node.fn === "schema.encodeSync")) {
+      if (node.kind === "libCall" && (node.fn === "effect.fn" || node.fn === "effect.fnPipe" || (String(node.fn).startsWith("schema.decodeUnknown") || node.fn === "schema.decodeSync" || node.fn === "schema.decodeOption" || node.fn === "schema.decodeEffect" || node.fn === "schema.decodeExit") || node.fn === "schema.is" || node.fn === "schema.encodeSync")) {
         const type = node.type as IrType | undefined;
         if (type?.kind !== "func") this.unsupported(`malformed ${node.fn} IR`);
         this.ensureClosureShape(type).runtimeCallback = true; // a kernel-built function value (effect.fn, the schema decoders)

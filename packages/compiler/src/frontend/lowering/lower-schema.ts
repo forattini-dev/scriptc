@@ -374,6 +374,23 @@ export function applySchemaPipeStep(L: Lowerer, source: IrExpr, step: ts.Express
   if (name === "brand" && step.arguments.length === 1) return wrap("brand", source, loc);
   if (name === "toTaggedUnion" && step.arguments.length === 1) return source; // the union itself; its `cases`/`is*` helpers are not covered
   if (name === "check") return step.arguments.reduce<IrExpr>((acc, filter) => lib("schema.check", [acc, handleArg(L, filter, "Schema.check")], EFFECT_T, loc), source);
+  // `Schema.decodeTo(Target, { decode: SchemaGetter.transform(f), encode: … })`: decode against the source, run the
+  // program's `f`, then decode THAT against the target. Encoding is not modelled — `encodeSync` keeps its fence.
+  if (name === "decodeTo" && step.arguments.length === 2 && step.arguments[1] !== undefined && ts.isObjectLiteralExpression(step.arguments[1]!)) {
+    const options = step.arguments[1] as ts.ObjectLiteralExpression;
+    const decodeProp = options.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "decode");
+    if (decodeProp === undefined || !ts.isPropertyAssignment(decodeProp)) L.unsupported("SC1090", step, "Schema.decodeTo without a 'decode' getter");
+    const getter = decodeProp.initializer;
+    if (!ts.isCallExpression(getter) || !ts.isPropertyAccessExpression(getter.expression) || !ts.isIdentifier(getter.expression.name) ||
+      getter.expression.name.text !== "transform" || getter.arguments.length !== 1) {
+      L.unsupported("SC1090", step, `Schema.decodeTo whose decode getter is not 'SchemaGetter.transform(f)'`);
+    }
+    const transform = L.lowerExpr(getter.arguments[0]!);
+    if (transform.type.kind !== "func" || transform.type.params.length !== 1) {
+      L.unsupported("SC1090", step, "Schema.decodeTo whose transform is not a one-parameter function");
+    }
+    return lib("schema.decodeTo", [source, handleArg(L, step.arguments[0]!, "Schema.decodeTo"), transform], EFFECT_T, loc);
+  }
   return L.unsupported("SC1090", step, `the effect kernel does not cover Schema.${name} as a pipe step yet`);
 }
 

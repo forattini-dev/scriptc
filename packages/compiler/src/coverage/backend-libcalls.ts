@@ -848,6 +848,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "schema.decodeExit": ["c", "rust"],
   "schema.decodeOption": ["c", "rust"],
   "schema.decodeSync": ["c", "rust"],
+  "schema.decodeTo": ["c", "rust"],
   "schema.encodeSync": ["c", "rust"],
   "schema.filter": ["c", "rust"],
   "schema.is": ["c", "rust"],

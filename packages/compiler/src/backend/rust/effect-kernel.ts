@@ -546,6 +546,20 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
       if (first === undefined || first.type.kind !== "array" || first.type.elem.kind !== "effect") break;
       return `runtime::schema_tuple(runtime::array_values(&${context.emitExpr(first)}))`;
     }
+    case "schema.decodeTo": {
+      // The program's transform runs BETWEEN the two decoders: the source's decoded value (the program's dynamic
+      // value) converts to the transform's parameter type, and its result converts back for the target decoder.
+      const transform = expr.args[2];
+      if (first === undefined || second === undefined || transform === undefined || transform.type.kind !== "func") break;
+      const param = transform.type.params[0];
+      if (param === undefined) break;
+      const callback = context.nextTemporary();
+      const keep = context.nextTemporary();
+      const dispatch = context.emitClosureDispatch(callback, transform.type, ["sc_arg"], expr.loc);
+      const dynIn = context.emitDynCheckValue(param, "sc_dyn", expr.loc);
+      const dynOut = context.emitDynFromValue(transform.type.ret, dispatch, expr.loc);
+      return `{ let ${callback} = ${context.emitExpr(transform)}; let ${keep} = ${callback}.clone(); let _ = &${keep}; runtime::schema_decode_to(&${context.emitExpr(first)}, &${context.emitExpr(second)}, std::rc::Rc::new(move |sc_boxed: runtime::EffectValue| { let sc_dyn: sc_dyn_value = match sc_boxed.downcast_ref::<sc_dyn_value>() { Some(sc_v) => sc_v.clone(), None => runtime::throw_error("scriptc: a schema transform received a foreign value".to_owned()) }; let sc_arg: ${context.rustType(param, expr.loc)} = ${dynIn}; std::rc::Rc::new(${dynOut}) as runtime::EffectValue })) }`;
+    }
     case "schema.wrap":
       if (first === undefined || second === undefined) break;
       return `runtime::schema_wrap(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
