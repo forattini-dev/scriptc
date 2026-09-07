@@ -117,6 +117,44 @@ final differential run could not build because locked crates were absent
 from the local cache. After `cargo fetch --locked`, the unchanged 11-case
 selection passed. This is focused validation, not a green repository gate.
 
+## Multiple failing finalizers
+
+A failed finalizer previously discarded the scope's remaining finalizers.
+Corpus 3020 reproduced native output containing only `last:Failure`, while
+Node continued with `middle:Failure,first:Failure`. A separate ownership test
+confirmed that this skipped PubSub unsubscription and retained queued data.
+
+The scope continuation now retains its remaining work across success,
+failure, defect and interruption, including asynchronous finalizers. Every
+finalizer observes the original body exit. Failed finalizers contribute their
+reasons in execution order; nested groups flatten without losing reasons.
+The first typed failure has squash priority over defects, and the first
+defect has priority over interruption. Cause predicates distinguish any
+interruption from interruption-only causes. Error taps preserve the entire
+cause; typed recovery uses its first typed failure.
+
+These rules follow the installed Effect 4.0.0-beta.83 implementation.
+Its `scopeCloseFinalizers` executes every finalizer under `Effect.exit` and
+combines their results. A failed scope close replaces the body failure;
+`ensuring` and `acquireUseRelease` also replace the body failure when release
+fails. The native implementation preserves that precedence rather than
+combining the body error with cleanup errors.
+
+Corpus 3020 covers LIFO execution, original exits, a throwing sync effect,
+suspension, interruption and release precedence. Corpus 3021 covers mixed
+and interruption-only causes, tapCause, nested scopes and ordinary recovery
+boundaries. Runtime tests verify PubSub registry/payload release even after
+a failed user finalizer, ordered cause accumulation and typed recovery/taps.
+
+Validation: 157 runtime tests and Clippy pass on Rust 1.98.0; compiler build,
+focused ESLint (zero errors, 28 existing warnings) and source-size checks
+pass. Corpus 3020/3021 plus 2978, 2991, 2994, 3009, 3010, 3011 and 3016–3019
+match Node in all 12 selected differential programs, with native heap
+auditing enabled. The first corpus draft hit the existing refusal for
+acquireUseRelease callbacks with omitted resource/exit parameters; the final
+witness supplies both and reproduces the intended runtime failure before
+the fix. Full repository validation remains separate and red.
+
 ## Remaining work
 
 This fixes specific ownership paths, not all memory retention in Effect.
@@ -128,11 +166,10 @@ Gc once per alias can overcount internal edges and clear reachable objects.
 A minimal cyclic-value witness and rooted/shared-owner tests must precede
 that change.
 
-Other pending semantics include combined causes and multiple failing
-finalizers, general fiber cancellation and interruption masks, runSync
+Other pending semantics include general fiber cancellation and interruption masks, runSync
 cleanup after asynchronous refusal, real bounded/unbounded collection
-concurrency, and PubSub backpressure. Single interruption causes do not
-provide fiber identity APIs. General typed record/class payload widening to
+concurrency, and PubSub backpressure. The cause model does not yet expose
+reason iteration, annotations, equality or fiber identity APIs. General typed record/class payload widening to
 unknown and dynamic-mode native Effect integration also remain unfinished.
 
 The consumer acceptance order remains RSP/Brain, then full red-dev/redcode,

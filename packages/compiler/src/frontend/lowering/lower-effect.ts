@@ -458,7 +458,7 @@ function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], ex
   }
 }
 
-/** `Cause`: a failure, defect or interruption. Combined causes are not modeled yet. */
+/** `Cause`: failures, defects and interruptions, including combined finalizer reasons. */
 function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
   const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Cause.${member} yet`);
@@ -490,7 +490,7 @@ function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], exp
     case "hasInterrupts":
     case "hasInterruptsOnly":
       if (args.length !== 1 || at(0).type.kind !== "effect") refused();
-      return lib("effect.causeHas", [at(0), numLit(member === "hasDies" ? 0 : 1, loc)], { kind: "bool" }, loc);
+      return lib("effect.causeHas", [at(0), numLit(member === "hasDies" ? 0 : member === "hasInterrupts" ? 1 : 2, loc)], { kind: "bool" }, loc);
     default:
       return refused();
   }

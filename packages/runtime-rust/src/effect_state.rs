@@ -283,13 +283,9 @@ pub fn effect_cause_squash(handle: &JsEffect) -> EffectValue {
     cause_of(handle).into_value()
 }
 
-/// Predicates for the kernel's single-reason causes.
+/// Predicates across all reasons, including mixed finalizer failures.
 pub fn effect_cause_has(handle: &JsEffect, what: f64) -> bool {
-    let cause = cause_of(handle);
-    match what as i32 {
-        0 => matches!(cause, EffectFailure::Die(_)),
-        _ => matches!(cause, EffectFailure::Interrupt),
-    }
+    cause_of(handle).has(what as u8)
 }
 
 pub fn effect_catch_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {

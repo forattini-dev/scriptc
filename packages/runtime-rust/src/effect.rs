@@ -83,6 +83,7 @@ enum EffectNode {
     Fail(EffectValue),
     Die(EffectValue),
     Interrupt,
+    FailCause(EffectFailure),
     Sync(Rc<dyn Fn() -> EffectValue>, TraceFn),
     Map(JsEffect, ValueFn, TraceFn),
     FlatMap(JsEffect, EffectFn, TraceFn),
@@ -173,7 +174,7 @@ pub enum KernelData {
     /// fixed ("An error occurred in Effect.tryPromise" — the reason itself rides effect's `cause`, which the kernel
     /// does not model yet).
     Unknown(JsString),
-    /// A single failure, defect or interruption. Combined causes remain unsupported.
+    /// A failure, defect, interruption or ordered group of finalizer reasons.
     Cause(EffectFailure),
     /// A `PubSub`: the subscriber queues a publish broadcasts into.
     PubSub(Rc<RefCell<PubSubState>>),
@@ -186,7 +187,7 @@ pub struct EffectData {
 impl Trace for EffectData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         match &self.node {
-            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::Interrupt | EffectNode::ServiceKey(_) => {}
+            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::Interrupt | EffectNode::FailCause(_) | EffectNode::ServiceKey(_) => {}
             EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
@@ -619,8 +620,9 @@ enum Frame {
     Restore(Outcome),
     /// Leave a scope: run its finalizers (LIFO) with the exit, then restore the outcome.
     CloseScope,
-    /// Finalizers still to run for an exit, then the outcome to restore.
-    Finalize(Vec<FinalizerFn>, Outcome),
+    /// Remaining finalizers, the unchanged body exit each observes, and
+    /// accumulated finalizer failures (which override the body on close).
+    Finalize(Vec<FinalizerFn>, Outcome, Option<EffectFailure>),
     Ensuring(JsEffect),
     /// `acquireRelease`: the resource arrived — register the release, answer the resource.
     Acquired(ReleaseFn),
@@ -729,6 +731,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Fail(error) => Step::Done(Err(EffectFailure::Fail(error.clone()))),
         EffectNode::Die(defect) => Step::Done(Err(EffectFailure::Die(defect.clone()))),
         EffectNode::Interrupt => Step::Done(Err(EffectFailure::Interrupt)),
+        EffectNode::FailCause(cause) => Step::Done(Err(cause.clone())),
         EffectNode::Sync(thunk, _) => Step::Done(Ok(thunk())),
         EffectNode::Map(inner, f, _) => Step::Push(Frame::Map(f.clone()), inner.clone()),
         EffectNode::FlatMap(inner, f, _) => Step::Push(Frame::FlatMap(f.clone()), inner.clone()),
@@ -917,22 +920,28 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     None
                 }
                 (Frame::FlatMap(f), Ok(value)) => Some(f(value)),
-                (Frame::CatchAll(f), Err(EffectFailure::Fail(error))) => Some(f(error)),
+                (Frame::CatchAll(f), Err(error)) => match error.first_value(true) {
+                    Some(value) => Some(f(value)),
+                    None => { outcome = Some(Err(error)); None }
+                },
                 (Frame::CatchCause(f), Err(error)) => Some(f(effect_box(error.into_cause()))),
-                (Frame::MapError(f), Err(EffectFailure::Fail(error))) => {
-                    outcome = Some(Err(EffectFailure::Fail(f(error))));
+                (Frame::MapError(f), Err(error)) => {
+                    outcome = Some(Err(error.map_typed(|value| EffectFailure::Fail(f(value)))));
                     None
                 }
-                (Frame::OrDie, Err(EffectFailure::Fail(error))) => {
-                    outcome = Some(Err(EffectFailure::Die(error)));
+                (Frame::OrDie, Err(error)) => {
+                    outcome = Some(Err(error.map_typed(EffectFailure::Die)));
                     None
                 },
                 (Frame::As(value), Ok(_)) => {
                     outcome = Some(Ok(value));
                     None
                 }
-                (Frame::Ignore, Ok(_) | Err(EffectFailure::Fail(_))) => {
-                    outcome = Some(Ok(Rc::new(())));
+                (Frame::Ignore, exit) => {
+                    outcome = Some(match exit {
+                        Err(error) if error.first_value(true).is_none() => Err(error),
+                        _ => Ok(effect_box(())),
+                    });
                     None
                 }
                 (Frame::ZipRight(next), Ok(_)) => Some(next),
@@ -951,29 +960,38 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     fiber.borrow_mut().frames.push(Frame::Restore(Ok(value.clone())));
                     Some(f(value))
                 }
-                (Frame::TapError(f), Err(EffectFailure::Fail(error))) => {
-                    fiber.borrow_mut().frames.push(Frame::Restore(Err(EffectFailure::Fail(error.clone()))));
-                    Some(f(error))
-                }
+                (Frame::TapError(f), Err(error)) => match error.first_value(true) {
+                    Some(value) => {
+                        fiber.borrow_mut().frames.push(Frame::Restore(Err(error)));
+                        Some(f(value))
+                    }
+                    None => { outcome = Some(Err(error)); None }
+                },
                 (Frame::Restore(stored), Ok(_)) => {
                     outcome = Some(stored);
                     None
                 }
                 (Frame::CloseScope, exit) => {
                     let finalizers = fiber.borrow_mut().scopes.pop().unwrap_or_default();
-                    fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit));
+                    fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit, None));
                     outcome = Some(Ok(Rc::new(())));
                     None
                 }
-                (Frame::Finalize(mut finalizers, exit), Ok(_)) => match finalizers.pop() {
-                    Some(finalizer) => {
-                        let next = finalizer(exit_handle(exit.clone()));
-                        fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit));
-                        Some(next)
-                    }
-                    None => {
-                        outcome = Some(exit);
-                        None
+                (Frame::Finalize(mut finalizers, exit, failures), finished) => {
+                    let failures = match finished {
+                        Ok(_) => failures,
+                        Err(error) => Some(match failures { Some(previous) => previous.combine(error), None => error }),
+                    };
+                    match finalizers.pop() {
+                        Some(finalizer) => {
+                            let next = finalizer(exit_handle(exit.clone()));
+                            fiber.borrow_mut().frames.push(Frame::Finalize(finalizers, exit, failures));
+                            Some(next)
+                        }
+                        None => {
+                            outcome = Some(match failures { Some(error) => Err(error), None => exit });
+                            None
+                        }
                     }
                 },
                 (Frame::Ensuring(finalizer), exit) => {
@@ -998,15 +1016,15 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     fiber.borrow_mut().frames.push(Frame::Restore(exit.clone()));
                     Some(release(resource, exit_handle(exit)))
                 }
-                (Frame::OrElse(or_else), Err(EffectFailure::Fail(_))) => {
-                    outcome = Some(Ok(or_else()));
+                (Frame::OrElse(or_else), Err(error)) => {
+                    outcome = Some(if error.first_value(true).is_some() { Ok(or_else()) } else { Err(error) });
                     None
                 }
-                (Frame::CatchIf(predicate, recover), Err(EffectFailure::Fail(error))) => {
-                    if predicate(error.clone()) {
-                        Some(recover(error))
+                (Frame::CatchIf(predicate, recover), Err(error)) => {
+                    if let Some(value) = error.first_value(true).filter(|value| predicate(value.clone())) {
+                        Some(recover(value))
                     } else {
-                        outcome = Some(Err(EffectFailure::Fail(error)));
+                        outcome = Some(Err(error));
                         None
                     }
                 }

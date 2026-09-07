@@ -47,3 +47,21 @@ fn queue_shutdown_releases_buffered_and_pending_payloads() {
     assert!(resumed.get(), "shutdown must wake blocked publishers");
     assert!(weak.upgrade().is_none(), "shutdown must release queued and pending values");
 }
+
+#[test]
+fn pubsub_scope_releases_when_later_finalizers_fail() {
+    let hub = effect_unbox::<JsEffect>(&effect_run_sync(&effect_pubsub_make(8.0, 0.0)));
+    let state = pubsub_of(&hub);
+    let payload = effect_box(vec![0u8; 4096]);
+    let weak = Rc::downgrade(&payload);
+    let acquire = effect_pubsub_subscribe(&hub);
+    let publish = effect_pubsub_publish(&hub, payload.clone());
+    let bad_finalizer = effect_add_finalizer(Rc::new(|_| effect_die(effect_box(2.0))), Box::new(|_| {}));
+    let body = effect_zip_right(&acquire, &effect_zip_right(&publish, &bad_finalizer));
+    let program = effect_exit(&effect_scoped(&body));
+    let exit = effect_unbox::<JsEffect>(&effect_run_sync(&program));
+    assert!(!effect_exit_is_success(&exit));
+    drop((payload, acquire, publish, bad_finalizer, body, program, exit));
+    assert!(state.borrow().subscribers.is_empty(), "a failed user finalizer must not skip subscription release");
+    assert!(weak.upgrade().is_none(), "buffered values must be released even when another finalizer fails");
+}

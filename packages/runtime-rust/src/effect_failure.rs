@@ -5,14 +5,45 @@ pub enum EffectFailure {
     Fail(EffectValue),
     Die(EffectValue),
     Interrupt,
+    /// Ordered finalizer reasons; nested groups are flattened on combination.
+    Combined(Vec<EffectFailure>),
 }
 
 impl EffectFailure {
     fn into_value(self) -> EffectValue {
+        self.first_value(true).or_else(|| self.first_value(false))
+            .unwrap_or_else(|| effect_box(error_new("Error", string("All fibers interrupted without error"))))
+    }
+
+    fn first_value(&self, typed: bool) -> Option<EffectValue> {
         match self {
-            Self::Fail(value) | Self::Die(value) => value,
-            Self::Interrupt => effect_box(error_new("Error", string("All fibers interrupted without error"))),
+            Self::Fail(value) if typed => Some(value.clone()),
+            Self::Die(value) if !typed => Some(value.clone()),
+            Self::Combined(reasons) => reasons.iter().find_map(|reason| reason.first_value(typed)),
+            _ => None,
         }
+    }
+
+    fn combine(self, next: Self) -> Self {
+        let mut reasons = match self { Self::Combined(reasons) => reasons, reason => vec![reason] };
+        match next { Self::Combined(next) => reasons.extend(next), reason => reasons.push(reason) }
+        Self::Combined(reasons)
+    }
+
+    fn has(&self, what: u8) -> bool {
+        match self {
+            Self::Combined(reasons) if what == 2 => !reasons.is_empty() && reasons.iter().all(|reason| reason.has(what)),
+            Self::Combined(reasons) => reasons.iter().any(|reason| reason.has(what)),
+            Self::Die(_) => what == 0,
+            Self::Interrupt => what == 1 || what == 2,
+            Self::Fail(_) => false,
+        }
+    }
+
+    /// Effect.mapError/orDie replace the whole cause using its first typed
+    /// failure. A cause without a typed failure passes through intact.
+    fn map_typed(self, f: impl FnOnce(EffectValue) -> Self) -> Self {
+        match self.first_value(true) { Some(value) => f(value), None => self }
     }
 
     fn into_cause(self) -> JsEffect {
@@ -24,6 +55,7 @@ impl EffectFailure {
             Self::Fail(value) => effect_fail(value),
             Self::Die(value) => effect_die(value),
             Self::Interrupt => effect_new(EffectNode::Interrupt),
+            combined @ Self::Combined(_) => effect_new(EffectNode::FailCause(combined)),
         }
     }
 }
