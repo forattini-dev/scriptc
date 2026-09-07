@@ -14,7 +14,11 @@
  * from what the declaration says it should be. Self-contained type-only
  * exports can return through npm-static-types.ts's JSDoc bridge, without
  * replacing executable signatures. Program-side use sites
- * therefore typecheck against the INFERRED export surface; where the
+ * therefore typecheck against the INFERRED export surface. If the only
+ * consumer errors are lost callback-parameter contexts, npm-static-context
+ * additionally requires the original declaration-based authoring check to
+ * pass before those callbacks enter checked dynamic lowering. Declaration
+ * value signatures are never copied into the native program. Where the
  * package's own JSDoc (usually written against that same .d.ts) types a
  * boundary, the declared types flow in through inference and the runtime
  * fences guard the sites the checker could not prove.

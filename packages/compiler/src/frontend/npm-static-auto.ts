@@ -134,3 +134,22 @@ export function findSingleNpmSurfaceOffender(
   }
   return null;
 }
+
+/** The opted-in packages a consumer-anchored tsc message NAMES: module
+ * specifiers in `Module '"spec"'` phrasings, and resolved file paths in
+ * `import("…")` type spellings — the two ways the checker points at an
+ * import surface from the importer's side. */
+export function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set<string> {
+  const hits = new Set<string>();
+  for (const m of message.matchAll(/Module '"([^"]+)"'/g)) {
+    const spec = m[1]!;
+    const parts = spec.split("/");
+    const prefix = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+    if (optedIn.has(prefix)) hits.add(prefix);
+  }
+  for (const m of message.matchAll(/import\("([^"]+)"\)/g)) {
+    const pkg = npmStaticPackageOfPath(m[1]!);
+    if (pkg !== null && optedIn.has(pkg)) hits.add(pkg);
+  }
+  return hits;
+}

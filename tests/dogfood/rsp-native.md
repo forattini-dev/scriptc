@@ -6,6 +6,14 @@ engine. Full RSP compilation and command acceptance are not achieved yet.
 The consumer checkout inspected on 2026-09-07 is at
 `c5255e006318fa3ec9aea51ccac11778da3888a1`.
 
+**Sanitizer evidence correction:** the resource limiter did not forward
+`SCRIPTC_SAN` to its transient systemd service before `7593476a`. Prefixing
+`SCRIPTC_SAN=1 pnpm limit -- ...` therefore ran the ordinary lane on this
+workstation. Earlier counts labelled sanitized below must not be counted as
+sanitizer evidence unless independently verified. The SDK checkpoint records
+replacement runs after the forwarding fix. The full repository gate remains
+pending/red.
+
 The refreshed static survey uses `backend: rust`, `target: bun`,
 `allowEngine: false` and `npmStatic: auto`. It initially reported 203
 diagnostics and 165 failed statements across 696 reached statements. These
@@ -283,10 +291,79 @@ Evidence: `/tmp/scriptc-var-class-before.log`,
 These paths are retained workstation artifacts; the runner is the portable
 reproduction entrypoint.
 
+## SDK callback-context admission checkpoint
+
+Forcing the original SDK into the RSP's static graph exposed 13 TypeScript
+implicit-any diagnostics in consumer callback parameters. The shipped
+declarations contextualize query/list results, while inference over the
+SDK's JavaScript RPC/JSON boundaries returns any. The fallback loop treated
+that loss of callback context as a reason to discard the entire package.
+
+The frontend now retries this narrowly defined case. Every remaining
+preflight diagnostic must be TS7006 or TS7031 at an unannotated parameter of
+an arrow/function-expression callback passed directly to a call. The original
+consumer must then pass a complete preflight against its ordinary declaration
+surface. A fresh native load must still have only these callback diagnostics.
+Only then may those callbacks proceed to native lowering. Both temporary
+programs are disposed/restored through the normal load lifecycle.
+
+No declaration value signatures or field types are copied into native IR.
+The regression deliberately declares numeric rows while returning a string
+in JavaScript; Rust, C and LLVM print the actual string exactly like Node.
+Invalid original callback bodies, originally untyped callbacks, unrelated
+TypeScript errors, non-callback implicit parameters, and inferred value
+signature disagreements retain their errors/fallback. Changing a declaration
+after a successful build revokes admission. Destructured callbacks can now
+reach lowering, where records containing any still receive SC2009.
+
+All five packages in the original RSP survey now report static admission,
+including `@reddb-io/sdk@1.23.1`. SC2013 falls from one to zero; there are
+zero island statements. Reached statements increase from 1,689 to 1,701,
+failed statements from 250 to 252 as more code becomes visible, and total
+diagnostics fall from 194 to 193. This is admission/analysis evidence, not
+a successful RSP executable.
+
+An isolated adapter importing the original SDK's `parseUri` passes preflight
+but still fails native compilation with 23 SC3003 refusals. These expose
+`globalThis.Bun`/`Deno` capability probes and URL/URLSearchParams values
+crossing unknown/record boundaries. No SDK executable or database acceptance
+is claimed, and no consumer/package files were rewritten.
+
+Validation: 67 plain checks pass (13 callback-context, 30 npm/type-bridge
+regressions and 24 fallback/library/external-boundary checks). Workspace
+build, source-size and diff checks pass; focused ESLint reports zero errors
+and 35 warnings. The compiler entrypoint's frozen source-size ceiling falls
+from 2,561 to 2,547 lines by moving package-attribution helpers out.
+
+After correcting sanitizer forwarding in `7593476a`, the callback suite
+passes 12 checks with `SCRIPTC_SAN=1` actually present in the child process.
+Its Rust case is excluded in this lane; C and LLVM compile with sanitizers.
+The earlier file `/tmp/scriptc-sdk-context-sanitized.log` contains an ordinary
+13-test run and is superseded by
+`/tmp/scriptc-sdk-context-verified-sanitized.log`. One resource-limiter
+regression and a live child-environment probe verify the forwarding fix.
+
+The 23 corpus programs covering the Error-message and bundled-class steps
+also pass both corrected C/LLVM lanes: 46 genuinely sanitized checks in
+`/tmp/scriptc-recent-verified-sanitized.log`. Both suites explicitly identify
+their sanitized mode. The C artifact for corpus 3031,
+`node_modules/.cache/scriptc-tests/067decdec2aaf4bb/program`, contains
+`__asan_init` and `__asan_report_load8`, verified with `nm`. These replacement
+runs establish sanitizer coverage for those two checkpoints; older focused
+checkpoints remain unaudited. They do not replace the full repository gate.
+
+Evidence: `/tmp/scriptc-sdk-rsp-preflight-before.json`,
+`/tmp/scriptc-sdk-context-before.log`,
+`/tmp/scriptc-sdk-context-final.log`,
+`/tmp/scriptc-sdk-npm-regressions.log`,
+`/tmp/scriptc-sdk-boundaries.log`,
+`/tmp/scriptc-rsp-after-sdk-admission.json`, and
+`/tmp/scriptc-sdk-original-result.json`.
+
 ## Next acceptance work
 
-1. Repair the SDK export-surface fallback, the remaining engine-import
-   diagnostic. Preserve honest fallback for unsupported declaration graphs.
+1. Implement the SDK's host-capability probes and native URL/URLSearchParams
+   boundaries, retaining Node/Bun target semantics and observable errors.
 2. Extend the original parser contracts to tokenization and full flag parsing.
 3. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.

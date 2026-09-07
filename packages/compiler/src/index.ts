@@ -39,7 +39,8 @@ import { checkPreflight, loadProgram } from "./frontend/program.js";
 import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
-import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender } from "./frontend/npm-static-auto.js";
+import { retryNpmCallbackContext } from "./frontend/npm-static-context.js";
+import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
@@ -465,25 +466,6 @@ interface Frontend {
   dispose: () => void;
 }
 
-/** The opted-in packages a consumer-anchored tsc message NAMES: module
- * specifiers in `Module '"spec"'` phrasings, and resolved file paths in
- * `import("…")` type spellings — the two ways the checker points at an
- * import surface from the importer's side. */
-function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set<string> {
-  const hits = new Set<string>();
-  for (const m of message.matchAll(/Module '"([^"]+)"'/g)) {
-    const spec = m[1]!;
-    const parts = spec.split("/");
-    const prefix = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
-    if (optedIn.has(prefix)) hits.add(prefix);
-  }
-  for (const m of message.matchAll(/import\("([^"]+)"\)/g)) {
-    const pkg = npmStaticPackageOfPath(m[1]!);
-    if (pkg !== null && optedIn.has(pkg)) hits.add(pkg);
-  }
-  return hits;
-}
-
 /** The one frontend, three npm postures: `undefined`/explicit package
  * lists and `"auto"` are the executable lane's (--npm-static; fallback =
  * island). `"lib"` is library mode's mandatory auto twin — the same
@@ -609,6 +591,10 @@ function runFrontend(
     load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
     preflight = checkPreflight(load);
   }
+  // Preserve the original strict authoring gate when only callback
+  // contextual types disappear across an inferred npm any boundary.
+  const contextual = retryNpmCallbackContext(entryPath, effective, load, preflight, externalTypes);
+  if (contextual !== null) ({ load, preflight } = contextual);
   // The last resort, ALL modes: an opt-in can change the PROGRAM's OWN
   // typecheck through errors that name no package at all (the inferred
   // surface replaces the shipped .d.ts — the commander name()/description()

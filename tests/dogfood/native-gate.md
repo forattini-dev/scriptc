@@ -42,6 +42,16 @@ Use the resource limiter for focused checks. Native tests need a private
 0700 cache, and inherited `LD_LIBRARY_PATH` disables persistent cache reuse.
 Do not disable sanitizers or relax behavioral assertions to make a gate pass.
 
+An audit on 2026-09-07 found that the limiter's explicit environment list
+omitted `SCRIPTC_SAN`. A flag prefixed before `pnpm limit` did not reach the
+transient service: a child-process probe printed `null`. Commit `7593476a`
+forwards it and the same probe prints `"1"`; a regression captures the
+`systemd-run --setenv SCRIPTC_SAN=1` argument. Earlier focused runs using
+that invocation are not sanitizer evidence. This finding does not reclassify
+the separately supervised full gate above; its command/environment needs
+its own audit. Replacement focused runs are recorded in
+[rsp-native.md](./rsp-native.md).
+
 Storage recovery removed 5,760 reproducible ELF/PE binaries (78,559,181,960
 bytes) only from the completed Redwall checkout's `node_modules/.cache/scriptc-tests`.
 Generated sources, oracle outputs, metadata, logs, consumer acceptance artifacts
