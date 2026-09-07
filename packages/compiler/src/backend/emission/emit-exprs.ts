@@ -5929,7 +5929,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_rm_opts(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fsp.stat":
             return finish(`scr_fsp_stat(${arg(0)})`);
-          case "fsp.open":
+          case "fsp.openNumeric": return finish(`scr_fsp_open_numeric(${arg(0)}, ${arg(1)}, ${arg(2)})`); case "fsp.open":
             return finish(`scr_fsp_open(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fileHandle.fd":
             return finish(`scr_file_handle_fd(${arg(0)})`);

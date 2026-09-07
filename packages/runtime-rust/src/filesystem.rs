@@ -843,6 +843,10 @@ pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileH
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
     };
+    file_handle_register(file)
+}
+
+fn file_handle_register(file: std::fs::File) -> JsFileHandle {
     let fd = file_id(&file);
     OPEN_FILES.with(|files| {
         let previous = files.borrow_mut().insert(fd, file);

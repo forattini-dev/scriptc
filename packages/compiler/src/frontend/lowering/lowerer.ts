@@ -1,3 +1,4 @@
+import { fsConstantValue } from "./fs-constants.js";
 import { InternalCompilerError } from "../../errors.js";
 import { activeRuntimeTarget, runtimeTargetIr } from "../../compat/runtime-target.js";
 import { isIslandModulePath, islandModuleReason, type ModuleTierRow } from "../tiering.js";
@@ -9060,18 +9061,16 @@ export class Lowerer {
    * non-namespace receivers (the property chain keeps trying). */
   lowerNamespaceBuiltinProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
     const loc = locOf(expr);
-    // fs.constants.X_OK through the namespace: the same four POSIX
-    // access-mode bits the named-import form bakes (lowerFsConstantsProperty).
+    // Named and namespace imports share the destination platform table.
     if (!expr.questionDotToken && ts.isPropertyAccessExpression(expr.expression)) {
       const inner = this.builtinMemberOf(expr.expression);
       if (inner && inner.module === "fs" && inner.member === "constants") {
-        const MODES: Record<string, number | undefined> = { F_OK: 0, X_OK: 1, W_OK: 2, R_OK: 4 };
-        const value = own(MODES, expr.name.text);
+        const value = fsConstantValue(expr.name.text, this.targetPlatform);
         if (value === undefined) {
           this.noLowering(
             `fs.constants.${expr.name.text}`,
             expr,
-            "F_OK, R_OK, W_OK, and X_OK are the lowered constants",
+            "access modes and O_RDONLY/O_WRONLY/O_RDWR/O_CREAT/O_EXCL/O_TRUNC/O_APPEND are supported",
           );
         }
         return { kind: "numLit", value, type: F64, loc };
@@ -9099,7 +9098,7 @@ export class Lowerer {
     }
     if (bi.member === "constants" && bi.module === "fs") {
       // A bare `fs.constants` read (not one of the baked bits above).
-      this.noLowering(`fs.constants`, expr, "F_OK, R_OK, W_OK, and X_OK are the lowered constants");
+      this.noLowering(`fs.constants`, expr, "access modes and O_RDONLY/O_WRONLY/O_RDWR/O_CREAT/O_EXCL/O_TRUNC/O_APPEND are supported");
     }
     if (builtinModuleFnOf(this, bi.module, bi.member)) {
       this.unsupported(

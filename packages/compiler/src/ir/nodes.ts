@@ -3259,7 +3259,7 @@ export type IrLibFn =
    * become rejections rather than escaping synchronously. read/write
    * results are call-site record shapes ({ bytesRead/bytesWritten,
    * buffer }) assembled by the backends around the fixed runtime ABI. */
-  | "fsp.open"
+  | "fsp.open" | "fsp.openNumeric"
   | "fileHandle.fd"
   | "fileHandle.close"
   | "fileHandle.read"

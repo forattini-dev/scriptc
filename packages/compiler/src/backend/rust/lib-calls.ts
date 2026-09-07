@@ -467,10 +467,10 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "fsp.stat" && expr.args.length === 1 && arg !== undefined) {
     return context.emitPromiseFromSync([arg], (value) => `runtime::fs_stat(&${value(0)}, true)`);
   }
-  if (expr.fn === "fsp.open" && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
+  if ((expr.fn === "fsp.open" || expr.fn === "fsp.openNumeric") && expr.args.length === 3 && arg !== undefined && expr.args[1] !== undefined && expr.args[2] !== undefined) {
     return context.emitPromiseFromSync(
       [arg, expr.args[1], expr.args[2]],
-      (value) => `runtime::file_handle_open(&${value(0)}, &${value(1)}, ${value(2)})`,
+      (value) => expr.fn === "fsp.openNumeric" ? `runtime::file_handle_open_numeric(&${value(0)}, ${value(1)}, ${value(2)})` : `runtime::file_handle_open(&${value(0)}, &${value(1)}, ${value(2)})`,
     );
   }
   if (expr.fn === "fileHandle.fd" && expr.args.length === 1 && arg !== undefined) {

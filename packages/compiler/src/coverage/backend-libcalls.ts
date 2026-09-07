@@ -402,6 +402,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fsp.mkdirRecursive": ["c", "llvm", "rust"],
   "fsp.mkdirRecursiveMode": ["c", "llvm", "rust"],
   "fsp.open": ["c", "llvm", "rust"],
+  "fsp.openNumeric": ["c", "llvm", "rust"],
   "fsp.readFile": ["c", "llvm", "rust"],
   "fsp.readFileBytes": ["c", "llvm", "rust"],
   "fsp.readdir": ["c", "llvm", "rust"],

@@ -97,6 +97,7 @@ include!("string_search.rs");
 include!("querystring.rs");
 include!("os.rs");
 include!("filesystem.rs");
+include!("filesystem_open_numeric.rs");
 include!("filesystem_dirent.rs");
 include!("filesystem_whole_file.rs");
 include!("fs_watch.rs");
@@ -155,6 +156,7 @@ mod tests {
     include!("effect_failure.test.rs");
     include!("effect_context.test.rs");
     include!("effect_runners.test.rs");
+    include!("filesystem_open_numeric.test.rs");
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");

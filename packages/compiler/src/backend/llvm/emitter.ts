@@ -623,7 +623,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fsp.rm": "scr_fsp_rm",
   "fsp.rmOpts": "scr_fsp_rm_opts",
   "fsp.stat": "scr_fsp_stat",
-  "fsp.open": "scr_fsp_open",
+  "fsp.open": "scr_fsp_open", "fsp.openNumeric": "scr_fsp_open_numeric",
   "fileHandle.fd": "scr_file_handle_fd",
   "fileHandle.close": "scr_file_handle_close_promise",
   "fileHandle.readFile": "scr_file_handle_read_file_promise",

@@ -48,6 +48,8 @@ dependency/Effect, RSP/Brain, and full application acceptance remain unfinished.
 
 The current Effect lifetime fixes, regression witnesses and remaining
 semantics are tracked in [effect-native.md](./effect-native.md).
+Original RSP admission and its consumer-directed blockers are tracked in
+[rsp-native.md](./rsp-native.md).
 The complete repository gates remain separate; current failures and repairs
 are tracked in [native-gate.md](./native-gate.md). Performance claims require a
 separate benchmark with fixed inputs, matching outputs, repeated runs,

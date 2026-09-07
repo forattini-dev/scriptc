@@ -449,6 +449,37 @@ ScrPromise *scr_fsp_open(ScrStr *path, ScrStr *flags, double mode) {
                                  &scr_file_handle_release_v, NULL);
 }
 
+ScrPromise *scr_fsp_open_numeric(ScrStr *path, double flags, double mode) {
+  ScrFileHandle *h = NULL;
+  if (!scr_file_handle_path_valid(path)) goto settled;
+  char received[48];
+  char message[224];
+  scr_num_received(flags, received);
+  if (!isfinite(flags) || trunc(flags) != flags || flags < -2147483648.0 || flags > 2147483647.0) {
+    const char *range = (!isfinite(flags) || trunc(flags) != flags)
+        ? "an integer" : ">= -2147483648 && <= 2147483647";
+    int len = snprintf(message, sizeof message,
+        "The value of \"flags\" is out of range. It must be %s. Received %s", range, received);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, message, (size_t)len, "ERR_OUT_OF_RANGE");
+    goto settled;
+  }
+  if (!scr_file_handle_mode_valid(mode)) goto settled;
+  int native_flags = (int)flags | O_BINARY;
+#ifdef _WIN32
+  native_flags |= _O_NOINHERIT;
+#elif defined(O_CLOEXEC)
+  native_flags |= O_CLOEXEC;
+#endif
+  int fd = open(path->data, native_flags, (mode_t)mode);
+  if (fd < 0) { scr_fs_throw(errno, "open", path); goto settled; }
+  h = malloc(sizeof(ScrFileHandle));
+  if (!h) scr_trap("scriptc: out of memory\n");
+  h->rc = 1;
+  h->fd = fd;
+settled:
+  return scr_promise_settled_ref(h, &scr_file_handle_retain_v, &scr_file_handle_release_v, NULL);
+}
+
 ScrPromise *scr_file_handle_close_promise(ScrFileHandle *h) {
   scr_file_handle_close(h);
   return scr_promise_settled_void();

@@ -827,7 +827,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.rm": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.rmOpts": { argTypes: [STRING, BOOL, BOOL], result: { kind: "promise", inner: VOID } },
   "fsp.stat": { argTypes: [STRING], result: { kind: "promise", inner: STATS_T } },
-  "fsp.open": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: FILEHANDLE_T } },
+  "fsp.open": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: FILEHANDLE_T } }, "fsp.openNumeric": { argTypes: [STRING, F64, F64], result: { kind: "promise", inner: FILEHANDLE_T } },
   "fileHandle.fd": { argTypes: [FILEHANDLE_T], result: F64 },
   "fileHandle.close": { argTypes: [FILEHANDLE_T], result: { kind: "promise", inner: VOID } },
   // read/write carry call-site result record shapes; the validator checks

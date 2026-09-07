@@ -1,3 +1,4 @@
+import { fsConstantValue } from "./fs-constants.js";
 import { lowerDeflateLevel } from "./lower-zlib.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Builtin-surface lowering: node builtin-module calls (fs, path, os, url,
@@ -905,7 +906,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     if (bi.module === "fs" && bi.member === "watch") {
       return lowerFsWatchCall(L, expr, loc);
     }
-    // fs/promises.open(path[, flags[, mode]]) — string flags and numeric
+    // fs/promises.open(path[, flags[, mode]]) — string/numeric flags and numeric
     // creation mode, with Node's "r"/0o666 defaults. The runtime wraps
     // the descriptor in a shared FileHandle and settles/rejects exactly
     // like the existing fs/promises operations.
@@ -914,21 +915,22 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         L.noLowering(
           `fs.promises.open with ${expr.arguments.length} arguments`,
           expr,
-          "use open(path[, stringFlags[, numericMode]])",
+          "use open(path[, stringOrNumericFlags[, numericMode]])",
         );
       }
       const path = L.lowerExprExpecting(expr.arguments[0]!, STRING);
       const defaultFlags = { kind: "strLit", value: "r", type: STRING, loc } satisfies IrExpr;
       const defaultMode = { kind: "numLit", value: 0o666, type: F64, loc } satisfies IrExpr;
+      const numericFlags = expr.arguments[1] && L.mapTypeOf(L.typeOf(expr.arguments[1]))?.kind === "f64";
       const flags = expr.arguments[1]
-        ? lowerBuiltinOptionalDefault(L, expr.arguments[1]!, STRING, defaultFlags)
+        ? numericFlags ? L.lowerExprExpecting(expr.arguments[1], F64) : lowerBuiltinOptionalDefault(L, expr.arguments[1], STRING, defaultFlags)
         : defaultFlags;
       const mode = expr.arguments[2]
         ? lowerBuiltinOptionalDefault(L, expr.arguments[2]!, F64, defaultMode)
         : defaultMode;
       return {
         kind: "libCall",
-        fn: "fsp.open",
+        fn: numericFlags ? "fsp.openNumeric" : "fsp.open",
         args: [path, flags, mode],
         type: { kind: "promise", inner: FILEHANDLE_T },
         loc,
@@ -5559,22 +5561,18 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     L.unsupported("SC1090", expr, `JSON methods as values (call '${member}' directly)`);
   }
 
-/** `constants.X_OK` where `constants` is a named fs import: the access-
-   * mode bits bake as number literals (POSIX values — Node's own on the
-   * supported hosts). Other fs.constants members (COPYFILE_*, O_*) fence
-   * by name. Null for non-fs-constants receivers. */
+/** Named fs.constants imports use destination-platform numeric values. */
   export function lowerFsConstantsProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken) return null;
     if (!ts.isIdentifier(expr.expression)) return null;
     const bi = L.builtinImportOf(expr.expression);
     if (!bi || bi.module !== "fs" || bi.member !== "constants") return null;
-    const MODES: Record<string, number | undefined> = { F_OK: 0, X_OK: 1, W_OK: 2, R_OK: 4 };
-    const value = own(MODES, expr.name.text);
+    const value = fsConstantValue(expr.name.text, L.targetPlatform);
     if (value === undefined) {
       L.noLowering(
         `fs.constants.${expr.name.text}`,
         expr,
-        "F_OK, R_OK, W_OK, and X_OK are the lowered constants",
+        "access modes and O_RDONLY/O_WRONLY/O_RDWR/O_CREAT/O_EXCL/O_TRUNC/O_APPEND are supported",
       );
     }
     return { kind: "numLit", value, type: F64, loc: locOf(expr) };

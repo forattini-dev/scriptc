@@ -1049,6 +1049,13 @@ declare module "node:fs" {
   export function accessSync(path: string, mode?: number): void;
   export function mkdtempSync(prefix: string): string;
   export const constants: {
+    readonly O_RDONLY: number;
+    readonly O_WRONLY: number;
+    readonly O_RDWR: number;
+    readonly O_CREAT: number;
+    readonly O_EXCL: number;
+    readonly O_TRUNC: number;
+    readonly O_APPEND: number;
     readonly F_OK: number;
     readonly R_OK: number;
     readonly W_OK: number;
