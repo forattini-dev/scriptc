@@ -1,17 +1,19 @@
 /* The effect kernel's Rust emission: `effect.*` lib calls over
  * runtime/effect.rs. Values cross the kernel boxed (`EffectValue`, an
  * `Rc<dyn Any>`): a producer boxes its typed value, a consumer unboxes
- * with the Rust type the IR knows at that site — no dynamic checks, the
- * checker already typed the effect's channels. Callbacks travel as the
+ * with the Rust type the IR knows at that site. Widened channels use
+ * checked reconstruction of unions and dynamic scalars. Callbacks travel as the
  * runtime's traced closures (the child-listener pattern). */
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import { typeEquals, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { unboxEffectDynamic } from "./effect-dynamic.js";
 
 /** A typed value boxed for the kernel. UNION values travel as their ARM: a producer typed by one arm (`Effect.fail(new
  * NotFound())`) and a consumer typed by the union (`Effect.catch` over `NotFound | Busy`) agree on the box; unit arms box
  * as `EffectUnit` so `undefined` and `null` stay apart. */
 function box(context: RustLibCallContext, type: IrType, value: string, loc: SrcLoc): string {
+  if (type.kind === "nullT") return `{ let _ = ${value}; runtime::effect_box(runtime::EffectUnit::Null) }`;
   if (type.kind !== "union") return `runtime::effect_box(${value})`;
   const union = context.union(type.unionId, loc);
   const name = context.unionName(union.id);
@@ -25,6 +27,8 @@ function box(context: RustLibCallContext, type: IrType, value: string, loc: SrcL
  * or any arm's box (rebuilt into the arm's variant); `()` answers an undefined arm (the kernel's own unit). */
 function unbox(context: RustLibCallContext, type: IrType, value: string, loc: SrcLoc): string {
   const rust = context.rustType(type, loc);
+  if (type.kind === "dyn") return unboxEffectDynamic(context, value);
+  if (type.kind === "nullT") return `{ let sc_unit = ${value}; if sc_unit.downcast_ref::<runtime::EffectUnit>() != Some(&runtime::EffectUnit::Null) { runtime::effect_unbox_mismatch("null"); } () }`;
   if (type.kind !== "union") return `runtime::effect_unbox::<${rust}>(${value})`;
   const union = context.union(type.unionId, loc);
   const name = context.unionName(union.id);

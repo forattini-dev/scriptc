@@ -1,8 +1,6 @@
-/* IR validation — runs on every compile as the backstop for frontend bugs.
- * A violation is an internal compiler error (the frontend should never
- * produce invalid IR), but it still carries the user's source location:
- * an ICE that points at source is a gift to whoever debugs it.
- */ import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
+/* IR validation: frontend invariant failures retain the user's source location. */
+import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
+import { validateEffectUnitArgument } from "./validate-effect-units.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -3749,7 +3747,7 @@ function validateFunction(
           err(`libCall ${e.fn}: ${e.args.length} args, expected ${sig.argTypes.length}`, e.loc);
         }
         e.args.forEach((a, i) => {
-          checkExpr(a);
+          if (!validateEffectUnitArgument(e.fn, a, i, err)) checkExpr(a);
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });

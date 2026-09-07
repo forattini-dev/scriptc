@@ -428,7 +428,7 @@ pub fn effect_exit_succeed(value: EffectValue) -> JsEffect {
 }
 
 pub fn effect_exit_fail(error: EffectValue) -> JsEffect {
-    exit_handle(Err(error))
+    exit_handle(Err(EffectFailure::Fail(error)))
 }
 
 pub fn effect_try(attempt: Rc<dyn Fn() -> EffectValue>, recover: RecoverFn, trace: TraceFn) -> JsEffect {
@@ -654,7 +654,7 @@ impl CollectSource {
     }
 }
 
-type Outcome = Result<EffectValue, EffectValue>;
+type Outcome = Result<EffectValue, EffectFailure>;
 
 enum Step {
     Done(Outcome),
@@ -751,8 +751,8 @@ fn fiber_new(effect: &JsEffect, on_exit: Box<dyn FnOnce(Outcome)>) -> FiberRef {
 fn effect_step(effect: &JsEffect) -> Step {
     effect.with(|data| match &data.node {
         EffectNode::Succeed(value) => Step::Done(Ok(value.clone())),
-        EffectNode::Fail(error) => Step::Done(Err(error.clone())),
-        EffectNode::Die(defect) => effect_defect(defect.clone()),
+        EffectNode::Fail(error) => Step::Done(Err(EffectFailure::Fail(error.clone()))),
+        EffectNode::Die(defect) => Step::Done(Err(EffectFailure::Die(defect.clone()))),
         EffectNode::Sync(thunk, _) => Step::Done(Ok(thunk())),
         EffectNode::Map(inner, f, _) => Step::Push(Frame::Map(f.clone()), inner.clone()),
         EffectNode::FlatMap(inner, f, _) => Step::Push(Frame::FlatMap(f.clone()), inner.clone()),
@@ -792,7 +792,7 @@ fn effect_step(effect: &JsEffect) -> Step {
                     if !is_scriptc_unwind(payload.as_ref()) {
                         std::panic::resume_unwind(payload);
                     }
-                    Err(recover(caught_from_panic(payload)))
+                    Err(EffectFailure::Fail(recover(caught_from_panic(payload))))
                 }
             })
         }
@@ -808,7 +808,7 @@ fn effect_step(effect: &JsEffect) -> Step {
 
 /// Drive a fiber until it exits or suspends on a promise (which resumes
 /// it from the promise's reaction, on a later loop turn).
-fn fiber_drive(fiber: &FiberRef) {
+fn fiber_drive_inner(fiber: &FiberRef) {
     loop {
         let (current, resumed) = {
             let mut state = fiber.borrow_mut();
@@ -917,13 +917,13 @@ fn fiber_drive(fiber: &FiberRef) {
                     promise_handle_observe(
                         &handle,
                         Box::new(move |settled| {
-                            let outcome = match settled {
+                            let outcome = catch_effect_defect(|| match settled {
                                 Ok(value) => Ok(Rc::from(value) as EffectValue),
                                 Err(reason) => match &recover {
-                                    Some(recover) => Err(recover(reason)),
-                                    None => effect_defect(Rc::new(caught_to_string(&reason))),
+                                    Some(recover) => Err(EffectFailure::Fail(recover(reason))),
+                                    None => Err(EffectFailure::Die(reason.value)),
                                 },
-                            };
+                            });
                             resumed.borrow_mut().resumed = Some(outcome);
                             fiber_drive(&resumed);
                         }),
@@ -949,20 +949,21 @@ fn fiber_drive(fiber: &FiberRef) {
                     None
                 }
                 (Frame::FlatMap(f), Ok(value)) => Some(f(value)),
-                (Frame::CatchAll(f), Err(error)) => Some(f(error)),
-                // The failure becomes a Cause the handler reads (a kernel Fail cause; the kernel raises defects as
-                // throws, which never reach a frame).
-                (Frame::CatchCause(f), Err(error)) => Some(f(effect_box(effect_cause_new(false, error)))),
-                (Frame::MapError(f), Err(error)) => {
-                    outcome = Some(Err(f(error)));
+                (Frame::CatchAll(f), Err(EffectFailure::Fail(error))) => Some(f(error)),
+                (Frame::CatchCause(f), Err(error)) => Some(f(effect_box(error.into_cause()))),
+                (Frame::MapError(f), Err(EffectFailure::Fail(error))) => {
+                    outcome = Some(Err(EffectFailure::Fail(f(error))));
                     None
                 }
-                (Frame::OrDie, Err(error)) => effect_defect(error),
+                (Frame::OrDie, Err(EffectFailure::Fail(error))) => {
+                    outcome = Some(Err(EffectFailure::Die(error)));
+                    None
+                },
                 (Frame::As(value), Ok(_)) => {
                     outcome = Some(Ok(value));
                     None
                 }
-                (Frame::Ignore, _) => {
+                (Frame::Ignore, Ok(_) | Err(EffectFailure::Fail(_))) => {
                     outcome = Some(Ok(Rc::new(())));
                     None
                 }
@@ -982,8 +983,8 @@ fn fiber_drive(fiber: &FiberRef) {
                     fiber.borrow_mut().frames.push(Frame::Restore(Ok(value.clone())));
                     Some(f(value))
                 }
-                (Frame::TapError(f), Err(error)) => {
-                    fiber.borrow_mut().frames.push(Frame::Restore(Err(error.clone())));
+                (Frame::TapError(f), Err(EffectFailure::Fail(error))) => {
+                    fiber.borrow_mut().frames.push(Frame::Restore(Err(EffectFailure::Fail(error.clone()))));
                     Some(f(error))
                 }
                 (Frame::Restore(stored), Ok(_)) => {
@@ -1029,15 +1030,15 @@ fn fiber_drive(fiber: &FiberRef) {
                     fiber.borrow_mut().frames.push(Frame::Restore(exit.clone()));
                     Some(release(resource, exit_handle(exit)))
                 }
-                (Frame::OrElse(or_else), Err(_)) => {
+                (Frame::OrElse(or_else), Err(EffectFailure::Fail(_))) => {
                     outcome = Some(Ok(or_else()));
                     None
                 }
-                (Frame::CatchIf(predicate, recover), Err(error)) => {
+                (Frame::CatchIf(predicate, recover), Err(EffectFailure::Fail(error))) => {
                     if predicate(error.clone()) {
                         Some(recover(error))
                     } else {
-                        outcome = Some(Err(error));
+                        outcome = Some(Err(EffectFailure::Fail(error)));
                         None
                     }
                 }
@@ -1090,7 +1091,7 @@ pub fn effect_run_sync(effect: &JsEffect) -> EffectValue {
     let outcome = exit.borrow_mut().take();
     match outcome {
         Some(Ok(value)) => value,
-        Some(Err(error)) => effect_defect(error),
+        Some(Err(error)) => effect_defect(error.into_value()),
         None => throw_error("Fiber cannot be resolved synchronously. This is caused by using runSync on an effect that performs an asynchronous operation".to_owned()),
     }
 }
@@ -1106,7 +1107,7 @@ pub fn effect_run_promise<T: HeapValue>(effect: &JsEffect, unbox: Rc<dyn Fn(&Eff
                 let _ = promise_fulfill(&target, unbox(&value));
             }
             Err(error) => {
-                let _ = promise_reject(&target, caught_from_any(error));
+                let _ = promise_reject(&target, caught_from_any(error.into_value()));
             }
         }),
     );

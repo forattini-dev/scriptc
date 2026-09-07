@@ -21,7 +21,7 @@ pub fn effect_deferred_await(handle: &JsEffect) -> JsEffect {
 pub fn effect_deferred_settle(handle: &JsEffect, value: EffectValue, ok: bool) -> JsEffect {
     let latch = latch_of(handle, "Deferred");
     effect_sync(Rc::new(move || {
-        let outcome = if ok { Ok(value.clone()) } else { Err(value.clone()) };
+        let outcome = if ok { Ok(value.clone()) } else { Err(EffectFailure::Fail(value.clone())) };
         effect_box(latch.borrow_mut().settle(outcome))
     }), Box::new(|_| {}))
 }
@@ -126,7 +126,7 @@ fn queue_step(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waite
                 return Some(Ok(offered));
             }
             if state.shutdown {
-                return Some(Err(effect_box("Queue is shut down".to_owned())));
+                return Some(Err(EffectFailure::Fail(effect_box("Queue is shut down".to_owned()))));
             }
             state.takers.push_back(waiter);
             None
@@ -184,7 +184,7 @@ pub fn effect_queue_shutdown(handle: &JsEffect) -> JsEffect {
         let takers = std::mem::take(&mut state.takers);
         drop(state);
         for taker in takers {
-            taker(Err(effect_box("Queue is shut down".to_owned())));
+            taker(Err(EffectFailure::Fail(effect_box("Queue is shut down".to_owned()))));
         }
         effect_box(())
     }), Box::new(|_| {}))
@@ -290,15 +290,9 @@ pub fn effect_catch_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffe
 /// `Effect.tapCause(e, f)`: the failure is observed as a Cause and then re-raised unchanged.
 pub fn effect_tap_error_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
     effect_catch_cause(source, Rc::new(move |cause| {
-        let failure = effect_fail(effect_cause_squash_value(&cause));
+        let handle = effect_unbox::<JsEffect>(&cause);
+        let (die, value) = cause_of(&handle);
+        let failure = if die { effect_die(value) } else { effect_fail(value) };
         effect_zip_right(&f(cause), &failure)
     }), trace)
-}
-
-/// The error a Cause carries, read from the BOXED handle the catch frame hands the callback.
-fn effect_cause_squash_value(boxed: &EffectValue) -> EffectValue {
-    match boxed.downcast_ref::<JsEffect>() {
-        Some(handle) => effect_cause_squash(handle),
-        None => throw_error("scriptc: a Cause handle was expected".to_owned()),
-    }
 }
