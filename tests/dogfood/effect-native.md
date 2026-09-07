@@ -51,6 +51,14 @@ repeated settlement returning false. Both new programs and regressions 2988,
 pass on Rust 1.98.0. This checkpoint does not make the full repository gate
 green; the immutable Redwall gate still has failures under investigation.
 
+The fourth correction routes Ref.getAndSet and SynchronizedRef.getAndSet
+through value replacement even when the replacement is callable. Previously
+the compiler emitted an updater invocation, tried to unbox the stored closure
+as the callback's argument type, and terminated before producing output.
+Corpus 3014 now matches Node and proves replacement does not call the function;
+2987 and 3009 also pass. Workspace build and focused ESLint pass (0 errors;
+28 existing warnings in the lowering module).
+
 Remaining semantics work includes multiple failing finalizers and combined causes,
 interruption and shutdown, bounded
 concurrency, PubSub scope cleanup, and tracing of boxed heap values.

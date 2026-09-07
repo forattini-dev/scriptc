@@ -335,18 +335,17 @@ function lowerRefMember(L: Lowerer, ns: string, member: string, args: ts.Express
       if (args.length !== 1 || at(0).type.kind !== "effect") refused();
       return lib("effect.refGet", [at(0)], EFFECT_T, loc);
     case "set":
-      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
-      return lib("effect.refSet", [at(0), at(1), numLit(0, loc)], EFFECT_T, loc);
-    case "update":
     case "getAndSet":
+      if (args.length !== 2 || at(0).type.kind !== "effect") refused();
+      // A replacement is a value even when the cell stores a function.
+      return lib("effect.refSet", [at(0), at(1), numLit(member === "getAndSet" ? 1 : 0, loc)], EFFECT_T, loc);
+    case "update":
     case "updateAndGet": {
       if (args.length !== 2) refused();
       const cell = at(0);
       const fn = at(1);
-      // `getAndSet(ref, value)` takes a VALUE, not a function: it is `update` with a constant.
-      if (member === "getAndSet" && fn.type.kind !== "func") return lib("effect.refSet", [cell, fn, numLit(1, loc)], EFFECT_T, loc);
       if (cell.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1) refused();
-      const keep = member === "update" ? 0 : member === "getAndSet" ? 1 : 2;
+      const keep = member === "update" ? 0 : 2;
       return lib("effect.refUpdate", [cell, fn, numLit(keep, loc)], EFFECT_T, loc);
     }
     case "updateEffect": {
