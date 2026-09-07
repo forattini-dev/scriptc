@@ -75,7 +75,7 @@ import {
   requireSpecOf,
   resolveImport,
   workspacePackageOfPath,
-} from "../program.js";
+} from "../program.js"; import { describeSignatureBlocker } from "../type-explain.js";
 import {
   containsRecord,
   containsUnion,
@@ -3347,7 +3347,7 @@ export class Lowerer {
         !this.dynamic &&
         !(widened.flags & ts.TypeFlags.Any) &&
         mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
-      ) { const detail = describeRecordMemberBlocker(widened, this.typeCtx); if (detail !== null) { this.pushDiag(componentTypeDiag(this.checker.typeToString(type), detail, locOf(node))); throw new PoisonError(); } // the STATIC reason first: the member that blocks the shape names the kernel gap
+      ) { const detail = describeRecordMemberBlocker(widened, this.typeCtx) ?? describeSignatureBlocker(widened, this.typeCtx); if (detail !== null) { this.pushDiag(componentTypeDiag(this.checker.typeToString(type), detail, locOf(node))); throw new PoisonError(); } // the STATIC reason first: the member that blocks the shape names the kernel gap
         this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
         throw new PoisonError();
       }
@@ -3402,7 +3402,7 @@ export class Lowerer {
       !(typeSym?.name === "ArrayBuffer" && this.isStdlibSymbol(typeSym)) &&
       mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
     ) {
-      this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
+      const detail = describeRecordMemberBlocker(widened, this.typeCtx) ?? describeSignatureBlocker(widened, this.typeCtx); this.pushDiag(detail !== null ? componentTypeDiag(this.checker.typeToString(type), detail, locOf(node)) : requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
       throw new PoisonError();
     }
     // STANDARD-LIBRARY nominal provenance, decided once: interface/class
@@ -3483,7 +3483,7 @@ export class Lowerer {
     // USER record shapes blocked by ONE member (SC2009's record arm):
     // name the member and its type.
     {
-      const detail = describeRecordMemberBlocker(widened, this.typeCtx);
+      const detail = describeRecordMemberBlocker(widened, this.typeCtx) ?? describeSignatureBlocker(widened, this.typeCtx);
       if (detail !== null) {
         this.pushDiag(componentTypeDiag(this.checker.typeToString(type), detail, locOf(node)));
         throw new PoisonError();
