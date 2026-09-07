@@ -426,9 +426,7 @@ function lowerQueueMember(L: Lowerer, member: string, args: ts.Expression[], exp
   }
 }
 
-/** `PubSub`: a publish copies the value into every subscriber's own queue, and a subscription IS a queue handle
- * (takes and sizes work on it unchanged). A subscription lives as long as the hub — effect drops it when the
- * subscribing scope closes, which the kernel has no hook for yet. */
+/** `PubSub`: subscriptions use queue handles and are released by their acquiring scope or hub shutdown. */
 function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
   const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover PubSub.${member} yet`);
@@ -460,8 +458,7 @@ function lowerPubSubMember(L: Lowerer, member: string, args: ts.Expression[], ex
   }
 }
 
-/** `Cause`: why an effect ended. The kernel models the failure channel and a die built from a defect value;
- * interruption has no kernel meaning yet, so `hasInterrupts`/`hasInterruptsOnly` answer false. */
+/** `Cause`: a failure, defect or interruption. Combined causes are not modeled yet. */
 function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], expr: ts.Node, loc: SrcLoc): IrExpr {
   const at = (index: number): IrExpr => L.lowerExpr(args[index]!);
   const refused = (): never => L.unsupported("SC1090", expr, `the effect kernel does not cover Cause.${member} yet`);
@@ -471,21 +468,23 @@ function lowerCauseMember(L: Lowerer, member: string, args: ts.Expression[], exp
       return lib("effect.causeFail", [at(0)], EFFECT_T, loc);
     case "squash": {
       if (args.length !== 1 || at(0).type.kind !== "effect") refused();
-      // The value comes out with the ERROR channel's type (`Cause<E>`'s E — what the kernel boxed at the failure);
-      // effect types the result `unknown`, so the site's own checked-dynamic slot takes it from there.
+      // A Cause<E> may contain a defect or interruption even when E is never.
+      // Squash returns unknown: reconstruct the actual box at that dynamic site.
       const causeTs = L.typeOf(args[0]!);
       const errorTs = L.checker.getTypeArguments(causeTs as ts.TypeReference)[0];
       const carried = errorTs === undefined ? null : L.mapTypeOf(errorTs);
-      if (carried === null || carried.kind === "void") refused();
-      const squashed = lib("effect.causeSquash", [at(0)], carried as IrType, loc);
+      if (carried === null) refused();
       const site = L.mapTypeOf(L.typeOf(expr));
-      if (site === null || site.kind !== "dyn") return squashed;
+      if (site === null || site.kind !== "dyn") refused();
       // effect types the result `unknown`: the value rides the site's checked-dynamic slot, which only takes what
       // the dynamic tier can hold (a class instance cannot cross it).
-      if (!canConvertToDyn(carried as IrType, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      if (carried?.kind !== "void" && !canConvertToDyn(carried as IrType, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
         L.unsupported("SC1090", expr, `Cause.squash into a checked-dynamic slot for the '${L.fmt(carried as IrType)}' failure channel (only values the dynamic tier holds cross it)`);
       }
-      return { kind: "dynFrom", value: squashed, type: DYN, loc };
+      if (carried?.kind === "void") return lib("effect.causeSquash", [at(0)], DYN, loc);
+      // Retain the declared carrier so native emission can still reconstruct
+      // typed composite failures, with dynamic fallback for other causes.
+      return { kind: "dynFrom", value: lib("effect.causeSquash", [at(0)], carried as IrType, loc), type: DYN, loc };
     }
     case "hasDies":
     case "hasInterrupts":

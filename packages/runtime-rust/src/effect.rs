@@ -82,6 +82,7 @@ enum EffectNode {
     Succeed(EffectValue),
     Fail(EffectValue),
     Die(EffectValue),
+    Interrupt,
     Sync(Rc<dyn Fn() -> EffectValue>, TraceFn),
     Map(JsEffect, ValueFn, TraceFn),
     FlatMap(JsEffect, EffectFn, TraceFn),
@@ -172,9 +173,8 @@ pub enum KernelData {
     /// fixed ("An error occurred in Effect.tryPromise" — the reason itself rides effect's `cause`, which the kernel
     /// does not model yet).
     Unknown(JsString),
-    /// A `Cause`: why an effect ended. The kernel models the FAILURE channel (`Cause.fail`) and a die built from a
-    /// defect value; interruption has no kernel meaning yet, so every `hasInterrupts` answers false.
-    Cause(bool, EffectValue),
+    /// A single failure, defect or interruption. Combined causes remain unsupported.
+    Cause(EffectFailure),
     /// A `PubSub`: the subscriber queues a publish broadcasts into.
     PubSub(Rc<RefCell<PubSubState>>),
 }
@@ -186,7 +186,7 @@ pub struct EffectData {
 impl Trace for EffectData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         match &self.node {
-            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::ServiceKey(_) => {}
+            EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::Interrupt | EffectNode::ServiceKey(_) => {}
             EffectNode::ProvideBundle(inner, _) => tracer.edge(inner),
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
             EffectNode::All(effects, _) => tracer.edge(effects),
@@ -728,6 +728,7 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::Succeed(value) => Step::Done(Ok(value.clone())),
         EffectNode::Fail(error) => Step::Done(Err(EffectFailure::Fail(error.clone()))),
         EffectNode::Die(defect) => Step::Done(Err(EffectFailure::Die(defect.clone()))),
+        EffectNode::Interrupt => Step::Done(Err(EffectFailure::Interrupt)),
         EffectNode::Sync(thunk, _) => Step::Done(Ok(thunk())),
         EffectNode::Map(inner, f, _) => Step::Push(Frame::Map(f.clone()), inner.clone()),
         EffectNode::FlatMap(inner, f, _) => Step::Push(Frame::FlatMap(f.clone()), inner.clone()),

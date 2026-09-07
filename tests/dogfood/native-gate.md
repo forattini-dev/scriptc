@@ -7,16 +7,21 @@ remain unfinished.
 
 The local fallback began on the clean, immutable Redwall snapshot
 `e7bcadbc6c8b7e7166a380fb81269b713fb295bf`. Sandbox configuration was unavailable
-(`SCRIPTC_SANDBOX_IMAGE` absent). The plain lane is still running with observed
-failures, and the sanitized lane is pending. Its supervisor was recovered
-after the original tool session disappeared; the test process itself survived.
+(`SCRIPTC_SANDBOX_IMAGE` absent). Both lanes finished with failures on 2026-09-07. The plain lane reported
+146 failed files / 348 failed tests, 55 passed files / 5,524 passed tests,
+and three snapshot failures. The sanitized lane reported 204 failed files /
+155 failed tests and two passed files / 37 passed tests. ENOSPC occurred
+already in the plain lane and prevented most sanitized tests from starting.
+These totals include infrastructure cascades, not independently confirmed
+regressions. Its supervisor was recovered after the original tool session
+disappeared; the test process itself survived.
 The run uses a two-core CPU quota, two Vitest workers, one compiler worker per test
 worker, and a private persistent cache. It cannot validate later Effect or
 runtime repairs. A fresh immutable gate must cover the final changes before
 shipping.
 
 Current local run evidence is in `/tmp/scriptc-redwall-full-gate.json`,
-`/tmp/scriptc-redwall-full-plain.log` and, once started,
+`/tmp/scriptc-redwall-full-plain.log` and
 `/tmp/scriptc-redwall-full-sanitized.log`. These are workstation artifacts,
 not portable checked-in proof of a passing gate.
 
@@ -31,7 +36,15 @@ not portable checked-in proof of a passing gate.
 | Static executable size | The hello-world size assertion observed 463,720 bytes against a 392,000-byte limit. Cause and acceptable budget remain unresolved. |
 | Cache identity and timing cases | Several mutation/publication/LRU cases failed; distinguish actual cache defects from timing failures before changing tests. |
 | Whole-corpus coverage sweep | The single sweep exceeded its 600-second timeout. This is not evidence that every individual coverage case failed. |
+| TS7 order baselines | The completed plain lane reports missing baselines for new corpus/diagnostic/npm/Node fixtures and changed preflight diagnostics. Review those differences before recording new expectations; ENOSPC does not explain missing checked-in baselines. |
 
 Use the resource limiter for focused checks. Native tests need a private
 0700 cache, and inherited `LD_LIBRARY_PATH` disables persistent cache reuse.
 Do not disable sanitizers or relax behavioral assertions to make a gate pass.
+
+Storage recovery removed 5,760 reproducible ELF/PE binaries (78,559,181,960
+bytes) only from the completed Redwall checkout's `node_modules/.cache/scriptc-tests`.
+Generated sources, oracle outputs, metadata, logs, consumer acceptance artifacts
+and source worktrees were retained. The removal manifest is
+`/tmp/scriptc-redwall-cache-reclaimed.tsv`. Subsequent gates need enough disk
+headroom for their native output caches as well as CPU and memory limits.

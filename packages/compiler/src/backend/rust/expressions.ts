@@ -16,6 +16,7 @@ import { emitRustUnionKeyGet } from "./union-key-get.js";
 import { emitRustIslandExpr } from "./island.js";
 import { emitRustArrayNewLen } from "./array-new-len.js";
 import { emitRustFfiCall } from "./ffi.js";
+import { emitEffectCauseDynamic } from "./effect-dynamic.js";
 import type { RustExpressionContext } from "./expression-context.js";
 export type { RustExpressionContext } from "./expression-context.js";
 
@@ -233,6 +234,9 @@ export class RustExpressionEmitter {
         return `{ let ${object}: runtime::JsMap<runtime::JsString, ${this.context.dynTypeName()}> = runtime::map_new(); ${fields} ${this.context.dynTypeName()}::Object(${object}) }`;
       }
       case "dynFrom":
+        if (expr.value.kind === "libCall" && expr.value.fn === "effect.causeSquash" && expr.value.args[0] !== undefined) {
+          return emitEffectCauseDynamic(expr, this.context, this.emitExpr(expr.value.args[0]));
+        }
         return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
       case "dynFromJsval":
         return this.emitExpr(expr.value);

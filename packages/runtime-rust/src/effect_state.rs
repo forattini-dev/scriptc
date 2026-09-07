@@ -81,6 +81,12 @@ fn queue_of(handle: &JsEffect) -> Rc<RefCell<QueueState>> {
 /// queued (the fiber that completes the other half drives this one).
 fn queue_step(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waiter: QueueWaiter) -> Option<Outcome> {
     let mut state = queue.borrow_mut();
+    if state.shutdown {
+        return Some(match value {
+            None => Err(EffectFailure::Interrupt),
+            Some(_) => Ok(effect_box(false)),
+        });
+    }
     match value {
         // TAKE: an item, else the oldest parked offer (which frees its fiber), else park.
         None => {
@@ -97,17 +103,11 @@ fn queue_step(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waite
                 offerer(Ok(effect_box(true)));
                 return Some(Ok(offered));
             }
-            if state.shutdown {
-                return Some(Err(EffectFailure::Fail(effect_box("Queue is shut down".to_owned()))));
-            }
             state.takers.push_back(waiter);
             None
         }
         // OFFER: hand it to a waiting taker, else store it, else follow the full-queue strategy.
         Some(item) => {
-            if state.shutdown {
-                return Some(Ok(effect_box(false)));
-            }
             if let Some(taker) = state.takers.pop_front() {
                 drop(state);
                 taker(Ok(item));
@@ -145,27 +145,40 @@ pub fn effect_queue_size(handle: &JsEffect) -> JsEffect {
     effect_sync(Rc::new(move || effect_box(queue.borrow().items.len() as f64)), Box::new(|_| {}))
 }
 
-/// `Queue.shutdown`: later offers answer false, and a take on an empty shut-down queue FAILS with "Queue is shut
-/// down" (effect interrupts the taking fiber there; the kernel has no interruption yet — a failure is the closest
-/// observable, and it keeps the runtime going).
+/// Detach buffered values and waiters before resuming any user code. The
+/// caller can close every subscription atomically before waking its fibers.
+fn queue_close(queue: &Rc<RefCell<QueueState>>) -> Vec<(QueueWaiter, Outcome)> {
+    let mut state = queue.borrow_mut();
+    state.shutdown = true;
+    state.items.clear();
+    let mut wake = Vec::new();
+    for taker in state.takers.drain(..) {
+        wake.push((taker, Err(EffectFailure::Interrupt)));
+    }
+    for (_, offerer) in state.offerers.drain(..) {
+        wake.push((offerer, Ok(effect_box(false))));
+    }
+    wake
+}
+
+fn queue_wake(waiters: Vec<(QueueWaiter, Outcome)>) {
+    for (waiter, outcome) in waiters { waiter(outcome); }
+}
+
+/// Effect 4 shutdown clears messages, interrupts takes, answers false to
+/// pending offers, and succeeds with true even when already shut down.
 pub fn effect_queue_shutdown(handle: &JsEffect) -> JsEffect {
     let queue = queue_of(handle);
     effect_sync(Rc::new(move || {
-        let mut state = queue.borrow_mut();
-        state.shutdown = true;
-        let takers = std::mem::take(&mut state.takers);
-        drop(state);
-        for taker in takers {
-            taker(Err(EffectFailure::Fail(effect_box("Queue is shut down".to_owned()))));
-        }
-        effect_box(())
+        queue_wake(queue_close(&queue));
+        effect_box(true)
     }), Box::new(|_| {}))
 }
 
 /// A `PubSub`: every subscriber gets its own queue, and a publish copies the value into each of them (the
 /// broadcast semantics effect gives). A subscription is a Dequeue handle — the same Queue the kernel already
-/// runs — so takes, sizes and shutdowns work on it unchanged. Divergence: a subscription lives as long as the
-/// PubSub (effect unsubscribes when the subscribing scope closes; the kernel has no scope hook for it yet).
+/// runs. Its acquiring scope unregisters it and releases buffered messages;
+/// shutting down the hub closes all remaining subscriptions.
 pub struct PubSubState {
     subscribers: Vec<Rc<RefCell<QueueState>>>,
     capacity: f64,
@@ -204,20 +217,43 @@ pub fn effect_pubsub_publish(handle: &JsEffect, value: EffectValue) -> JsEffect 
     }), Box::new(|_| {}))
 }
 
-/// `PubSub.subscribe(hub)`: a fresh queue registered with the hub, answered as a Dequeue handle.
+/// `PubSub.subscribe(hub)`: acquire a fresh queue in the current scope.
 pub fn effect_pubsub_subscribe(handle: &JsEffect) -> JsEffect {
     let hub = pubsub_of(handle);
-    effect_sync(Rc::new(move || {
+    let release_hub = Rc::downgrade(&hub);
+    let acquire = effect_sync(Rc::new(move || {
         let (capacity, strategy) = { let state = hub.borrow(); (state.capacity, state.strategy) };
         let queue = queue_new(capacity, strategy);
-        hub.borrow_mut().subscribers.push(queue_of(&queue));
+        let mut state = hub.borrow_mut();
+        if state.shutdown { queue_close(&queue_of(&queue)); }
+        else { state.subscribers.push(queue_of(&queue)); }
         effect_box(queue)
-    }), Box::new(|_| {}))
+    }), no_trace());
+    effect_acquire_release(&acquire, Rc::new(move |resource, _exit| {
+        let queue = queue_of(&effect_unbox::<JsEffect>(&resource));
+        let hub = release_hub.clone();
+        effect_sync(Rc::new(move || {
+            if let Some(hub) = hub.upgrade() {
+                hub.borrow_mut().subscribers.retain(|other| !Rc::ptr_eq(other, &queue));
+            }
+            queue_wake(queue_close(&queue));
+            effect_box(())
+        }), no_trace())
+    }), no_trace())
 }
 
 pub fn effect_pubsub_shutdown(handle: &JsEffect) -> JsEffect {
     let hub = pubsub_of(handle);
-    effect_sync(Rc::new(move || { hub.borrow_mut().shutdown = true; effect_box(()) }), Box::new(|_| {}))
+    effect_sync(Rc::new(move || {
+        let queues = {
+            let mut state = hub.borrow_mut();
+            state.shutdown = true;
+            std::mem::take(&mut state.subscribers)
+        };
+        let wake = queues.iter().flat_map(queue_close).collect();
+        queue_wake(wake);
+        effect_box(())
+    }), no_trace())
 }
 
 /// `Effect.tryPromise(() => promise)` — the single-thunk form: a rejection becomes effect's `UnknownError`, a
@@ -231,27 +267,28 @@ pub fn effect_try_promise_unknown(thunk: Rc<dyn Fn() -> JsPromiseHandle>, trace:
 
 /// A `Cause`: why an effect ended. `die` marks a defect cause; the value is the error (or the defect).
 pub fn effect_cause_new(die: bool, value: EffectValue) -> JsEffect {
-    effect_new(EffectNode::Data(KernelData::Cause(die, value)))
+    let cause = if die { EffectFailure::Die(value) } else { EffectFailure::Fail(value) };
+    cause.into_cause()
 }
 
-fn cause_of(handle: &JsEffect) -> (bool, EffectValue) {
+fn cause_of(handle: &JsEffect) -> EffectFailure {
     handle.with(|data| match &data.node {
-        EffectNode::Data(KernelData::Cause(die, value)) => (*die, value.clone()),
+        EffectNode::Data(KernelData::Cause(cause)) => cause.clone(),
         _ => throw_error("scriptc: a Cause handle was expected".to_owned()),
     })
 }
 
 /// `Cause.squash(cause)`: the error a failure carries, or the defect a die carries.
 pub fn effect_cause_squash(handle: &JsEffect) -> EffectValue {
-    cause_of(handle).1
+    cause_of(handle).into_value()
 }
 
-/// `Cause.hasDies` / `hasInterrupts` / `hasInterruptsOnly`: the kernel has no interruption, so only dies answer.
+/// Predicates for the kernel's single-reason causes.
 pub fn effect_cause_has(handle: &JsEffect, what: f64) -> bool {
-    let (die, _) = cause_of(handle);
+    let cause = cause_of(handle);
     match what as i32 {
-        0 => die,
-        _ => false,
+        0 => matches!(cause, EffectFailure::Die(_)),
+        _ => matches!(cause, EffectFailure::Interrupt),
     }
 }
 
@@ -263,8 +300,7 @@ pub fn effect_catch_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffe
 pub fn effect_tap_error_cause(source: &JsEffect, f: Rc<dyn Fn(EffectValue) -> JsEffect>, trace: Box<dyn Fn(&mut Tracer<'_>)>) -> JsEffect {
     effect_catch_cause(source, Rc::new(move |cause| {
         let handle = effect_unbox::<JsEffect>(&cause);
-        let (die, value) = cause_of(&handle);
-        let failure = if die { effect_die(value) } else { effect_fail(value) };
+        let failure = cause_of(&handle).into_effect();
         effect_zip_right(&f(cause), &failure)
     }), trace)
 }

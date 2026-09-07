@@ -1,20 +1,29 @@
-/// Typed failures and defects both unwind the Effect continuation stack.
-/// Ordinary failure handlers only recover Fail; catchCause observes both.
+/// Failures, defects and interruption unwind the Effect continuation stack.
+/// Ordinary failure handlers only recover Fail; catchCause observes all three.
 #[derive(Clone)]
 pub enum EffectFailure {
     Fail(EffectValue),
     Die(EffectValue),
+    Interrupt,
 }
 
 impl EffectFailure {
     fn into_value(self) -> EffectValue {
-        match self { Self::Fail(value) | Self::Die(value) => value }
+        match self {
+            Self::Fail(value) | Self::Die(value) => value,
+            Self::Interrupt => effect_box(error_new("Error", string("All fibers interrupted without error"))),
+        }
     }
 
     fn into_cause(self) -> JsEffect {
+        effect_new(EffectNode::Data(KernelData::Cause(self)))
+    }
+
+    fn into_effect(self) -> JsEffect {
         match self {
-            Self::Fail(value) => effect_cause_new(false, value),
-            Self::Die(value) => effect_cause_new(true, value),
+            Self::Fail(value) => effect_fail(value),
+            Self::Die(value) => effect_die(value),
+            Self::Interrupt => effect_new(EffectNode::Interrupt),
         }
     }
 }

@@ -71,9 +71,70 @@ all 15 admission cases now pass, including two sequential controls. Corpus
 first 3015 draft hit the existing refusal for console.log of a void call;
 the final fixture observes discard through the callback's side effects.
 
-Remaining semantics work includes multiple failing finalizers and combined causes,
-interruption and shutdown, bounded
-concurrency, PubSub scope cleanup, and tracing of boxed heap values.
-Single-threaded execution alone does not provide atomicity across awaits.
-Do not interpret API admission or the existing sequential corpus as proof
-that these broader concurrent contracts are satisfied.
+## Subscription lifetime and shutdown
+
+The original native PubSub retained every subscription until the hub was
+dropped. Closing an acquiring scope left its queue registered and buffered
+values alive. A differential witness returned `value:7` from a closed
+subscription, then stopped producing output when hub shutdown left a take
+pending. Node instead reported interruption and ran the waiting consumer's
+finalizer.
+
+Subscriptions now register an acquire/release finalizer with the current
+scope. Release removes the registration, clears messages and wakes waiters.
+Hub shutdown detaches and closes all its queues before resuming any waiting
+fiber, so callbacks can reenter without observing a partly closed hub or
+borrowing its state recursively.
+
+Queue shutdown follows the installed Effect 4 behavior: buffered messages are
+discarded, pending takes interrupt, pending offers answer false, later offers
+answer false, and repeated shutdown succeeds with true. Interruption is a
+separate outcome from typed failure and defect, so ordinary error handlers do
+not swallow it. Cause predicates and tapCause preserve this distinction.
+Cause.squash reconstructs the actual boxed value into unknown; the typed error
+channel alone cannot describe a defect or interruption, including Cause<never>.
+
+Regression witnesses:
+
+- `3016-effect-pubsub-scope.ts`: escaped subscription, nested scope isolation,
+  shutdown of a pending take and its finalizer.
+- `3017-effect-queue-shutdown.ts`: buffered and blocked offers, pending takes,
+  shutdown idempotence and bypassing typed error recovery.
+- `3018-effect-interruption-cause.ts`: squashing interruption and defects whose
+  payload differs from the typed error channel.
+- `3019-effect-cause-composite.ts`: preserving record, array and union failure
+  conversion while accepting a defect outside the declared error channel.
+- `packages/runtime-rust/src/effect_state.test.rs`: 100 consecutive scopes
+  release registrations and weakly observed payloads, body failure/defect
+  cleanup, and release of buffered and pending queue payloads with reentry.
+
+Validation: all 154 runtime tests and Clippy pass on Rust 1.98.0. The four
+new differential programs plus 2978, 2989, 2990, 2991, 2994, 3010 and 3011
+pass against Node (11 total), with native heap auditing enabled. Workspace
+build, the final compiler rebuild and source-size checks pass; focused
+ESLint reports zero errors and 28 existing lowering warnings. The first
+final differential run could not build because locked crates were absent
+from the local cache. After `cargo fetch --locked`, the unchanged 11-case
+selection passed. This is focused validation, not a green repository gate.
+
+## Remaining work
+
+This fixes specific ownership paths, not all memory retention in Effect.
+`EffectValue` is still `Rc<dyn Any>`. `EffectData::trace` does not enumerate
+boxed payloads, service bundles, or kernel state, and suspended fiber frames
+are not collector nodes. Integrating these owners requires preserving shared
+box identity in the collector's reference accounting: tracing the same boxed
+Gc once per alias can overcount internal edges and clear reachable objects.
+A minimal cyclic-value witness and rooted/shared-owner tests must precede
+that change.
+
+Other pending semantics include combined causes and multiple failing
+finalizers, general fiber cancellation and interruption masks, runSync
+cleanup after asynchronous refusal, real bounded/unbounded collection
+concurrency, and PubSub backpressure. Single interruption causes do not
+provide fiber identity APIs. General typed record/class payload widening to
+unknown and dynamic-mode native Effect integration also remain unfinished.
+
+The consumer acceptance order remains RSP/Brain, then full red-dev/redcode,
+followed by measured CPU/RSS optimization. The full repository gate is still
+red; see [native-gate.md](./native-gate.md).
