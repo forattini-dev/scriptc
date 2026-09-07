@@ -43,8 +43,9 @@ Use `dogfood-scoreboard.mjs --backend rust --no-engine` for admission
 diagnostics. Its `validation` field distinguishes frontend coverage from
 backend emission. Neither mode invokes rustc or executes a consumer.
 
-The Redwall milestone is in progress; dependency/Effect, RSP/Brain, and
-full application acceptance remain unfinished. Performance claims require a
+Redwall consumer acceptance and its first benchmark are recorded below;
+dependency/Effect, RSP/Brain, and full application acceptance remain unfinished.
+The complete repository gates remain separate. Performance claims require a
 separate benchmark with fixed inputs, matching outputs, repeated runs,
 CPU time, peak RSS, executable size, and pinned compiler/consumer identities.
 No speed or memory improvement is established by the sidecar contracts.

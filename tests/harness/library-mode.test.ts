@@ -937,32 +937,32 @@ describe.each(EMISSIONS)("K14: determinism fences, %s emission", (emission) => {
 
   test("a manifest-id-keyed teachings entry attaches to that surface's own refusal", async () => {
     const diags = await refusal(
-      `export function f(): number { return Math.sin(1); }\n`,
+      `import { isBuiltin } from "node:module"; export function f(): number { return isBuiltin("fs") ? 1 : 0; }\n`,
       {
         exports: [{ export: "f", symbol: "kx_f", params: [], returns: "f64" }],
-        determinism: { teachings: { "stdlib.math.sin": "trig runs in the host; request it as an effect" } },
+        determinism: { teachings: { "node-builtin.module.isBuiltin": "module discovery belongs to the host" } },
       },
       emission,
     );
-    // The surface's own code, not a fence code: the id key attaches text
-    // to the refusal that already fires.
-    expect(diags[0]!.code).toBe("SC2012");
-    expect(diags[0]!.message).toContain("Math.sin");
-    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: trig runs in the host; request it as an effect");
+    // The module member has a manifest refusal; its id must attribute
+    // teaching without replacing the original diagnostic.
+    expect(diags[0]!.code).toBe("SC2020");
+    expect(diags[0]!.message).toContain("module.isBuiltin");
+    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: module discovery belongs to the host");
   });
 
   test("fencing a surface the static tier refuses anyway changes only the message", async () => {
     const diags = await refusal(
-      `export function f(): number { return Math.sin(1); }\n`,
+      `import { isBuiltin } from "node:module"; export function f(): number { return isBuiltin("fs") ? 1 : 0; }\n`,
       {
         exports: [{ export: "f", symbol: "kx_f", params: [], returns: "f64" }],
-        determinism: { fences: [{ id: "stdlib.math.sin", teaching: "trig is host math" }] },
+        determinism: { fences: [{ id: "node-builtin.module.isBuiltin", teaching: "module discovery is a host effect" }] },
       },
       emission,
     );
     // The existing refusal's code survives — the fence never re-codes a
     // surface that already refuses; its teaching rides as the note.
-    expect(diags[0]!.code).toBe("SC2012");
-    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: trig is host math");
+    expect(diags[0]!.code).toBe("SC2020");
+    expect(diags[0]!.note).toBe("from the 'refusal-fixture' profile: module discovery is a host effect");
   });
 });

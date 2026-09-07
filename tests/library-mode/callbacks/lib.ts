@@ -12,12 +12,15 @@ declare function mix(a: number, b: number): number;
 declare function orphan(x: number): void;
 
 let sessions = 0;
+// Reuse library-owned storage: the host must copy each borrowed delivery.
+// The final unregistered-channel trap longjmps out of stream, so a local
+// allocation there would be abandoned by the poisoned instance contract.
+const chunk = new Uint8Array(3);
 
 export function stream(n: number, base: number): number {
   sessions++;
   let acc = 0;
   for (let i = 0; i < n; i++) {
-    const chunk = new Uint8Array(3);
     chunk[0] = 65 + i; // 'A' + i
     chunk[1] = 48 + ((base + i) % 10); // a digit tied to the arguments
     chunk[2] = 33; // '!'
