@@ -5694,9 +5694,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3028-error-optional-message.ts": {
+   "order": [
+    "<repo>/tests/corpus/3028-error-optional-message.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3029-error-message-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/3029-error-message-coercion.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/303-break-continue.ts": {
    "order": [
     "<repo>/tests/corpus/303-break-continue.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3030-error-message-order.js": {
+   "order": [
+    "<repo>/tests/corpus/3030-error-message-order.js"
    ],
    "diags": []
   },

@@ -26,6 +26,7 @@ import { lowerHttpAgentNew, lowerHttpServerNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
+import { errorWithCause } from "./lower-error-message.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -4492,28 +4493,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     return false;
   }
 
-/** `new C(args)` for a class declared in the program (imports resolve
-   * through aliases, so cross-module classes construct too). */
-  /** The single message argument of a builtin Error construction or
-   * super() call: "" when omitted or explicitly undefined (Node's message
-   * property default), the string otherwise. The lib signature's second
-   * parameter (options/cause) has no lowering. */
-  export function errorMessageArg(L: Lowerer, args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node): IrExpr {
-    if (args.length > 1) {
-      L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause')");
-    }
-    if (args.length === 0) return { kind: "strLit", value: "", type: STRING, loc };
-    const value = L.lowerExpr(args[0]!);
-    if (value.type.kind === "string") return value;
-    if (value.kind === "unitLit" && value.unit === "undefined") {
-      return { kind: "strLit", value: "", type: STRING, loc };
-    }
-    L.unsupported(
-      "SC1090",
-      args[0]!,
-      `Error messages of type '${L.fmt(value.type)}' (the message must be a string)`,
-    );
-  }
+export { errorMessageArg } from "./lower-error-message.js";
 
 /** `new C(...)` of a registered PROGRAM class — the shared tail of the
  * identifier and namespace-qualified construction forms. */
@@ -4791,7 +4771,6 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (args.length > 2) {
           L.unsupported("SC1090", args[2] ?? expr, "Error constructor arguments after options");
         }
-        const msg = L.errorMessageArg(args.slice(0, 1), loc, expr);
         if (args.length === 2) {
           const options = args[1]!;
           if (!ts.isObjectLiteralExpression(options)) {
@@ -4817,28 +4796,13 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             L.unsupported("SC1090", property, "Error constructor option other than a plain 'cause' property");
           }
           if (causeNode !== null) {
-            const cause = L.lowerExpr(causeNode);
-            const dynCause = L.coerceToExpected(cause, DYN);
-            if (dynCause.type.kind !== "dyn") {
-              L.noLowering(
-                `Error cause of type '${L.fmt(cause.type)}'`,
-                causeNode,
-                "unknown and checked-dynamic-convertible cause values lower",
-              );
-            }
-            return {
-              kind: "libCall",
-              fn: "error.newCause",
-              args: [msg, dynCause],
-              type: { kind: "object", className: errInfo.def.name },
-              loc,
-            };
+            return errorWithCause(L, args[0]!, causeNode, errInfo.def.name, loc);
           }
         }
         return {
           kind: "libCall",
           fn: "error.new",
-          args: [msg],
+          args: [L.errorMessageArg(args.slice(0, 1), loc, expr)],
           type: { kind: "object", className: errInfo.def.name },
           loc,
         };

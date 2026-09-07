@@ -169,16 +169,66 @@ and `/tmp/scriptc-parser-lint.log`. Consumer evidence is in
 `/tmp/scriptc-rsp-parser-preflight-after.json` and
 `/tmp/scriptc-rsp-after-parser-admission.json`.
 
+## Error message coercion checkpoint
+
+Error construction and Error-subclass `super(message)` now accept optional
+and unknown messages when their values have an existing native dynamic
+conversion. `undefined` means an empty message; other values use JavaScript
+ToString, including object hooks and conversion exceptions. Symbol messages
+throw TypeError. Unsupported native carriers remain explicit refusals.
+No runtime or engine dependency was added.
+
+The inline `{ cause: expression }` path now evaluates the message expression
+and then the cause expression before converting the message. A differential
+regression reproduced the former ordering mismatch, including skipped cause
+effects when message conversion threw. Three corpus programs pin coercion,
+optional messages, single evaluation and argument/conversion ordering.
+
+On original RSP revision `c5255e006318fa3ec9aea51ccac11778da3888a1`,
+the same 1,665 statements are reached with 256 failures (previously 259)
+and 194 diagnostics (previously 199). All five removed diagnostics are
+Error message refusals: parser unknown, TOON optional string, and three
+numeric-message specializations in shared flag parsing. The one SDK engine
+import diagnostic remains; island statements remain zero. This is an
+analysis result, not a successful RSP executable.
+
+The original parser utility probe still passes preflight and now advances
+past `ParseError`'s message conversion. Its six remaining deferred refusals
+are subclasses whose `ParseError` base is not recognized as a registered
+program class. The original consumer files were not modified.
+
+Validation: 39 plain differential checks pass across Rust, C and LLVM;
+10 C/LLVM checks pass with sanitizers. Workspace build, source-size and
+diff checks pass. Focused ESLint reports zero errors and 94 warnings.
+The three new preflight baselines were recorded individually with empty
+diagnostics. The existing 20-entry order-canary chunk fails before reaching
+them because `2963-island-async-callback/main.ts` has no recorded baseline;
+unrelated baseline debt was not rewritten. The full repository gate was
+not rerun and remains pending/red.
+
+Evidence: `/tmp/scriptc-error-message-before.log`,
+`/tmp/scriptc-error-order-before.log`,
+`/tmp/scriptc-error-message-parity.log`,
+`/tmp/scriptc-error-existing-parity.log`,
+`/tmp/scriptc-error-message-sanitized.log`,
+`/tmp/scriptc-error-order-canary.log`,
+`/tmp/scriptc-error-message-build.log`,
+`/tmp/scriptc-error-message-lint.log`,
+`/tmp/scriptc-parser-after-error-coercion.json`, and
+`/tmp/scriptc-rsp-after-error-coercion.json`.
+
 ## Next acceptance work
 
-1. Repair the SDK export-surface fallback, the remaining engine-import
+1. Repair class-expression base registration for the parser's Error
+   subclasses, using the original utility probe as the acceptance witness.
+2. Repair the SDK export-surface fallback, the remaining engine-import
    diagnostic. Preserve honest fallback for unsupported declaration graphs.
-2. Implement the native bigint/hrtime path used by invocation telemetry,
+3. Implement the native bigint/hrtime path used by invocation telemetry,
    preserving integer precision.
-3. Address recursive JSON and generic flag-schema record coercions, Promise
+4. Address recursive JSON and generic flag-schema record coercions, Promise
    payload widening and typed ChildProcess values crossing unknown boundaries.
-4. Fill the remaining Node API gaps, including appendFileSync options.
-5. Compile the original entrypoint and run real CLI contracts for usage/errors,
+5. Fill the remaining Node API gaps, including appendFileSync options.
+6. Compile the original entrypoint and run real CLI contracts for usage/errors,
    passthrough stdout/stderr/exit behavior, then resident/store operations in
    disposable test directories.
 
