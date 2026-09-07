@@ -1,3 +1,4 @@
+import { lowerArrayClearAssignment } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Statement lowering: the statement dispatch (lowerStmt), variable
  * declarations including destructuring patterns, scoped blocks, control
@@ -4586,15 +4587,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
               loc,
             };
           }
-          // wrapper.close = fn — the net.Server close-override idiom
-          // (routed to lower-server; the generic fences stay for
-          // everything else).
+          const clear = lowerArrayClearAssignment(L, expr.left, expr.right);
+          if (clear) return clear;
+          // wrapper.close = fn — the net.Server close-override idiom.
           {
             const closeOverride = lowerServerCloseOverrideAssignment(L, expr.left, expr.right, locOf(expr));
             if (closeOverride) return closeOverride;
           }
-          // res.statusCode = 404 / res.statusMessage = "..." — Node's
-          // writable ServerResponse properties (same routing).
+          // Writable ServerResponse status properties.
           {
             const resProp = lowerHttpResPropertyAssignment(L, expr.left, expr.right, locOf(expr));
             if (resProp) return resProp;

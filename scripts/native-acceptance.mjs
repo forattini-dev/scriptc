@@ -16,6 +16,7 @@ const { values, positionals } = parseArgs({
     target: { type: "string", default: "node24" },
     out: { type: "string" },
     cwd: { type: "string" },
+    "consumer-root": { type: "string" },
     "binary-env": { type: "string", default: "SCRIPTC_NATIVE_BINARY" },
     "npm-static": { type: "string", multiple: true },
   },
@@ -61,7 +62,7 @@ const report = {
     node: process.version,
     rustc: spawnSync("rustc", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? null,
   },
-  consumer: revision(dirname(entry)),
+  consumer: { root: resolve(values["consumer-root"] ?? dirname(entry)), ...revision(resolve(values["consumer-root"] ?? dirname(entry))) },
   analysis: null, build: null, contract: null,
 };
 const save = () => writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");

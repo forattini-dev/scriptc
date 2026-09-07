@@ -24,6 +24,7 @@ pub trait ClearEdges {
 
 struct Node<T> {
     id: usize,
+    candidate: Cell<bool>,
     value: RefCell<T>,
 }
 
@@ -33,6 +34,10 @@ where
 {
     fn id(&self) -> usize {
         self.id
+    }
+
+    fn clear_candidate(&self) {
+        self.candidate.set(false);
     }
 
     fn trace(&self, tracer: &mut Tracer<'_>) {
@@ -81,6 +86,7 @@ where
         Self {
             inner: Some(Rc::new(Node {
                 id,
+                candidate: Cell::new(false),
                 value: RefCell::new(value),
             })),
         }
@@ -161,14 +167,27 @@ where
         let Some(node) = self.inner.take() else {
             return;
         };
-        let erased: DynNodeRc = node.clone();
-        let candidate = Rc::downgrade(&erased);
-        drop(erased);
-        drop(node);
-        if candidate.strong_count() > 0 {
-            let _ = CYCLE_CANDIDATES
-                .try_with(|candidates| candidates.borrow_mut().push(candidate));
+        if Rc::strong_count(&node) == 1 {
+            return;
         }
+        let _ = CYCLE_DROPS.try_with(|count| count.set(count.get().saturating_add(1)));
+        if node.candidate.replace(true) {
+            return;
+        }
+        let erased: DynNodeRc = node;
+        let candidate = Rc::downgrade(&erased);
+        let _ = CYCLE_CANDIDATES.try_with(|buffer| {
+            let mut buffer = buffer.borrow_mut();
+            buffer.push(candidate);
+            // Weak-count pruning never traces or borrows payloads, so it is
+            // safe even while a container operation holds a mutable borrow.
+            let _ = CYCLE_PRUNE_AT.try_with(|next| {
+                if buffer.len() >= next.get() {
+                    buffer.retain(|weak| weak.strong_count() > 0);
+                    next.set(buffer.len().saturating_mul(2).max(CYCLE_PRESSURE_THRESHOLD));
+                }
+            });
+        });
     }
 }
 
@@ -182,12 +201,11 @@ const CYCLE_PRESSURE_THRESHOLD: usize = 4096;
 
 /// Run a collection pass when enough drop candidates have accumulated.
 ///
-/// Every aliased handle drop records a candidate, so a long-running program
-/// that never collected until exit would retain each candidate's node
-/// allocation through its `Weak`. Draining on pressure bounds that growth.
+/// Count aliased drops separately from the deduplicated candidate queue:
+/// repeated access to one object still schedules collection at the next
+/// safe point, without retaining one Weak allocation per operation.
 pub fn collect_cycles_if_pressured() -> usize {
-    let pressured =
-        CYCLE_CANDIDATES.with(|buffer| buffer.borrow().len() >= CYCLE_PRESSURE_THRESHOLD);
+    let pressured = CYCLE_DROPS.with(|count| count.get() >= CYCLE_PRESSURE_THRESHOLD);
     if pressured { collect_cycles() } else { 0 }
 }
 
@@ -199,14 +217,16 @@ pub fn collect_cycles_if_pressured() -> usize {
 /// explicitly discounted, so the collector itself never keeps garbage live.
 pub fn collect_cycles() -> usize {
     let candidates = CYCLE_CANDIDATES.with(|buffer| std::mem::take(&mut *buffer.borrow_mut()));
+    CYCLE_DROPS.with(|count| count.set(0));
+    CYCLE_PRUNE_AT.with(|next| next.set(CYCLE_PRESSURE_THRESHOLD));
     let mut nodes = Vec::<DynNodeRc>::new();
     let mut positions = HashMap::<usize, usize>::new();
     let mut queue = VecDeque::<DynNodeRc>::new();
 
     for candidate in candidates {
-        if let Some(node) = candidate.upgrade()
-            && !positions.contains_key(&node.id())
-        {
+        if let Some(node) = candidate.upgrade() {
+            node.clear_candidate();
+            if positions.contains_key(&node.id()) { continue; }
             positions.insert(node.id(), nodes.len());
             nodes.push(node.clone());
             queue.push_back(node);

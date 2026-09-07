@@ -10,6 +10,13 @@ pub fn zlib_deflate_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     bytes_from_elements(zlib_compress_bytes(&bytes_u8_values(input), true))
 }
 
+/// A frontend-validated integer compression level.
+pub fn zlib_deflate_sync_level(input: &JsBytes<u8>, level: f64) -> JsBytes<u8> {
+    assert!((-1.0..=9.0).contains(&level) && level.fract() == 0.0, "scriptc: invalid native deflate level");
+    let compression = if level == -1.0 { Compression::default() } else { Compression::new(level as u32) };
+    bytes_from_elements(zlib_compress_bytes_level(&bytes_u8_values(input), true, compression))
+}
+
 /// deflateRawSync: the same DEFLATE stream with no zlib wrapper.
 pub fn zlib_deflate_raw_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
     bytes_from_elements(zlib_compress_bytes(&bytes_u8_values(input), false))
@@ -78,7 +85,11 @@ pub fn zlib_unzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
 /// The shared one-shot deflate loop: Node's default compression level, with
 /// or without the zlib wrapper. Compression of valid input cannot fail.
 fn zlib_compress_bytes(source: &[u8], zlib_header: bool) -> Vec<u8> {
-    let mut compressor = Compress::new(Compression::default(), zlib_header);
+    zlib_compress_bytes_level(source, zlib_header, Compression::default())
+}
+
+fn zlib_compress_bytes_level(source: &[u8], zlib_header: bool, level: Compression) -> Vec<u8> {
+    let mut compressor = Compress::new(level, zlib_header);
     let mut output = Vec::new();
     let mut consumed = 0;
     loop {

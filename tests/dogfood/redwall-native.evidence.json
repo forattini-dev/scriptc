@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "consumer": {
+    "commit": "a5f33a32f36e8448e6faa4121588b92ec21b9f59",
+    "source": {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/redwall-render.ts",
+      "sha256": "2977305cc13e7f3d687a285d09d500030a622f7571b7c16dd7ffae801da99487",
+      "bytes": 27554
+    }
+  },
+  "compiler": {
+    "commit": "5870f18ff51722d55882e7a90aa3505010e30e55",
+    "dirty": true,
+    "distSha256": "9bd585fdd53eb827c400d4e67e932de29dfc80b541dc70ed5bf3efa2311d8c4c",
+    "runtimeSourceSha256": "409a073e7b177b48566e95683a419ca75157d5b30830875e6c7f5cbfe3abf4a6",
+    "runtimeLockSha256": "9dd16d6e4943477af04e215db04e285389b1cccfeaf0964ac8063d9f984a558d",
+    "node": "v24.15.0",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "build": {
+    "ok": true,
+    "milliseconds": 305213.458873,
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "runtimeFences": [],
+    "binary": "/tmp/scriptc-redwall-contract/acceptance/program",
+    "binarySha256": "5195a9b3cf1780aa2bcdf173b87cb0c904fecb2299dcf46d0347936c4d5ba69f",
+    "generatedSourceSha256": "7f3f8db07c46bbd7a54c77d6c6a0a06ebeab4470a368bd56f57e035693a84f7b"
+  },
+  "execution": {
+    "engine": "none",
+    "externalFfi": false
+  },
+  "acceptanceReport": {
+    "path": "/tmp/scriptc-redwall-contract/acceptance/acceptance.json",
+    "sha256": "ccff6db3c941ccd2092d7d4a1d2b9092e4a63c634e3853357eb866a0397e77a0",
+    "bytes": 21703
+  },
+  "contract": {
+    "testsPassed": 38,
+    "assertions": 112,
+    "nativeRendersComparedWithBun": 26,
+    "log": {
+      "path": "/tmp/scriptc-redwall-contract-parity.log",
+      "sha256": "e4519cb462992496bb33996f648bb5e10f11f68021b75090ed8d942fc20c0b80",
+      "bytes": 4154
+    },
+    "preload": {
+      "path": "/tmp/scriptc-redwall-repro/preload.ts",
+      "sha256": "038d30468077a471cc8263b5ef641831de44ce95c0ac0f5db11b7a1ec6b71fb8",
+      "bytes": 1875
+    }
+  },
+  "fixedOutput": {
+    "path": "/tmp/scriptc-redwall-repro/output.png",
+    "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+    "bytes": 108881
+  },
+  "measurements": {
+    "path": "/tmp/scriptc-redwall-repro/measurements/benchmark.json",
+    "sha256": "e74671baa9c4cf69815070bccef856568bfbd12b5b922d16fc51c6d9d1124789",
+    "bytes": 17491
+  },
+  "limitations": [
+    "Tested compiler was dirty; commit is the parent checkpoint, not an immutable build identity.",
+    "Helpers in the original contracts run under Bun; all renderRedwall calls use the native subprocess and original Bun byte oracle.",
+    "Shared host with 50 percent CPU quota; elapsed time is not idle-host throughput.",
+    "Full repository plain and sanitized gates are still pending."
+  ]
+}

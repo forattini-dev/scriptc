@@ -1,5 +1,6 @@
 trait DynNode {
     fn id(&self) -> usize;
+    fn clear_candidate(&self);
     fn trace(&self, tracer: &mut Tracer<'_>);
     fn clear_edges(&self);
 }
@@ -11,6 +12,8 @@ thread_local! {
     static NEXT_NODE_ID: Cell<usize> = const { Cell::new(1) };
     static LIVE_NODES: Cell<usize> = const { Cell::new(0) };
     static CYCLE_CANDIDATES: RefCell<Vec<DynNodeWeak>> = const { RefCell::new(Vec::new()) };
+    static CYCLE_DROPS: Cell<usize> = const { Cell::new(0) };
+    static CYCLE_PRUNE_AT: Cell<usize> = const { Cell::new(CYCLE_PRESSURE_THRESHOLD) };
     static EXCEPTION_SLOT: RefCell<Option<Rc<dyn Any>>> = const { RefCell::new(None) };
     static PROCESS_ARGV: RefCell<Option<JsArray<JsString>>> = const { RefCell::new(None) };
     static OPEN_FILES: RefCell<HashMap<i32, std::fs::File>> = RefCell::new(HashMap::new());

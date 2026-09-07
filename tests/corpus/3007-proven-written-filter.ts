@@ -1,0 +1,10 @@
+const values: (string | null)[] = [null, "a", null, "b"];
+const kept = values.filter((value): value is string => value !== null);
+console.log(kept.join(","));
+const record = { name: "before" };
+const records: ({ name: string } | null)[] = [null, record];
+const filtered = records.filter((value): value is { name: string } => { return null !== value; });
+filtered[0].name = "after";
+console.log(record.name, filtered[0] === record);
+const optional: (number | null | undefined)[] = [null, 1, undefined, 2];
+console.log(optional.filter((value): value is number => value != null).join(","));

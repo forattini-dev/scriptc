@@ -5764,8 +5764,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_write_file_bytes(${arg(0)}, ${arg(1)})`);
           case "fsp.readFileBytes":
             return finish(`scr_fsp_read_file_bytes(${arg(0)})`);
-          // zlib (scr_zlib.c — linked only when these appear on the IR):
-          // inflate throws on corrupt input (may-throw seed set).
+          case "zlib.deflateSyncLevel":
+            return finish(`scr_zlib_deflate_level(${arg(0)}, ${arg(1)})`);
           case "zlib.deflateSync":
             return finish(`scr_zlib_deflate(${arg(0)})`);
           case "zlib.inflateSync":

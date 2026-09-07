@@ -43,19 +43,29 @@ Use `dogfood-scoreboard.mjs --backend rust --no-engine` for admission
 diagnostics. Its `validation` field distinguishes frontend coverage from
 backend emission. Neither mode invokes rustc or executes a consumer.
 
-The Redwall, dependency/Effect, RSP/Brain, and full application milestones
-still need implementation and acceptance. Performance claims require a
+The Redwall milestone is in progress; dependency/Effect, RSP/Brain, and
+full application acceptance remain unfinished. Performance claims require a
 separate benchmark with fixed inputs, matching outputs, repeated runs,
 CPU time, peak RSS, executable size, and pinned compiler/consumer identities.
 No speed or memory improvement is established by the sidecar contracts.
 
-A fixed-input adapter calling the original Redwall renderer (red-dev
-revision `a5f33a32f36e8448e6faa4121588b92ec21b9f59`) reached 741 statements
-with 15 diagnostics in native Rust analysis. Enabling checked dynamic values
-did not remove the blockers. The required compiler work includes Float64Array
-representation, deflate options, tuple indexing and typed-array set inputs,
-filter predicates, spreads, and unknown-valued brand-token records. Preserve
-the renderer's float precision and compression settings when adding support.
+The original Redwall renderer (red-dev revision
+`a5f33a32f36e8448e6faa4121588b92ec21b9f59`) now compiles to a native
+Rust executable with `engine: none`, no external FFI, and no runtime
+fences. Its fixed-input adapter reaches 769 statements with no reachable
+diagnostics. This does not establish admission of the full red-dev CLI.
+
+The first execution was stopped after sustained memory-high pressure:
+the process cgroup peaked at 2,258,354,176 bytes without producing a new
+PNG. Two runtime regressions reproduced unbounded candidate growth in
+100,000 synchronous byte reads and temporary-object allocations. The
+collector now deduplicates live candidates and prunes dead Weak handles
+without tracing borrowed payloads; a separate drop counter preserves
+safe-point collection scheduling. All 151 runtime tests and Clippy pass after the fix. The renderer now
+completes, with exact PNG parity against Bun for all 26 native invocations
+exercised by the original 38 contracts (38 passed, 112 assertions). A
+separate fixed-input run produced 108,881 bytes, SHA256
+`4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6`.
 
 Known limits relevant to subsequent work:
 
@@ -67,13 +77,48 @@ Known limits relevant to subsequent work:
 - Broader Fetch conformance, including redirects and HTTPS, needs separate
   coverage beyond the sidecar's loopback/manual-redirect contracts.
 
-The first Redwall compatibility slice adds Float64Array throughout the IR,
-frontend, C/LLVM/Rust emitters and both runtimes. Eight-byte backing views
-retain shared storage and full f64 precision. The focused C and LLVM
-Node/native differential checks passed; the Rust differential is pending.
-All 149 Rust runtime tests and Clippy passed on 1.98.0. Compiler/CLI builds
-and lint passed. Re-analysis of the unchanged renderer reaches 755
-statements with 11 diagnostics; it still does not compile end to end.
+Redwall compatibility adds Float64Array throughout the IR, frontend,
+C/LLVM/Rust emitters and both runtimes. Eight-byte views share storage and
+retain f64 precision. Corpus 3000 passes the Node/native differential in
+all three backends. Further corpus programs cover numeric-array/tuple
+TypedArray.set, dense array clearing, homogeneous tuple indexing/join,
+unknown indexed records, mixed spreads, proven non-null filter predicates,
+and fixed compression levels. Corpus 3001-3003 passes all three backends.
+Compiler/CLI builds, admission tests and lint pass. Corpus 3004-3008 now also passes all three backends. The cold LLVM
+timeout passed on retry; a real level-1 compression-byte mismatch led to
+an explicit SC2020 refusal for fixed levels 1-8, until their compatibility
+is implemented. This slice admits only -1, 0 and 9. Fourteen admission
+tests cover retained filter, array-length and compression-level fences.
+
+Prepare reproducible consumer adapters without rewriting its sources:
+
+```sh
+node scripts/prepare-native-redwall.mjs --consumer ../red-dev --out /tmp/native-redwall
+pnpm limit -- bun /tmp/native-redwall/fixture.ts
+pnpm limit -- node scripts/native-acceptance.mjs \
+  --entry /tmp/native-redwall/main.ts --target bun \
+  --out /tmp/native-redwall/native --consumer-root ../red-dev --cwd ../red-dev \
+  --binary-env SCRIPTC_NATIVE_REDWALL_BINARY -- \
+  bun test --timeout 300000 --preload /tmp/native-redwall/preload.ts src/redwall-render.test.ts
+pnpm limit -- bun build --compile --minify /tmp/native-redwall/main.ts --outfile /tmp/native-redwall/bun-program
+pnpm limit -- node scripts/native-benchmark.mjs \
+  --spec /tmp/native-redwall/benchmark.json --out /tmp/native-redwall/measurements
+```
+
+The preload replaces only `renderRedwall` with native subprocess calls;
+helper contracts continue to exercise the original TypeScript. Each native
+render is additionally compared byte-for-byte with the original Bun
+implementation. The hook requires at least one native invocation, reports
+its count, rejects stderr/failed native calls and enables heap auditing. The benchmark uses the same descriptor and assets
+for both compiled adapters and requires exact PNG bytes before reporting.
+
+The full plain/sanitized gate is not green. The earlier plain run was
+interrupted after cache-contract failures: inherited `LD_LIBRARY_PATH`
+disabled cache admission, the Zig shim had no selected version, and three
+runtime-shadow fixtures omitted QuickJS's dtoa source. The fixtures now
+copy both vendor dependencies, and all three focused cache tests pass. Local validation must unset LD_LIBRARY_PATH,
+use the installed Zig binary in its test-local PATH, and use a private
+0700 cache root; no global workstation configuration is required.
 
 `scripts/native-benchmark.mjs` measures fresh Linux processes with GNU time.
 Pass `--spec cases.json --out results --runs 7 --warmup 2`. The spec contains
@@ -88,4 +133,22 @@ RSS in KiB, elapsed time, and min/median/max excluding warmups. Run under the
 same resource limits on an otherwise idle host; elapsed time includes launch
 cost and reflects any cgroup throttling. Four harness tests cover equivalent
 runs, output mismatch, artifact mismatch/staleness, and command failure.
-No consumer performance measurements have been recorded with this tool yet.
+The first Redwall measurement contains seven runs per candidate and two
+warmups; all 18 outputs match. Raw evidence is in
+`redwall-native.measurements.json`, with build/contract identities in
+`redwall-native.evidence.json`. Median results on this shared Linux host:
+
+| Metric | Rust | Bun compiled |
+| --- | ---: | ---: |
+| Executable bytes | 3,836,816 | 81,393,120 |
+| CPU seconds | 8.88 | 1.41 |
+| Peak RSS KiB | 110,996 | 137,632 |
+| Elapsed milliseconds | 17,805 | 2,857 |
+
+Rust's executable is 21.2 times smaller and median peak RSS is 19.4% lower
+in this workload, while CPU consumption is 6.3 times higher. Runtime
+optimization remains necessary. These are fresh-process measurements
+under a 50% CPU quota on a host running unrelated workloads, not an
+idle-host throughput benchmark. The report retains cgroup limits and
+per-sample load averages. It identifies the tested dirty compiler snapshot;
+it must not be relabeled as a later clean commit.

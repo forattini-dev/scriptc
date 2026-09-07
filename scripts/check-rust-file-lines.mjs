@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // until the entry disappears at 1,200 lines. This is debt tracking, not an
 // exemption from the final rule.
 const legacyOversizedFiles = new Map([
-  ["packages/compiler/src/backend/cc.test.ts", 4_104],
+  ["packages/compiler/src/backend/cc.test.ts", 4_103],
   ["packages/compiler/src/backend/cc.ts", 6_087],
   ["packages/compiler/src/backend/emission/emit-async.ts", 1_279],
   ["packages/compiler/src/backend/emission/emit-exprs.ts", 7_981],
@@ -21,10 +21,10 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/frontend/lowering/lower-assert.ts", 1_492],
   ["packages/compiler/src/frontend/lowering/lower-builtins.ts", 8_299],
   ["packages/compiler/src/frontend/lowering/lower-calls.ts", 9_616],
-  ["packages/compiler/src/frontend/lowering/lower-classes.ts", 5_693],
-  ["packages/compiler/src/frontend/lowering/lower-containers.ts", 8_060],
+  ["packages/compiler/src/frontend/lowering/lower-classes.ts", 5_692],
+  ["packages/compiler/src/frontend/lowering/lower-containers.ts", 8_043],
   ["packages/compiler/src/frontend/lowering/lower-emitter.ts", 1_325],
-  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_233],
+  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_232],
   ["packages/compiler/src/frontend/lowering/lower-inspect.ts", 1_729],
   ["packages/compiler/src/frontend/lowering/lower-island.ts", 3_509],
   ["packages/compiler/src/frontend/lowering/lower-modules.ts", 2_316],

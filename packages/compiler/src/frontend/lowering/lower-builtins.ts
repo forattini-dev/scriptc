@@ -1,3 +1,4 @@
+import { lowerDeflateLevel } from "./lower-zlib.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Builtin-surface lowering: node builtin-module calls (fs, path, os, url,
  * crypto, child_process spawn/spawnSync and child/stats/spawn-result
@@ -1711,8 +1712,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       }
       return finishWrite(optionValues);
     }
-    // zlib takes Buffers; a string argument (the lib admits it) gets the
-    // wrap-it-first hint instead of a generic type mismatch.
+    if (bi.module === "zlib" && bi.member === "deflateSync" && expr.arguments.length === 2) return lowerDeflateLevel(L, expr);
     if (bi.module === "zlib" && expr.arguments.length >= 1) {
       const dataIr = L.mapTypeOf(L.typeOf(expr.arguments[0]!));
       if (!(dataIr?.kind === "bytes" && dataIr.elem === "u8")) {

@@ -143,6 +143,7 @@ mod tests {
     include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
+    include!("tests/heap_pressure.rs");
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");

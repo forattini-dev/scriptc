@@ -5175,9 +5175,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // is the lib constructor's `readonly T[] | Iterable<T> | null`
           // union — unmappable, so the generic literal path can't type it);
           // an array-typed VALUE seed lowers as itself.
-          if (ts.isArrayLiteralExpression(argNode) && !argNode.elements.some(ts.isSpreadElement)) {
-            const elems = argNode.elements.map((el) => L.lowerExprExpecting(el, mapped.elem));
-            const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(mapped.elem), loc };
+          if (ts.isArrayLiteralExpression(argNode)) {
+            const seed = L.lowerExprExpecting(argNode, arrayOf(mapped.elem));
             return { kind: "setNew", seed, type: mapped, loc };
           }
           if (!ts.isSpreadElement(argNode)) {

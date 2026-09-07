@@ -775,8 +775,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "buffer.isEncoding": { argTypes: [STRING], result: BOOL },
   "buffer.isUtf8": { argTypes: [BYTES_U8], result: BOOL },
   "buffer.concatLen": { argTypes: [arrayOf(BYTES_U8), F64], result: BYTES_U8 },
-  // The checked-dynamic compare/equals validators (Node's argument
-  // ladders over dyn-boxed invalid-input probes).
+  // Checked-dynamic compare/equals preserve Node's invalid-argument errors.
   "buffer.compareChk": { argTypes: [DYN, DYN], result: F64 },
   "bytes.equalsChk": { argTypes: [BYTES_U8, DYN], result: BOOL },
   "bytes.compareChk": { argTypes: [BYTES_U8, DYN, DYN, DYN, DYN, DYN], result: F64 },
@@ -801,6 +800,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.writeFileSyncBytes": { argTypes: [STRING, BYTES_U8], result: VOID },
   "fsp.readFileBytes": { argTypes: [STRING], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.deflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "zlib.deflateSyncLevel": { argTypes: [BYTES_U8, F64], result: BYTES_U8 },
   "zlib.inflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.gzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.gunzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },

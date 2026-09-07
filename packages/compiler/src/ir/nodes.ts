@@ -3207,9 +3207,9 @@ export type IrLibFn =
    * family over u8 bytes with Node's default options — the zlib wrapper
    * (deflateSync/inflateSync), gzip framing (gzipSync/gunzipSync), the
    * header-sniffing unzipSync (gzip magic vs a zlib header), and the
-   * wrapper-free raw pair. The compressors never throw (OOM aborts); the
-   * decompressors THROW Node's error catchably on corrupt input. */
+   * raw pair. deflateSyncLevel accepts a known integer -1..9; inflate throws. */
   | "zlib.deflateSync"
+  | "zlib.deflateSyncLevel"
   | "zlib.inflateSync"
   | "zlib.gzipSync"
   | "zlib.gunzipSync"

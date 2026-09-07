@@ -5293,6 +5293,7 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path);
  * aborts); inflate of corrupt input THROWS Node's error catchably
  * ("incorrect header check", ...). Borrow their input; results +1. */
 ScrBytes *scr_zlib_deflate(const ScrBytes *data);
+ScrBytes *scr_zlib_deflate_level(const ScrBytes *data, double level);
 ScrBytes *scr_zlib_inflate(const ScrBytes *data);
 /* The rest of the one-shot family: gzip framing (gzipSync/gunzipSync),
  * Node's header-sniffing unzipSync, and the wrapper-free raw pair. The

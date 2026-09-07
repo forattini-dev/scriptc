@@ -119,6 +119,13 @@ ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode) {
  * the raw pair — each one mode selection over the engines above, so all
  * five share their Node-exact error messages and codes. */
 
+ScrBytes *scr_zlib_deflate_level(const ScrBytes *data, double level) {
+  if (!(level >= -1 && level <= 9) || level != (double)(int)level) {
+    scr_trap("scriptc: invalid native deflate level\n");
+  }
+  return scr_zlib_deflate_mode(data, 0, level);
+}
+
 ScrBytes *scr_zlib_deflate(const ScrBytes *data) {
   return scr_zlib_deflate_mode(data, 0, Z_DEFAULT_COMPRESSION);
 }

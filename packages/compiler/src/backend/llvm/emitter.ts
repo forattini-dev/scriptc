@@ -469,8 +469,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fs.writeSync": "scr_fs_write_sync",
   "fs.writeStrSync": "scr_fs_write_str_sync",
   "fs.closeSync": "scr_fs_close",
-  // string_decoder (scr_bytes.c): stateless helpers over (enc, pending,
-  // chunk) — never throw.
+  // string_decoder helpers over (enc, pending, chunk) never throw.
   "strdec.write": "scr_strdec_write",
   "strdec.next": "scr_strdec_next",
   "strdec.end": "scr_strdec_end",
@@ -485,6 +484,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "text.decode": "scr_text_decode",
   "text.decodeLegacy": "scr_text_decode_legacy",
   "zlib.deflateSync": "scr_zlib_deflate",
+  "zlib.deflateSyncLevel": "scr_zlib_deflate_level",
   "zlib.inflateSync": "scr_zlib_inflate",
   "zlib.gzipSync": "scr_zlib_gzip",
   "zlib.gunzipSync": "scr_zlib_gunzip",

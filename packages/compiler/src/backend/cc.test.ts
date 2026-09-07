@@ -389,11 +389,10 @@ test.skipIf(process.platform === "win32")(
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(projectDir),
         mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-          cp(
-            join(originalRuntime, "..", "vendor", "ryu"),
-            join(dir, "runtime", "vendor", "ryu"),
-            { recursive: true },
-          )
+          Promise.all(["ryu", "quickjs-ng"].map((vendor) => cp(
+            join(originalRuntime, "..", "vendor", vendor),
+            join(dir, "runtime", "vendor", vendor), { recursive: true },
+          )))
         ),
       ]);
       await mkdir(join(fakeRuntime, "sys"));
@@ -835,9 +834,9 @@ test.skipIf(process.platform === "win32")(
         mkdir(binDir),
         cp(originalRuntime, fakeRuntime, { recursive: true }),
         mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-          cp(join(originalRuntime, "..", "vendor", "ryu"), join(dir, "runtime", "vendor", "ryu"), {
-            recursive: true,
-          }),
+          Promise.all(["ryu", "quickjs-ng"].map((vendor) => cp(
+            join(originalRuntime, "..", "vendor", vendor), join(dir, "runtime", "vendor", vendor), { recursive: true },
+          ))),
         ),
       ]);
       const numberSource = join(fakeRuntime, "scr_number.c");
@@ -2696,9 +2695,9 @@ test.skipIf(process.platform === "win32")(
     await Promise.all([
       cp(originalRuntime, fakeRuntime, { recursive: true }),
       mkdir(join(dir, "runtime", "vendor"), { recursive: true }).then(() =>
-        cp(join(originalRuntime, "..", "vendor", "ryu"), join(dir, "runtime", "vendor", "ryu"), {
-          recursive: true,
-        }),
+        Promise.all(["ryu", "quickjs-ng"].map((vendor) => cp(
+          join(originalRuntime, "..", "vendor", vendor), join(dir, "runtime", "vendor", vendor), { recursive: true },
+        ))),
       ),
     ]);
 

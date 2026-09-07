@@ -2,7 +2,7 @@
 // Repeated Linux process benchmarks with an output-equivalence gate.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpus, release } from "node:os";
+import { cpus, loadavg, release } from "node:os";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -50,10 +50,15 @@ const cases = spec.cases.map((item) => {
   return { name: item.name, command, cwd, artifacts, executable, acceptance };
 });
 const inputs = (spec.inputs ?? []).map((p) => fingerprint(fromSpec(p)));
+const cgroupPath = readFileSync("/proc/self/cgroup", "utf8").split("\n").find((line) => line.startsWith("0::"))?.slice(3);
+const limits = Object.fromEntries(["cpu.max", "memory.high", "memory.max", "memory.swap.max"].map((name) => {
+  const path = cgroupPath ? join("/sys/fs/cgroup", cgroupPath, name) : "";
+  return [name, path && existsSync(path) ? readFileSync(path, "utf8").trim() : null];
+}));
 mkdirSync(out, { recursive: true });
 const report = {
   schema: 1, createdAt: new Date().toISOString(), spec: fingerprint(specPath),
-  host: { platform: process.platform, arch: process.arch, release: release(), cpus: cpus().length, cpu: cpus()[0]?.model, node: process.version },
+  host: { platform: process.platform, arch: process.arch, release: release(), cpus: cpus().length, cpu: cpus()[0]?.model, node: process.version, limits },
   measurement: "fresh process per sample; warmup included in output checks; GNU time CPU seconds and peak RSS KiB; elapsed includes process launch; alternating candidate order",
   runs, warmup, inputs, cases, samples: [], equivalence: false, summary: null,
 };
@@ -93,7 +98,7 @@ try {
       const identity = JSON.stringify(output);
       if (expected === null) expected = identity;
       const matches = expected === identity;
-      report.samples.push({ candidate: item.name, round, warmup: round < 0, elapsedMs, userSeconds, systemSeconds, cpuSeconds: userSeconds + systemSeconds, peakRssKiB, output, matches });
+      report.samples.push({ candidate: item.name, round, warmup: round < 0, loadAverage: loadavg(), elapsedMs, userSeconds, systemSeconds, cpuSeconds: userSeconds + systemSeconds, peakRssKiB, output, matches });
       save();
       if (!matches) throw new Error(`${id}: output differs from the first candidate; performance comparison refused`);
     }

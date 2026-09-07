@@ -2139,7 +2139,7 @@ declare module "node:readline" {
  * wrapper, gzip framing, the header-sniffing unzipSync, and the raw pair.
  * brotli typechecks and fences at its use sites. */
 declare module "zlib" {
-  export function deflateSync(data: string | Uint8Array): Buffer;
+  export function deflateSync(data: string | Uint8Array, options?: { level?: number }): Buffer;
   export function inflateSync(data: Uint8Array): Buffer;
   export function gzipSync(data: string | Uint8Array): Buffer;
   export function gunzipSync(data: Uint8Array): Buffer;

@@ -1,3 +1,4 @@
+import { lowerHomogeneousTupleRead, tupleSpreadArray } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Expression lowering: the expression dispatch (lowerExpr), literals
  * (array/object/regex/template), operators (binary incl. compound targets,
@@ -4512,9 +4513,8 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
             loc: locOf(el),
           };
         }
-        // A same-family array whose ELEMENT lifts (string[] into a
-        // (string | symbol)[] literal — per-element wrap/width copy):
-        // the interned width helper reshapes before the spread copies.
+        src = tupleSpreadArray(L, src, type) ?? src;
+        // Lift compatible array elements before the spread copies them.
         if (src.type.kind === "array" && !typeEquals(src.type, type)) {
           const w = L.widthCoerce(src, type);
           if (w) src = w;
@@ -6899,10 +6899,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
       return { kind: "bytesIntrinsic", method: "get", receiver: recv, args: [index], type: F64, loc: locOf(expr) };
     }
-    // Tuple element read `t[0]`: a positional-field read of the tuple's
-    // record shape — LITERAL indices only (the checker's per-index types
-    // are what make the read honest; a dynamic index over a heterogeneous
-    // shape has no single element type). Narrows like any field read.
+    // Tuple reads select a record field; runtime indices require a uniform type.
     if (receiverIr?.kind === "record") {
       const shape = L.shapes.get(receiverIr.shapeId);
       if (shape?.tuple) {
@@ -6916,6 +6913,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         if (obj.type.kind === "jsval") return islandElementRead(L, expr, obj);
         const idx = tupleLiteralIndex(expr.argumentExpression);
         if (idx === null) {
+          const read = lowerHomogeneousTupleRead(L, expr, obj);
+          if (read) return read;
           L.unsupported(
             "SC1090",
             expr.argumentExpression,
@@ -7319,7 +7318,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     let declared: IrType | null = null;
     if (shape.indexValue) {
       declared = shape.indexValue;
-      if (includeUndefined || L.program.getCompilerOptions().noUncheckedIndexedAccess) {
+      if (declared.kind !== "dyn" && (includeUndefined || L.program.getCompilerOptions().noUncheckedIndexedAccess)) {
         declared = L.withUndefinedArmOf(declared);
         if (!declared) L.badType(expr, L.typeOf(expr));
       }

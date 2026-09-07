@@ -5,6 +5,7 @@ import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
  * the decompressors throw Node's catchable Error on corrupt input. */
 const ZLIB_ONE_SHOTS: Readonly<Record<string, string | undefined>> = {
   "zlib.deflateSync": "zlib_deflate_sync",
+  "zlib.deflateSyncLevel": "zlib_deflate_sync_level",
   "zlib.inflateSync": "zlib_inflate_sync",
   "zlib.gzipSync": "zlib_gzip_sync",
   "zlib.gunzipSync": "zlib_gunzip_sync",
@@ -19,9 +20,11 @@ export function emitRustZlibCall(
 ): string | null {
   const runtimeFn = ZLIB_ONE_SHOTS[expr.fn];
   if (runtimeFn === undefined) return null;
-  const [data] = expr.args;
-  if (expr.args.length !== 1 || data?.type.kind !== "bytes" || data.type.elem !== "u8") {
+  const [data, level] = expr.args;
+  const explicitLevel = expr.fn === "zlib.deflateSyncLevel";
+  if (explicitLevel && level?.type.kind !== "f64") context.unsupported("deflate level shape", expr.loc);
+  if (expr.args.length !== (explicitLevel ? 2 : 1) || data?.type.kind !== "bytes" || data.type.elem !== "u8") {
     context.unsupported(`${expr.fn} shape`, expr.loc);
   }
-  return `runtime::${runtimeFn}(&(${context.emitExpr(data)}))`;
+  return `runtime::${runtimeFn}(&(${context.emitExpr(data)})${explicitLevel && level ? `, ${context.emitExpr(level)}` : ""})`;
 }

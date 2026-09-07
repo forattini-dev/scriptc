@@ -1,3 +1,4 @@
+import { provesWrittenNonNullFilter } from "./lower-native-containers.js";
 /* Call lowering: the lowerCall dispatch chain, parameter-shape analysis and
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
@@ -7151,9 +7152,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       return { kind: "call", callee: helper, args: [receiver], type: arrayOf(outElem ?? elem), loc };
     }
 
-    // Inferred type predicate: inline function literal, NO return
-    // annotation (a written one is an unchecked assertion), and the
-    // checker reports a predicate over parameter 0.
+    // Inline inferred predicates, or written predicates whose bodies prove the arm.
+    // Other annotations retain the unchecked-assertion fence.
     if (!ts.isArrowFunction(argNode) && !ts.isFunctionExpression(argNode)) {
       L.unsupported(
         "SC1090",
@@ -7162,7 +7162,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           `(only an inline callback whose predicate the checker inferred can re-tag — ${annotateEscape})`,
       );
     }
-    if (argNode.type) {
+    if (argNode.type && !provesWrittenNonNullFilter(L, argNode, elem, outElem!)) {
       L.unsupported(
         "SC1090",
         argNode,

@@ -1,3 +1,4 @@
+import { lowerArraySpreadInsert, lowerBytesSetCall, lowerTupleJoinCall } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Container-surface call lowering: array methods (including the HOF family
  * map/filter/forEach with their synthesized helper functions), Map/Set
@@ -351,9 +352,9 @@ function fenceProducedArrayElem(L: Lowerer, node: ts.Node, producer: string, ele
     }
     if (name === "push" || name === "unshift" || name === "pop") {
       const receiver = L.lowerExpr(access.expression);
-      // `a.push(...src)` / `a.unshift(...src)`: copy src's elements in
-      // order (count snapshotted first, so the self-spread forms duplicate
-      // like JS) and return the new length.
+      if (name !== "pop" && call.arguments.length > 1 && call.arguments.some(ts.isSpreadElement)) {
+        return lowerArraySpreadInsert(L, call, receiver, receiverIr, name);
+      }
       const spreadArg = call.arguments.length === 1 && ts.isSpreadElement(call.arguments[0]!)
         ? call.arguments[0]!
         : null;
@@ -767,10 +768,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     return name;
   }
 
-/** READ-ONLY array methods on TUPLE receivers — `t.slice(...)`,
-   * `t.includes(v)`, `t.map(f)`, and `t.every(f)`: a tuple is a fixed-shape
-   * record, but these methods never
-   * write, so the positions snapshot into a fresh array (the for-of-over-
+/** Read-only tuple methods snapshot fields into an array (the for-of-over-
    * tuples stance — pure receivers only, since the reads re-emit per
    * position) and the ordinary array machinery runs over it. The element
    * type is the one position type, or the positions' interned union with
@@ -781,6 +779,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
+    if (name === "join") return lowerTupleJoinCall(L, call, access);
     if (name !== "slice" && name !== "includes" && name !== "map" && name !== "every") return null;
     if (!L.isStdlibMember(access)) return null;
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
@@ -5588,23 +5587,7 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       return { kind: "bytesIntrinsic", method: "fillElem", receiver, args: [v, ...idx], type: receiverIr, loc };
     }
-    if (name === "set") {
-      if (nArgs < 1 || nArgs > 2) {
-        L.noLowering(`.set with ${nArgs} arguments on typed arrays`, call);
-      }
-      const receiver = L.lowerExpr(access.expression);
-      const src = L.lowerExpr(call.arguments[0]!);
-      if (!typeEquals(src.type, receiverIr)) {
-        L.noLowering(
-          `.set from '${L.fmt(src.type)}' values`,
-          call.arguments[0]!,
-          "only a same-kind typed array copies in (number[] sources have no lowering — narrow unions first)",
-        );
-      }
-      const args = [src];
-      if (nArgs === 2) args.push(L.lowerExprExpecting(call.arguments[1]!, F64));
-      return { kind: "bytesIntrinsic", method: "setFrom", receiver, args, type: VOID, loc };
-    }
+    if (name === "set") return lowerBytesSetCall(L, call, access, receiverIr);
     if (name === "toString") {
       // Buffer's toString(encoding?) — utf8 by default. A 0-arg toString
       // resolved against the plain Uint8Array interface is JS's
