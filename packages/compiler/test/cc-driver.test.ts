@@ -229,6 +229,20 @@ int main(void) {
   return getcontext(&here);
 }
 `;
+const WINDOWS_CLOCK_C = String.raw`
+#include "scr_runtime.h"
+#include "scr_time.h"
+#include <stdio.h>
+
+int main(void) {
+  double before = scr_now_ms();
+  struct timespec delay = {0, 1};
+  if (scr_nanosleep(&delay, NULL) != 0) return 1;
+  if (scr_now_ms() < before || scr_date_now() <= 0) return 2;
+  fputs("windows clocks ok\n", stdout);
+  return 0;
+}
+`;
 const WINDOWS_CA_EKU_C = String.raw`
 #include "scr_runtime.h"
 
@@ -237,7 +251,19 @@ const WINDOWS_CA_EKU_C = String.raw`
 #include <windows.h>
 #include <wincrypt.h>
 
+static void count_system_cert(void *ctx, const unsigned char *der, size_t len) {
+  if (der != NULL && len > 0) (*(size_t *)ctx)++;
+}
+
 int main(int argc, char **argv) {
+  /* Keep the actual store-enumeration path linked for the cross-target
+   * TrustedPeople assertion; the two-argument path tests EKU policy. */
+  if (argc == 1) {
+    size_t count = 0;
+    scr_tls_ca_windows_certs(count_system_cert, &count);
+    printf("system certificates: %zu\n", count);
+    return 0;
+  }
   if (argc != 2) return 2;
   FILE *file = fopen(argv[1], "rb");
   if (file == NULL) return 3;
@@ -388,14 +414,20 @@ describe.skipIf(!zigOnPath())("zig cc builds (zig on PATH)", () => {
     const dir = await mkdtemp(join(tmpdir(), "scr-zigcc-win-"));
     const cPath = join(dir, "program.c");
     const caProbePath = join(dir, "ca-eku.c");
-    await writeFile(cPath, HELLO_C);
+    await writeFile(cPath, WINDOWS_CLOCK_C);
     await writeFile(caProbePath, WINDOWS_CA_EKU_C);
     const outPath = join(dir, "program.exe");
     const caOutPath = join(dir, "ca-probe.exe");
     await withCcEnv("zigcc", "x86_64-windows-gnu", async () => {
       await compileC({ cPath, outPath });
-      const magic = (await readFile(outPath)).subarray(0, 2);
-      expect([...magic]).toEqual([0x4d, 0x5a]); // MZ
+      const clockPe = await readFile(outPath);
+      expect([...clockPe.subarray(0, 2)]).toEqual([0x4d, 0x5a]); // MZ
+      for (const imported of ["QueryPerformanceCounter", "GetSystemTimeAsFileTime", "Sleep"]) {
+        expect(clockPe.includes(imported), imported).toBe(true);
+      }
+      if (process.platform === "win32") {
+        expect((await execFileAsync(outPath)).stdout).toBe("windows clocks ok\n");
+      }
       // CA introspection is mbedTLS-free but imports and PEM-encodes the
       // same filtered Windows certificate-store entries that the TLS client
       // consumes.

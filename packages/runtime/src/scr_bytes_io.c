@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include "scr_time.h"
 #ifdef __APPLE__
 #include <sys/stat.h> /* lchmod(2) — the fs.lchmodSync ladder's real tail */
 #endif
@@ -261,9 +261,7 @@ double scr_fs_to_unix_timestamp(const ScrDyn *t) {
   }
   if (t->kind == SCR_DYN_NUM && isfinite(t->v.num)) {
     if (t->v.num < 0) {
-      struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);
-      return ((double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6) / 1000.0;
+      return scr_clock_realtime_ms() / 1000.0;
     }
     return t->v.num;
   }

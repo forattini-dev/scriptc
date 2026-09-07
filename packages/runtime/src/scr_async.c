@@ -29,13 +29,9 @@
 #ifdef _WIN32
 /* Windows arm: fibers come from the Win32 Fibers API (CreateFiber /
  * SwitchToFiber — the direct ucontext analog: cooperatively scheduled,
- * same thread, own stack); the idle sleep is nanosleep (mingw-w64 ships
- * it, over Sleep). poll(2) has no Windows arm — see the sleep seam in
- * scr_loop_run: the poller-backed units (net/dgram/watch) are not built
- * for win32 targets (cc.ts gates them), so their fds never appear; the
- * events unit DOES cross-compile (scr_events.c's win32 arm) and is
- * served by a capped nanosleep — dispatch at the next turn's top, the
- * cap bounding signal/stdin latency instead of a pollable wake fd. */
+ * same thread, own stack); the idle sleep uses the runtime nanosleep
+ * seam over Win32 Sleep. Socket readiness comes from WSAPoll; the loop
+ * caps its sleep before the next readiness/signal/stdin dispatch. */
 #include <windows.h>
 #elif defined(__wasi__)
 #include <poll.h>
@@ -46,6 +42,8 @@
 #include <ucontext.h>
 #include <unistd.h>
 #endif
+
+#include "scr_time.h"
 
 #ifdef __wasi__
 /* WASI Preview 1 has no process-spawn capability. The child unit is not
@@ -432,9 +430,7 @@ static size_t scr_reffed_timers = 0;
 /* Exported: the island's timer machinery (scr_web.c) shares this clock so
  * its deadlines are comparable with the loop's. */
 double scr_now_ms(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+  return scr_clock_monotonic_ms();
 }
 
 static bool scr_timer_before(const ScrTimer *a, const ScrTimer *b) {
@@ -2493,7 +2489,7 @@ bool scr_loop_run(ScrPromise *top_level) {
       if (due > now) {
         double wait = due - now;
         struct timespec ts = {(time_t)(wait / 1000.0), (long)((wait - (double)((time_t)(wait / 1000.0)) * 1000.0) * 1e6)};
-        nanosleep(&ts, NULL);
+        scr_nanosleep(&ts, NULL);
       }
       now = scr_now_ms();
 #else
@@ -2587,7 +2583,7 @@ bool scr_loop_run(ScrPromise *top_level) {
       if (due > now) {
         double wait = due - now;
         struct timespec ts = {(time_t)(wait / 1000.0), (long)((wait - (double)((time_t)(wait / 1000.0)) * 1000.0) * 1e6)};
-        nanosleep(&ts, NULL);
+        scr_nanosleep(&ts, NULL);
         now = due;
       }
     }

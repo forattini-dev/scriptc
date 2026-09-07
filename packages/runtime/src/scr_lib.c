@@ -96,6 +96,8 @@ extern char **environ; /* env snapshot (scr_env_pairs) */
 
 #endif /* _WIN32 */
 
+#include "scr_time.h"
+
 /* O_BINARY: Windows-only (CRT text mode would translate \n on fd writes);
  * zero elsewhere so the POSIX open flags are unchanged. */
 #ifndef O_BINARY
@@ -2669,7 +2671,7 @@ void scr_fs_rm_opts_retry(ScrStr *path, bool recursive, bool force, double max_r
       struct timespec ts;
       ts.tv_sec = (time_t)(ms / 1000.0);
       ts.tv_nsec = (long)((ms - (double)ts.tv_sec * 1000.0) * 1000000.0);
-      nanosleep(&ts, NULL);
+      scr_nanosleep(&ts, NULL);
     }
   }
   scr_fs_throw(f.err, f.op, f.path);
@@ -2822,7 +2824,7 @@ ScrStr *scr_atomics_wait(ScrBytes *arr, double idx, double expected, double time
         (long)((ms - (double)(time_t)(ms / 1000.0) * 1000.0) * 1e6),
     };
     struct timespec rem;
-    while (nanosleep(&left, &rem) != 0 && errno == EINTR) left = rem;
+    while (scr_nanosleep(&left, &rem) != 0 && errno == EINTR) left = rem;
   }
   return scr_str_new("timed-out", 9);
 }
@@ -4338,10 +4340,8 @@ double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position) {
  * observe exactly this payload. */
 
 double scr_date_now(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
   /* Node's Date.now() is integer milliseconds. */
-  return floor((double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6);
+  return floor(scr_clock_realtime_ms());
 }
 
 /* Date's TimeClip: non-finite/out-of-range values become Invalid Date,
