@@ -213,6 +213,47 @@ checks pass; focused ESLint reports zero errors and 471 warnings across the
 selected compiler files. These focused checks do not establish a green full
 repository gate.
 
+## PubSub admission and backpressure
+
+Corpus 3024 reproduced two publish errors: a full bounded hub reported
+success before its slow subscriber freed capacity, and a dropping hub
+delivered a rejected message to its faster subscriber while reporting true.
+Node waited in the first case and rejected the second publication atomically.
+
+Bounded surplus now waits in FIFO order at the hub, using the existing
+fiber/latch suspension mechanism. The longest unread subscriber suffix
+determines shared capacity. Accepted publications update every subscription
+before resuming user callbacks; dropping rejects the whole publication,
+and sliding evicts the oldest shared message only from subscriptions that
+still retain it. A single drainer preserves publisher order under callback
+reentry. The subscription set at admission includes subscriptions that joined
+while the publication was waiting.
+
+Closing subscriptions releases buffered values and admits waiting producers.
+The installed Effect 4 also does this during hub shutdown: previously queued
+publications can complete with true as the subscriptions close, while new
+publications observe shutdown and return false. Corpus 3024 pins this behavior
+instead of assuming shutdown must interrupt the blocked publication.
+
+Corpus 3025 covers FIFO admission, late subscriptions, last-subscriber release,
+fresh subscriptions and sliding with readers at different positions. Runtime
+tests cover reentrant publications and payload release after scope closure
+or hub shutdown. An ownership test also reproduced premature destruction of
+the hub after dropping its external handle. Open subscriptions now retain the
+hub, the hub registers subscriptions weakly, and closing a subscription
+releases its hub reference, avoiding a direct reference-counting cycle.
+
+Validation: all 166 runtime tests and Clippy pass on Rust 1.98.0. Corpus
+3024/3025 plus 2978, 2988, 3009, 3012, 3013, 3016, 3017, 3020, 3022 and 3023
+match Node in all 12 selected differential programs, with native heap
+auditing enabled. Source-size and whitespace checks pass. This checkpoint
+changes the Rust runtime and tests only; the preceding compiler build remains
+applicable. Full repository validation is still not green.
+
+This covers the supported publish/take path. General cancellation of blocked
+publishers, replay options, capacity validation and further PubSub query and
+subscription APIs still need separate admission and behavioral coverage.
+
 ## Remaining work
 
 This fixes specific ownership paths, not all memory retention in Effect.
@@ -226,7 +267,7 @@ that change.
 
 Other pending semantics include general fiber cancellation and interruption masks,
 real bounded/unbounded collection
-concurrency, and PubSub backpressure. The cause model does not yet expose
+concurrency, and the PubSub extensions listed above. The cause model does not yet expose
 reason iteration, annotations, equality or fiber identity APIs. General typed record/class payload widening to
 unknown and dynamic-mode native Effect integration also remain unfinished.
 

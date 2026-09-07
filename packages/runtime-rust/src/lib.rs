@@ -112,6 +112,7 @@ include!("effect_runners.rs");
 include!("effect_latch.rs");
 include!("effect_refs.rs");
 include!("effect_state.rs");
+include!("effect_pubsub.rs");
 include!("windows_paths.rs");
 include!("json.rs");
 include!("number_format.rs");
@@ -150,6 +151,7 @@ mod tests {
     include!("tests/language_and_heap.rs");
     include!("tests/heap_pressure.rs");
     include!("effect_state.test.rs");
+    include!("effect_pubsub.test.rs");
     include!("effect_failure.test.rs");
     include!("effect_context.test.rs");
     include!("effect_runners.test.rs");

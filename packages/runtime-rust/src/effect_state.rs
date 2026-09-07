@@ -61,12 +61,13 @@ pub struct QueueState {
     takers: std::collections::VecDeque<QueueWaiter>,
     offerers: std::collections::VecDeque<(EffectValue, QueueWaiter)>,
     shutdown: bool,
+    pubsub: Option<Rc<RefCell<PubSubState>>>,
 }
 
 fn queue_new(capacity: f64, strategy: u8) -> JsEffect {
     effect_new(EffectNode::Data(KernelData::Queue(Rc::new(RefCell::new(QueueState {
         items: std::collections::VecDeque::new(), capacity, strategy,
-        takers: std::collections::VecDeque::new(), offerers: std::collections::VecDeque::new(), shutdown: false,
+        takers: std::collections::VecDeque::new(), offerers: std::collections::VecDeque::new(), shutdown: false, pubsub: None,
     })))))
 }
 
@@ -80,6 +81,16 @@ fn queue_of(handle: &JsEffect) -> Rc<RefCell<QueueState>> {
 /// One queue operation for the fiber driver: the outcome when it completes at once, or None when `waiter` was
 /// queued (the fiber that completes the other half drives this one).
 fn queue_step(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waiter: QueueWaiter) -> Option<Outcome> {
+    let hub = queue.borrow().pubsub.clone();
+    let taking = value.is_none();
+    let outcome = queue_step_inner(queue, value, waiter);
+    if taking && outcome.is_some() && let Some(hub) = hub {
+        pubsub_drain(&hub);
+    }
+    outcome
+}
+
+fn queue_step_inner(queue: &Rc<RefCell<QueueState>>, value: Option<EffectValue>, waiter: QueueWaiter) -> Option<Outcome> {
     let mut state = queue.borrow_mut();
     if state.shutdown {
         return Some(match value {
@@ -150,6 +161,7 @@ pub fn effect_queue_size(handle: &JsEffect) -> JsEffect {
 fn queue_close(queue: &Rc<RefCell<QueueState>>) -> Vec<(QueueWaiter, Outcome)> {
     let mut state = queue.borrow_mut();
     state.shutdown = true;
+    state.pubsub = None;
     state.items.clear();
     let mut wake = Vec::new();
     for taker in state.takers.drain(..) {
@@ -173,87 +185,6 @@ pub fn effect_queue_shutdown(handle: &JsEffect) -> JsEffect {
         queue_wake(queue_close(&queue));
         effect_box(true)
     }), Box::new(|_| {}))
-}
-
-/// A `PubSub`: every subscriber gets its own queue, and a publish copies the value into each of them (the
-/// broadcast semantics effect gives). A subscription is a Dequeue handle — the same Queue the kernel already
-/// runs. Its acquiring scope unregisters it and releases buffered messages;
-/// shutting down the hub closes all remaining subscriptions.
-pub struct PubSubState {
-    subscribers: Vec<Rc<RefCell<QueueState>>>,
-    capacity: f64,
-    strategy: u8,
-    shutdown: bool,
-}
-
-fn pubsub_of(handle: &JsEffect) -> Rc<RefCell<PubSubState>> {
-    handle.with(|data| match &data.node {
-        EffectNode::Data(KernelData::PubSub(state)) => state.clone(),
-        _ => throw_error("scriptc: a PubSub handle was expected".to_owned()),
-    })
-}
-
-pub fn effect_pubsub_make(capacity: f64, strategy: f64) -> JsEffect {
-    let strategy = strategy as u8;
-    effect_sync(Rc::new(move || effect_box(effect_new(EffectNode::Data(KernelData::PubSub(Rc::new(RefCell::new(
-        PubSubState { subscribers: Vec::new(), capacity, strategy, shutdown: false },
-    ))))))), Box::new(|_| {}))
-}
-
-/// `PubSub.publish(hub, a)`: the value reaches every subscriber's queue (a full one follows its own strategy).
-pub fn effect_pubsub_publish(handle: &JsEffect, value: EffectValue) -> JsEffect {
-    let hub = pubsub_of(handle);
-    effect_sync(Rc::new(move || {
-        let state = hub.borrow();
-        if state.shutdown {
-            return effect_box(false);
-        }
-        let queues: Vec<Rc<RefCell<QueueState>>> = state.subscribers.clone();
-        drop(state);
-        for queue in queues {
-            queue_step(&queue, Some(value.clone()), Box::new(|_| {}));
-        }
-        effect_box(true)
-    }), Box::new(|_| {}))
-}
-
-/// `PubSub.subscribe(hub)`: acquire a fresh queue in the current scope.
-pub fn effect_pubsub_subscribe(handle: &JsEffect) -> JsEffect {
-    let hub = pubsub_of(handle);
-    let release_hub = Rc::downgrade(&hub);
-    let acquire = effect_sync(Rc::new(move || {
-        let (capacity, strategy) = { let state = hub.borrow(); (state.capacity, state.strategy) };
-        let queue = queue_new(capacity, strategy);
-        let mut state = hub.borrow_mut();
-        if state.shutdown { queue_close(&queue_of(&queue)); }
-        else { state.subscribers.push(queue_of(&queue)); }
-        effect_box(queue)
-    }), no_trace());
-    effect_acquire_release(&acquire, Rc::new(move |resource, _exit| {
-        let queue = queue_of(&effect_unbox::<JsEffect>(&resource));
-        let hub = release_hub.clone();
-        effect_sync(Rc::new(move || {
-            if let Some(hub) = hub.upgrade() {
-                hub.borrow_mut().subscribers.retain(|other| !Rc::ptr_eq(other, &queue));
-            }
-            queue_wake(queue_close(&queue));
-            effect_box(())
-        }), no_trace())
-    }), no_trace())
-}
-
-pub fn effect_pubsub_shutdown(handle: &JsEffect) -> JsEffect {
-    let hub = pubsub_of(handle);
-    effect_sync(Rc::new(move || {
-        let queues = {
-            let mut state = hub.borrow_mut();
-            state.shutdown = true;
-            std::mem::take(&mut state.subscribers)
-        };
-        let wake = queues.iter().flat_map(queue_close).collect();
-        queue_wake(wake);
-        effect_box(())
-    }), no_trace())
 }
 
 /// `Effect.tryPromise(() => promise)` — the single-thunk form: a rejection becomes effect's `UnknownError`, a
