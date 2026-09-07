@@ -118,3 +118,13 @@ fn process_signals_finish() {
         }
     });
 }
+
+// signal-hook may receive a signal on the stdin/helper thread. Its atomic
+// flag does not interrupt the event-loop thread's blocking I/O wait.
+fn process_signal_deadline() -> Option<std::time::Instant> {
+    PROCESS_SIGNAL_REGISTRATIONS.with(|registrations| {
+        (!registrations.borrow().is_empty()).then(|| {
+            std::time::Instant::now() + std::time::Duration::from_millis(50)
+        })
+    })
+}

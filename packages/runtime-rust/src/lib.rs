@@ -124,6 +124,7 @@ include!("http_server.rs");
 include!("http_client.rs");
 include!("abort.rs");
 include!("fetch.rs");
+include!("fetch_reader.rs");
 include!("http_agent.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
@@ -149,6 +150,7 @@ mod tests {
     include!("tests/inspect.rs");
     include!("tests/net_and_http.rs");
     include!("tests/http_framing.rs");
+    include!("tests/fetch_reader.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("tests/tls.rs");

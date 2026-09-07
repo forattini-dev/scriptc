@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { withNativeBuildSlot } from "../native-build-slot.js";
-import type { RustRuntimeFeature } from "./runtime-features.js";
+import { featuresEmbedIsland, type RustRuntimeFeature } from "./runtime-features.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -22,6 +22,7 @@ export interface RustCompileOptions {
   optimization?: "release" | "dev";
   sanitize?: boolean;
   runtimeFeatures?: readonly RustRuntimeFeature[];
+  allowEngine?: boolean;
   linkInputs?: readonly string[];
   systemLibraries?: readonly string[];
 }
@@ -51,6 +52,9 @@ export class RustCompileError extends Error {
  * executable. No C translation unit or C compiler participates in this path.
  */
 export async function compileRust(options: RustCompileOptions): Promise<void> {
+  if (options.allowEngine === false && featuresEmbedIsland(options.runtimeFeatures ?? [])) {
+    throw new RustCompileError("--no-engine forbids JavaScript engine runtime features");
+  }
   await withNativeBuildSlot(() => compileRustUnbounded(options));
 }
 

@@ -6,6 +6,7 @@ pub fn fetch_response_new_text(body: &JsString) -> JsHttpRequest {
     Gc::new(HttpRequestData {
         fetch_response: true,
         fetch_body_used: false,
+        fetch_body_locked: false,
         socket: None,
         method: empty_string(),
         url: empty_string(),
@@ -33,7 +34,7 @@ pub fn fetch_start(
     url: &JsString,
     method: &JsString,
     headers: &JsArray<JsString>,
-    body: Option<&JsString>,
+    body: Option<&JsBytes<u8>>,
 ) -> JsPromise<JsHttpRequest> {
     let result = promise_new();
     let setup_guard = result.clone();
@@ -82,7 +83,7 @@ pub fn fetch_start(
             true,
         );
         if let Some(body) = body {
-            http_client_write_str(&request, &body);
+            http_client_write_bytes(&request, &body);
         }
         http_client_end(&request);
     });
@@ -122,6 +123,7 @@ pub fn fetch_response_bytes(response: &JsHttpRequest) -> JsPromise<JsBytes<u8>> 
         Rc::new(|_| {}),
         false,
     );
+    http_request_resume(response);
     result
 }
 

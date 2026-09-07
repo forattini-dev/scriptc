@@ -59,6 +59,7 @@ impl HttpServerState {
 pub struct HttpRequestData {
     fetch_response: bool,
     fetch_body_used: bool,
+    fetch_body_locked: bool,
     socket: Option<JsNetSocket>,
     method: JsString,
     url: JsString,
@@ -445,7 +446,7 @@ pub fn http_request_fetch_body_used(request: &JsHttpRequest) -> bool {
 
 pub fn http_request_claim_fetch_body(request: &JsHttpRequest) -> bool {
     request.with_mut(|request| {
-        if request.fetch_body_used {
+        if request.fetch_body_used || request.fetch_body_locked {
             false
         } else {
             request.fetch_body_used = true;

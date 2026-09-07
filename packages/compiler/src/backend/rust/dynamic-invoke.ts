@@ -378,6 +378,8 @@ class RustDynamicInvokeEmitter {
     this.emitAbortSignalArm();
     this.emitHttpRequestArm();
     this.emitHttpHeadersArm();
+    this.context.line(`${this.dyn}::FetchBody(body) => sc_dyn_fetch_body_invoke(body, method, args, callee_name),`);
+    this.context.line(`${this.dyn}::FetchReader(reader) => sc_dyn_fetch_reader_invoke(reader, method, callee_name),`);
     this.emitHttpResponseArm();
     this.emitHttpAgentArm();
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");

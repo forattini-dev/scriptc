@@ -31,6 +31,8 @@ let dynamic = false;
 let write = false;
 let name = "redcode";
 let target;
+let backend;
+let allowEngine = true;
 let writeTiers = false;
 const npmStatic = [];
 const islandModules = [];
@@ -41,12 +43,17 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--npm-static") npmStatic.push(args[++i]);
   else if (a === "--name") name = args[++i];
   else if (a === "--target") target = args[++i];
+  else if (a === "--backend") backend = args[++i];
+  else if (a === "--no-engine") allowEngine = false;
   else if (a === "--write-tiers") writeTiers = true;
   else if (a === "--island-module") islandModules.push(args[++i]);
   else if (a.startsWith("--")) { console.error(`unknown flag ${a}`); process.exit(1); }
   else entry = path.resolve(a);
 }
 if (entry === null || !existsSync(entry)) { console.error("entry file missing"); process.exit(1); }
+if (backend !== undefined && !["rust", "c", "llvm"].includes(backend)) {
+  console.error("backend must be rust, c or llvm"); process.exit(1);
+}
 
 const { analyze, writeProjectTiers } = await import(path.join(repoRoot, "packages/compiler/dist/index.js"));
 
@@ -73,6 +80,8 @@ process.stderr.write = (chunk, ...rest) => {
 const t0 = performance.now();
 const { coverage } = analyze(entry, {
   dynamic,
+  allowEngine,
+  ...(backend === undefined ? {} : { backend }),
   ...(target !== undefined ? { target } : {}),
   ...(npmStatic.length > 0 ? { npmStatic } : {}),
   ...(islandModules.length > 0 ? { islandModules } : {}),
@@ -169,7 +178,9 @@ function fold(diagnostics) {
 const board = {
   name,
   entry: path.relative(repoRoot, entry),
-  options: { dynamic, target: target ?? null, npmStatic, islandModules },
+  options: { dynamic, target: target ?? null, backend: backend ?? null, allowEngine, npmStatic, islandModules },
+  validation: backend !== undefined || !allowEngine ? "backend-emission" : "frontend-only",
+  execution: coverage.execution ?? null,
   preflightFailed: coverage.preflightFailed,
   stats: coverage.stats,
   unreachedStats: coverage.unreached?.stats ?? null,

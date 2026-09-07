@@ -67,6 +67,9 @@ async function main(): Promise<number> {
   }
 
   const [command, inputArg] = positionals;
+  if (values.engine === false && (command === "cache" || values.lib || values["from-c"])) {
+    fail("--no-engine applies to TypeScript/JavaScript executable builds, runs and coverage");
+  }
   if (command === "cache") {
     if (inputArg !== "warm") fail(`unknown cache command "${inputArg ?? ""}" (supported: warm)\n\n${USAGE}`);
     if (values.lib || values.dynamic || values.backend !== undefined || values.target !== undefined || (values.conditions ?? []).length > 0 || values["from-c"] || values.ffi !== undefined || values.profile !== undefined || (values["npm-static"] ?? []).length > 0 || values["provenance-sources"] || externalTypeArgs.length > 0 || values.out !== undefined || values["emit-ir"] || !values["keep-c"]) {
@@ -250,6 +253,8 @@ async function main(): Promise<number> {
 
   if (command === "coverage") {
     const { coverage, sourceTexts } = analyze(input, {
+      ...(backend === undefined ? {} : { backend }),
+      ...(values.engine === false ? { allowEngine: false } : {}),
       target,
       ...(conditions.length > 0 ? { conditions } : {}),
       ...(islandModules.length > 0 ? { islandModules } : {}),
@@ -261,7 +266,7 @@ async function main(): Promise<number> {
     const color = process.stdout.isTTY ?? false;
     process.stdout.write(renderCoverage(coverage, { color, sourceTexts }) + "\n");
     if (!coverage.preflightFailed) persistTiers();
-    return coverage.preflightFailed ? 1 : 0;
+    return coverage.preflightFailed || ((backend !== undefined || values.engine === false) && coverage.diagnostics.length > 0) ? 1 : 0;
   }
 
   const outDir = values.out ? dirname(resolve(values.out)) : join(dirname(input), ".scriptc");
@@ -283,6 +288,7 @@ async function main(): Promise<number> {
       return outPath;
     }
     const result = await compile(input, {
+      ...(values.engine === false ? { allowEngine: false } : {}),
       target,
       ...(conditions.length > 0 ? { conditions } : {}),
       ...(islandModules.length > 0 ? { islandModules } : {}),

@@ -34,6 +34,9 @@ export const ISLAND_AMBIENT_TYPES = [
   "ReadableStreamReadResult",
   "ReadableStreamReadValueResult",
   "ReadableStreamReadDoneResult",
+  "ReadableStreamDefaultReadResult",
+  "ReadableStreamDefaultReadValueResult",
+  "ReadableStreamDefaultReadDoneResult",
 ] as const;
 
 /** node:util.parseArgs's public and @types/node helper type names. Values
@@ -1644,18 +1647,13 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // exactly like npm-declared types. Static fetch has one deliberately
   // narrower native representation: Response is an opaque checked-
   // dynamic capsule consumed only by the Response method lowerings, and
-  // RequestInit is a checked-dynamic options object consumed by native
-  // fetch. AbortSignal, response Headers, and the readable Web Streams
-  // slice are native handles carried by that same checked-dynamic
-  // representation. Provenance, not names: a user's own `interface
-  // Response` maps as a record like any other.
-  // Interface OR class declarations (the shipped fallback declares
-  // interfaces; @types/node's undici-types declares Response as a class).
+  // Fetch options and handles use checked-dynamic values. Match stdlib
+  // provenance; user-defined names such as `interface Response` stay records.
   {
     const alias = widened.getAliasSymbol();
     if (
       !ctx.dynamic &&
-      alias?.name === "ReadableStreamReadResult" &&
+      (alias?.name === "ReadableStreamReadResult" || alias?.name === "ReadableStreamDefaultReadResult") &&
       checker.declarationsOf(alias).some(
         (d) =>
           ts.isTypeAliasDeclaration(d) &&
@@ -1677,7 +1675,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     !ctx.dynamic &&
     psym &&
     (psym.name === "ReadableStreamReadValueResult" ||
-      psym.name === "ReadableStreamReadDoneResult") &&
+      psym.name === "ReadableStreamReadDoneResult" ||
+      psym.name === "ReadableStreamDefaultReadValueResult" ||
+      psym.name === "ReadableStreamDefaultReadDoneResult") &&
     checker.declarationsOf(psym).some(
       (d) =>
         ts.isInterfaceDeclaration(d) &&

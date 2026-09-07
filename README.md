@@ -46,6 +46,15 @@ $ ./hello-rust ctate
 hello, ctate
 ```
 
+For native builds without an embedded JavaScript engine, use
+`scriptc build hello.ts --backend rust --no-engine`. This rejects engine
+imports, evaluation, persisted island modules, and deferred unsupported
+operations before building. Checked native dynamic values remain available.
+`scriptc coverage hello.ts --backend rust --no-engine` also checks Rust
+emission and exits nonzero on a refusal; successful coverage does not replace
+compiling and testing the executable. Engine absence does not imply that all
+transitive native dependencies forbid unsafe code.
+
 Rust builds emit `#![forbid(unsafe_code)]`, do not translate through C, and
 report unsupported constructs instead of falling back to another backend. The
 current subset includes classes with constructors, fields, accessors,

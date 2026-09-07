@@ -322,7 +322,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fetch.abortControllerNew": ["c", "llvm", "rust"],
   "fetch.abortNow": ["c", "llvm", "rust"],
   "fetch.abortTimeout": ["c", "llvm", "rust"],
-  "fetch.readerRead": ["c", "llvm"],
+  "fetch.readerRead": ["c", "llvm", "rust"],
   "fetch.responseBytes": ["c", "llvm", "rust"],
   "fetch.responseJson": ["c", "llvm", "rust"],
   "fetch.responseNew": ["c", "llvm", "rust"],

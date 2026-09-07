@@ -196,12 +196,17 @@ fn http_client_feed(
                 return;
             };
             connection.buffer.drain(..head_len);
-            connection.body_remaining = content_length;
-            connection.chunked = chunked;
+            // HEAD, 204 and 304 end at the response head even when a
+            // persistent connection remains open and Content-Length is absent.
+            let no_body = status == 204.0 || status == 304.0
+                || request.with(|request| request.method.as_ref() == "HEAD");
+            connection.body_remaining = if no_body { Some(0) } else { content_length };
+            connection.chunked = !no_body && chunked;
             let socket = request.with(|request| request.socket.clone());
             let response = Gc::new(HttpRequestData {
                 fetch_response: false,
                 fetch_body_used: false,
+                fetch_body_locked: false,
                 socket,
                 method: empty_string(),
                 url: empty_string(),

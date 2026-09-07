@@ -27,6 +27,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line(`"ok" if runtime::http_request_is_fetch_response(request) => { let status = runtime::http_request_status_code(request).unwrap_or(200.0); ${dyn}::Boolean((200.0..300.0).contains(&status)) },`);
   line(`"statusText" if runtime::http_request_is_fetch_response(request) => ${dyn}::String(runtime::http_request_status_message(request).unwrap_or_else(runtime::empty_string)),`);
   line(`"bodyUsed" if runtime::http_request_is_fetch_response(request) => ${dyn}::Boolean(runtime::http_request_fetch_body_used(request)),`);
+  line(`"body" if runtime::http_request_is_fetch_response(request) => if runtime::fetch_body_is_null(request) { ${dyn}::Null } else { ${dyn}::FetchBody(request.clone()) },`);
   line(`"url" => ${dyn}::String(runtime::http_request_url(request)),`);
   line(`"method" => ${dyn}::String(runtime::http_request_method(request)),`);
   line(`"statusCode" => runtime::http_request_status_code(request).map(${dyn}::Number).unwrap_or(${dyn}::Null),`);
@@ -66,7 +67,27 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
   close("}");
 
+  open(`fn sc_dyn_fetch_read(reader: &runtime::JsFetchReader) -> runtime::JsPromise<${dyn}> {`);
+  line(`runtime::promise_map(&runtime::fetch_reader_read(reader), |chunk| { let result = runtime::map_new(); runtime::map_set_by(&result, runtime::string("done"), ${dyn}::Boolean(chunk.is_none()), |a, b| a == b); if let Some(chunk) = chunk { runtime::map_set_by(&result, runtime::string("value"), ${dyn}::Bytes(chunk), |a, b| a == b); } ${dyn}::Object(result) })`);
+  close("}");
+
   if (!context.usesDynamicInvoke()) return;
+
+  open(`fn sc_dyn_fetch_body_invoke(body: &runtime::JsHttpRequest, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
+  open("match method {");
+  line(`"getReader" => { if !matches!(args.first(), None | Some(${dyn}::Undefined)) { runtime::throw_type_error("Reader options are not supported yet".to_owned()); } ${dyn}::FetchReader(runtime::fetch_body_get_reader(body)) },`);
+  line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+  close("}");
+  close("}");
+
+  open(`fn sc_dyn_fetch_reader_invoke(reader: &runtime::JsFetchReader, method: &str, callee_name: &str) -> ${dyn} {`);
+  open("match method {");
+  line(`"read" => ${dyn}::Promise(runtime::promise_to_handle(&sc_dyn_fetch_read(reader))),`);
+  line(`"cancel" => ${dyn}::Promise(runtime::promise_to_mapped_handle(&runtime::fetch_reader_cancel(reader), |_| ${dyn}::Undefined)),`);
+  line(`"releaseLock" => { runtime::fetch_reader_release(reader); ${dyn}::Undefined },`);
+  line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
+  close("}");
+  close("}");
 
   open(`fn sc_dyn_http_headers_invoke(headers: &runtime::JsHttpRequest, method: &str, args: &[${dyn}], callee_name: &str) -> ${dyn} {`);
   open("match method {");

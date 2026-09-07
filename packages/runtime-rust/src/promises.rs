@@ -20,6 +20,12 @@ impl HeapValue for JsSearchParams {}
 impl HeapValue for JsError {}
 impl HeapValue for Caught {}
 
+impl<T: HeapValue> HeapValue for Option<T> {
+    fn trace_value(&self, tracer: &mut Tracer<'_>) {
+        if let Some(value) = self { value.trace_value(tracer); }
+    }
+}
+
 impl<T> HeapValue for Gc<T>
 where
     T: Trace + ClearEdges + 'static,

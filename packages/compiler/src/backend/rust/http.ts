@@ -1,4 +1,5 @@
 import type { IrType } from "../../ir/nodes.js";
+import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -238,7 +239,29 @@ export function emitRustHttpCall(
     const init = context.nextTemporary();
     const promise = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${url} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; let (sc_method, sc_headers, sc_body) = match &${init} { ${dyn}::Undefined | ${dyn}::Null => (runtime::string("GET"), runtime::array_new(Vec::new()), None), ${dyn}::Object(..) => { let sc_method = sc_dyn_key_get(&${init}, &runtime::string("method"), false); let sc_method = match sc_method { ${dyn}::Undefined => runtime::string("GET"), ${dyn}::String(sc_value) => sc_value, sc_value => sc_dyn_arg_type_fail("init.method", "of type string", &sc_value), }; let sc_headers = sc_dyn_key_get(&${init}, &runtime::string("headers"), false); let sc_headers = match &sc_headers { ${dyn}::Undefined | ${dyn}::Null => runtime::array_new(Vec::new()), ${dyn}::Object(sc_values) => { let sc_headers = runtime::array_new(Vec::new()); let mut sc_index = 0.0; while sc_index < runtime::map_iter_count(sc_values) { if runtime::map_iter_live(sc_values, sc_index) { let sc_name = runtime::map_iter_key(sc_values, sc_index); let sc_value = runtime::map_iter_value(sc_values, sc_index); let sc_value = match sc_value { ${dyn}::String(sc_value) => sc_value, sc_value => sc_dyn_arg_type_fail("init.headers value", "of type string", &sc_value), }; runtime::array_push(&sc_headers, sc_name); runtime::array_push(&sc_headers, sc_value); } sc_index += 1.0; } sc_headers }, sc_value => sc_dyn_arg_type_fail("init.headers", "of type object", sc_value), }; let sc_body = sc_dyn_key_get(&${init}, &runtime::string("body"), false); let sc_body = match sc_body { ${dyn}::Undefined | ${dyn}::Null => None, ${dyn}::String(sc_value) => Some(sc_value), sc_value => sc_dyn_arg_type_fail("init.body", "of type string", &sc_value), }; (sc_method, sc_headers, sc_body) }, sc_value => sc_dyn_arg_type_fail("init", "of type object", sc_value), }; let ${promise} = runtime::fetch_start(&${url}, &sc_method, &sc_headers, sc_body.as_ref()); runtime::promise_map(&${promise}, |sc_response| ${dyn}::HttpRequest(sc_response)) }`;
+    return `{ let ${url} = ${context.emitExpr(expr.args[0])}; let ${init} = ${context.emitExpr(expr.args[1])}; let (sc_method, sc_headers, sc_body) = match &${init} { ${dyn}::Undefined | ${dyn}::Null => (runtime::string("GET"), runtime::array_new(Vec::new()), None), ${dyn}::Object(..) => { let sc_method = sc_dyn_key_get(&${init}, &runtime::string("method"), false); let sc_method = match sc_method { ${dyn}::Undefined => runtime::string("GET"), ${dyn}::String(sc_value) => sc_value, sc_value => sc_dyn_arg_type_fail("init.method", "of type string", &sc_value), }; let sc_headers = sc_dyn_key_get(&${init}, &runtime::string("headers"), false); let sc_headers = match &sc_headers { ${dyn}::Undefined | ${dyn}::Null => runtime::array_new(Vec::new()), ${dyn}::Object(sc_values) => { let sc_headers = runtime::array_new(Vec::new()); let mut sc_index = 0.0; while sc_index < runtime::map_iter_count(sc_values) { if runtime::map_iter_live(sc_values, sc_index) { let sc_name = runtime::map_iter_key(sc_values, sc_index); let sc_value = runtime::map_iter_value(sc_values, sc_index); let sc_value = match sc_value { ${dyn}::String(sc_value) => sc_value, sc_value => sc_dyn_arg_type_fail("init.headers value", "of type string", &sc_value), }; runtime::array_push(&sc_headers, sc_name); runtime::array_push(&sc_headers, sc_value); } sc_index += 1.0; } sc_headers }, sc_value => sc_dyn_arg_type_fail("init.headers", "of type object", sc_value), }; let sc_body = sc_dyn_key_get(&${init}, &runtime::string("body"), false); let sc_body = match sc_body { ${dyn}::Undefined | ${dyn}::Null => None, ${dyn}::String(sc_value) => Some(runtime::buffer_from_string(&sc_value, &runtime::string("utf8"))), ${dyn}::Bytes(sc_value) | ${dyn}::Buffer(sc_value) => Some(sc_value), sc_value => sc_dyn_arg_type_fail("init.body", "of type string or Uint8Array", &sc_value), }; (sc_method, sc_headers, sc_body) }, sc_value => sc_dyn_arg_type_fail("init", "of type object", sc_value), }; let ${promise} = runtime::fetch_start(&${url}, &sc_method, &sc_headers, sc_body.as_ref()); runtime::promise_map(&${promise}, |sc_response| ${dyn}::HttpRequest(sc_response)) }`;
+  }
+  if (expr.fn === "fetch.readerRead" && expr.args.length === 1 &&
+      expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&
+      expr.type.inner.kind === "record") {
+    const reader = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    const shape = context.record(expr.type.inner.shapeId, expr.loc);
+    const fields = shape.fields.map((field) => {
+      if (field.name === "done" && field.type.kind === "bool") return `${mangleField(field.name)}: sc_chunk.is_none()`;
+      if (field.name === "value" && field.type.kind === "dyn") return `${mangleField(field.name)}: Some(sc_chunk.map(${dyn}::Bytes).unwrap_or(${dyn}::Undefined))`;
+      if (field.name === "value" && field.type.kind === "union") {
+        const union = context.union(field.type.unionId, expr.loc);
+        const bytes = union.arms.findIndex((arm) => arm.kind === "bytes" && arm.elem === "u8");
+        const empty = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        if (union.arms.length === 2 && bytes >= 0 && empty >= 0) {
+          const name = context.unionName(union.id);
+          return `${mangleField(field.name)}: Some(sc_chunk.map(${name}::${context.unionVariant(bytes)}).unwrap_or(${name}::${context.unionVariant(empty)}))`;
+        }
+      }
+      context.unsupported("Fetch reader result other than Uint8Array", expr.loc);
+    }).join(", ");
+    return `{ let ${reader} = ${context.emitExpr(expr.args[0])}; match &${reader} { ${dyn}::FetchReader(sc_reader) => runtime::promise_map(&runtime::fetch_reader_read(sc_reader), |sc_chunk| runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })), sc_value => sc_dyn_arg_type_fail("this", "an instance of ReadableStreamDefaultReader", sc_value), } }`;
   }
   if (expr.fn === "fetch.responseText" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&

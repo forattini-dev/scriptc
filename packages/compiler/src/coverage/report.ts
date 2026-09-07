@@ -11,8 +11,11 @@ import { renderAll } from "../diagnostics/render.js";
 import type { LowerStats } from "../frontend/lowering/lowerer.js";
 import type { NpmBuiltinUse, NpmLazyTrap } from "../frontend/npm.js";
 import type { ProvenanceSources } from "../frontend/provenance-registry.js";
+import type { ExecutionProfile } from "../backend/execution-profile.js";
 
 export interface CoverageInput {
+  backend?: "rust" | "c" | "llvm";
+  execution?: ExecutionProfile;
   file: string;
   /** Analyzed as a --dynamic build: island sites LOWER (their statements
    * land in stats.statementsIsland) instead of SC2013-fencing, and the
@@ -94,6 +97,11 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   const out: string[] = [];
   out.push(`${c(BOLD, "scriptc coverage")} ${DIMPath(input.file, opts.color ?? false)}`);
   out.push("");
+
+  if (input.execution !== undefined) {
+    out.push(`  backend ${input.backend ?? "auto"}; JavaScript engine ${input.execution.engine}; external FFI ${input.execution.externalFfi ? "yes" : "no"}`);
+    out.push("");
+  }
 
   if (input.preflightFailed) {
     // Three preflight failure shapes, in order of "whose problem is it":

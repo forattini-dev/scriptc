@@ -12,8 +12,8 @@
  *   SC2xxx  scriptc type rules (types we cannot compile yet)
  *   SC3xxx  backend/target coverage: the program is valid, but the selected
  *            alternate backend or execution target does not include it
- *            (SC3001 — LLVM IR tier refusal; SC3002 — target refusal, both
- *            minted in index.ts)
+ *            (SC3001 — backend refusal; SC3002 — target refusal, minted
+ *            in index.ts; SC3003 — no-engine admission, execution-profile.ts)
  *   SC4xxx  library-mode/profile refusals (the library-emission mode): profile
  *            malformed (SC4001), export unresolved (SC4002), unmappable
  *            signature (SC4003), async/generator export (SC4004), the

@@ -648,6 +648,7 @@ fn run_event_loop_with_first_checkpoint(
                 .map(|task| task.due)
                 .min()
         });
+        let next_due = next_due.into_iter().chain(process_signal_deadline()).min();
         if ffi_foreign_pending() {
             let wait = event_loop_wait_timeout(
                 next_due,

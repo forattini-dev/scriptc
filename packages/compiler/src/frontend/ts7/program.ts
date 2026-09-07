@@ -74,9 +74,12 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
         );
         break;
       case "jsx":
-        // Same enum-name spelling discipline (adopted project configs carry
-        // numeric JsxEmit values): "Preserve" -> "preserve".
-        out[key] = enumKeyOf(JsxEmit as never, value as number)?.toLowerCase() ?? value;
+        // JSX's public tsconfig spellings contain hyphens absent from the
+        // enum keys. Keep TS7's symbolic values, but serialize its wire names.
+        out[key] = value === JsxEmit.ReactNative ? "react-native"
+          : value === JsxEmit.ReactJSX ? "react-jsx"
+            : value === JsxEmit.ReactJSXDev ? "react-jsxdev"
+              : enumKeyOf(JsxEmit as never, value as number)?.toLowerCase() ?? value;
         break;
       default: {
         if (typeof value === "number" && key !== "maxNodeModuleJsDepth") {

@@ -196,6 +196,7 @@ fn http_server_next(connection: &mut HttpServerConnection) -> HttpServerStep {
     let request = Gc::new(HttpRequestData {
         fetch_response: false,
         fetch_body_used: false,
+        fetch_body_locked: false,
         socket: Some(connection.socket.clone()),
         method: head.method,
         url: head.url,

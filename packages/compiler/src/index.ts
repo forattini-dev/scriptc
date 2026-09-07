@@ -1,3 +1,4 @@
+import { llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
 import { InternalCompilerError } from "./errors.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -7,6 +8,8 @@ import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js"
 import { compileRust, compileRustLibrary, RustCompileError } from "./backend/rust/compile.js";
 import { emitRustModule, RustUnsupportedError } from "./backend/rust/emitter.js";
 import { resolveIslandSourceStore, rustRuntimeFeatures, withIslandStore } from "./backend/rust/runtime-features.js";
+import { executionProfile, noEngineDiagnostics, type ExecutionProfile } from "./backend/execution-profile.js";
+export type { ExecutionProfile } from "./backend/execution-profile.js";
 import { splitLlvmLibraryProgram, splitLlvmProgram } from "./backend/llvm/split.js";
 import { rebaseLibrarySourceComments, replaceLibraryIdentity, stripLibraryIdentity, stripLibrarySourceComments } from "./backend/library-identity.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -226,6 +229,9 @@ export interface CompileOptions {
    * island constructs are diagnostics and nothing about codegen or linking
    * changes. */
   dynamic?: boolean;
+  /** false rejects engine-backed IR and deferred unsupported functionality,
+   * independently of --dynamic and persisted island module configuration. */
+  allowEngine?: boolean;
   /** Code generator for the program TU. Unset (the release default): the
    * LLVM backend emits LLVM IR text (.ll) that rides the SAME clang
    * command line in the program-TU seat, and a program outside the LLVM
@@ -268,72 +274,11 @@ export type CompileResult =
    * the code generator that ACTUALLY emitted the TU; `llvmRefusal` is
    * present iff the default lane fell back to C, carrying the tier
    * refusal's machine-readable kind tag ("stmt:...", "libCall:...", ...). */
-  | { ok: true; binaryPath: string; cPath: string; sourcePath?: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string }
-  | { ok: true; binaryPath: string; cPath: string; sourcePath: string; irPath?: string; backend: "rust"; safetyProfile: "rust-only" | "rust+external-ffi"; llvmRefusal?: never }
+  | { ok: true; binaryPath: string; cPath: string; sourcePath?: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string; execution: ExecutionProfile; runtimeFences?: ScrDiagnostic[] }
+  | { ok: true; binaryPath: string; cPath: string; sourcePath: string; irPath?: string; backend: "rust"; safetyProfile: "rust-only" | "rust+external-ffi"; llvmRefusal?: never; execution: ExecutionProfile; runtimeFences: ScrDiagnostic[] }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
-/** The LLVM backend's tier refusal as a diagnostic. SC3xxx = backend
- * coverage (the program is fine — this backend doesn't compile it yet);
- * the parenthesized kind tag is machine-readable for the differential
- * harness's histogram. */
-function llvmRefusalDiag(err: LlvmUnsupportedError, entryPath: string): ScrDiagnostic {
-  return {
-    code: "SC3001",
-    message: err.message,
-    loc: err.loc ?? { file: entryPath, start: 0, end: 0 },
-  };
-}
 
-function rustRefusalDiag(err: RustUnsupportedError, entryPath: string): ScrDiagnostic {
-  return {
-    code: "SC3001",
-    message: err.message,
-    loc: err.loc ?? { file: entryPath, start: 0, end: 0 },
-  };
-}
-
-/** Every refusal one emission collected (SCRIPTC_RUST_REFUSALS=all), the
- * first one alone otherwise; identical (message, location) pairs once. */
-function rustRefusalDiags(err: RustUnsupportedError, entryPath: string): ScrDiagnostic[] {
-  const seen = new Set<string>();
-  const out: ScrDiagnostic[] = [];
-  for (const refusal of [err, ...err.also]) {
-    const diag = rustRefusalDiag(refusal, entryPath);
-    const key = `${diag.message}@${diag.loc.file}:${diag.loc.start}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(diag);
-  }
-  return out;
-}
-
-/** A valid IR surface the explicitly-selected code generator cannot host.
- * SC3001 is backend coverage (as with an LLVM tier refusal), not a target
- * capability gap: wasm32-wasi's production LLVM lane still accepts it. */
-function backendRefusalDiag(
-  backend: "c" | "llvm" | "rust",
-  target: string,
-  surface: string,
-  loc: SrcLoc,
-): ScrDiagnostic {
-  return {
-    code: "SC3001",
-    message: `${backend} backend does not support ${surface} for ${target}${backend === "rust" ? "" : "; use --backend llvm"}`,
-    loc,
-  };
-}
-
-/** A valid program surface that the selected execution target cannot host.
- * SC3xxx stays the backend/target-coverage family: source semantics are
- * valid, but this target deliberately refuses them instead of emitting a
- * binary that traps later. */
-function targetRefusalDiag(target: string, surface: string, loc: SrcLoc): ScrDiagnostic {
-  return {
-    code: "SC3002",
-    message: `${target} target does not support ${surface}`,
-    loc,
-  };
-}
 
 /** APIs that require host capabilities absent from portable WASI Preview 1.
  * These are target diagnostics, not backend-tier gaps: the same language IR
@@ -461,6 +406,9 @@ export function buildTargetPlatform(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 export interface AnalyzeOptions {
+  /** When selected, also validate IR and check this backend's emission. */
+  backend?: CompileOptions["backend"];
+  allowEngine?: boolean;
   /** See CompileOptions.target / conditions / islandModules. */
   target?: RuntimeTargetId;
   conditions?: readonly string[];
@@ -994,6 +942,39 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
     const provenance = provenanceSources();
+    const diagnostics = [...preflight, ...lowered.diagnostics];
+    let execution: ExecutionProfile | undefined;
+    if (lowered.module !== null && (opts.backend !== undefined || opts.allowEngine === false)) {
+      const mod = lowered.module;
+      const backend = opts.backend ?? "llvm";
+      execution = executionProfile(backend, opts.dynamic ?? false, ffi !== null, mod);
+      diagnostics.push(...validateModule(mod).map((v) => iceDiag(v.message, v.loc)));
+      if (opts.allowEngine === false) diagnostics.push(...noEngineDiagnostics(mod, backend, opts.dynamic ?? false, lowered.runtimeFences));
+      if (diagnostics.length === 0) {
+        try {
+          if (backend === "rust") {
+            const target = process.env["SCRIPTC_TARGET"];
+            if (target !== undefined && target !== "" && target !== "native") {
+              diagnostics.push(backendRefusalDiag("rust", target, "this target", { file: entryPath, start: 0, end: 0 }));
+            } else {
+              emitRustModule(mod);
+            }
+          } else if (backend === "c") {
+            emitModule(mod);
+          } else {
+            try { emitLlvmModule(mod); }
+            catch (error) {
+              if (!(error instanceof LlvmUnsupportedError) || opts.backend === "llvm" || buildTargetPlatform() === "wasi") throw error;
+              emitModule(mod);
+            }
+          }
+        } catch (error) {
+          if (error instanceof RustUnsupportedError) diagnostics.push(...rustRefusalDiags(error, entryPath));
+          else if (error instanceof LlvmUnsupportedError) diagnostics.push(llvmRefusalDiag(error, entryPath));
+          else throw error;
+        }
+      }
+    }
     return {
       coverage: {
         file: entryPath,
@@ -1002,7 +983,9 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         // The import fences report as blockers alongside the statement-level
         // ones (use sites of the fenced bindings emit matching diagnostics,
         // which the report groups with these).
-        diagnostics: [...preflight, ...lowered.diagnostics],
+        diagnostics,
+        ...(opts.backend === undefined ? {} : { backend: opts.backend }),
+        ...(execution === undefined ? {} : { execution }),
         ...(lowered.runtimeFences.length > 0 ? { runtimeFences: lowered.runtimeFences } : {}),
         ...(lowered.unreached ? { unreached: lowered.unreached } : {}),
         ...(lowered.npmBuiltins ? { npmBuiltins: lowered.npmBuiltins } : {}),
@@ -1199,7 +1182,7 @@ async function compileTracked(
   }
   // The incremental Rust lane deliberately bypasses the whole-program C/LLVM
   // cache until its artifact identity includes rustc and Cargo inputs.
-  const cacheRoot = !rustBackend && provenanceSources() === null
+  const cacheRoot = !rustBackend && opts.allowEngine !== false && provenanceSources() === null
     ? await prepareBuildCacheRoot(buildCacheRoot())
     : null;
   const implementation = await compilerImplementationIdentity();
@@ -1243,6 +1226,7 @@ async function compileTracked(
         binaryPath: opts.outPath,
         cPath: earlyHit.cPath,
         backend: earlyHit.native.backend,
+        execution: executionProfile(earlyHit.native.backend, opts.dynamic ?? false, ffi !== null),
         ...(earlyHit.irPath === undefined ? {} : { irPath: earlyHit.irPath }),
         ...(earlyHit.native.llvmRefusal === undefined
           ? {}
@@ -1285,6 +1269,7 @@ async function compileTracked(
       binaryPath: opts.outPath,
       cPath: earlyHit.cPath,
       backend: earlyHit.native.backend,
+      execution: executionProfile(earlyHit.native.backend, opts.dynamic ?? false, ffi !== null),
       ...(earlyHit.irPath === undefined ? {} : { irPath: earlyHit.irPath }),
       ...(earlyHit.native.llvmRefusal === undefined
         ? {}
@@ -1322,6 +1307,11 @@ async function compileTracked(
       ]);
     }
     if (lowered.module === null) return fail(lowered.diagnostics);
+
+    if (opts.allowEngine === false) {
+      const diagnostics = noEngineDiagnostics(lowered.module, opts.backend ?? "llvm", opts.dynamic ?? false, lowered.runtimeFences);
+      if (diagnostics.length > 0) return fail(diagnostics);
+    }
 
     const validation = validateModule(lowered.module);
     if (validation.length > 0) {
@@ -1387,6 +1377,8 @@ async function compileTracked(
       if (!(error instanceof RustUnsupportedError)) throw error;
       return { ok: false, diagnostics: rustRefusalDiags(error, entryPath), sourceTexts };
     }
+    const execution = executionProfile("rust", opts.dynamic ?? false, ffi !== null, lowered.module!);
+    const runtimeFeatures = rustRuntimeFeatures(lowered.module!);
     const sourcePath = join(opts.outDir, `${stem}.rs`);
     await writeFile(sourcePath, rustSource);
     await Promise.all([
@@ -1403,7 +1395,8 @@ async function compileTracked(
         sourcePath,
         outPath: opts.outPath,
         optimization: opts.optimization ?? "release",
-        runtimeFeatures: rustRuntimeFeatures(lowered.module!),
+        runtimeFeatures,
+        ...(opts.allowEngine === undefined ? {} : { allowEngine: opts.allowEngine }),
         ...(ffi === null
           ? {}
           : { linkInputs: ffi.libraries, systemLibraries: ffi.systemLibraries }),
@@ -1421,6 +1414,8 @@ async function compileTracked(
       sourcePath,
       backend: "rust",
       safetyProfile: ffi === null ? "rust-only" : "rust+external-ffi",
+      execution,
+      runtimeFences: lowered.runtimeFences,
       ...(irPath === undefined ? {} : { irPath }),
     };
   }
@@ -1532,6 +1527,8 @@ async function compileTracked(
     binaryPath: opts.outPath,
     cPath,
     backend,
+    execution: executionProfile(backend, opts.dynamic ?? false, ffi !== null),
+    runtimeFences: lowered.runtimeFences,
     ...(irPath !== undefined ? { irPath } : {}),
     ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),
   };

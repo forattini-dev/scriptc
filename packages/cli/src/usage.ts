@@ -70,6 +70,8 @@ Options:
       --emit-ir      also write the IR as JSON next to the executable
       --sanitize     build with ASan + runtime RC audit
       --dynamic      embed the dynamic engine (adds ~620KB; static stays the default)
+      --no-engine    reject JavaScript engines and deferred unsupported operations;
+                     with --backend rust, checked native dynamic values remain valid
       --ffi <file>   bind signature-only TypeScript declarations to native
                      C symbols and link the manifest's archives/libraries
       --npm-static <pkg[,pkg…]|auto>
@@ -108,6 +110,7 @@ export const CLI_OPTIONS = {
   "emit-ir": { type: "boolean", default: false },
   sanitize: { type: "boolean", default: false },
   dynamic: { type: "boolean", default: false },
+  engine: { type: "boolean", default: true },
   ffi: { type: "string" },
   "npm-static": { type: "string", multiple: true },
   "provenance-sources": { type: "boolean", default: false },
