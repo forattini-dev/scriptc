@@ -25,12 +25,13 @@ test("bootstrap serves version and help without loading the compiler graph", asy
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     const help = await execFileAsync(process.execPath, ["--import", preload, bootstrap, "--help"]);
     expect(help.stdout).toContain("scriptc build <file.ts|.js>");
+    expect(help.stdout).toContain("default: rust");
   } finally {
     await rm(preloadDir, { recursive: true, force: true }).catch(() => undefined);
   }
 });
 
-test("bootstrap exact builds use the routed cache and source edits fall through", async () => {
+test("explicit LLVM builds use the routed cache and source edits fall through", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-bootstrap-cache-"));
   const cacheRoot = join(dir, "cache");
   const entry = join(dir, "main.ts");
@@ -43,6 +44,7 @@ test("bootstrap exact builds use the routed cache and source edits fall through"
       bootstrap,
       "build",
       entry,
+      "--backend", "llvm",
       "-o",
       outPath,
     ], {
@@ -86,18 +88,24 @@ test("bootstrap exact builds use the routed cache and source edits fall through"
   }
 }, 120_000);
 
-test("installed CLI exposes the explicit Rust backend", async () => {
+test.each(["default", "rust"])("installed CLI builds Rust with %s selection", async (selection) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-cli-rust-"));
   const entry = join(dir, "main.ts");
   const outPath = join(dir, process.platform === "win32" ? "program.exe" : "program");
   try {
     await writeFile(entry, 'console.log("rust cli");\n');
+    const preload = join(dir, "reject-legacy-cache.mjs");
+    await writeFile(preload, `import { registerHooks } from 'node:module';
+registerHooks({ load(url, context, nextLoad) {
+  if (url.endsWith('/compiler/dist/startup-cache.js')) throw new Error('Rust entered legacy startup cache');
+  return nextLoad(url, context);
+}});
+`);
     const built = await execFileAsync(process.execPath, [
-      bootstrap,
+      "--import", preload, bootstrap,
       "build",
       entry,
-      "--backend",
-      "rust",
+      ...(selection === "rust" ? ["--backend", "rust"] : []),
       "-o",
       outPath,
     ], { maxBuffer: 4 * 1024 * 1024 });

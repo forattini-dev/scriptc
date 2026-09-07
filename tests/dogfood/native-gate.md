@@ -58,3 +58,28 @@ Generated sources, oracle outputs, metadata, logs, consumer acceptance artifacts
 and source worktrees were retained. The removal manifest is
 `/tmp/scriptc-redwall-cache-reclaimed.tsv`. Subsequent gates need enough disk
 headroom for their native output caches as well as CPU and memory limits.
+
+## Rust-default checkpoint
+
+Rust is now the default build and backend-validated coverage path. The
+legacy whole-program startup cache is restricted to explicit C/LLVM
+selections. Library profiles still specify their emission explicitly.
+Plain adoption tests exercise Rust; tests that consume SCRIPTC_SAN select
+C explicitly for that lane, because Rust sanitizer support is unfinished.
+The full gate must be rerun after this default migration; prior gate
+results do not certify it, and focused passes are not a release verdict.
+
+Documentation smoke builds produced a native Rust executable, an explicit
+LLVM Linux ARM64 ELF and an explicit LLVM Windows x64 PE. WASI failed while
+compiling the C runtime, reporting undeclared realpath/chmod and DT_SOCK.
+No C runtime repair is included in this checkpoint. Evidence is retained in
+`/tmp/scriptc-rust-default-doc-smoke.json` and its companion log. Windows
+and ARM64 artifacts were inspected, not executed on this Linux x64 host.
+
+The full project-adoption suite at this checkpoint has 11 passes and two
+failures. Rust explicitly refuses fetch.streamNew in the @types/node
+ReadableStream constructor fixture; the second failure is a diagnostic
+snapshot disagreement around Response.clone and URL.hash. Neither assertion
+was relaxed or skipped. These remain quality blockers for the new default,
+recorded in `/tmp/scriptc-rust-default-adoption.log`. The selected sanitized
+C/LLVM/adoption run has 21 passes, not a full sanitizer gate.

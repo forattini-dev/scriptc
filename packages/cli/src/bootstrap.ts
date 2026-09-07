@@ -58,8 +58,9 @@ async function tryFastPath(): Promise<number | null> {
     values.lib || values.engine === false || values["from-c"] || values["provenance-sources"] ||
     (values["external-types"] ?? []).length > 0
   ) return null;
-  const backend = values.backend;
-  if (backend !== undefined && backend !== "c" && backend !== "llvm") return null;
+  const backend = values.backend ?? "rust";
+  // Only explicit C/LLVM selections may restore their legacy cached artifacts.
+  if (backend !== "c" && backend !== "llvm") return null;
   const targetArg = values.target;
   const islandModules = (values["island-module"] ?? [])
     .flatMap((value) => value.split(","))
@@ -124,7 +125,7 @@ async function tryFastPath(): Promise<number | null> {
     emitIr: values["emit-ir"],
     sanitize: values.sanitize,
     dynamic: values.dynamic,
-    backend: backend ?? "auto",
+    backend,
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
     npmStatic,
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },

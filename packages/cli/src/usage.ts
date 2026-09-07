@@ -48,17 +48,12 @@ Options:
       --write-tiers  after an --island-module auto build or coverage run,
                      persist the frontier into that scriptc.json so later
                      builds skip the fixpoint
-      --backend <b>  code generator. llvm is the default; c emits readable C,
-                     and rust emits memory-safe Rust and invokes rustc directly
-                     without a C translation or compiler fallback. Rust is an
-                     experimental native-only subset and reports unsupported
-                     constructs instead of changing backend. On native targets,
-                     a program outside the LLVM tier still
-                     builds — the default lane emits C for it and a one-line
-                     stderr note names the construct — while an explicit
-                     --backend llvm fails with that construct named
-                     wasm32-wasi is LLVM-only unless --backend c is explicit;
-                     its C inspection lane accepts async-free programs only
+      --backend <b>  code generator (default: rust). Rust emits memory-safe
+                     native code and invokes rustc directly. Unsupported
+                     constructs are diagnostics; no backend fallback occurs.
+                     c and llvm are explicit compatibility/debugging backends.
+                     Cross-compilation and WASI currently require --backend llvm
+                     (or --backend c for supported inspection targets).
       --optimization <release|dev>
                      native optimization posture (default: release/-O2). dev
                      uses -O0 and stable cached LLVM object shards for faster
@@ -69,7 +64,7 @@ Options:
       --no-keep-c    delete the generated program TU after compiling
       --emit-ir      also write the IR as JSON next to the executable
       --sanitize     build with ASan + runtime RC audit
-      --dynamic      embed the dynamic engine (adds ~620KB; static stays the default)
+      --dynamic      explicitly embed a JS engine (static stays the default)
       --no-engine    reject JavaScript engines and deferred unsupported operations;
                      with --backend rust, checked native dynamic values remain valid
       --ffi <file>   bind signature-only TypeScript declarations to native

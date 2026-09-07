@@ -117,6 +117,7 @@ async function buildDriver(): Promise<string> {
   const binary = join(driverOutDir, "program");
   mkdirSync(driverOutDir, { recursive: true });
   const result = await compile(join(driverDir, "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: binary,
     outDir: driverOutDir,
     sanitize,

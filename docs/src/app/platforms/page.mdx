@@ -1,12 +1,18 @@
 # Platform Support
 
+Rust is the primary and default backend for native host builds, using Cargo
+and rustc. Its platform and API coverage is still evolving. The C/LLVM
+compatibility targets below require explicit backend selection; cross-target
+examples use <code>--backend llvm</code>. Rust reports an unsupported target
+instead of changing backend.
+
 ## macOS (arm64)
 
-The primary platform. clang — preinstalled with the Xcode Command Line Tools — is the only system dependency for producing binaries. The full surface is supported: the language, the stdlib, the Node API surface including the server stack, `--dynamic`, and the sanitizer lane.
+For explicit C/LLVM builds, clang is preinstalled with the Xcode Command Line Tools. Their supported surface includes: the language, the stdlib, the Node API surface including the server stack, `--dynamic`, and the sanitizer lane.
 
 ## Cross-compilation via zig
 
-scriptc cross-compiles from macOS using zig's bundled clang and sysroots. Install [zig](https://ziglang.org), then select it with two environment variables:
+The explicit C/LLVM backends cross-compile using zig's bundled clang and sysroots. Install [zig](https://ziglang.org), then select it with two environment variables:
 
 <dl>
   <dt><code>SCRIPTC_CC=zigcc</code></dt>
@@ -18,7 +24,7 @@ scriptc cross-compiles from macOS using zig's bundled clang and sysroots. Instal
 ### Linux (arm64, x86_64)
 
 ```console
-$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-gnu.2.36 scriptc build fib.ts -o fib-linux
+$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-gnu.2.36 scriptc build fib.ts --backend llvm -o fib-linux
 $ file fib-linux
 fib-linux: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 2.0.0, with debug_info, not stripped
 ```
@@ -28,7 +34,7 @@ The runtime has native Linux backends throughout: the event loop is epoll (kqueu
 ### Windows (x86_64)
 
 ```console
-$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu scriptc build fib.ts -o fib.exe
+$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu scriptc build fib.ts --backend llvm -o fib.exe
 $ file fib.exe
 fib.exe: PE32+ executable (console) x86-64, for MS Windows
 ```
@@ -57,9 +63,9 @@ The full library-mode feature set applies: profile-declared exports and ABI entr
 
 ### WebAssembly (WASI Preview 1)
 
-Set <code>SCRIPTC_CC=zigcc</code> and <code>SCRIPTC_TARGET=wasm32-wasi</code> to produce a standalone <code>.wasm</code> module. Without <code>-o</code>, <code>scriptc build hello.ts</code> writes <code>.scriptc/hello.wasm</code>. <code>scriptc run</code> hosts the module with Node's WASI implementation, inherits stdio and environment, preopens the current working directory as <code>/</code>, and maps the host platform's temporary directory to the guest's <code>/tmp</code>. A built module can run in another WASI Preview 1 host instead.
+Select <code>--backend llvm</code>, <code>SCRIPTC_CC=zigcc</code> and <code>SCRIPTC_TARGET=wasm32-wasi</code> to produce a standalone <code>.wasm</code> module. Without <code>-o</code>, <code>scriptc build hello.ts --backend llvm</code> writes <code>.scriptc/hello.wasm</code>. <code>scriptc run --backend llvm</code> hosts the module with Node's WASI implementation, inherits stdio and environment, preopens the current working directory as <code>/</code>, and maps the host platform's temporary directory to the guest's <code>/tmp</code>. A built module can run in another WASI Preview 1 host instead.
 
-WASI is a production LLVM target with the same language tiers as the native targets. Its 32-bit LLVM ABI supports collections, closures, exceptions, classes, checked dynamic values, async/await, promises, synchronous and asynchronous generators, timers, stdin/readline events, process-exit listeners, filesystem callbacks and promises, and the <code>--dynamic</code> QuickJS island. The debugging C backend remains available for async-free inspection only through an explicit <code>--backend c</code>; coroutine-dependent programs report <code>SC3001</code>, and WASI never silently falls back to C.
+WASI uses the explicit LLVM compatibility backend. The latest local smoke is blocked compiling C runtime references to realpath, chmod and DT_SOCK; a passing WASI build is not established for this checkpoint. Its 32-bit LLVM ABI supports collections, closures, exceptions, classes, checked dynamic values, async/await, promises, synchronous and asynchronous generators, timers, stdin/readline events, process-exit listeners, filesystem callbacks and promises, and the <code>--dynamic</code> QuickJS island. The debugging C backend remains available for async-free inspection only through an explicit <code>--backend c</code>; coroutine-dependent programs report <code>SC3001</code>, and WASI never silently falls back to C.
 
 The remaining executable boundary is host capability, not language coverage. WASI Preview 1 has no portable socket, process-spawn, OS-signal, network-interface, or filesystem-notification APIs. Networking/fetch, child processes, signal APIs, <code>os.networkInterfaces()</code>, and <code>fs.watch</code> therefore fail before linking with diagnostic <code>SC3002</code>. <code>--sanitize</code>, native FFI, and library-mode archive builds are unavailable too. Filesystem behavior is bounded by the host's preopens, and process/OS introspection follows WASI's reduced model.
 

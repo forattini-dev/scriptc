@@ -34,7 +34,8 @@ const LANE_ONLY: Readonly<Record<string, readonly NpmLane[]>> = {
   "http-server-raw-island": ["rust"],
 };
 
-/** `backend` is the lane being measured; unset is the release default, C. */
+/** `backend` selects the measured lane; legacy callers omit it for C.
+ * The primary npm harness passes Rust explicitly. */
 export function npmCases(fixturesRoot: string, backend?: NpmLane): NpmCase[] {
   const lane: NpmLane = backend ?? "c";
   const table: NpmCase[] = [

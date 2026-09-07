@@ -1,14 +1,14 @@
 # scriptc
 
-scriptc compiles TypeScript and JavaScript to native executables and WebAssembly modules. It uses the TypeScript compiler for parsing and type checking, then emits LLVM IR for clang to compile. A readable C backend remains available for debugging, and the experimental native-only Rust backend emits memory-safe Rust and invokes `rustc` directly.
+scriptc compiles TypeScript and JavaScript to native executables through Rust. Rust is the primary and default backend: the TypeScript frontend builds a typed IR, the Rust backend emits memory-safe code, and `rustc` produces the executable. C and direct LLVM emission remain explicitly selectable compatibility and comparison backends.
 
-Static builds include a small native runtime, but no Node or JavaScript engine. Code that cannot compile statically is reported as a diagnostic. For npm packages and `any`-typed code, `--dynamic` embeds [quickjs-ng](https://github.com/quickjs-ng/quickjs) explicitly.
+Static builds include a small native runtime, but no Node or JavaScript engine. Code that cannot compile statically is reported as a diagnostic. For code that requires a JavaScript engine, `--dynamic` opts in explicitly. Rust uses V8 by default (Boa is optional); C/LLVM use quickjs-ng. The native mission uses `--no-engine` and statically admitted npm sources.
 
 scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via WASI Preview 1.
 
 ## Installation
 
-The compiler requires Node.js 24 or newer and clang. Experimental `--backend rust` builds require Cargo and rustc instead of clang. The executables it produces do not require Node.
+The compiler requires Node.js 24 or newer, Cargo, and rustc. Explicit C/LLVM builds require clang. The executables it produces do not require Node.
 
 ```console
 $ npm install -g scriptc
@@ -38,7 +38,7 @@ $ ./hello ctate
 hello, ctate
 ```
 
-To exercise the experimental memory-safe subset, select Rust explicitly:
+Rust is also selectable explicitly:
 
 ```console
 $ scriptc build hello.ts --backend rust -o hello-rust
@@ -50,7 +50,7 @@ For native builds without an embedded JavaScript engine, use
 `scriptc build hello.ts --backend rust --no-engine`. This rejects engine
 imports, evaluation, persisted island modules, and deferred unsupported
 operations before building. Checked native dynamic values remain available.
-`scriptc coverage hello.ts --backend rust --no-engine` also checks Rust
+`scriptc coverage hello.ts --no-engine` also checks Rust
 emission and exits nonzero on a refusal; successful coverage does not replace
 compiling and testing the executable. Engine absence does not imply that all
 transitive native dependencies forbid unsafe code.
@@ -108,17 +108,11 @@ $ scriptc coverage hello.ts
 
 ## Build WebAssembly
 
-WASI and other cross-target builds require Zig. Its bundled WASI libc produces a portable WASI Preview 1 module through the production LLVM backend:
-
-```console
-$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=wasm32-wasi scriptc build hello.ts --no-keep-c -o hello.wasm >/dev/null
-$ file hello.wasm
-hello.wasm: WebAssembly (wasm) binary module version 0x1 (MVP)
-$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=wasm32-wasi scriptc run hello.ts
-hello, world
-```
-
-The WASI target supports the same executable language tiers as the native targets, including async/await, promises, generators, timers, stdin/readline events, callback and promise filesystem APIs, and `--dynamic`. APIs that require capabilities absent from portable WASI Preview 1—network sockets/fetch, child processes, OS signals, and filesystem watching—fail before linking with `SC3002`; sanitizer builds, native FFI, and library-mode archive builds are target diagnostics too. See [platform support](https://scriptc.dev/platforms) for the precise boundary.
+Cross-target builds currently require an explicit C/LLVM backend and Zig.
+The WASI compatibility path is not validated at this checkpoint: the local
+smoke failed compiling C runtime references to `realpath`, `chmod` and
+`DT_SOCK`. See the [native gate follow-up](./tests/dogfood/native-gate.md).
+Rust currently builds for the native host and reports unsupported targets.
 
 ## Use npm packages
 
@@ -140,6 +134,17 @@ hello from scriptc
 ## Documentation
 
 See the [quickstart](https://scriptc.dev/quickstart) and [CLI reference](https://scriptc.dev/cli) for the complete workflow. The docs also describe [npm dependencies](https://scriptc.dev/dependencies), [native FFI](https://scriptc.dev/ffi), [platform support](https://scriptc.dev/platforms), and the current [limitations](https://scriptc.dev/limitations).
+
+## Backend direction
+
+New native functionality prioritizes Rust. Shared frontend/IR changes retain
+regression coverage for the explicit C/LLVM lanes; a new Rust capability need
+not wait for equivalent implementations there. Unsupported operations never
+select another backend implicitly. The compiler remains experimental.
+
+[The Rust roadmap](./RUST_ROADMAP.md) defines the quality and consumer-acceptance
+criteria. Superiority over direct LLVM emission is a target to demonstrate,
+not a claim established by the default selection.
 
 ## Development
 

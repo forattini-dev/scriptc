@@ -35,15 +35,10 @@ const sanitize = process.env["SCRIPTC_SAN"] === "1";
 // to resolve — a bare "node" spawn would silently compare against
 // whatever major is running the suite.
 const oracleExecutable = primaryOracleExecutable(NODE_COMPAT_MATRIX);
-/* SCRIPTC_TEST_BACKEND pins the lane. Unset — the normal run, and what CI
- * gates on — this suite rides the RELEASE DEFAULT, because embedded npm
- * tables are production surface and this differential is what keeps
- * package resolution, compressed source storage and the island boundary
- * honest through the backend that actually ships. Setting it to "rust"
- * re-runs the identical case table against the Rust island instead, which
- * is how the Node-compat program measures that lane's baseline; it is a
- * measurement, not a gate, so nothing below relaxes when it is set. */
-const backend = process.env["SCRIPTC_TEST_BACKEND"] as "c" | "llvm" | "rust" | undefined;
+/* The primary plain lane uses Rust. Sanitized runs explicitly select C;
+ * SCRIPTC_TEST_BACKEND can select another comparison lane. */
+const backend = (process.env["SCRIPTC_TEST_BACKEND"] as "c" | "llvm" | "rust" | undefined)
+  ?? (sanitize ? "c" : "rust");
 
 // The case table lives in npm-cases.ts: the Linux lane runs the identical
 // cases (same entries, same argv lists) inside its container. The shard

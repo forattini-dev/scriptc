@@ -233,21 +233,10 @@ export interface CompileOptions {
   /** false rejects engine-backed IR and deferred unsupported functionality,
    * independently of --dynamic and persisted island module configuration. */
   allowEngine?: boolean;
-  /** Code generator for the program TU. Unset (the release default): the
-   * LLVM backend emits LLVM IR text (.ll) that rides the SAME clang
-   * command line in the program-TU seat, and a program outside the LLVM
-   * tier falls back to the debugging C backend transparently — the IR is
-   * backend-agnostic, so only the emit retries; CompileResult records the
-   * lane (`backend`, plus `llvmRefusal` when the fallback engaged). ONLY a
-   * tier refusal (LlvmUnsupportedError) falls back — every real diagnostic
-   * and every ICE fails the build on either lane. Explicit `llvm` is the
-   * debugging/CI pin and keeps the fail-loudly contract: an out-of-tier
-   * program is diagnostic SC3001 naming the first unsupported construct,
-   * never a silent lane change. Explicit `c` pins the debugging C backend.
-   * wasm32-wasi is a production LLVM target and never takes the automatic
-   * C fallback; a missing LLVM lowering there is SC3001. The Rust lane is an
-   * explicitly selected, native-only experimental subset. Every gap is SC3001
-   * and never falls back to C/LLVM. */
+  /** Code generator. Rust is the default and emits safe Rust directly.
+   * C and LLVM require explicit selection. Every backend reports unsupported
+   * constructs instead of silently changing generators. Rust currently
+   * supports native builds; cross targets require an explicit C/LLVM backend. */
   backend?: "c" | "llvm" | "rust";
   /** Native optimization posture. Release is the shipped -O2 default; dev
    * uses -O0 and stable multi-TU object caching for large LLVM programs. */
@@ -269,12 +258,9 @@ export interface CompileOptions {
 }
 
 export type CompileResult =
-  /** `cPath` is the generated program TU next to the binary: the .ll under
-   * the LLVM backend (the default lane), the .c under the C backend (same
-   * seat, same lifecycle — --keep-c in the CLI governs both). `backend` is
-   * the code generator that ACTUALLY emitted the TU; `llvmRefusal` is
-   * present iff the default lane fell back to C, carrying the tier
-   * refusal's machine-readable kind tag ("stmt:...", "libCall:...", ...). */
+  /** `cPath` names the generated source (.rs/.ll/.c) for compatibility.
+   * `backend` identifies the selected generator. `llvmRefusal` is retained
+   * for legacy cache metadata; new builds never fall back to another backend. */
   | { ok: true; binaryPath: string; cPath: string; sourcePath?: string; irPath?: string; backend: "c" | "llvm"; llvmRefusal?: string; execution: ExecutionProfile; runtimeFences?: ScrDiagnostic[] }
   | { ok: true; binaryPath: string; cPath: string; sourcePath: string; irPath?: string; backend: "rust"; safetyProfile: "rust-only" | "rust+external-ffi"; llvmRefusal?: never; execution: ExecutionProfile; runtimeFences: ScrDiagnostic[] }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
@@ -755,6 +741,7 @@ function lowerWithFrontier(fe: Frontend, options: LowerOptions): LowerResult {
 }
 
 export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeResult {
+  opts = { ...opts, backend: opts.backend ?? "rust" };
   setActiveRuntimeTarget(resolveRuntimeTarget(resolve(entryPath), opts.target).profile, opts.conditions ?? []);
   setIslandModules(opts.islandModules ?? [], resolve(entryPath));
   let ffi: FfiProfile | null = null;
@@ -816,7 +803,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     let execution: ExecutionProfile | undefined;
     if (lowered.module !== null && (opts.backend !== undefined || opts.allowEngine === false)) {
       const mod = lowered.module;
-      const backend = opts.backend ?? "llvm";
+      const backend = opts.backend ?? "rust";
       execution = executionProfile(backend, opts.dynamic ?? false, ffi !== null, mod);
       diagnostics.push(...validateModule(mod).map((v) => iceDiag(v.message, v.loc)));
       if (opts.allowEngine === false) diagnostics.push(...noEngineDiagnostics(mod, backend, opts.dynamic ?? false, lowered.runtimeFences));
@@ -832,11 +819,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
           } else if (backend === "c") {
             emitModule(mod);
           } else {
-            try { emitLlvmModule(mod); }
-            catch (error) {
-              if (!(error instanceof LlvmUnsupportedError) || opts.backend === "llvm" || buildTargetPlatform() === "wasi") throw error;
-              emitModule(mod);
-            }
+            emitLlvmModule(mod);
           }
         } catch (error) {
           if (error instanceof RustUnsupportedError) diagnostics.push(...rustRefusalDiags(error, entryPath));
@@ -885,6 +868,7 @@ function clearCompileSessionCaches(): void {
 }
 
 export async function compile(entryPath: string, opts: CompileOptions): Promise<CompileResult> {
+  opts = { ...opts, backend: opts.backend ?? "rust" };
   clearCompileSessionCaches();
   const frontendInputs = new FrontendInputTracker();
   return frontendInputs.run(() => compileTracked(entryPath, opts, frontendInputs));
@@ -1179,7 +1163,7 @@ async function compileTracked(
     if (lowered.module === null) return fail(lowered.diagnostics);
 
     if (opts.allowEngine === false) {
-      const diagnostics = noEngineDiagnostics(lowered.module, opts.backend ?? "llvm", opts.dynamic ?? false, lowered.runtimeFences);
+      const diagnostics = noEngineDiagnostics(lowered.module, opts.backend ?? "rust", opts.dynamic ?? false, lowered.runtimeFences);
       if (diagnostics.length > 0) return fail(diagnostics);
     }
 
@@ -1289,15 +1273,11 @@ async function compileTracked(
       ...(irPath === undefined ? {} : { irPath }),
     };
   }
-  // Both backends hang off the same in-memory IrModule (never the JSON
-  // dump); the LLVM backend's .ll takes the .c's seat on the exact clang
-  // command line below — compileC accepts either. The default lane tries
-  // LLVM first; a tier refusal retries ONLY the emit with the C backend
-  // (the frontend ran once, the IR is backend-agnostic — nothing recompiles).
+  // Explicit C/LLVM builds share the in-memory IR and clang toolchain.
+  // An emission refusal never changes the selected backend.
   let cPath = join(opts.outDir, `${stem}.c`);
   let backend: "c" | "llvm" = "c";
   let llvmSource: string | null = null;
-  let llvmRefusal: string | undefined;
   if (opts.backend !== "c") {
     try {
       const ll = emitLlvmModule(lowered.module!, {
@@ -1310,12 +1290,7 @@ async function compileTracked(
       backend = "llvm";
     } catch (err) {
       if (!(err instanceof LlvmUnsupportedError)) throw err;
-      // Explicit backend "llvm" keeps the fail-loudly contract (the
-      // debugging/CI pin): SC3001, never a silent lane change.
-      if (opts.backend === "llvm" || buildPlatform === "wasi") {
-        return { ok: false, diagnostics: [llvmRefusalDiag(err, entryPath)], sourceTexts };
-      }
-      llvmRefusal = err.kind;
+      return { ok: false, diagnostics: [llvmRefusalDiag(err, entryPath)], sourceTexts };
     }
   }
   if (backend === "c") {
@@ -1338,7 +1313,6 @@ async function compileTracked(
     backend,
     opts.dynamic ?? false,
     opts.optimization ?? "release",
-    llvmRefusal,
   );
   const programSplit =
     backend === "llvm" && (opts.optimization ?? "release") === "dev" &&
@@ -1400,7 +1374,6 @@ async function compileTracked(
     execution: executionProfile(backend, opts.dynamic ?? false, ffi !== null),
     runtimeFences: lowered.runtimeFences,
     ...(irPath !== undefined ? { irPath } : {}),
-    ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),
   };
 }
 

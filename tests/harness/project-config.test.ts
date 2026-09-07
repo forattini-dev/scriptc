@@ -16,11 +16,8 @@ import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { analyze, compile, renderAll } from "@scriptc/compiler";
 
-/* Every compile below deliberately carries NO backend pin: this suite is
- * the user-adoption path, so it must see exactly what a flagless
- * `scriptc build` produces — the LLVM backend where the tier claims the
- * program, the transparent C fallback where it refuses. A failure here
- * that a `backend: "c"` pin would hide is a release-default bug. */
+/* Plain adoption checks exercise Rust, the primary backend. The separate
+ * sanitized lane selects C explicitly, because Rust has no ASan mode yet. */
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const fixture = (name: string) => join(repoRoot, "tests/fixtures/strictness", name);
@@ -34,6 +31,7 @@ function outDirFor(name: string): string {
 test("indexed-loose: the project's own (less strict) knobs are adopted — compiles and runs", async () => {
   const outDir = outDirFor("loose");
   const result = await compile(join(fixture("indexed-loose"), "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -47,6 +45,7 @@ test("indexed-loose: the project's own (less strict) knobs are adopted — compi
 test("indexed-strict: the project's EXTRA strictness is honored — preflight fails", async () => {
   const outDir = outDirFor("strict");
   const result = await compile(join(fixture("indexed-strict"), "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -61,6 +60,7 @@ test("indexed-strict: the project's EXTRA strictness is honored — preflight fa
 test("node-types: the supported process surface lowers statically under @types/node", async () => {
   const outDir = outDirFor("node-types");
   const result = await compile(join(nodeTypesDir, "argv-env.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "argv-env"),
     outDir,
     sanitize,
@@ -79,6 +79,7 @@ test("node-types: an argument resolving to the binary is preserved", async () =>
   const outDir = outDirFor("node-argv-binary-argument");
   const entry = join(nodeTypesDir, "argv-env.ts");
   const result = await compile(entry, {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "argv-env"),
     outDir,
     sanitize,
@@ -101,6 +102,7 @@ test("node-types: an argument resolving to the binary is preserved", async () =>
 test("node-types: captured NodeJS.WritableStream values write through the procStream scalar", async () => {
   const outDir = outDirFor("node-stream-capture");
   const result = await compile(join(nodeTypesDir, "stream-capture.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "stream-capture"),
     outDir,
     sanitize,
@@ -115,6 +117,7 @@ test("node-types: captured NodeJS.WritableStream values write through the procSt
 test("node-types: path and os lower statically under @types/node's shapes", async () => {
   const outDir = outDirFor("node-path-os");
   const result = await compile(join(nodeTypesDir, "path-os.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "path-os"),
     outDir,
     sanitize,
@@ -128,6 +131,7 @@ test("node-types: path and os lower statically under @types/node's shapes", asyn
 test("node-types: fetch AbortSignal and readable bodies lower statically", async () => {
   const outDir = outDirFor("node-fetch-static");
   const result = await compile(join(nodeTypesDir, "fetch-static.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "fetch-static"),
     outDir,
     sanitize,
@@ -138,6 +142,7 @@ test("node-types: fetch AbortSignal and readable bodies lower statically", async
 test("node-types: declared-but-not-lowered surface fences, naming @types/node", async () => {
   const outDir = outDirFor("node-fenced");
   const result = await compile(join(nodeTypesDir, "fenced.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "fenced"),
     outDir,
     sanitize,
@@ -163,6 +168,7 @@ test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc
   // surface and lowers). The unknown READS lower now (the dyn keyed read,
   // corpus 1544) — no SC1100 remains. Never a SC0001.
   const result = await compile(entry, {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -180,6 +186,7 @@ test("json-any: any-typed JSON.parse reads pass preflight (the project's own tsc
 test("json-any-broken: genuine type errors report the project world's own tsc errors, not override-manufactured ones", async () => {
   const outDir = outDirFor("json-any-broken");
   const result = await compile(join(fixture("json-any-broken"), "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -196,6 +203,7 @@ test("json-any-broken: genuine type errors report the project world's own tsc er
 test("null-floor: disabling strictNullChecks fails with the floor diagnostic", async () => {
   const outDir = outDirFor("floor");
   const result = await compile(join(fixture("null-floor"), "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -218,6 +226,7 @@ test("no-types-node: a bare project outside the repo compiles on the fallback de
   writeFileSync(join(dir, "main.ts"), 'const who: string = "bare";\nconsole.log(`hi ${who}`);\n');
   const outDir = outDirFor("bare");
   const result = await compile(join(dir, "main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,
@@ -235,6 +244,7 @@ test("dot-parent: bare '.' and '..' imports build and run (the TS project dialec
   // resolution dialect (the SEMANTICS.md relative-specifier note).
   const outDir = outDirFor("dot-parent");
   const result = await compile(join(repoRoot, "tests/coverage-fixtures/dot-parent/main.ts"), {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, "main"),
     outDir,
     sanitize,

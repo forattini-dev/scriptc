@@ -154,7 +154,7 @@ async function buildDriver(name: string, entrySource: (rel: string) => string): 
   // shaped, so it rides the release default — today the npm embedding
   // refuses the LLVM tier and the build falls back to the C backend
   // transparently; this suite staying green IS the fallback acceptance.
-  const result = await compile(entry, { outPath: binary, outDir, sanitize, dynamic: true });
+  const result = await compile(entry, { backend: sanitize ? "c" : "rust", outPath: binary, outDir, sanitize, dynamic: true });
   if (!result.ok) {
     throw new Error(
       "vercel e2e driver failed to compile:\n" +

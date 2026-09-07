@@ -39,12 +39,9 @@ async function compileAndRun(name: string, source: string): Promise<RunResult> {
   mkdirSync(outDir, { recursive: true });
   const file = join(outDir, `${name}.ts`);
   writeFileSync(file, source);
-  // Deliberately NO backend pin: these are flagless-user-shaped --dynamic
-  // builds, so the suite rides the release default (LLVM where the tier
-  // claims the program, the transparent C fallback where it refuses). The
-  // fence MESSAGES asserted below come from the island runtime the two
-  // backends share, so they are lane-invariant by construction.
+  // Rust is the primary plain lane; C retains the separate sanitizer lane.
   const result = await compile(file, {
+    backend: sanitize ? "c" : "rust",
     outPath: join(outDir, name),
     outDir,
     sanitize,

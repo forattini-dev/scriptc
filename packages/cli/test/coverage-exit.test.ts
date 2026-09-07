@@ -37,9 +37,9 @@ const cases = [
     verdict: "fully static",
   },
   {
-    name: "successful partial analysis",
+    name: "partial Rust coverage reports blockers",
     input: "tests/coverage-fixtures/mixed.ts",
-    exitCode: 0,
+    exitCode: 1,
     verdict: "blockers:",
   },
   {

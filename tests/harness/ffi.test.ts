@@ -1134,6 +1134,7 @@ test("a missing FFI symbol is an SC5004 diagnostic, not a rejected compile", asy
   );
 
   const result = await compile(entry, {
+    backend: sanitize ? "c" : "rust",
     outDir,
     outPath: join(outDir, "program"),
     sanitize,

@@ -63,13 +63,13 @@ Prebuilds the release runtime objects and native TLS/dynamic-engine archives aga
   <dd>Output executable path. Default: <code>.scriptc/&lt;name&gt;</code> next to the input file.</dd>
 
   <dt><code>--dynamic</code></dt>
-  <dd>Embed the dynamic engine (~620KB) so npm dependencies and <code>any</code>-typed code can run. Static stays the default — without this flag, dynamic-tier sites are per-site compile errors. See <a href="/dependencies">npm Dependencies</a>.</dd>
+  <dd>Explicitly embed a JavaScript engine for supported dynamic code: V8 by default in Rust (Boa is optional), or quickjs-ng in C/LLVM. Static stays the default — without this flag, dynamic-tier sites are per-site compile errors. See <a href="/dependencies">npm Dependencies</a>.</dd>
 
   <dt><code>--ffi &lt;file&gt;</code></dt>
   <dd>Bind signature-only TypeScript declarations to native C ABI symbols and link the manifest's archive, object, and system-library inputs. See <a href="/ffi">Native FFI</a>.</dd>
 
   <dt><code>--backend &lt;c|llvm|rust&gt;</code></dt>
-  <dd>Code generator: <code>llvm</code> (default — emits LLVM IR text, compiled by the same clang), <code>c</code> (the readable debugging backend), or <code>rust</code> (experimental, native targets only — emits Rust linked against the memory-safe <code>#![forbid(unsafe_code)]</code> runtime and builds with your <code>rustc</code>/Cargo instead of clang; it reports unsupported constructs as <code>SC3001</code> rather than falling back). Unset, a native build can fall back to C when the program is outside the LLVM tier. The production <code>wasm32-wasi</code> target never falls back: a missing LLVM lowering is <code>SC3001</code>. Use <code>--backend c</code> explicitly only when inspecting generated C; on WASI that inspection lane accepts async-free programs only and reports <code>SC3001</code> for coroutine-dependent surfaces.</dd>
+  <dd>Code generator: <code>rust</code> is the primary and default backend. It emits memory-safe Rust and builds with Cargo/rustc. <code>llvm</code> and <code>c</code> require explicit selection. Unsupported constructs report diagnostics instead of changing backend. Rust currently targets native builds; cross-compilation, WASI and sanitizer builds require an explicitly selected compatible C/LLVM backend. Library profiles name their emission backend explicitly.</dd>
 
   <dt><code>--npm-static &lt;pkg[,pkg…]|auto&gt;</code></dt>
   <dd>EXPERIMENTAL. Compile the named npm packages' shipped JS statically as program modules instead of embedding them for the engine (repeatable; <code>auto</code> opts in every eligible direct import). A package the preflight refuses falls back to the island with a coverage-report note. See <a href="/dependencies">npm Dependencies</a> for maturity notes.</dd>
@@ -81,13 +81,13 @@ Prebuilds the release runtime objects and native TLS/dynamic-engine archives aga
   <dd>Coverage only. Map an exact bare module specifier to a local declaration file supplied by an embedder. Repeat the option for multiple modules. The declaration supplies checker types so application coverage can continue; runtime imports and values remain explicit <code>SC1010</code> blockers. Relative paths resolve from the current working directory. Accepted files end in <code>.d.ts</code>, <code>.d.mts</code>, or <code>.d.cts</code>.</dd>
 
   <dt><code>--sanitize</code></dt>
-  <dd>Build with AddressSanitizer plus the runtime reference-count audit — the same lane the compiler's own test corpus runs under. Useful when a program misbehaves and you want leaks or memory errors to be loud.</dd>
+  <dd>Build with AddressSanitizer plus the runtime reference-count audit. Select <code>--backend c</code> or <code>--backend llvm</code> explicitly; Rust sanitizer support is unfinished. Useful when a program misbehaves and you want leaks or memory errors to be loud.</dd>
 
   <dt><code>--emit-ir</code></dt>
   <dd>Also write the typed IR as JSON (<code>&lt;name&gt;.ir.json</code>) next to the executable.</dd>
 
   <dt><code>--keep-c</code> / <code>--no-keep-c</code></dt>
-  <dd>Keep (default) or delete the generated program translation unit next to the executable — the <code>.ll</code> file under the default LLVM backend, or the <code>.c</code> under <code>--backend c</code> (and when the default build fell back). The generated C is readable and annotated with source lines.</dd>
+  <dd>Keep (default) or delete the generated source next to the executable: <code>.rs</code> for the default Rust backend, <code>.ll</code> for explicit LLVM, or <code>.c</code> for explicit C.</dd>
 
   <dt><code>--from-c</code></dt>
   <dd>Treat the input as a C (or <code>.ll</code>) file. Toolchain plumbing and debugging. These arbitrary translation units bypass the persistent artifact cache because their header dependency graph is caller-owned.</dd>
@@ -100,7 +100,7 @@ Prebuilds the release runtime objects and native TLS/dynamic-engine archives aga
 
 <dl>
   <dt><code>SCRIPTC_CACHE_DIR</code></dt>
-  <dd>Override the persistent build-cache root. By default it is <code>$XDG_CACHE_HOME/scriptc/build</code> when that variable is set, <code>$HOME/Library/Caches/scriptc/build</code> on macOS, <code>%LOCALAPPDATA%\scriptc\cache\build</code> on Windows, and <code>$HOME/.cache/scriptc/build</code> on other platforms. The cache stores checksum-verified, content-addressed executables, library archives, and per-flavor runtime objects. Identities include the compiler's resolved system-header dependencies and linker/assembler identities. The compiler remains required so dependency selection is rediscovered on every cache-enabled invocation. FFI builds with archive/object inputs or ambient <code>system_libraries</code> always relink against their current dependencies while retaining runtime-object reuse. Mutable compiler input paths such as <code>CPATH</code> and <code>SDKROOT</code>, and compiler wrappers, bypass persistent artifacts and objects so dependencies rebuilt in place cannot go stale. Opaque archiver wrappers rebuild library program members and archives while retaining runtime-object reuse. Direct Clang, Apple's system Clang shim, <code>zig cc</code>, trusted platform archivers, and <code>zig ar</code> retain their applicable persistent tiers. An existing POSIX override must already be private; otherwise caching is bypassed without changing the directory's permissions.</dd>
+  <dd>Override the persistent C/LLVM build-cache root. Rust reuses its compiled runtime through Cargo; its whole-program startup cache is not yet implemented. By default it is <code>$XDG_CACHE_HOME/scriptc/build</code> when that variable is set, <code>$HOME/Library/Caches/scriptc/build</code> on macOS, <code>%LOCALAPPDATA%\scriptc\cache\build</code> on Windows, and <code>$HOME/.cache/scriptc/build</code> on other platforms. The cache stores checksum-verified, content-addressed executables, library archives, and per-flavor runtime objects. Identities include the compiler's resolved system-header dependencies and linker/assembler identities. The compiler remains required so dependency selection is rediscovered on every cache-enabled invocation. FFI builds with archive/object inputs or ambient <code>system_libraries</code> always relink against their current dependencies while retaining runtime-object reuse. Mutable compiler input paths such as <code>CPATH</code> and <code>SDKROOT</code>, and compiler wrappers, bypass persistent artifacts and objects so dependencies rebuilt in place cannot go stale. Opaque archiver wrappers rebuild library program members and archives while retaining runtime-object reuse. Direct Clang, Apple's system Clang shim, <code>zig cc</code>, trusted platform archivers, and <code>zig ar</code> retain their applicable persistent tiers. An existing POSIX override must already be private; otherwise caching is bypassed without changing the directory's permissions.</dd>
 
   <dt><code>SCRIPTC_NO_CACHE</code></dt>
   <dd>Set to <code>1</code> to bypass all build-cache reads and writes. An explicitly empty <code>SCRIPTC_CACHE_DIR</code> has the same effect.</dd>
@@ -116,14 +116,14 @@ Prebuilds the release runtime objects and native TLS/dynamic-engine archives aga
 </dl>
 
 ```console
-$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-gnu.2.36 scriptc build fib.ts -o fib-linux
+$ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-gnu.2.36 scriptc build fib.ts --backend llvm -o fib-linux
 $ file fib-linux
 fib-linux: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 2.0.0, with debug_info, not stripped
 ```
 
 ## Backends
 
-The default backend emits textual LLVM IR, compiled by the same clang that links the runtime. On native targets, a program outside that tier is never miscompiled—the build falls back to the C backend transparently and says so in one stderr line. The production <code>wasm32-wasi</code> target uses LLVM's 32-bit ABI path and never falls back; an LLVM coverage gap is a build diagnostic. Dynamic npm embedding is LLVM surface on every target.
+The default backend emits memory-safe Rust and invokes rustc. Builds and coverage use the same backend selection. Unsupported Rust constructs and targets are diagnostics; the compiler never retries them through C or LLVM. Explicit C/LLVM selections remain available for compatibility, comparison and cross-compilation.
 
 The C backend is a debugging aid: deliberately readable, source-line-annotated output with differential tests against LLVM wherever the two overlap. Pin it when you want to inspect what your program became:
 
@@ -137,4 +137,4 @@ $ head -1 fib.c
 
 An explicit <code>--backend llvm</code> pins the LLVM backend and fails with diagnostic SC3001, naming the unsupported construct, instead of falling back — useful for CI lanes that must notice tier changes.
 
-The experimental Rust backend (<code>--backend rust</code>) trades toolchains: it needs <code>cargo</code> and <code>rustc</code> instead of clang, emits safe Rust against the <code>#&#33;[forbid(unsafe_code)]</code> runtime crate, and never falls back — an unsupported construct is a loud <code>SC3001</code>. Native targets only; cross-compilation, WASI, and sanitizers stay on the C/LLVM lanes for now.
+The default Rust backend (also selectable with <code>--backend rust</code>) uses its own toolchain: it needs <code>cargo</code> and <code>rustc</code> instead of clang, emits safe Rust against the <code>#&#33;[forbid(unsafe_code)]</code> runtime crate, and never falls back — an unsupported construct is a loud <code>SC3001</code>. Native targets only; cross-compilation, WASI, and sanitizers stay on the C/LLVM lanes for now.

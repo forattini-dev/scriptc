@@ -5,15 +5,8 @@
  * oracle. A program outside the tier must REFUSE loudly under the
  * explicit `backend: "llvm"` pin this suite builds with: diagnostic
  * SC3001 naming the first unsupported IR construct, never wrong code.
- * (The RELEASE default is LLVM with a transparent C fallback; the pin is
- * exactly how this suite keeps refusals loud. Each refused program is
- * additionally rebuilt through the default lane below, asserting the
- * fallback lands on the C backend with the same refusal kind recorded.)
- *
- * SCRIPTC_SAN=1 rebuilds both lanes with ASan + the runtime RC audit; the
- * emitted .ll opts its functions into instrumentation via sanitize_address,
- * so the LLVM-emitted frames are covered too. The refusal histogram and
- * the claimed count print at the end — phase 2's queue.
+ * C and LLVM are explicitly selected comparison lanes; Rust is the default.
+ * A refused LLVM program is separately checked through explicit C.
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -202,7 +195,7 @@ function programInputs(file: string): string[] {
   ].sort();
 }
 
-async function build(file: string, backend: "c" | "llvm" | "default") {
+async function build(file: string, backend: "c" | "llvm") {
   const hash = createHash("sha256");
   for (const f of programInputs(file)) hash.update(f).update(readFileSync(f));
   // "llvm-c" (not the bare key differential.test.ts computes) keeps this
@@ -213,7 +206,7 @@ async function build(file: string, backend: "c" | "llvm" | "default") {
   const key = hash
     .update(sanitize ? "san" : "plain")
     .update(wantsDynamic(file) ? "dyn" : "")
-    .update(backend === "llvm" ? "llvm" : backend === "c" ? "llvm-c" : "llvm-def")
+    .update(backend === "llvm" ? "llvm" : "llvm-c")
     .digest("hex")
     .slice(0, 16);
   const outDir = join(cacheDir, key);
@@ -229,15 +222,13 @@ async function build(file: string, backend: "c" | "llvm" | "default") {
   // CI runner as the seven fs/path llvm-differential failures of run
   // 29965245855 — empty or interleaved stdout on whichever lane lost the
   // race, reproducible locally by racing the two same-named binaries.
-  const lane = backend === "llvm" ? "program-llvm" : backend === "c" ? "program-llvmc" : "program-llvmdef";
+  const lane = backend === "llvm" ? "program-llvm" : "program-llvmc";
   return compile(file, {
     outPath: join(outDir, `${lane}${sanitize ? "-san" : ""}`),
     outDir,
     sanitize,
     dynamic: wantsDynamic(file),
-    // "default" leaves the option unset — the release default's
-    // LLVM-with-transparent-C-fallback lane, exercised on refusals below.
-    ...(backend === "default" ? {} : { backend }),
+    backend,
   });
 }
 
@@ -263,14 +254,11 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
         const kind = /\(([^)]+)\)/.exec(llvmRes.diagnostics[0]!.message)?.[1] ?? "?";
         refusalKinds.set(kind, (refusalKinds.get(kind) ?? 0) + 1);
         refusalPrograms.set(kind, [...(refusalPrograms.get(kind) ?? []), rel]);
-        // The release default must land this same program on the C lane
-        // TRANSPARENTLY: one frontend pass, the emit retried through the
-        // C backend, the refusal recorded — never a failed build.
-        const defRes = await build(file, "default");
-        if (!defRes.ok) throw new Error(`the default lane failed to fall back on a refused program: ${rel}`);
-        expect(defRes.backend).toBe("c");
-        expect(defRes.llvmRefusal).toBe(kind);
-        expect(defRes.cPath.endsWith(".c")).toBe(true);
+        const cRes = await build(file, "c");
+        if (!cRes.ok) throw new Error(`explicit C failed on an LLVM-refused program: ${rel}`);
+        expect(cRes.backend).toBe("c");
+        expect(cRes.llvmRefusal).toBeUndefined();
+        expect(cRes.cPath.endsWith(".c")).toBe(true);
         return;
       }
       claimed.push(rel);

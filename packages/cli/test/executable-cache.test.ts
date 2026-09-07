@@ -24,7 +24,7 @@ test("exact executable repeats skip lowering while edits and damaged outputs sta
     const build = async (extra: string[] = []): Promise<{ stderr: string }> => {
       const { stderr } = await execFileAsync(
         process.execPath,
-        ["--import", tsxLoader, cliEntry, "build", entry, "-o", outPath, ...extra],
+        ["--import", tsxLoader, cliEntry, "build", entry, "--backend", "llvm", "-o", outPath, ...extra],
         {
           env: {
             ...process.env,
@@ -131,7 +131,7 @@ test.skipIf(process.platform === "win32")(
     const build = (): Promise<void> =>
       execFileAsync(
         process.execPath,
-        ["--import", tsxLoader, cliEntry, "build", entry, "-o", outPath],
+        ["--import", tsxLoader, cliEntry, "build", entry, "--backend", "llvm", "-o", outPath],
         {
           env: { ...process.env, PATH: path, SCRIPTC_CACHE_DIR: cacheRoot },
           maxBuffer: 4 * 1024 * 1024,

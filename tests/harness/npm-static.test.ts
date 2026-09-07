@@ -330,7 +330,7 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // flag, even) and must not share the dir.
     const outDir = join(cacheDir, `npm-static-workspace-${sanitize ? "san" : "plain"}`);
     mkdirSync(outDir, { recursive: true });
-    const result = await compile(entry, { outPath: join(outDir, "program"), outDir, sanitize, npmStatic: ["wslinked"] });
+    const result = await compile(entry, { backend: sanitize ? "c" : "rust", outPath: join(outDir, "program"), outDir, sanitize, npmStatic: ["wslinked"] });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     const [nodeRes, nativeRes] = await Promise.all([
       runBinary(oracleExecutable, [entry]),

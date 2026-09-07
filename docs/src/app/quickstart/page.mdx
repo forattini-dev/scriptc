@@ -4,9 +4,9 @@ Install the CLI from npm and compile your first binary in a couple of minutes.
 
 ## Prerequisites
 
-- **macOS arm64** is the primary platform ([Linux and Windows](/platforms) are cross-compilation targets).
-- **clang** — preinstalled with the Xcode Command Line Tools.
-- **Node ≥ 20** — to run the compiler. The binaries it produces need no Node at all.
+- **Cargo and rustc** — Rust is the primary and default native backend.
+- **Node ≥ 24** — to run the compiler. The binaries it produces need no Node at all.
+- **clang** — required when explicitly selecting the C/LLVM backends; see [platform support](/platforms).
 
 ## Install
 
@@ -38,8 +38,6 @@ Or produce the executable:
 $ scriptc build hello.ts -o hello
 $ ./hello scriptc
 hello, scriptc
-$ ls -la hello
--rwxr-xr-x  1 you  staff  329752  hello
 ```
 
 That is a self-contained native binary — no Node, no node_modules, no JavaScript engine. It starts in about 4ms where Node takes ~35ms to print the same line.

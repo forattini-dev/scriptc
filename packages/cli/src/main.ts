@@ -182,7 +182,7 @@ async function main(): Promise<number> {
     externalTypes[specifier] = declarationPath;
   }
   const ffiProfilePath = values.ffi !== undefined ? resolve(values.ffi) : undefined;
-  const backend = values.backend;
+  const backend = values.backend ?? "rust";
   if (backend !== undefined && backend !== "c" && backend !== "llvm" && backend !== "rust") {
     fail(`unknown backend "${backend}" (supported: c, llvm, rust)\n\n${USAGE}`);
   }
@@ -311,14 +311,6 @@ async function main(): Promise<number> {
       throw new CliExit(1);
     }
     persistTiers();
-    // The lane-change note: the ONLY case where silence would be dishonest
-    // is the default lane quietly building through C — one stderr line
-    // names the refusal. A successful LLVM build is the documented default
-    // (and the kept .ll next to the binary is the durable record), and an
-    // explicit --backend was the user's own choice — neither gets a line.
-    if (result.llvmRefusal !== undefined) {
-      process.stderr.write(`scriptc: backend c (llvm refused: ${result.llvmRefusal})\n`);
-    }
     if (!values["keep-c"]) rmSync(result.cPath, { force: true });
     return result.binaryPath;
   };
