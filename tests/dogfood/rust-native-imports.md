@@ -54,8 +54,10 @@ lane does not establish byte-for-byte stderr equivalence.
 ## Remaining boundaries
 
 This slice accepts primitive exports, primitive unions, native dynamic handles
-and declared functions with supported argument/result representations. Typed
-records, arrays and other composite exports require a native reference view
+and declared functions with supported argument/result representations. Open
+`Record<string, unknown>` value exports now share their native map. Records
+with declared fields or typed index values, arrays and other composite exports
+require a native reference view
 that preserves identity and shared mutation; the current copy conversion is
 refused. Class and generic exports, broader function signatures, callable
 `then` exports, CommonJS namespaces, computed module paths, callable
@@ -273,3 +275,65 @@ the dynamic-await view correction. The twelve normal-exit programs match
 Node stdout, stderr and exit status; 3045 retains the documented exit-13
 stderr limitation. The final 3051 coverage reports `engine: none` and
 `externalFfi: false`.
+
+## Shared unknown-index record values
+
+The follow-up to `71e06834` removes copies when Rust boxes or validates an
+open `Record<string, unknown>`: both sides already store the same
+`JsMap<JsString, ScDyn>`. The conversion retains that map directly, including
+its existing nested references. It no longer builds a deep copy or stores a
+snapshot in the live-reference side table. Other record layouts keep their
+existing boundaries and conversion behavior.
+
+Native namespaces now admit globals of that exact record layout. Getters
+retain the exported map, and reassigning an exported `let` publishes the new
+map on subsequent reads. Named aliases share the binding; `export default
+state` retains the original object reference, including mutations made before
+or after the named binding changes.
+
+| Export shape | Native admission |
+| --- | --- |
+| `let state: Record<string, unknown>` | Shared map value |
+| `const state = { count: 0 }` | Still refused: declared-field storage |
+| `const state: Record<string, number>` | Still refused: typed index storage |
+| `const state: { count: number; [key: string]: unknown }` | Still refused: hybrid storage |
+| `function update(state: Record<string, unknown>)` | Still refused: callers can supply other compatible layouts |
+| A supported `unknown` callback argument/result | An already canonical record map retains identity |
+
+This does not make arbitrary typed objects passed through `unknown` safe from
+copying: the source must already use the canonical map. Native namespaces
+also keep their existing typed-record conversion refusal; their live getters
+need namespace-aware operations, not just shared data storage.
+
+Corpus 3052 tests both conversion directions, insertion/deletion, nested map
+identity and mutation, self references, an abandoned cycle with heap audit,
+circular JSON rejection, shallow spread, independent `structuredClone`, and
+JSON.parse aliases. Its native import witness tests static/dynamic identity,
+namespace aliases, direct reads, exported rebinding, default object snapshots
+and asynchronous mutation through an existing `unknown` callback contract.
+The source runs unchanged under Node and the Rust binary with the engine
+prohibited.
+
+Validation covers 55 API/IR/backend tests in eight files and 23 differential
+programs selected by `304[1-9]-|305[0-2]-|1575-|2676-|2691-|2692-|2849-|2850-`.
+The shared numeric prefixes also include existing module/namespace cases.
+All twelve native import witnesses prohibit the engine. The 21 normal-exit
+programs compare stdout, stderr and exit status; 3045 and the existing
+2676 top-level-await exit-1 witness retain the harness's nonzero-exit stderr
+limitation. Heap audit is enabled, including the abandoned record cycle.
+Only the new 3052 preflight/order baseline was added; all previous entries
+are preserved.
+
+Local evidence: `/tmp/scriptc-index-record-corpus-final.log`,
+`/tmp/scriptc-index-record-api-final.log` and
+`/tmp/scriptc-index-record-baseline.log`. The earlier failing identity witness
+is `/tmp/scriptc-index-record-before.log`; the independent export admission
+refusal is `/tmp/scriptc-index-record-export-before.log`.
+The Rust runtime source is unchanged, so the prior 183 Cargo tests and Clippy
+result remain historical evidence rather than a new runtime gate.
+
+Workspace build and lint pass, including generated-file and source-ceiling
+checks. Lint retains 3,114 warnings and zero errors. Logs are
+`/tmp/scriptc-index-record-build.log` and `/tmp/scriptc-index-record-lint.log`.
+These focused results do not replace the pending full plain/sanitized gate,
+original-consumer acceptance or measured C/LLVM comparison.

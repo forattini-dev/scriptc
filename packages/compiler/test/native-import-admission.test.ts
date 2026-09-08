@@ -67,6 +67,10 @@ test("a computed import still requires an explicit supported runtime path", () =
 
 test.each([
   ["mutable object identity", "export const state = { count: 0 };", "identity"],
+  ["typed index record", "export const state: Record<string, number> = { count: 0 };", "identity"],
+  ["declared unknown index record", "export const state: { count: number; [key: string]: unknown } = { count: 0 };", "identity"],
+  ["indexed record callback argument", "export function update(state: Record<string, unknown>): void { state.count = 1; }", "identity"],
+  ["indexed record callback result", "export function state(): Record<string, unknown> { return { count: 0 }; }", "identity"],
   ["array identity", "export const values = [1, 2];", "identity"],
   ["namespace thenable", "export function then(): void {}", "thenable"],
   ["namespace JSON hook", "export function toJSON(): string { return \"custom\"; }", "coercion"],

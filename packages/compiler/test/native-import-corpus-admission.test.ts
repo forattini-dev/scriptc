@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, "../../..");
 const entries = [
   ...globSync(`${root}/tests/corpus/304[1-9]-*/main.ts`),
   ...globSync(`${root}/tests/corpus/304[1-7]-*.ts`),
-  ...globSync(`${root}/tests/corpus/305[01]-*/main.ts`),
+  ...globSync(`${root}/tests/corpus/305[0-2]-*/main.ts`),
 ].sort();
 
 test.each(entries)("native import corpus prohibits the engine: %s", entry => {

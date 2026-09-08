@@ -91,6 +91,16 @@ function callableHook(L: Lowerer, name: string, type: IrType): boolean {
   return ["func", "jsval", "dyn"].includes(type.kind);
 }
 
+function sharedRecordExportSafe(L: Lowerer, type: IrType): boolean {
+  if (type.kind !== "record") return false;
+  const shape = L.shapes.get(type.shapeId);
+  // Only this layout is already the Rust dynamic map. Declared fields and
+  // typed index values still require conversion. This is a value-export
+  // rule, not callback admission: callers may pass structurally compatible
+  // records whose storage has a different layout.
+  return !!shape && !shape.tuple && shape.fields.length === 0 && shape.indexValue?.kind === "dyn";
+}
+
 function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts.CallExpression, setup: IrStmt[]): IrExpr | null {
   const loc = locOf(site);
   for (const decl of L.checker.declarationsOf(symbol)) {
@@ -109,7 +119,7 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
   };
   const global = L.globalsBySymbol.get(resolved);
   if (global) {
-    if (!identitySafe(L, global.type)) refuse(`has type '${L.fmt(global.type)}'; preserving this export's identity requires a native reference view`);
+    if (!identitySafe(L, global.type) && !sharedRecordExportSafe(L, global.type)) refuse(`has type '${L.fmt(global.type)}'; preserving this export's identity requires a native reference view`);
     if (callableHook(L, name, global.type)) refuse("may be a callable namespace coercion/thenable hook and needs a native implementation");
     return marshal({ kind: "varRef", localId: global.id, type: global.type, loc });
   }

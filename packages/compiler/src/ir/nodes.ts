@@ -4898,8 +4898,8 @@ export type IrExpr =
    * undefined is representable (the array OOB policy; on declared-only
    * shapes tsc's keyof check makes the trap unreachable without an `as`
    * smuggle). Declared-field values surface as `type`: V-typed fields read
-   * directly, dyn results build a dyn COPY of the field value (the dynFrom
-   * conversion — deep for composites, documented), union results wrap.
+   * directly, dyn results use dynFrom (copies except for shared backend
+   * representations), and union results wrap.
    * The key and object are borrowed; refcounted results are owned (+1).
    * `overflowOnly` (set when the key is a LITERAL that names no declared
    * field): the read touches only the overflow map — declared fields need
@@ -4907,8 +4907,8 @@ export type IrExpr =
   | { kind: "recordKeyGet"; obj: IrExpr; shapeId: string; key: IrExpr; overflowOnly?: true; type: IrType; loc: SrcLoc }
   /** Static value → dyn conversion (`type` is always dyn): the operand
    * (a JSON-safe type — f64/string/bool/record/array/union, validated)
-   * converts to a fresh dyn tree, DEEP-COPYING composites (the jsMarshal
-   * aliasing stance; a dyn value can never alias static storage). An
+   * converts to a fresh dyn tree, DEEP-COPYING composites except Rust's
+   * open unknown-valued records, which share the canonical dynamic map. An
    * undefined-armed union's undefined arm becomes the undefined dyn
    * singleton. A FUNCTION operand (canBoxFuncIntoDyn — the mustCall shape:
    * a typed closure flowing into an untyped JS helper's implicit-any

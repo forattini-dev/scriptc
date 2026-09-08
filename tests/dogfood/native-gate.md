@@ -215,3 +215,25 @@ still no final RSP module, execution profile or executable.
 The Sandbox image and local environment configuration remain absent. No fresh
 full plain/sanitized fallback was completed in this step: the full gate stays
 pending/red. Focused validation is not release certification.
+
+## Canonical record map checkpoint
+
+The follow-up to `71e06834` preserves the native map when open
+`Record<string, unknown>` values cross typed/dynamic boundaries, and admits
+those records as native namespace value exports. Declared-field records,
+typed index values and broader record callback signatures remain refused.
+The original RSP survey is unchanged and still produces no complete binary.
+
+The focused gate passes 55 API/IR/backend tests and 23 differential programs,
+including twelve native import witnesses with the engine prohibited. The
+new record witness checks shared mutation, default-export snapshots, native
+async calls, cloning and an abandoned cycle under heap audit. The two
+nonzero-exit witnesses retain the harness's documented stderr limitation.
+Evidence and the exact admitted boundary are in the
+[native import record](./rust-native-imports.md#shared-unknown-index-record-values).
+
+Workspace build, lint, generated-file and source-ceiling checks also pass;
+lint retains 3,114 warnings and zero errors. Runtime source is unchanged;
+its previous Cargo/Clippy gate was not repeated.
+No fresh full plain/sanitized gate was completed. Full validation and release
+readiness remain pending/red, independent of these focused results.

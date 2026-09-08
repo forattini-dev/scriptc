@@ -1129,7 +1129,7 @@ export class RustDynamicEmitter {
           const shape = this.context.records.get(type.shapeId);
           if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
             const name = this.context.dynTypeName();
-            return `{ let value = ${value}; match &value { ${name}::Object(object) => runtime::live_dyn_ref_get(object.identity()).unwrap_or_else(|| match sc_dyn_deep_copy(&value) { ${name}::Object(object) => object, _ => unreachable!("scriptc invariant: copied dyn object changed kind"), }), _ => sc_dyn_check_fail("object", &value), } }`;
+            return `{ let value = ${value}; match value { ${name}::Object(object) => object, value => sc_dyn_check_fail("object", &value), } }`;
           }
         }
         if (!this.context.isRustJsonCompatible(type)) {

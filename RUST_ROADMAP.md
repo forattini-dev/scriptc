@@ -18,9 +18,11 @@ Changing the default does not establish superior correctness or performance.
    Lazy evaluation, cached failures and live primitive exports now have native
    witnesses, including runtime wildcard graphs, diamonds and cycles. Exported
    functions can also return primitive/void Promises through native views that
-   retain identity and reaction ordering. The next boundaries are exporting
-   records, arrays, classes and richer functions
-   while preserving identity, plus sharing static namespace objects.
+   retain identity and reaction ordering. Open unknown-valued record exports
+   share the native dynamic map, including nested map aliases and mutation.
+   The next boundaries are records with declared fields or typed index values,
+   arrays, classes, richer function signatures and shared static namespace
+   objects, all while preserving identity and shared mutation.
    Reaching these modules exposes additional consumer gaps.
 2. Native value boundaries. Complete checked URL/SearchParams references,
    recursive records/JSON and Promise payload conversion. Preserve identity,

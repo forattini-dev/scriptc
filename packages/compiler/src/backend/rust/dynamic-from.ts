@@ -11,7 +11,8 @@ interface DynFromHelper {
   readonly liveRef: boolean;
 }
 
-/** Emits typed-to-dynamic deep copies.
+/** Emits typed-to-dynamic conversions. Open unknown-valued record maps
+ * retain identity; other composites copy.
  *
  * Acyclic shapes stay inline. Recursive composites are interned as named
  * helpers so records, arrays, and unions can call one another without the
@@ -144,7 +145,9 @@ export class RustDynamicFromEmitter {
       return `{ let ${record} = ${value}; ${guard}let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${record}); ` : ""}${name}::Array(${output}) }`;
     }
     if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
-      return liveRef ? `{ let source = ${value}; let mirror = match sc_dyn_deep_copy(&${name}::Object(source.clone())) { ${name}::Object(value) => value, _ => unreachable!() }; runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Object(mirror) }` : `sc_dyn_deep_copy(&${name}::Object(${value}))`;
+      // Open unknown-valued records already store the canonical dynamic
+      // map. Boxing changes the tag, not the object or its nested values.
+      return `${name}::Object(${value})`;
     }
     if (shape?.indexValue !== undefined && shape.fields.length === 0) {
       const source = this.context.nextTemporary();

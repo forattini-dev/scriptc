@@ -519,3 +519,27 @@ no-engine build. No consumer code was rewritten.
 
 Evidence: `/tmp/scriptc-rsp-after-async-import.json` and its `.mts`/`.log`
 companions, retained separately from the preceding export-star survey.
+
+## Canonical record maps and native value exports
+
+The working snapshot based on `71e06834` fixes Rust aliasing when an open
+`Record<string, unknown>` crosses a typed/dynamic boundary and admits native
+namespace value exports of that exact layout. The original RSP survey was
+repeated on clean consumer revision `c5255e006318fa3ec9aea51ccac11778da3888a1`
+with the same Rust/Bun/no-engine options. All 209 diagnostics are unchanged:
+2,109 reached statements, 257 failed, two reported island statements,
+100 runtime fences and five static npm packages. There is no final module,
+execution profile or RSP executable.
+
+The telemetry record is a different layout: `RspTelemetryEvent` combines a
+required `collection`, optional declared fields and an unknown-valued index
+signature. It still needs shared declared-field storage/validation and a
+callback ABI that preserves compatible argument objects. Open-map export
+support does not admit `appendTelemetryEvent` or justify rewriting its
+signature. Its three-argument `appendFileSync` call remains a separate gap.
+
+Evidence: `/tmp/scriptc-rsp-after-index-record.json` and its `.mts`/`.log`
+companions. No consumer implementation was changed. The
+[shared-record witness](./rust-native-imports.md#shared-unknown-index-record-values)
+establishes native behavior for the admitted map layout, not full telemetry
+acceptance or a performance comparison.

@@ -8498,6 +8498,13 @@
     "<repo>/tests/corpus/3051-native-import-async-functions/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3052-native-index-record-identity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3052-native-index-record-identity/module.ts",
+    "<repo>/tests/corpus/3052-native-index-record-identity/main.ts"
+   ],
+   "diags": []
   }
  }
 }
