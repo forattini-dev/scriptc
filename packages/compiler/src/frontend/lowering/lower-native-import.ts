@@ -116,7 +116,12 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
   const sig = L.fnSigsBySymbol.get(resolved);
   if (sig) {
     if (["then", "toJSON", "toString", "valueOf"].includes(name)) refuse("is a callable namespace coercion/thenable hook and needs a native implementation");
-    if (!sig.params.every(p => p.mode === "required" && identitySafe(L, p.type)) || !identitySafe(L, sig.returnType)) {
+    // Promise handles retain the source identity and rejection; their
+    // fulfillment mapper must still avoid copying composite values.
+    const resultSafe = sig.returnType.kind === "promise"
+      ? identitySafe(L, sig.returnType.inner)
+      : identitySafe(L, sig.returnType);
+    if (!sig.params.every(p => p.mode === "required" && identitySafe(L, p.type)) || !resultSafe) {
       refuse("has a function signature whose argument or result identity requires a native reference view");
     }
     L.noteEdge(sig.name);

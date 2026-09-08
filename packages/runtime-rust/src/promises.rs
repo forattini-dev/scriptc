@@ -86,10 +86,13 @@ pub struct PromiseData<T: HeapValue> {
     state: PromiseState<T>,
     handled: bool,
     reported: bool,
+    // Keep ordinary promises at one optional pointer of view overhead.
+    view: Option<Rc<JsPromiseHandle>>,
 }
 
 impl<T: HeapValue> Trace for PromiseData<T> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(view) = &self.view { promise_handle_trace(view, tracer); }
         if let PromiseState::Fulfilled(Some(value)) = &self.state {
             value.trace_value(tracer);
         }
@@ -98,6 +101,7 @@ impl<T: HeapValue> Trace for PromiseData<T> {
 
 impl<T: HeapValue> ClearEdges for PromiseData<T> {
     fn clear_edges(&mut self) {
+        self.view = None;
         self.state = PromiseState::Pending(Vec::new());
         self.handled = true;
     }
@@ -116,6 +120,7 @@ pub struct JsPromiseHandle {
     identity: usize,
     catch: PromiseCatchHook,
     observe: PromiseObserveHook,
+    poll: PromisePollHook,
     trace: PromiseTrace,
 }
 
@@ -164,11 +169,13 @@ where
     U: HeapValue,
     F: Fn(T) -> U + 'static,
 {
-    let identity = promise.identity();
+    let identity = promise_view_identity(promise);
     let source = promise.clone();
     let observed_source = promise.clone();
     let traced_source = promise.clone();
+    let polled_source = promise.clone();
     let map = Rc::new(map);
+    let poll_map = map.clone();
     JsPromiseHandle {
         identity,
         catch: Rc::new(move |callback| {
@@ -196,10 +203,13 @@ where
             promise_then(
                 &observed_source,
                 Box::new(move |outcome| {
-                    callback(outcome.map(|value| Box::new(map(value)) as Box<dyn Any>));
+                    callback(promise_view_map_outcome(outcome, map.as_ref()));
                 }),
             );
         }),
+        poll: Rc::new(move || promise_poll(&polled_source).map(|outcome| {
+            promise_view_map_outcome(outcome, poll_map.as_ref())
+        })),
         trace: Rc::new(move |tracer| tracer.edge(&traced_source)),
     }
 }
@@ -226,6 +236,7 @@ pub fn promise_new<T: HeapValue>() -> JsPromise<T> {
         state: PromiseState::Pending(Vec::new()),
         handled: false,
         reported: false,
+        view: None,
     });
     let weak = promise.downgrade();
     PROMISE_FINALIZERS.with(|finalizers| {
@@ -260,6 +271,7 @@ pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
         state: PromiseState::Fulfilled(Some(value)),
         handled: false,
         reported: false,
+        view: None,
     })
 }
 
@@ -493,6 +505,10 @@ fn promise_schedule<T: HeapValue>(reaction: PromiseReaction<T>, outcome: Result<
 }
 
 pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReaction<T>) {
+    if let Some(view) = promise.with(|data| data.view.clone()) {
+        (view.observe)(Box::new(move |outcome| reaction(promise_view_outcome(outcome))));
+        return;
+    }
     let registered_context = async_context_capture();
     let reaction: PromiseReaction<T> = Box::new(move |outcome| {
         let _context_guard = async_context_install(registered_context);
@@ -533,6 +549,9 @@ pub fn promise_then<T: HeapValue>(promise: &JsPromise<T>, reaction: PromiseReact
 }
 
 pub fn promise_poll<T: HeapValue>(promise: &JsPromise<T>) -> Option<Result<T, Caught>> {
+    if let Some(view) = promise.with(|data| data.view.clone()) {
+        return (view.poll)().map(promise_view_outcome);
+    }
     let (settled, rejection_handled) = promise.with_mut(|data| {
         let rejection_handled = data.reported;
         data.reported = false;
@@ -613,6 +632,7 @@ where
 }
 
 pub fn promise_fulfill<T: HeapValue>(promise: &JsPromise<T>, value: T) -> bool {
+    if promise.with(|data| data.view.is_some()) { return false; }
     let reactions = promise.with_mut(|data| match &mut data.state {
         PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
         PromiseState::Fulfilled(_) | PromiseState::Rejected(_) => None,
@@ -628,6 +648,7 @@ pub fn promise_fulfill<T: HeapValue>(promise: &JsPromise<T>, value: T) -> bool {
 }
 
 pub fn promise_reject<T: HeapValue>(promise: &JsPromise<T>, reason: Caught) -> bool {
+    if promise.with(|data| data.view.is_some()) { return false; }
     let reactions = promise.with_mut(|data| match &mut data.state {
         PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
         PromiseState::Fulfilled(_) | PromiseState::Rejected(_) => None,

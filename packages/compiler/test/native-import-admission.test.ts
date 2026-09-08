@@ -71,6 +71,9 @@ test.each([
   ["namespace thenable", "export function then(): void {}", "thenable"],
   ["namespace JSON hook", "export function toJSON(): string { return \"custom\"; }", "coercion"],
   ["namespace coercion hook", "export function toString(): string { return \"custom\"; }", "coercion"],
+  ["async object result", "export async function state() { return { count: 0 }; }", "identity"],
+  ["async array result", "export async function state() { return [1, 2]; }", "identity"],
+  ["async record argument", "export async function update(state: { count: number }): Promise<void> { state.count++; }", "identity"],
   ["callable object result", "export function state() { return { count: 0 }; }", "identity"],
 ] as const)("native import refuses unsupported %s explicitly", (_name, dependency, detail) => {
   const coverage = coverageOf(`async function main(): Promise<void> { await import("./module.ts"); } main();`, dependency);

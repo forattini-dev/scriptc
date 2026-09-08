@@ -8491,6 +8491,13 @@
     "<repo>/tests/corpus/3050-native-import-star-ambiguity/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3051-native-import-async-functions/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3051-native-import-async-functions/state.ts",
+    "<repo>/tests/corpus/3051-native-import-async-functions/main.ts"
+   ],
+   "diags": []
   }
  }
 }

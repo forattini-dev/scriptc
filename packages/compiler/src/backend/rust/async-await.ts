@@ -18,7 +18,7 @@ export function emitAwaitDependency(
     }
     const dynamic = context.rustType(expr.type, expr.loc);
     const awaited = context.nextName("sc_async_await_dyn");
-    return `{ let ${awaited} = ${context.emitExpr(value)}; match ${awaited} { ${dynamic}::Promise(handle) => runtime::promise_from_handle::<${dynamic}>(&handle), value => runtime::promise_resolved(value), } }`;
+    return `{ let ${awaited} = ${context.emitExpr(value)}; match ${awaited} { ${dynamic}::Promise(handle) => runtime::promise_view_from_handle::<${dynamic}>(&handle), value => runtime::promise_resolved(value), } }`;
   }
   if (expr.kind === "awaitExpr") return context.emitExpr(expr.value);
   if (expr.value.type.kind !== "union") {

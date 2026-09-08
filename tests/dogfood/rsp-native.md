@@ -493,3 +493,29 @@ lowered module or execution profile. Evidence is retained separately in
 `/tmp/scriptc-rsp-9b03640f-survey.json` preserves the prior checkpoint's survey,
 and `/tmp/scriptc-rsp-after-export-star-intermediate.json` retains the survey
 before the final indirect-re-export validation changes.
+
+## Native Promise-returning exports
+
+The next working snapshot, based on `c6e8e2d0`, admits the exported
+`runRspMcpServer(): Promise<void>` call and advances the fast-git namespace
+past `fastTelemetryRoot`. On the unchanged, clean consumer revision
+`c5255e006318fa3ec9aea51ccac11778da3888a1`, the same Rust/Bun/no-engine survey
+now reaches 2,109 statements (+177), with 257 failed statements (+10),
+209 diagnostics (+11), 100 runtime fences and five static npm packages.
+The newly visible diagnostics concern MCP record casts, store methods,
+`existsSync` used as a value, and resident-store class/function boundaries.
+The extra diagnostics reflect deeper traversal, not a completed executable.
+
+There are still 43 native namespace boundary diagnostics. The three telemetry
+imports still refuse `appendTelemetryEvent`: its indexed `RspTelemetryEvent`
+argument needs a shared native record view even though `Promise<void>` results
+now have a native bridge. The three-argument `appendFileSync` call remains an
+independent gap. These are the next concrete telemetry requirements.
+
+The report now counts two island statements. The classifier's existing generic
+IR counting issue remains; this survey has no final module or execution
+profile, so that count proves neither an engine dependency nor a successful
+no-engine build. No consumer code was rewritten.
+
+Evidence: `/tmp/scriptc-rsp-after-async-import.json` and its `.mts`/`.log`
+companions, retained separately from the preceding export-star survey.

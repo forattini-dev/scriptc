@@ -229,7 +229,7 @@ class RustDynamicInvokeEmitter {
     this.close("}");
 
     this.open(`fn sc_dyn_promise_chain(handle: &runtime::JsPromiseHandle, on_fulfilled: ${this.dyn}, on_rejected: ${this.dyn}) -> ${this.dyn} {`);
-    this.context.line(`let source = runtime::promise_from_handle::<${this.dyn}>(handle);`);
+    this.context.line(`let source = runtime::promise_view_from_handle::<${this.dyn}>(handle);`);
     this.context.line(`let result = runtime::promise_new::<${this.dyn}>();`);
     this.context.line("let target = result.clone();");
     this.open("runtime::promise_then(&source, Box::new(move |outcome| match outcome {");
@@ -257,7 +257,7 @@ class RustDynamicInvokeEmitter {
     this.close("}");
 
     this.open(`fn sc_dyn_promise_finally(handle: &runtime::JsPromiseHandle, callback: ${this.dyn}) -> ${this.dyn} {`);
-    this.context.line(`let source = runtime::promise_from_handle::<${this.dyn}>(handle);`);
+    this.context.line(`let source = runtime::promise_view_from_handle::<${this.dyn}>(handle);`);
     this.context.line(`let result = runtime::promise_new::<${this.dyn}>();`);
     this.context.line("let target = result.clone();");
     this.open("runtime::promise_then(&source, Box::new(move |outcome| {");

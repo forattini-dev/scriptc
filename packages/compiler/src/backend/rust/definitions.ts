@@ -433,8 +433,10 @@ export class RustDefinitionEmitter {
         case "secureCtx":
         case "record":
         case "func":
-        case "promise":
           comparison = "left.ptr_eq(right)";
+          break;
+        case "promise":
+          comparison = "runtime::promise_view_identity(left) == runtime::promise_view_identity(right)";
           break;
         case "regex":
         case "symbol":

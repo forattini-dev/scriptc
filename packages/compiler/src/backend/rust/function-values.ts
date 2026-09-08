@@ -201,6 +201,10 @@ export class RustFunctionValueEmitter {
       const compare = `${this.functionIdentity(left, expr.left.type, expr.loc)} == ${this.functionIdentity(right, expr.right.type, expr.loc)}`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
+    if (expr.left.type.kind === "promise" && (expr.op === "===" || expr.op === "!==")) {
+      const compare = `runtime::promise_view_identity(&(${left})) == runtime::promise_view_identity(&(${right}))`;
+      return expr.op === "!==" ? `!(${compare})` : compare;
+    }
     if (this.context.isTracedHandle(expr.left.type) && (expr.op === "===" || expr.op === "!==")) {
       const compare = `((${left}).ptr_eq(&(${right})))`;
       return expr.op === "!==" ? `!(${compare})` : compare;

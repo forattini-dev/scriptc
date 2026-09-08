@@ -714,15 +714,17 @@ function emitGenericPromiseBridge(
   const island = context.hasEmbeddedModules()
     ? `${dyn}::Island(sc_handle) => runtime::island_promise_bridge(&sc_handle, |sc_value| ${dyn}::Island(sc_value)), `
     : "";
-  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::promise_from_handle::<${dyn}>(&sc_handle), ${island}sc_value => runtime::promise_resolved(sc_value), }`;
+  const fromHandle = context.hasEmbeddedModules() ? "promise_from_handle" : "promise_view_from_handle";
+  const map = context.hasEmbeddedModules() ? "promise_map" : "promise_view_map";
+  const adopt = `match ${value} { ${dyn}::Promise(sc_handle) => runtime::${fromHandle}::<${dyn}>(&sc_handle), ${island}sc_value => runtime::promise_resolved(sc_value), }`;
   if (expr.type.inner.kind === "jsval") {
     return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; ${source} }`;
   }
   if (expr.type.inner.kind === "void") {
-    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::promise_map(&${source}, |_| ()) }`;
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::${map}(&${source}, |_| ()) }`;
   }
   if (expr.type.inner.kind === "array" && expr.type.inner.elem.kind === "jsval") {
-    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::promise_map(&${source}, |sc_value| match sc_value { ${dyn}::Array(sc_array) => sc_array, sc_value => sc_dyn_check_fail("array", &sc_value), }) }`;
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::${map}(&${source}, |sc_value| match sc_value { ${dyn}::Array(sc_array) => sc_array, sc_value => sc_dyn_check_fail("array", &sc_value), }) }`;
   }
   context.unsupported("island promise bridge payload", expr.loc);
 }

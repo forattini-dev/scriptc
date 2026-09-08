@@ -186,3 +186,32 @@ C/LLVM sanitizer checks were not repeated. The full plain/sanitized suite
 remains pending/red, with Sandbox configuration still absent and no fresh full
 local fallback completed. The original RSP survey still refuses the telemetry
 callback's record/Promise boundary and produces no complete executable.
+
+## Native asynchronous export checkpoint
+
+The follow-up to `c6e8e2d0` admits primitive/void Promise results from exported
+functions and corrects the extra reaction job introduced by native handle
+bridging. Rust promise views preserve source identity, observation ordering
+and rejection ownership. Typed record/array arguments and composite Promise
+payloads remain refused. Details and local validation artifacts are in the
+[native import record](./rust-native-imports.md#native-asynchronous-function-boundary).
+
+Thirteen differential programs pass across the focused selection and final
+3051 rerun: eleven native imports and two existing async regressions. The
+exit-13 stderr limitation of 3045 is unchanged.
+
+The focused API/IR/backend checks pass 52 cases across eight files, including
+three embedded-engine bridge regressions. Rust 1.98.0 passes 183 runtime tests
+and all-target Clippy with warnings denied. Workspace build, lint, generated
+files and source ceilings pass; lint retains 3,114 warnings and zero errors.
+The new preflight/order entry preserves all existing baselines.
+
+The unchanged original RSP now reaches 2,109 statements, with 257 failed and
+209 diagnostics. The newly admitted asynchronous exports expose deeper MCP
+and resident-store blockers. Telemetry still requires an identity-preserving
+record argument boundary and the separate appendFileSync overload. There is
+still no final RSP module, execution profile or executable.
+
+The Sandbox image and local environment configuration remain absent. No fresh
+full plain/sanitized fallback was completed in this step: the full gate stays
+pending/red. Focused validation is not release certification.

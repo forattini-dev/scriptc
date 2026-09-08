@@ -31,6 +31,7 @@ include!("async_local_storage.rs");
 include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");
+include!("promise_views.rs");
 include!("native_module.rs");
 include!("stdin.rs");
 include!("terminal.rs");
@@ -152,6 +153,7 @@ mod tests {
     include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
+    include!("promise_views.test.rs");
     include!("tests/heap_pressure.rs");
     include!("effect_state.test.rs");
     include!("effect_pubsub.test.rs");

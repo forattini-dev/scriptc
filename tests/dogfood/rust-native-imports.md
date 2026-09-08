@@ -215,3 +215,61 @@ confirms Node linking failures and native refusals for invalid named
 re-exports hidden behind a previously visited star or explicit root export.
 The [RSP survey](./rsp-native.md#runtime-star-re-export-resolution) records the
 remaining callback boundary after the three telemetry star imports resolve.
+
+## Native asynchronous function boundary
+
+The follow-up to `c6e8e2d0` admits declared exported functions returning
+`Promise<number>`, `Promise<string>`, `Promise<boolean>` and `Promise<void>`.
+The argument admission and callback-signature checks remain in force; typed
+record/array arguments and composite Promise payloads still refuse because
+marshaling them would copy shared state. Existing dynamic handles retain their
+own representation contract; this does not make arbitrary typed objects safe
+to pass through `unknown` or `any`.
+
+Corpus 3051 exposed an extra microtask in the old native handle bridge:
+`ns.cached().then(callback)` ran after a separately queued Promise callback
+and an `await Promise.resolve()`, whereas Node ran it before both. The new
+Rust promise view forwards observations and polling to the original source;
+it does not settle an intermediate promise first. Void payload conversion is
+also a view. View mappers are internal representation conversions, not user
+callbacks; they may run for each observation. Native dynamic reaction receivers and dynamic awaits use this
+path. Promise resolution/adoption and embedded-engine bridges retain their
+separate implementations.
+
+Views retain source identity across typed comparisons, union comparisons and
+re-boxing. Merely creating a view does not mark its source rejection handled.
+Mapping failures reach observers as rejections; views trace their source and
+release it when cleared. The runtime tests cover pending settlement, reaction
+order, unhandled rejection identity, conversion errors and heap cleanup.
+
+The normal-exit no-engine witness covers exported async functions, cached and
+fresh Promise identity, function aliases, typed Promise parameters, dynamic
+aliases and awaits, `.then`/`.catch`/`.finally`, primitive/void fulfillment and
+Error rejection identity. Its stdout, stderr and exit status must match Node.
+This is a limited native boundary, not complete JavaScript Promise conformance.
+
+The 52 focused API/IR/backend checks include the eleven native import admission
+programs and the three existing embedded-engine Promise bridge regressions.
+All 52 pass together on the final source. The Error witness compares the
+rejection with its original statically imported Error reference. The runtime
+gate passes all 183 tests and all-target Clippy with
+`-D warnings` on Rust 1.98.0. Workspace build and lint pass; lint reports zero
+errors and the same 3,114 warnings. Only the new 3051 preflight/order baseline
+was added, preserving every prior entry.
+
+Evidence: `/tmp/scriptc-native-async-api-final.log`,
+`/tmp/scriptc-native-async-runtime-final.log`,
+`/tmp/scriptc-native-async-clippy-final.log`,
+`/tmp/scriptc-native-async-build.log`, `/tmp/scriptc-native-async-lint.log` and
+`/tmp/scriptc-native-async-baseline-final.log`. These are local checkpoint
+artifacts. The full plain/sanitized gate and original-consumer acceptance
+remain pending; no C/LLVM superiority or release readiness is established.
+
+The differential selection validates thirteen programs: native imports
+3041–3051 plus existing async-ordering (1021) and dynamic-rejection (2566)
+regressions. Twelve passed in `/tmp/scriptc-native-async-corpus.log`; the new
+3051 witness then passed in `/tmp/scriptc-native-async-corpus-final.log` after
+the dynamic-await view correction. The twelve normal-exit programs match
+Node stdout, stderr and exit status; 3045 retains the documented exit-13
+stderr limitation. The final 3051 coverage reports `engine: none` and
+`externalFfi: false`.
