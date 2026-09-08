@@ -15,7 +15,7 @@ commit scriptc to every transitive Node/Bun capability.
 
 | Witness | Classification | Required next action |
 | --- | --- | --- |
-| `RspTelemetryEvent` in `apps/rsp/src/telemetry/schema.ts`, passed to `appendTelemetryEvent` | Compiler gap: the source already declares the collection, optional fields and unknown-valued index signature. | Implement shared declared-field/index storage and compatible callback boundaries; pin identity, mutation and async behavior. Do not replace the signature with `unknown` to hide the gap. |
+| `RspTelemetryEvent` in `apps/rsp/src/telemetry/schema.ts`, passed to `appendTelemetryEvent` | Compiler gap: the source already declares the collection, optional fields and unknown-valued index signature. The scalar-record boundary is implemented in the checkpoint below. | Retain identity/mutation/async regressions; complete the other telemetry exports and API gaps. Do not replace the signature with `unknown` to hide a compiler gap. |
 | `appendFileSync` with `{ encoding: "utf8", mode: 0o600 }` in `telemetry/spool.ts` | Compiler API gap selected for the telemetry workload; the currently admitted two-argument form does not implement these options. | Implement creation permissions and encoding semantics with differential tests, including umask and existing-file behavior. Do not discard `mode` to obtain admission. |
 | SDK callback context lost when scriptc substitutes inferred JS types for ordinary declarations | Compiler gap, repaired in the recorded callback-context slice below. | Retain ordinary-preflight and implementation-divergence regressions; avoid requiring redundant callback annotations as a workaround. |
 
@@ -570,3 +570,31 @@ companions. No consumer implementation was changed. The
 [shared-record witness](./rust-native-imports.md#shared-unknown-index-record-values)
 establishes native behavior for the admitted map layout, not full telemetry
 acceptance or a performance comparison.
+
+## Shared declared-field record callbacks
+
+The working snapshot based on `f1c4abf9` gives scalar-field records shared
+native storage when they cross typed/dynamic boundaries. It admits the
+original `appendTelemetryEvent` signature without modifying the consumer's
+types. The [record callback witness](./rust-native-imports.md#shared-declared-field-record-callbacks)
+compares native execution with Node, including structurally compatible
+arguments, shared mutation across await, exports and Promise results.
+
+The fresh survey uses the same clean consumer revision
+`c5255e006318fa3ec9aea51ccac11778da3888a1` and Rust/Bun/no-engine/npm-auto
+options. Reached statements increase from 2,109 to 2,140; the report still
+has 257 failed statements, 209 diagnostics, 100 runtime fences, two generic
+island statements and five statically admitted npm packages.
+
+Seven previous refusals are replaced by deeper boundaries at the same import
+sites: three `appendTelemetryEvent` refusals become `drainTelemetrySpool`
+signature refusals; three `DEFAULT_RSP_OVERHEAD_CEILING` record refusals become
+`RSP_OVERHEAD_FAMILIES` tuple refusals; one `mergeRspBlock` signature refusal
+becomes `provisionRspRepoStore`. Each namespace must admit its complete export
+surface, so these are not seven accepted imports. No final module, execution
+profile, telemetry command execution or complete RSP binary is established.
+The `appendFileSync` options gap remains independent.
+
+Evidence: `/tmp/scriptc-rsp-after-declared-record.json` and its `.mts`/`.log`
+companions. The consumer checkout remains unchanged. This is compiler
+admission progress, not a measured performance improvement or release gate.

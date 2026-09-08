@@ -1,4 +1,5 @@
-import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
+import { isSharedRecord } from "./shared-records.js";
 import type { IrFuncType } from "./model.js";
 import { emitRustIslandDestructuringFunction } from "./island-destructuring-function.js";
 import { emitRustIslandBuiltin } from "./island-builtins.js";
@@ -6,6 +7,7 @@ import { emitRustIslandBuiltin } from "./island-builtins.js";
 type IslandExpr = Extract<IrExpr, { kind: "jsMarshal" | "jsOp" | "jsExit" | "jsBridgePromise" }>;
 
 export interface RustIslandContext {
+  readonly records: ReadonlyMap<string, IrRecordShape>;
   nextName(prefix: string): string;
   dynTypeName(): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
@@ -59,6 +61,12 @@ function emitMarshal(
 ): string {
   const host = emitHostFunction(expr, context, emitExpr);
   if (host !== null) return host;
+  if (!context.hasEmbeddedModules() && expr.value.type.kind === "record") {
+    const shape = context.records.get(expr.value.type.shapeId);
+    if (!isSharedRecord(shape) && !(shape?.fields.length === 0 && shape.indexValue?.kind === "dyn")) {
+      context.unsupported("native record argument requires shared storage for its declared fields and index values", expr.loc);
+    }
+  }
   switch (expr.value.type.kind) {
     case "f64":
     case "bool":

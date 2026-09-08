@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
@@ -664,7 +665,7 @@ export function emitRustGeneratorResume(
         context.unsupported(`unexpected IteratorResult field '${field.name}'`, expr.loc);
       return `${mangleField(field.name)}: ${context.isEdgeValue(field.type) ? `Some(${raw})` : raw}`;
     }).join(", ");
-    return `runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`;
+    return `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`;
   };
   const yielded = generatorType.yieldT.kind === "void"
     ? "runtime::GeneratorStep::Yielded(_) => unreachable!(\"scriptc invariant: void generator yielded\")"

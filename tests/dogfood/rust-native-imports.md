@@ -278,6 +278,9 @@ stderr limitation. The final 3051 coverage reports `engine: none` and
 
 ## Shared unknown-index record values
 
+This historical checkpoint describes `2526d7b9`. The declared-field and
+callback refusals in its table are superseded by the next checkpoint below.
+
 The follow-up to `71e06834` removes copies when Rust boxes or validates an
 open `Record<string, unknown>`: both sides already store the same
 `JsMap<JsString, ScDyn>`. The conversion retains that map directly, including
@@ -337,3 +340,79 @@ checks. Lint retains 3,114 warnings and zero errors. Logs are
 `/tmp/scriptc-index-record-build.log` and `/tmp/scriptc-index-record-lint.log`.
 These focused results do not replace the pending full plain/sanitized gate,
 original-consumer acceptance or measured C/LLVM comparison.
+
+## Shared declared-field record callbacks
+
+Rust now chooses shared map storage for records that cross a typed/dynamic
+boundary and have scalar declared fields, primitive optional unions, and
+optionally an unknown-valued index signature. Each typed view retains the
+same map; field reads and checked conversions validate its declared types.
+Shapes used only in static paths keep their typed structs. The storage
+plan clones Rust-local shape metadata and leaves shared IR shapes unchanged.
+
+Native imports admit these record values and required record parameters,
+synchronous record results and `Promise<Record>` results. Structurally
+compatible scalar-field arguments can have a different shape and still share
+the same object. The existing Promise views preserve settlement ordering.
+Typed reads/writes, keyed access, JSON, shallow record clones, globals,
+closures and async frames use the selected representation. The wrappers
+trace their map through the existing collector; no unsafe runtime code or
+new global reference cache is introduced.
+
+Record-literal IR now marks synthetic missing optional fields with `absent`.
+Shared literals retain source insertion order and omit those own keys while
+preserving explicitly present `undefined` fields. Scalar-field JSON decoding
+validates the shape and retains extra properties in the shared map. This does
+not remove existing frontend reflection/spread restrictions for other layouts.
+
+| Boundary | Current admission |
+| --- | --- |
+| Plain scalar-field record, including optional primitive fields | Shared typed/dynamic value, native export or callback parameter/result |
+| Same fields plus `[key: string]: unknown` | Same shared behavior; dynamic extras retain existing references |
+| `Record<string, unknown>` | Existing canonical map, now also admitted in native callback signatures |
+| Structurally compatible scalar-field caller record | Shared original map; no parameter-shape copy |
+| Typed nested record/array/class fields, typed index maps and tuples | Still outside this shared layout; native record marshaling refuses copying these arguments |
+| Callback unions containing record arms, optional/rest parameters | Still refused by native import signature admission |
+| Namespace conversion to a typed record | Still refused; namespace getters/prototype behavior require a separate implementation |
+
+This slice does not make every object crossing `unknown` identity-preserving.
+Other existing typed/dynamic composite conversions retain their documented
+limits. Scalar unions here describe runtime primitive types; this work does
+not add literal-value validation that the existing IR type erases.
+
+Corpus 3053 compares boxing/unboxing, writes in both directions, container
+references, absent versus explicit optional keys, JSON decoding, shallow
+copies, independent structured clones and collectable cycles. Corpus 3054
+compares static/dynamic exports, aliases and default snapshots, synchronous
+and async record callbacks, mutation across await and differently shaped
+compatible arguments. Both require the engine to be absent and run under
+the Rust heap audit with Node output/error/exit parity.
+
+The original failing witness is `/tmp/scriptc-declared-record-before.log`:
+Rust printed `identity false false` and retained the old field value.
+Original-consumer survey results and remaining telemetry barriers are in
+[rsp-native.md](./rsp-native.md#shared-declared-field-record-callbacks).
+
+Validation on the final implementation passes 64 API/IR/backend tests in
+eight files and 44 Rust differential programs, including all fourteen native
+import/record witnesses (3041–3054). The 42 normal-exit programs compare
+stdout, stderr and exit status; 3045 and the existing 2676 top-level-await
+exit-1 witness retain the harness's nonzero-exit stderr limitation. Twenty-two
+selected C/LLVM checks pass with sanitizers, covering eleven existing
+programs, including optional fields and async record literals. The runtime
+source is unchanged; no fresh Cargo test/Clippy gate is claimed.
+
+Workspace build and lint pass (zero errors, 3,114 existing warnings), including
+generated files and source ceilings. Only the two new preflight/order
+baselines were added. Logs: `/tmp/scriptc-shared-record-api-verified.log`,
+`/tmp/scriptc-shared-record-corpus-final.log`,
+`/tmp/scriptc-shared-record-sanitized.log`,
+`/tmp/scriptc-shared-record-build-final.log`,
+`/tmp/scriptc-shared-record-lint-final.log` and
+`/tmp/scriptc-shared-record-baseline.log`.
+
+These are focused local results. The Sandbox attempt stops before tests
+because `SCRIPTC_SANDBOX_IMAGE` is absent
+(`/tmp/scriptc-shared-record-sandbox.log`); a fresh full local fallback has
+not completed. The full gate remains pending/red. No release certification,
+complete consumer acceptance or performance superiority is established.

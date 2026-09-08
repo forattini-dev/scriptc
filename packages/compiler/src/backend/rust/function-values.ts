@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
@@ -311,7 +312,7 @@ export class RustFunctionValueEmitter {
         : expr.fn === "fileHandle.writeBytes"
           ? `runtime::file_handle_write_bytes(&${value(0)}, &${value(1)}, ${value(2)}, ${value(3)}, ${value(4)}, ${value(5)})`
           : `runtime::file_handle_write_str(&${value(0)}, &${value(1)}, ${value(2)}, &${value(3)})`;
-      return `{ let sc_count = ${operation}; let sc_buffer = ${value(1)}; runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
+      return `{ let sc_count = ${operation}; let sc_buffer = ${value(1)}; ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
     });
   }
 

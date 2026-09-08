@@ -1,5 +1,13 @@
 # Native repository gate follow-up
 
+Latest local checkpoint: scalar-field record references and native callback
+boundaries, based on `f1c4abf9`. The
+[shared-record validation](./rust-native-imports.md#shared-declared-field-record-callbacks)
+passes 64 API/IR/backend tests, 44 Rust differential programs, 22 selected
+C/LLVM sanitizer checks, workspace build and lint. The Sandbox attempt still
+stops on missing `SCRIPTC_SANDBOX_IMAGE`; no fresh full local fallback has
+completed. These focused passes do not change the full-suite verdict below.
+
 Consumer acceptance and repository validation are separate. RPC sidecar and
 Redwall acceptance do not make the full repository gate green. The Effect
 milestone remains in progress; RSP/Brain and full red-dev/redcode acceptance

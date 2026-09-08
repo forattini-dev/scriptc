@@ -4860,7 +4860,7 @@ export type IrExpr =
    * are in SOURCE order (JS evaluates property values in source order) and
    * cover the shape's fields exactly once each (validated — a source literal
    * omitting OPTIONAL fields reaches the IR already completed: the frontend
-   * appends the wrapped undefined arm for each omitted one). Allocates
+   * appends undefined with `absent: true` for omitted own keys). Allocates
    * (fields zeroed) and returns owned (+1); ownership of refcounted field
    * values MOVES into the record. */
   /** Entries flagged `overflow` are UNDECLARED keys of an index-signature
@@ -4874,7 +4874,7 @@ export type IrExpr =
    * may throw), but nothing is stored — the emitter releases the result
    * with the statement frame. Any value type is legal here, void included
    * (an awaited Promise<void>). */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; type: IrType; loc: SrcLoc }
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; absent?: true }[]; type: IrType; loc: SrcLoc }
   /** Same-shape object spread with explicit overrides: `{ ...source,
    * field: value }`. `source` is evaluated first and borrowed by one
    * per-shape clone helper; `overrides` then evaluate in source order and
@@ -4907,8 +4907,8 @@ export type IrExpr =
   | { kind: "recordKeyGet"; obj: IrExpr; shapeId: string; key: IrExpr; overflowOnly?: true; type: IrType; loc: SrcLoc }
   /** Static value → dyn conversion (`type` is always dyn): the operand
    * (a JSON-safe type — f64/string/bool/record/array/union, validated)
-   * converts to a fresh dyn tree, DEEP-COPYING composites except Rust's
-   * open unknown-valued records, which share the canonical dynamic map. An
+   * converts to a fresh dyn tree, except Rust's canonical unknown maps and
+   * selected scalar-field record views, which share native storage. An
    * undefined-armed union's undefined arm becomes the undefined dyn
    * singleton. A FUNCTION operand (canBoxFuncIntoDyn — the mustCall shape:
    * a typed closure flowing into an untyped JS helper's implicit-any

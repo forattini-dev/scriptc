@@ -5706,7 +5706,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       throw new PoisonError();
     };
 
-    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[] = [];
+    const fields: { name: string; value: IrExpr; overflow?: true; drop?: true; absent?: true }[] = [];
     const hasInlineSpread = (prop: ts.SpreadAssignment): boolean =>
       computedInlineSpread !== null && computedInlineSpread.prop === prop;
     const selectedComputedSpread = (): { local: IrLocal; init: IrExpr } | null =>
@@ -6372,7 +6372,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // `{ plugins: unknown, ... }` — a JS caller the checker admits).
         const absent = L.wrappedUndefined(f.type, loc) ?? (f.type.kind === "dyn" ? dynUndefinedExpr(loc) : null);
         if (!absent) throw shapeMismatch(expr); // only optional (undefined-armed) and 'unknown' fields may be omitted
-        fields.push({ name: f.name, value: absent });
+        fields.push({ name: f.name, value: absent, absent: true });
       }
     }
     const result: IrExpr = { kind: "recordLit", fields, type, loc };

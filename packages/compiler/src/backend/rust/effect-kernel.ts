@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 /* The effect kernel's Rust emission: `effect.*` lib calls over
  * runtime/effect.rs. Values cross the kernel boxed (`EffectValue`, an
  * `Rc<dyn Any>`): a producer boxes its typed value, a consumer unboxes
@@ -66,7 +67,7 @@ function collector(carrier: RustLibCallExpr["args"][number], context: RustLibCal
       const value = unbox(context, field.type, `&sc_values[${index}]`, loc);
       return `${mangleField(field.name)}: ${context.isEdgeValue(field.type) ? `Some(${value})` : value}`;
     }).join(", ");
-    return `std::rc::Rc::new(|sc_values: Vec<runtime::EffectValue>| runtime::effect_box(runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })))`;
+    return `std::rc::Rc::new(|sc_values: Vec<runtime::EffectValue>| runtime::effect_box(${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })))`;
   }
   return context.unsupported("effect collection carrier", loc);
 }

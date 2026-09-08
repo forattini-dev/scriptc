@@ -2,6 +2,7 @@ import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, Src
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleLocal } from "../mangle.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
+import { isSharedRecord } from "./shared-records.js";
 
 export interface RustLoopTarget {
   readonly id: number;
@@ -393,6 +394,7 @@ class RustStatementEmitter {
     if (shape.indexValue === undefined) {
       const declared = shape.fields.map((field, index) => {
         const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
+        if (isSharedRecord(shape)) return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.set_${mangleField(field.name)}(${value}); }`;
         return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`;
       }).join(" ");
       this.context.line(`{ ${bindings} ${declared} else { runtime::throw_type_error(format!("Cannot add property '{}' to a fixed-shape object", ${key})); } }`);
@@ -407,9 +409,10 @@ class RustStatementEmitter {
         ? this.context.emitDynCheckValue(field.type, value, stmt.loc)
         : value;
       const stored = this.context.isEdgeValue(field.type) ? `Some(${checked})` : checked;
+      if (isSharedRecord(shape)) return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.set_${mangleField(field.name)}(${checked}); }`;
       return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`;
     });
-    const overflow = `${object}.with(|record| record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone())`;
+    const overflow = isSharedRecord(shape) ? `${object}.object.clone()` : `${object}.with(|record| record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone())`;
     const setOverflow = `let overflow = ${overflow}; runtime::map_set_by(&overflow, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
     const dispatch = declared.length === 0
       ? setOverflow
@@ -435,6 +438,10 @@ class RustStatementEmitter {
     }
     const object = this.context.nextTemporary();
     const value = this.context.nextTemporary();
+    if (isSharedRecord(shape)) {
+      this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${value} = ${this.context.emitExpr(stmt.value)}; ${object}.set_${mangleField(field.name)}(${value}); }`);
+      return;
+    }
     const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
     this.context.line(`{ let ${object} = ${this.context.emitExpr(stmt.obj)}; let ${value} = ${this.context.emitExpr(stmt.value)}; ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`);
   }

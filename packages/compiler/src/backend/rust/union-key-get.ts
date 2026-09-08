@@ -3,6 +3,7 @@ import { typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
 import type { RustExpressionContext } from "./expressions.js";
 import { emitRustRecordKeyGetValues } from "./indexed-records.js";
+import { isSharedRecord } from "./shared-records.js";
 
 type UnionKeyGetContext = Pick<RustExpressionContext,
   "dynTypeName" | "emitDynFromValue" | "isEdgeValue" | "isUnit" |
@@ -48,6 +49,7 @@ export function emitRustUnionKeyGet(
     if (shape === undefined) context.unsupported(`unknown union keyed record '${arm.shapeId}'`, expr.loc);
     const field = literal === null ? undefined : shape.fields.find((candidate) => candidate.name === literal);
     if (field !== undefined) {
+      if (isSharedRecord(shape)) return `${variant}(payload) => ${surface(`payload.get_${mangleField(field.name)}()`, field.type)}`;
       const access = `record.${mangleField(field.name)}`;
       const answer = context.isEdgeValue(field.type)
         ? `${access}.as_ref().expect("scriptc: cleared live union field").clone()`

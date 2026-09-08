@@ -4,6 +4,7 @@ import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrE
 import { type Lowerer, newFnCtx } from "./lowerer.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 import { nativeModuleExports } from "./lower-native-import-exports.js";
+import { nativeRecordShapeSupported } from "../../ir/native-record.js";
 
 /** Local ESM imports own a cached evaluation and a live, singleton namespace.
  * JSVAL is the Rust runtime's safe handle here; no embedded engine is used. */
@@ -81,7 +82,11 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
 }
 
 function identitySafe(L: Lowerer, type: IrType): boolean {
-  if (type.kind === "union") return L.unions.get(type.unionId)?.arms.every(arm => identitySafe(L, arm)) ?? false;
+  if (type.kind === "union") return L.unions.get(type.unionId)?.arms.every(arm => arm.kind !== "record" && identitySafe(L, arm)) ?? false;
+  if (type.kind === "record") {
+    const shape = L.shapes.get(type.shapeId);
+    return !!shape && nativeRecordShapeSupported(shape, L.unions);
+  }
   return ["f64", "bool", "string", "nullT", "undefinedT", "void", "jsval", "dyn"].includes(type.kind);
 }
 
@@ -89,16 +94,6 @@ function callableHook(L: Lowerer, name: string, type: IrType): boolean {
   if (!["then", "toJSON", "toString", "valueOf"].includes(name)) return false;
   if (type.kind === "union") return L.unions.get(type.unionId)?.arms.some(arm => callableHook(L, name, arm)) ?? false;
   return ["func", "jsval", "dyn"].includes(type.kind);
-}
-
-function sharedRecordExportSafe(L: Lowerer, type: IrType): boolean {
-  if (type.kind !== "record") return false;
-  const shape = L.shapes.get(type.shapeId);
-  // Only this layout is already the Rust dynamic map. Declared fields and
-  // typed index values still require conversion. This is a value-export
-  // rule, not callback admission: callers may pass structurally compatible
-  // records whose storage has a different layout.
-  return !!shape && !shape.tuple && shape.fields.length === 0 && shape.indexValue?.kind === "dyn";
 }
 
 function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts.CallExpression, setup: IrStmt[]): IrExpr | null {
@@ -119,7 +114,7 @@ function nativeExportValue(L: Lowerer, name: string, symbol: ts.Symbol, site: ts
   };
   const global = L.globalsBySymbol.get(resolved);
   if (global) {
-    if (!identitySafe(L, global.type) && !sharedRecordExportSafe(L, global.type)) refuse(`has type '${L.fmt(global.type)}'; preserving this export's identity requires a native reference view`);
+    if (!identitySafe(L, global.type)) refuse(`has type '${L.fmt(global.type)}'; preserving this export's identity requires a native reference view`);
     if (callableHook(L, name, global.type)) refuse("may be a callable namespace coercion/thenable hook and needs a native implementation");
     return marshal({ kind: "varRef", localId: global.id, type: global.type, loc });
   }

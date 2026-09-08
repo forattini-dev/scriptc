@@ -25,12 +25,16 @@ Changing the default does not establish superior correctness or performance.
    functions can also return primitive/void Promises through native views that
    retain identity and reaction ordering. Open unknown-valued record exports
    share the native dynamic map, including nested map aliases and mutation.
-   The next boundaries are records with declared fields or typed index values,
+   Scalar declared-field records now share storage at typed/dynamic boundaries
+   and in native callback arguments/results, including primitive optional
+   fields and unknown-valued extras. Static-only shapes retain typed structs.
+   The next boundaries are nested typed fields or typed index values,
    arrays, classes, richer function signatures and shared static namespace
    objects, all while preserving identity and shared mutation.
-   The immediate witness is the already-typed RSP telemetry record/callback;
-   its declared fields and index signature need shared storage, not a consumer
-   signature rewrite. Complete checked URL/SearchParams references,
+   RSP's telemetry record/callback signature now passes its prior boundary;
+   other exports in the same barrel still refuse admission. Extend optional
+   callback signatures and composite references without consumer signature
+   rewrites. Complete checked URL/SearchParams references,
    recursive records/JSON and Promise payload conversion. Preserve identity,
    shared mutation and observable errors; do not use an engine to erase gaps.
 2. Runtime and compiler efficiency alongside semantic work. Profile

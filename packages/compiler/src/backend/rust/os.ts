@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrRecordShape, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -87,7 +88,7 @@ function emitNetworkInfoRow(
     if (value === undefined) context.unsupported(`os.networkInterfaces '${entry.name}' field`, expr.loc);
     return `${mangleField(entry.name)}: ${value}`;
   }).join(", ");
-  return `${infoName}::${context.unionVariant(arm.tag)}(runtime::Gc::new(${mangleRecordStruct(arm.type.shapeId)} { ${fields} }))`;
+  return `${infoName}::${context.unionVariant(arm.tag)}(${recordNewName(arm.type.shapeId)}(${mangleRecordStruct(arm.type.shapeId)} { ${fields} }))`;
 }
 
 export function emitRustOsCall(

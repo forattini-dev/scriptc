@@ -3,6 +3,7 @@ import { typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
 import type { RustExpressionContext } from "./expressions.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
+import { isSharedRecord } from "./shared-records.js";
 
 type IndexedRecordContext = Pick<RustExpressionContext,
   "dynTypeName" | "emitDynFromValue" | "isEdgeValue" | "needsClone" |
@@ -68,16 +69,21 @@ export function emitRustRecordKeyGetValues(
     };
     const declared = shape.fields.map((field) => {
       const stored = `${record}.${mangleField(field.name)}`;
-      const value = surface(field.type, ownField(field.type, stored));
+      const value = surface(field.type, isSharedRecord(shape) ? `${object}.get_${mangleField(field.name)}()` : ownField(field.type, stored));
       return `if ${key}.as_ref() == "${context.rustString(field.name)}" { return ${value}; }`;
     }).join(" ");
     const miss = missingRecordValue(expr, context);
     if (indexValue === undefined) {
+      if (isSharedRecord(shape)) return `{ ${bindings} (|| { ${declared} ${miss} })() }`;
       return `{ ${bindings} ${object}.with(|${record}| { ${declared} ${miss} }) }`;
     }
     const overflow = `${record}.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow")`;
     const lookup = `runtime::map_get_by(${overflow}, &${key}, |left, right| left.as_ref() == right.as_ref())`;
     const present = surface(indexValue, "value");
+    if (isSharedRecord(shape)) {
+      const lookup = `runtime::map_get_by(&${object}.object, &${key}, |left, right| left.as_ref() == right.as_ref())`;
+      return `{ ${bindings} (|| { ${declared} match ${lookup} { Some(value) => ${present}, None => ${miss} } })() }`;
+    }
     return `{ ${bindings} ${object}.with(|${record}| { ${declared} match ${lookup} { Some(value) => ${present}, None => ${miss}, } }) }`;
   }
   if (indexValue === undefined) context.unsupported(`indexed record read '${expr.shapeId}'`, expr.loc);

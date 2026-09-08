@@ -16,6 +16,7 @@ import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 import type { RustClosureShape } from "./model.js";
+import { isSharedRecord, recordCheckName } from "./shared-records.js";
 
 export class RustDynamicEmitter {
   private readonly dynFrom: RustDynamicFromEmitter;
@@ -1127,6 +1128,7 @@ export class RustDynamicEmitter {
       case "record": {
         if (type.kind === "record") {
           const shape = this.context.records.get(type.shapeId);
+          if (isSharedRecord(shape)) return `${recordCheckName(type.shapeId)}(${value})`;
           if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
             const name = this.context.dynTypeName();
             return `{ let value = ${value}; match value { ${name}::Object(object) => object, value => sc_dyn_check_fail("object", &value), } }`;

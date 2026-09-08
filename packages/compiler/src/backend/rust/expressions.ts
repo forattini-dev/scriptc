@@ -1,3 +1,4 @@
+import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrExpr, IrFunction } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
@@ -533,6 +534,16 @@ export class RustExpressionEmitter {
         if (expr.type.kind !== "record") this.context.unsupported("record literal with a non-record type", expr.loc);
         const shape = this.context.records.get(expr.type.shapeId);
         if (shape === undefined) this.context.unsupported(`unknown record shape '${expr.type.shapeId}'`, expr.loc);
+        if (isSharedRecord(shape)) {
+          const object = this.context.nextName("sc_record");
+          const entries = expr.fields.map(entry => {
+            const value = this.emitExpr(entry.value);
+            if (entry.drop || entry.absent) return `let _ = ${value};`;
+            const boxed = this.context.emitDynFromValue(entry.value.type, value, entry.value.loc);
+            return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(entry.name)}"), ${boxed}, |a, b| a == b);`;
+          }).join(" ");
+          return `{ let ${object} = runtime::map_new(); ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`;
+        }
         if (shape.indexValue !== undefined && shape.fields.length === 0) {
           const map = this.context.nextName("sc_rt");
           const entries = expr.fields.map((entry) => {
@@ -571,7 +582,7 @@ export class RustExpressionEmitter {
           return `${mangleField(field.name)}: ${stored}`;
         }).join(", ");
         const overflowField = overflow === null ? "" : `, ${RUST_RECORD_OVERFLOW}: Some(${overflow})`;
-        return `{ ${bindings.join(" ")} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields}${overflowField} }) }`;
+        return `{ ${bindings.join(" ")} ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields}${overflowField} }) }`;
       }
       case "recordClone": {
         const source = this.context.nextName("sc_rt");
@@ -586,6 +597,7 @@ export class RustExpressionEmitter {
         const shape = this.context.records.get(expr.shapeId);
         const field = shape?.fields.find((candidate) => candidate.name === expr.field);
         if (shape === undefined || field === undefined) this.context.unsupported(`unknown record field '${expr.shapeId}.${expr.field}'`, expr.loc);
+        if (isSharedRecord(shape)) return `(${this.emitExpr(expr.obj)}).get_${mangleField(field.name)}()`;
         const access = `record.${mangleField(field.name)}`;
         const result = this.context.isEdgeValue(field.type)
           ? `${access}.as_ref().expect("scriptc: cleared live record field").clone()`
@@ -604,6 +616,10 @@ export class RustExpressionEmitter {
           return `runtime::map_string_keys_js_order(&(${this.emitExpr(expr.obj)}))`;
         }
         const object = this.context.nextName("sc_rt");
+        if (isSharedRecord(shape)) {
+          const declared = shape.fields.map(field => `key.as_ref() != "${this.context.rustString(field.name)}"`).join(" && ");
+          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let keys = runtime::map_string_keys_js_order(&${object}.object); let output = runtime::array_new(Vec::new()); let mut index = 0.0; while index < runtime::array_len(&keys) { let key = runtime::array_get(&keys, index); if ${declared} { runtime::array_push(&output, key); } index += 1.0; } output }`;
+        }
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with(|record| runtime::map_string_keys_js_order(record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"))) }`;
       }
       case "caughtToDyn": {
@@ -733,6 +749,7 @@ export class RustExpressionEmitter {
           if (shape === undefined || field === undefined) {
             this.context.unsupported(`unknown union discriminant field '${arm.shapeId}.${expr.field}'`, expr.loc);
           }
+          if (isSharedRecord(shape)) return `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}(payload) => payload.get_${mangleField(field.name)}()`;
           const access = `record.${mangleField(field.name)}`;
           const result = this.context.isEdgeValue(field.type)
             ? `${access}.as_ref().expect("scriptc: cleared live union field").clone()`
@@ -1008,7 +1025,7 @@ export class RustExpressionEmitter {
           if (value === undefined) this.context.unsupported(`Promise.withResolvers field '${field.name}'`, expr.loc);
           return `${mangleField(field.name)}: Some(${value})`;
         }).join(", ");
-        return `{ let ${promise} = runtime::promise_new::<${this.context.rustType(promiseType.inner, expr.loc)}>(); let ${resolver} = runtime::Gc::new(${this.context.closureName(resolverShape)}::PromiseResolver { promise: Some(${promise}.clone()) }); let ${rejector} = runtime::Gc::new(${this.context.closureName(rejectorShape)}::${rejectorVariant} { promise: Some(${promise}.clone()) }); runtime::Gc::new(${mangleRecordStruct(record.id)} { ${fields} }) }`;
+        return `{ let ${promise} = runtime::promise_new::<${this.context.rustType(promiseType.inner, expr.loc)}>(); let ${resolver} = runtime::Gc::new(${this.context.closureName(resolverShape)}::PromiseResolver { promise: Some(${promise}.clone()) }); let ${rejector} = runtime::Gc::new(${this.context.closureName(rejectorShape)}::${rejectorVariant} { promise: Some(${promise}.clone()) }); ${recordNewName(record.id)}(${mangleRecordStruct(record.id)} { ${fields} }) }`;
       }
       case "newPromise": {
         if (expr.type.kind !== "promise" || expr.executor.type.kind !== "func") {

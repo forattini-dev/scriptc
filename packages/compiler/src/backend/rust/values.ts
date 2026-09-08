@@ -1,3 +1,4 @@
+import { isSharedRecord, sharedRecordName } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
@@ -221,6 +222,7 @@ export class RustValueEmitter {
       case "record": {
         const shape = this.context.records.get(type.shapeId);
         if (shape === undefined) this.context.unsupported(`unknown record type '${type.shapeId}'`, loc);
+        if (isSharedRecord(shape)) return sharedRecordName(shape.id);
         if (shape.indexValue !== undefined && shape.fields.length === 0) {
           const value = shape.indexValue.kind === "dyn"
             ? this.context.dynTypeName()
@@ -344,6 +346,7 @@ export class RustValueEmitter {
   }
 
   needsClone(type: IrType): boolean {
+    if (type.kind === "record") return true;
     return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
@@ -407,12 +410,14 @@ export class RustValueEmitter {
   }
 
   isTracedHandle(type: IrType): boolean {
+    if (type.kind === "record" && isSharedRecord(this.context.records.get(type.shapeId))) return false;
     return type.kind === "array" || type.kind === "bytes" || type.kind === "map" || type.kind === "set" || type.kind === "stats" || type.kind === "fileHandle" || type.kind === "spawnRes" || type.kind === "effect" || type.kind === "genericFunc" || type.kind === "child" || type.kind === "childStream" || type.kind === "fsWatcher" || type.kind === "netServer" || type.kind === "netSocket" || type.kind === "dgramSocket" || type.kind === "httpReq" || type.kind === "httpRes" || type.kind === "httpClientReq" || type.kind === "secureCtx" || type.kind === "record" || type.kind === "promise" ||
       (type.kind === "object" && (this.context.classes.has(type.className) || RUNTIME_STREAM_CLASSES.has(type.className) ||
         (RUNTIME_ERROR_CLASSES.has(type.className) && this.context.errorClassRoots().length > 0))) || type.kind === "func";
   }
 
   isEdgeValue(type: IrType): boolean {
+    if (type.kind === "record") return true;
     return this.isTracedHandle(type) || type.kind === "union" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && type.className === RUNTIME_EMITTER_CLASS);
   }

@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrType } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -271,7 +272,7 @@ export function emitRustHttpCall(
       }
       context.unsupported("Fetch reader result field", expr.loc);
     }).join(", ");
-    const record = `runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`;
+    const record = `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`;
     return `{ let ${reader} = ${context.emitExpr(expr.args[0])}; match &${reader} { ${dyn}::FetchReader(sc_reader) => runtime::promise_map(&runtime::fetch_reader_read(sc_reader), |sc_bytes| { let sc_chunk = sc_bytes.map(${dyn}::Bytes); ${record} }), ${dyn}::WebReader(sc_reader) => runtime::web_reader_read_with(sc_reader, |sc_chunk| ${record}), sc_value => sc_dyn_arg_type_fail("this", "an instance of ReadableStreamDefaultReader", sc_value), } }`;
   }
   if (expr.fn === "fetch.responseText" && expr.args.length === 1 &&

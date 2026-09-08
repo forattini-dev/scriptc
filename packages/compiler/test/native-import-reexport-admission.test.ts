@@ -34,19 +34,27 @@ test.each([
   }
 });
 
-test("star exports preserve the refusal for mutable composite identities", () => {
+test.each([
+  ["scalar fields", "{ count: 1 }", true],
+  ["nested typed fields", "{ nested: { count: 1 } }", false],
+] as const)("star exports preserve record admission for %s", (_name, value, accepted) => {
   const directory = mkdtempSync(join(tmpdir(), "scriptc-native-star-identity-"));
   try {
     const entry = join(directory, "main.ts");
     writeFileSync(entry, 'async function main() { await import("./barrel.ts"); } main();');
     writeFileSync(join(directory, "barrel.ts"), 'export * from "./leaf.ts";');
-    writeFileSync(join(directory, "leaf.ts"), 'export const state = { count: 1 };');
+    writeFileSync(join(directory, "leaf.ts"), `export const state = ${value};`);
     const { coverage } = analyze(entry, { backend: "rust", allowEngine: false });
     expect(coverage.preflightFailed).toBe(false);
-    expect(coverage.diagnostics).toEqual([
-      expect.objectContaining({ code: "SC1090", message: expect.stringContaining("export 'state'") }),
-    ]);
-    expect(coverage.diagnostics[0]?.message).toContain("identity");
+    if (accepted) {
+      expect(coverage.diagnostics).toEqual([]);
+      expect(coverage.execution?.engine).toBe("none");
+    } else {
+      expect(coverage.diagnostics).toEqual([
+        expect.objectContaining({ code: "SC1090", message: expect.stringContaining("export 'state'") }),
+      ]);
+      expect(coverage.diagnostics[0]?.message).toContain("identity");
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

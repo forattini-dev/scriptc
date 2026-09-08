@@ -15,6 +15,7 @@ import { emitRustGeneratorBody } from "./generators.js";
 import type { RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustSyncModuleBody } from "./native-module.js";
+import { emitSharedRecordDefinition } from "./shared-records.js";
 
 export interface RustDefinitionContext {
   families(): readonly IrFamily[];
@@ -463,6 +464,7 @@ export class RustDefinitionEmitter {
 
   emitRecordDefinitions(): void {
     for (const shape of this.context.records.values()) {
+      if (shape.fields.length !== 0 || shape.indexValue === undefined) emitSharedRecordDefinition(this.context, shape);
       // Pure index-signature records are represented directly by JsMap.
       // Hybrid shapes retain their declared slots and embed a map for extras.
       if (shape.indexValue !== undefined && shape.fields.length === 0) continue;

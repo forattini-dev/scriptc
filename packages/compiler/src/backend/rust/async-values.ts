@@ -1,3 +1,4 @@
+import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
@@ -26,6 +27,7 @@ export interface RustAsyncValueContext {
   ): void;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
   emitExpr(expr: IrExpr): string;
+  emitDynFromValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string;
   emitArrayGetValues(expr: Extract<IrExpr, { kind: "arrayGet" }>, array: string, index: string): string;
@@ -264,6 +266,17 @@ export class RustAsyncValueEmitter {
       });
       return;
     }
+    if (isSharedRecord(shape)) {
+      const object = this.context.nextName("sc_async_record");
+      const overflow = new Map(overflowValues);
+      const entries = expr.fields.filter(field => !field.drop && !field.absent).map(field => {
+        const value = (field.overflow ? overflow : values).get(field.name);
+        if (value === undefined) this.context.unsupported(`missing async shared record field '${field.name}'`, expr.loc);
+        return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${this.context.emitDynFromValue(field.value.type, value, expr.loc)}, |a, b| a == b);`;
+      }).join(" ");
+      consume(`{ let ${object} = runtime::map_new(); ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`);
+      return;
+    }
     if (shape.indexValue !== undefined && shape.fields.length === 0) {
       const map = this.context.nextName("sc_async_record");
       const valueType = this.context.rustType(shape.indexValue, expr.loc);
@@ -279,7 +292,7 @@ export class RustAsyncValueEmitter {
       return `${mangleField(field.name)}: ${this.context.isEdgeValue(field.type) ? `Some(${value})` : value}`;
     }).join(", ");
     if (shape.indexValue === undefined) {
-      consume(`runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`);
+      consume(`${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`);
       return;
     }
     const map = this.context.nextName("sc_async_record");
@@ -287,7 +300,7 @@ export class RustAsyncValueEmitter {
     const entries = overflowValues.map(([name, value]) =>
       `runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`
     ).join(" ");
-    consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields}, ${RUST_RECORD_OVERFLOW}: Some(${map}) }) }`);
+    consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields}, ${RUST_RECORD_OVERFLOW}: Some(${map}) }) }`);
   }
 
   recordCloneShape(
@@ -311,6 +324,9 @@ export class RustAsyncValueEmitter {
     source: string,
   ): string {
     const shape = this.recordCloneShape(expr);
+    if (isSharedRecord(shape)) {
+      return `{ let object = runtime::map_new(); let mut index = 0.0; while index < runtime::map_iter_count(&${source}.object) { if runtime::map_iter_live(&${source}.object, index) { runtime::map_set_by(&object, runtime::map_iter_key(&${source}.object, index), runtime::map_iter_value(&${source}.object, index), |a, b| a == b); } index += 1.0; } ${sharedRecordName(shape.id)} { object } }`;
+    }
     const fields = shape.fields.map((field) => {
       const access = `record.${mangleField(field.name)}`;
       const value = this.context.isEdgeValue(field.type) || this.context.needsClone(field.type)
@@ -318,7 +334,7 @@ export class RustAsyncValueEmitter {
         : access;
       return `${mangleField(field.name)}: ${value}`;
     }).join(", ");
-    return `${source}.with(|record| runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }))`;
+    return `${source}.with(|record| ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} }))`;
   }
 
   emitRecordCloneOverride(
@@ -332,6 +348,7 @@ export class RustAsyncValueEmitter {
     if (field === undefined) {
       this.context.unsupported(`unknown record clone field '${shape.id}.${fieldName}'`, expr.loc);
     }
+    if (isSharedRecord(shape)) return `${clone}.set_${mangleField(field.name)}(${value});`;
     const stored = this.context.isEdgeValue(field.type) ? `Some(${value})` : value;
     return `${clone}.with_mut(|record| record.${mangleField(field.name)} = ${stored});`;
   }

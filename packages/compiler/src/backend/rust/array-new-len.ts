@@ -1,3 +1,4 @@
+import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrExpr, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
@@ -22,14 +23,16 @@ export function emitRustArrayNewLen(
   if (elem.kind === "record") {
     const shape = context.records.get(elem.shapeId);
     if (shape === undefined) context.unsupported(`unknown record shape '${elem.shapeId}'`, expr.loc);
-    if (shape.indexValue !== undefined && shape.fields.length === 0) {
+    if (isSharedRecord(shape)) {
+      absent = `${sharedRecordName(shape.id)} { object: runtime::map_new() }`;
+    } else if (shape.indexValue !== undefined && shape.fields.length === 0) {
       absent = "runtime::map_new()";
     } else {
       const fields = shape.fields.map((field) => `${mangleField(field.name)}: ${
         context.isEdgeValue(field.type) ? "None" : context.defaultValue(field.type, expr.loc)
       }`).join(", ");
       const overflow = shape.indexValue === undefined ? "" : `, ${RUST_RECORD_OVERFLOW}: None`;
-      absent = `runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields}${overflow} })`;
+      absent = `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields}${overflow} })`;
     }
   } else if (elem.kind === "union") {
     absent = context.defaultValue(elem, expr.loc);

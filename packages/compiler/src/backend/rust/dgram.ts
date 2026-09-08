@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -73,7 +74,7 @@ function emitMessageListener(
       if (value === undefined) context.unsupported(`dgram rinfo field '${field.name}'`, expr.loc);
       return `${mangleField(field.name)}: ${value}`;
     }).join(", ");
-    rinfo = `runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} })`;
+    rinfo = `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`;
   }
   const args = messageType === undefined ? [] : rinfoType === undefined ? ["sc_message"] : ["sc_message", rinfo];
   const callback = context.nextTemporary();
@@ -182,7 +183,7 @@ export function emitRustDgramCall(
       if (value === undefined) context.unsupported(`dgram address field '${field.name}'`, expr.loc);
       return `${mangleField(field.name)}: ${value}`;
     }).join(", ");
-    return `{ let (sc_address, sc_family, sc_port) = runtime::dgram_address(&(${context.emitExpr(receiver)})); runtime::Gc::new(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
+    return `{ let (sc_address, sc_family, sc_port) = runtime::dgram_address(&(${context.emitExpr(receiver)})); ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} }) }`;
   }
   if ((expr.fn === "dgram.close" || expr.fn === "dgram.unref" || expr.fn === "dgram.ref") &&
       expr.args.length === 1 && receiver?.type.kind === "dgramSocket") {

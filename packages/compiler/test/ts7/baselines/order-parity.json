@@ -8505,6 +8505,19 @@
     "<repo>/tests/corpus/3052-native-index-record-identity/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3053-native-declared-record-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/3053-native-declared-record-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3054-native-record-callback/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3054-native-record-callback/module.ts",
+    "<repo>/tests/corpus/3054-native-record-callback/main.ts"
+   ],
+   "diags": []
   }
  }
 }

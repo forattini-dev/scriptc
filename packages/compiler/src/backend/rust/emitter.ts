@@ -1,3 +1,4 @@
+import { planSharedRecords } from "./shared-records.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -234,6 +235,7 @@ class RustEmitter {
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly asyncValueEmitter = new RustAsyncValueEmitter({
+    emitDynFromValue: (type, value, loc) => this.emitDynFromValue(type, value, loc),
     records: this.records,
     asyncFrameExtras: () => this.asyncFrameExtrasStack,
     line: (value) => this.line(value),
@@ -516,6 +518,7 @@ class RustEmitter {
     this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn" || global.type.kind === "jsval");
     buildRustClassGraph(this.classMeta, this.functions, (kind, loc) => this.unsupported(kind, loc));
     this.discoverClosures();
+    if (planSharedRecords(mod, this.records, this.unions)) this.usesDyn = true;
   }
   emit(): string {
     this.checkModuleSurface();
@@ -773,7 +776,6 @@ class RustEmitter {
           this.unsupported(`Promise resolver signature '${resolverKey}' with multiple value types`);
         }
         this.promiseResolverTypes.set(resolverKey, promiseType.inner);
-
         const rejectorKey = typeKey(rejectorType);
         let rejectorShape = this.closureShapes.get(rejectorKey);
         if (rejectorShape === undefined) {
@@ -790,7 +792,6 @@ class RustEmitter {
     };
     visit(this.mod);
   }
-
   private ensureClosureShape(type: IrFuncType): RustClosureShape {
     const key = typeKey(type);
     let shape = this.closureShapes.get(key);
@@ -800,7 +801,6 @@ class RustEmitter {
     }
     return shape;
   }
-
   private registerDynBoxedFunction(type: IrFuncType): void {
     const shape = this.ensureClosureShape(type);
     const key = typeKey(shape.type);

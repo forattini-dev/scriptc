@@ -3,6 +3,7 @@ import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
+import { isSharedRecord } from "./shared-records.js";
 
 interface DynFromHelper {
   readonly name: string;
@@ -11,8 +12,8 @@ interface DynFromHelper {
   readonly liveRef: boolean;
 }
 
-/** Emits typed-to-dynamic conversions. Open unknown-valued record maps
- * retain identity; other composites copy.
+/** Emits typed-to-dynamic conversions. Canonical maps and Rust's selected
+ * scalar-field record views retain identity; other composites copy.
  *
  * Acyclic shapes stay inline. Recursive composites are interned as named
  * helpers so records, arrays, and unions can call one another without the
@@ -127,6 +128,7 @@ export class RustDynamicFromEmitter {
   private emitRecord(type: Extract<IrType, { kind: "record" }>, value: string, loc?: SrcLoc, liveRef = false): string {
     const name = this.context.dynTypeName();
     const shape = this.context.records.get(type.shapeId);
+    if (isSharedRecord(shape)) return `${name}::Object((${value}).object)`;
     if (shape?.tuple) {
       const record = this.context.nextTemporary();
       const output = this.context.nextTemporary();

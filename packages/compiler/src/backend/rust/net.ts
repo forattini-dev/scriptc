@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import type { IrType } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -290,7 +291,7 @@ export function emitRustNetCall(
       `${mangleField("family")}: runtime::net_server_address_family(&${server})`,
       `${mangleField("port")}: runtime::net_server_port(&${server})`,
     ].join(", ");
-    return `{ let ${server} = ${context.emitExpr(expr.args[0])}; runtime::Gc::new(${mangleRecordStruct(expr.type.shapeId)} { ${fields} }) }`;
+    return `{ let ${server} = ${context.emitExpr(expr.args[0])}; ${recordNewName(expr.type.shapeId)}(${mangleRecordStruct(expr.type.shapeId)} { ${fields} }) }`;
   }
   if (expr.fn === "net.serverClose" && expr.args.length === 1 && expr.args[0]?.type.kind === "netServer") {
     return `runtime::net_server_close(&(${context.emitExpr(expr.args[0])}))`;

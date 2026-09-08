@@ -1,3 +1,4 @@
+import { recordNewName } from "./shared-records.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
@@ -40,7 +41,7 @@ export function emitRustFilesystemCall(
     `${mangleField("name")}: ${entry}.name`,
     `${mangleField("parentPath")}: ${path}.clone()`,
   ].join(", ");
-  return `{ let ${path} = ${context.emitExpr(pathExpr)}; let ${output}: ${context.rustType(expr.type, expr.loc)} = runtime::array_new(Vec::new()); for ${entry} in runtime::fs_readdir_types(&${path}) { let sc_row = runtime::Gc::new(${mangleRecordStruct(rowType.shapeId)} { ${fields} }); runtime::array_push(&${output}, sc_row); } ${output} }`;
+  return `{ let ${path} = ${context.emitExpr(pathExpr)}; let ${output}: ${context.rustType(expr.type, expr.loc)} = runtime::array_new(Vec::new()); for ${entry} in runtime::fs_readdir_types(&${path}) { let sc_row = ${recordNewName(rowType.shapeId)}(${mangleRecordStruct(rowType.shapeId)} { ${fields} }); runtime::array_push(&${output}, sc_row); } ${output} }`;
 }
 
 function emitRustFsReadCall(
