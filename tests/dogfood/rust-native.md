@@ -4,6 +4,13 @@ The rollout keeps five milestones: RPC sidecar; original Redwall renderer
 and benchmarks; shared native dependencies and Effect semantics; RSP/Brain
 command acceptance; full red-dev/redcode and measured runtime optimization.
 
+These are named acceptance workloads under the
+[native TypeScript contract](../../NATIVE_TYPESCRIPT.md), not a promise of
+unlimited Node/Bun compatibility. Legitimate consumer migrations are recorded
+separately; comparisons then use the same implementation. Historical
+original-source milestones below retain their stated scope. Efficiency work
+on accepted workloads proceeds alongside remaining admission work.
+
 The first consumer is redcode's original `packages/rpc-sidecar/src/cli.ts`.
 It compiles with `backend: rust`, `allowEngine: false`, and `target: bun`.
 The native executable passed all eight existing sidecar contracts on
@@ -48,7 +55,7 @@ dependency/Effect, RSP/Brain, and full application acceptance remain unfinished.
 
 The current Effect lifetime fixes, regression witnesses and remaining
 semantics are tracked in [effect-native.md](./effect-native.md).
-Original RSP admission and its consumer-directed blockers are tracked in
+Original RSP admission and blocker ownership are tracked in
 [rsp-native.md](./rsp-native.md).
 The complete repository gates remain separate; current failures and repairs
 are tracked in [native-gate.md](./native-gate.md). Performance claims require a

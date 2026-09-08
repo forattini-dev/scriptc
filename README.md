@@ -137,6 +137,12 @@ See the [quickstart](https://scriptc.dev/quickstart) and [CLI reference](https:/
 
 ## Backend direction
 
+The [native TypeScript contract](./NATIVE_TYPESCRIPT.md) explains the types,
+configuration and dependency requirements for consumers, and distinguishes
+compiler gaps from changes needed in an application. Valid typed code that
+exposes missing lowering is compiler work; supporting every Node/Bun feature
+is not a prerequisite for improving the native compiler.
+
 New native functionality prioritizes Rust. Shared frontend/IR changes retain
 regression coverage for the explicit C/LLVM lanes; a new Rust capability need
 not wait for equivalent implementations there. Unsupported operations never

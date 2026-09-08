@@ -6,6 +6,28 @@ engine. Full RSP compilation and command acceptance are not achieved yet.
 The consumer checkout inspected on 2026-09-07 is at
 `c5255e006318fa3ec9aea51ccac11778da3888a1`.
 
+## Blocker ownership
+
+The [native TypeScript contract](../../NATIVE_TYPESCRIPT.md) governs new
+admission work. The original-source target above describes this workload's
+evidence; it does not forbid legitimate, documented consumer migrations or
+commit scriptc to every transitive Node/Bun capability.
+
+| Witness | Classification | Required next action |
+| --- | --- | --- |
+| `RspTelemetryEvent` in `apps/rsp/src/telemetry/schema.ts`, passed to `appendTelemetryEvent` | Compiler gap: the source already declares the collection, optional fields and unknown-valued index signature. | Implement shared declared-field/index storage and compatible callback boundaries; pin identity, mutation and async behavior. Do not replace the signature with `unknown` to hide the gap. |
+| `appendFileSync` with `{ encoding: "utf8", mode: 0o600 }` in `telemetry/spool.ts` | Compiler API gap selected for the telemetry workload; the currently admitted two-argument form does not implement these options. | Implement creation permissions and encoding semantics with differential tests, including umask and existing-file behavior. Do not discard `mode` to obtain admission. |
+| SDK callback context lost when scriptc substitutes inferred JS types for ordinary declarations | Compiler gap, repaired in the recorded callback-context slice below. | Retain ordinary-preflight and implementation-divergence regressions; avoid requiring redundant callback annotations as a workaround. |
+
+These examples do not classify all 209 diagnostics in the latest recorded
+survey. Cascades and newly reached dependencies still require minimized
+witnesses. No consumer correction is established merely by a refusal code.
+If a dependency requires runtime JS evaluation, document that specific native
+scope exclusion and adaptation before assigning it to the consumer; package
+admission failure alone is not that evidence.
+
+## Historical validation notes
+
 **Sanitizer evidence correction:** the resource limiter did not forward
 `SCRIPTC_SAN` to its transient systemd service before `7593476a`. Prefixing
 `SCRIPTC_SAN=1 pnpm limit -- ...` therefore ran the ordinary lane on this
@@ -412,6 +434,11 @@ Evidence: `/tmp/scriptc-capabilities-before.log`,
 `/tmp/scriptc-rsp-after-capability-survey.json`.
 
 ## Next acceptance work
+
+Apply the ownership classification above before expanding this workload.
+Compiler priorities and efficiency work are ordered in the
+[Rust roadmap](../../RUST_ROADMAP.md); the remaining RSP requirements below
+are a workload inventory, not an instruction to implement all Node/Bun APIs.
 
 1. Implement the SDK's native URL/URLSearchParams boundaries, retaining
    object identity, shared searchParams mutation and observable errors.
