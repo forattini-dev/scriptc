@@ -466,3 +466,30 @@ earlier source locations and IR constructs. Pre-guard evidence remains in
 `/tmp/scriptc-rsp-before-export-star-guard.json`; the star-export reproduction
 is `/tmp/scriptc-native-import-star-probe.json`. The initial working survey
 is preserved as `/tmp/scriptc-rsp-after-native-import-initial.json`.
+
+## Runtime star re-export resolution
+
+The subsequent working snapshot, based on `9b03640f`, resolves the telemetry
+barrel's runtime star exports. The survey was rerun on the final implementation,
+including validation of indirect named re-exports, with the same options and
+clean consumer revision as above. Its totals remain 1,932 reached statements,
+247 failed, 198 diagnostics, 100 runtime fences, zero island statements, and
+five static npm packages. The unreached totals also remain unchanged.
+
+Exactly three diagnostics change: the runtime `export *` refusals become
+native-signature refusals for `appendTelemetryEvent` at the same import sites.
+The 43 native namespace boundaries now comprise 24 function-signature cases,
+10 composite-value cases and nine unsupported export representations. These
+imports request `appendTelemetryEvent` and string collection constants; the
+function's `RspTelemetryEvent` argument is an indexed record with optional
+fields, and its result is `Promise<void>`. Preserving values across that
+native callback boundary remains necessary. The already-reported three-argument
+`appendFileSync` call in `telemetry/spool.ts` is a separate implementation gap.
+
+This is removal of the star-export resolution barrier, not acceptance of the
+original telemetry imports or an RSP binary. The survey still has no final
+lowered module or execution profile. Evidence is retained separately in
+`/tmp/scriptc-rsp-after-export-star.json` and its `.mts`/`.log` companions;
+`/tmp/scriptc-rsp-9b03640f-survey.json` preserves the prior checkpoint's survey,
+and `/tmp/scriptc-rsp-after-export-star-intermediate.json` retains the survey
+before the final indirect-re-export validation changes.

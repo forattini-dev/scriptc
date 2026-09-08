@@ -16,9 +16,9 @@ Changing the default does not establish superior correctness or performance.
 
 1. Extend the [native local import slice](./tests/dogfood/rust-native-imports.md).
    Lazy evaluation, cached failures and live primitive exports now have native
-   witnesses. The next boundaries are complete wildcard export resolution and
-   exporting records, arrays, classes and richer functions while preserving
-   identity, plus sharing static namespace objects.
+   witnesses, including runtime wildcard graphs, diamonds and cycles. The next
+   boundaries are exporting records, arrays, classes and richer functions
+   while preserving identity, plus sharing static namespace objects.
    Reaching these modules exposes additional consumer gaps.
 2. Native value boundaries. Complete checked URL/SearchParams references,
    recursive records/JSON and Promise payload conversion. Preserve identity,

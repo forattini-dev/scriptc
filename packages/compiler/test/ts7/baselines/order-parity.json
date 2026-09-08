@@ -8473,6 +8473,24 @@
     "<repo>/tests/corpus/3047-native-import-checkpoint/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3048-native-import-reexports/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3048-native-import-reexports/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3049-native-import-star-cycle/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3049-native-import-star-cycle/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3050-native-import-star-ambiguity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3050-native-import-star-ambiguity/main.ts"
+   ],
+   "diags": []
   }
  }
 }

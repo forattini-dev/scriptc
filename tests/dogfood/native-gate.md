@@ -158,3 +158,31 @@ for this checkpoint. The focused C/LLVM sanitizer selection does not test
 Rust sanitizer support or certify a release. The original RSP survey still
 reports refusals and produces no complete executable; neither C/LLVM
 equivalence nor superior performance is established.
+
+## Native Rust wildcard re-export checkpoint
+
+The follow-up to `9b03640f` replaces the blanket wildcard refusal with runtime
+ESM export resolution. Multilevel stars, diamonds, cycles, explicit overrides,
+type-only shadows and renamed default snapshots have native witnesses.
+Named re-exports are checked independently so another star or explicit root
+export cannot hide an invalid dependent binding. See the updated
+[native import parity record](./rust-native-imports.md#wildcard-checkpoint-validation).
+
+All ten native import corpus programs and 45 API/IR/backend tests pass with
+the no-engine contracts enforced. The nine normal-exit corpus programs match
+Node's stdout, stderr and exit status; the existing exit-13 stderr limitation
+for 3045 is unchanged. Workspace build and lint pass with zero errors and
+3,114 warnings, including source-ceiling and generated-file checks. Only the
+three new preflight/order baselines were added; prior entries were preserved.
+
+Final evidence is in `/tmp/scriptc-native-star-corpus-final.log`,
+`/tmp/scriptc-native-star-api-final.log`,
+`/tmp/scriptc-native-star-build-checkpoint.log`,
+`/tmp/scriptc-native-star-lint-checkpoint.log` and
+`/tmp/scriptc-native-star-baselines.log`.
+
+Rust runtime sources are unchanged in this step; the previous Cargo and
+C/LLVM sanitizer checks were not repeated. The full plain/sanitized suite
+remains pending/red, with Sandbox configuration still absent and no fresh full
+local fallback completed. The original RSP survey still refuses the telemetry
+callback's record/Promise boundary and produces no complete executable.

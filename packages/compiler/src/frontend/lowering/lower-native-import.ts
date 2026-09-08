@@ -3,6 +3,7 @@ import { locOf } from "../program.js";
 import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
 import { type Lowerer, newFnCtx } from "./lowerer.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
+import { nativeModuleExports } from "./lower-native-import-exports.js";
 
 /** Local ESM imports own a cached evaluation and a live, singleton namespace.
  * JSVAL is the Rust runtime's safe handle here; no embedded engine is used. */
@@ -10,12 +11,6 @@ export function lowerNativeImportCall(L: Lowerer, call: ts.CallExpression): IrEx
   if (L.dynamic) return null;
   const dep = nativeImportTargetOf(L, call);
   if (!dep) return null;
-  for (const statement of dep.statements) {
-    if (ts.isExportDeclaration(statement) && !statement.isTypeOnly && statement.exportClause === undefined) {
-      L.unsupported("SC1090", call,
-        "native import() namespaces with runtime 'export *' declarations (use named re-exports so every exported binding is preserved)");
-    }
-  }
   const loc = locOf(call);
   const name = nativeNamespaceBuilder(L, dep, call);
   L.noteEdge(name);
@@ -61,15 +56,7 @@ function nativeNamespaceBuilder(L: Lowerer, dep: ts.SourceFile, site: ts.CallExp
     const object = L.declareHiddenLocal("%namespace", JSVAL);
     const objectRef: IrExpr = { kind: "varRef", localId: object.id, type: JSVAL, loc };
     body.push({ kind: "varDecl", localId: object.id, init: { kind: "jsOp", op: "objLit", args: [], type: JSVAL, loc }, loc });
-    const entries = [...(L.checker.getSymbolAtLocation(dep)?.getExports() ?? new Map())]
-      .map(([key, sym]): [string, ts.Symbol] => {
-        // TypeScript escapes user names beginning with two underscores in
-        // symbol tables. Namespace property keys keep the source spelling.
-        const escaped = String(key);
-        return [escaped.startsWith("___") ? escaped.slice(1) : escaped, sym];
-      })
-      .filter(([key]) => key !== "export=")
-      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    const entries = nativeModuleExports(L, dep, site);
     for (const [exportName, symbol] of entries) {
       const value = nativeExportValue(L, exportName, symbol, site, body);
       if (!value) continue;

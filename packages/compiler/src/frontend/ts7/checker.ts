@@ -213,6 +213,7 @@ export class CheckerFacade {
   /** Symbol-keyed memos. */
   private readonly typeOfSymbol = new WeakMap<Ts7Symbol, Type | undefined>();
   private readonly aliasedSymbol = new WeakMap<Ts7Symbol, Ts7Symbol>();
+  private readonly immediateAliasedSymbol = new WeakMap<Ts7Symbol, Ts7Symbol | undefined>();
   private readonly declaredTypeOfSymbol = new WeakMap<Ts7Symbol, Type>();
   /** Type-keyed memos. */
   private readonly baseTypeOfLiteral = new WeakMap<Type, Type>();
@@ -532,6 +533,15 @@ export class CheckerFacade {
       aliased = this.raw.getAliasedSymbol(symbol);
       this.aliasedSymbol.set(symbol, aliased);
     }
+    return aliased;
+  }
+
+  /** Follow one alias edge so callers can retain intermediate runtime
+   * bindings, including an entity-name default export's snapshot storage. */
+  getImmediateAliasedSymbol(symbol: Ts7Symbol): Ts7Symbol | undefined {
+    if (this.immediateAliasedSymbol.has(symbol)) return this.immediateAliasedSymbol.get(symbol);
+    const aliased = this.raw.getImmediateAliasedSymbol(symbol);
+    this.immediateAliasedSymbol.set(symbol, aliased);
     return aliased;
   }
 

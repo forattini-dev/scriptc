@@ -9,7 +9,8 @@ are cached separately. Configured local aliases use the same resolver.
 Namespace reads use traced getters over the original module globals. Mutable
 primitive exports stay live; entity-name default exports retain their snapshot
 semantics. Declared function exports share a cached native wrapper, including
-its function properties, across aliases and named re-exports. Keys follow the
+its function properties, across aliases, named re-exports and runtime wildcard
+re-exports. Keys follow the
 Node 24 oracle: canonical array indexes first in numeric order, followed by
 other export names in UTF-16 lexicographic order. Namespaces have null
 prototypes and reject writes and extensions. Enumeration, JSON and
@@ -32,6 +33,9 @@ sites do not force an otherwise static executable to use the native loader.
 | 3045 | Top-level self-import remains pending and exits 13 |
 | 3046 | Dynamically reached cycle uses the runtime evaluation root |
 | 3047 | Nested microtask checkpoints, unit exports, destructuring and named static imports |
+| 3048 | Multilevel wildcard re-exports, diamonds, explicit overrides, live aliases and renamed default snapshots |
+| 3049 | Cyclic wildcard graph, function identity and cached namespaces |
+| 3050 | Ambiguous wildcard names omitted; type-only declarations do not hide runtime bindings |
 
 These programs select the Rust differential lane. C and direct LLVM explicitly
 return SC3001 for this new native module IR; their existing embedded-engine
@@ -42,7 +46,7 @@ verify local/promise/global aliases and `.then`, and pin
 unsupported boundaries. Runtime tests cover queue order, completion adoption,
 shared failure identity, reentrancy, teardown and namespace protection.
 
-For the six normal-exit corpus programs, the differential harness compares
+For the normal-exit corpus programs, the differential harness compares
 stdout, stderr and exit status with Node. Corpus 3045 instead checks stdout,
 exit 13 and absence of the Rust heap-audit marker; the existing nonzero-exit
 lane does not establish byte-for-byte stderr equivalence.
@@ -58,12 +62,11 @@ refused. Class and generic exports, broader function signatures, callable
 JSON/coercion hooks and import attributes still have explicit boundaries.
 JSON imports retain their separate route.
 
-Runtime `export *` declarations in the imported namespace module are refused
-with SC1090. A native/Node probe showed that the checker's raw symbol export
-table omitted wildcard bindings: Node printed `bump,local,value`, while Rust
-printed only `local`. The admission guard prevents that incomplete namespace
-from compiling. Type-only wildcard exports and named re-exports remain
-admitted; API regressions cover all three cases.
+Runtime `export *` follows the compiled ESM graph. Wildcards targeting
+CommonJS, embedded modules or dependencies outside that graph remain explicit
+SC1090 boundaries. The full namespace still refuses any export whose native
+reference or function representation is unsupported, even if the application
+only reads another export from that namespace.
 
 Converting a native namespace into typed records or Promise payloads that
 would copy its exports is also refused. Local aliases and casts retain the
@@ -79,7 +82,38 @@ advantage. Rustc normally continues to use LLVM internally.
 The repository's full plain and sanitized gates remain pending/red; focused
 checks are a development checkpoint, not release certification.
 
-## Checkpoint validation
+## Runtime wildcard resolution
+
+The initial checkpoint `9b03640f` refused wildcard namespaces because the
+checker's raw `Symbol.getExports()` table omitted their bindings. The
+replacement resolves names over explicit runtime exports and runtime wildcard
+edges. Explicit value exports win, wildcards exclude `default`, and repeated
+paths to the same original binding agree. Names that resolve to different
+bindings through competing stars are absent from the namespace. A visited
+set per name prevents recursion through cycles without caching incomplete
+cycle results as final answers.
+
+The checker's `getExportsOfModule()` is not a runtime namespace table either:
+it includes type-only wildcard values, lets type declarations hide runtime
+star values, and chooses a symbol for ambiguous stars. The resolver therefore
+uses runtime edges and ignores explicit type-only declarations when selecting
+bindings. Corpus 3050 deliberately suppresses TS2308 on a conflicting star
+declaration to test Node's valid namespace omission behavior; this does not
+relax compiler diagnostics for ordinary named imports.
+
+Named re-exports and imports that are re-exported locally also resolve through
+runtime module/name pairs. Following the checker's final alias would otherwise
+select the type-only source's value or drop a real export hidden by an
+interface. Each reachable indirect export is validated independently: an
+earlier star or explicit root export cannot hide a conflicting named binding
+in a dependent module. Such invalid named re-exports receive SC1090, including
+when the original TS diagnostic was suppressed.
+
+Local aliases are followed one hop at a time, stopping at registered snapshot
+storage. This preserves `export default value` through later named renames
+and wildcards, while `export { value as default }` remains live.
+
+## Initial checkpoint validation (9b03640f)
 
 All seven native import corpus programs pass with the engine prohibited,
 subject to the documented stderr limit for the exit-13 witness.
@@ -140,3 +174,44 @@ checks are recorded in `/tmp/scriptc-native-import-build-checkpoint.log`,
 `/tmp/scriptc-native-import-baselines-check.log`. The wildcard mismatch probe
 is `/tmp/scriptc-native-import-star-probe.json`. These local artifacts are
 not portable release proof.
+
+## Wildcard checkpoint validation
+
+The subsequent checkpoint is based on `9b03640f`. All 45 native import
+API/IR/backend tests in seven files pass, including namespace admission,
+an actual no-engine Rust binary, unchanged C/LLVM refusals and three invalid
+named re-export graphs. The new 3048–3050 preflight/order records have no
+diagnostics; all previous baseline entries are preserved.
+
+All ten native import corpus programs pass with the engine prohibited. The
+nine normal-exit witnesses compare stdout, stderr and exit status against
+Node; the existing exit-13 stderr limitation for 3045 remains documented
+above. Workspace build and lint pass with zero errors and 3,114 warnings;
+source ceilings and generated-file checks also pass.
+
+The API command above includes the expanded test files. The complete native
+import corpus selection is now:
+
+```bash
+pnpm limit -- env -u LD_LIBRARY_PATH pnpm exec vitest run \
+  tests/harness/rust-differential.test.ts \
+  -t '304[1-9]-|3050-' --maxWorkers=1
+```
+
+This step changes frontend resolution and its tests; the Rust runtime source
+is unchanged. The earlier Cargo and C/LLVM sanitizer results remain evidence
+for their recorded checkpoint, not newly executed full gates. The Sandbox
+image remains unconfigured and neither checkout has `.env.local`; no fresh
+full local fallback was completed. Release readiness and original-consumer
+acceptance therefore remain pending.
+
+Evidence: `/tmp/scriptc-native-star-api-final.log`,
+`/tmp/scriptc-native-star-corpus-final.log`,
+`/tmp/scriptc-native-star-build-checkpoint.log`,
+`/tmp/scriptc-native-star-lint-checkpoint.log`,
+`/tmp/scriptc-native-star-baselines.log` and
+`/tmp/scriptc-native-export-final-review.json`. The last file independently
+confirms Node linking failures and native refusals for invalid named
+re-exports hidden behind a previously visited star or explicit root export.
+The [RSP survey](./rsp-native.md#runtime-star-re-export-resolution) records the
+remaining callback boundary after the three telemetry star imports resolve.
