@@ -119,3 +119,42 @@ Sandbox attempt stops before tests because SCRIPTC_SANDBOX_IMAGE is absent
 (`/tmp/scriptc-stream-sandbox.log`). No full local fallback was completed on
 this checkpoint; selected plain/sanitized passes do not certify a release or
 original RSP/Brain/red-dev/redcode acceptance.
+
+## Native Rust local import checkpoint
+
+Literal local ESM imports now have a Rust-native evaluation queue, shared
+module evaluation/failure records and live namespace getters. The
+[native import parity record](./rust-native-imports.md) documents admission,
+behavioral witnesses, reproducible commands and remaining boundaries.
+Runtime wildcard re-exports are explicitly refused after a Node comparison
+exposed silently missing namespace exports; type-only wildcards and named
+re-exports remain admitted.
+
+Focused validation passes on the working snapshot based on `c6e8cb8c`:
+
+| Check | Result |
+| --- | --- |
+| Native Rust corpus 3041–3047 | 7 passes with engine prohibited; exit-13 witness does not assert complete stderr parity |
+| Native import API/IR/backend files | 38 passes, including an actual Rust binary and C/LLVM refusal contracts |
+| Existing C/LLVM module/await/JSON selection | 28 plain and 12 sanitized passes |
+| Rust runtime, pinned 1.98.0 | 180 tests pass; all-target Clippy passes with warnings denied |
+| Workspace build and lint | Pass; zero lint errors and 3,114 warnings; generated files and source ceilings match |
+| New preflight/order baselines | All seven match; existing unrelated disagreements retained |
+
+Final focused logs are `/tmp/scriptc-native-import-corpus-checkpoint.log`,
+`/tmp/scriptc-native-import-api-checkpoint.log`,
+`/tmp/scriptc-native-import-legacy-plain.log`,
+`/tmp/scriptc-native-import-legacy-sanitized.log`,
+`/tmp/scriptc-native-namespace-order-full.log`,
+`/tmp/scriptc-native-namespace-order-clippy.log`,
+`/tmp/scriptc-native-import-build-checkpoint.log`,
+`/tmp/scriptc-native-import-lint-checkpoint.log` and
+`/tmp/scriptc-native-import-baselines-check.log`.
+
+The full-suite verdict remains pending/red. Sandbox configuration is still
+unavailable on this workstation (`SCRIPTC_SANDBOX_IMAGE` is absent, and
+neither checkout has `.env.local`); no fresh full local fallback was completed
+for this checkpoint. The focused C/LLVM sanitizer selection does not test
+Rust sanitizer support or certify a release. The original RSP survey still
+reports refusals and produces no complete executable; neither C/LLVM
+equivalence nor superior performance is established.

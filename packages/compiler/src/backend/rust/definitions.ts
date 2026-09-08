@@ -14,6 +14,7 @@ import {
 import { emitRustGeneratorBody } from "./generators.js";
 import type { RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
+import { emitRustSyncModuleBody } from "./native-module.js";
 
 export interface RustDefinitionContext {
   families(): readonly IrFamily[];
@@ -1028,7 +1029,7 @@ export class RustDefinitionEmitter {
     } else if (fn.generator !== undefined) {
       emitRustGeneratorBody(fn, this.context);
     } else {
-      this.context.emitStatements(fn.body);
+      emitRustSyncModuleBody(fn, this.context);
       if (fn.returnType.kind !== "void") {
         this.context.line(`unreachable!("scriptc invariant: function '${this.context.rustString(fn.name)}' fell through")`);
       }

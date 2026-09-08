@@ -1,3 +1,4 @@
+import { validateModuleInitCaches } from "./validate-module-inits.js";
 /* IR validation: frontend invariant failures retain the user's source location. */
 import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
@@ -123,6 +124,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "timers.hasRef": { argTypes: [F64], result: BOOL },
   "timers.refresh": { argTypes: [F64], result: F64 },
   "timers.setImmediate": { argTypes: [{ kind: "func", params: [], ret: VOID }], result: F64 },
+  "module.import": { argTypes: [{ kind: "func", params: [], ret: { kind: "promise", inner: JSVAL } }], result: { kind: "promise", inner: JSVAL } },
+  "module.namespace": { argTypes: [JSVAL], result: JSVAL },
   "timers.queueMicrotask": { argTypes: [{ kind: "func", params: [], ret: VOID }], result: VOID },
   "timers.queueMicrotaskDyn": { argTypes: [DYN], result: VOID },
   "timers.clearImmediate": { argTypes: [F64], result: VOID },
@@ -1724,37 +1727,7 @@ function validateFunction(
   const err = (message: string, loc: SrcLoc) =>
     errors.push({ message: `in ${fn.name}: ${message}`, loc });
 
-  const asyncCaches = [
-    ["asyncCacheGlobal", fn.asyncCacheGlobal],
-    ["asyncCycleCacheGlobal", fn.asyncCycleCacheGlobal],
-  ] as const;
-  for (const [field, cacheId] of asyncCaches) {
-    if (cacheId === undefined) continue;
-    if (fn.async !== true) {
-      err(`an ${field} is only valid on an async function`, fn.loc);
-    }
-    if (fn.params.length !== 0 || (fn.captures?.length ?? 0) !== 0) {
-      err("a cached async function must have no parameters or captures", fn.loc);
-    }
-    const cache = globals.get(cacheId);
-    if (cache === undefined) {
-      err(`async cache names undeclared global "${cacheId}"`, fn.loc);
-    } else {
-      const expected: IrType = { kind: "promise", inner: fn.returnType };
-      if (!typeEquals(cache.type, expected)) {
-        err(
-          `async cache global "${cacheId}" has type ${typeKey(cache.type)}, expected ${typeKey(expected)}`,
-          fn.loc,
-        );
-      }
-      if (!cache.mutable) {
-        err(`async cache global "${cacheId}" is immutable`, fn.loc);
-      }
-    }
-  }
-  if (fn.asyncCycleCacheGlobal !== undefined && fn.asyncCacheGlobal === undefined) {
-    err("an asyncCycleCacheGlobal requires a module asyncCacheGlobal", fn.loc);
-  }
+  validateModuleInitCaches(fn, globals, err);
 
   // The class graph's two questions (upcast/downcast/instanceOf/virtualCall
   // legality): strict-descendant tests over the base links, and hierarchy

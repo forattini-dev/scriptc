@@ -27,6 +27,7 @@ pub fn finish() {
     TIMER_TASKS.with(|tasks| tasks.borrow_mut().clear());
     IMMEDIATE_TASKS.with(|tasks| tasks.borrow_mut().clear());
     MICROTASKS.with(|tasks| tasks.borrow_mut().clear());
+    native_modules_finish();
     NEXT_TICKS.with(|tasks| tasks.borrow_mut().clear());
     PROMISE_CHECKS.with(|checks| checks.borrow_mut().clear());
     UNHANDLED_REJECTION_HANDLER.with(|handler| *handler.borrow_mut() = None);
@@ -524,6 +525,10 @@ fn run_event_loop_with_first_checkpoint(
             continue;
         }
         if skip_ticks && NEXT_TICKS.with(|tasks| !tasks.borrow().is_empty()) {
+            continue;
+        }
+
+        if native_module_dispatch_one() {
             continue;
         }
 

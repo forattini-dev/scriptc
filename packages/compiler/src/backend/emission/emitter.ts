@@ -1,3 +1,6 @@
+import type { CEmitOptions } from "./options.js";
+export type { CEmitOptions } from "./options.js";
+import { assertNativeModuleBackend } from "../native-module-support.js";
 import { InternalCompilerError } from "../../errors.js";
 /* IR → C. Three-address style: every IR expression lands in a fresh C temp.
  * Verbose (clang -O2 erases it) but buys three things: short-circuit
@@ -66,17 +69,12 @@ import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch,
 import { emitExpr } from "./emit-exprs.js";
 import { emitLibraryIdentityLines } from "../library-identity.js";
 
-export interface CEmitOptions {
-  /** Library archive assembly may move the volatile identity getters into a
-   * separate translation unit. Public/direct emission keeps them by default. */
-  emitLibraryIdentity?: boolean;
-}
-
 export function emitModule(
   mod: IrModule,
   sourceText?: string,
   options: CEmitOptions = {},
 ): string {
+  assertNativeModuleBackend(mod, "c");
   return new CEmitter(mod, sourceText, options).emit();
 }
 

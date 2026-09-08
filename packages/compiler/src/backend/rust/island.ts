@@ -282,7 +282,7 @@ function emitOperation(
     const target = context.nextName("sc_island_target");
     const source = context.nextName("sc_island_source");
     const dyn = context.dynTypeName();
-    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
+    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { let sc_value = if runtime::map_is_module_namespace(sc_source) { sc_dyn_object_key_get(sc_source, &sc_key, &${source}) } else { sc_value }; sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
   }
   if (expr.op === "defineGetter" && expr.args.length === 3) {
     const target = context.nextName("sc_island_target");

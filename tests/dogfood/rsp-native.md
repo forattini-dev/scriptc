@@ -428,3 +428,41 @@ Evidence: `/tmp/scriptc-capabilities-before.log`,
 Full repository plain/sanitized gates remain a separate release requirement;
 see [native-gate.md](./native-gate.md). RSP performance claims require its own
 fixed-input benchmarks after command acceptance.
+
+## Native local import checkpoint
+
+The final survey retains the original, clean RSP revision
+`c5255e006318fa3ec9aea51ccac11778da3888a1` and uses `backend: rust`,
+`target: bun`, `allowEngine: false`, and `npmStatic: auto`. Against the
+capability-guard snapshot above, it reaches 1,932 statements (previously
+1,701), with 247 failed (250), 198 diagnostics (193), and 100 runtime fences
+(99). All five npm packages remain static. The compiler is the recorded
+working snapshot based on `c6e8cb8c`, not an immutable released build.
+
+The 43 generic SC2012 refusals for local `import()` become narrower native
+boundary refusals: 21 function-signature boundaries, 10 composite-value
+boundaries (records, arrays and a tuple), nine exports without a supported
+identity-preserving representation, and three runtime `export *` namespaces.
+Those three imports reach the original telemetry barrel. A separate native
+probe demonstrated missing runtime star exports, so these imports now refuse
+explicitly; type-only stars and named re-exports retain their tested behavior.
+This does not mean 43 imports are accepted. Reaching more code also exposes
+`@reddb-io/red-castle` outside native package admission. Counts describe
+occurrences, not independent defects or successful binaries.
+
+The final report records zero island statements. Before the star-export
+refusal, it recorded four: telemetry namespace reads and calls at
+`apps/rsp/src/cli/passthrough.ts:72,118` and
+`apps/rsp/src/cli/invocation-telemetry.ts:86,87`. The trace found only native
+`getProp`/`callFn`, `jsExit`, and `jsBridgePromise` operations; `stmtUsesIsland`
+counts those nodes without considering the backend. That classification
+discrepancy remains separate: the count now drops because the imports refuse,
+not because the classifier was repaired. The survey still has no final
+lowered module or execution profile and establishes no RSP binary acceptance.
+
+Evidence: `/tmp/scriptc-rsp-after-native-import.json` and its `.mts`/`.log`
+companions; `/tmp/scriptc-rsp-native-import-island-trace.json` records the
+earlier source locations and IR constructs. Pre-guard evidence remains in
+`/tmp/scriptc-rsp-before-export-star-guard.json`; the star-export reproduction
+is `/tmp/scriptc-native-import-star-probe.json`. The initial working survey
+is preserved as `/tmp/scriptc-rsp-after-native-import-initial.json`.

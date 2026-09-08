@@ -4,6 +4,7 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
     iteration_depth: usize,
     // Dynamic objects reuse JsMap; this bit preserves Object.create(null).
     null_prototype: bool,
+    module_namespace: bool,
     prototype: Option<V>,
 }
 
@@ -33,6 +34,7 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
         live: 0,
         iteration_depth: 0,
         null_prototype: false,
+        module_namespace: false,
         prototype: None,
     })
 }
@@ -45,7 +47,31 @@ pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V
     map.with(|data| data.null_prototype)
 }
 
+/// Called only after a compiled namespace's export getters are installed.
+/// Node 24 enumerates index keys numerically before UTF-16-sorted names;
+/// map_string_entry_order supplies the index partition at each read.
+pub fn map_mark_module_namespace<V: HeapValue>(map: &JsMap<JsString, V>) {
+    map.with_mut(|data| {
+        data.module_namespace = true;
+        data.null_prototype = true;
+        data.prototype = None;
+        data.entries.retain(Option::is_some);
+        data.entries.sort_by(|left, right| {
+            let left = &left.as_ref().expect("scriptc: namespace export tombstone").0;
+            let right = &right.as_ref().expect("scriptc: namespace export tombstone").0;
+            left.encode_utf16().cmp(right.encode_utf16())
+        });
+    });
+}
+
+pub fn map_is_module_namespace<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    map.with(|data| data.module_namespace)
+}
+
 pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, prototype: V) {
+    if map_is_module_namespace(map) {
+        throw_type_error("[object Module] is not extensible".to_owned());
+    }
     map.with_mut(|data| data.prototype = Some(prototype));
 }
 
@@ -59,6 +85,9 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if map_is_module_namespace(map) {
+        throw_type_error("Cannot modify module namespace".to_owned());
+    }
     map.with_mut(|data| {
         if let Some((_, stored)) = data
             .entries
@@ -109,6 +138,9 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if map_is_module_namespace(map) {
+        return false;
+    }
     map.with_mut(|data| {
         let Some(index) = data
             .entries
@@ -131,6 +163,9 @@ pub fn map_size<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
 }
 
 pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if map_is_module_namespace(map) {
+        throw_type_error("Cannot modify module namespace".to_owned());
+    }
     map.with_mut(|data| {
         data.live = 0;
         if data.iteration_depth == 0 {

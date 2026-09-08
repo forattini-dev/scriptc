@@ -1,3 +1,5 @@
+import type { IrFunction } from "./functions.js";
+export type { IrFunction } from "./functions.js";
 import { InternalCompilerError } from "../errors.js";
 /* scriptc IR — the only interface between frontend and backends.
  *
@@ -1277,47 +1279,6 @@ export interface IrUnionDef {
   arms: IrType[];
 }
 
-export interface IrFunction {
-  /** Original TS name (mangling is a backend concern). Lifted lambdas get
-   * synthetic '%'-prefixed names ('%' can't appear in a TS identifier). */
-  name: string;
-  params: IrParam[];
-  returnType: IrType;
-  /** All locals including params, pre-collected and scope-flat: ids are
-   * unique per function ("x.0", "x.1" for shadowing). The frontend resolves
-   * lexical scoping; backends and future SSA both want exactly this. */
-  locals: IrLocal[];
-  /** Present on lifted functions that capture enclosing bindings: the boxed
-   * variables received through the closure environment, in caps[] order.
-   * Each is also listed in `locals` (with boxed: true); it is NOT a param. */
-  captures?: IrParam[];
-  /** Async: the body runs on a fiber; `returnType` is the INNER type T (a
-   * `return v` fulfills with v) while call sites receive Promise<T>. */
-  async?: true;
-  /** Async module initializers only: a module-global Promise<T> slot where
-   * the spawn wrapper caches its first evaluation promise. Every later
-   * static/dynamic import receives that same promise, including while the
-   * first evaluation is suspended. */
-  asyncCacheGlobal?: string;
-  /** Async cyclic module initializers only: the SCC's shared Promise<T>
-   * slot. Eager recursive spawning writes member promises from the inside
-   * out, so the member that actually initiated evaluation writes last and
-   * becomes the runtime cycle root. Dynamic imports wait on this shared
-   * completion verdict instead of a build-time-selected member. */
-  asyncCycleCacheGlobal?: string;
-  /** Generator (`function*`): the body runs on a fiber created SUSPENDED
-   * (nothing runs until the first `.next()`); `returnType` is the
-   * generator's TReturn (VOID when it carries no value — `return;`
-   * completes with the undefined arm) while call sites receive the
-   * generator type `{ yieldT, retT: returnType, nextT }` from an emitted
-   * spawn wrapper that only allocates. `yieldT` is what `yield e` sends
-   * out, `nextT` what `.next(v)` sends in (the yield expression's result
-   * type). Mutually exclusive with `async` (async generators are fenced). */
-  generator?: { yieldT: IrType; nextT: IrType };
-  body: IrStmt[];
-  loc: SrcLoc;
-}
-
 export interface IrParam {
   localId: string;
   name: string;
@@ -1895,6 +1856,9 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
+  /** Native local import: queued loader, fresh promise, cached evaluation. */
+  | "module.import"
+  | "module.namespace"
   | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runSyncExit" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" | "effect.forEach" | "effect.all" | "effect.log" | "effect.tap" | "effect.tapError" | "effect.suspend" | "effect.sleep" | "effect.scoped" | "effect.addFinalizer" | "effect.ensuring" | "effect.acquireRelease" | "effect.acquireUseRelease" | "effect.exit" | "effect.exitSucceed" | "effect.exitFail" | "effect.exitIsSuccess" | "effect.exitIsFailure" | "effect.dataTag" | "effect.exitValue" | "effect.try" | "effect.orElseSucceed" | "effect.catchIf" | "effect.catchTag" | "layer.effectDiscard" | "effect.dataMessage" | "effect.fnPipe" | "effect.durationMillis" | "effect.durationToMillis" | "effect.refMake" | "effect.refMakeUnsafe" | "effect.syncRefMake" | "effect.syncRefMakeUnsafe" | "effect.refGet" | "effect.refSet" | "effect.refUpdate" | "effect.refUpdateEffect" | "effect.deferredMake" | "effect.deferredAwait" | "effect.deferredSettle" | "effect.deferredIsDone" | "effect.semaphoreMake" | "effect.semaphoreMakeUnsafe" | "effect.semaphoreWithPermits" | "effect.queueMake" | "effect.queueTake" | "effect.queueOffer" | "effect.queueSize" | "effect.queueShutdown" | "effect.pubsubMake" | "effect.pubsubPublish" | "effect.pubsubSubscribe" | "effect.pubsubShutdown" | "effect.tryPromiseUnknown" | "effect.catchCause" | "effect.tapErrorCause" | "effect.causeFail" | "effect.causeSquash" | "effect.causeHas" | "schema.prim" | "schema.literal" | "schema.struct" | "schema.array" | "schema.record" | "schema.union" | "schema.tuple" | "schema.decodeTo" | "schema.filterPattern" | "schema.filterBetween" | "schema.wrap" | "schema.filter" | "schema.check" | "schema.decodeSync" | "schema.decodeOption" | "schema.decodeEffect" | "schema.decodeExit" | "schema.is" | "schema.test" | "schema.encodeSync" | "schema.make" | "option.some" | "option.none" | "option.isSome" | "option.getOrUndefined" | "option.getOrElse" | "option.map" | "option.match" // the effect kernel (static builds; lower-effect.ts)
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers

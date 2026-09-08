@@ -31,6 +31,7 @@ include!("async_local_storage.rs");
 include!("process_signals.rs");
 include!("event_loop.rs");
 include!("promises.rs");
+include!("native_module.rs");
 include!("stdin.rs");
 include!("terminal.rs");
 include!("readline.rs");
@@ -167,6 +168,8 @@ mod tests {
     include!("tests/http_framing.rs");
     include!("tests/fetch_reader.rs");
     include!("web_stream.test.rs");
+    include!("native_module.test.rs");
+    include!("collections.test.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("tests/tls.rs");

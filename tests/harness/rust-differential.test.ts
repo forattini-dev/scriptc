@@ -235,6 +235,7 @@ async function build(file: string) {
     outDir,
     backend: "rust",
     optimization: "dev",
+    ...(/^\/\/ @no-engine\s*$/m.test(readFileSync(file, "utf8")) ? { allowEngine: false } : {}),
     dynamic: wantsDynamic(file),
     target: targetOf(file),
     ...(islandModulesOf(file).length > 0 ? { islandModules: islandModulesOf(file) } : {}),
@@ -277,6 +278,7 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
         );
       }
       expect(res.backend).toBe("rust");
+      if (/^\/\/ @no-engine\s*$/m.test(readFileSync(file, "utf8"))) expect(res.execution.engine).toBe("none");
 
       const stdin = STDIN_FIXTURES[rel] ?? "";
       const [rust, node] = await Promise.all([

@@ -9,6 +9,8 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
+import { nativeImportHandleType } from "./lower-native-import-types.js";
+import { varBindingType } from "./lower-variable-types.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, isCjsJsFile, isJsSourceFile, locOf, requireSpecOf } from "../program.js";
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
@@ -367,34 +369,6 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     const g = L.globalsBySymbol.get(symbol);
     if (g) return g;
     return hoistVarBinding(L, symbol, decl.name);
-  }
-
-/** The `var` symbol's function-scoped binding TYPE — the declared type at
-   * the binding name, with the JS-source fallbacks every mutable binding
-   * takes (an empty-object-literal type is checked-dynamic because tsc
-   * admits ANY later assignment to it; an unmappable strict type in a JS
-   * file rides the dyn fallback). Null when no static type can hold the
-   * binding. */
-  function varBindingType(L: Lowerer, nameNode: ts.Identifier): IrType | null {
-    let type = L.mapTypeOf(L.typeOf(nameNode));
-    if (type?.kind === "record" && isJsSourceFile(nameNode.getSourceFile())) {
-      const shape = L.shapes.get(type.shapeId);
-      if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
-    }
-    if (!type) type = dynFallbackType(L, nameNode, L.typeOf(nameNode));
-    // `var p = import("./m")` in a function body: the hoisted slot holds
-    // the island promise/handle — the import expression's only production
-    // (lowerVarDecl's rule for block-scoped bindings).
-    if (L.dynamic && ts.isVariableDeclaration(nameNode.parent) && nameNode.parent.name === nameNode) {
-      type =
-        importCallHandleType(nameNode.parent.initializer) ??
-        // An unchecked-overload call result stores the handle, exactly the
-        // let/const rule (see uncheckedOverloadHandleCall).
-        (uncheckedOverloadHandleCall(L, nameNode.parent.initializer) ? JSVAL : null) ??
-        type;
-    }
-    if (!type || type.kind === "void") return null;
-    return type;
   }
 
 /** `var` declarations hoist to their FUNCTION: the binding exists across
@@ -3377,6 +3351,10 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // the initializer and break identity across repeated init calls.
       (!decl.type && !isLet && isJsSourceFile(decl.getSourceFile()) && optionalClassValue
         ? init.type
+        : null) ??
+      ((init.type.kind === "jsval" ||
+        (init.type.kind === "promise" && init.type.inner.kind === "jsval"))
+        ? nativeImportHandleType(L, decl.initializer)
         : null) ??
       (L.dynamic &&
       (init.type.kind === "jsval" ||

@@ -8429,6 +8429,50 @@
     "<repo>/tests/corpus/3040-web-stream-source-this.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3041-native-local-import/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3041-native-local-import/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3042-native-module-namespace/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3042-native-module-namespace/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3043-native-import-failure/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3043-native-import-failure/state.ts",
+    "<repo>/tests/corpus/3043-native-import-failure/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3044-native-import-await/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3044-native-import-await/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3045-native-import-self-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/3045-native-import-self-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3046-native-import-cycle-root/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3046-native-import-cycle-root/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3047-native-import-checkpoint/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3047-native-import-checkpoint/static.ts",
+    "<repo>/tests/corpus/3047-native-import-checkpoint/main.ts"
+   ],
+   "diags": []
   }
  }
 }

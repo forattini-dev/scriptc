@@ -279,6 +279,28 @@ pub fn json_write_map_properties<V>(
     });
 }
 
+/// Serializes property reads without holding a map borrow across getters.
+/// The source identity remains on the ordinary JSON cycle stack.
+pub fn json_write_map_with<V, F>(map: &JsMap<JsString, V>, writer: &mut JsonWriter, read: F)
+where
+    V: HeapValue + JsonValue,
+    F: Fn(&JsString, V) -> V,
+{
+    let identity = map.identity();
+    if let Some(start) = writer.stack.iter().position(|entry| entry.identity == identity) {
+        throw_type_error(writer.circular_message(start));
+    }
+    writer.stack.push(JsonSeen { identity, is_array: false, edge: None });
+    writer.begin_object();
+    let mut first = true;
+    for (key, value) in map_string_entries_js_order(map) {
+        writer.property(&mut first, &key, &read(&key, value));
+    }
+    writer.end_object();
+    let entry = writer.stack.pop().expect("scriptc: JSON container stack underflow");
+    assert_eq!(entry.identity, identity);
+}
+
 pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     if value.is_json_undefined() {
         return string("undefined");
@@ -525,6 +547,7 @@ where
             entries,
             iteration_depth: 0,
             null_prototype: false,
+            module_namespace: false,
             prototype: None,
         })
     }

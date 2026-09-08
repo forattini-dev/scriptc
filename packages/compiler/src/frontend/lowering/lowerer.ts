@@ -71,7 +71,6 @@ import {
   isNodeEsmFile,
   isNodeTypesPath,
   locOf,
-  orderedImportsOf,
   overridesDtsPath,
   npmStaticDepSf7,
   requireSpecOf,
@@ -95,7 +94,9 @@ import {
   withUndefinedArm as withUndefinedArmCanonical,
 } from "../types.js";
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
-import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, collectAssetImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
+import { noteNativeImportSource, rejectNativeImportCopy, lowerNativeImportAssertion } from "./lower-native-import-boundary.js";
+import { prepareModuleInits, lowerFileInit, pruneUnusedNativeModuleCaches } from "./lower-module-init.js";
+import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports, collectAssetImports, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js"; import { returnOfFailingYield } from "./lower-schema.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, implicitMonoFile, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
@@ -510,15 +511,15 @@ export function lowerToIr(
   const dynamic = options.dynamic ?? false;
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
-  // --dynamic: modules reachable only through dynamic import() of the
+  // Modules reachable only through literal import() of the
   // program's own files join the compiled graph here, ONCE, before any
   // pass constructs (nothing calls their %init at startup — the import()
-  // site's namespace builder does, on the engine microtask, Node's
+  // site's namespace builder does, in its module job, Node's
   // evaluation point for them). Inadmissible static cycles inside the
   // added subgraph are minted here and handed to reachable emit after this
   // extension of the shared array; no later pass re-walks the subgraph.
   const dynamicCycleDiags: ScrDiagnostic[] = [];
-  if (dynamic) {
+  {
     appendDynamicImportModules(program, moduleOrder, (cycle, reason) => {
       dynamicCycleDiags.push(
         unsupportedDiag("SC1016", { file: entry.fileName, start: 0, end: 0 }, `circular imports (${cycle}; ${reason})`),
@@ -1364,6 +1365,9 @@ export class Lowerer {
   /** Module → the name of its synthesized namespace-BUILDER function
    * (lowerOwnModuleImport): every `import()` of the same program module
    * shares one builder. */
+  readonly nativeImportSources = new WeakMap<IrExpr, ts.Expression>();
+  readonly nativeExportFunctions = new Map<string, { valueId: string; readyId: string }>();
+  readonly nativeImportTargets = new Set<ts.SourceFile>();
   readonly dynNsBuilders = new Map<ts.SourceFile, string>();
   /** Parameters forced to the island-handle type (jsval) regardless of
    * their checker type: then-handler params whose settled value is an
@@ -1402,6 +1406,8 @@ export class Lowerer {
    * reference on cache hits, matching Node's one ModuleJob promise per
    * module even across diamonds and concurrent dynamic imports. */
   readonly modulePromiseOf = new Map<ts.SourceFile, string>();
+  /** Synchronous ESM evaluation records retain the original thrown value. */
+  readonly syncModulePromiseOf = new Map<ts.SourceFile, string>();
   /** Async import-cycle member → the cycle's deterministic graph
    * representative. Used to recognize internal SCC edges; this is NOT
    * necessarily the runtime evaluation root, because a dynamically-only
@@ -1947,7 +1953,7 @@ export class Lowerer {
    * at the first default symbol carrying registered storage. Local
    * `export { x as default }` specifiers (no module specifier) are LIVE
    * bindings in Node and fall through to ordinary alias resolution. */
-  private defaultSnapshotSymbolOf(alias: ts.Symbol): ts.Symbol | null {
+  defaultSnapshotSymbolOf(alias: ts.Symbol): ts.Symbol | null {
     let sym: ts.Symbol | undefined = alias;
     for (let hop = 0; sym !== undefined && hop < 32; hop++) {
       if (hop > 0 && sym.flags & ts.SymbolFlags.Alias && this.globalsBySymbol.has(sym)) return sym;
@@ -2169,132 +2175,8 @@ export class Lowerer {
     return collectProgram(this, parts);
   }
 
-  /** Names every file's %init and registers the run-once guard globals
-   * (EVERY module, the entry included: an admissible import cycle can
-   * close back on the entry, whose init call must be the cache hit Node's
-   * revisit is — not a recursion) BEFORE any body lowers: function bodies
-   * and init bodies alike may contain require statements that lower to
-   * calls of these names. Runs in every pass so the ids are
-   * deterministic. */
   prepareModuleInits(parts: FileParts[]): void {
-    parts.forEach((fp, i) => this.initNameOf.set(fp.sf, `%init.${i}`));
-    for (const fp of parts) {
-      const rawTag = this.fileTag.get(fp.sf) ?? "";
-      const tag = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
-      // '%' cannot appear in a user identifier, so the id can never
-      // collide with a collected module global of the same file.
-      const id = `%g.${tag}%loaded`;
-      this.moduleGuardOf.set(fp.sf, id);
-      this.globalsList.push({ id, name: "%loaded", type: BOOL, mutable: true });
-    }
-
-    // A module is intrinsically async when an await/for-await occurs
-    // outside every nested function-like boundary. Then propagate that
-    // status backwards through STATIC ESM edges: Node does not start an
-    // importer's body until each async dependency has completed. CJS
-    // import/require edges deliberately do not propagate — Node refuses
-    // require(esm) when the graph contains top-level await, and the call
-    // sites below keep that as a named unsupported boundary.
-    for (const fp of parts) {
-      let found = false;
-      ts.walkPreorder(fp.sf, (node) => {
-        if (node !== fp.sf && ts.isFunctionLike(node)) return "skip";
-        if (
-          ts.isAwaitExpression(node) ||
-          (ts.isForOfStatement(node) && node.awaitModifier !== undefined)
-        ) {
-          found = true;
-          return "stop";
-        }
-        return undefined;
-      });
-      if (found) this.asyncInitFiles.add(fp.sf);
-    }
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const fp of parts) {
-        if (this.asyncInitFiles.has(fp.sf) || !isNodeEsmFile(fp.sf)) continue;
-        if (orderedImportsOf(this.program, fp.sf).some(({ dep }) => dep !== null && this.asyncInitFiles.has(dep))) {
-          this.asyncInitFiles.add(fp.sf);
-          changed = true;
-        }
-      }
-    }
-    for (const fp of parts) {
-      if (!this.asyncInitFiles.has(fp.sf)) continue;
-      const rawTag = this.fileTag.get(fp.sf) ?? "";
-      const tag = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
-      const id = `%g.${tag}%initPromise`;
-      this.modulePromiseOf.set(fp.sf, id);
-      this.globalsList.push({
-        id,
-        name: "%initPromise",
-        type: { kind: "promise", inner: VOID },
-        mutable: true,
-      });
-    }
-
-    const orderIndex = new Map(parts.map((fp, i) => [fp.sf, i] as const));
-    const partSet = new Set(parts.map((fp) => fp.sf));
-    const staticDeps = (sf: ts.SourceFile): ts.SourceFile[] =>
-      orderedImportsOf(this.program, sf)
-        .map(({ dep }) => dep)
-        .filter((dep): dep is ts.SourceFile => dep !== null && dep !== sf && partSet.has(dep));
-
-    // Tarjan SCCs over the same static graph. The last postorder member is
-    // a deterministic COMPONENT representative for internal-edge tests
-    // and global naming. The runtime evaluation root can differ: a cycle
-    // reached only through import() starts at whichever member is actually
-    // requested first, not whichever import() site preflight discovered
-    // first. The shared cycle-promise slot below is filled by the emitted
-    // spawn wrappers so it records that runtime choice.
-    let nextIndex = 0;
-    const indexOf = new Map<ts.SourceFile, number>();
-    const lowOf = new Map<ts.SourceFile, number>();
-    const stack: ts.SourceFile[] = [];
-    const onStack = new Set<ts.SourceFile>();
-    const visit = (sf: ts.SourceFile): void => {
-      const at = nextIndex++;
-      indexOf.set(sf, at);
-      lowOf.set(sf, at);
-      stack.push(sf);
-      onStack.add(sf);
-      for (const dep of staticDeps(sf)) {
-        if (!indexOf.has(dep)) {
-          visit(dep);
-          lowOf.set(sf, Math.min(lowOf.get(sf)!, lowOf.get(dep)!));
-        } else if (onStack.has(dep)) {
-          lowOf.set(sf, Math.min(lowOf.get(sf)!, indexOf.get(dep)!));
-        }
-      }
-      if (lowOf.get(sf) !== indexOf.get(sf)) return;
-      const component: ts.SourceFile[] = [];
-      for (;;) {
-        const member = stack.pop()!;
-        onStack.delete(member);
-        component.push(member);
-        if (member === sf) break;
-      }
-      if (component.length < 2 || !component.some((member) => this.asyncInitFiles.has(member))) return;
-      const root = component.reduce((a, b) => orderIndex.get(a)! > orderIndex.get(b)! ? a : b);
-      const rawTag = this.fileTag.get(root) ?? "";
-      const tag = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
-      const cyclePromiseId = `%g.${tag}%cyclePromise`;
-      this.globalsList.push({
-        id: cyclePromiseId,
-        name: "%cyclePromise",
-        type: { kind: "promise", inner: VOID },
-        mutable: true,
-      });
-      for (const member of component) {
-        if (this.asyncInitFiles.has(member)) {
-          this.asyncCycleRepresentativeOf.set(member, root);
-          this.asyncCyclePromiseOf.set(member, cyclePromiseId);
-        }
-      }
-    };
-    for (const fp of parts) if (!indexOf.has(fp.sf)) visit(fp.sf);
+    prepareModuleInits(this, parts);
   }
 
   /** The lowering of a CommonJS `require("./local")` occurrence: a call of
@@ -2500,6 +2382,7 @@ export class Lowerer {
   /** Final retention, pruning, and module assembly shared by ordinary emit
    * and the retained reachability worklist. */
   finishModule(functions: IrFunction[]): LowerResult {
+    pruneUnusedNativeModuleCaches(this, functions);
 
     // Globals typed by a class that never REGISTERED (a JS class whose
     // collection fenced — Symbol-keyed fields, an unsupported base): the
@@ -3958,6 +3841,7 @@ export class Lowerer {
    * else (including a DIFFERENT union) is left for requireExactShape, which
    * rejects union mismatches with SC2003. */
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
+    rejectNativeImportCopy(this, expr, expected);
     // Island boundary, both directions. IN: any static value flowing into
     // an any-typed slot marshals implicitly (tsc allows the assignment;
     // the marshal is where its semantics live). OUT: an 'any' value
@@ -8425,7 +8309,7 @@ export class Lowerer {
   /* ── expressions ──────────────────────────────────────────────────── */
 
   lowerExpr(expr: ts.Expression): IrExpr {
-    return lowerExpr(this, expr);
+    return noteNativeImportSource(this, expr, lowerExpr(this, expr));
   }
 
   lowerIntrinsicProperty(expr: ts.PropertyAccessExpression): IrExpr | null {
@@ -8535,6 +8419,8 @@ export class Lowerer {
   }
 
   lowerAsExpression(expr: ts.AsExpression | ts.TypeAssertion): IrExpr {
+    const native = lowerNativeImportAssertion(this, expr);
+    if (native) return native;
     // ISLAND value cast to a PROMISE type (`factory(opts) as Promise<Mod>`
     // — the Node-typed async-API shape): promises never have a validated
     // exit, so instead of refusing the build the cast DEFERS the failure

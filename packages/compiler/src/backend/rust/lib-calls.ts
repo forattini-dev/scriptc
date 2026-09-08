@@ -22,6 +22,7 @@ import { emitRustFilesystemCall } from "./filesystem.js";
 import { emitRustDiagnosticsChannelCall } from "./diagnostics-channel.js";
 import { emitRustAsyncLocalStorageCall } from "./async-local-storage.js";
 import { emitRustAssertCall } from "./assert-calls.js";
+import { emitRustNativeModuleCall } from "./native-module.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -82,6 +83,8 @@ export interface RustLibCallContext {
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const nativeModuleCall = emitRustNativeModuleCall(expr, context);
+  if (nativeModuleCall !== null) return nativeModuleCall;
   const eventEmitterCall = context.emitEventEmitterCall(expr);
   if (eventEmitterCall !== null) return eventEmitterCall;
   const dynamicCall = emitRustDynamicLibCall(expr, context);

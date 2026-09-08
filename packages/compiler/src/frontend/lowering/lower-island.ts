@@ -1,10 +1,10 @@
-import { InternalCompilerError } from "../../errors.js";
 /* Island-boundary lowering: jsval marshaling into the island (jsvalIn and
  * its boundary fences), island-expression detection, the island method-call
  * surface (Math and number/string methods under --dynamic), and the npm
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { nativeImportHandleType } from "./lower-native-import-types.js";
 import { isKernelModule } from "../shared.js";
 import { BOOL, BYTES_U8, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canConvertToDyn, canMarshalTypedFuncIntoIsland, islandPromisePayloadTag, isUnitType } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_FNS, STATIC_MATH_PROPS, boundaryIntoIslandMsg } from "./surfaces.js";
@@ -26,6 +26,7 @@ import {
    * static type while their only runtime representation remains jsval.
    * Promise declarations keep their checker-driven await/catch bridge. */
   export function isIslandExpr(L: Lowerer, node: ts.Expression): boolean {
+    if (nativeImportHandleType(L, node)?.kind === "jsval") return true;
     const mapped = L.mapTypeOf(L.typeOf(node));
     if (mapped?.kind === "jsval") return true;
     if (
@@ -2811,7 +2812,7 @@ export function lowerStaticReadableStreamReaderCall(
    * Falls through (returns null) whenever any premise fails — a computed
    * specifier, a non-JSON target, a namespace type outside the bakeable
    * surface — so the ordinary import() fences still report. */
-  function lowerJsonDynamicImport(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  export function lowerJsonDynamicImport(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.arguments.length !== 2 || !jsonImportAttributeOf(call)) return null;
     const arg = call.arguments[0];
     if (arg === undefined || !ts.isStringLiteralLike(arg)) return null;
@@ -2848,58 +2849,7 @@ export function lowerStaticReadableStreamReaderCall(
     return { kind: "intrinsic", name: "promise.resolve", args: [value], type: mapped, loc };
   }
 
-  export function lowerDynamicImportCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
-    if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
-    const json = lowerJsonDynamicImport(L, call);
-    if (json !== null) return json;
-    L.requireDynamicApi("'import()'", call);
-    const loc = locOf(call);
-    const arg = call.arguments[0];
-    if (call.arguments.length !== 1) {
-      L.unsupported("SC1090", call, "dynamic import() with import attributes");
-    }
-    if (arg === undefined) {
-      L.unsupported("SC1090", call, "dynamic import() without a specifier");
-    }
-    if (!ts.isStringLiteralLike(arg)) {
-      const specifier = L.lowerExpr(arg);
-      if (specifier.type.kind !== "string") {
-        L.unsupported(
-          "SC1090",
-          arg,
-          "dynamic import() of a computed value that is not statically a string",
-        );
-      }
-      const raw: IrExpr = {
-        kind: "libCall",
-        fn: "island.importDynPath",
-        args: [specifier],
-        type: JSVAL,
-        loc,
-      };
-      return { kind: "jsBridgePromise", value: raw, type: { kind: "promise", inner: JSVAL }, loc };
-    }
-    const res = L.dynImports.get(`${call.getSourceFile().fileName}\u0000${arg.text}`);
-    if (!res) {
-      // Collection walks every file before bodies lower, so a missing
-      // entry is a lowerer bug, not user error.
-      throw new InternalCompilerError(`lowerer bug: unresolved dynamic import '${arg.text}'`);
-    }
-    if (res.kind === "program-module") {
-      return lowerOwnModuleImport(L, call, arg);
-    }
-    if (res.kind !== "module") {
-      throw new PoisonError(); // resolution failed — collection reported it
-    }
-    const raw: IrExpr = {
-      kind: "libCall",
-      fn: "island.importDyn",
-      args: [{ kind: "strLit", value: res.key, type: STRING, loc }],
-      type: JSVAL,
-      loc,
-    };
-    return { kind: "jsBridgePromise", value: raw, type: { kind: "promise", inner: JSVAL }, loc };
-  }
+export { lowerDynamicImportCall } from "./lower-dynamic-import.js";
 
 /** Dynamic `import()` of one of the program's OWN modules: the compiled
    * module's exports, marshaled into the engine as a namespace object.
@@ -2917,7 +2867,7 @@ export function lowerStaticReadableStreamReaderCall(
    * signatures) cross as trap functions that throw a pointed TypeError
    * when USED — the namespace still builds, exactly like Node still
    * resolves it. */
-  function lowerOwnModuleImport(L: Lowerer, call: ts.CallExpression, arg: ts.StringLiteralLike): IrExpr {
+  export function lowerOwnModuleImport(L: Lowerer, call: ts.CallExpression, arg: ts.StringLiteralLike): IrExpr {
     const loc = locOf(call);
     let dep: ts.SourceFile | null = null;
     const modSym = L.checker.getSymbolAtLocation(arg);

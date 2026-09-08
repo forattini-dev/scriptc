@@ -1,3 +1,4 @@
+import { dynPromiseAdapter } from "./emit-dynamic-promise.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
@@ -429,50 +430,6 @@ function streamFromArrayAdapter(
   E.walkerDefs.push(...d);
   return sym;
 }
-
-function dynPromiseAdapter(
-  E: CEmitter,
-  inner: IrType,
-): string {
-  if (!isRefCounted(inner) || inner.kind === "dyn") {
-    throw new InternalCompilerError(
-      `dynamic promise adapter requires a concrete reference type, got ${typeKey(inner)}`,
-    );
-  }
-  const key = typeKey(inner);
-  const existing = E.dynPromiseAdapters.get(key);
-  if (existing) return existing;
-  const sym = `sc_dpa_${E.dynPromiseAdapters.size}`;
-  E.dynPromiseAdapters.set(key, sym);
-  const sig = `static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src)`;
-  E.walkerProtos.push(`${sig}; /* checked-dynamic promise exit ${key} */`);
-  let fulfill: string;
-  if (inner.kind === "string") {
-    fulfill = `scr_promise_fulfill_str(sc_dst, sc_v);`;
-  } else {
-    const rc = vAdapters(inner);
-    fulfill = `scr_promise_fulfill_ref(sc_dst, sc_v, &${rc.retain}, &${rc.release}, ${E.traceArgC(inner)});`;
-  }
-  E.walkerDefs.push(
-    `${sig} { /* checked-dynamic promise exit ${key} */`,
-    `  ScrDyn *sc_d = (ScrDyn *)scr_promise_payload_ref(sc_src);`,
-    `  ${cDecl(inner, "sc_v")} = ${E.dynCheckHelper(inner)}(sc_d, NULL);`,
-    `  scr_dyn_release(sc_d);`,
-    `  if (scr_exc_pending()) {`,
-    `    scr_promise_reject_pending(sc_dst);`,
-    `    return;`,
-    `  }`,
-    `  ${fulfill}`,
-    `}`,
-    ``,
-  );
-  return sym;
-}
-
-
-
-
-
 
 /** Evaluate a bytes receiver as a borrow when it is a direct, unboxed
  * binding and all later operands are stable. The binding's scope/global
@@ -7208,6 +7165,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `X.name` through a class value: the class object's stored
             // .name string (+1 — a no-op retain on the interned immortal).
             return finish(`scr_classobj_name(${arg(0)})`);
+          case "module.import": case "module.namespace":
+            throw new Error("the C backend does not support native local module imports yet; use --backend rust");
           case "process.onUncaughtException":
           case "process.offUncaughtException": case "effect.succeed": case "effect.sync": case "effect.map": case "effect.flatMap": case "effect.runSync": case "effect.runSyncExit": case "effect.runPromise": case "effect.gen": case "effect.fail": case "effect.die": case "effect.orDie": case "effect.catchAll": case "effect.mapError": case "effect.promise": case "effect.tryPromise": case "effect.fn": case "effect.void": case "effect.as": case "effect.asVoid": case "effect.ignore": case "effect.andThenEffect": case "effect.serviceKey": case "effect.provide": case "effect.provideService": case "layer.empty": case "layer.succeed": case "layer.effect": case "layer.provide": case "layer.provideMerge": case "layer.merge": case "effect.forEach": case "effect.all": case "effect.log": case "effect.tap": case "effect.tapError": case "effect.suspend": case "effect.sleep": case "effect.scoped": case "effect.addFinalizer": case "effect.ensuring": case "effect.acquireRelease": case "effect.acquireUseRelease": case "effect.exit": case "effect.exitSucceed": case "effect.exitFail": case "effect.exitIsSuccess": case "effect.exitIsFailure": case "effect.dataTag": case "effect.exitValue": case "effect.try": case "effect.orElseSucceed": case "effect.catchIf": case "effect.catchTag": case "layer.effectDiscard": case "effect.dataMessage": case "effect.fnPipe": case "effect.durationMillis": case "effect.durationToMillis": case "effect.refMake": case "effect.refMakeUnsafe": case "effect.syncRefMake": case "effect.syncRefMakeUnsafe": case "effect.refGet": case "effect.refSet": case "effect.refUpdate": case "effect.refUpdateEffect": case "effect.deferredMake": case "effect.deferredAwait": case "effect.deferredSettle": case "effect.deferredIsDone": case "effect.semaphoreMake": case "effect.semaphoreMakeUnsafe": case "effect.semaphoreWithPermits": case "effect.queueMake": case "effect.queueTake": case "effect.queueOffer": case "effect.queueSize": case "effect.queueShutdown": case "effect.pubsubMake": case "effect.pubsubPublish": case "effect.pubsubSubscribe": case "effect.pubsubShutdown": case "effect.tryPromiseUnknown": case "effect.catchCause": case "effect.tapErrorCause": case "effect.causeFail": case "effect.causeSquash": case "effect.causeHas": case "schema.prim": case "schema.literal": case "schema.struct": case "schema.array": case "schema.record": case "schema.union": case "schema.tuple": case "schema.decodeTo": case "schema.filterPattern": case "schema.filterBetween": case "schema.wrap": case "schema.filter": case "schema.check": case "schema.decodeSync": case "schema.decodeOption": case "schema.decodeEffect": case "schema.decodeExit": case "schema.is": case "schema.test": case "schema.encodeSync": case "schema.make": case "option.some": case "option.none": case "option.isSome": case "option.getOrUndefined": case "option.getOrElse": case "option.map": case "option.match":
             // Rust backend only (the program entry's dispatch and the

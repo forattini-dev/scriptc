@@ -634,6 +634,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "math.sqrt": ["c", "llvm", "rust"],
   "math.tan": ["c", "llvm", "rust"],
   "math.trunc": ["c", "llvm", "rust"],
+  "module.import": ["c", "rust"],
+  "module.namespace": ["c", "rust"],
   "navigator.userAgent": ["c", "llvm", "rust"],
   "net.connect": ["c", "llvm", "rust"],
   "net.connectAttempt": ["c", "llvm", "rust"],

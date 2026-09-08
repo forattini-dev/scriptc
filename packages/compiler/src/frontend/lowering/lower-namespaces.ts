@@ -873,6 +873,10 @@ export function moduleNamespaceRecord(
   site: ts.Identifier,
   visiting: Set<ts.SourceFile>,
 ): IrExpr {
+  if (L.nativeImportTargets.has(sf)) {
+    L.unsupported("SC1013", site,
+      "static namespace values mixed with native import() require a shared namespace representation; use named exports or the import() namespace");
+  }
   const loc = locOf(site);
   const refuse: (member: string, why: string) => never = (member, why) =>
     L.unsupported(

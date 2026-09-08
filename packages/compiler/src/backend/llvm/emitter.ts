@@ -1,3 +1,6 @@
+import type { LlvmTargetOptions } from "./target-options.js";
+export type { LlvmTargetOptions } from "./target-options.js";
+import { assertNativeModuleBackend } from "../native-module-support.js";
 import { InternalCompilerError } from "../../errors.js";
 /* IR → LLVM IR text (.ll). The LLVM backend consumes the SAME in-memory
  * IrModule the C backend does (never the JSON dump — see the -0 lesson in
@@ -199,17 +202,8 @@ interface LlScopeEntry {
   boxed?: boolean;
 }
 
-export interface LlvmTargetOptions {
-  /** Pointer width of the target C ABI. Native targets are 64-bit today. */
-  pointerBits?: 32 | 64;
-  /** Select the WASI libc entry-point convention. */
-  wasi?: boolean;
-  /** Library archive assembly may move the volatile identity getters into a
-   * separate translation unit. Public/direct emission keeps them by default. */
-  emitLibraryIdentity?: boolean;
-}
-
 export function emitLlvmModule(mod: IrModule, options: LlvmTargetOptions = {}): string {
+  assertNativeModuleBackend(mod, "llvm");
   return new LlEmitter(mod, options).emit();
 }
 

@@ -12,7 +12,9 @@ import { BOOL, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, I
 import type { IrFfiCallbackParam, IrFfiCallbackParamClass, IrFfiImport, IrFfiReleaseParam } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { isGenericCallableMemberType, typeKey } from "../types.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, jsFuncNameOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { islandPromiseStorageTypeOf, nativeImportHandleType } from "./lower-native-import-types.js";
+import { lowerNativeNamespaceObjectWalk } from "./lower-native-namespace.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -3305,6 +3307,18 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const args = expr.arguments.map((a) => {
         const lowered = L.lowerExpr(a);
         if (lowered.type.kind === "jsval") {
+          if (nativeImportHandleType(L, a)?.kind === "jsval") {
+            // A compiled namespace has a native inspect implementation;
+            // its handle retains the Module label and reads live exports.
+            return {
+              kind: "libCall",
+              fn: "insp.dynS",
+              args: [{ kind: "dynFromJsval", value: lowered, type: DYN, loc },
+                { kind: "numLit", value: 2, type: F64, loc }],
+              type: STRING,
+              loc,
+            } satisfies IrExpr;
+          }
           // Node prints objects with util.inspect formatting, which
           // String() cannot match — silent divergence is banned. Templates
           // are ToString (Node-exact), casts are validated: both honest.
@@ -6261,25 +6275,6 @@ const inliningPredicates = new Set<ts.Symbol>();
    * wrapper's await re-throws it), and a handler throw rejects the
    * result — the spec's onFulfilled rules by construction. Null for
    * non-promise receivers and other members. */
-  /** The storage type behind a promise-valued expression whose CHECKER type
-   * has no mapping — the dynamic-import receiver rule (--dynamic): a direct
-   * `import("...")` call is the island promise itself; an identifier bound
-   * to a promise-of-jsval local or module global answers the binding's
-   * type. Null everywhere else. */
-  function islandPromiseStorageTypeOf(L: Lowerer, e: ts.Expression): IrType | null {
-    const direct = importCallHandleType(e);
-    if (direct?.kind === "promise") return direct;
-    if (!ts.isIdentifier(e)) return null;
-    const local = L.resolveLocal(e);
-    if (local?.type.kind === "promise" && local.type.inner.kind === "jsval") return local.type;
-    if (local) return null;
-    let sym = L.checker.getSymbolAtLocation(e);
-    if (sym && sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym);
-    const g = sym ? L.globalsBySymbol.get(sym) : undefined;
-    if (g?.type.kind === "promise" && g.type.inner.kind === "jsval") return g.type;
-    return null;
-  }
-
 /** Marks an INLINE then-handler's unannotated identifier parameters for
    * the island-handle (jsval) binding type — paramShape's early-out. Only
    * the inline arrow/function forms qualify: a handler VALUE keeps its own
@@ -6415,7 +6410,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (call.questionDotToken || access.questionDotToken) return null;
     const member = access.name.text;
     if (member !== "then" && member !== "catch" && member !== "finally") return null;
-    let recvT = L.mapTypeOf(L.typeOf(access.expression));
+    let recvT = nativeImportHandleType(L, access.expression) ?? L.mapTypeOf(L.typeOf(access.expression));
     // A dynamic-import promise under an unmappable checker type
     // (`Promise<typeof import("./m")>` — module-namespace types have no
     // static mapping): the BINDING holds the island promise
@@ -7759,6 +7754,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (call.questionDotToken || access.questionDotToken) return null;
     if (!L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = access.name.text;
+    const namespaceWalk = lowerNativeNamespaceObjectWalk(L, call, member);
+    if (namespaceWalk) return namespaceWalk;
     // Object.is — the spec's SameValue over the static kinds. Number
     // pairs take the runtime SameValue (NaN equals NaN, +0 differs from
     // -0 — the two divergences from ===); every other supported pair

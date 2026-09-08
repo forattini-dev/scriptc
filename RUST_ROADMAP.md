@@ -14,10 +14,12 @@ Changing the default does not establish superior correctness or performance.
 
 ## Implementation priorities
 
-1. Native imports with statically known destinations. Compile the module graph,
-   preserving lazy initialization, once-only evaluation, live exports, rejection
-   behavior and async ordering. The RSP snapshot records 43 import diagnostics
-   at local literal paths; reaching these modules can expose additional gaps.
+1. Extend the [native local import slice](./tests/dogfood/rust-native-imports.md).
+   Lazy evaluation, cached failures and live primitive exports now have native
+   witnesses. The next boundaries are complete wildcard export resolution and
+   exporting records, arrays, classes and richer functions while preserving
+   identity, plus sharing static namespace objects.
+   Reaching these modules exposes additional consumer gaps.
 2. Native value boundaries. Complete checked URL/SearchParams references,
    recursive records/JSON and Promise payload conversion. Preserve identity,
    shared mutation and observable errors; do not use an engine to erase gaps.

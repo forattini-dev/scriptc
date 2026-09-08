@@ -143,6 +143,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Buffer(value) => runtime::JsonValue::write_json(&${name}::Bytes(value.clone()), writer),`);
     this.context.line(`${name}::Array(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::ArrayIterator(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::Object(value) if runtime::map_is_module_namespace(value) => runtime::json_write_map_with(value, writer, |key, _| sc_dyn_object_key_get(value, key, self)),`);
     this.context.line(`${name}::Object(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Getter(..) => writer.write_null(),`);
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
@@ -633,7 +634,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
-    this.context.line(`${name}::Object(object) => runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()),`);
+    this.context.line(`${name}::Object(object) => { if runtime::map_is_module_namespace(object) { if runtime::map_has_by(object, &key, |left, right| left.as_ref() == right.as_ref()) { runtime::throw_type_error(format!("Cannot assign to read only property '{}' of object '[object Module]'", key)); } runtime::throw_type_error(format!("Cannot add property {}, object is not extensible", key)); } runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()); },`);
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
@@ -1003,6 +1004,7 @@ export class RustDynamicEmitter {
     this.context.line("},");
     this.context.line(`${name}::Object(value) => {`);
     this.context.pushIndent();
+    this.context.line("if runtime::map_is_module_namespace(value) { runtime::throw_dom_exception(\"DataCloneError\", \"[object Module] could not be cloned.\"); }");
     this.context.line("let identity = value.identity();");
     this.context.line("if parents.contains(&identity) { runtime::throw_value(runtime::error_new(\"Error\", runtime::string(\"structuredClone of cyclic values (the checked-dynamic tree cannot represent cycles) is not supported yet\"))); }");
     this.context.line("parents.push(identity);");
