@@ -3563,7 +3563,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     let v: IrType | null = null;
     for (const info of indexInfos) {
       if (!stringKey(info.keyType) && !(info.keyType.flags & ts.TypeFlags.Number)) return null;
-      const iv = mapType(info.valueType, ctx);
+      const anyNamed = !ctx.dynamic && (info.valueType.flags & ts.TypeFlags.Any) !== 0 && (widened.getAliasSymbol() !== undefined || checker.getPropertiesOfType(widened).length > 0); const iv = mapType(info.valueType, ctx) ?? (anyNamed ? DYN : null); // a NAMED `any`-valued signature (`Record<string, any>`, a config bag) is the checked-dynamic slot in a static build, the rule a type-parameter member instantiated at `any` follows; anonymous ones stay unmapped because the checker synthesizes one for the object REST of an empty literal, where an index-signature shape would fence the rest binding
       // A jsval-valued signature absorbs the shape: `Record<string,
       // JSONValue>` (a package's own JSON alias) and `Record<string, any>`
       // are one island object — the overflow map has no handle slot, and
