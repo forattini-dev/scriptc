@@ -9,7 +9,7 @@ fn mixed_finalizer_scope() -> JsEffect {
         EffectFailure::Fail(effect_box(2.0)),
     ] {
         let register = effect_add_finalizer(Rc::new(move |exit| {
-            let original = exit_of(&exit).err().expect("failed body exit");
+            let Err(original) = exit_of(&exit) else { panic!("failed body exit") };
             assert_eq!(effect_unbox::<f64>(&original.into_value()), 99.0);
             reason.clone().into_effect()
         }), super::no_trace());
@@ -20,7 +20,7 @@ fn mixed_finalizer_scope() -> JsEffect {
 
 fn observed_effect_failure(effect: &JsEffect) -> EffectFailure {
     let exit = effect_unbox::<JsEffect>(&effect_run_sync(&effect_exit(effect)));
-    exit_of(&exit).err().expect("expected failure")
+    match exit_of(&exit) { Err(failure) => failure, Ok(_) => panic!("expected failure") }
 }
 
 #[test]

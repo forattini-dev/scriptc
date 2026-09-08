@@ -2055,6 +2055,14 @@ static void sf_stream_start_wait_entry(ScrFiber *self, void *arg) {
   scr_promise_release(wait->promise);
   free(wait);
 
+  /* WebIDL's promise conversion and the controller's start-fulfilled step
+   * are separate jobs. An already-fulfilled callback must not let pull run
+   * ahead of a microtask queued after the ReadableStream constructor. */
+  ScrPromise *start_step = scr_promise_new();
+  scr_promise_fulfill_void(start_step);
+  scr_await_void(start_step);
+  scr_promise_release(start_step);
+
   if (rejected) {
     ScrDyn *reason = scr_caught_to_dyn(caught);
     sf_stream_error(s, reason);

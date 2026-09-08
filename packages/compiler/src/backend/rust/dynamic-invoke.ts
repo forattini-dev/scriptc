@@ -379,6 +379,9 @@ class RustDynamicInvokeEmitter {
     this.emitHttpRequestArm();
     this.emitHttpHeadersArm();
     this.context.line(`${this.dyn}::FetchBody(body) => sc_dyn_fetch_body_invoke(body, method, args, callee_name),`);
+    this.context.line(`${this.dyn}::WebStream(stream) => sc_web_stream_invoke(stream, method, args, callee_name),`);
+    this.context.line(`${this.dyn}::WebReader(reader) => sc_web_reader_invoke(reader, method, args, callee_name),`);
+    this.context.line(`${this.dyn}::WebController(stream) => sc_web_controller_invoke(stream, method, args, callee_name),`);
     this.context.line(`${this.dyn}::FetchReader(reader) => sc_dyn_fetch_reader_invoke(reader, method, callee_name),`);
     this.emitHttpResponseArm();
     this.emitHttpAgentArm();

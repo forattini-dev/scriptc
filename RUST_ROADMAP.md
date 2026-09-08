@@ -59,9 +59,11 @@ not establish performance superiority, or a direct LLVM comparison.
 
 [RSP admission](./tests/dogfood/rsp-native.md) remains incomplete, and the
 [full repository gate](./tests/dogfood/native-gate.md) remains pending/red.
-The default migration also exposes an unsupported native ReadableStream
-constructor (fetch.streamNew) in the adoption suite; implement its behavior
-and retain the failing witness before claiming that compatibility milestone.
+The native ReadableStream constructor gap exposed by the default migration is
+addressed by the [Web Streams parity slice](./tests/dogfood/rust-web-streams.md).
+Its original adoption entry now builds and runs in Rust, C and LLVM without an
+engine. The document distinguishes the tested stream contracts from the wider
+Fetch/Streams behavior and full consumer acceptance still to complete.
 
 Making Rust primary is an implementation and product direction, not a release
 certification or a claim that the full applications already compile.

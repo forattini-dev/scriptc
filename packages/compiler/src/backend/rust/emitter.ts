@@ -673,7 +673,7 @@ class RustEmitter {
         if (node.fn.endsWith("UncaughtException")) this.usesProcessUncaughtListeners = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
-        (node.kind === "libCall" && (node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
+        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }
       if (node.kind === "dynFrom" || node.kind === "jsMarshal") {

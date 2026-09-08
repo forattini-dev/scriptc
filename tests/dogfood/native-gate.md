@@ -83,3 +83,39 @@ snapshot disagreement around Response.clone and URL.hash. Neither assertion
 was relaxed or skipped. These remain quality blockers for the new default,
 recorded in `/tmp/scriptc-rust-default-adoption.log`. The selected sanitized
 C/LLVM/adoption run has 21 passes, not a full sanitizer gate.
+
+## Native Rust Web Streams checkpoint
+
+The two adoption failures recorded above are repaired. The full project-adoption
+file now passes all 15 tests, including an explicit Rust/C/LLVM build-and-execute
+matrix for the original `node-types/fetch-static.ts` entry with no engine.
+The five default-backend API tests also pass (20/20 in the combined run).
+The constructor is implemented in Rust, and the diagnostic snapshot retains
+the static Response.clone refusal while removing the obsolete URL.hash refusal.
+The original entry does not invoke its network request functions, so this is
+constructor/admission evidence rather than full Fetch transport conformance.
+
+The [Web Streams parity record](./rust-web-streams.md) describes the native
+queue, callbacks, locks, read/closed settlement, chunk identity and cycle tests.
+All 30 selected plain corpus tests pass in Rust, C and LLVM. Corpus 3039 also
+exposed a pre-existing start-Promise ordering difference in the C runtime;
+the repaired C/LLVM behavior matches Node. The 172 Rust runtime tests and
+all-target Clippy with warnings denied pass on the pinned Rust 1.98.0 toolchain.
+Workspace build, changed-compiler ESLint, generated-libcall checks and source
+ceilings pass. Seven reviewed preflight/order records were added only for the
+new corpus programs, preserving prior unrelated baseline disagreements.
+
+The selected sanitized run passes 27/27: 20 C/LLVM corpus tests, two original
+adoption builds, the diagnostic snapshot and four existing stream integration
+contracts. Those four contracts also pass plain. The final logs are
+`/tmp/scriptc-stream-parity-final.log`,
+`/tmp/scriptc-stream-adoption-final.log`,
+`/tmp/scriptc-stream-sanitized-final.log` and
+`/tmp/scriptc-stream-runtime-checkpoint.log`; the parity record gives the
+commands and distinguishes Rust witnesses from C/LLVM transport coverage.
+
+This checkpoint does not change the full-suite verdict above. The fresh
+Sandbox attempt stops before tests because SCRIPTC_SANDBOX_IMAGE is absent
+(`/tmp/scriptc-stream-sandbox.log`). No full local fallback was completed on
+this checkpoint; selected plain/sanitized passes do not certify a release or
+original RSP/Brain/red-dev/redcode acceptance.

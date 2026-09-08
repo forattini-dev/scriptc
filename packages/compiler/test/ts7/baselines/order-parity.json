@@ -8387,6 +8387,48 @@
     "<repo>/tests/fixtures/node-types/stream-capture.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3034-web-stream-constructor.ts": {
+   "order": [
+    "<repo>/tests/corpus/3034-web-stream-constructor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3035-web-stream-pull.ts": {
+   "order": [
+    "<repo>/tests/corpus/3035-web-stream-pull.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3036-web-stream-cancel-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/3036-web-stream-cancel-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3037-web-stream-read-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3037-web-stream-read-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3038-web-stream-reader-closed.ts": {
+   "order": [
+    "<repo>/tests/corpus/3038-web-stream-reader-closed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3039-web-stream-start-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3039-web-stream-start-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3040-web-stream-source-this.js": {
+   "order": [
+    "<repo>/tests/corpus/3040-web-stream-source-this.js"
+   ],
+   "diags": []
   }
  }
 }

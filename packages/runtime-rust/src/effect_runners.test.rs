@@ -12,7 +12,7 @@ fn sync_exit_keeps_pending_work_alive_and_releases_it_after_completion() {
     }), super::no_trace());
     let work = effect_ensuring(&effect_deferred_await(&gate), &cleanup);
     let snapshot = effect_run_sync_exit(&work);
-    let EffectFailure::Die(value) = exit_of(&snapshot).err().expect("pending snapshot") else {
+    let Err(EffectFailure::Die(value)) = exit_of(&snapshot) else {
         panic!("pending work must be a defect, not an interruption");
     };
     let error = effect_unbox::<JsError>(&value);

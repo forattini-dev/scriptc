@@ -45,7 +45,7 @@ fn pending_pubsub_payloads_release_on_unsubscribe_and_shutdown() {
             flag.set(true);
             value
         }), super::no_trace());
-        let pending = effect_run_promise(&publish, Rc::new(|value| effect_unbox::<bool>(value)));
+        let pending = effect_run_promise(&publish, Rc::new(effect_unbox::<bool>));
         drop((payload, publish));
         assert!(!completed.get(), "full hub must suspend its producer");
         assert!(weak.upgrade().is_some());
@@ -71,7 +71,7 @@ fn pubsub_broadcast_commits_all_subscribers_before_reentrant_publication() {
         assert_eq!(effect_unbox::<f64>(&value), 1.0);
         effect_pubsub_publish(&reentrant, effect_box(2.0))
     }), super::no_trace());
-    let pending = effect_run_promise(&read, Rc::new(|value| effect_unbox::<bool>(value)));
+    let pending = effect_run_promise(&read, Rc::new(effect_unbox::<bool>));
     effect_run_sync(&effect_pubsub_publish(&hub, effect_box(1.0)));
     assert_eq!(pubsub_of(&hub).borrow().publishers.len(), 1,
         "the slow subscriber must already hold 1 when the fast subscriber publishes 2");
@@ -94,8 +94,8 @@ fn pubsub_drainer_keeps_fifo_when_a_resumed_publisher_publishes_again() {
     let chained = effect_flat_map(&effect_pubsub_publish(&hub, effect_box(2.0)), Rc::new(move |_| {
         effect_pubsub_publish(&reentrant, effect_box(4.0))
     }), super::no_trace());
-    let second = effect_run_promise(&chained, Rc::new(|value| effect_unbox::<bool>(value)));
-    let third = effect_run_promise(&effect_pubsub_publish(&hub, effect_box(3.0)), Rc::new(|value| effect_unbox::<bool>(value)));
+    let second = effect_run_promise(&chained, Rc::new(effect_unbox::<bool>));
+    let third = effect_run_promise(&effect_pubsub_publish(&hub, effect_box(3.0)), Rc::new(effect_unbox::<bool>));
     for expected in [1.0, 2.0, 3.0, 4.0] {
         assert_eq!(effect_unbox::<f64>(&effect_run_sync(&effect_queue_take(&subscription))), expected);
     }

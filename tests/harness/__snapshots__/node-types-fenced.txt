@@ -50,14 +50,14 @@ fenced.ts:29:15 - error SC2020: 'Response.type in a static build' is typed by @t
 
   hint: the native static Response surface is status/ok/statusText/url/redirected/headers/body/bodyUsed plus json(), text(), and bytes(); use --dynamic for the wider Web API
 
-fenced.ts:30:3 - error SC2020: 'Response.clone' is typed by @types/node but has no scriptc lowering yet
+fenced.ts:30:3 - error SC2020: 'Response.clone in a static build' is typed by @types/node but has no scriptc lowering yet
 
   29 |   console.log(response.type);
   30 |   response.clone();
      |   ^~~~~~~~~~~~~~
   31 | }
 
-  hint: the dynamic fetch bridge does not implement this Response operation
+  hint: the native static Response surface is status/ok/statusText/url/redirected/headers/body/bodyUsed plus json(), text(), and bytes(); use --dynamic for the wider Web API
 
 fenced.ts:33:21 - error SC2020: 'ReadableStream.from() over Set<number> iterables' is part of the standard library types but has no scriptc lowering yet
 
@@ -91,18 +91,9 @@ fenced.ts:42:13 - error SC2020: 'PlatformPath.sep' is typed by @types/node but h
   41 | console.log(cpus().length);
   42 | console.log(win32.sep);
      |             ^~~~~~~~~
-  43 | /* URL members beyond the supported getters (protocol/pathname/href/
+  43 | /* URL.hash and searchParams now LOWER under the adopted Node types.
 
   hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
-
-fenced.ts:48:13 - error SC2020: 'URL.hash' is typed by @types/node but has no scriptc lowering yet
-
-  47 | const u = new URL("https://example.com/x?a=1");
-  48 | console.log(u.hash);
-     |             ^~~~~~
-  49 | u.searchParams.get("a");
-
-  hint: protocol, pathname, href, host, hostname, search, searchParams, and toString() are the supported URL members
 
 fenced.ts:55:13 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 

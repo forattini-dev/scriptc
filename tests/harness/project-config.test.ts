@@ -128,15 +128,22 @@ test("node-types: path and os lower statically under @types/node's shapes", asyn
   expect(stdout).toBe("b/c.txt\n/x/y z .gz\ntrue /\ntrue true\ntrue true true true true\ntrue\n");
 });
 
-test("node-types: fetch AbortSignal and readable bodies lower statically", async () => {
-  const outDir = outDirFor("node-fetch-static");
+test.each(sanitize ? ["c", "llvm"] as const : ["rust", "c", "llvm"] as const)("node-types: fetch AbortSignal and readable bodies lower statically (%s)", async (backend) => {
+  const outDir = outDirFor(`node-fetch-static-${backend}`);
   const result = await compile(join(nodeTypesDir, "fetch-static.ts"), {
-    backend: sanitize ? "c" : "rust",
+    backend,
+    allowEngine: false,
     outPath: join(outDir, "fetch-static"),
     outDir,
     sanitize,
   });
   expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
+  if (!result.ok) return;
+  expect(result.backend).toBe(backend);
+  expect(result.execution.engine).toBe("none");
+  const { stdout, stderr } = await execFileAsync(result.binaryPath);
+  expect(stdout).toBe("");
+  expect(stderr).toBe("");
 });
 
 test("node-types: declared-but-not-lowered surface fences, naming @types/node", async () => {

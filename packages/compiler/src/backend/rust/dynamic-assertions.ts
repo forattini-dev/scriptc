@@ -39,7 +39,10 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::AbortController(..) => "AbortController {}".to_owned(), ${name}::AbortSignal(..) => "AbortSignal { aborted: false }".to_owned(), ${name}::HttpRequest(..) => "IncomingMessage {}".to_owned(),`);
   context.line(`${name}::HttpHeaders(..) => "Headers {}".to_owned(),`);
   context.line(`${name}::FetchBody(..) => "ReadableStream {}".to_owned(),`);
+  context.line(`${name}::WebStream(..) => "ReadableStream {}".to_owned(),`);
   context.line(`${name}::FetchReader(..) => "ReadableStreamDefaultReader {}".to_owned(),`);
+  context.line(`${name}::WebController(..) => "ReadableStreamDefaultController {}".to_owned(),`);
+  context.line(`${name}::WebReader(..) => "ReadableStreamDefaultReader {}".to_owned(),`);
   context.line(`${name}::HttpResponse(..) => "ServerResponse {}".to_owned(),`);
   context.line(`${name}::HttpAgent(..) => "Agent {}".to_owned(),`);
   context.line(`${name}::Bytes(value) => {`);
@@ -85,7 +88,7 @@ export function emitRustDynamicAssertions(
   context.popIndent();
   context.line("}");
 
-  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
+  context.line(`fn sc_dyn_assert_is_object(value: &${name}) -> bool { matches!(value, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::ArrayIterator(..) | ${name}::Object(..) | ${name}::Regex(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)) }`);
   if (functionPatterns.length === 0) {
     context.line(`fn sc_dyn_assert_is_function(value: &${name}) -> bool { matches!(value, ${name}::NativeConstructor(..) | ${name}::NativeMethod(..)) }`);
   } else {

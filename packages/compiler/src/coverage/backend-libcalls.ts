@@ -332,7 +332,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "fetch.responseText": ["c", "llvm", "rust"],
   "fetch.start": ["c", "llvm", "rust"],
   "fetch.streamFrom": ["c", "llvm"],
-  "fetch.streamNew": ["c", "llvm"],
+  "fetch.streamNew": ["c", "llvm", "rust"],
   "fileHandle.close": ["c", "llvm", "rust"],
   "fileHandle.fd": ["c", "llvm", "rust"],
   "fileHandle.read": ["c", "llvm", "rust"],

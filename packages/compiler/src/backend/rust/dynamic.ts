@@ -1,6 +1,8 @@
+import { emitRustDynamicEquality } from "./dynamic-equality.js";
 import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
+import { emitRustDynamicWebStream } from "./dynamic-web-stream.js";
 import { emitRustDynamicHttp } from "./dynamic-http.js";
 import { emitRustDynamicAgent } from "./dynamic-agent.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
@@ -57,6 +59,7 @@ export class RustDynamicEmitter {
     this.context.line("HttpHeaders(runtime::JsHttpRequest),");
     this.context.line("FetchBody(runtime::JsHttpRequest),");
     this.context.line("FetchReader(runtime::JsFetchReader),");
+    this.context.line(`WebStream(runtime::JsWebStream<${name}>), WebController(runtime::JsWebStream<${name}>), WebReader(runtime::JsWebReader<${name}>),`);
     this.context.line("HttpResponse(runtime::JsHttpResponse),");
     this.context.line("HttpAgent(runtime::JsHttpAgent),");
     if (usesEmbeddedModules) this.context.line("Island(runtime::IslandValue),");
@@ -94,6 +97,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::HttpHeaders(value) => tracer.edge(value),");
     this.context.line("Self::FetchBody(value) => tracer.edge(value),");
     this.context.line("Self::FetchReader(value) => tracer.edge(value),");
+    this.context.line("Self::WebStream(value) | Self::WebController(value) => tracer.edge(value), Self::WebReader(value) => tracer.edge(value),");
     this.context.line("Self::HttpResponse(value) => tracer.edge(value),");
     this.context.line("Self::HttpAgent(value) => tracer.edge(value),");
     this.context.line("_ => {},");
@@ -144,7 +148,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetServer(..) => { writer.begin_object(); writer.end_object(); },`);
     this.context.line(`${name}::NetSocket(..) => { writer.begin_object(); writer.end_object(); },`);
-    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => { writer.begin_object(); writer.end_object(); },`);
+    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => { writer.begin_object(); writer.end_object(); },`);
     if (usesEmbeddedModules) {
       this.context.line(`${name}::Island(value) => runtime::JsonValue::write_json(&runtime::island_json_node(value), writer),`);
     }
@@ -294,6 +298,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::AbortController(value) => ${name}::AbortController(value.clone()), ${name}::AbortSignal(value) => ${name}::AbortSignal(value.clone()), ${name}::HttpRequest(value) => ${name}::HttpRequest(value.clone()),`);
     this.context.line(`${name}::HttpHeaders(value) => ${name}::HttpHeaders(value.clone()),`);
     this.context.line(`${name}::FetchBody(value) => ${name}::FetchBody(value.clone()),`);
+    this.context.line(`${name}::WebStream(value) => ${name}::WebStream(value.clone()),`);
+    this.context.line(`${name}::WebController(value) => ${name}::WebController(value.clone()),`);
+    this.context.line(`${name}::WebReader(value) => ${name}::WebReader(value.clone()),`);
     this.context.line(`${name}::FetchReader(value) => ${name}::FetchReader(value.clone()),`);
     this.context.line(`${name}::HttpResponse(value) => ${name}::HttpResponse(value.clone()),`);
     this.context.line(`${name}::HttpAgent(value) => ${name}::HttpAgent(value.clone()),`);
@@ -346,7 +353,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetServer(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::NetSocket(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
-    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
+    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::ArrayIterator(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
@@ -415,7 +422,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => "promise",`);
     this.context.line(`${name}::NetServer(..) => "object",`);
     this.context.line(`${name}::NetSocket(..) => "object",`);
-    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => "object",`);
+    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => "object",`);
     if (boxedShapes.length > 0) {
       this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
     }
@@ -584,6 +591,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::HttpHeaders(..) => ${name}::Undefined,`);
     this.context.line(`${name}::FetchBody(request) => if key.as_ref() == "locked" { ${name}::Boolean(runtime::fetch_body_locked(request)) } else { ${name}::Undefined },`);
     this.context.line(`${name}::FetchReader(..) => ${name}::Undefined,`);
+    this.context.line(`${name}::WebReader(reader) => if key.as_ref() == "closed" { ${name}::Promise(runtime::promise_to_mapped_handle(&runtime::web_reader_closed(reader), |_| ${name}::Undefined)) } else { ${name}::Undefined },`);
+    this.context.line(`${name}::WebStream(stream) => if key.as_ref() == "locked" { ${name}::Boolean(runtime::web_stream_locked(stream)) } else { ${name}::Undefined },`);
+    this.context.line(`${name}::WebController(stream) => if key.as_ref() == "desiredSize" { runtime::web_stream_desired_size(stream).map(${name}::Number).unwrap_or(${name}::Null) } else { ${name}::Undefined },`);
     this.context.line(`${name}::HttpResponse(response) => sc_dyn_http_response_get(response, key),`);
     this.context.line(`${name}::HttpAgent(agent) => sc_dyn_http_agent_get(agent, key),`);
     for (const shape of boxedShapes) {
@@ -680,7 +690,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Promise(..) => runtime::string("[object Promise]"),`);
     this.context.line(`${name}::NetServer(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::NetSocket(..) => runtime::string("[object Object]"),`);
-    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => runtime::string("[object Object]"),`);
+    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
     this.context.line("let mut output = String::new();");
@@ -745,6 +755,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::AbortController(..) => "an instance of AbortController".to_owned(), ${name}::AbortSignal(..) => "an instance of AbortSignal".to_owned(), ${name}::HttpRequest(..) => "an instance of IncomingMessage".to_owned(),`);
     this.context.line(`${name}::HttpHeaders(..) => "an instance of Headers".to_owned(),`);
     this.context.line(`${name}::FetchBody(..) => "an instance of ReadableStream".to_owned(),`);
+    this.context.line(`${name}::WebStream(..) => "an instance of ReadableStream".to_owned(),`);
+    this.context.line(`${name}::WebController(..) => "an instance of ReadableStreamDefaultController".to_owned(),`);
+    this.context.line(`${name}::WebReader(..) => "an instance of ReadableStreamDefaultReader".to_owned(),`);
     this.context.line(`${name}::FetchReader(..) => "an instance of ReadableStreamDefaultReader".to_owned(),`);
     this.context.line(`${name}::HttpResponse(..) => "an instance of ServerResponse".to_owned(),`);
     this.context.line(`${name}::HttpAgent(..) => "an instance of Agent".to_owned(),`);
@@ -849,6 +862,7 @@ export class RustDynamicEmitter {
       emitRustDynamicInvoke(this.context, boxedShapes);
     }
     emitRustDynamicHttp(this.context);
+    emitRustDynamicWebStream(this.context);
     emitRustDynamicAgent(this.context);
     emitRustDynamicStringCoercion(this.context, boxedShapes);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
@@ -967,6 +981,9 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::AbortController(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortController> could not be cloned."), ${name}::AbortSignal(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortSignal> could not be cloned."), ${name}::HttpRequest(..) => runtime::throw_dom_exception("DataCloneError", "#<IncomingMessage> could not be cloned."),`);
     this.context.line(`${name}::HttpHeaders(..) => runtime::throw_dom_exception("DataCloneError", "#<Headers> could not be cloned."),`);
     this.context.line(`${name}::FetchBody(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStream> could not be cloned."),`);
+    this.context.line(`${name}::WebStream(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStream> could not be cloned."),`);
+    this.context.line(`${name}::WebController(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultController> could not be cloned."),`);
+    this.context.line(`${name}::WebReader(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultReader> could not be cloned."),`);
     this.context.line(`${name}::FetchReader(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultReader> could not be cloned."),`);
     this.context.line(`${name}::HttpResponse(..) => runtime::throw_dom_exception("DataCloneError", "#<ServerResponse> could not be cloned."),`);
     this.context.line(`${name}::HttpAgent(..) => runtime::throw_dom_exception("DataCloneError", "#<Agent> could not be cloned."),`);
@@ -1016,66 +1033,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
 
-    this.context.line(`fn sc_dyn_equal(left: &${name}, right: &${name}, deep: bool) -> bool {`);
-    this.context.pushIndent();
-    this.context.line("match (left, right) {");
-    this.context.pushIndent();
-    this.context.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
-    this.context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
-    this.context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
-    this.context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
-    if (usesEmbeddedModules) this.context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);
-    this.context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);
-    this.context.line(`(${name}::Url(left), ${name}::Url(right)) => std::rc::Rc::ptr_eq(left, right),`);
-    this.context.line(`(${name}::NetServer(left), ${name}::NetServer(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::NetSocket(left), ${name}::NetSocket(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::AbortController(left), ${name}::AbortController(right)) | (${name}::AbortSignal(left), ${name}::AbortSignal(right)) => left.ptr_eq(right), (${name}::HttpRequest(left), ${name}::HttpRequest(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::HttpHeaders(left), ${name}::HttpHeaders(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::FetchBody(left), ${name}::FetchBody(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::FetchReader(left), ${name}::FetchReader(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::HttpResponse(left), ${name}::HttpResponse(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::HttpAgent(left), ${name}::HttpAgent(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::Bytes(left), ${name}::Bytes(right)) => {`);
-    this.context.pushIndent();
-    this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::bytes_len(left) != runtime::bytes_len(right) { false } else {");
-    this.context.pushIndent();
-    this.context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::bytes_len(left) { equal = runtime::bytes_get(left, index) == runtime::bytes_get(right, index); index += 1.0; } equal");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`(${name}::TypedBytes(left), ${name}::TypedBytes(right)) => runtime::typed_bytes_ptr_eq(left, right) || (deep && runtime::typed_bytes_deep_equals(left, right)),`);
-    this.context.line(`(${name}::Buffer(left), ${name}::Buffer(right)) => left.ptr_eq(right) || (deep && runtime::bytes_deep_equals(left, right)),`);
-    this.context.line(`(${name}::NativeConstructor(left), ${name}::NativeConstructor(right)) => left == right,`);
-    this.context.line(`(${name}::NativeMethod(left), ${name}::NativeMethod(right)) => left == right,`);
-    this.context.line(`(${name}::ArrayIterator(left), ${name}::ArrayIterator(right)) => left.ptr_eq(right),`);
-    this.context.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
-    this.context.pushIndent();
-    this.context.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
-    this.context.pushIndent();
-    this.context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::array_len(left) { equal = sc_dyn_equal(&runtime::array_get(left, index), &runtime::array_get(right, index), true); index += 1.0; } equal");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`(${name}::Object(left), ${name}::Object(right)) => {`);
-    this.context.pushIndent();
-    this.context.line("if sc_dyn_is_null_proto(left) != sc_dyn_is_null_proto(right) { false } else if left.ptr_eq(right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
-    this.context.pushIndent();
-    this.context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::map_iter_count(left) { if runtime::map_iter_live(left, index) { let key = runtime::map_iter_key(left, index); let field = runtime::map_iter_value(left, index); equal = runtime::map_get_by(right, &key, |a, b| a.as_ref() == b.as_ref()).is_some_and(|other| sc_dyn_equal(&field, &other, true)); } index += 1.0; } equal");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("},");
-    for (const shape of boxedShapes) {
-      const variant = this.context.dynFunctionVariant(shape);
-      this.context.line(`(${name}::${variant}(left, _, _), ${name}::${variant}(right, _, _)) => left.identity() == right.identity(),`);
-    }
-    this.context.line("_ => false,");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
+    emitRustDynamicEquality(this.context, boxedShapes);
   }
 
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {

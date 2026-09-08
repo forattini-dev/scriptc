@@ -40,10 +40,10 @@ import { win32 } from "path";
 watchFile("x", () => {});
 console.log(cpus().length);
 console.log(win32.sep);
-/* URL members beyond the supported getters (protocol/pathname/href/
- * host/hostname/search/searchParams) fence member-qualified, with the
- * supported list; searchParams and its method surface LOWER under
- * @types/node's declarations (provenance-mapped like URL itself). */
+/* URL.hash and searchParams now LOWER under the adopted Node types.
+ * Keep these accesses among the refusal witnesses so diagnostics cannot
+ * accidentally reintroduce fences for supported getters. The positive
+ * URL corpus checks their native values and mutation behavior. */
 const u = new URL("https://example.com/x?a=1");
 console.log(u.hash);
 u.searchParams.get("a");

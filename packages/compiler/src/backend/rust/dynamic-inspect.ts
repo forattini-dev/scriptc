@@ -77,7 +77,10 @@ export function emitRustDynamicInspect(
   context.line(`${name}::AbortController(..) => runtime::string("AbortController {}"), ${name}::AbortSignal(..) => runtime::string("AbortSignal { aborted: false }"), ${name}::HttpRequest(..) => runtime::string("IncomingMessage {}"),`);
   context.line(`${name}::HttpHeaders(..) => runtime::string("Headers {}"),`);
   context.line(`${name}::FetchBody(..) => runtime::string("ReadableStream {}"),`);
+  context.line(`${name}::WebStream(..) => runtime::string("ReadableStream {}"),`);
   context.line(`${name}::FetchReader(..) => runtime::string("ReadableStreamDefaultReader {}"),`);
+  context.line(`${name}::WebController(..) => runtime::string("ReadableStreamDefaultController {}"),`);
+  context.line(`${name}::WebReader(..) => runtime::string("ReadableStreamDefaultReader {}"),`);
   context.line(`${name}::HttpResponse(..) => runtime::string("ServerResponse {}"),`);
   context.line(`${name}::HttpAgent(..) => runtime::string("Agent {}"),`);
   context.line(`${name}::NativeConstructor(name) => runtime::string(&format!("[Function: {name}]")),`);
