@@ -35,3 +35,6 @@ tmp-*/
 .env.local
 .env*
 *.tsbuildinfo
+
+# Scratch space the redcode tooling keeps inside the checkout: worktrees and run state, never sources.
+.red/tmp/
