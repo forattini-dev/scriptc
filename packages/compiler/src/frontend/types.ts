@@ -3474,7 +3474,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     let v: IrType | null = null;
     for (const info of indexInfos) {
       if (!stringKey(info.keyType) && !(info.keyType.flags & ts.TypeFlags.Number)) return null;
-      const iv = info.valueType.flags & ts.TypeFlags.Undefined ? unitOnlyUnion(ctx.unions) : mapType(info.valueType, ctx) ?? (!ctx.dynamic && (info.valueType.flags & ts.TypeFlags.Any) !== 0 && (widened.getAliasSymbol() !== undefined || checker.getPropertiesOfType(widened).length > 0) ? DYN : null);
+      // Named any-valued signatures use checked-dynamic slots; anonymous
+      // signatures synthesized for empty object rest remain unmapped.
+      const anyNamed = !ctx.dynamic && (info.valueType.flags & ts.TypeFlags.Any) !== 0 &&
+        (widened.getAliasSymbol() !== undefined || checker.getPropertiesOfType(widened).length > 0);
+      const iv = info.valueType.flags & ts.TypeFlags.Undefined
+        ? unitOnlyUnion(ctx.unions)
+        : mapType(info.valueType, ctx) ?? (anyNamed ? DYN : null);
       // A jsval-valued signature absorbs the shape: `Record<string,
       // JSONValue>` (a package's own JSON alias) and `Record<string, any>`
       // are one island object — the overflow map has no handle slot, and
