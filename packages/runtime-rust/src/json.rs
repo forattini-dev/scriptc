@@ -1,5 +1,5 @@
 pub fn number_to_string(value: f64) -> JsString {
-    Rc::from(format_number(value))
+    JsString::from(format_number(value))
 }
 
 pub fn number_is_integer(value: f64) -> bool {
@@ -26,6 +26,7 @@ pub trait JsonObject: Trace + ClearEdges + 'static {
     const IS_ARRAY: bool = false;
 
     fn write_json_object(&self, writer: &mut JsonWriter);
+    fn json_identity(&self) -> Option<usize> { None }
 }
 
 enum JsonEdge {
@@ -77,7 +78,7 @@ impl JsonWriter {
         value.write_json(self);
     }
 
-    pub fn property<T: JsonValue>(&mut self, first: &mut bool, name: &str, value: &T) {
+    pub fn property<T: JsonValue, S: JsStringSource + ?Sized>(&mut self, first: &mut bool, name: &S, value: &T) {
         if value.is_json_undefined() {
             return;
         }
@@ -87,7 +88,7 @@ impl JsonWriter {
         *first = false;
         self.write_string(name);
         self.output.push(':');
-        self.set_edge(JsonEdge::Property(name.to_owned()));
+        self.set_edge(JsonEdge::Property(name.to_string()));
         value.write_json(self);
     }
 
@@ -128,9 +129,12 @@ impl JsonWriter {
         self.output.push_str("null");
     }
 
-    fn write_string(&mut self, value: &str) {
+    fn write_string<S: JsStringSource + ?Sized>(&mut self, value: &S) {
         self.output.push('"');
-        for ch in value.chars() {
+        for item in char::decode_utf16(value.utf16_units()) {
+            let ch = match item { Ok(ch) => ch, Err(error) => {
+                self.output.push_str(&format!("\\u{:04x}", error.unpaired_surrogate())); continue;
+            } };
             match ch {
                 '"' => self.output.push_str("\\\""),
                 '\\' => self.output.push_str("\\\\"),
@@ -211,7 +215,7 @@ where
     T: JsonObject,
 {
     fn write_json(&self, writer: &mut JsonWriter) {
-        let id = self.identity();
+        let id = self.with(|value| value.json_identity()).unwrap_or_else(|| self.identity());
         if let Some(start) = writer.stack.iter().position(|entry| entry.identity == id) {
             throw_type_error(writer.circular_message(start));
         }
@@ -238,7 +242,7 @@ where
     fn write_json_object(&self, writer: &mut JsonWriter) {
         writer.begin_array();
         let mut first = true;
-        for (index, value) in self.elements.iter().enumerate() {
+        for (index, value) in self.elements().iter().enumerate() {
             writer.element(&mut first, index, value);
         }
         writer.end_array();
@@ -249,14 +253,15 @@ impl<V> JsonObject for MapData<JsString, V>
 where
     V: HeapValue + JsonValue,
 {
+    fn json_identity(&self) -> Option<usize> { self.view.as_ref().map(|view| view.identity()) }
+
     fn write_json_object(&self, writer: &mut JsonWriter) {
         writer.begin_object();
         let mut first = true;
         for position in map_string_entry_order(self) {
-            let (key, value) = self.entries[position]
-                .as_ref()
-                .expect("scriptc: ordered JSON property points at a tombstone");
-            writer.property(&mut first, key, value);
+            let key = self.entry_key(position).expect("scriptc: ordered JSON property points at a tombstone");
+            let value = self.entry_value(position);
+            writer.property(&mut first, &key, &value);
         }
         writer.end_object();
     }
@@ -271,10 +276,9 @@ pub fn json_write_map_properties<V>(
 {
     map.with(|data| {
         for position in map_string_entry_order(data) {
-            let (key, value) = data.entries[position]
-                .as_ref()
-                .expect("scriptc: ordered JSON property points at a tombstone");
-            writer.property(first, key, value);
+            let key = data.entry_key(position).expect("scriptc: ordered JSON property points at a tombstone");
+            let value = data.entry_value(position);
+            writer.property(first, &key, &value);
         }
     });
 }
@@ -286,7 +290,7 @@ where
     V: HeapValue + JsonValue,
     F: Fn(&JsString, V) -> V,
 {
-    let identity = map.identity();
+    let identity = map_identity(map);
     if let Some(start) = writer.stack.iter().position(|entry| entry.identity == identity) {
         throw_type_error(writer.circular_message(start));
     }
@@ -307,7 +311,7 @@ pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     }
     let mut writer = JsonWriter::new();
     value.write_json(&mut writer);
-    Rc::from(writer.output)
+    JsString::from(writer.output)
 }
 
 pub fn json_stringify_indented<T: JsonValue>(value: &T, indent: &str) -> JsString {
@@ -366,7 +370,7 @@ pub fn json_stringify_indented<T: JsonValue>(value: &T, indent: &str) -> JsStrin
             _ => output.push(ch),
         }
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub enum JsonNode {
@@ -375,7 +379,7 @@ pub enum JsonNode {
     Number(f64),
     String(JsString),
     Array(Vec<JsonNode>),
-    Object(Vec<(String, JsonNode)>),
+    Object(Vec<(JsString, JsonNode)>),
 }
 
 impl JsonValue for JsonNode {
@@ -441,7 +445,7 @@ pub fn json_index_path(path: &str, index: usize) -> String {
 pub fn json_expect_object<'a>(
     node: &'a JsonNode,
     path: &str,
-) -> Result<&'a [(String, JsonNode)], String> {
+) -> Result<&'a [(JsString, JsonNode)], String> {
     match node {
         JsonNode::Object(fields) => Ok(fields),
         _ => Err(json_type_error(path, "object", node)),
@@ -455,16 +459,16 @@ pub fn json_expect_array<'a>(node: &'a JsonNode, path: &str) -> Result<&'a [Json
     }
 }
 
-pub fn json_object_field<'a>(object: &'a [(String, JsonNode)], name: &str) -> Option<&'a JsonNode> {
+pub fn json_object_field<'a, S: JsStringSource + ?Sized>(object: &'a [(JsString, JsonNode)], name: &S) -> Option<&'a JsonNode> {
     object
         .iter()
         .rev()
-        .find_map(|(key, value)| (key == name).then_some(value))
+        .find_map(|(key, value)| key.encode_utf16().eq(name.utf16_units()).then_some(value))
 }
 
-pub fn json_required_field<'a>(
-    object: &'a [(String, JsonNode)],
-    name: &str,
+pub fn json_required_field<'a, S: JsStringSource + ?Sized>(
+    object: &'a [(JsString, JsonNode)],
+    name: &S,
     path: &str,
 ) -> Result<&'a JsonNode, String> {
     json_object_field(object, name).ok_or_else(|| format!("expected property '{}' at {path}", name))
@@ -519,6 +523,7 @@ where
         Ok(Self {
             elements: decoded,
             raw: None,
+            view: None,
         })
     }
 }
@@ -535,7 +540,7 @@ where
             if let Some((_, stored)) = entries
                 .iter_mut()
                 .flatten()
-                .find(|(stored, _)| stored.as_ref() == key)
+                .find(|(stored, _)| stored == key)
             {
                 *stored = decoded;
             } else {
@@ -543,6 +548,7 @@ where
             }
         }
         Ok(Self {
+            view: None,
             live: entries.len(),
             entries,
             iteration_depth: 0,
@@ -559,7 +565,7 @@ pub fn json_parse_typed<T: JsonDecode>(text: &JsString) -> T {
 }
 
 pub fn json_parse_node(text: &JsString) -> Result<JsonNode, String> {
-    JsonParser::new(text).parse()
+    JsonParser::new(&json_source_utf8(text)).parse()
 }
 
 struct JsonParser<'a> {
@@ -600,7 +606,7 @@ impl<'a> JsonParser<'a> {
                 self.keyword(b"false")?;
                 Ok(JsonNode::Bool(false))
             }
-            Some(b'"') => Ok(JsonNode::String(Rc::from(self.string()?))),
+            Some(b'"') => Ok(JsonNode::String(self.string()?)),
             Some(b'[') => self.array(),
             Some(b'{') => self.object(),
             Some(b'-' | b'0'..=b'9') => self.number(),
@@ -696,10 +702,10 @@ impl<'a> JsonParser<'a> {
         Ok(JsonNode::Number(value))
     }
 
-    fn string(&mut self) -> Result<String, String> {
+    fn string(&mut self) -> Result<JsString, String> {
         debug_assert_eq!(self.peek(), Some(b'"'));
         self.position += 1;
-        let mut output = String::new();
+        let mut output = JsStringBuilder::new();
         loop {
             let Some(byte) = self.peek() else {
                 return self.syntax("unterminated string");
@@ -707,7 +713,7 @@ impl<'a> JsonParser<'a> {
             match byte {
                 b'"' => {
                     self.position += 1;
-                    return Ok(output);
+                    return Ok(output.finish());
                 }
                 b'\\' => {
                     self.position += 1;
@@ -724,29 +730,7 @@ impl<'a> JsonParser<'a> {
                         b'n' => output.push('\n'),
                         b'r' => output.push('\r'),
                         b't' => output.push('\t'),
-                        b'u' => {
-                            let first = self.hex_quad()?;
-                            if (0xd800..=0xdbff).contains(&first)
-                                && self.bytes.get(self.position..self.position + 2) == Some(b"\\u")
-                            {
-                                self.position += 2;
-                                let second = self.hex_quad()?;
-                                if (0xdc00..=0xdfff).contains(&second) {
-                                    let scalar = 0x10000
-                                        + (((first as u32 - 0xd800) << 10)
-                                            | (second as u32 - 0xdc00));
-                                    output.push(
-                                        char::from_u32(scalar).expect("valid JSON surrogate pair"),
-                                    );
-                                } else {
-                                    output.push('\u{fffd}');
-                                    output
-                                        .push(char::from_u32(second as u32).unwrap_or('\u{fffd}'));
-                                }
-                            } else {
-                                output.push(char::from_u32(first as u32).unwrap_or('\u{fffd}'));
-                            }
-                        }
+                        b'u' => output.push_unit(self.hex_quad()?),
                         _ => return self.syntax("invalid string escape"),
                     }
                 }

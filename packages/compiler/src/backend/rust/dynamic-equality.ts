@@ -6,6 +6,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   const usesEmbeddedModules = context.hasEmbeddedModules();
   context.line(`fn sc_dyn_equal(left: &${name}, right: &${name}, deep: bool) -> bool {`);
   context.pushIndent();
+  context.line("if let (Some(left), Some(right)) = (sc_dyn_function_identity(left), sc_dyn_function_identity(right)) { return left == right; }");
   context.line("match (left, right) {");
   context.pushIndent();
   context.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
@@ -43,7 +44,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::ArrayIterator(left), ${name}::ArrayIterator(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::Array(left), ${name}::Array(right)) => {`);
   context.pushIndent();
-  context.line("if left.ptr_eq(right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
+  context.line("if runtime::array_ptr_eq(left, right) { true } else if !deep || runtime::array_len(left) != runtime::array_len(right) { false } else {");
   context.pushIndent();
   context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::array_len(left) { equal = sc_dyn_equal(&runtime::array_get(left, index), &runtime::array_get(right, index), true); index += 1.0; } equal");
   context.popIndent();
@@ -52,7 +53,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line("},");
   context.line(`(${name}::Object(left), ${name}::Object(right)) => {`);
   context.pushIndent();
-  context.line("if sc_dyn_is_null_proto(left) != sc_dyn_is_null_proto(right) { false } else if left.ptr_eq(right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
+  context.line("if sc_dyn_is_null_proto(left) != sc_dyn_is_null_proto(right) { false } else if runtime::map_ptr_eq(left, right) { true } else if !deep || runtime::map_size(left) != runtime::map_size(right) { false } else {");
   context.pushIndent();
   context.line("let mut index = 0.0; let mut equal = true; while equal && index < runtime::map_iter_count(left) { if runtime::map_iter_live(left, index) { let key = runtime::map_iter_key(left, index); let field = runtime::map_iter_value(left, index); equal = runtime::map_get_by(right, &key, |a, b| a.as_ref() == b.as_ref()).is_some_and(|other| sc_dyn_equal(&field, &other, true)); } index += 1.0; } equal");
   context.popIndent();

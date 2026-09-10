@@ -1,0 +1,1155 @@
+{
+  "roots": {
+    "red-skills": "/home/cyber/Work/reddb.io/red-skills",
+    "redcode": "/home/cyber/Work/reddb.io/redcode",
+    "red-dev": "/home/cyber/Work/reddb.io/red-dev",
+    "toon": "/home/cyber/Work/reddb.io/toon",
+    "tuiuiu.js": "/home/cyber/Work/tetis/libs/tuiuiu.js"
+  },
+  "targets": [
+    {
+      "id": "red-skills-dev",
+      "repo": "red-skills",
+      "name": "dev",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/cli.ts",
+      "relativeEntry": "apps/dev/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "c272229abab20d646ccd7b91e970d0268d9272839e4d73deee8b05af9d4724bc"
+    },
+    {
+      "id": "red-skills-castle-mcp",
+      "repo": "red-skills",
+      "name": "castle-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/mcp-server.ts",
+      "relativeEntry": "apps/dev/src/mcp-server.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "21738c96962e297bf9a5bb5c8e8d178541efc30102f7ce6d8653fd6f589f818e"
+    },
+    {
+      "id": "red-skills-code-nav",
+      "repo": "red-skills",
+      "name": "code-nav",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/src/index.ts",
+      "relativeEntry": "apps/code-nav/src/index.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "8d99e6259f3a5351c5d7615ea71c28e5e68e4d15bbd67eb77054d3b2a3db15a4"
+    },
+    {
+      "id": "red-skills-brain",
+      "repo": "red-skills",
+      "name": "brain",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/cli.ts",
+      "relativeEntry": "apps/brain/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "f55631c73984cb50a241a32ae50d8d54d1a06b5a87d9e9401a50a0f1f3511abd"
+    },
+    {
+      "id": "red-skills-brain-mcp",
+      "repo": "red-skills",
+      "name": "brain-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/mcp-server.ts",
+      "relativeEntry": "apps/brain/src/mcp-server.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "fb0868523d508ceb2d05e70c6ebc19b7660232365a28718df64eaf92aef132e5"
+    },
+    {
+      "id": "red-skills-memory",
+      "repo": "red-skills",
+      "name": "memory",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/cli.ts",
+      "relativeEntry": "apps/memory/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "2276e3ae088dcc89fc138e4cf24ba6ea8d3ea056cd8ef6db1b2016a9eacc201b"
+    },
+    {
+      "id": "red-skills-memory-mcp",
+      "repo": "red-skills",
+      "name": "memory-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/mcp-server.ts",
+      "relativeEntry": "apps/memory/src/mcp-server.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "921ee830e1a354750a06ad454ca3e75eaa986c7300b745b874e68da2693296c7"
+    },
+    {
+      "id": "red-skills-rsp",
+      "repo": "red-skills",
+      "name": "rsp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli.ts",
+      "relativeEntry": "apps/rsp/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "a9fadef1bb3e3c8d68ac759eb30bc24501048c696be10c4fcb3a45a30d9ab18e"
+    },
+    {
+      "id": "red-skills-rsp-mcp",
+      "repo": "red-skills",
+      "name": "rsp-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/mcp-server.ts",
+      "relativeEntry": "apps/rsp/src/mcp-server.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "ad66ba5bd5475b187c30bda1d8e36117b069773cf47ba13e8a1e3ac74cbda447"
+    },
+    {
+      "id": "red-skills-redskilled",
+      "repo": "red-skills",
+      "name": "redskilled",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/src/cli.ts",
+      "relativeEntry": "apps/redskilled/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "42f8f32628a3580737cd7e73aaa3aeb887d797d484090bd5d028f09089cfb6af"
+    },
+    {
+      "id": "red-skills-red-browser",
+      "repo": "red-skills",
+      "name": "red-browser",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/red-browser/src/cli.ts",
+      "relativeEntry": "apps/red-browser/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "d6dea2ab174b0d990d4d03783af95b242f8cb2061f418b596bf57938002a20f0"
+    },
+    {
+      "id": "red-skills-benchmark-memory",
+      "repo": "red-skills",
+      "name": "benchmark-memory",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-memory/src/cli.ts",
+      "relativeEntry": "apps/benchmark-memory/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "e8233d01d40db5b8d787edfd6a59b79ab3d80af15a37efd0ea99e6f34c4e7eb3"
+    },
+    {
+      "id": "red-skills-benchmark-code-understanding",
+      "repo": "red-skills",
+      "name": "benchmark-code-understanding",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/cli.ts",
+      "relativeEntry": "apps/benchmark-code-understanding/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "f8d8163e033ff888f5bfa3652fe59a51c921f972768b059657b82af8cc92243b"
+    },
+    {
+      "id": "red-skills-rsp-benchmark",
+      "repo": "red-skills",
+      "name": "rsp-benchmark",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/two-axis-benchmark-cli.ts",
+      "relativeEntry": "apps/rsp/src/two-axis-benchmark-cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "7114b1705348012f7ac4a02a142cd083dfcb5ad5e80ebe16c49d7a723a16df14"
+    },
+    {
+      "id": "red-skills-opencode-host",
+      "repo": "red-skills",
+      "name": "opencode-host",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/opencode-host/src/generate.ts",
+      "relativeEntry": "apps/opencode-host/src/generate.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "5131f90758aba56bfe198169bc2b8100fa9a3bd551c7d656a866d2d54b67c199"
+    },
+    {
+      "id": "red-skills-herdr",
+      "repo": "red-skills",
+      "name": "herdr",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+      "relativeEntry": "apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "3630c2318cf0f0c6950407125cacce70544b0ef76a77f92fcefc0ad9da276c26"
+    },
+    {
+      "id": "red-skills-red-castle",
+      "repo": "red-skills",
+      "name": "red-castle",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/src/main.ts",
+      "relativeEntry": "packages/red-castle/src/main.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "6fea444247d156ff79c36d058896b2f773a9d5f79541a5359c5a6fdcdb9db860"
+    },
+    {
+      "id": "red-skills-red-castle-mcp",
+      "repo": "red-skills",
+      "name": "red-castle-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/src/mcp-server.ts",
+      "relativeEntry": "packages/red-castle/src/mcp-server.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "c650254745ef2f06355a78a19f522041b1d707f36d3d62caff062688bf5b526b"
+    },
+    {
+      "id": "red-skills-entrypoint",
+      "repo": "red-skills",
+      "name": "entrypoint",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packages/shared/entrypoint-cli.ts",
+      "relativeEntry": "packages/shared/entrypoint-cli.ts",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "5c50f0273093ab38cd5ff6041f8ccb0d63876b228a04c7acbca527df3213290a"
+    },
+    {
+      "id": "red-skills-afk-container",
+      "repo": "red-skills",
+      "name": "afk-container",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/afk-container/src/entrypoint.mjs",
+      "relativeEntry": "apps/afk-container/src/entrypoint.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "cdad8152badab4642f80c9a5bf31da8db495106ce85ee098295ff765c247ddbe"
+    },
+    {
+      "id": "red-skills-red-fetch",
+      "repo": "red-skills",
+      "name": "red-fetch",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/plugins/dev/hooks/red-fetch.mjs",
+      "relativeEntry": "plugins/dev/hooks/red-fetch.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "ca1feb8b98bec932eb24d232940f26a28a44d0a34819b67114624536b87cbcf2"
+    },
+    {
+      "id": "red-skills-afk",
+      "repo": "red-skills",
+      "name": "afk",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/plugins/dev/skills/engineering/afk/bin/afk.mjs",
+      "relativeEntry": "plugins/dev/skills/engineering/afk/bin/afk.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "50670409b2ef8364e7e07f8fbc5e6eacf77361684e1a9e05a1b2b6de4c428e07"
+    },
+    {
+      "id": "red-skills-pi-afk",
+      "repo": "red-skills",
+      "name": "pi-afk",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/pi/dev/skills/engineering/afk/bin/afk.mjs",
+      "relativeEntry": "packaging/pi/dev/skills/engineering/afk/bin/afk.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "50670409b2ef8364e7e07f8fbc5e6eacf77361684e1a9e05a1b2b6de4c428e07"
+    },
+    {
+      "id": "red-skills-codex-statusline",
+      "repo": "red-skills",
+      "name": "codex-statusline",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/plugins/dev/hooks/ensure-codex-statusline.mjs",
+      "relativeEntry": "plugins/dev/hooks/ensure-codex-statusline.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "5c37fed5924e199e0b72824220f83972a8bc54ac9a969a74bb590a59b8d3dace"
+    },
+    {
+      "id": "red-skills-brain-bootstrap",
+      "repo": "red-skills",
+      "name": "brain-bootstrap",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/plugins/brain/scripts/bootstrap.mjs",
+      "relativeEntry": "plugins/brain/scripts/bootstrap.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "d1f50a9bfac1cb656fdf5773574ce9d3a9939e04dbbbaa3723b5754c89afc6a6"
+    },
+    {
+      "id": "red-skills-memory-bootstrap",
+      "repo": "red-skills",
+      "name": "memory-bootstrap",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/plugins/memory/scripts/bootstrap.mjs",
+      "relativeEntry": "plugins/memory/scripts/bootstrap.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "e7c38ecf4f30e6c12e9eeec3bb1bd1db2e4b96748ad3a3e65ba23c0a8c150add"
+    },
+    {
+      "id": "red-skills-npm-red-skills-brain",
+      "repo": "red-skills",
+      "name": "npm-red-skills-brain",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-brain.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-brain.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "7e465173b9d4e39a7ec0be47e59146a3cbdd0079ef41d2bfe9c9717b887178be"
+    },
+    {
+      "id": "red-skills-npm-red-skills-castle-mcp",
+      "repo": "red-skills",
+      "name": "npm-red-skills-castle-mcp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-castle-mcp.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-castle-mcp.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "7019f070ba7df8a21be558fc980b28f42360f0b410ec953b4eaea223fc234153"
+    },
+    {
+      "id": "red-skills-npm-red-skills-code-nav",
+      "repo": "red-skills",
+      "name": "npm-red-skills-code-nav",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-code-nav.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-code-nav.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "53812f9a2cf36aaf5a0a5eda5e8305f8f083cbdfde4b2a3d9ae96d3302f380f9"
+    },
+    {
+      "id": "red-skills-npm-red-skills-dev",
+      "repo": "red-skills",
+      "name": "npm-red-skills-dev",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-dev.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-dev.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "3065987953d9758d4c35c08b8508ee5375b4e17530b3c7852a59164a972b87ef"
+    },
+    {
+      "id": "red-skills-npm-red-skills-memory",
+      "repo": "red-skills",
+      "name": "npm-red-skills-memory",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-memory.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-memory.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "96e56717a7723e884360a8cc6320d98d0aa6c74283dcd472c317a8c58c4cc313"
+    },
+    {
+      "id": "red-skills-npm-red-skills-redskilled",
+      "repo": "red-skills",
+      "name": "npm-red-skills-redskilled",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/red-skills-redskilled.mjs",
+      "relativeEntry": "packaging/npm/bin/red-skills-redskilled.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "6d05a0b6cb0cc3733919a8b9688a081110fd61b1eaeb423ab110abf2c2f0ea61"
+    },
+    {
+      "id": "red-skills-npm-rsp",
+      "repo": "red-skills",
+      "name": "npm-rsp",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/bin/rsp.mjs",
+      "relativeEntry": "packaging/npm/bin/rsp.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "b20b8224941b25d243306aebc62e6392dac1dffc8bc8af7343ebef975d875701"
+    },
+    {
+      "id": "redcode-redcode",
+      "repo": "redcode",
+      "name": "redcode",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/index.ts",
+      "relativeEntry": "packages/redcode/src/index.ts",
+      "kind": "application",
+      "target": "bun",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "c2f50a022542255948a33909320e633ea2aab1407db4aaa4e3e88175b5624b4f"
+    },
+    {
+      "id": "redcode-lildax",
+      "repo": "redcode",
+      "name": "lildax",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/cli/src/index.ts",
+      "relativeEntry": "packages/cli/src/index.ts",
+      "kind": "application",
+      "target": "bun",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "d8ae935231893a6858f95b9143f6ab8fe6dc472f7167de5272791c8232680209"
+    },
+    {
+      "id": "redcode-rpc-sidecar",
+      "repo": "redcode",
+      "name": "rpc-sidecar",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/src/cli.ts",
+      "relativeEntry": "packages/rpc-sidecar/src/cli.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "Existing scriptc build entry; retested explicitly with Rust/no-engine",
+      "exists": true,
+      "entrySha256": "acc8c926c65efcfdd531bf514122cec3b92c12fb04ee469938e4fec065d31a62"
+    },
+    {
+      "id": "redcode-redcode-launcher",
+      "repo": "redcode",
+      "name": "redcode-launcher",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/redcode/bin/redcode",
+      "relativeEntry": "packages/redcode/bin/redcode",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "67c414b684c7a5bdc46d1fc2152fed1071d6e113a9c81b446f3f36f45ed4b23c"
+    },
+    {
+      "id": "redcode-lildax-launcher",
+      "repo": "redcode",
+      "name": "lildax-launcher",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/cli/bin/lildax.cjs",
+      "relativeEntry": "packages/cli/bin/lildax.cjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "c23dff04634750ee0842b62eda01b49f1a95d725741b507bb9495c7f9e9bfd2a"
+    },
+    {
+      "id": "red-dev-red-dev",
+      "repo": "red-dev",
+      "name": "red-dev",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "relativeEntry": "src/main.ts",
+      "kind": "application",
+      "target": "bun",
+      "reason": "Linux, Windows and debug share this source; host-native test only",
+      "exists": true,
+      "entrySha256": "f926f60816cf5cb6a63520658883602548f84e3ff7bdfcdb42246ababdd797f3"
+    },
+    {
+      "id": "red-dev-tui-smoke",
+      "repo": "red-dev",
+      "name": "tui-smoke",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/scripts/tui-smoke.ts",
+      "relativeEntry": "scripts/tui-smoke.ts",
+      "kind": "smoke",
+      "target": "bun",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "2e7f7ccfd8146cfa3de91b86240e3ec1496ae9c1e04521084deb1624e2c97da3"
+    },
+    {
+      "id": "toon-toon-cli",
+      "repo": "toon",
+      "name": "toon-cli",
+      "entry": "/home/cyber/Work/reddb.io/toon/vendor/toon/packages/cli/src/cli-entry.ts",
+      "relativeEntry": "vendor/toon/packages/cli/src/cli-entry.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "Vendored upstream TS CLI; local tq is already Rust",
+      "exists": true,
+      "entrySha256": "4b440de7ec05fc2a9be925863e8dcaf5e00f3d670f33ad958453870ad805397f"
+    },
+    {
+      "id": "toon-toon-launcher",
+      "repo": "toon",
+      "name": "toon-launcher",
+      "entry": "/home/cyber/Work/reddb.io/toon/vendor/toon/packages/cli/bin/toon.mjs",
+      "relativeEntry": "vendor/toon/packages/cli/bin/toon.mjs",
+      "kind": "launcher",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "ab35d537729779d522d8dc8870ac71c2d7330974fe16aed164ca3c7e4bff93b1"
+    },
+    {
+      "id": "tuiuiu.js-tuiuiu",
+      "repo": "tuiuiu.js",
+      "name": "tuiuiu",
+      "entry": "/home/cyber/Work/tetis/libs/tuiuiu.js/src/cli/index.ts",
+      "relativeEntry": "src/cli/index.ts",
+      "kind": "application",
+      "target": "node24",
+      "reason": "",
+      "exists": true,
+      "entrySha256": "b7d3ff0ce4364a310e726c8db607ae5c570e831ca6887cc9ca63308dbd8cb461"
+    }
+  ],
+  "packages": [
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/package.json",
+      "name": "red-skills",
+      "bin": null,
+      "scripts": {
+        "build": "turbo run build --filter=!@reddb-io/red-castle --only",
+        "bundle": "turbo run bundle --filter=!@reddb-io/red-castle --only",
+        "typecheck": "turbo run typecheck --filter=!@reddb-io/red-castle --only",
+        "test": "turbo run test --filter=!@reddb-io/red-castle --only",
+        "audit:hooks": "bash scripts/audit-hook-hardening-contract.sh",
+        "changeset": "changeset",
+        "release:version": "changeset version && node scripts/sync-version.mjs",
+        "version:sync": "node scripts/sync-version.mjs",
+        "version:sync:check": "node scripts/sync-version.mjs --check",
+        "generate-manifests": "node scripts/generate-codex-manifests.mjs && node scripts/generate-gemini-manifests.mjs && node scripts/generate-pi-manifests.mjs",
+        "codex:manifests": "node scripts/generate-codex-manifests.mjs",
+        "codex:manifests:check": "node scripts/generate-codex-manifests.mjs --check",
+        "gemini:manifests": "node scripts/generate-gemini-manifests.mjs",
+        "gemini:manifests:check": "node scripts/generate-gemini-manifests.mjs --check",
+        "pi:manifests": "node scripts/generate-pi-manifests.mjs",
+        "pi:manifests:check": "node scripts/generate-pi-manifests.mjs --check",
+        "pi:packages:build": "node scripts/build-pi-packages.mjs",
+        "pi:packages:check": "node scripts/build-pi-packages.mjs --check",
+        "pi:packages:publish": "node scripts/publish-pi-packages.mjs"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/packaging/npm/package.json",
+      "name": "@reddb-io/red-skills",
+      "bin": {
+        "red-skills-dev": "bin/red-skills-dev.mjs",
+        "red-skills-castle-mcp": "bin/red-skills-castle-mcp.mjs",
+        "red-skills-code-nav": "bin/red-skills-code-nav.mjs",
+        "red-skills-memory": "bin/red-skills-memory.mjs",
+        "red-skills-brain": "bin/red-skills-brain.mjs",
+        "red-skills-redskilled": "bin/red-skills-redskilled.mjs",
+        "rsp": "bin/rsp.mjs"
+      },
+      "scripts": {}
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/package.json",
+      "name": "@reddb-io/code-nav-mcp",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/index.ts --outfile ../../dist/code-nav-mcp.bundle.min.mjs --asset code-nav.bundle.min.mjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "test": "NODE_OPTIONS=--max-old-space-size=6144 vitest run",
+        "dev": "tsx src/index.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/package.json",
+      "name": "@reddb-io/dev",
+      "bin": null,
+      "scripts": {
+        "dev": "node --import tsx src/cli.ts",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/dev.bundle.min.mjs --asset dev.bundle.min.mjs --minify",
+        "bundle:mcp": "node ../../scripts/bundle-app.mjs --entry src/mcp-server.ts --outfile ../../dist/castle-mcp.bundle.min.mjs --asset castle-mcp.bundle.min.mjs --minify",
+        "bundle:red-fetch": "esbuild ../../packages/shared/entrypoint-cli.ts --bundle --minify --platform=node --format=esm --target=node22 --define:__ENTRYPOINT_ROLE__='\"fetch\"' --outfile=../../plugins/dev/hooks/red-fetch.mjs --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+        "bundle:entrypoint": "esbuild ../../packages/shared/entrypoint-cli.ts --bundle --minify --platform=node --format=esm --target=node22 --define:__ENTRYPOINT_ROLE__='\"run:dev\"' --outfile=../../plugins/dev/skills/engineering/afk/bin/afk.mjs --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\"",
+        "build": "pnpm run bundle && pnpm run bundle:mcp && pnpm run bundle:red-fetch && pnpm run bundle:entrypoint",
+        "test": "NODE_OPTIONS=--max-old-space-size=3072 vitest run",
+        "test:invariants": "NODE_OPTIONS=--max-old-space-size=3072 vitest run tests/toon-json-guard.test.ts tests/extinct-source-guard.test.ts tests/shipped-primitive-guard.test.ts tests/host-owns-birth-guard.test.ts tests/shipped-binary-guard.test.ts tests/declared-wait-guard.test.ts tests/lane-run-mode-guard.test.ts",
+        "test:canary": "NODE_OPTIONS=--max-old-space-size=3072 vitest run tests/mcp-lane-canary.test.ts tests/mcp-lane-canary-e2e.test.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/brain/package.json",
+      "name": "@reddb-io/brain",
+      "bin": {
+        "brain": "dist/cli.js",
+        "brain-mcp": "dist/mcp-server.js"
+      },
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "build": "tsc -p tsconfig.build.json && pnpm bundle",
+        "bundle": "pnpm bundle:cli && pnpm bundle:mcp",
+        "bundle:cli": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/brain.bundle.min.mjs --asset brain.bundle.min.mjs --minify --reddb-from-package",
+        "bundle:mcp": "node ../../scripts/bundle-app.mjs --entry src/mcp-server.ts --outfile ../../dist/brain-mcp.bundle.min.mjs --asset brain-mcp.bundle.min.mjs --minify --reddb-from-package",
+        "test": "vitest run",
+        "dev": "node --import tsx src/cli.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/package.json",
+      "name": "@reddb-io/rsp",
+      "bin": {
+        "rsp": "dist/cli.js"
+      },
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "build": "tsc -p tsconfig.build.json && pnpm bundle",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/rsp.bundle.min.mjs --asset rsp.bundle.min.mjs --minify --reddb-from-package",
+        "bench:two-axis": "node --import tsx src/two-axis-benchmark-cli.ts",
+        "bench:two-axis:neutral": "node --import tsx src/two-axis-benchmark-cli.ts --fixture-root tests/fixtures-neutral --corpus-label neutral-third-party --corpus-provenance \"Public run metadata from vitest-dev/vitest Actions run 29274168273 and rust-lang/cargo Actions run 29195830177.\" --corpus-provenance \"Git machine output from public nodejs/node and rust-lang/rust repository history captured on 2026-07-13.\" --corpus-provenance \"Cargo JSON message output follows the published --message-format=json contract with third-party crate-style test names.\" --out bench/results/rsp-two-axis-neutral.toon --summary bench/results/rsp-two-axis-neutral.md --no-require-large-output-fixtures",
+        "bench:two-axis:check": "node --import tsx src/two-axis-benchmark-cli.ts --check --out bench/results/rsp-two-axis.toon --summary bench/results/rsp-two-axis.md",
+        "gen:ambient-skill": "node --import tsx scripts/gen-ambient-skill.mjs",
+        "test": "vitest run",
+        "test:integration": "vitest run --config vitest.integration.config.ts",
+        "dev": "node --import tsx src/cli.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-memory/package.json",
+      "name": "@reddb-io/benchmark-memory",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/benchmark-memory.bundle.min.mjs --asset benchmark-memory.bundle.min.mjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "references:baseline": "tsx src/cli.ts references baseline --json --human",
+        "references:eval": "tsx src/cli.ts references eval --json --human",
+        "references:eval:v2": "tsx src/cli.ts references eval --v2 --json --human",
+        "references:interop": "tsx src/cli.ts references interop --json --human",
+        "dev": "node --import tsx src/cli.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/package.json",
+      "name": "@reddb-io/benchmark-code-understanding",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/benchmark-code-understanding.bundle.min.mjs --asset benchmark-code-understanding.bundle.min.mjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "test": "vitest run",
+        "dev": "node --import tsx src/cli.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/opencode-host/package.json",
+      "name": "@reddb-io/red-skills",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/generate.ts --outfile ../../dist/opencode-host.bundle.min.mjs --asset opencode-host.bundle.min.mjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "test": "NODE_OPTIONS=--max-old-space-size=6144 vitest run",
+        "generate": "tsx src/generate.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/vscode-extension-red-skills/package.json",
+      "name": "vscode-extension-red-skills",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --outfile=out/extension.cjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "package": "pnpm run build && tsx src/package-vsix.ts",
+        "test": "NODE_OPTIONS=--max-old-space-size=4096 vitest run"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/package.json",
+      "name": "@reddb-io/redskilled",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "NODE_OPTIONS=--max-old-space-size=4096 vitest run",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/redskilled.bundle.min.mjs --asset redskilled.bundle.min.mjs --minify",
+        "build": "pnpm run typecheck && pnpm run bundle",
+        "build:native": "node-gyp rebuild --directory=native",
+        "serve": "tsx src/cli.ts serve"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/package.json",
+      "name": "@reddb-io/herdr-plugin-red-skills",
+      "bin": {
+        "red-skills-herdr": "bin/red-skills-herdr.mjs"
+      },
+      "scripts": {
+        "test": "python3 scripts/check-manifest.py && node --test \"tests/*.test.mjs\"",
+        "check": "python3 scripts/check-manifest.py && node --test \"tests/*.test.mjs\"",
+        "bundle": "node ../../scripts/bundle-app.mjs --entry bin/red-skills-herdr.mjs --outfile ../../dist/herdr-plugin-red-skills.bundle.min.mjs --asset herdr-plugin-red-skills.bundle.min.mjs --minify",
+        "build": "pnpm run bundle",
+        "smoke": "sh scripts/smoke.sh",
+        "preview": "node scripts/preview.mjs",
+        "fake-daemon": "node scripts/fake-daemon.mjs /tmp/redskilled-fake.sock",
+        "dashboard": "node bin/red-skills-herdr.mjs dashboard",
+        "doctor": "node bin/red-skills-herdr.mjs doctor"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/memory/tests/fixtures/dev-artifacts/package.json",
+      "name": "dev-artifact-fixture",
+      "bin": null,
+      "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "test:ci": "vitest run"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/apps/memory/package.json",
+      "name": "@reddb-io/memory",
+      "bin": {
+        "memory": "dist/cli.js",
+        "memory-mcp": "dist/mcp-server.js"
+      },
+      "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "lint:deterministic-extractors": "tsx src/deterministic-extractor-vocabulary-lint.ts",
+        "build": "pnpm lint:deterministic-extractors && tsc -p tsconfig.build.json && pnpm bundle",
+        "bundle": "pnpm bundle:cli && pnpm bundle:mcp",
+        "bundle:cli": "node ../../scripts/bundle-app.mjs --entry src/cli.ts --outfile ../../dist/memory.bundle.min.mjs --asset memory.bundle.min.mjs --minify --reddb-from-package",
+        "bundle:mcp": "node ../../scripts/bundle-app.mjs --entry src/mcp-server.ts --outfile ../../dist/memory-mcp.bundle.min.mjs --asset memory-mcp.bundle.min.mjs --minify --reddb-from-package",
+        "test": "vitest run",
+        "test:bench-latency": "RED_MEMORY_ASSERT_LATENCY_INVARIANT=1 vitest run tests/bench-latency.test.ts",
+        "test:integration": "RED_MEMORY_RECALL_P50_TARGET_MS=250 vitest run --config vitest.integration.config.ts",
+        "dev": "node --import tsx src/cli.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/package.json",
+      "name": "@reddb-io/red-castle",
+      "bin": null,
+      "scripts": {
+        "build": "npm run build:dist",
+        "build:dist": "tsup && node scripts/copy-templates.mjs && node scripts/check-public-types-effect-free.mjs",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "typecheck": "tsgo --noEmit",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "sandcastle": "npm run build:dist && tsx .red-castle/run.ts",
+        "test-podman": "npm run build:dist && tsx --env-file=.red-castle/.env .red-castle/test-podman.ts",
+        "test-interactive": "npm run build:dist && tsx --env-file=.red-castle/.env .red-castle/test-interactive.ts"
+      }
+    },
+    {
+      "repo": "red-skills",
+      "file": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/docs/package.json",
+      "name": "sandcastle-docs",
+      "bin": null,
+      "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/sdks/vscode/package.json",
+      "name": "redcode",
+      "bin": null,
+      "scripts": {
+        "vscode:prepublish": "bun run package",
+        "compile": "bun run check-types && bun run lint && node esbuild.js",
+        "watch:esbuild": "node esbuild.js --watch",
+        "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+        "package": "bun run check-types && bun run lint && node esbuild.js --production",
+        "compile-tests": "tsc -p . --outDir out",
+        "watch-tests": "tsc -p . -w --outDir out",
+        "pretest": "bun run compile-tests && bun run compile && bun run lint",
+        "check-types": "tsc --noEmit",
+        "lint": "eslint src",
+        "test": "vscode-test"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/http-recorder/package.json",
+      "name": "@reddb-io/redcode-http-recorder",
+      "bin": null,
+      "scripts": {
+        "test": "bun test --timeout 30000 --only-failures",
+        "typecheck": "tsgo --noEmit",
+        "build": "bun ./script/build.ts",
+        "verify:package": "bun ./script/verify-package.ts"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/package.json",
+      "name": "@reddb-io/redcode-rpc-sidecar",
+      "bin": null,
+      "scripts": {
+        "build": "bun script/build.ts",
+        "test": "bun test",
+        "test:native": "bun script/test-native.ts",
+        "typecheck": "tsgo --noEmit"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/enterprise/package.json",
+      "name": "@reddb-io/redcode-enterprise",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo --noEmit",
+        "dev": "vite dev",
+        "build": "vite build",
+        "build:cloudflare": "OPENCODE_DEPLOYMENT_TARGET=cloudflare vite build",
+        "start": "vite start",
+        "shell-prod": "sst shell --target Teams --stage production"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/web/package.json",
+      "name": "@reddb-io/redcode-web",
+      "bin": null,
+      "scripts": {
+        "dev": "astro dev",
+        "dev:remote": "VITE_API_URL=https://api.opencode.ai astro dev",
+        "start": "astro dev",
+        "build": "astro build",
+        "preview": "astro preview",
+        "astro": "astro"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/plugin/package.json",
+      "name": "@reddb-io/redcode-plugin",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo --noEmit",
+        "build": "tsc"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/package.json",
+      "name": "@reddb-io/redcode",
+      "bin": {
+        "redcode": "./bin/redcode"
+      },
+      "scripts": {
+        "typecheck": "tsgo --noEmit",
+        "test": "bun test --timeout 30000 --only-failures",
+        "test:httpapi": "bun run script/httpapi-exercise.ts --mode coverage --fail-on-missing --fail-on-skip && bun run script/httpapi-exercise.ts --mode auth --fail-on-missing --fail-on-skip && bun run script/httpapi-exercise.ts --mode effect --fail-on-missing --fail-on-skip",
+        "bench:test": "bun run script/bench-test-suite.ts",
+        "profile:test": "bun run script/profile-test-files.ts",
+        "build": "bun run script/build.ts",
+        "build:whiteboard": "bun run script/whiteboard-bundle.ts",
+        "dev": "bun run ./src/index.ts",
+        "dev:temporary": "bun run ./src/temporary.ts"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/app/package.json",
+      "name": "@reddb-io/redcode-app",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo -b",
+        "typecheck:e2e": "tsgo -p e2e/tsconfig.json",
+        "start": "vite",
+        "dev": "vite",
+        "build": "vite build",
+        "serve": "vite preview",
+        "test": "bun run test:unit && bun run test:browser",
+        "test:unit": "bun test --conditions=solid --only-failures --preload ./happydom.ts ./src",
+        "test:browser": "bun test --conditions=browser --preload ./happydom.ts ./test-browser",
+        "test:unit:watch": "bun test --conditions=solid --watch --preload ./happydom.ts ./src",
+        "test:e2e": "playwright test",
+        "test:e2e:local": "playwright test",
+        "test:e2e:ui": "playwright test --ui",
+        "test:e2e:report": "playwright show-report e2e/playwright-report",
+        "test:stability": "bun test ./e2e/performance/unit/visual-stability.test.ts && playwright test --config e2e/performance/timeline-stability/playwright.config.ts",
+        "test:bench": "bun test ./e2e/performance/unit && playwright test --config e2e/performance/playwright.config.ts"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/cli/package.json",
+      "name": "@reddb-io/redcode-cli",
+      "bin": {
+        "lildax": "./bin/lildax.cjs"
+      },
+      "scripts": {
+        "build": "bun run script/build.ts",
+        "dev": "bun run src/index.ts",
+        "typecheck": "tsgo --noEmit"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/ui/package.json",
+      "name": "@reddb-io/redcode-ui",
+      "bin": null,
+      "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "typecheck": "tsgo --noEmit",
+        "test": "bun test src --timeout 30000 --only-failures",
+        "dev": "vite",
+        "generate:tailwind": "bun run script/tailwind.ts",
+        "generate:v2-oc2": "bun run script/build-oc2-v2-overrides.ts"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/stats/app/package.json",
+      "name": "@reddb-io/redcode-stats-app",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo --noEmit",
+        "dev": "vite dev --host 0.0.0.0",
+        "build": "vite build",
+        "start": "vite start"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/storybook/package.json",
+      "name": "@reddb-io/redcode-storybook",
+      "bin": null,
+      "scripts": {
+        "storybook": "storybook dev -p 6006",
+        "build": "storybook build"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/desktop/package.json",
+      "name": "@reddb-io/redcode-desktop",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo -b",
+        "predev": "bun ./scripts/predev.ts",
+        "dev": "electron-vite dev",
+        "prebuild": "bun ./scripts/prebuild.ts",
+        "build": "electron-vite build",
+        "preview": "electron-vite preview",
+        "package": "electron-builder --config electron-builder.config.ts",
+        "package:mac": "electron-builder --mac --config electron-builder.config.ts",
+        "package:win": "electron-builder --win --config electron-builder.config.ts",
+        "package:linux": "electron-builder --linux --config electron-builder.config.ts",
+        "native:build": "bun install --cwd native"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/sdk/js/package.json",
+      "name": "@reddb-io/redcode-sdk",
+      "bin": null,
+      "scripts": {
+        "test": "bun test",
+        "typecheck": "tsgo --noEmit",
+        "build": "bun ./script/build.ts"
+      }
+    },
+    {
+      "repo": "redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/packages/console/app/package.json",
+      "name": "@reddb-io/redcode-console-app",
+      "bin": null,
+      "scripts": {
+        "typecheck": "tsgo --noEmit",
+        "dev": "vite dev --host 0.0.0.0",
+        "dev:remote": "VITE_AUTH_URL=https://auth.dev.opencode.ai VITE_STRIPE_PUBLISHABLE_KEY=pk_test_51RtuLNE7fOCwHSD4mewwzFejyytjdGoSDK7CAvhbffwaZnPbNb2rwJICw6LTOXCmWO320fSNXvb5NzI08RZVkAxd00syfqrW7t bun sst shell --stage=dev bun dev",
+        "build": "bun ./script/generate-sitemap.ts && vite build && bun ../../opencode/script/schema.ts ./.output/public/config.json ./.output/public/tui.json",
+        "start": "vite start"
+      }
+    },
+    {
+      "repo": "red-dev",
+      "file": "/home/cyber/Work/reddb.io/red-dev/package.json",
+      "name": "red-dev",
+      "bin": null,
+      "scripts": {
+        "dev": "bun run src/main.ts",
+        "typecheck": "tsc --noEmit",
+        "test": "bun test",
+        "build:linux": "bun build src/main.ts --compile --define process.env.NODE_ENV=\"\\\"production\\\"\" --target=bun-linux-x64 --outfile dist/red-dev-linux-x64",
+        "build:windows": "bun build src/main.ts --compile --define process.env.NODE_ENV=\"\\\"production\\\"\" --target=bun-windows-x64 --outfile dist/red-dev-windows-x64.exe",
+        "build": "bun run build:linux && bun run build:windows",
+        "build:debug": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/red-dev-debug",
+        "smoke": "bun build scripts/tui-smoke.ts --compile --target=bun-linux-x64 --outfile dist/tui-smoke && ./dist/tui-smoke",
+        "e2e:offline-ubuntu24": "bun run scripts/offline-depot-e2e.ts",
+        "e2e:rollback-ubuntu24": "bun run scripts/rollback-e2e.ts"
+      }
+    },
+    {
+      "repo": "toon",
+      "file": "/home/cyber/Work/reddb.io/toon/vendor/toon/docs/package.json",
+      "name": "@toon-format/docs",
+      "bin": null,
+      "scripts": {
+        "dev": "vitepress dev",
+        "build": "vitepress build",
+        "preview": "vitepress preview"
+      }
+    },
+    {
+      "repo": "toon",
+      "file": "/home/cyber/Work/reddb.io/toon/vendor/toon/package.json",
+      "name": "@toon-format/monorepo",
+      "bin": null,
+      "scripts": {
+        "build": "pnpm -r --filter=./packages/** run build",
+        "automd": "automd",
+        "docs:dev": "vitepress dev docs",
+        "docs:build": "vitepress build docs",
+        "docs:preview": "vitepress preview docs",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "test": "pnpm -r test",
+        "test:types": "tsc --noEmit",
+        "release": "bumpp -r"
+      }
+    },
+    {
+      "repo": "toon",
+      "file": "/home/cyber/Work/reddb.io/toon/vendor/toon/packages/cli/package.json",
+      "name": "@toon-format/cli",
+      "bin": {
+        "toon": "bin/toon.mjs"
+      },
+      "scripts": {
+        "dev": "node ./src/cli-entry.ts --help",
+        "build": "tsdown",
+        "test": "vitest"
+      }
+    },
+    {
+      "repo": "toon",
+      "file": "/home/cyber/Work/reddb.io/toon/vendor/toon/packages/toon/package.json",
+      "name": "@toon-format/toon",
+      "bin": null,
+      "scripts": {
+        "build": "tsdown",
+        "test": "vitest"
+      }
+    },
+    {
+      "repo": "tuiuiu.js",
+      "file": "/home/cyber/Work/tetis/libs/tuiuiu.js/package.json",
+      "name": "tuiuiu.js",
+      "bin": {
+        "tuiuiu": "dist/cli/index.js"
+      },
+      "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "test": "vitest --exclude tests/benchmarks/**",
+        "test:run": "vitest run --exclude tests/benchmarks/**",
+        "test:coverage": "vitest run --coverage --exclude tests/benchmarks/**",
+        "test:watch": "vitest watch",
+        "test:performance": "vitest run tests/core/frame-performance.test.ts tests/core/buffer-perf.test.ts tests/benchmarks/runtime-performance.test.ts tests/benchmarks/runtime-stress.test.ts",
+        "test:performance:stress": "vitest run tests/benchmarks/runtime-stress.test.ts",
+        "test:devx-contracts": "vitest run tests/forms/interactive-state-hooks.test.ts tests/forms/interactive-wave1-state.test.ts tests/forms/interactive-wave2-state.test.ts tests/organisms/interactive-wave2-organisms-state.test.ts tests/integration/residual-interactive-devx.test.ts tests/primitives/scroll.test.ts tests/layout/tabs-mouse.test.ts tests/molecules/data-viz/legend.test.ts tests/components/data-viz.test.ts tests/organisms/scroll-area.test.ts tests/organisms/scroll-list.test.ts tests/organisms/data-table.test.ts",
+        "test:runtime-contracts": "vitest run tests/core/frame.test.ts tests/core/frame-commands.test.ts tests/core/frame-queries.test.ts tests/core/renderer.test.ts tests/core/delta-render.test.ts tests/app/render-loop.test.ts tests/dev-tools/debugger.test.ts tests/dev-tools/inspector-snapshot.test.ts tests/primitives/scroll.test.ts tests/organisms/scroll-area.test.ts tests/layout/tabs-mouse.test.ts tests/layout/scroll-area-mouse.test.ts",
+        "typecheck": "tsc --noEmit",
+        "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+        "docs": "tsx scripts/serve-docs.ts",
+        "docs:gifs": "bash scripts/generate-gifs.sh",
+        "lint": "biome lint src tests scripts",
+        "prepublishOnly": "pnpm run build && node scripts/inject-version.js",
+        "storybook": "tsx src/cli/index.ts storybook",
+        "example": "tsx scripts/examples.ts run",
+        "example:list": "tsx scripts/examples.ts list",
+        "example:counter": "tsx scripts/examples.ts run app-counter",
+        "example:layout": "tsx scripts/examples.ts run app-layout",
+        "example:forms": "tsx scripts/examples.ts run app-forms",
+        "example:dashboard": "tsx scripts/examples.ts run app-dashboard",
+        "example:chat": "tsx scripts/examples.ts run app-chat",
+        "example:invaders": "tsx scripts/examples.ts run tuiuiu-invaders",
+        "example:meteor": "tsx scripts/examples.ts run tuiuiu-meteor",
+        "example:sideblaster": "tsx scripts/examples.ts run tuiuiu-sideblaster",
+        "example:tetris": "tsx scripts/examples.ts run tuiuiu-tetris",
+        "example:snake": "tsx scripts/examples.ts run tuiuiu-snake",
+        "example:runtime-contracts": "tsx scripts/examples.ts run programmatic-runtime-contracts",
+        "storybook:coverage": "tsx scripts/storybook-coverage.ts write",
+        "verify:contracts": "tsx scripts/verify-public-contracts.ts",
+        "validate:devx-contracts": "pnpm test:devx-contracts && pnpm typecheck && pnpm build && pnpm verify:contracts",
+        "validate:runtime-contracts": "pnpm test:runtime-contracts && pnpm typecheck && pnpm build && pnpm verify:contracts"
+      }
+    }
+  ],
+  "exclusions": [
+    "tq: crates/tq/src/main.rs is already Rust, not a TS input",
+    "Web sites, libraries, editor extensions, build tools and ordinary tests/examples are not standalone product binaries",
+    "Redcode embedded TUI/raster/tree-sitter workers belong to the application packaging graph; not independent CLI binaries",
+    "Generated dist aliases mapped to original source; platform variants deduplicated by entry point",
+    "redcode packages/http-recorder builds an ESM library with external packages, not an executable"
+  ],
+  "createdAt": "2026-09-10T18:42:06.642942+00:00",
+  "compilerSourceFingerprint": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "rootsIdentity": {
+    "red-skills": {
+      "head": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+      "gitStatus": ""
+    },
+    "redcode": {
+      "head": "c8ab670fe46bbc0a1319cf0eeecf21a74a816ef6",
+      "gitStatus": " M .github/workflows/test.yml\n M CONTRIBUTING.md\n M README.md\n M bun.lock\n M package.json\n M packages/app/e2e/utils/mock-server.ts\n M packages/app/package.json\n M packages/app/src/components/dialog-goal.tsx\n M packages/app/src/components/session/session-design-preview.test.ts\n M packages/app/src/components/session/session-design-preview.ts\n M packages/app/src/components/session/session-design-tab.tsx\n M packages/app/src/context/language.tsx\n M packages/app/src/i18n/am.ts\n M packages/app/src/i18n/ar.ts\n M packages/app/src/i18n/az.ts\n M packages/app/src/i18n/bg.ts\n M packages/app/src/i18n/bn.ts\n M packages/app/src/i18n/br.ts\n M packages/app/src/i18n/bs.ts\n M packages/app/src/i18n/ca.ts\n M packages/app/src/i18n/cs.ts\n M packages/app/src/i18n/da.ts\n M packages/app/src/i18n/de.ts\n M packages/app/src/i18n/dv.ts\n M packages/app/src/i18n/dz.ts\n M packages/app/src/i18n/el.ts\n M packages/app/src/i18n/en.ts\n M packages/app/src/i18n/es.ts\n M packages/app/src/i18n/et.ts\n M packages/app/src/i18n/fa.ts\n M packages/app/src/i18n/fi.ts\n M packages/app/src/i18n/fo.ts\n M packages/app/src/i18n/fr.ts\n M packages/app/src/i18n/hi.ts\n M packages/app/src/i18n/hr.ts\n M packages/app/src/i18n/hu.ts\n M packages/app/src/i18n/hy.ts\n M packages/app/src/i18n/id.ts\n M packages/app/src/i18n/is.ts\n M packages/app/src/i18n/it.ts\n M packages/app/src/i18n/ja.ts\n M packages/app/src/i18n/ka.ts\n M packages/app/src/i18n/km.ts\n M packages/app/src/i18n/ko.ts\n M packages/app/src/i18n/lo.ts\n M packages/app/src/i18n/lt.ts\n M packages/app/src/i18n/lv.ts\n M packages/app/src/i18n/mk.ts\n M packages/app/src/i18n/mn.ts\n M packages/app/src/i18n/ms.ts\n M packages/app/src/i18n/my.ts\n M packages/app/src/i18n/ne.ts\n M packages/app/src/i18n/nl.ts\n M packages/app/src/i18n/no.ts\n M packages/app/src/i18n/pa.ts\n M packages/app/src/i18n/pl.ts\n M packages/app/src/i18n/ro.ts\n M packages/app/src/i18n/ru.ts\n M packages/app/src/i18n/si.ts\n M packages/app/src/i18n/sk.ts\n M packages/app/src/i18n/sl.ts\n M packages/app/src/i18n/sq.ts\n M packages/app/src/i18n/sr.ts\n M packages/app/src/i18n/sv.ts\n M packages/app/src/i18n/tg.ts\n M packages/app/src/i18n/th.ts\n M packages/app/src/i18n/tk.ts\n M packages/app/src/i18n/tr.ts\n M packages/app/src/i18n/uk.ts\n M packages/app/src/i18n/ur.ts\n M packages/app/src/i18n/uz.ts\n M packages/app/src/i18n/vi.ts\n M packages/app/src/i18n/zh.ts\n M packages/app/src/i18n/zht.ts\n M packages/app/src/pages/session/composer/session-composer-region.tsx\n M packages/app/src/pages/session/composer/session-goal-dock.tsx\n M packages/app/src/pages/session/session-side-panel.tsx\n M packages/app/src/pages/session/use-session-commands.tsx\n M packages/client/src/contract.ts\n M packages/client/src/generated-effect/client.ts\n M packages/client/src/generated/client.ts\n M packages/client/src/generated/types.ts\n M packages/client/test/promise.test.ts\n M packages/core/package.json\n M packages/core/schema.json\n M packages/core/src/config/mcp.ts\n M packages/core/src/cross-spawn-spawner.ts\n M packages/core/src/database/migration.gen.ts\n M packages/core/src/database/schema.gen.ts\n M packages/core/src/image.ts\n M packages/core/src/image/photon.ts\n M packages/core/src/location-mutation.ts\n M packages/core/src/location-services.ts\n M packages/core/src/plugin.ts\n M packages/core/src/plugin/agent.ts\n M packages/core/src/plugin/host.ts\n M packages/core/src/plugin/promise.ts\n M packages/core/src/session/runner/llm.ts\n M packages/core/src/session/runner/publish-llm-event.ts\n M packages/core/src/tool/builtins.ts\n M packages/core/src/tool/registry.ts\n M packages/core/src/tool/tool.ts\n M packages/core/src/v1/config/mcp.ts\n M packages/core/test/agent.test.ts\n M packages/core/test/location-layer.test.ts\n M packages/core/test/location-mutation.test.ts\n M packages/core/test/plugin/fixture.ts\n M packages/core/test/plugin/host.ts\n M packages/core/test/session-runner-tool-events.test.ts\n M packages/core/test/session-runner.test.ts\n M packages/httpapi-codegen/src/index.ts\n M packages/httpapi-codegen/test/generate.test.ts\n M packages/plugin/src/v2/effect/context.ts\n M packages/plugin/src/v2/effect/index.ts\n M packages/plugin/src/v2/promise/context.ts\n M packages/plugin/src/v2/promise/index.ts\n M packages/protocol/src/api.ts\n M packages/protocol/src/groups/session.ts\n M packages/redcode/package.json\n M packages/redcode/script/build.ts\n M packages/redcode/src/agent/agent.ts\n M packages/redcode/src/cli/cmd/run/tool.ts\n M packages/redcode/src/cli/cmd/tui.ts\n M packages/redcode/src/cli/cmd/upgrade.ts\n D packages/redcode/src/design/attachments.ts\n D packages/redcode/src/design/client/artifact.ts\n D packages/redcode/src/design/client/audit.ts\n D packages/redcode/src/design/client/helpers.ts\n D packages/redcode/src/design/export.ts\n M packages/redcode/src/design/feedback.ts\n D packages/redcode/src/design/kinds.ts\n D packages/redcode/src/design/layout-warnings.ts\n D packages/redcode/src/design/lint.ts\n D packages/redcode/src/design/manifest.ts\n D packages/redcode/src/design/playbooks.ts\n D packages/redcode/src/design/registry.ts\n D packages/redcode/src/design/route-path.ts\n D packages/redcode/src/design/sdk.ts\n D packages/redcode/src/design/serve.ts\n D packages/redcode/src/design/shell.ts\n D packages/redcode/src/design/state.ts\n D packages/redcode/src/design/states.ts\n D packages/redcode/src/design/system.ts\n M packages/redcode/src/design/vendor/README.md\n D packages/redcode/src/design/watch.ts\n D packages/redcode/src/design/whiteboard.ts\n M packages/redcode/src/index.ts\n M packages/redcode/src/lsp/client.ts\n M packages/redcode/src/lsp/launch.ts\n M packages/redcode/src/lsp/lsp.ts\n M packages/redcode/src/provider/transform.ts\n M packages/redcode/src/server/routes/instance/httpapi/groups/session.ts\n M packages/redcode/src/server/routes/instance/httpapi/handlers/global.ts\n M packages/redcode/src/server/routes/instance/httpapi/handlers/session.ts\n M packages/redcode/src/server/routes/instance/httpapi/server.ts\n M packages/redcode/src/server/shared/design.ts\n M packages/redcode/src/session/goal-runtime.ts\n M packages/redcode/src/session/goal.ts\n M packages/redcode/src/session/processor.ts\n M packages/redcode/src/session/prompt.ts\n D packages/redcode/src/session/prompt/design-mode.txt\n M packages/redcode/src/session/prompt/plan-mode.txt\n M packages/redcode/src/session/reminders.ts\n M packages/redcode/src/session/session.ts\n D packages/redcode/src/tool/design-exit.txt\n D packages/redcode/src/tool/design-export.ts\n D packages/redcode/src/tool/design-export.txt\n D packages/redcode/src/tool/design-playbook.ts\n D packages/redcode/src/tool/design-playbook.txt\n D packages/redcode/src/tool/design-preview.ts\n D packages/redcode/src/tool/design-preview.txt\n M packages/redcode/src/tool/design.ts\n M packages/redcode/src/tool/plan.ts\n M packages/redcode/src/tool/registry.ts\n M packages/redcode/test/agent/agent.test.ts\n M packages/redcode/test/cli/acp/lifecycle.test.ts\n D packages/redcode/test/design/attachments.test.ts\n D packages/redcode/test/design/client.test.ts\n D packages/redcode/test/design/exit.test.ts\n D packages/redcode/test/design/export.test.ts\n D packages/redcode/test/design/feedback.test.ts\n D packages/redcode/test/design/host.test.ts\n D packages/redcode/test/design/kinds.test.ts\n D packages/redcode/test/design/layout-warnings.test.ts\n D packages/redcode/test/design/lint.test.ts\n D packages/redcode/test/design/manifest.test.ts\n D packages/redcode/test/design/mode.test.ts\n D packages/redcode/test/design/playbooks.test.ts\n D packages/redcode/test/design/preview.test.ts\n D packages/redcode/test/design/registry.test.ts\n D packages/redcode/test/design/route-path.test.ts\n D packages/redcode/test/design/route.test.ts\n D packages/redcode/test/design/sdk.test.ts\n D packages/redcode/test/design/serve.test.ts\n D packages/redcode/test/design/shell.test.ts\n D packages/redcode/test/design/state.test.ts\n D packages/redcode/test/design/states.test.ts\n D packages/redcode/test/design/system.test.ts\n D packages/redcode/test/design/whiteboard.test.ts\n M packages/redcode/test/fixture/lsp/fake-lsp-server.js\n M packages/redcode/test/lsp/index.test.ts\n M packages/redcode/test/lsp/node-options.test.ts\n M packages/redcode/test/patched-dependencies.test.ts\n M packages/redcode/test/provider/provider.test.ts\n M packages/redcode/test/provider/transform.test.ts\n M packages/redcode/test/server/httpapi-exercise/backend.ts\n M packages/redcode/test/server/httpapi-exercise/index.ts\n M packages/redcode/test/session/goal.test.ts\n M packages/redcode/test/session/prompt.test.ts\n M packages/schema/src/index.ts\n M packages/sdk-next/test/embedded.test.ts\n M packages/sdk/js/src/v2/gen/sdk.gen.ts\n M packages/sdk/js/src/v2/gen/types.gen.ts\n M packages/server/package.json\n M packages/server/src/handlers.ts\n M packages/server/src/handlers/session.ts\n M packages/server/src/routes.ts\n M packages/tui/package.json\n M packages/tui/src/app.tsx\n M packages/tui/src/component/prompt/index.tsx\n M packages/tui/src/context/event.ts\n M packages/tui/src/context/sdk.tsx\n M packages/tui/src/context/sync.tsx\n M packages/tui/src/feature-plugins/sidebar/context.tsx\n M packages/tui/src/routes/session/index.tsx\n M packages/tui/test/app-lifecycle.test.tsx\n M packages/tui/test/cli/cmd/tui/sync-fixture.tsx\n M packages/tui/test/cli/tui/use-event.test.tsx\n M packages/tui/test/fixture/tui-sdk.ts\n M script/test-redcode-release-contract.ts\n M script/upstream-ported.txt\n M turbo.json\n?? .changeset/context-performance.md\n?? .changeset/design-browser-toolchain.md\n?? .changeset/design-canonical-builds.md\n?? .changeset/design-goal-localization.md\n?? .changeset/design-native-runtime.md\n?? .changeset/design-review-controls.md\n?? .changeset/design-runtime-boundaries.md\n?? .changeset/design-source-discovery.md\n?? .changeset/design-studio-v2.md\n?? .changeset/design-terminal-session.md\n?? .changeset/design-workspace-metadata.md\n?? .changeset/embedded-request-services.md\n?? .changeset/global-event-handshake.md\n?? .changeset/goal-mode-continuity.md\n?? .changeset/goal-response-validation.md\n?? .changeset/location-alias-permissions.md\n?? .changeset/lsp-node-recovery.md\n?? .changeset/lsp-save-diagnostics.md\n?? .changeset/native-image-feedback.md\n?? .changeset/new-session-direct.md\n?? .changeset/prompt-mode-border.md\n?? .changeset/remove-upgrade-banner.md\n?? .changeset/repair-goal-attempts.md\n?? .changeset/restore-design-tui.md\n?? .changeset/settled-goal-completion.md\n?? .changeset/terminal-cleanup-deadline.md\n?? .changeset/tui-session-lifecycle.md\n?? .changeset/upstream-provider-sync.md\n?? .changeset/windows-whiteboard-fonts.md\n?? .github/actions/setup-playwright/\n?? .red/researches/2026-09-07-cli-quality-audit.md\n?? .red/researches/2026-09-07-goal-modes-comparison.md\n?? packages/app/e2e/smoke/session-goal.spec.ts\n?? packages/app/src/components/session/session-design-mount.ts\n?? packages/app/src/i18n/design-goal-br.ts\n?? packages/app/src/i18n/design-goal.test.ts\n?? packages/app/src/i18n/design-goal.ts\n?? packages/app/src/utils/goal-api.ts\n?? packages/app/test-browser/session-design-mount.test.ts\n?? packages/core/src/database/migration/20260907054831_design_studio.ts\n?? packages/core/src/database/migration/20260908001613_session_goals_plans.ts\n?? packages/core/src/database/migration/20260908015235_goal_review_usage.ts\n?? packages/core/src/design/\n?? packages/core/src/session/goal-completion.ts\n?? packages/core/src/session/goal.sql.ts\n?? packages/core/src/session/goal.ts\n?? packages/core/src/session/plan.ts\n?? packages/core/src/session/progress-context.ts\n?? packages/core/src/tool/design.ts\n?? packages/core/src/tool/external.ts\n?? packages/core/src/tool/goal.ts\n?? packages/core/src/tool/mcp.ts\n?? packages/core/src/tool/plan.ts\n?? packages/core/src/tool/session-evidence.ts\n?? packages/core/test/design-boundaries.test.ts\n?? packages/core/test/design-raster.test.ts\n?? packages/core/test/design-runtime.test.ts\n?? packages/core/test/design-system.test.ts\n?? packages/core/test/design-whiteboard.test.ts\n?? packages/core/test/design.test.ts\n?? packages/core/test/fixture/design-dependencies.ts\n?? packages/core/test/fixture/design-mcp.ts\n?? packages/core/test/goal-runner.test.ts\n?? packages/core/test/image-photon.test.ts\n?? packages/core/test/mcp-design.test.ts\n?? packages/core/test/performance/\n?? packages/core/test/plugin/design-tools.test.ts\n?? packages/core/test/process/cancellation.test.ts\n?? packages/core/test/process/descendant-cancellation.test.ts\n?? packages/core/test/session-goal.test.ts\n?? packages/core/test/tool-goal-plan.test.ts\n?? packages/design/\n?? packages/plugin/src/v2/effect/tools.ts\n?? packages/plugin/src/v2/promise/tools.ts\n?? packages/plugin/src/v2/tools.ts\n?? packages/protocol/src/groups/design.ts\n?? packages/redcode/.scriptc-zod/\n?? packages/redcode/config.json\n?? packages/redcode/scriptc.json\n?? packages/redcode/src/cli/cmd/design.ts\n?? packages/redcode/src/cli/design-command.ts\n?? packages/redcode/src/cli/design-server.ts\n?? packages/redcode/src/cli/design-terminal.ts\n?? packages/redcode/src/cli/worker-path.ts\n?? packages/redcode/src/design/handoff.ts\n?? packages/redcode/src/design/legacy.ts\n?? packages/redcode/src/design/read.ts\n?? packages/redcode/src/design/review-server.ts\n?? packages/redcode/src/design/studio.ts\n?? packages/redcode/test/cli/design-terminal.test.ts\n?? packages/redcode/test/design/tui-studio.test.ts\n?? packages/redcode/test/lsp/client-save.test.ts\n?? packages/redcode/test/lsp/node-options-recovery.test.ts\n?? packages/redcode/test/provider/openai-service-tier.test.ts\n?? packages/redcode/test/server/design-tui.test.ts\n?? packages/redcode/test/server/global-event-handshake.test.ts\n?? packages/redcode/test/server/httpapi-exercise/design-goal.ts\n?? packages/schema/src/design.ts\n?? packages/schema/src/session-goal.ts\n?? packages/schema/src/session-plan.ts\n?? packages/server/bunfig.toml\n?? packages/server/src/handlers/design.ts\n?? packages/server/test/\n?? packages/tui/script/\n?? packages/tui/src/component/dialog-goal-budget.tsx\n?? packages/tui/src/util/mode-transition.ts\n?? packages/tui/src/util/session-navigation.ts\n?? packages/tui/test/cli/cmd/tui/sync-lifecycle.test.tsx\n?? packages/tui/test/cli/tui/sdk-reconnect.test.tsx\n?? packages/tui/test/component/dialog-goal-budget.test.tsx\n?? packages/tui/test/fixture/dialog.tsx\n?? packages/tui/test/new-session.test.tsx\n?? packages/tui/test/util/mode-transition.test.ts\n?? packages/tui/test/util/session-navigation.test.tsx\n?? patches/@ai-sdk%2Fopenai@3.0.88.patch\n?? script/diagnose-terminal.sh\n?? specs/cli-reliability.md\n?? specs/design-goal-localization-br.md\n?? specs/design-goal-localization.md\n?? specs/design/\n?? specs/goal-modes.md\n?? specs/terminal-freeze.md\n?? specs/upstream/\n"
+    },
+    "red-dev": {
+      "head": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+      "gitStatus": ""
+    },
+    "toon": {
+      "head": "d80b8881cd590114f4993c238eb3225831d9ca5d",
+      "gitStatus": ""
+    },
+    "tuiuiu.js": {
+      "head": "87fc4176048c3ec64b461e0b76558f038e16881e",
+      "gitStatus": ""
+    }
+  },
+  "optimization": "release",
+  "preconditions": {
+    "fullGate": "/tmp/scriptc-consolidation-gate-20260910h/gate.json",
+    "redwallMeasurement": "/tmp/scriptc-boundary-redwall-20260910h/completion-runner.json",
+    "requiredMeasurementStatus": "evidence-ready-for-review"
+  }
+}

@@ -184,8 +184,9 @@ pub fn data_view_set(
 pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, offset: f64) {
     let offset = if offset.is_nan() { 0.0 } else { offset.trunc() };
     let target_length = target.with(|data| data.length);
-    let source_values =
-        source.with(|data| data.storage.borrow()[data.offset..data.offset + data.length].to_vec());
+    // Snapshot through the view's storage model before any target write. The
+    // source and target can overlap even when their view handles differ.
+    let source_values = bytes_values(source);
     if offset < 0.0
         || !offset.is_finite()
         || offset > target_length as f64
@@ -193,11 +194,17 @@ pub fn bytes_set_from<T: ByteElement>(target: &JsBytes<T>, source: &JsBytes<T>, 
     {
         throw_range_error("offset is out of bounds".to_owned());
     }
-    target.with(|data| {
-        let start = data.offset + offset as usize;
-        data.storage.borrow_mut()[start..start + source_values.len()]
-            .copy_from_slice(&source_values);
-    });
+    if target.with(|data| data.backing.is_some()) {
+        for (index, value) in source_values.into_iter().enumerate() {
+            bytes_set_usize(target, offset as usize + index, value.to_number());
+        }
+    } else {
+        target.with(|data| {
+            let start = data.offset + offset as usize;
+            data.storage.borrow_mut()[start..start + source_values.len()]
+                .copy_from_slice(&source_values);
+        });
+    }
 }
 
 fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
@@ -208,17 +215,17 @@ fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
                 use std::fmt::Write;
                 let _ = write!(output, "{byte:02x}");
             }
-            Rc::from(output)
+            JsString::from(output)
         }
-        "base64" => Rc::from(bytes_base64_encode(values)),
-        "base64url" => Rc::from(
+        "base64" => JsString::from(bytes_base64_encode(values)),
+        "base64url" => JsString::from(
             bytes_base64_encode(values)
                 .replace('+', "-")
                 .replace('/', "_")
                 .trim_end_matches('=')
                 .to_owned(),
         ),
-        "utf8" | "utf-8" => Rc::from(String::from_utf8_lossy(values).as_ref()),
+        "utf8" | "utf-8" => JsString::from(String::from_utf8_lossy(values).as_ref()),
         "utf16le" => {
             let units: Vec<u16> = values
                 .as_chunks::<2>()
@@ -226,15 +233,15 @@ fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
                 .iter()
                 .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
                 .collect();
-            Rc::from(String::from_utf16_lossy(&units))
+            string_from_utf16(&units)
         }
-        "latin1" => Rc::from(
+        "latin1" => JsString::from(
             values
                 .iter()
                 .map(|byte| char::from(*byte))
                 .collect::<String>(),
         ),
-        "ascii" => Rc::from(
+        "ascii" => JsString::from(
             values
                 .iter()
                 .map(|byte| char::from(*byte & 0x7f))
@@ -243,6 +250,10 @@ fn decode_bytes(values: &[u8], encoding: &str) -> JsString {
         other => throw_type_error(format!("Unknown encoding: {other}")),
     }
 }
+
+#[cfg(test)]
+#[path = "bytes_encoding.test.rs"]
+mod bytes_encoding_tests;
 
 fn bytes_decode_index(index: f64, length: usize) -> usize {
     if index.is_nan() || index <= 0.0 {
@@ -322,7 +333,7 @@ pub fn bytes_to_string_range(
 ) -> JsString {
     let values = bytes_u8_values(bytes);
     let (start, end) = bytes_decode_bounds(values.len(), start, end);
-    decode_bytes(&values[start..end], encoding.as_ref())
+    decode_bytes(&values[start..end], encoding)
 }
 
 pub fn bytes_to_string_checked(bytes: &JsBytes<u8>, encoding: &JsString) -> JsString {
@@ -392,7 +403,7 @@ fn string_decoder_utf8_tail(bytes: &[u8]) -> usize {
 fn string_decoder_base64(values: &[u8], url: bool) -> JsString {
     let output = bytes_base64_encode(values);
     if url {
-        Rc::from(
+        JsString::from(
             output
                 .replace('+', "-")
                 .replace('/', "_")
@@ -400,7 +411,7 @@ fn string_decoder_base64(values: &[u8], url: bool) -> JsString {
                 .to_owned(),
         )
     } else {
-        Rc::from(output)
+        JsString::from(output)
     }
 }
 
@@ -440,14 +451,14 @@ fn string_decoder_utf16_step(pending: f64, chunk: &JsBytes<u8>) -> (JsString, f6
 }
 
 fn string_decoder_step(encoding: &JsString, pending: f64, chunk: &JsBytes<u8>) -> (JsString, f64) {
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "utf16le" => string_decoder_utf16_step(pending, chunk),
         "base64" | "base64url" => {
             let combined = string_decoder_combined(pending, chunk);
             let tail = combined.len() % 3;
             let complete = combined.len() - tail;
             (
-                string_decoder_base64(&combined[..complete], encoding.as_ref() == "base64url"),
+                string_decoder_base64(&combined[..complete], encoding == "base64url"),
                 string_decoder_pack(&combined[complete..]),
             )
         }
@@ -478,7 +489,7 @@ pub fn string_decoder_next(encoding: &JsString, pending: f64, chunk: &JsBytes<u8
 
 pub fn string_decoder_end(encoding: &JsString, pending: f64) -> JsString {
     let pending = string_decoder_unpack(pending);
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "base64" => string_decoder_base64(&pending, false),
         "base64url" => string_decoder_base64(&pending, true),
         "utf16le" => decode_bytes(&pending, "utf16le"),
@@ -574,7 +585,7 @@ fn bytes_base64_encode(values: &[u8]) -> String {
 }
 
 fn buffer_string_bytes(value: &JsString, encoding: &JsString) -> Vec<u8> {
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "hex" => bytes_hex_decode(value),
         "base64" | "base64url" => bytes_base64_decode(value),
         "utf8" | "utf-8" => value.as_bytes().to_vec(),
@@ -591,7 +602,7 @@ pub fn buffer_from_string(value: &JsString, encoding: &JsString) -> JsBytes<u8> 
 pub fn buffer_concat(values: &JsArray<JsBytes<u8>>) -> JsBytes<u8> {
     let mut output = Vec::new();
     values.with(|array| {
-        for bytes in &array.elements {
+        for bytes in array.elements().iter() {
             bytes.with(|data| {
                 output.extend_from_slice(
                     &data.storage.borrow()[data.offset..data.offset + data.length],
@@ -610,7 +621,7 @@ pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u
     let mut output = vec![0; total as usize];
     let mut offset = 0;
     values.with(|array| {
-        for bytes in &array.elements {
+        for bytes in array.elements().iter() {
             if offset == output.len() {
                 break;
             }
@@ -625,7 +636,7 @@ pub fn buffer_concat_len(values: &JsArray<JsBytes<u8>>, total: f64) -> JsBytes<u
 
 pub fn buffer_byte_length_string(value: &JsString, encoding: &JsString) -> f64 {
     let units: Vec<u16> = value.encode_utf16().collect();
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "latin1" | "ascii" => units.len() as f64,
         "utf16le" => (units.len() * 2) as f64,
         "hex" => (units.len() / 2) as f64,

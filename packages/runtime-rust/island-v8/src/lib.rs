@@ -271,7 +271,11 @@ fn string_property(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<v8::Objec
 
 fn error_of(scope: &mut v8::PinScope<'_, '_>, exception: v8::Local<v8::Value>) -> Error {
     let value = Some(Value(v8::Global::new(scope, exception)));
-    if let Ok(object) = v8::Local::<v8::Object>::try_from(exception) {
+    // Ordinary thrown objects keep their handle without invoking getters
+    // for Error-shaped metadata or coercing them through user toString.
+    if exception.is_native_error()
+        && let Ok(object) = v8::Local::<v8::Object>::try_from(exception)
+    {
         let name = string_property(scope, object, "name").unwrap_or_else(|| "Error".to_owned());
         let message = string_property(scope, object, "message").unwrap_or_default();
         let code = string_property(scope, object, "code");
@@ -280,7 +284,7 @@ fn error_of(scope: &mut v8::PinScope<'_, '_>, exception: v8::Local<v8::Value>) -
     }
     Error {
         name: "Error".to_owned(),
-        message: exception.to_rust_string_lossy(scope),
+        message: if exception.is_object() { String::new() } else { exception.to_rust_string_lossy(scope) },
         code: None,
         stack: None,
         value,
@@ -399,83 +403,7 @@ pub fn construct(callee: &Value, args: &[Value]) -> Result<Value, Error> {
     }
 }
 
-/* ── properties ────────────────────────────────────────────────────── */
-
-pub fn get(target: &Value, key: &str) -> Result<Value, Error> {
-    enter!(scope);
-    v8::tc_scope!(let tc, scope);
-    let local = v8::Local::new(tc, &target.0);
-    let Some(object) = local.to_object(tc) else {
-        return Err(Error::text("TypeError", format!("cannot read property '{key}' of {}", local.to_rust_string_lossy(tc))));
-    };
-    let key_local = v8::String::new(tc, key).unwrap_or_else(|| v8::String::empty(tc));
-    match object.get(tc, key_local.into()) {
-        Some(value) => Ok(Value(v8::Global::new(tc, value))),
-        None => Err(caught!(tc)),
-    }
-}
-
-pub fn set(target: &Value, key: &str, value: &Value) -> Result<(), Error> {
-    enter!(scope);
-    v8::tc_scope!(let tc, scope);
-    let local = v8::Local::new(tc, &target.0);
-    let Some(object) = local.to_object(tc) else {
-        return Err(Error::text("TypeError", format!("cannot set property '{key}' of {}", local.to_rust_string_lossy(tc))));
-    };
-    let key_local = v8::String::new(tc, key).unwrap_or_else(|| v8::String::empty(tc));
-    let value_local = v8::Local::new(tc, &value.0);
-    match object.set(tc, key_local.into(), value_local) {
-        Some(_) => Ok(()),
-        None => Err(caught!(tc)),
-    }
-}
-
-pub fn get_index(target: &Value, index: u32) -> Result<Value, Error> {
-    enter!(scope);
-    v8::tc_scope!(let tc, scope);
-    let local = v8::Local::new(tc, &target.0);
-    let Some(object) = local.to_object(tc) else {
-        return Err(Error::text("TypeError", "cannot index a non-object"));
-    };
-    match object.get_index(tc, index) {
-        Some(value) => Ok(Value(v8::Global::new(tc, value))),
-        None => Err(caught!(tc)),
-    }
-}
-
-pub fn set_index(target: &Value, index: u32, value: &Value) -> Result<(), Error> {
-    enter!(scope);
-    v8::tc_scope!(let tc, scope);
-    let local = v8::Local::new(tc, &target.0);
-    let Some(object) = local.to_object(tc) else {
-        return Err(Error::text("TypeError", "cannot index a non-object"));
-    };
-    let value_local = v8::Local::new(tc, &value.0);
-    match object.set_index(tc, index, value_local) {
-        Some(_) => Ok(()),
-        None => Err(caught!(tc)),
-    }
-}
-
-/// The value's own enumerable string keys, in JavaScript order.
-pub fn own_keys(target: &Value) -> Result<Vec<String>, Error> {
-    enter!(scope);
-    v8::tc_scope!(let tc, scope);
-    let local = v8::Local::new(tc, &target.0);
-    let Some(object) = local.to_object(tc) else {
-        return Ok(Vec::new());
-    };
-    let Some(names) = object.get_own_property_names(tc, v8::GetPropertyNamesArgs::default()) else {
-        return Err(caught!(tc));
-    };
-    let mut out = Vec::with_capacity(names.length() as usize);
-    for index in 0..names.length() {
-        if let Some(name) = names.get_index(tc, index) {
-            out.push(name.to_rust_string_lossy(tc));
-        }
-    }
-    Ok(out)
-}
+include!("object_properties.rs");
 
 /* ── values ────────────────────────────────────────────────────────── */
 
@@ -1037,8 +965,7 @@ enum Evaluation<'s> {
 }
 
 /// Instantiates and evaluates `module` (once — a module never evaluates
-/// twice, and no namespace is read below `EvaluatingAsync`, which V8
-/// checks fatally), draining microtasks; Err on a link or evaluation
+/// twice, and namespaces are accessed only once instantiated), draining microtasks; Err on a link or evaluation
 /// failure.
 struct PhaseDepthGuard;
 
@@ -1048,7 +975,7 @@ impl Drop for PhaseDepthGuard {
     }
 }
 
-fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::Local<'s, v8::Module>) -> Result<Evaluation<'s>, Error> {
+fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::Local<'s, v8::Module>, binding: Option<(&str, &str)>) -> Result<Evaluation<'s>, Error> {
     v8::tc_scope!(let tc, scope);
     // Only a ROOT call (not one nested through a host callback) accounts
     // its phases, so dependencies compiled during instantiate and
@@ -1069,6 +996,20 @@ fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::
             return Err(caught!(tc));
         }
     }
+    if let Some((export, specifier)) = binding
+        && matches!(module.get_status(), v8::ModuleStatus::Instantiated | v8::ModuleStatus::Evaluating | v8::ModuleStatus::Evaluated)
+    {
+        // Presence is independent of the binding's value: a valid export
+        // may still be uninitialized here, or explicitly hold undefined.
+        let namespace = v8::Local::<v8::Object>::try_from(module.get_module_namespace())
+            .map_err(|_| Error::text("TypeError", "module namespace is not an object"))?;
+        let name = v8::String::new(tc, export).ok_or_else(|| Error::text("Error", "engine string"))?;
+        match namespace.has(tc, name.into()) {
+            Some(true) => {}
+            Some(false) => return Err(Error::text("SyntaxError", format!("The requested module '{specifier}' does not provide an export named '{export}'"))),
+            None => return Err(caught!(tc)),
+        }
+    }
     if module.get_status() == v8::ModuleStatus::Instantiated {
         let started = std::time::Instant::now();
         let evaluated = module.evaluate(tc);
@@ -1079,8 +1020,15 @@ fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::
             return Err(caught!(tc));
         };
         if let Ok(promise) = v8::Local::<v8::Promise>::try_from(promise_value) {
+            // The loader observes this internal promise and forwards failure
+            // through import()/the host result. Application import promises
+            // remain independently reportable when nobody handles them.
+            promise.mark_as_handled();
             let global = v8::Global::new(tc, promise);
             with_engine(|engine| {
+                // Synchronous evaluation may already have rejected before
+                // mark_as_handled; remove only this exact internal promise.
+                engine.unhandled.retain(|(candidate, _)| *candidate != global);
                 engine.module_promises.insert(key.to_owned(), global);
             });
         }
@@ -1113,13 +1061,22 @@ fn evaluate_module<'s>(scope: &mut v8::PinScope<'s, '_>, key: &str, module: v8::
 /// referrer), evaluating it and everything it reaches. Ok(None) when a
 /// top-level await (or a cycle in progress) left it pending.
 pub fn import_module(key: &str) -> Result<Option<Value>, Error> {
+    import_module_binding(key, None)
+}
+
+/// Validate a static binding after linking and before evaluating its target.
+pub fn import_module_checked(key: &str, export: &str, specifier: &str) -> Result<Option<Value>, Error> {
+    import_module_binding(key, Some((export, specifier)))
+}
+
+fn import_module_binding(key: &str, binding: Option<(&str, &str)>) -> Result<Option<Value>, Error> {
     enter!(scope);
     let source = resolve_source("", key).map_err(|message| Error::text("ReferenceError", message))?;
     let Some(module) = module_for(scope, source) else {
         v8::tc_scope!(let tc, scope);
         return Err(caught!(tc));
     };
-    match evaluate_module(scope, key, module)? {
+    match evaluate_module(scope, key, module, binding)? {
         Evaluation::Done(namespace) => Ok(Some(Value(v8::Global::new(scope, namespace)))),
         Evaluation::Pending(_) | Evaluation::Cycle => Ok(None),
     }
@@ -1350,7 +1307,7 @@ fn import_step(source: &ModuleSource) -> HostResult {
         v8::tc_scope!(let tc, scope);
         return HostResult::Throw(caught!(tc));
     };
-    match evaluate_module(scope, key, module) {
+    match evaluate_module(scope, key, module, None) {
         Err(error) => HostResult::Throw(error),
         Ok(Evaluation::Done(namespace)) => HostResult::Value(Value(v8::Global::new(scope, namespace))),
         Ok(Evaluation::Pending(promise)) => {
@@ -1409,6 +1366,10 @@ fn dynamic_import_callback<'s>(
     let promise = helper.call(scope, v8::undefined(scope).into(), &[step_local])?;
     v8::Local::<v8::Promise>::try_from(promise).ok()
 }
+
+#[cfg(test)]
+#[path = "lib.test.rs"]
+mod module_evaluation_tests;
 
 #[cfg(test)]
 mod tests {

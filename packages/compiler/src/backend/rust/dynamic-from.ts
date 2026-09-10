@@ -1,3 +1,7 @@
+import { rustJsString } from "./string-literals.js";
+import { emitNativeMapFrom } from "./native-map-values.js";
+import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/native-record.js";
+import { emitNativeArrayFrom } from "./native-array-values.js";
 import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField } from "../mangle.js";
@@ -12,8 +16,8 @@ interface DynFromHelper {
   readonly liveRef: boolean;
 }
 
-/** Emits typed-to-dynamic conversions. Canonical maps and Rust's selected
- * scalar-field record views retain identity; other composites copy.
+/** Emits typed-to-dynamic conversions. Canonical maps, scalar map/array views
+ * and selected shared records retain identity; other composites copy.
  *
  * Acyclic shapes stay inline. Recursive composites are interned as named
  * helpers so records, arrays, and unions can call one another without the
@@ -23,7 +27,7 @@ export class RustDynamicFromEmitter {
   private readonly helperNames = new Map<string, string>();
   private readonly helpers: DynFromHelper[] = [];
 
-  constructor(private readonly context: RustDynamicContext) {}
+  constructor(private readonly context: RustDynamicContext, private readonly check: (type: IrType, value: string, loc?: SrcLoc) => string) {}
 
   emit(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     if (this.isRecursiveComposite(type)) {
@@ -88,11 +92,13 @@ export class RustDynamicFromEmitter {
           this.context.unsupported(`dynamic function boxing for '${typeKey(type)}'`, loc);
         }
         if (this.context.usesDynamicInvoke()) {
-          return `sc_dyn_box_function_${shape.index}(${value}, runtime::string("${this.context.rustString(functionName)}"))`;
+          return `sc_dyn_box_function_${shape.index}(${value}, ${rustJsString(functionName, text => this.context.rustString(text))})`;
         }
-        return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, runtime::string("${this.context.rustString(functionName)}"), runtime::map_new())`;
+        return `${name}::${this.context.dynFunctionVariant(shape)}(${value}, ${rustJsString(functionName, text => this.context.rustString(text))}, runtime::map_new())`;
       }
       case "array": {
+        if (nativeArrayViewSupported(type)) return emitNativeArrayFrom(type, value, name,
+          (element, item) => this.emit(element, item, loc), (element, item) => this.check(element, item, loc));
         const source = this.context.nextTemporary();
         const output = this.context.nextTemporary();
         const index = this.context.nextTemporary();
@@ -128,7 +134,7 @@ export class RustDynamicFromEmitter {
   private emitRecord(type: Extract<IrType, { kind: "record" }>, value: string, loc?: SrcLoc, liveRef = false): string {
     const name = this.context.dynTypeName();
     const shape = this.context.records.get(type.shapeId);
-    if (isSharedRecord(shape)) return `${name}::Object((${value}).object)`;
+    if (isSharedRecord(shape)) return `${name}::${shape?.tuple ? "Array" : "Object"}((${value}).object)`;
     if (shape?.tuple) {
       const record = this.context.nextTemporary();
       const output = this.context.nextTemporary();
@@ -146,6 +152,9 @@ export class RustDynamicFromEmitter {
         : "";
       return `{ let ${record} = ${value}; ${guard}let ${output}: runtime::JsArray<${name}> = runtime::array_new(Vec::new()); ${record}.with(|${record}| { ${fields} }); ${liveRef ? `runtime::live_dyn_ref_store(${output}.identity(), ${record}); ` : ""}${name}::Array(${output}) }`;
     }
+    const indexValue = nativeIndexedRecordValue(type, id => this.context.records.get(id), id => this.context.union(id, loc));
+    if (indexValue !== undefined) return emitNativeMapFrom(indexValue, value, name,
+      (element, item) => this.emit(element, item, loc), (element, item) => this.check(element, item, loc));
     if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
       // Open unknown-valued records already store the canonical dynamic
       // map. Boxing changes the tag, not the object or its nested values.
@@ -173,7 +182,7 @@ export class RustDynamicFromEmitter {
         ? `${stored}.as_ref().expect("scriptc: cleared live dynamic record field").clone()`
         : this.context.needsClone(field.type) ? `${stored}.clone()` : stored;
       const dynamic = this.emit(field.type, fieldValue, loc, "", liveRef);
-      return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
+      return `runtime::map_set_by(&${object}, ${rustJsString(field.name, text => this.context.rustString(text))}, ${dynamic}, |left, right| left.as_ref() == right.as_ref());`;
     }).join(" ");
     const overflow = shape.indexValue === undefined ? "" : (() => {
       const source = this.context.nextTemporary();

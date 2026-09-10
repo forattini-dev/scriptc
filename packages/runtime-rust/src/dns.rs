@@ -13,7 +13,7 @@ pub fn dns_lookup(
             string(&format!("getaddrinfo EAI_ADDRFAMILY {hostname}")),
         ))
     } else {
-        (hostname.as_ref(), 0)
+        (hostname.to_utf8_lossy(), 0)
             .to_socket_addrs()
             .ok()
             .and_then(|mut addresses| addresses.find(|address| address.is_ipv4()))

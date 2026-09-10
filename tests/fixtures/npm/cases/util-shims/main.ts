@@ -1,4 +1,5 @@
 // @dynamic
+// @no-deprecation
 // The island's node:util (and node:util/types) shims, differentially
 // against Node: inspect/format/promisify/callbackify/inherits/
 // isDeepStrictEqual/parseArgs/stripVTControlCharacters/styleText/types —

@@ -47,7 +47,8 @@ import type {
   TypeReference,
 } from "typescript/unstable/sync";
 import { walkPreorder } from "./ast.js";
-import { SignatureKind, SyntaxKind, TypeFlags } from "./enums.js";
+import { SignatureKind, SymbolFlags, SyntaxKind, TypeFlags } from "./enums.js";
+import { hasUnpairedSurrogate, Utf16Literals } from "./utf16-literals.js";
 
 /** Array-overload chunk size: large enough that per-request overhead
  * vanishes, small enough to keep any single JSON-RPC payload modest. */
@@ -320,8 +321,18 @@ export class CheckerFacade {
 
   /** 5.9.3's type.getProperty(name). */
   getPropertyOfType(type: Type, name: string): Ts7Symbol | undefined {
-    return this.raw.getPropertyOfType(type, name);
+    // JSON requests cannot encode isolated UTF-16 units. Compare the repaired
+    // local names without sending the invalid Unicode string across the RPC.
+    if (hasUnpairedSurrogate(name)) return this.getPropertiesOfType(type).find((property) => property.name === name);
+    return this.utf16Literals.restore(this.raw.getPropertyOfType(type, name));
   }
+  private readonly utf16Literals = new Utf16Literals(
+    (symbol) => this.declarationsOf(symbol),
+    (node) => {
+      const symbol = this.getSymbolAtLocation(node);
+      return symbol !== undefined && (symbol.flags & SymbolFlags.Alias) !== 0 ? this.getAliasedSymbol(symbol) : symbol;
+    },
+  );
 
   /** The 5.9.3 checker never answered undefined from getTypeAtLocation-
    * family queries (errorType/anyType stood in); the 7 client loosens them
@@ -497,25 +508,25 @@ export class CheckerFacade {
   }
 
   getTypeAtLocation(node: Node): Type {
-    if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
+    if (this.typeAtLocation.has(node)) return this.utf16Literals.restoreType(this.typeAtLocation.get(node), node) ?? this.anyType();
     this.autoPrefetch(node, "types");
-    if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
+    if (this.typeAtLocation.has(node)) return this.utf16Literals.restoreType(this.typeAtLocation.get(node), node) ?? this.anyType();
     const type = this.raw.getTypeAtLocation(node);
     this.typeAtLocation.set(node, type);
-    return type ?? this.anyType();
+    return this.utf16Literals.restoreType(type, node) ?? this.anyType();
   }
 
   getSymbolAtLocation(node: Node): Ts7Symbol | undefined {
-    if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
+    if (this.symbolAtLocation.has(node)) return this.utf16Literals.restore(this.symbolAtLocation.get(node));
     this.autoPrefetch(node, "symbols");
-    if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
+    if (this.symbolAtLocation.has(node)) return this.utf16Literals.restore(this.symbolAtLocation.get(node));
     const symbol = this.raw.getSymbolAtLocation(node);
     this.symbolAtLocation.set(node, symbol);
-    return symbol;
+    return this.utf16Literals.restore(symbol);
   }
 
   getTypeOfSymbol(symbol: Ts7Symbol): Type {
-    if (this.typeOfSymbol.has(symbol)) return this.typeOfSymbol.get(symbol) ?? this.anyType();
+    if (this.typeOfSymbol.has(symbol)) return this.utf16Literals.restoreSymbolType(this.typeOfSymbol.get(symbol), symbol) ?? this.anyType();
     // The direct (memo-miss) path wears the same panic fence as the
     // prefetch sweep: symbols the sweep never saw (members resolved from
     // other files' d.ts) can hit the identical server panics (observed:
@@ -524,7 +535,7 @@ export class CheckerFacade {
     // presented as `any`.
     const [type] = withPanicFence([symbol], (c) => this.raw.getTypeOfSymbol(c));
     this.typeOfSymbol.set(symbol, type);
-    return type ?? this.anyType();
+    return this.utf16Literals.restoreSymbolType(type, symbol) ?? this.anyType();
   }
 
   getAliasedSymbol(symbol: Ts7Symbol): Ts7Symbol {
@@ -562,10 +573,10 @@ export class CheckerFacade {
   }
 
   getTypeFromTypeNode(node: Node): Type {
-    if (this.typeFromTypeNode.has(node)) return this.typeFromTypeNode.get(node) ?? this.anyType();
+    if (this.typeFromTypeNode.has(node)) return this.utf16Literals.restoreType(this.typeFromTypeNode.get(node), node) ?? this.anyType();
     const type = this.raw.getTypeFromTypeNode(node as never);
     this.typeFromTypeNode.set(node, type);
-    return type ?? this.anyType();
+    return this.utf16Literals.restoreType(type, node) ?? this.anyType();
   }
 
   getShorthandAssignmentValueSymbol(node: Node): Ts7Symbol | undefined {
@@ -661,7 +672,7 @@ export class CheckerFacade {
   getPropertiesOfType(type: Type): readonly Ts7Symbol[] {
     let props = this.propertiesOfType.get(type);
     if (props === undefined) {
-      props = this.raw.getPropertiesOfType(type);
+      props = this.raw.getPropertiesOfType(type).map((symbol) => this.utf16Literals.restore(symbol));
       this.propertiesOfType.set(type, props);
     }
     return props;

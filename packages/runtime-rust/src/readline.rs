@@ -2,10 +2,13 @@ struct ReadlineInterface {
     id: u64,
     closed: bool,
     dead: bool,
+    output: bool,
     question: Option<Box<dyn FnOnce(JsString)>>,
     next_line: Option<Box<dyn FnOnce(Option<JsString>)>>,
     close_listeners: Vec<Box<dyn FnOnce()>>,
     buffer: Vec<u8>,
+    iterating: bool,
+    lines: VecDeque<JsString>,
 }
 
 struct ReadlineState {
@@ -20,7 +23,9 @@ thread_local! {
     }) };
 }
 
-pub fn readline_create() -> f64 {
+pub fn readline_create() -> f64 { readline_create_with_output(true) }
+
+pub fn readline_create_with_output(output: bool) -> f64 {
     let dead = !stdin_readline_start();
     READLINE_STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -30,10 +35,13 @@ pub fn readline_create() -> f64 {
             id,
             closed: false,
             dead,
+            output,
             question: None,
             next_line: None,
             close_listeners: Vec::new(),
             buffer: Vec::new(),
+            iterating: false,
+            lines: VecDeque::new(),
         });
         id as f64
     })
@@ -49,16 +57,13 @@ enum ReadlineConsumer {
     Iterator(Box<dyn FnOnce(Option<JsString>)>),
 }
 
-type ReadlineLine = (ReadlineConsumer, JsString);
+type ReadlineLine = (Option<ReadlineConsumer>, JsString);
 
 fn readline_take_line(id: u64) -> Option<ReadlineLine> {
     READLINE_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let interface = state.interfaces.iter_mut().find(|interface| interface.id == id)?;
         if interface.closed {
-            return None;
-        }
-        if interface.question.is_none() && interface.next_line.is_none() {
             return None;
         }
         let (line_length, advance) = interface
@@ -78,7 +83,8 @@ fn readline_take_line(id: u64) -> Option<ReadlineLine> {
             .question
             .take()
             .map(ReadlineConsumer::Question)
-            .or_else(|| interface.next_line.take().map(ReadlineConsumer::Iterator))?;
+            .or_else(|| interface.next_line.take().map(ReadlineConsumer::Iterator));
+        if consumer.is_none() && interface.iterating { interface.lines.push_back(line.clone()); }
         Some((consumer, line))
     })
 }
@@ -86,21 +92,25 @@ fn readline_take_line(id: u64) -> Option<ReadlineLine> {
 fn readline_drain(id: u64) {
     while let Some((consumer, answer)) = readline_take_line(id) {
         match consumer {
-            ReadlineConsumer::Question(callback) => callback(answer),
-            ReadlineConsumer::Iterator(callback) => callback(Some(answer)),
+            Some(ReadlineConsumer::Question(callback)) => callback(answer),
+            Some(ReadlineConsumer::Iterator(callback)) => callback(Some(answer)),
+            None => {},
         }
     }
 }
 
 pub fn readline_next_line(id: f64, callback: Box<dyn FnOnce(Option<JsString>)>) {
     let mut callback = Some(callback);
+    let mut queued = None;
     let live_id = READLINE_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let interface = readline_id(id)
             .and_then(|id| state.interfaces.iter_mut().find(|interface| interface.id == id))?;
-        if interface.closed || interface.dead {
-            return None;
-        }
+        interface.iterating = true;
+        // Closing detaches input, but the iterator still owns events already
+        // received from that input. Drain them before reporting completion.
+        queued = interface.lines.pop_front();
+        if queued.is_some() || interface.closed || interface.dead { return None; }
         if interface.next_line.is_some() {
             throw_error("readline already has a pending async iterator read".to_owned());
         }
@@ -110,12 +120,14 @@ pub fn readline_next_line(id: f64, callback: Box<dyn FnOnce(Option<JsString>)>) 
     if let Some(id) = live_id {
         readline_drain(id);
     } else if let Some(callback) = callback {
-        callback(None);
+        callback(queued);
     }
 }
 
 pub fn readline_question(id: f64, query: &JsString, callback: Box<dyn FnOnce(JsString)>) {
     let id = readline_id(id);
+    let output = READLINE_STATE.with(|state| state.borrow().interfaces.iter()
+        .find(|entry| Some(entry.id) == id).is_some_and(|entry| entry.output));
     let state = READLINE_STATE.with(|readlines| {
         let mut readlines = readlines.borrow_mut();
         let interface = id.and_then(|id| readlines.interfaces.iter_mut().find(|entry| entry.id == id));
@@ -132,10 +144,10 @@ pub fn readline_question(id: f64, query: &JsString, callback: Box<dyn FnOnce(JsS
     match state {
         0 => throw_error("readline was closed".to_owned()),
         1 => {
-            process_stdout_write(query);
+            if output { process_stdout_write(query); }
         }
         _ => {
-            process_stdout_write(query);
+            if output { process_stdout_write(query); }
             readline_drain(id.expect("scriptc: live readline id"));
         }
     }
@@ -158,12 +170,8 @@ fn readline_settle_close(id: u64) {
             std::mem::take(&mut interface.close_listeners),
         )
     });
-    if let Some(next_line) = next_line {
-        next_line(None);
-    }
-    for listener in listeners {
-        listener();
-    }
+    for listener in listeners { listener(); }
+    if let Some(next_line) = next_line { next_line(None); }
 }
 
 pub fn readline_close(id: f64) {
@@ -215,22 +223,31 @@ fn readline_stdin_data(bytes: &[u8]) {
 }
 
 fn readline_stdin_end() {
-    let ids = READLINE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state
-            .interfaces
-            .iter_mut()
-            .filter(|interface| !interface.closed && !interface.dead)
-            .map(|interface| {
-                if !interface.buffer.is_empty() && interface.buffer.last() != Some(&b'\n') {
-                    interface.buffer.push(b'\n');
-                }
-                interface.id
-            })
-            .collect::<Vec<_>>()
-    });
+    let ids = READLINE_STATE.with(|state| state.borrow().interfaces.iter()
+        .filter(|interface| !interface.closed && !interface.dead)
+        .map(|interface| interface.id).collect::<Vec<_>>());
     for id in ids {
-        readline_drain(id);
+        let last = READLINE_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let interface = state.interfaces.iter_mut().find(|interface| interface.id == id)?;
+            if interface.closed || interface.buffer.is_empty() { return None; }
+            let mut bytes = std::mem::take(&mut interface.buffer);
+            let held_cr = bytes.last() == Some(&b'\r');
+            if held_cr { bytes.pop(); }
+            // Node's onend emits the unterminated tail to 'line' listeners,
+            // bypassing question(). A held CR is a real terminator instead.
+            let consumer = if held_cr {
+                interface.question.take().map(ReadlineConsumer::Question)
+            } else { None }.or_else(|| interface.next_line.take().map(ReadlineConsumer::Iterator));
+            let line = string(&String::from_utf8_lossy(&bytes));
+            if consumer.is_none() && interface.iterating { interface.lines.push_back(line.clone()); }
+            Some((consumer, line))
+        });
+        match last {
+            Some((Some(ReadlineConsumer::Question(callback)), line)) => callback(line),
+            Some((Some(ReadlineConsumer::Iterator(callback)), line)) => callback(Some(line)),
+            _ => {},
+        }
         readline_settle_close(id);
     }
 }

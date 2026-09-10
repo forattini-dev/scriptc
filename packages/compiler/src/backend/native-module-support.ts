@@ -1,3 +1,4 @@
+import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { IrModule, SrcLoc } from "../ir/nodes.js";
 import { LlvmUnsupportedError } from "./llvm/unsupported.js";
@@ -9,6 +10,8 @@ export function nativeModuleBackendDiagnostics(
   backend: "c" | "llvm" | "rust",
 ): ScrDiagnostic[] {
   if (backend === "rust") return [];
+  const callableRecords = nativeCallableRecordBackendDiagnostics(mod, backend);
+  if (callableRecords.length > 0) return callableRecords;
   let loc = mod.functions.find((fn) => fn.syncModuleCacheGlobal !== undefined)?.loc;
   const visit = (value: unknown): void => {
     if (loc !== undefined || value === null || typeof value !== "object") return;
@@ -35,7 +38,7 @@ export function assertNativeModuleBackend(mod: IrModule, backend: "c" | "llvm"):
   const diagnostic = nativeModuleBackendDiagnostics(mod, backend)[0];
   if (diagnostic === undefined) return;
   const error = backend === "llvm"
-    ? new LlvmUnsupportedError("module.import", diagnostic.loc)
+    ? new LlvmUnsupportedError(diagnostic.message, diagnostic.loc)
     : new Error(diagnostic.message);
   error.message = diagnostic.message;
   throw error;

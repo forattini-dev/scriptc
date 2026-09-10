@@ -25,7 +25,7 @@ The double-to-shortest-decimal core of Ryū (d2s and its headers only — the fl
 
 The QuickJS-ng JavaScript engine, embedded by the opt-in `--dynamic` build mode (see packages/runtime/src/scr_island.c). Static builds never compile or link any of this.
 
-The tree is a plain snapshot of the upstream commit with directories the library build does not need removed (tests/, docs/, examples/, test262 fixtures, CI config, generator scripts). No vendored file is modified; to update, re-clone upstream at the new commit, delete its .git directory, apply the same trim, and update this file.
+The tree is a snapshot of the upstream commit with directories the library build does not need removed (tests/, docs/, examples/, test262 fixtures, CI config, generator scripts). A local module-link diagnostic patch is documented in `quickjs-ng/PATCHES.md`. To update, re-clone upstream at the new commit, delete its .git directory, apply the same trim, reapply the documented patch, and update this file.
 
 The engine archive (libqjs.a) is prebuilt best-effort during npm installation (or explicitly by `scriptc cache warm`) and otherwise built lazily on the first `--dynamic` compile. It lives under the per-user build cache's `vendor/<commit>-<flavor>-<target>-<toolchain>/` directory — one flavor per lane (plain, asan), native platform/architecture or explicit cross target, and compiler environment/identity.
 

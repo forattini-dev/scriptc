@@ -154,7 +154,7 @@ fn days_from_civil(mut year: i64, month: i32, date: i32) -> f64 {
 }
 
 /// Date.UTC's MakeDay/MakeTime/TimeClip pipeline over numeric arguments.
-pub fn date_utc(
+fn date_components_ms(
     year: f64,
     month: f64,
     date: f64,
@@ -190,12 +190,7 @@ pub fn date_utc(
     let normalized_year = year + month_cycles;
     let normalized_month = (month - month_cycles * 12.0) as i32;
     let days = days_from_civil(normalized_year as i64, normalized_month + 1, 1) + (date - 1.0);
-    let time =
-        days * 86_400_000.0 + hours * 3_600_000.0 + minutes * 60_000.0 + seconds * 1_000.0 + ms;
-    if time.abs() > 8_640_000_000_000_000.0 {
-        return f64::NAN;
-    }
-    if time == 0.0 { 0.0 } else { time }
+    days * 86_400_000.0 + hours * 3_600_000.0 + minutes * 60_000.0 + seconds * 1_000.0 + ms
 }
 
 fn date_make_ms(
@@ -473,16 +468,11 @@ fn date_local_snapshot(seconds: f64) -> Option<(i64, i32, i32, i32, i32, i32)> {
     ))
 }
 
-fn date_local_parts(ms: f64) -> Option<DateParts> {
-    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 {
-        return None;
-    }
-    let clipped = ms.trunc();
-    let seconds = (clipped / 1_000.0).floor();
+fn date_local_offset_seconds(seconds: f64) -> Option<f64> {
     let mut basis_seconds = seconds;
     let mut local = date_local_snapshot(basis_seconds);
     if local.is_none() {
-        let utc = date_utc_parts_unchecked(clipped);
+        let utc = date_utc_parts_unchecked(seconds * 1_000.0);
         let surrogate_year = 2_000 + (utc.year - 2_000).rem_euclid(400);
         basis_seconds = days_from_civil(surrogate_year, utc.month + 1, utc.date) * 86_400.0
             + f64::from(utc.hours) * 3_600.0
@@ -495,7 +485,13 @@ fn date_local_parts(ms: f64) -> Option<DateParts> {
         + f64::from(hours) * 3_600.0
         + f64::from(minutes) * 60.0
         + f64::from(seconds);
-    let local_offset = local_as_utc - basis_seconds;
+    Some(local_as_utc - basis_seconds)
+}
+
+fn date_local_parts(ms: f64) -> Option<DateParts> {
+    if !ms.is_finite() || ms.abs() > 8_640_000_000_000_000.0 { return None; }
+    let clipped = ms.trunc();
+    let local_offset = date_local_offset_seconds((clipped / 1_000.0).floor())?;
     let mut parts = date_utc_parts_unchecked(clipped + local_offset * 1_000.0);
     let timezone_offset = (-local_offset / 60.0).trunc();
     parts.timezone_offset = if timezone_offset == 0.0 {

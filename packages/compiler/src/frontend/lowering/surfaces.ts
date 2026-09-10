@@ -934,7 +934,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // The Buffer form (no encoding), the fd forms (readFileSync(fd[,
     // "utf8"])), and the checked-dynamic encoding form.
     readFileSync: ["fs.readFileSyncBuf", "fs.readFileSyncBytes", "fs.readFileSyncDyn", "fs.readFdSync", "fs.readFdSyncBytes"],
-    // The bytes-data form and both options forms ({ mode }, { flag: "wx", mode }).
+    appendFileSync: ["fs.appendFileModeSync"],
     writeFileSync: ["fs.writeFileSyncBytes", "fs.writeFileModeSync", "fs.writeFileExclusiveModeSync"],
     // The utf8 string overload; the table row is the Buffer-window form.
     writeSync: ["fs.writeStrSync"],
@@ -1005,8 +1005,8 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     id: "stdlib.date.constructor",
     kind: "stdlib",
     name: "Date constructor",
-    fns: ["date.newNow", "date.newMs", "date.newString"],
-    note: "zero arguments, or one milliseconds/date-string argument; values are the read-only TimeClip scalar slice",
+    fns: ["date.newNow", "date.newMs", "date.newString", "date.newComponents"],
+    note: "zero arguments, one milliseconds/date-string argument, or local calendar components; read-only TimeClip values",
   },
   {
     id: "stdlib.date.UTC",

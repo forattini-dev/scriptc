@@ -6,5 +6,7 @@ async function run(): Promise<void> {
   console.log(probed);
   console.log(m.abortShape());
   console.log(m.validated());
+  const surface: string = await m.surface();
+  console.log(surface);
 }
 run();

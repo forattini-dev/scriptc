@@ -1,4 +1,5 @@
-import type { IrModule, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrModule, SrcLoc } from "../../ir/nodes.js";
+import { nativeNumberPredicateInput } from "./island-builtins.js";
 import { hasRustEmbeddedModules } from "./embedded-modules.js";
 
 export type RustRuntimeFeature = "island-eval" | "island-v8" | "sqlite";
@@ -54,6 +55,10 @@ export function rustEngineRequirement(mod: IrModule): { surface: string; loc: Sr
     ) {
       requirement = { surface: `operation '${String(node.fn)}'`, loc: node.loc ?? entryLoc };
       return;
+    }
+    if (node.kind === "jsOp") {
+      const nativeInput = nativeNumberPredicateInput(value as Extract<IrExpr, { kind: "jsOp" }>);
+      if (nativeInput !== null) { visit(nativeInput); return; }
     }
     if (node.kind === "jsOp" && node.op === "globalGet") {
       requirement = { surface: "an engine global lookup", loc: node.loc ?? entryLoc };

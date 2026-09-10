@@ -96,7 +96,7 @@ enum EffectNode {
     ZipRight(JsEffect, JsEffect),
     Gen(GenFn, TraceFn),
     /// A service key: run, it looks the service up in the fiber's environment (`yield* Service`).
-    ServiceKey(Rc<str>),
+    ServiceKey(JsString),
     /// `Effect.provideService` / a built layer's bundle provided to the inner effect.
     ProvideBundle(JsEffect, Bundle),
     /// Restore the exact service context captured by a finalizer.
@@ -140,13 +140,13 @@ enum EffectNode {
 }
 
 /// The services a layer answers / a provide installs: `(key, value)` pairs, later entries shadowing earlier ones.
-pub type Bundle = Rc<Vec<(Rc<str>, EffectValue)>>;
+pub type Bundle = Rc<Vec<(JsString, EffectValue)>>;
 
 #[derive(Clone)]
 pub enum LayerNode {
     Empty,
-    Succeed(Rc<str>, EffectValue),
-    Effect(Rc<str>, JsEffect),
+    Succeed(JsString, EffectValue),
+    Effect(JsString, JsEffect),
     /// `Layer.effectDiscard(effect)`: runs the effect for its effects, provides nothing.
     EffectDiscard(JsEffect),
     /// `Layer.provide(outer, inner)`: inner's services feed outer's build and stay hidden; `provideMerge` keeps them.
@@ -307,7 +307,7 @@ pub fn effect_try_promise(thunk: PromiseFn, recover: RecoverFn, trace: TraceFn) 
     effect_new(EffectNode::TryPromise(thunk, recover, trace))
 }
 
-fn key_of(handle: &JsEffect) -> Rc<str> {
+fn key_of(handle: &JsEffect) -> JsString {
     handle.with(|data| match &data.node {
         EffectNode::ServiceKey(key) => key.clone(),
         _ => throw_error("scriptc: a service key was expected".to_owned()),
@@ -315,7 +315,7 @@ fn key_of(handle: &JsEffect) -> Rc<str> {
 }
 
 pub fn effect_service_key(id: &JsString) -> JsEffect {
-    effect_new(EffectNode::ServiceKey(Rc::from(id.as_ref())))
+    effect_new(EffectNode::ServiceKey(id.clone()))
 }
 
 pub fn effect_provide_service(source: &JsEffect, key: &JsEffect, value: EffectValue) -> JsEffect {
@@ -546,7 +546,7 @@ fn bundle_of(value: &EffectValue) -> Bundle {
 }
 
 fn bundle_join(left: &Bundle, right: &Bundle) -> EffectValue {
-    let mut joined: Vec<(Rc<str>, EffectValue)> = Vec::with_capacity(left.len() + right.len());
+    let mut joined: Vec<(JsString, EffectValue)> = Vec::with_capacity(left.len() + right.len());
     joined.extend(left.iter().cloned());
     joined.extend(right.iter().cloned());
     Rc::new(Rc::new(joined) as Bundle)
@@ -617,7 +617,7 @@ enum Frame {
     Gen(Box<dyn EffectGen>),
     /// Leave a provide scope: drop this many environment entries.
     PopEnv(usize),
-    RestoreEnv(Vec<(Rc<str>, EffectValue)>),
+    RestoreEnv(Vec<(JsString, EffectValue)>),
     /// A collection in progress: the next index to run, the values so far, the source and the collector.
     Collect(usize, Vec<EffectValue>, CollectSource, CollectFn),
     /// `tap`: run the callback's effect, then restore the value; `tapError` the same on the failure.
@@ -669,7 +669,7 @@ enum Step {
     Done(Outcome),
     Push(Frame, JsEffect),
     /// Look a service up (`yield* Service`).
-    Lookup(Rc<str>),
+    Lookup(JsString),
     /// Enter a provide scope with these services, then run the inner effect.
     Enter(Bundle, JsEffect),
     ReplaceEnv(Bundle, JsEffect),
@@ -716,7 +716,7 @@ pub struct EffectFiber {
     resumed: Option<Outcome>,
     frames: Vec<Frame>,
     /// The services in scope, innermost provide last.
-    env: Vec<(Rc<str>, EffectValue)>,
+    env: Vec<(JsString, EffectValue)>,
     /// Open scopes' finalizers, innermost last (each in registration order).
     scopes: Vec<Vec<FinalizerFn>>,
     id: u64,

@@ -3,8 +3,15 @@
  * against the in-container Linux Node oracle. The fixture node_modules
  * are COMMITTED TEST DATA; binaries embed the package sources at build
  * time, the Node lane resolves them from the repo mount. */
-import { globSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
+/** Same explicit opt-in as the corpus: only deprecated-API notices are
+ * disabled in the Node oracle. All captured stderr remains byte-exact. */
+export function npmOracleFlags(entry: string): string[] {
+  return readFileSync(entry, "utf8").split("\n", 4).some(line => /^\/\/ @no-deprecation\s*$/.test(line))
+    ? ["--no-deprecation"] : [];
+}
 
 export type NpmLane = "c" | "llvm" | "rust";
 
@@ -15,6 +22,8 @@ export interface NpmCase {
   argvs?: string[][];
   /** Lanes the case is valid on; absent means every lane. */
   lanes?: readonly NpmLane[];
+  /** Intentional startup failure: Node renders a stack; native renders one fatal line. */
+  fatalLink?: string;
 }
 
 /* Cases whose HOST SURFACE only one island answers today. A case listed
@@ -34,6 +43,14 @@ const LANE_ONLY: Readonly<Record<string, readonly NpmLane[]>> = {
   "http-server-raw-island": ["rust"],
 };
 
+// Exact causes for programs intentionally rejected before entry evaluation.
+// These contracts do not normalize stderr for ordinary npm programs.
+const FATAL_LINKS: Readonly<Record<string, string>> = {
+  "esm-missing-default": "SyntaxError: The requested module 'phantomdts' does not provide an export named 'default'",
+  "esm-missing-export": "SyntaxError: The requested module 'condsplit' does not provide an export named 'webOnly'",
+  "cjs-lexer-invisible": "SyntaxError: The requested module 'lexzoo/getters.js' does not provide an export named 'hidden'",
+};
+
 /** `backend` selects the measured lane; legacy callers omit it for C.
  * The primary npm harness passes Rust explicitly. */
 export function npmCases(fixturesRoot: string, backend?: NpmLane): NpmCase[] {
@@ -50,7 +67,8 @@ export function npmCases(fixturesRoot: string, backend?: NpmLane): NpmCase[] {
       .map((entry) => {
         const name = entry.split("/").at(-2)!;
         const lanes = LANE_ONLY[name];
-        return lanes === undefined ? { name, entry } : { name, entry, lanes };
+        const fatalLink = FATAL_LINKS[name];
+        return { name, entry, ...(lanes === undefined ? {} : { lanes }), ...(fatalLink === undefined ? {} : { fatalLink }) };
       }),
     {
       // THE acceptance test: a calculator CLI on the real commander package

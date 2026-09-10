@@ -1,3 +1,4 @@
+import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 /* The lib-boundary pass: the checked-coercion chokepoint between lowered
  * statements and the validator's libCall/intrinsic signature tables.
  *
@@ -48,7 +49,7 @@ import { unionMismatchDiag, unsupportedDiag } from "../../diagnostics/diagnostic
  * callback flowing into setTimeout's `() => void` slot adapts through
  * the per-target shim). */
 function dynCheckable(L: Lowerer, want: IrType): boolean {
-  if (L.jsonSafe(want)) return true;
+  if (L.jsonSafe(want) || nativeRecordCheckSupported(want, id => L.shapes.get(id), id => L.unions.get(id))) return true;
   if (want.kind === "bytes" && want.elem === "u8") return true;
   if (want.kind === "object" && want.className === "%Error") return true;
   if (want.kind === "func") {

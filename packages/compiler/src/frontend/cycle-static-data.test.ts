@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import * as ts from "./ts7/adapter.js";
 import { ambientDtsPath, fallbackDtsPath } from "./program.js";
-import { externalStaticDataPropertyInitializer } from "./cycle-static-data.js";
+import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js";
 
 interface FixtureWorld {
   dir: string;
@@ -66,7 +66,7 @@ export const dynamic = TABLE[dynamicKey].maxBytes;
   return world;
 }
 
-function initializerFor(exportedName: string): ts.Expression | null {
+function preinitializedRead(exportedName: string, includeRegistry = false): boolean {
   const fixture = fixtureWorld();
   const consumer = fixture.program.getSourceFile(
     fixture.files.find((file) => file.endsWith("consumer.ts"))!,
@@ -79,16 +79,26 @@ function initializerFor(exportedName: string): ts.Expression | null {
   );
   const expression = statement?.declarationList.declarations[0]?.initializer;
   if (expression === undefined) throw new Error(`missing fixture expression ${exportedName}`);
-  return externalStaticDataPropertyInitializer(fixture.checker, expression);
+  const cycle = new Set([consumer]);
+  if (includeRegistry) {
+    const registry = fixture.program.getSourceFile(fixture.files.find(file => file.endsWith("registry.ts"))!);
+    if (registry === undefined) throw new Error("missing registry source");
+    cycle.add(registry);
+  }
+  return isPreinitializedDataPropertyRead(fixture.checker, expression, cycle);
 }
 
-test("finds exact leaves in an imported const data table", () => {
-  expect(initializerFor("maxBytes")?.getText()).toBe("4 * MIB");
-  expect(initializerFor("targetRatio")?.getText()).toBe("TARGET");
+test("admits runtime data reads initialized outside the cycle", () => {
+  expect(preinitializedRead("maxBytes")).toBe(true);
+  expect(preinitializedRead("targetRatio")).toBe(true);
+});
+
+test("does not treat a cycle member's data as preinitialized", () => {
+  expect(preinitializedRead("maxBytes", true)).toBe(false);
 });
 
 test("rejects getters, spreads, and dynamic keys", () => {
-  expect(initializerFor("getter")).toBeNull();
-  expect(initializerFor("spread")).toBeNull();
-  expect(initializerFor("dynamic")).toBeNull();
+  expect(preinitializedRead("getter")).toBe(false);
+  expect(preinitializedRead("spread")).toBe(false);
+  expect(preinitializedRead("dynamic")).toBe(false);
 });

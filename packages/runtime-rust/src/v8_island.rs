@@ -51,13 +51,23 @@ fn v8_trace() -> bool {
 /* ── errors ────────────────────────────────────────────────────────── */
 
 fn v8_caught(error: &v8e::Error) -> Caught {
-    // A thrown primitive (`throw "reason"`) exits as a string-valued
-    // Caught, exactly as the boa lane and the C island answer it; only
-    // objects become native errors.
-    if let Some(value) = &error.value
-        && !v8e::is_object(value)
-    {
-        return caught_value(string(&error.message));
+    if let Some(value) = &error.value {
+        if let Some(number) = v8e::as_number(value) {
+            return caught_value(number);
+        }
+        if let Some(boolean) = v8e::as_bool(value) {
+            return caught_value(boolean);
+        }
+        if v8e::type_of(value) == "string" {
+            // JSON scalar escaping preserves lone UTF-16 surrogates, unlike
+            // the engine's UTF-8 display string stored in error.message.
+            let text = island_json(&IslandValue(value.clone()));
+            return caught_value(json_parse_typed::<JsString>(&text));
+        }
+        if !v8e::is_native_error(value) {
+            // Nullish values and arbitrary thrown objects remain values.
+            return caught_value(IslandValue(value.clone()));
+        }
     }
     caught_value(JsError {
         identity: Rc::new(()),
@@ -67,6 +77,19 @@ fn v8_caught(error: &v8e::Error) -> Caught {
         cause: None,
         dom: None,
     })
+}
+
+fn v8_value_of_caught(caught: &Caught) -> Option<v8e::Value> {
+    if let Some(value) = caught.value.downcast_ref::<IslandValue>() {
+        return Some(value.0.clone());
+    }
+    if let Some(value) = caught.value.downcast_ref::<JsString>() {
+        return Some(ok(v8e::json_parse(&json_stringify(value))));
+    }
+    if let Some(value) = caught.value.downcast_ref::<f64>() {
+        return Some(v8e::number(*value));
+    }
+    caught.value.downcast_ref::<bool>().map(|value| v8e::boolean(*value))
 }
 
 /// An engine failure thrown into static code.
@@ -90,12 +113,15 @@ fn ok<T>(result: Result<T, v8e::Error>) -> T {
 /// A caught scriptc error as the engine's error (name, message, code).
 fn v8_error_of_caught(caught: &Caught) -> v8e::Error {
     if !caught_is_error(caught) {
+        let value = v8_value_of_caught(caught);
         return v8e::Error {
             name: "Error".to_owned(),
-            message: caught_to_string(caught).to_string(),
+            // An actual thrown value needs no diagnostic coercion here:
+            // its toString may have effects or throw another exception.
+            message: if value.is_some() { String::new() } else { caught_to_string(caught).to_string() },
             code: None,
             stack: None,
-            value: None,
+            value,
         };
     }
     v8e::Error {
@@ -144,11 +170,11 @@ fn helper(name: &'static str, source: &str) -> v8e::Value {
 }
 
 fn js_string(value: &JsString) -> v8e::Value {
-    v8e::string(value.as_ref())
+    v8e::string(value)
 }
 
 fn js_string_of(value: &v8e::Value) -> JsString {
-    Rc::from(ok(v8e::to_string(value)).as_str())
+    JsString::from(ok(v8e::to_string(value)).as_str())
 }
 
 fn string_array(values: &JsArray<JsString>) -> v8e::Value {
@@ -166,7 +192,7 @@ fn arg_string(args: &[v8e::Value], index: usize) -> Result<String, v8e::Error> {
 }
 
 fn arg_js_string(args: &[v8e::Value], index: usize) -> Result<JsString, v8e::Error> {
-    Ok(Rc::from(arg_string(args, index)?.as_str()))
+    Ok(JsString::from(arg_string(args, index)?.as_str()))
 }
 
 fn arg_number(args: &[v8e::Value], index: usize) -> Result<f64, v8e::Error> {
@@ -194,7 +220,7 @@ fn arg_strings(args: &[v8e::Value], index: usize) -> Result<JsArray<JsString>, v
     if v8e::is_array(&value) {
         let length = v8e::to_number(&v8e::get(&value, "length")?)? as usize;
         for i in 0..length {
-            out.push(Rc::from(v8e::to_string(&v8e::get_index(&value, i as u32)?)?.as_str()));
+            out.push(JsString::from(v8e::to_string(&v8e::get_index(&value, i as u32)?)?.as_str()));
         }
     }
     Ok(array_new(out))
@@ -489,12 +515,16 @@ fn v8_resolve(referrer: &str, specifier: &str) -> Result<v8e::ModuleSource, Stri
     Err(format!("cannot resolve module '{specifier}' from '{referrer}' (scriptc embeds npm code at build time)"))
 }
 
-fn v8_namespace(key: &str) -> v8e::Value {
+fn v8_namespace(key: &str, binding: Option<(&str, &str)>) -> v8e::Value {
     v8_ensure();
     if v8_trace() {
         eprintln!("scriptc island: evaluate {key}");
     }
-    match v8e::import_module(key) {
+    let result = match binding {
+        Some((export, specifier)) => v8e::import_module_checked(key, export, specifier),
+        None => v8e::import_module(key),
+    };
+    match result {
         Ok(Some(namespace)) => namespace,
         Ok(None) => throw_error_code(
             format!("Embedded module '{key}' did not finish evaluating"),
@@ -505,11 +535,16 @@ fn v8_namespace(key: &str) -> v8e::Value {
 }
 
 pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
-    let namespace = v8_namespace(key.as_ref());
-    if export.as_ref() == "*" {
+    island_import_named(key, export, key)
+}
+
+pub fn island_import_named(key: &JsString, export: &JsString, specifier: &JsString) -> IslandValue {
+    let binding: Option<(&str, &str)> = if export == "*" { None } else { Some((export, specifier)) };
+    let namespace = v8_namespace(key, binding);
+    if export == "*" {
         return IslandValue(namespace);
     }
-    IslandValue(ok(v8e::get(&namespace, export.as_ref())))
+    IslandValue(ok(v8e::get(&namespace, export)))
 }
 
 /// `import(key)` as the engine's own promise (a failure rejects it).
@@ -528,7 +563,7 @@ pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
         let error = v8e::error("Error", &message, Some(code));
         IslandValue(ok(v8e::call(&reject, None, &[error])))
     };
-    let Ok(url) = url::Url::parse(specifier.as_ref()) else {
+    let Ok(url) = url::Url::parse(specifier) else {
         return failure(format!("Only file: URLs can be imported at runtime: '{specifier}'"), "ERR_UNSUPPORTED_ESM_URL_SCHEME");
     };
     if url.scheme() != "file" {
@@ -539,7 +574,7 @@ pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
     };
     let key = path.to_string_lossy().into_owned();
     V8_EXTERNAL.with(|external| external.borrow_mut().insert(key.clone()));
-    island_import_dyn(&Rc::from(key.as_str()))
+    island_import_dyn(&JsString::from(key.as_str()))
 }
 
 pub fn island_register_modules(modules: &'static [IslandModule]) {
@@ -607,12 +642,12 @@ pub fn island_value_object(fields: Vec<(JsString, IslandValue)>) -> IslandValue 
 
 pub fn island_value_json(value: &JsString) -> IslandValue {
     v8_ensure();
-    IslandValue(ok(v8e::json_parse(value.as_ref())))
+    IslandValue(ok(v8e::json_parse(value)))
 }
 
 pub fn island_value_regexp(source: &JsString, flags: &JsString) -> IslandValue {
     v8_ensure();
-    IslandValue(ok(v8e::regexp(source.as_ref(), flags.as_ref())))
+    IslandValue(ok(v8e::regexp(source, flags)))
 }
 
 pub fn island_value_date(ms: f64) -> IslandValue {
@@ -622,6 +657,10 @@ pub fn island_value_date(ms: f64) -> IslandValue {
 
 pub fn island_value_error(caught: &Caught) -> IslandValue {
     v8_ensure();
+    // Promise rejection reasons are values, not necessarily Error objects.
+    if let Some(value) = v8_value_of_caught(caught) {
+        return IslandValue(value);
+    }
     let error = v8_error_of_caught(caught);
     IslandValue(v8e::error(&error.name, &error.message, error.code.as_deref()))
 }
@@ -646,7 +685,7 @@ pub fn island_host_argument_value(arguments: &[IslandHostArgument], index: usize
 pub fn island_host_argument_string(arguments: &[IslandHostArgument], index: usize) -> JsString {
     let value = island_host_argument_value(arguments, index);
     match v8e::as_string(&value.0) {
-        Some(text) => Rc::from(text.as_str()),
+        Some(text) => JsString::from(text.as_str()),
         None => throw_type_error(format!("expected string at $, got {}", v8e::type_of(&value.0))),
     }
 }
@@ -707,6 +746,33 @@ pub fn island_value_host_function(arity: usize, callback: IslandHostCallback) ->
 
 /* ── the promise bridge ────────────────────────────────────────────── */
 
+// Called only between native callbacks. Engine jobs can enqueue native
+// microtasks/nextTicks, which must run before either rejection ledger reports.
+fn v8_run_checkpoint() {
+    if V8_BOOTED.with(Cell::get) {
+        v8e::run_microtasks();
+    }
+}
+
+// The native ledger gets first refusal. A native promise exported to JS is
+// observed by the bridge; the derived engine promise owns its rejection.
+// Reporting only native promises therefore silently loses orphaned actions.
+fn v8_report_unhandled_rejections() {
+    if !V8_BOOTED.with(Cell::get) { return; }
+    for (_, reason) in v8e::take_unhandled_rejections() {
+        // Match the existing deliberately dormant WebAssembly stub contract.
+        if v8e::is_object(&reason)
+            && v8e::get(&reason, "__scr_wasm_stub").is_ok_and(|marker| v8e::truthy(&marker))
+        {
+            continue;
+        }
+        let message = v8e::to_string(&reason).unwrap_or_else(|_| "[object]".to_owned());
+        eprintln!("UnhandledPromiseRejection: {message}");
+        UNHANDLED_REJECTION.with(|flag| flag.set(true));
+        break;
+    }
+}
+
 pub fn island_promise_bridge<T, F>(value: &IslandValue, map: F) -> JsPromise<T>
 where
     T: HeapValue,
@@ -742,7 +808,7 @@ where
 
 pub fn island_eval(code: &JsString) -> JsString {
     v8_ensure();
-    let value = ok(v8e::eval(code.as_ref(), "scriptc:eval"));
+    let value = ok(v8e::eval(code, "scriptc:eval"));
     js_string_of(&value)
 }
 
@@ -795,6 +861,10 @@ pub fn island_construct(callee: &IslandValue, args: &[IslandValue]) -> IslandVal
 
 pub fn island_instance_of(value: &IslandValue, target: &IslandValue) -> bool {
     ok(v8e::instance_of(&value.0, &target.0))
+}
+
+pub fn island_copy_data_properties(target: &IslandValue, source: &IslandValue) {
+    ok(v8e::copy_data_properties(&target.0, &source.0));
 }
 
 pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
@@ -863,7 +933,7 @@ pub fn island_strict_equal_number(value: &IslandValue, other: f64) -> bool {
 }
 
 pub fn island_strict_equal_string(value: &IslandValue, other: &JsString) -> bool {
-    v8e::as_string(&value.0).as_deref() == Some(other.as_ref())
+    v8e::as_string(&value.0).as_deref() == Some(other)
 }
 
 pub fn island_iter_new(value: &IslandValue) -> IslandValue {

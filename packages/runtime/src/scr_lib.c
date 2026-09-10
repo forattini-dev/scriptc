@@ -141,6 +141,10 @@ static void scr_lib_cleanup(void) {
  * audit's bar). */
 static bool scr_lib_same_executable_path(const char *a, const char *b) {
   if (strcmp(a, b) == 0) return true;
+#ifdef __wasi__
+  /* WASI has no host executable identity or process-spawning API. */
+  return false;
+#else
   char resolved_a[PATH_MAX], resolved_b[PATH_MAX];
 #ifdef _WIN32
   const char *use_a = _fullpath(resolved_a, a, sizeof resolved_a) != NULL ? resolved_a : a;
@@ -150,6 +154,7 @@ static bool scr_lib_same_executable_path(const char *a, const char *b) {
   const char *use_a = realpath(a, resolved_a) != NULL ? resolved_a : a;
   const char *use_b = realpath(b, resolved_b) != NULL ? resolved_b : b;
   return strcmp(use_a, use_b) == 0;
+#endif
 #endif
 }
 
@@ -295,10 +300,14 @@ ScrStr *scr_process_exec_path(void) {
     if (raw[0] == '\0' && scr_lib_argc > 0) {
       snprintf(raw, sizeof(raw), "%s", scr_lib_argv[0]);
     }
-    char resolved[PATH_MAX];
 #ifdef _WIN32
+    char resolved[PATH_MAX];
     const char *use = _fullpath(resolved, raw, sizeof resolved) != NULL ? resolved : raw;
+#elif defined(__wasi__)
+    /* The host supplies the module's path in the guest namespace as argv[0]. */
+    const char *use = raw;
 #else
+    char resolved[PATH_MAX];
     const char *use = realpath(raw, resolved) != NULL ? resolved : raw;
 #endif
     scr_exec_path_str = scr_str_new(use, strlen(use));
@@ -1682,7 +1691,11 @@ ScrStr *scr_fs_read_file(ScrStr *path) {
 }
 
 ScrStr *scr_fs_realpath(ScrStr *path) {
-#ifdef _WIN32
+#ifdef __wasi__
+  /* wasi-libc cannot canonicalize a path against a host filesystem root. */
+  scr_fs_throw(ENOSYS, "realpath", path);
+  return NULL;
+#elif defined(_WIN32)
   /* _fullpath resolves . / .. and drive-relative forms (symlink-free —
    * the honest Windows approximation); a missing path throws Node's
    * lstat-spelled ENOENT like the POSIX arm. */
@@ -1780,6 +1793,10 @@ void scr_fs_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode) {
   scr_fs_write_file_open_mode(path, data, mode, O_EXCL);
 }
 
+void scr_fs_append_file_mode(ScrStr *path, ScrStr *data, double mode, bool exclusive) {
+  scr_fs_write_file_open_mode(path, data, mode, O_APPEND | (exclusive ? O_EXCL : 0));
+}
+
 void scr_fs_append_file(ScrStr *path, ScrStr *data) {
   scr_fs_write_common(path, data, "ab");
 }
@@ -1806,7 +1823,12 @@ void scr_fs_unlink(ScrStr *path) {
 }
 
 void scr_fs_chmod(ScrStr *path, double mode) {
+#ifdef __wasi__
+  (void)mode;
+  scr_fs_throw(ENOSYS, "chmod", path);
+#else
   if (chmod(path->data, (mode_t)mode) != 0) scr_fs_throw(errno, "chmod", path);
+#endif
 }
 
 void scr_fs_chown(ScrStr *path, double uid, double gid) {
@@ -3364,7 +3386,9 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
       case DT_DIR: kind = 2; break;
       case DT_LNK: kind = 3; break;
       case DT_FIFO: kind = 4; break;
+#ifdef DT_SOCK
       case DT_SOCK: kind = 5; break;
+#endif
       case DT_CHR: kind = 6; break;
       case DT_BLK: kind = 7; break;
       default: { /* DT_UNKNOWN: the lstat fallback */
@@ -4553,7 +4577,7 @@ double scr_date_parse_get_time(ScrStr *s) {
  * month to ±1e7 before normalizing the month (kMaxYear/kMinYear and
  * kMaxMonth/kMinMonth, date.h); Node answers NaN past either bound even
  * when the two inputs would normalize back into range. Never throws. */
-double scr_date_utc(double y, double mo, double d,
+static double scr_date_components_ms(double y, double mo, double d,
                     double h, double mi, double s, double ms) {
   if (!isfinite(y) || !isfinite(mo) || !isfinite(d) || !isfinite(h) ||
       !isfinite(mi) || !isfinite(s) || !isfinite(ms)) {
@@ -4572,8 +4596,7 @@ double scr_date_utc(double y, double mo, double d,
   int mn = (int)(mo - floor(mo / 12.0) * 12.0); /* 0..11 */
   double days = scr_days_from_civil((long long)ym, mn + 1, 1) + (d - 1.0);
   double t = days * 86400000.0 + h * 3600000.0 + mi * 60000.0 + s * 1000.0 + ms;
-  if (fabs(t) > 8640000000000000.0) return NAN; /* TimeClip */
-  return t == 0 ? 0 : t; /* normalize -0 (TimeClip's +0) */
+  return t;
 }
 
 /* ── Date calendar getters ────────────────────────────────────────────
@@ -4635,10 +4658,7 @@ static bool scr_date_localtime(double secd, struct tm *out) {
 #endif
 }
 
-static bool scr_date_local_parts(double ms, ScrDateParts *out) {
-  if (!isfinite(ms) || fabs(ms) > 8640000000000000.0) return false;
-  double clipped = trunc(ms);
-  double secd = floor(clipped / 1000.0);
+static bool scr_date_local_offset(double secd, double *out) {
   struct tm tmv;
   double basis_secd = secd;
   if (!scr_date_localtime(basis_secd, &tmv)) {
@@ -4649,7 +4669,7 @@ static bool scr_date_local_parts(double ms, ScrDateParts *out) {
      * every valid Date finite; the OS-vs-Node historical-rule difference
      * remains the documented timezone-data divergence. */
     ScrDateParts utc;
-    scr_date_utc_parts_unchecked(clipped, &utc);
+    scr_date_utc_parts_unchecked(secd * 1000.0, &utc);
     long long cycle_year = (utc.year - 2000) % 400;
     if (cycle_year < 0) cycle_year += 400;
     long long surrogate_year = 2000 + cycle_year;
@@ -4667,11 +4687,42 @@ static bool scr_date_local_parts(double ms, ScrDateParts *out) {
   double local_as_utc =
     scr_days_from_civil((long long)tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday) * 86400.0 +
     tmv.tm_hour * 3600.0 + tmv.tm_min * 60.0 + tmv.tm_sec;
-  double local_offset = local_as_utc - basis_secd;
+  *out = local_as_utc - basis_secd;
+  return true;
+}
+
+static bool scr_date_local_parts(double ms, ScrDateParts *out) {
+  if (!isfinite(ms) || fabs(ms) > 8640000000000000.0) return false;
+  double clipped = trunc(ms), local_offset;
+  if (!scr_date_local_offset(floor(clipped / 1000.0), &local_offset)) return false;
   scr_date_utc_parts_unchecked(clipped + local_offset * 1000.0, out);
   double timezone_offset = trunc(-local_offset / 60.0);
   out->timezone_offset = timezone_offset == 0 ? 0 : timezone_offset;
   return true;
+}
+
+double scr_date_utc(double y, double mo, double d, double h, double mi, double sec, double ms) {
+  return scr_date_new_ms(scr_date_components_ms(y, mo, d, h, mi, sec, ms));
+}
+
+double scr_date_new_components(double y, double mo, double d, double h, double mi, double sec, double ms) {
+  double local = scr_date_components_ms(y, mo, d, h, mi, sec, ms);
+  const double window = 172800000.0;
+  if (!isfinite(local) || fabs(local) > 8640000000000000.0 + window) return NAN;
+  double earliest = INFINITY, after_gap = INFINITY, gap = INFINITY;
+  for (int i = -1; i <= 1; i++) {
+    double offset, actual;
+    if (!scr_date_local_offset(floor((local + i * window) / 1000.0), &offset)) continue;
+    double candidate = local - offset * 1000.0;
+    if (!scr_date_local_offset(floor(candidate / 1000.0), &actual)) continue;
+    double displacement = (actual - offset) * 1000.0;
+    if (displacement == 0) earliest = fmin(earliest, candidate);
+    else if (displacement > 0 && displacement < gap) {
+      gap = displacement;
+      after_gap = candidate;
+    }
+  }
+  return scr_date_new_ms(isfinite(earliest) ? earliest : after_gap);
 }
 
 static bool scr_date_parts(double ms, bool utc, ScrDateParts *out) {
@@ -5037,8 +5088,6 @@ bool scr_num_same_value(double a, double b) {
 }
 
 bool scr_num_is_nan(double x) { return isnan(x) != 0; }
-
-bool scr_num_is_integer(double x) { return isfinite(x) && trunc(x) == x; }
 
 bool scr_num_is_safe_integer(double x) {
   return isfinite(x) && trunc(x) == x && fabs(x) <= 9007199254740991.0;

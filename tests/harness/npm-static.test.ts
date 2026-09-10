@@ -56,7 +56,7 @@ async function runBinary(cmd: string, args: string[]): Promise<RunResult> {
 /** Compile one pilot statically (no --dynamic — the whole point) with the
  * named packages opted in; cache-keyed over the program and the vendored
  * packages. */
-async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise<string> {
+async function buildStatic(entry: string, npmStatic: string[] | "auto", backend: "c" | "rust" = "c"): Promise<string> {
   const hash = createHash("sha256");
   const inputs = [
     entry,
@@ -68,6 +68,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash
+    .update(backend)
     .update(npmStatic === "auto" ? "auto" : npmStatic.join(","))
     .update(sanitize ? "san" : "plain")
     .digest("hex")
@@ -80,9 +81,9 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
     sanitize,
     npmStatic,
     // Pinned: the suite pins --npm-static's FRONTEND frontier (coverage
-    // numbers, fence sites); the backend lane is held fixed so those pins
-    // move only when the frontend moves.
-    backend: "c",
+    // numbers, fence sites); existing pilots stay on C. A newly admitted
+    // message-map path also runs explicitly on the primary Rust backend.
+    backend,
   });
   if (!result.ok) {
     throw new Error(
@@ -90,6 +91,7 @@ async function buildStatic(entry: string, npmStatic: string[] | "auto"): Promise
         result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
     );
   }
+  expect(result.execution.engine).toBe("none");
   return result.binaryPath;
 }
 
@@ -212,22 +214,32 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(coverage.runtimeFences ?? []).toHaveLength(0);
   }, 120_000);
 
-  // The two surfaces statuses-cli.ts documents but does not drive, pinned
-  // so the frontier moves deliberately. Both are OUTSIDE the expando
-  // story: `status(code)` claims `@returns {number}` in JSDoc while its
-  // body returns a string (the ms precedent — a JSDoc claim the body
-  // contradicts), and getStatusCode indexes the `var map = {}` that
-  // createMessageToStatusCodeMap builds, which inference gives no index
-  // signature. The package still COMPILES static — the fences are runtime.
+  // Numeric and numeric-string inputs contradict status()'s numeric JSDoc
+  // return. Its internal message-map lookup is now admitted; the execution
+  // test below pins that path separately from these remaining runtime fences.
   test("statuses' JSDoc-contradicting call path stays a runtime fence", () => {
     const { coverage } = analyze(join(pilotRoot, "statuses-call-cli.ts"), { npmStatic: ["statuses"] });
     expect(coverage.npmStatic).toEqual([{ package: "statuses", status: "static" }]);
     expect(coverage.preflightFailed).toBe(false);
     expect(coverage.diagnostics).toHaveLength(0); // builds — fences are runtime
     const fences = coverage.runtimeFences ?? [];
-    expect(fences).toHaveLength(3);
+    expect(fences).toHaveLength(2);
     expect(fences.filter((f) => /'string' values where 'number' is expected/.test(f.message))).toHaveLength(2);
-    expect(fences.filter((f) => /indexing records with non-string or non-number keys/.test(f.message))).toHaveLength(1);
+    expect(fences.filter((f) => /indexing records with non-string or non-number keys/.test(f.message))).toHaveLength(0);
+  }, 120_000);
+
+  test.for(["c", "rust"] as const)("statuses message lookups byte-match Node on %s", async (backend, { skip }) => {
+    if (sanitize && backend === "rust") skip("Rust differential is sanitizer-invariant");
+    const entry = join(pilotRoot, "statuses-message-cli.ts");
+    const binary = await buildStatic(entry, ["statuses"], backend);
+    const [node, native] = await Promise.all([
+      execFileAsync(oracleExecutable, [entry]),
+      execFileAsync(binary, [], { env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" } }),
+    ]);
+    expect(native.stdout).toBe(node.stdout);
+    expect(native.stdout).toBe('404\n200\n500\n404\ninvalid status message: "missing status message"\n');
+    expect(native.stderr).toBe(node.stderr);
+    expect(native.stderr).toBe("");
   }, 120_000);
 
   // Tier 2: commander opts in and COMPILES as program modules — the

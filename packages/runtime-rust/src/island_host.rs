@@ -186,7 +186,7 @@ fn island_host_write(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let fd = island_host_arg_number(arguments, 0, context)?;
-    let text: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let text: JsString = JsString::from(island_host_arg_string(arguments, 1, context)?.as_str());
     if fd == 2.0 {
         process_stderr_write(&text);
     } else {
@@ -202,7 +202,7 @@ fn island_host_read_stdin(
     _arguments: &[JsValue],
     _c: &mut Context,
 ) -> JsResult<JsValue> {
-    let encoding: JsString = Rc::from("utf8");
+    let encoding: JsString = JsString::from("utf8");
     Ok(island_host_string(&fs_read_fd(0.0, &encoding)))
 }
 
@@ -246,7 +246,7 @@ fn island_host_path(
     let operation = island_host_arg_string(arguments, 0, context)?;
     let win32 = island_host_arg(arguments, 1).to_boolean();
     let text = |index: usize, context: &mut Context| -> JsResult<JsString> {
-        Ok(Rc::from(
+        Ok(JsString::from(
             island_host_arg_string(arguments, index, context)?.as_str(),
         ))
     };
@@ -258,7 +258,7 @@ fn island_host_path(
         let length = array.length(context)?;
         let mut items = Vec::with_capacity(length as usize);
         for index in 0..length {
-            items.push(Rc::from(
+            items.push(JsString::from(
                 array.at(index as i64, context)?.to_string(context)?.to_std_string_lossy().as_str(),
             ));
         }
@@ -310,7 +310,7 @@ fn island_host_url_to_path(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let value: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let value: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     Ok(island_host_string(&url_string_to_path(&value)))
 }
 
@@ -319,7 +319,7 @@ fn island_host_url_from_path(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let value: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let value: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     Ok(island_host_string(&url_href(&url_path_to_file_url(&value))))
 }
 

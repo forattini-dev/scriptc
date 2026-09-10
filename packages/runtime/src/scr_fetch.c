@@ -2206,6 +2206,13 @@ static void sf_stream_pull(SfStream *s) {
       s->error) {
     return;
   }
+  /* ReadableStream.from has highWaterMark 0: merely having a reader
+   * attached is not demand. Body collectors/uploads do supply demand. */
+  if (sf_stream_has_from_source(s) && !s->collector &&
+      !s->request_owner && !s->request_discarding &&
+      (!s->reader || !s->reader->pending_head)) {
+    return;
+  }
   if (s->pulling) {
     s->pull_again = true;
     return;

@@ -647,12 +647,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             return;
           }
           if (arm.kind === "undefinedT") {
-            // Reachable only as a record FIELD's serializer (bare
-            // undefined-armed unions are fenced from stringify), and the
-            // record writer drops the field while it holds this tag before
-            // calling — so the tag can never arrive here.
-            d.push(`  case ${i}: /* undefined arm: the field dropped at the record level */`);
-            d.push(`    scr_trap("scriptc: internal error: stringify reached an undefined arm\\n");`);
+            // Object fields are omitted by their parent; array slots write null.
+            d.push(`  case ${i}: scr_jb_puts(b, "null"); break;`);
             return;
           }
           const w = E.jsonWriteHelper(arm);

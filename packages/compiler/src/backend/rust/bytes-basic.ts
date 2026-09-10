@@ -4,6 +4,10 @@ type BytesIntrinsic = Extract<IrExpr, { kind: "bytesIntrinsic" }>;
 
 export interface RustBytesBasicContext {
   emitExpr(expr: IrExpr): string;
+  integerIndex(expr: IrExpr): string | undefined;
+  regionReceiver(expr: IrExpr): string | null;
+  readRegionReceiver(expr: IrExpr): string | null;
+  borrowReceiver(expr: IrExpr, later: readonly IrExpr[]): string | null;
   nextName(prefix: string): string;
 }
 
@@ -11,15 +15,29 @@ export function emitRustBytesBasicIntrinsic(
   expr: BytesIntrinsic,
   context: RustBytesBasicContext,
 ): string | null {
+  const region = context.regionReceiver(expr.receiver) ?? context.readRegionReceiver(expr.receiver);
+  if (region !== null) {
+    if ((expr.method === "length" || expr.method === "byteLength") && expr.args.length === 0) return `(${region}.len() as f64)`;
+    if (expr.method === "get" && expr.args[0] !== undefined && expr.args.length === 1) {
+      const index = context.nextName("sc_rt");
+      const integer = context.integerIndex(expr.args[0]);
+      const getter = integer === undefined ? "bytes_region_get" : "bytes_region_get_usize";
+      return `{ let ${index} = ${integer ?? context.emitExpr(expr.args[0])}; runtime::${getter}(&*${region}, ${index}) }`;
+    }
+  }
   const receiver = (): string => context.emitExpr(expr.receiver);
+  const readReceiver = (): string => context.borrowReceiver(expr.receiver, expr.args) ?? receiver();
   if (expr.method === "length" && expr.args.length === 0) {
-    return `runtime::bytes_len(&(${receiver()}))`;
+    return `runtime::bytes_len(&(${readReceiver()}))`;
   }
   if (expr.method === "byteLength" && expr.args.length === 0) {
-    return `runtime::bytes_byte_len(&(${receiver()}))`;
+    return `runtime::bytes_byte_len(&(${readReceiver()}))`;
   }
   if (expr.method === "get" && expr.args.length === 1 && expr.args[0] !== undefined) {
-    return `runtime::bytes_get(&(${receiver()}), ${context.emitExpr(expr.args[0])})`;
+    const integer = context.integerIndex(expr.args[0]);
+    return integer === undefined
+      ? `runtime::bytes_get(&(${readReceiver()}), ${context.emitExpr(expr.args[0])})`
+      : `runtime::bytes_get_usize(&(${readReceiver()}), ${integer})`;
   }
   if (expr.method === "slice" || expr.method === "subarray") {
     const start = expr.args[0] === undefined ? "0.0" : context.emitExpr(expr.args[0]);

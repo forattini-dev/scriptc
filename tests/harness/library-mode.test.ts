@@ -838,6 +838,28 @@ describe.each(EMISSIONS)("K14: determinism fences, %s emission", (emission) => {
     expect(diags[0]!.message).toContain("'stdlib.date.valueOf'");
   });
 
+  test.each([
+    ["getTime", "new Date(0).getTime()", 'Date.parse("1970-01-01T00:00:00.000Z")'],
+    ["parse", 'Date.parse("1970-01-01T00:00:00.000Z")', "new Date(0).getTime()"],
+  ])("an exact Date.%s fence denies only its own operation", async (member, denied, allowed) => {
+    const exportProfile = {
+      exports: [{ export: "read", symbol: "kx_read", params: [], returns: "f64" }],
+      determinism: { fences: [{ id: `stdlib.date.${member}` }] },
+    };
+    await acceptance(
+      `export function read(): number { return ${allowed}; }\n`,
+      exportProfile,
+      emission,
+    );
+    const diags = await refusal(
+      `export function read(): number { return ${denied}; }\n`,
+      exportProfile,
+      emission,
+    );
+    expect(diags.map((d) => d.code)).toEqual(["SC4008"]);
+    expect(diags[0]!.message).toContain(`'stdlib.date.${member}'`);
+  });
+
   test("a process.env read under the full-fence profile refuses SC4008 naming the process entry", async () => {
     const diags = await refusal(
       `export function home(): number { return (process.env["HOME"] ?? "").length; }\n`,

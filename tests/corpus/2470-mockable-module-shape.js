@@ -50,6 +50,12 @@ box.mockImplementation("tick", () => console.log("mocked tick"));
 box.mocked.tick();
 box.mockRestore();
 box.mocked.tick();
+// Exercise the adapted function's record argument, not just its presence in
+// the returned API. The dynamic body reads its callable fields via entries.
+box.mockImplementations({ tick: () => console.log("batch tick") });
+box.mocked.tick();
+box.mockRestore();
+box.mocked.tick();
 try {
   box.mockImplementation("tock", () => {});
 } catch (e) {

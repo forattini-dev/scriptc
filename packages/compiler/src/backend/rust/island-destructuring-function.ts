@@ -1,3 +1,4 @@
+import { rustJsString } from "./string-literals.js";
 import type { IrExpr } from "../../ir/nodes.js";
 import type { RustIslandContext } from "./island.js";
 
@@ -30,6 +31,10 @@ export function emitRustIslandDestructuringFunction(
   }
   const sourceExpr = argumentsByName.get("v");
   if (sourceExpr === undefined) return null;
+  // Native helpers cannot read engine handles or run their iterators. Only
+  // an empty object check is representation-independent; keep its original
+  // source spelling in the TypeError instead of the synthetic parameter v.
+  if (context.hasEmbeddedModules() && parseObjectPattern(body)?.length !== 0) return null;
 
   const computed = emitComputedPropertyPattern(body, sourceExpr, argumentsByName, context, emitExpr);
   if (computed !== null) return computed;
@@ -61,10 +66,13 @@ export function emitRustIslandDestructuringFunction(
   const output = context.nextName("sc_island_output");
   const dyn = context.dynTypeName();
   const pushes = object.map((key) =>
-    `runtime::array_push(&${output}, sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false));`
+    `runtime::array_push(&${output}, sc_dyn_key_get(&${source}, &${rustJsString(key, text => context.rustString(text))}, false));`
   ).join(" ");
   const sourceName = context.rustString(callee.destructuringSourceName ?? "v");
-  return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is null.".to_owned()), _ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
+  const islandChecks = context.hasEmbeddedModules()
+    ? `${dyn}::Island(sc_value) if runtime::island_is_undefined(sc_value) => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is undefined.".to_owned()), ${dyn}::Island(sc_value) if runtime::island_is_null(sc_value) => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is null.".to_owned()), `
+    : "";
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; match &${source} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is undefined.".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure '${sourceName}' as it is null.".to_owned()), ${islandChecks}_ => {}, } let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${pushes} ${dyn}::Array(${output}) }`;
 }
 
 function emitObjectArrayDefaultPattern(
@@ -81,7 +89,7 @@ function emitObjectArrayDefaultPattern(
   const source = context.nextName("sc_island_source");
   const value = context.nextName("sc_island_value");
   const output = context.nextName("sc_island_output");
-  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${value} = sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(key)}"), false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::Array(runtime::array_new(Vec::new())) } else { ${value} }; let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${dyn}::Array(${output}) }`;
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${value} = sc_dyn_key_get(&${source}, &${rustJsString(key, text => context.rustString(text))}, false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::Array(runtime::array_new(Vec::new())) } else { ${value} }; let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${dyn}::Array(${output}) }`;
 }
 
 function emitArrayHoleRestPattern(
@@ -127,7 +135,7 @@ function emitObjectDefaultPattern(
     ? `let ${rest}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); ${copyObjectRest(source, rest, excluded, dyn)}`
     : "";
   const restPush = pattern.hasRest ? `runtime::array_push(&${output}, ${dyn}::Object(${rest}));` : "";
-  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${excluded} = runtime::string("${context.rustString(key)}"); let ${value} = sc_dyn_key_get(&${source}, &${excluded}, false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${fallback} } else { ${value} }; ${restSetup} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${restPush} ${dyn}::Array(${output}) }`;
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; ${requireObject(source, dyn)} let ${excluded} = ${rustJsString(key, text => context.rustString(text))}; let ${value} = sc_dyn_key_get(&${source}, &${excluded}, false); let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${fallback} } else { ${value} }; ${restSetup} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${restPush} ${dyn}::Array(${output}) }`;
 }
 
 function parseObjectDefaultPattern(
@@ -191,7 +199,7 @@ function primitiveDynLiteral(
   }
   if (value === null) return `${dyn}::Null`;
   if (typeof value === "boolean") return `${dyn}::Boolean(${value})`;
-  if (typeof value === "string") return `${dyn}::String(runtime::string("${context.rustString(value)}"))`;
+  if (typeof value === "string") return `${dyn}::String(${rustJsString(value, text => context.rustString(text))})`;
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   const number = Object.is(value, -0) ? "-0.0" : Number.isInteger(value) ? `${value}.0` : String(value);
   return `${dyn}::Number(${number})`;
@@ -216,7 +224,7 @@ function emitComputedPropertyPattern(
   const value = context.nextName("sc_island_value");
   const output = context.nextName("sc_island_output");
   const defaulting = defaultValue === null ? "" :
-    `let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::String(runtime::string("${context.rustString(defaultValue)}")) } else { ${value} };`;
+    `let ${value} = if matches!(&${value}, ${dyn}::Undefined) { ${dyn}::String(${rustJsString(defaultValue, text => context.rustString(text))}) } else { ${value} };`;
   return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${key} = ${emitExpr(keyExpr)}; ${requireObject(source, dyn)} let ${value} = sc_dyn_key_get(&${source}, &sc_dyn_to_string(&${key}), false); ${defaulting} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); runtime::array_push(&${output}, ${value}); ${dyn}::Array(${output}) }`;
 }
 
@@ -322,8 +330,8 @@ function emitNestedDefaultPattern(
   const requireObject = (name: string) =>
     `match &${name} { ${dyn}::Undefined => runtime::throw_type_error("Cannot destructure an undefined value".to_owned()), ${dyn}::Null => runtime::throw_type_error("Cannot destructure a null value".to_owned()), _ => {}, }`;
   const push = innerKey === null ? "" :
-    `runtime::array_push(&${output}, sc_dyn_key_get(&${nested}, &runtime::string("${context.rustString(innerKey)}"), false));`;
-  return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${fallback} = ${emitExpr(defaultExpr)}; ${requireObject(source)} let ${nested} = sc_dyn_key_get(&${source}, &runtime::string("${context.rustString(outerKey)}"), false); let ${nested} = if matches!(&${nested}, ${dyn}::Undefined) { ${fallback} } else { ${nested} }; ${requireObject(nested)} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${push} ${dyn}::Array(${output}) }`;
+    `runtime::array_push(&${output}, sc_dyn_key_get(&${nested}, &${rustJsString(innerKey, text => context.rustString(text))}, false));`;
+  return `{ let ${source} = ${emitExpr(sourceExpr)}; let ${fallback} = ${emitExpr(defaultExpr)}; ${requireObject(source)} let ${nested} = sc_dyn_key_get(&${source}, &${rustJsString(outerKey, text => context.rustString(text))}, false); let ${nested} = if matches!(&${nested}, ${dyn}::Undefined) { ${fallback} } else { ${nested} }; ${requireObject(nested)} let ${output}: runtime::JsArray<${dyn}> = runtime::array_new(Vec::new()); ${push} ${dyn}::Array(${output}) }`;
 }
 
 function parseString(value: string | undefined): string | null {

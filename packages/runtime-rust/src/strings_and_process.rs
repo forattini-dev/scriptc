@@ -10,41 +10,36 @@ fn array_index(index: f64, allow_end: bool, len: usize) -> usize {
 }
 
 pub fn empty_string() -> JsString {
-    Rc::from("")
+    JsString::from("")
 }
 
-pub fn string(value: &str) -> JsString {
-    Rc::from(value)
+pub fn string<S: JsStringSource + ?Sized>(value: &S) -> JsString {
+    value.to_js_string()
 }
 
 pub fn string_concat(left: &JsString, right: &JsString) -> JsString {
-    let mut result = String::with_capacity(left.len() + right.len());
+    let mut result = JsStringBuilder::new();
     result.push_str(left);
     result.push_str(right);
-    Rc::from(result)
+    result.finish()
 }
 
 pub fn string_raw(raw: &JsArray<JsString>, substitutions: &JsArray<JsString>) -> JsString {
     let raw_len = array_len(raw);
     let substitutions_len = array_len(substitutions);
-    let mut output = String::new();
+    let mut output = JsStringBuilder::new();
     let mut index = 0.0;
     while index < raw_len {
         output.push_str(&array_get(raw, index));
-        if index + 1.0 < raw_len && index < substitutions_len {
-            output.push_str(&array_get(substitutions, index));
-        }
+        if index + 1.0 < raw_len && index < substitutions_len { output.push_str(&array_get(substitutions, index)); }
         index += 1.0;
     }
-    Rc::from(output)
+    output.finish()
 }
 
-pub fn string_is_well_formed(_value: &JsString) -> bool {
-    true
-}
-
+pub fn string_is_well_formed(value: &JsString) -> bool { value.is_well_formed() }
 pub fn string_to_well_formed(value: &JsString) -> JsString {
-    value.clone()
+    if value.is_well_formed() { value.clone() } else { string(value.to_utf8_lossy()) }
 }
 
 fn uri_unescaped(byte: u8, keep_reserved: bool) -> bool {
@@ -61,6 +56,7 @@ fn uri_unescaped(byte: u8, keep_reserved: bool) -> bool {
 }
 
 fn encode_uri(value: &JsString, keep_reserved: bool) -> JsString {
+    if !value.is_well_formed() { throw_uri_error("URI malformed".to_owned()); }
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
     if value
@@ -80,7 +76,7 @@ fn encode_uri(value: &JsString, keep_reserved: bool) -> JsString {
             encoded.push(HEX[usize::from(byte & 0x0f)]);
         }
     }
-    Rc::from(String::from_utf8(encoded).expect("URI encoding emits ASCII"))
+    JsString::from(String::from_utf8(encoded).expect("URI encoding emits ASCII"))
 }
 
 pub fn string_encode_uri_component(value: &JsString) -> JsString {
@@ -152,7 +148,7 @@ fn string_decode_uri_component_try(value: &JsString) -> Option<JsString> {
             index += 3;
         }
     }
-    Some(Rc::from(String::from_utf8(decoded).ok()?))
+    Some(JsString::from(String::from_utf8(decoded).ok()?))
 }
 
 pub fn string_decode_uri_component(value: &JsString) -> JsString {
@@ -209,7 +205,7 @@ pub fn string_atob(value: &JsString) -> JsString {
             accumulator &= if bits == 0 { 0 } else { (1 << bits) - 1 };
         }
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn string_btoa(value: &JsString) -> JsString {
@@ -243,7 +239,7 @@ pub fn string_btoa(value: &JsString) -> JsString {
             '='
         });
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn string_base64_missing_argument() -> JsString {
@@ -258,55 +254,20 @@ pub fn string_len(value: &JsString) -> f64 {
 }
 
 pub fn string_code_point_at_string(value: &JsString, index: f64) -> JsString {
+    let units: Vec<u16> = value.encode_utf16().collect();
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
-    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
-        return empty_string();
-    }
-    let target = index as usize;
-    let mut position = 0usize;
-    for character in value.chars() {
-        let width = character.len_utf16();
-        if target == position {
-            return Rc::from(character.to_string());
-        }
-        if width == 2 && target == position + 1 {
-            return string("\u{fffd}");
-        }
-        position += width;
-    }
-    empty_string()
+    if !index.is_finite() || index < 0.0 || index >= units.len() as f64 { return empty_string(); }
+    let start = index as usize;
+    let end = advance_string_index(&units, start, true).min(units.len());
+    string_from_utf16(&units[start..end])
 }
 
 pub fn string_char_at(value: &JsString, index: f64) -> JsString {
     let index = if index.is_nan() { 0.0 } else { index.trunc() };
-    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
-        return empty_string();
-    }
-    let target = index as usize;
-    let mut position = 0usize;
-    for ch in value.chars() {
-        let width = ch.len_utf16();
-        if target == position {
-            return if width == 1 {
-                Rc::from(ch.to_string())
-            } else {
-                // Like the C runtime, safe UTF-8 storage cannot represent
-                // the lone surrogate JavaScript returns for an astral half.
-                string("\u{fffd}")
-            };
-        }
-        if width == 2 && target == position + 1 {
-            return string("\u{fffd}");
-        }
-        position += width;
-    }
-    empty_string()
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 { return empty_string(); }
+    value.encode_utf16().nth(index as usize).map_or_else(empty_string, |unit| string_from_utf16(&[unit]))
 }
 
-/// `String.prototype.at` over UTF-16 code units. The frontend intentionally
-/// types this as `string` rather than `string | undefined`; preserve the
-/// project's existing island-boundary divergence by throwing the same
-/// catchable TypeError when the relative index is outside the string.
 pub fn string_at(value: &JsString, index: f64) -> JsString {
     let units: Vec<u16> = value.encode_utf16().collect();
     let relative = if index.is_nan() { 0.0 } else { index.trunc() };
@@ -449,7 +410,7 @@ pub fn string_slice(value: &JsString, start: f64, end: f64) -> JsString {
     if end <= start {
         return empty_string();
     }
-    Rc::from(String::from_utf16_lossy(&units[start..end]))
+    string_from_utf16(&units[start..end])
 }
 
 pub fn string_repeat(value: &JsString, count: f64) -> JsString {
@@ -457,7 +418,7 @@ pub fn string_repeat(value: &JsString, count: f64) -> JsString {
     if !count.is_finite() || count < 0.0 {
         trap_range_error("Invalid count value".to_owned());
     }
-    Rc::<str>::from(value.repeat(count as usize))
+    { let mut output = JsStringBuilder::new(); for _ in 0..count as usize { output.push_str(value); } output.finish() }
 }
 
 fn string_pad(value: &JsString, max_length: f64, fill: &JsString, at_start: bool) -> JsString {
@@ -487,7 +448,7 @@ fn string_pad(value: &JsString, max_length: f64, fill: &JsString, at_start: bool
         padded.extend_from_slice(&value_units);
         append_padding(&mut padded);
     }
-    Rc::from(String::from_utf16_lossy(&padded))
+    string_from_utf16(&padded)
 }
 
 pub fn string_pad_start(value: &JsString, max_length: f64, fill: &JsString) -> JsString {
@@ -586,11 +547,11 @@ pub fn string_replace_all(value: &JsString, search: &JsString, replacement: &JsS
 }
 
 pub fn string_to_lower_case(value: &JsString) -> JsString {
-    Rc::<str>::from(value.to_lowercase())
+    string_change_case(value, false)
 }
 
 pub fn string_to_upper_case(value: &JsString) -> JsString {
-    Rc::<str>::from(value.to_uppercase())
+    string_change_case(value, true)
 }
 
 fn javascript_whitespace(ch: char) -> bool {
@@ -611,35 +572,34 @@ fn javascript_whitespace(ch: char) -> bool {
 }
 
 pub fn string_trim(value: &JsString) -> JsString {
-    Rc::from(value.trim_matches(javascript_whitespace))
+    string_trim_units(value, true, true)
 }
 
 pub fn string_trim_start(value: &JsString) -> JsString {
-    Rc::from(value.trim_start_matches(javascript_whitespace))
+    string_trim_units(value, true, false)
 }
 
 pub fn string_trim_end(value: &JsString) -> JsString {
-    Rc::from(value.trim_end_matches(javascript_whitespace))
+    string_trim_units(value, false, true)
 }
 
 pub fn string_split(value: &JsString, separator: &JsString, limit: f64) -> JsArray<JsString> {
     let limit = to_uint32(limit) as usize;
-    if limit == 0 {
-        return array_new(Vec::new());
+    if limit == 0 { return array_new(Vec::new()); }
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let sep: Vec<u16> = separator.encode_utf16().collect();
+    if sep.is_empty() {
+        return array_new(units.iter().take(limit).map(|unit| string_from_utf16(&[*unit])).collect());
     }
-    let parts = if separator.is_empty() {
-        value
-            .encode_utf16()
-            .take(limit)
-            .map(|unit| Rc::from(String::from_utf16_lossy(&[unit])))
-            .collect()
-    } else {
-        value
-            .split(separator.as_ref())
-            .take(limit)
-            .map(Rc::<str>::from)
-            .collect()
-    };
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while let Some(offset) = units[start..].windows(sep.len()).position(|part| part == sep) {
+        let end = start + offset;
+        parts.push(string_from_utf16(&units[start..end]));
+        if parts.len() == limit { return array_new(parts); }
+        start = end + sep.len();
+    }
+    parts.push(string_from_utf16(&units[start..]));
     array_new(parts)
 }
 
@@ -659,11 +619,11 @@ pub fn process_argv() -> JsArray<JsString> {
         } else {
             executable.clone()
         };
-        let mut values = vec![Rc::from(executable.as_str()), Rc::from(script.as_str())];
+        let mut values = vec![JsString::from(executable.as_str()), JsString::from(script.as_str())];
         if let Some(first) = first.filter(|value| value != SELF_REEXEC_MARKER) {
-            values.push(Rc::from(first));
+            values.push(JsString::from(first));
         }
-        values.extend(native.map(Rc::<str>::from));
+        values.extend(native.map(JsString::from));
         let argv = array_new(values);
         *slot = Some(argv.clone());
         argv
@@ -683,11 +643,11 @@ pub fn process_platform() -> JsString {
 pub fn process_cwd() -> JsString {
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| trap_other("scriptc: process.cwd() failed\n".to_owned()));
-    Rc::from(cwd.to_string_lossy().as_ref())
+    JsString::from(cwd.to_string_lossy().as_ref())
 }
 
 pub fn process_chdir(path: &JsString) {
-    std::env::set_current_dir(path.as_ref())
+    std::env::set_current_dir(path.to_utf8_lossy())
         .unwrap_or_else(|error| throw_fs_error("chdir", path, error));
 }
 
@@ -835,7 +795,7 @@ pub fn process_getgid() -> f64 {
 }
 
 pub fn process_exec_path() -> JsString {
-    Rc::from(
+    JsString::from(
         std::env::current_exe()
             .expect("scriptc: executable path is unavailable")
             .to_string_lossy()
@@ -891,7 +851,7 @@ pub fn process_env_get(name: &JsString) -> Option<JsString> {
     }) {
         return value;
     }
-    std::env::var_os(name.as_ref()).map(|value| Rc::from(value.to_string_lossy().as_ref()))
+    std::env::var_os(name.to_utf8_lossy()).map(|value| JsString::from(value.to_string_lossy().as_ref()))
 }
 
 pub fn process_env_set(name: &JsString, value: &JsString) {
@@ -914,11 +874,11 @@ pub fn process_env_pairs() -> JsArray<JsString> {
                 .iter()
                 .find(|(stored, _)| process_env_name_eq(stored, &name))
                 .map_or_else(
-                    || Some(Rc::from(value.to_string_lossy().as_ref())),
+                    || Some(JsString::from(value.to_string_lossy().as_ref())),
                     |(_, value)| value.clone(),
                 );
             if let Some(value) = value {
-                pairs.push(Rc::from(name));
+                pairs.push(JsString::from(name));
                 pairs.push(value);
             }
         }
@@ -926,7 +886,7 @@ pub fn process_env_pairs() -> JsArray<JsString> {
             if !seen.iter().any(|seen| process_env_name_eq(seen, name))
                 && let Some(value) = value
             {
-                pairs.push(Rc::from(name.as_str()));
+                pairs.push(JsString::from(name.as_str()));
                 pairs.push(value.clone());
             }
         }
@@ -938,7 +898,7 @@ pub fn process_env_apply(command: &mut std::process::Command) {
     PROCESS_ENV_WRITES.with(|writes| {
         for (name, value) in writes.borrow().iter() {
             match value {
-                Some(value) => command.env(name, value.as_ref()),
+                Some(value) => command.env(name, value.to_utf8_lossy()),
                 None => command.env_remove(name),
             };
         }

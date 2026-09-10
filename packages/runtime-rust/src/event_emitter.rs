@@ -135,7 +135,7 @@ where
         emitter
             .events
             .iter()
-            .find(|event| event.name.as_ref() == name.as_ref())
+            .find(|event| event.name.as_ref() == name)
             .map_or_else(Vec::new, |event| event.listeners.clone())
     })
 }
@@ -152,7 +152,7 @@ where
         let Some(event_index) = emitter
             .events
             .iter()
-            .position(|event| event.name.as_ref() == name.as_ref())
+            .position(|event| event.name.as_ref() == name)
         else {
             return false;
         };
@@ -182,7 +182,7 @@ where
         let Some(event_index) = emitter
             .events
             .iter()
-            .position(|event| event.name.as_ref() == name.as_ref())
+            .position(|event| event.name.as_ref() == name)
         else {
             return false;
         };
@@ -212,7 +212,7 @@ where
         let Some(event_index) = emitter
             .events
             .iter()
-            .position(|event| event.name.as_ref() == name.as_ref())
+            .position(|event| event.name.as_ref() == name)
         else {
             return false;
         };
@@ -239,7 +239,7 @@ pub fn emitter_remove_all<L>(
         } else if let Some(index) = emitter
             .events
             .iter()
-            .position(|event| event.name.as_ref() == name.as_ref())
+            .position(|event| event.name.as_ref() == name)
         {
             emitter.events.remove(index);
         }
@@ -254,7 +254,7 @@ where
         emitter
             .events
             .iter()
-            .find(|event| event.name.as_ref() == name.as_ref())
+            .find(|event| event.name.as_ref() == name)
             .map_or(0.0, |event| event.listeners.len() as f64)
     })
 }
@@ -271,7 +271,7 @@ where
         emitter
             .events
             .iter()
-            .find(|event| event.name.as_ref() == name.as_ref())
+            .find(|event| event.name.as_ref() == name)
             .map_or(0.0, |event| {
                 event
                     .listeners

@@ -1,3 +1,4 @@
+import { inferredRegexBindingType } from "./lower-regex-captures.js";
 /* Module-graph lowering: splitting each source file into its parts, the
  * program-collection pass (signatures, classes, globals — reachability
  * seeds), npm/JSON import collection, per-file %init functions, %main, and
@@ -26,7 +27,7 @@ import { collectNamespaceStmt, nsAliasVarDeclOf, nsPathPrefix, trapDeclRootOf } 
 import { collectExpandoMembers } from "./lower-expando.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, exactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
+import { decoratorNodesOf, probeExactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 
@@ -1723,13 +1724,13 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             const exactNewClass =
               isJsSourceFile(sf) && decl.type === undefined &&
               ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
-                ? exactInstanceClassOf(L, decl.initializer)
+                ? probeExactInstanceClassOf(L, decl.initializer)
                 : null;
             let type = storedDynValue
               ? DYN
               : storedOptionalClassValue ??
                 (exactNewClass ? { kind: "object", className: exactNewClass.def.name } : null) ??
-                handleT ?? L.irTypeOf(nameNode);
+                handleT ?? inferredRegexBindingType(L, decl, L.irTypeOf(nameNode));
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the
@@ -1738,8 +1739,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // spells the pushed element type here — the value's element
             // type is the truth, so the global slot takes the handle-
             // element array (lowerVarDecl's adoption, the file-scope
-            // face). Annotated declarations keep the validated-boundary
-            // fence.
+            // face). Annotated declarations keep the validated boundary.
             if (
               L.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.type === undefined && decl.initializer !== undefined &&

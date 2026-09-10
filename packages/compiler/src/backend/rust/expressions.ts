@@ -1,3 +1,8 @@
+import { borrowedRustBytesLocal } from "./bytes-borrow.js";
+import { rustJsString } from "./string-literals.js";
+import { regexCaptureLayout } from "../../ir/regex-captures.js";
+import { sharedDiscriminatedUnion, discriminatedUnionBox, discriminatedUnionCheck, discriminatedUnionTag } from "./discriminated-records.js";
+import { emitNativeDynamicArrayLiteral } from "./native-array-values.js";
 import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrExpr, IrFunction } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -15,6 +20,7 @@ import { emitRustNullish } from "./nullish.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
 import { emitRustIslandExpr } from "./island.js";
+import { rustIslandDynamicTest } from "./dynamic-island.js";
 import { emitRustArrayNewLen } from "./array-new-len.js";
 import { emitRustFfiCall } from "./ffi.js";
 import { emitEffectCauseDynamic } from "./effect-dynamic.js";
@@ -36,18 +42,24 @@ export class RustExpressionEmitter {
     }
   }
 
+  borrowBytesReceiver(expr: IrExpr, later: readonly IrExpr[]): string | null {
+    return this.replacements === null ? borrowedRustBytesLocal(expr, later, this.context) : null;
+  }
+
   emitExpr(expr: IrExpr): string {
     const replacement = this.replacements?.get(expr);
     if (replacement !== undefined) return replacement;
+    const integer = this.replacements === null ? this.context.integerLoops.regions.current()?.expression(expr) : null;
+    if (integer != null) return integer;
     switch (expr.kind) {
       case "numLit":
         return this.context.numberLiteral(expr.value);
       case "strLit":
-        return `runtime::string("${this.context.rustString(expr.value)}")`;
+        return rustJsString(expr.value, value => this.context.rustString(value));
       case "regexLit":
         return `runtime::regex_new("${this.context.rustString(expr.pattern)}", "${this.context.rustString(expr.flags)}")`;
       case "templateStrings": {
-        const cooked = expr.cooked.map((value) => `"${this.context.rustString(value)}"`).join(", ");
+        const cooked = expr.cooked.map((value) => rustJsString(value, text => this.context.rustString(text))).join(", ");
         return `runtime::template_strings("${this.context.rustString(expr.key)}", &[${cooked}])`;
       }
       case "boolLit":
@@ -159,6 +171,8 @@ export class RustExpressionEmitter {
           `let ${receiver} = ${this.emitExpr(expr.receiver)};`,
           ...expr.args.map((argument, index) => `let ${args[index]} = ${this.emitExpr(argument)};`),
         ].join(" ");
+        const captureLayout = regexCaptureLayout(expr.type, (id) => this.context.union(id, expr.loc));
+        const capture = captureLayout === null ? "" : `|value| match value { Some(text) => ${this.context.unionName(captureLayout.id)}::${this.context.unionVariant(captureLayout.stringTag)}(text), None => ${this.context.unionName(captureLayout.id)}::${this.context.unionVariant(captureLayout.undefinedTag)}, }`;
         if (expr.method === "match" && args.length === 1) {
           if (expr.type.kind !== "union") this.context.unsupported("regex match result without a union", expr.loc);
           const union = this.context.union(expr.type.unionId, expr.loc);
@@ -166,10 +180,10 @@ export class RustExpressionEmitter {
           const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
           if (arrayTag < 0 || nullTag < 0) this.context.unsupported("regex match result union shape", expr.loc);
           const name = this.context.unionName(union.id);
-          return `{ ${bindings} match runtime::regex_match(&${receiver}, &${args[0]}) { Some(value) => ${name}::${this.context.unionVariant(arrayTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, } }`;
+          return `{ ${bindings} match runtime::regex_match(&${receiver}, &${args[0]}, ${capture}) { Some(value) => ${name}::${this.context.unionVariant(arrayTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, } }`;
         }
         if ((expr.method === "matchAll" || expr.method === "matchAllInto") && args.length === (expr.method === "matchAll" ? 1 : 2)) {
-          return `{ ${bindings} runtime::regex_${expr.method === "matchAll" ? "match_all" : "match_all_into"}(&${receiver}, &${args[0]}${expr.method === "matchAllInto" ? `, &${args[1]}` : ""}) }`;
+          return `{ ${bindings} runtime::regex_${expr.method === "matchAll" ? "match_all" : "match_all_into"}(&${receiver}, &${args[0]}${expr.method === "matchAllInto" ? `, &${args[1]}` : ""}, ${capture}) }`;
         }
         if (expr.method === "search" && args.length === 1) {
           return `{ ${bindings} runtime::regex_search(&${receiver}, &${args[0]}) }`;
@@ -235,14 +249,17 @@ export class RustExpressionEmitter {
         return `{ let ${object}: runtime::JsMap<runtime::JsString, ${this.context.dynTypeName()}> = runtime::map_new(); ${fields} ${this.context.dynTypeName()}::Object(${object}) }`;
       }
       case "dynFrom":
+        if (expr.value.kind === "arrayLit") return emitNativeDynamicArrayLiteral(expr.value, this.context, value => this.emitExpr(value));
         if (expr.value.kind === "libCall" && expr.value.fn === "effect.causeSquash" && expr.value.args[0] !== undefined) {
           return emitEffectCauseDynamic(expr, this.context, this.emitExpr(expr.value.args[0]));
         }
         return this.context.emitDynFromValue(expr.value.type, this.emitExpr(expr.value), expr.loc, expr.fnName ?? "", expr.liveRef === true);
       case "dynFromJsval":
-        return this.emitExpr(expr.value);
+        return this.context.hasEmbeddedModules()
+          ? `sc_dyn_normalize_island(${this.emitExpr(expr.value)})` : this.emitExpr(expr.value);
       case "dynCall":
         return emitRustDynamicCall(expr, {
+          hasEmbeddedModules: () => this.context.hasEmbeddedModules(),
           dynTypeName: () => this.context.dynTypeName(),
           emitExpr: (value) => this.emitExpr(value),
           nextName: (prefix) => this.context.nextName(prefix),
@@ -286,6 +303,9 @@ export class RustExpressionEmitter {
             test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), _ => true }`;
             break;
         }
+        if (this.context.hasEmbeddedModules()) {
+          test = `match &${value} { ${name}::Island(sc_island) => ${rustIslandDynamicTest(expr.test, "sc_island")}, _ => ${test}, }`;
+        }
         if (expr.negated) test = `!(${test})`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${test} }`;
       }
@@ -303,7 +323,8 @@ export class RustExpressionEmitter {
         const arrayTest = expr.key === "length"
           ? "true"
           : index === null ? "false" : `runtime::array_len(array) > ${index}.0`;
-        const test = `match &${value} { ${this.context.dynTypeName()}::Object(object) => runtime::map_has_by(object, &runtime::string("${this.context.rustString(expr.key)}"), |left, right| left.as_ref() == right.as_ref()), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
+        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
+        if (this.context.hasEmbeddedModules()) test = `match &${value} { ${this.context.dynTypeName()}::Island(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), _ => ${test}, }`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${expr.negated === true ? `!(${test})` : test} }`;
       }
       case "dynScalarEq": {
@@ -471,6 +492,11 @@ export class RustExpressionEmitter {
           return `{ let ${receiver} = ${this.emitExpr(expr.receiver)}; let ${value} = ${this.emitExpr(valueExpr)}; let ${offset} = ${this.emitExpr(offsetExpr)}; let ${width} = ${this.emitExpr(widthExpr)}; runtime::bytes_write_num_var(&${receiver}, "${this.context.rustString(kind.value)}", ${value}, ${offset}, ${width}) }`;
         }
         const basic = emitRustBytesBasicIntrinsic(expr, {
+          // Preevaluated expression values take precedence over local storage.
+          borrowReceiver: (value, later) => this.borrowBytesReceiver(value, later),
+          regionReceiver: value => this.replacements === null ? this.context.byteRegions.read(value) : null,
+          readRegionReceiver: value => this.replacements === null ? this.context.byteRegions.read(value, true) : null,
+          integerIndex: (value) => this.context.integerLoops.index(value),
           emitExpr: (value) => this.emitExpr(value),
           nextName: (prefix) => this.context.nextName(prefix),
         });
@@ -540,16 +566,16 @@ export class RustExpressionEmitter {
             const value = this.emitExpr(entry.value);
             if (entry.drop || entry.absent) return `let _ = ${value};`;
             const boxed = this.context.emitDynFromValue(entry.value.type, value, entry.value.loc);
-            return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(entry.name)}"), ${boxed}, |a, b| a == b);`;
+            return shape.tuple ? `runtime::array_push(&${object}, ${boxed});` : `runtime::map_set_by(&${object}, ${rustJsString(entry.name, text => this.context.rustString(text))}, ${boxed}, |a, b| a == b);`;
           }).join(" ");
-          return `{ let ${object} = runtime::map_new(); ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`;
+          return `{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`;
         }
         if (shape.indexValue !== undefined && shape.fields.length === 0) {
           const map = this.context.nextName("sc_rt");
           const entries = expr.fields.map((entry) => {
             if (entry.drop) this.context.unsupported("dropped indexed record field", expr.loc);
             const value = this.context.nextName("sc_rt");
-            return `let ${value} = ${this.emitExpr(entry.value)}; runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(entry.name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`;
+            return `let ${value} = ${this.emitExpr(entry.value)}; runtime::map_set_by(&${map}, ${rustJsString(entry.name, text => this.context.rustString(text))}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
           }).join(" ");
           return `{ let ${map}: ${this.context.rustType(expr.type, expr.loc)} = runtime::map_new(); ${entries} ${map} }`;
         }
@@ -570,7 +596,7 @@ export class RustExpressionEmitter {
           if (entry.drop) continue;
           if (entry.overflow) {
             if (overflow === null) this.context.unsupported("record overflow field", expr.loc);
-            bindings.push(`runtime::map_set_by(&${overflow}, runtime::string("${this.context.rustString(entry.name)}"), ${temp}, |left, right| left.as_ref() == right.as_ref());`);
+            bindings.push(`runtime::map_set_by(&${overflow}, ${rustJsString(entry.name, text => this.context.rustString(text))}, ${temp}, |left, right| left.as_ref() == right.as_ref());`);
           } else {
             values.set(entry.name, temp);
           }
@@ -623,6 +649,7 @@ export class RustExpressionEmitter {
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with(|record| runtime::map_string_keys_js_order(record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"))) }`;
       }
       case "caughtToDyn": {
+        if (this.context.hasEmbeddedModules()) return `sc_dyn_from_caught(${this.emitExpr(expr.value)})`;
         const caught = this.context.nextName("sc_rt");
         const error = this.context.nextName("sc_rt");
         const dyn = this.context.dynTypeName();
@@ -737,7 +764,9 @@ export class RustExpressionEmitter {
         if (arm === undefined || this.context.isUnit(arm)) this.context.unsupported(`invalid union narrow '${expr.unionId}:${expr.tag}'`, expr.loc);
         const value = this.context.nextName("sc_rt");
         const variant = `${this.context.unionName(union.id)}::${this.context.unionVariant(expr.tag)}`;
-        return `{ let ${value} = ${this.emitExpr(expr.value)}; match ${value} { ${variant}(payload) => payload, _ => unreachable!("scriptc invariant: invalid union narrowing") } }`;
+        const raw = this.emitExpr(expr.value);
+        const input = sharedDiscriminatedUnion(this.context, union) ? discriminatedUnionCheck(this.context, union, discriminatedUnionBox(this.context, union, raw)) : raw;
+        return `{ let ${value} = ${input}; match ${value} { ${variant}(payload) => payload, _ => unreachable!("scriptc invariant: invalid union narrowing") } }`;
       }
       case "unionDisc": {
         const union = this.context.union(expr.unionId, expr.loc);
@@ -764,6 +793,10 @@ export class RustExpressionEmitter {
         const union = this.context.union(expr.unionId, expr.loc);
         const arm = union.arms[expr.tag];
         if (arm === undefined) this.context.unsupported(`unknown union tag '${expr.unionId}:${expr.tag}'`, expr.loc);
+        if (sharedDiscriminatedUnion(this.context, union)) {
+          const test = discriminatedUnionTag(this.context, union, expr.tag, this.emitExpr(expr.value));
+          return expr.negated ? `!(${test})` : test;
+        }
         const value = this.context.nextName("sc_rt");
         const pattern = `${this.context.unionName(union.id)}::${this.context.unionVariant(expr.tag)}${this.context.isUnit(arm) ? "" : "(..)"}`;
         const test = `{ let ${value} = ${this.emitExpr(expr.value)}; matches!(${value}, ${pattern}) }`;
@@ -990,7 +1023,7 @@ export class RustExpressionEmitter {
           classNameArms: (className, loc) => {
             const meta = this.context.classMetaOf(className, loc);
             return this.context.classSubtree(meta).map((candidate) =>
-              `${candidate.pre} => runtime::string("${this.context.rustString(candidate.def.jsName ?? "")}"),`
+              `${candidate.pre} => ${rustJsString(candidate.def.jsName ?? "", text => this.context.rustString(text))},`
             ).join(" ");
           },
         });

@@ -1,4 +1,7 @@
-import { planSharedRecords } from "./shared-records.js";
+import { RustByteRegions } from "./byte-regions.js";
+import { RustLocalCells } from "./local-cells.js";
+import { RustIntegerLoops } from "./integer-loops.js";
+import { planSharedRecords, registerSharedRecordMethods } from "./shared-records.js";
 import type {
   IrClassDef,
   IrExpr,
@@ -14,7 +17,7 @@ import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/
 import { emitRustStatements } from "./statements.js";
 import { RustContainerExpressionEmitter } from "./container-expressions.js";
 import { RustDynamicEmitter } from "./dynamic.js";
-import { registerDynamicFunctionShapes } from "./dynamic-function-model.js";
+import { dynamicBoxedInputType, registerDynamicFunctionShapes } from "./dynamic-function-model.js";
 import { RustAsyncControlEmitter, type RustAsyncHandlers } from "./async-control.js";
 import { RustAsyncValueEmitter } from "./async-values.js";
 import { RustExpressionEmitter } from "./expressions.js";
@@ -72,6 +75,7 @@ class RustEmitter {
   private indent = 0;
   private temporary = 0;
   private currentFunction: IrFunction | null = null;
+  private readonly integerLoops = new RustIntegerLoops(() => this.currentFunction, this.functions);
   private currentAsyncResult: string | null = null;
   private currentAsyncLocals: Set<string> | null = null;
   /** Raw locals of enclosing async helper frames that nested fn helpers
@@ -93,7 +97,8 @@ class RustEmitter {
     allowsContinue: boolean;
   }[] = [];
   private readonly completionLoopBoundaries: number[] = [];
-  private readonly forcedBoxedLocals = new Set<string>();
+  private readonly byteRegions = new RustByteRegions(() => this.currentFunction, this.functions);
+  private readonly localCells = new RustLocalCells(() => this.currentFunction);
   private nextLoopTargetId = 0;
   private usesDyn = false;
   private usesDynamicInvoke = false;
@@ -324,6 +329,9 @@ class RustEmitter {
     emitOrDefault: (expr) => this.valueEmitter.emitOrDefault(expr),
     emitPromiseFromSync: (args, operation) => this.emitPromiseFromSync(args, operation),
     emitPromiseRaceValue: (from, to, value, loc) => this.emitPromiseRaceValue(from, to, value, loc),
+    byteRegions: this.byteRegions,
+    localIsBoxed: (local) => this.valueEmitter.localIsBoxed(local),
+    integerLoops: this.integerLoops,
     emitRead: (id, type, loc) => this.emitRead(id, type, loc),
     emitRecordCloneInitial: (expr, source) => this.emitRecordCloneInitial(expr, source),
     emitRecordCloneOverride: (expr, clone, name, value) =>
@@ -363,7 +371,7 @@ class RustEmitter {
     records: this.records,
     unions: this.unions,
     currentFunction: () => this.currentFunction,
-    isForcedBoxed: (id) => this.forcedBoxedLocals.has(id),
+    localCells: this.localCells,
     line: (value) => this.line(value),
     emitExpr: (expr) => this.emitExpr(expr),
     classMetaOf: (name, loc) => this.classMetaOf(name, loc),
@@ -448,7 +456,7 @@ class RustEmitter {
     emitDynamicDefinition: () => this.dynamicEmitter.emitDynamicDefinition(),
     emitDynFromValue: (type, value, loc, functionName, liveRef) =>
       this.dynamicEmitter.emitDynFromValue(type, value, loc, functionName, liveRef),
-    emitDynCheckValue: (type, value, loc) => this.dynamicEmitter.emitDynCheckValue(type, value, loc),
+    emitDynCheckValue: (type, value, loc, path) => this.dynamicEmitter.emitDynCheckValue(type, value, loc, path),
     emitAsyncStatements: (statements, onComplete) => this.emitAsyncStatements(statements, onComplete),
     emitExpr: (expr) => this.emitExpr(expr),
     assignmentExpr: (id, value, loc) => this.assignmentExpr(id, value, loc),
@@ -519,6 +527,7 @@ class RustEmitter {
     buildRustClassGraph(this.classMeta, this.functions, (kind, loc) => this.unsupported(kind, loc));
     this.discoverClosures();
     if (planSharedRecords(mod, this.records, this.unions)) this.usesDyn = true;
+    registerSharedRecordMethods(this.records, type => { this.registerDynAdapter(type); this.registerDynBoxedFunction(type); });
   }
   emit(): string {
     this.checkModuleSurface();
@@ -527,9 +536,8 @@ class RustEmitter {
         ? "#![forbid(unsafe_code)]"
         : "#![deny(unsafe_op_in_unsafe_fn)]",
     );
-    // Whole-program TUs expand large macro invocations (chunked
-    // thread_local! blocks, wide matches); the default limit of 128 is
-    // sized for hand-written crates.
+    // Whole-program thread_local! blocks and wide matches exceed the default
+    // macro recursion limit of 128 used by hand-written crates.
     this.line("#![recursion_limit = \"1024\"]");
     this.line("");
     this.line("use scriptc_runtime as runtime;");
@@ -676,13 +684,13 @@ class RustEmitter {
         if (node.fn.endsWith("UncaughtException")) this.usesProcessUncaughtListeners = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
-        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "dyn.this" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
+        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }
-      if (node.kind === "dynFrom" || node.kind === "jsMarshal") {
+      const boxedInput = dynamicBoxedInputType(node);
+      if (boxedInput !== undefined) {
         this.usesDyn = true;
-        const operand = node.value as { type?: IrType } | undefined;
-        if (operand?.type !== undefined) registerDynamicFunctionShapes(operand.type, this.records, this.unions, (type) => this.registerDynBoxedFunction(type));
+        registerDynamicFunctionShapes(boxedInput, this.records, this.unions, (type) => this.registerDynBoxedFunction(type));
       }
       if (node.kind === "dynCheck") {
         const operand = node.value as { kind?: string; fn?: string } | undefined;
@@ -857,7 +865,7 @@ class RustEmitter {
   private emitClassDefinitions(): void { this.definitionEmitter.emitClassDefinitions(); }
   private emitErrorValueDefinition(): void { this.definitionEmitter.emitErrorValueDefinition(); }
   private emitGlobals(): void { this.definitionEmitter.emitGlobals(); }
-  private emitFunction(fn: IrFunction): void { this.forcedBoxedLocals.clear(); this.definitionEmitter.emitFunction(fn); }
+  private emitFunction(fn: IrFunction): void { this.localCells.clear(); this.definitionEmitter.emitFunction(fn); }
   private containsAsyncSuspension(value: unknown): boolean {
     return this.asyncControlEmitter.containsAsyncSuspension(value);
   }
@@ -943,9 +951,11 @@ class RustEmitter {
   ): void {
     this.asyncValueEmitter.emitAsyncConsole(expr, remaining, index, values, onComplete);
   }
-
   private emitStatements(statements: readonly IrStmt[]): void {
     emitRustStatements(statements, {
+      byteRegions: this.byteRegions,
+      localCells: this.localCells,
+      integerLoops: this.integerLoops,
       loopTargets: this.loopTargets,
       completionLoopBoundaries: this.completionLoopBoundaries,
       capturedReturnDepth: () => this.capturedReturnDepth,
@@ -961,15 +971,13 @@ class RustEmitter {
       nextLoopTargetId: () => this.nextLoopTargetId++,
       dynTypeName: () => this.dynTypeName(),
       emitExpr: (expr) => this.emitExpr(expr),
+      borrowBytesReceiver: (expr, later) => this.expressionEmitter.borrowBytesReceiver(expr, later),
       emitRead: (id, type, loc) => this.emitRead(id, type, loc),
       emitAssignment: (id, value, loc) => this.emitAssignment(id, value, loc),
       emitDynCheckValue: (type, value, loc) => this.emitDynCheckValue(type, value, loc),
       local: (id, loc) => this.local(id, loc),
-      localIsBoxed: (local) => this.localIsBoxed(local),
-      forceBoxedLocal: (id, forced) => {
-        if (forced) this.forcedBoxedLocals.add(id);
-        else this.forcedBoxedLocals.delete(id);
-      },
+      localIsBoxed: (local) => this.valueEmitter.localIsBoxed(local),
+      forceBoxedLocal: (id, forced) => this.localCells.set(id, forced),
       rustType: (type, loc) => this.rustType(type, loc),
       record: (shapeId) => this.records.get(shapeId),
       classDef: (name, loc) => this.classDef(name, loc),
@@ -1029,9 +1037,7 @@ class RustEmitter {
     return this.functionValueEmitter.emitFileHandleTransferPromise(expr);
   }
 
-  private emitFsRenameCallback(expr: Extract<IrExpr, { kind: "libCall" }>): string {
-    return this.functionValueEmitter.emitFsRenameCallback(expr);
-  }
+  private emitFsRenameCallback(expr: Extract<IrExpr, { kind: "libCall" }>): string { return this.functionValueEmitter.emitFsRenameCallback(expr); }
 
   private emitPromiseRaceValue(from: IrType, to: IrType, value: string, loc: SrcLoc): string {
     return this.functionValueEmitter.emitPromiseRaceValue(from, to, value, loc);
@@ -1043,17 +1049,14 @@ class RustEmitter {
     return this.valueEmitter.displayValue(value, type, loc);
   }
 
-  private truthiness(value: string, type: IrType, loc: SrcLoc): string {
-    return this.valueEmitter.truthiness(value, type, loc);
-  }
+  private truthiness(value: string, type: IrType, loc: SrcLoc): string { return this.valueEmitter.truthiness(value, type, loc); }
 
   private emitRead(id: string, type: IrType, loc: SrcLoc): string {
-    return this.valueEmitter.emitRead(id, type, loc);
+    const integer = this.integerLoops.read(id);
+    return integer === undefined ? this.valueEmitter.emitRead(id, type, loc) : `(${integer} as f64)`;
   }
 
-  private emitAssignment(id: string, value: string, loc: SrcLoc): void {
-    this.valueEmitter.emitAssignment(id, value, loc);
-  }
+  private emitAssignment(id: string, value: string, loc: SrcLoc): void { this.valueEmitter.emitAssignment(id, value, loc); }
 
   private assignmentExpr(id: string, value: string, loc: SrcLoc): string {
     return this.valueEmitter.assignmentExpr(id, value, loc);
@@ -1061,9 +1064,6 @@ class RustEmitter {
 
   private local(id: string, loc: SrcLoc) { return this.valueEmitter.local(id, loc); }
 
-  private localIsBoxed(local: IrFunction["locals"][number]): boolean {
-    return this.valueEmitter.localIsBoxed(local);
-  }
 
   private rustBytesElement(elem: "u8" | "u32" | "i32" | "f32" | "f64"): string {
     return this.valueEmitter.rustBytesElement(elem);

@@ -23,3 +23,24 @@ export function abortShape() {
 export function validated() {
   return String(WebAssembly.validate(new Uint8Array(4)));
 }
+export async function surface() {
+  const results = [];
+  const message = (name) => 'WebAssembly.' + name + ' is not supported in scriptc binaries (the embedded engine has no wasm runtime)';
+  for (const name of ['compile', 'instantiate', 'compileStreaming', 'instantiateStreaming']) {
+    let returned;
+    try { returned = WebAssembly[name](new Uint8Array(4), {}); }
+    catch { results.push(name + ':sync throw'); continue; }
+    try { await returned; results.push(name + ':resolved'); }
+    catch (error) { results.push(name + ':' + (error.message === message(name))); }
+  }
+  for (const name of ['Module', 'Instance', 'Memory', 'Table', 'Global']) {
+    try { new WebAssembly[name](); results.push(name + ':constructed'); }
+    catch (error) { results.push(name + ':' + (error.message === message(name))); }
+  }
+  for (const name of ['RuntimeError', 'CompileError', 'LinkError']) {
+    const error = new WebAssembly[name]('test');
+    results.push(name + ':' + (error instanceof Error && error.name === name && error.message === 'test'));
+  }
+  results.push('valid:' + WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])));
+  return results.join('|');
+}

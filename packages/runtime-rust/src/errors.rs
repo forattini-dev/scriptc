@@ -34,7 +34,7 @@ fn error_property(error: &JsError, name: bool) -> Option<JsString> {
                 })
                 .as_ref()
             })
-            .map(|value| Rc::from(value.as_str()))
+            .map(|value| JsString::from(value.as_str()))
     })
 }
 
@@ -336,7 +336,7 @@ pub fn throw_syntax_error(message: String) -> ! {
 }
 
 pub fn throw_syntax_error_trap(message: String) -> ! {
-    let error = error_new("SyntaxError", Rc::from(message));
+    let error = error_new("SyntaxError", JsString::from(message));
     LIBRARY_TRAP_CODES.with(|codes| {
         let mut codes = codes.borrow_mut();
         codes.retain(|(identity, _)| identity.strong_count() != 0);
@@ -474,7 +474,7 @@ pub fn caught_error_code(caught: &Caught) -> Option<JsString> {
         .expect("scriptc: narrowed non-Error caught value")
         .code
         .as_deref()
-        .map(Rc::<str>::from)
+        .map(JsString::from)
 }
 
 pub fn caught_library_trap_code(caught: &Caught) -> Option<&'static str> {
@@ -489,6 +489,10 @@ pub fn caught_library_trap_code(caught: &Caught) -> Option<&'static str> {
 }
 
 pub fn caught_to_string(caught: &Caught) -> JsString {
+    #[cfg(feature = "island-v8")]
+    if let Some(value) = caught.value.downcast_ref::<IslandValue>() {
+        return island_to_string(value);
+    }
     if let Some(value) = caught.value.downcast_ref::<f64>() {
         return number_to_string(*value);
     }
@@ -506,12 +510,12 @@ pub fn caught_to_string(caught: &Caught) -> JsString {
 
 pub fn error_to_string_parts(name: &str, message: &str) -> JsString {
     if name.is_empty() {
-        return Rc::from(message);
+        return JsString::from(message);
     }
     if message.is_empty() {
-        return Rc::from(name);
+        return JsString::from(name);
     }
-    Rc::from(format!("{name}: {message}"))
+    JsString::from(format!("{name}: {message}"))
 }
 
 pub fn error_to_string(error: &JsError) -> JsString {
@@ -535,11 +539,11 @@ pub fn error_is_class(error: &JsError, name: &str) -> bool {
 }
 
 pub fn error_name(error: &JsError) -> JsString {
-    error_property(error, true).unwrap_or_else(|| Rc::from(error.name.as_str()))
+    error_property(error, true).unwrap_or_else(|| JsString::from(error.name.as_str()))
 }
 
 pub fn error_message(error: &JsError) -> JsString {
-    error_property(error, false).unwrap_or_else(|| Rc::from(error.message.as_str()))
+    error_property(error, false).unwrap_or_else(|| JsString::from(error.message.as_str()))
 }
 
 fn errors_finish() {
@@ -549,7 +553,7 @@ fn errors_finish() {
 }
 
 pub fn error_code(error: &JsError) -> Option<JsString> {
-    error.code.as_deref().map(Rc::from)
+    error.code.as_deref().map(JsString::from)
 }
 
 pub fn error_cause<T: Clone + 'static>(error: &JsError) -> Option<T> {
@@ -781,7 +785,7 @@ pub fn assert_eq_string(
     message: &JsString,
     has_message: bool,
 ) {
-    let same = left.as_ref() == right.as_ref();
+    let same = left == right;
     if (negated && !same) || (!negated && same) {
         return;
     }

@@ -1,3 +1,10 @@
+import { lowerNumericParser } from "./lower-numeric-parser.js";
+import { lowerNumberConversion } from "./lower-number-conversion.js";
+import { hasHiddenOptionalIndex } from "./lower-contextual-index.js";
+import { inferredRegexCaptureReturn } from "./lower-regex-captures.js";
+export { lowerRecordFieldCall } from "./lower-record-field-call.js";
+export { wrappedUndefined } from "./lower-undefined.js";
+import { lowerTypedObjectIteration } from "./lower-object-iteration.js";
 import { provesWrittenNonNullFilter } from "./lower-native-containers.js";
 /* Call lowering: the lowerCall dispatch chain, parameter-shape analysis and
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
@@ -20,7 +27,7 @@ import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf } from "./surfaces.
 import { ffiBindingDiag, ffiSignatureDiag, libCallbackDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
-import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
+import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
 import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx } from "./lower-families.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
@@ -545,16 +552,6 @@ export interface GenericInstance {
     return out;
   }
 
-/** The undefined arm of an undefined-armed union `type`, wrapped (a
-   * unitLit under a unionWrap) — the value every "absent" slot holds: an
-   * omitted optional argument, an omitted optional record field. Null when
-   * `type` has no undefined arm to wrap into. */
-  export function wrappedUndefined(L: Lowerer, type: IrType, loc: SrcLoc): IrExpr | null {
-    const unit: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
-    const wrapped = L.coerceToExpected(unit, type);
-    return wrapped.kind === "unionWrap" ? wrapped : null;
-  }
-
 /** The synthesized argument for an omitted omittable param: the interned
    * undefined arm of the param's `T | undefined` ABI union, or the checked-dynamic tree
    * undefined for a checked-dynamic param (`bar?: any`). */
@@ -778,8 +775,7 @@ export interface GenericInstance {
     const retTsType = L.checker.getReturnTypeOfSignature(sig);
     // A body that always throws infers `never` — as a RETURN type that is
     // void with a stronger guarantee (`() => never` is assignable to
-    // `() => void`), and throw-only callbacks are ordinary code
-    // (`.action(() => { throw ... })`). `never` VALUES stay unmapped.
+    // `() => void`), including throw-only callbacks.
     if (retTsType.flags & ts.TypeFlags.Never) return VOID;
     // A JS function whose UNANNOTATED return infers a FUNCTION type
     // (test/common's mustCall — tsc infers `() => any` from the wrapper
@@ -819,7 +815,7 @@ export interface GenericInstance {
     ) {
       return DYN;
     }
-    const returnType = L.mapTypeOf(retTsType);
+    const returnType = inferredRegexCaptureReturn(L, decl, L.mapTypeOf(retTsType));
     if (!returnType) {
       // JS inference residue (an `any` return, an unmappable union): the
       // checked-dynamic fallback, exactly the declaration story in
@@ -2053,12 +2049,11 @@ export function genericFnOf(L: Lowerer, ident: ts.Identifier): GenericFnInfo | n
       const arg = call.arguments[i];
       if (arg && !ts.isSpreadElement(arg)) {
         // The argument's own checker type, literal-widened ('add' binds
-        // string) — typeOf consults the ACTIVE instance's bindings, so a
-        // bound param forwarded into another implicit call transitively
-        // instantiates it (this._initCommandGroup(command)).
+        // string); typeOf propagates active bindings through nested calls
+        // such as this._initCommandGroup(command).
         const t = L.checker.getBaseTypeOfLiteralType(L.typeOf(arg));
         const mapped = L.mapTypeOf(t);
-        if (bindableImplicitIr(mapped)) {
+        if (bindableImplicitIr(mapped) && !hasHiddenOptionalIndex(L, arg, mapped)) {
           bound = mapped;
           argTypes.set(sym, t);
         }
@@ -3544,17 +3539,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       return L.lowerComptime(expr);
     }
 
-    // The lib constructors-as-functions with STATIC conversion semantics:
-    // String(x) is exactly the template-literal ToString, Boolean(x) is
-    // exactly the condition ToBoolean (union arms included), Number(x) is
-    // ToNumber where it lowers exactly: numbers pass through, booleans
-    // become 1/0, and strings run the runtime's ECMA-exact
-    // StringToNumber (num.fromString — the full StringNumericLiteral
-    // grammar, scr_string.c). Other argument types (unions included —
-    // narrow first) keep the fence.
-    // Provenance-checked like setTimeout; zero-arg forms are the JS
-    // constants ("", false, 0). `new String(...)` (wrapper objects) stays
-    // on the SC2020 fence.
+    // Primitive constructors preserve JS conversion and evaluation order.
+    // Number also dispatches over primitive unions, retaining null/undefined.
+    // Provenance checking keeps shadowed functions on ordinary call paths.
     if (
       ts.isIdentifier(expr.expression) &&
       (expr.expression.text === "String" ||
@@ -3585,29 +3572,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // representation (`Boolean(rec && list.some(f))` — a record and a
       // bool) that a value lowering of the `&&` would fence on.
       if (name === "Boolean") return L.lowerCondition(argNode);
-      const arg = L.lowerExpr(argNode);
+      const arg = lowerAbsenceProbe(L, argNode) ?? L.lowerExpr(argNode);
       if (name === "String") return L.ensureString(arg, argNode);
-      if (arg.type.kind === "f64") return arg;
-      if (arg.type.kind === "bool") {
-        return {
-          kind: "ternary",
-          cond: arg,
-          then: { kind: "numLit", value: 1, type: F64, loc },
-          else_: { kind: "numLit", value: 0, type: F64, loc },
-          type: F64,
-          loc,
-        };
-      }
-      if (arg.type.kind === "string") {
-        return { kind: "libCall", fn: "num.fromString", args: [arg], type: F64, loc };
-      }
-      L.noLowering(
-        `Number of ${L.fmt(arg.type)} values`,
-        argNode,
-        arg.type.kind === "union"
-          ? "numbers, booleans, and strings lower (the full ToNumber string grammar included) — narrow the union first"
-          : undefined,
-      );
+      const converted = lowerNumberConversion(L, arg);
+      if (converted) return converted;
+      L.noLowering(`Number of ${L.fmt(arg.type)} values`, argNode);
     }
 
     // __island_eval: the internal island testing hook (eval in the embedded
@@ -3898,8 +3867,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // island globals: a user function shadowing the name has a
       // different, non-stdlib symbol. parseInt's omitted radix completes
       // to 0 — the spec's "undefined" (base 10 with the 0x hex escape);
-      // parseFloat lowers the STRING form only (Node would ToString other
-      // values — no static story); isNaN/isFinite's arguments are
+      // parsers convert native primitives (including optional strings)
+      // before parsing; isNaN/isFinite's arguments are
       // checker-pinned (or checked) to number, where the global's ToNumber
       // coercion is the identity and the tests are Number.isNaN /
       // Number.isFinite exactly (ms's `isFinite(val)` guard).
@@ -3920,75 +3889,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           return { kind: "libCall", fn: "num.isNaN", args: [x], type: BOOL, loc };
         }
         const radix: IrExpr = expr.arguments[1]
-          ? L.lowerExprExpecting(expr.arguments[1], F64)
+          ? lowerAbsenceProbe(L, expr.arguments[1]) ?? L.lowerExpr(expr.arguments[1])
           : { kind: "numLit", value: 0, type: F64, loc };
-        const optional = lowerAbsenceProbe(L, expr.arguments[0]!);
-        if (optional?.type.kind === "union") {
-          const def = L.unions.get(optional.type.unionId);
-          const stringTag = def?.arms.findIndex((arm) => arm.kind === "string") ?? -1;
-          if (
-            def &&
-            stringTag >= 0 &&
-            def.arms.every((arm) => arm.kind === "string" || isUnitType(arm))
-          ) {
-            const unionT = optional.type;
-            const key = `parseInt.optional:${unionT.unionId}`;
-            let helper = L.widthHelpers.get(key);
-            if (!helper) {
-              helper = `%parseInt.optional.${L.widthHelpers.size}`;
-              L.widthHelpers.set(key, helper);
-              const value: IrExpr = { kind: "varRef", localId: "value.0", type: unionT, loc };
-              const radixRef: IrExpr = { kind: "varRef", localId: "radix.0", type: F64, loc };
-              const body: IrStmt[] = def.arms.flatMap((arm, tag): IrStmt[] =>
-                isUnitType(arm)
-                  ? [{
-                      kind: "if",
-                      cond: { kind: "unionIsTag", unionId: unionT.unionId, tag, negated: false, value, type: BOOL, loc },
-                      then: [{ kind: "return", value: { kind: "numLit", value: NaN, type: F64, loc }, loc }],
-                      else_: null,
-                      loc,
-                    }]
-                  : [],
-              );
-              body.push({
-                kind: "return",
-                value: {
-                  kind: "libCall",
-                  fn: "num.parseInt",
-                  args: [{ kind: "unionNarrow", unionId: unionT.unionId, tag: stringTag, value, type: STRING, loc }, radixRef],
-                  type: F64,
-                  loc,
-                },
-                loc,
-              });
-              L.liftedFns.push({
-                name: helper,
-                params: [
-                  { localId: "value.0", name: "value", type: unionT },
-                  { localId: "radix.0", name: "radix", type: F64 },
-                ],
-                returnType: F64,
-                locals: [
-                  { id: "value.0", name: "value", type: unionT, mutable: true },
-                  { id: "radix.0", name: "radix", type: F64, mutable: true },
-                ],
-                body,
-                loc,
-              });
-            }
-            return { kind: "call", callee: helper, args: [optional, radix], type: F64, loc };
-          }
-        }
+        const value = lowerAbsenceProbe(L, expr.arguments[0]!) ?? L.lowerExpr(expr.arguments[0]!);
+        const parsed = lowerNumericParser(L, "parseInt", value, radix);
+        if (parsed) return parsed;
         const s = L.lowerExprExpecting(expr.arguments[0]!, STRING);
         return { kind: "libCall", fn: "num.parseInt", args: [s, radix], type: F64, loc };
       }
-      // STATIC parseFloat/isFinite over exactly-typed arguments —
+      // STATIC parseFloat on primitives and isFinite on numbers —
       // parseInt's siblings (num.parseFloat is ECMA 19.2.4's decimal-
       // literal prefix parse in scr_string.c; a number-typed isFinite IS
       // Number.isFinite — the global's ToNumber coercion is the identity
       // there, ms's `isFinite(val)` guard). Other argument types fall
       // through to today's island path (--dynamic) or its SC2012 fence:
-      // the ToNumber/ToString coercions on arbitrary values stay engine
+      // coercion hooks on arbitrary objects stay engine
       // territory. The probe never emits — lowering is IR construction.
       if (
         (expr.expression.text === "parseFloat" || expr.expression.text === "isFinite") &&
@@ -3996,9 +3911,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
       ) {
         const name = expr.expression.text;
-        const probed = probeLower(L, expr.arguments[0]!);
-        if (name === "parseFloat" && probed?.type.kind === "string") {
-          return { kind: "libCall", fn: "num.parseFloat", args: [probed], type: F64, loc };
+        const probed = (name === "parseFloat" ? lowerAbsenceProbe(L, expr.arguments[0]!) : null) ?? probeLower(L, expr.arguments[0]!);
+        if (name === "parseFloat" && probed) {
+          const parsed = lowerNumericParser(L, "parseFloat", probed);
+          if (parsed) return parsed;
         }
         if (name === "isFinite" && probed?.type.kind === "f64") {
           return { kind: "libCall", fn: "number.isFinite", args: [probed], type: BOOL, loc };
@@ -5022,9 +4938,9 @@ export function lowerDynDispatchMethodCall(
   if (call.arguments.some((arg) => ts.isSpreadElement(arg))) {
     L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
   }
-  // Array.isArray narrows `unknown` to checker-`any[]`. Under --dynamic,
-  // that contextual `any` would normally make an inline HOF callback's
-  // first parameter an island handle, even though a native dyn array
+  // Array.isArray produces `any[]`; evolving JS fields can retain `never[]`.
+  // Those contextual residues must not give an inline HOF callback's
+  // first parameter an island handle or numeric ABI: a native dyn array
   // actually passes one checked-dynamic element. Pin that unannotated
   // parameter to unknown while lowering the callback so guards inside it
   // (`values.every((value) => Array.isArray(value))`) stay in the native
@@ -5044,7 +4960,7 @@ export function lowerDynDispatchMethodCall(
     if (
       param && ts.isIdentifier(param.name) && !param.type && !param.initializer &&
       !param.dotDotDotToken &&
-      (L.checker.getTypeAtLocation(param.name).flags & ts.TypeFlags.Any) !== 0 &&
+      (L.checker.getTypeAtLocation(param.name).flags & (ts.TypeFlags.Any | ts.TypeFlags.Never)) !== 0 &&
       !L.chainNarrowedType.has(param.name)
     ) {
       callbackParam = param.name;
@@ -8253,182 +8169,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const probed = probeLower(L, argNode);
       if (probed?.type.kind === "record") argIr = probed.type;
     }
-    if (argIr?.kind !== "record") return null; // Maps, classes, arrays → the SC2020 fence
-    const shape = L.shapes.get(argIr.shapeId);
-    if (!shape || shape.tuple) return null; // tuple → the fence
-    // Accessor-carrying shapes: Node's answer includes the accessor NAMES
-    // (own enumerable properties) and — for values/entries — the getter
-    // RESULTS, invoked in key order. The static field walk models neither
-    // (accessor slots live outside declaredOrder), so the surface fences.
-    if (shapeHasAccessorSlots(shape)) {
-      L.unsupported(
-        "SC1090",
-        call,
-        `Object.${member} over a shape carrying get/set accessor properties (Node lists the accessor names${member === "keys" ? "" : " and invokes the getters"} — the static key walk cannot; read the properties explicitly)`,
-      );
-    }
-    if (shape.indexValue) {
-      // Index-signature (overflow-carrying) shapes: the runtime walk —
-      // declared fields first, then the overflow in JS own-key order
-      // (lowerObjectIterOverIndexShape in lower-containers).
-      return lowerObjectIterOverIndexShape(L, call, member, argIr, shape);
-    }
-    const loc = locOf(call);
-    const resultT = L.irTypeOf(call);
-    if (resultT.kind !== "array") L.badType(call, L.typeOf(call)); // defensive
-    const receiver = L.lowerExpr(argNode);
-    if (member === "keys") {
-      // The keys walk is shared with for-in (which iterates exactly the
-      // keys Object.keys answers — one construction, one intern key).
-      return recordKeysArrayCall(L, receiver, argIr, shape, loc);
-    }
-
-    // The result-element type each field's value flows into: string for
-    // keys, the checker's value union for values, the [string, V] tuple's
-    // "1" field for entries.
-    let valueT: IrType | null = null;
-    let tupleT: (IrType & { kind: "record" }) | null = null;
-    if (member === "values") valueT = resultT.elem;
-    if (member === "entries") {
-      if (resultT.elem.kind !== "record") L.badType(call, L.typeOf(call));
-      tupleT = resultT.elem;
-      const tupleShape = L.shapes.get(resultT.elem.shapeId);
-      if (!tupleShape?.tuple || tupleShape.fields.length !== 2) L.badType(call, L.typeOf(call));
-      valueT = tupleShape.fields.find((f) => f.name === "1")!.type;
-    }
-
-    const key = `obj.${member}:${argIr.shapeId}:${typeKey(resultT)}`;
-    let helper = L.arrHofHelpers.get(key);
-    if (!helper) {
-      helper = `%obj.${member}.${L.arrHofHelpers.size}`;
-      const recT = argIr;
-      const ref: IrExpr = { kind: "varRef", localId: "r.0", type: recT, loc };
-      const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: resultT, loc };
-      L.arrHofHelpers.set(key, helper);
-      const fn: IrFunction = {
-        name: helper,
-        params: [{ localId: "r.0", name: "r", type: recT }],
-        returnType: resultT,
-        locals: [
-          { id: "r.0", name: "r", type: recT, mutable: true },
-          { id: "out.0", name: "out", type: resultT, mutable: false },
-        ],
-        body: [],
-        loc,
-      };
-      const finalize = (): void => {
-        const current = L.shapes.get(argIr.shapeId) ?? shape;
-        const body: IrStmt[] = [
-          { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc },
-        ];
-        const order = current.declaredOrder ?? current.fields.map((f) => f.name);
-        for (const name of order) {
-          const f = current.fields.find((x) => x.name === name)!;
-          const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: argIr.shapeId, field: f.name, type: f.type, loc };
-          // The pushed element per member; null when the field's value
-          // cannot flow into the result element type.
-          const elemOf = (value: IrExpr, vt: IrType): IrExpr | null => {
-            if (!valueT) return null;
-            if (typeEquals(vt, valueT)) return value;
-            if (valueT.kind === "union" && vt.kind !== "union") {
-              const tag = L.armTag(valueT.unionId, vt);
-              if (tag >= 0) {
-                return { kind: "unionWrap", unionId: valueT.unionId, tag, value, type: valueT, loc };
-              }
-            }
-            return null;
-          };
-          // Undefined-armed fields: the push is guarded by a tag test, and
-          // the pushed value is the narrowed non-undefined arm.
-          let guardUndefTag: number | null = null;
-          let value: IrExpr = raw;
-          let vt: IrType = f.type;
-          if (f.type.kind === "union") {
-            const undefTag = L.armTag(f.type.unionId, UNDEFINED_T);
-            if (undefTag >= 0) {
-              guardUndefTag = undefTag;
-              const arms = L.unions.get(f.type.unionId)?.arms ?? [];
-              const others = arms.filter((a) => a.kind !== "undefinedT");
-              if (typeEquals(f.type, valueT ?? f.type)) {
-              // The field union IS the result union (single-field shapes):
-              // push the raw box — but then the undefined skip must NOT
-              // narrow. Handled below via vt === valueT.
-                value = raw;
-                vt = f.type;
-              } else if (others.length === 1) {
-                vt = others[0]!;
-              // A UNIT other arm (`null | undefined` fields — the mixed-
-              // defaults spread idiom; undefined was filtered above, so
-              // the unit is null): units carry no payload, so the guarded
-              // push writes the unit LITERAL — unionNarrow to a unit arm
-              // (and unionWrap of a narrowed unit) is malformed IR; the
-              // literal is the one legal unit spelling.
-                value = isUnitType(vt)
-                  ? { kind: "unitLit", unit: "null", type: vt, loc }
-                  : { kind: "unionNarrow", unionId: f.type.unionId, tag: L.armTag(f.type.unionId, vt), value: raw, type: vt, loc };
-              } else {
-                L.unsupported(
-                  "SC1090",
-                  call,
-                  `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a multi-arm union that ` +
-                    "cannot re-tag into the result element type — read the fields directly)",
-                );
-              }
-            } else if (!typeEquals(f.type, valueT ?? f.type)) {
-              L.unsupported(
-                "SC1090",
-                call,
-                `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a union that cannot ` +
-                  "re-tag into the result element type — read the fields directly)",
-              );
-            }
-          }
-          const coerced = elemOf(value, vt);
-          if (!coerced) {
-            L.unsupported(
-              "SC1090",
-              call,
-              `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' of type '${L.fmt(f.type)}' ` +
-                `cannot flow into the '${L.fmt(valueT!)}' result element — read the fields directly)`,
-            );
-          }
-          const pushed: IrExpr =
-            member === "values"
-              ? coerced
-              : {
-                  kind: "recordLit",
-                  fields: [
-                    { name: "0", value: { kind: "strLit", value: f.name, type: STRING, loc } },
-                    { name: "1", value: coerced },
-                  ],
-                  type: tupleT!,
-                  loc,
-                };
-          const pushStmt: IrStmt = {
-            kind: "exprStmt",
-            expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushed], type: F64, loc },
-            loc,
-          };
-          body.push(
-            guardUndefTag !== null && f.type.kind === "union"
-              ? {
-                  kind: "if",
-                  cond: { kind: "unionIsTag", unionId: f.type.unionId, tag: guardUndefTag, negated: true, value: raw, type: BOOL, loc },
-                  then: [pushStmt],
-                  else_: null,
-                  loc,
-                }
-              : pushStmt,
-          );
-        }
-        body.push({ kind: "return", value: outRef, loc });
-        fn.body = body;
-      };
-      finalize();
-      L.shapeOrderHelperFinalizers.push(finalize);
-      L.liftedFns.push(fn);
-    }
-    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+    return lowerTypedObjectIteration(L, call, member, argIr);
   }
 
 /** The declaration's real Block body. tsgo's remote child indexing can hand
@@ -8528,10 +8269,6 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     }
   }
 
-/** `r.f(args)` where `r` is a record and `f` a func-typed field: an
-   * ordinary indirect call through the field's closure value. Deliberately
-   * record-only — calling a func-typed CLASS field stays rejected (the
-   * generic method-call rejection in lowerCall). */
 /** `Object.assign(fn, { bold, ... })` → a HYBRID record literal: the
    * reserved %call field takes the function, each source object literal's
    * properties fill their declared fields (later sources override, JS's
@@ -8608,67 +8345,6 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       fields.push({ name: f.name, value: v });
     }
     return { kind: "recordLit", fields, type: mapped, loc };
-  }
-
-  export function lowerRecordFieldCall(L: Lowerer, call: ts.CallExpression,
-    access: ts.PropertyAccessExpression,): IrExpr | null {
-    if (L.chainBlocked(call)) return null;
-    if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "record") return null;
-    const target = L.fieldTarget(access);
-    // In a monomorphized union-generic body, control-flow can expose a
-    // callable field from one constraint arm even when this concrete
-    // instance has a narrower record shape that omits it. The branch is
-    // normally unreachable (the discriminant selected another arm), but
-    // it must still lower. Model the absent JS property as dyn undefined:
-    // if control ever does reach it, dynCall throws the same catchable
-    // TypeError as `undefined(...)` instead of inventing a native slot.
-    if (!target) {
-      const declaredCallee = L.mapTypeOf(L.typeOf(access));
-      const probed = declaredCallee?.kind === "func" ? probeLower(L, access.expression) : null;
-      if (probed?.type.kind === "record") {
-        const concreteShape = L.shapes.get(probed.type.shapeId);
-        if (
-          concreteShape && !concreteShape.indexValue &&
-          !concreteShape.fields.some((f) => f.name === access.name.text)
-        ) {
-          if (call.arguments.some((a) => ts.isSpreadElement(a))) {
-            L.unsupported("SC1090", call, "spread arguments in calls through absent generic record fields");
-          }
-          const receiver = L.lowerExpr(access.expression);
-          const callee: IrExpr = {
-            kind: "seqExpr",
-            stmts: [{ kind: "exprStmt", expr: receiver, loc: receiver.loc }],
-            result: dynUndefinedExpr(locOf(access)),
-            type: DYN,
-            loc: locOf(access),
-          };
-          const args = call.arguments.map((arg) => L.lowerExprExpecting(arg, DYN));
-          return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
-        }
-      }
-    }
-    let callee = target
-      ? L.maybeNarrow(L.fieldGetExpr(target, locOf(access), access), access)
-      : null;
-    if (!callee) return null;
-    // A HYBRID (function-with-properties) field is callable through its
-    // reserved %call slot — `colors.blue("x")` where blue also carries
-    // `.bold` (the chalk shape).
-    if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
-    if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
-    const params = callee.type.params;
-    const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
-    // Optional/defaulted record methods use the same completed ABI as any
-    // other function value: omitted trailing arguments become the slot's
-    // undefined arm before the exact-arity call reaches the backend.
-    for (let i = args.length; i < params.length; i++) {
-      const absent = omittedArgFor(L, params[i]!, locOf(call));
-      if (!absent) {
-        L.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
-      }
-      args.push(absent);
-    }
-    return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }
 
 /** The function-like node behind an object-literal generic-method member:
@@ -9007,10 +8683,10 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     return false;
   }
 
-/** True when `sym` — a binding whose type has NO static mapping — is DEAD:
+/** True when an unmappable or generic-family binding is provably DEAD:
    * never read anywhere in the program, not exported through a specifier,
    * declared with no initializer or a side-effect-free one, and written
-   * (if at all) only by plain assignments of side-effect-free values. Node
+   * only by standalone assignments of side-effect-free values. Node
    * materializes those values and drops them — zero observable effect —
    * so the declaration and its writes lower to NOTHING instead of fencing
    * on a type the program never consumes (`var xs2: typeof Array;`, the
@@ -9034,11 +8710,11 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     // Exported bindings stay out: a library build's exports are consumed
     // from outside the graph, and export specifiers double as reads.
     if (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) return false;
-    // The type gate LAST among the cheap checks: querying the checker for
-    // a type is the expensive step (and can panic upstream — the 1e999
-    // bug), so only survivors of the syntactic filters pay it. Mappable
-    // types keep their real storage.
-    if (L.mapTypeOf(L.checker.getTypeOfSymbol(sym)) !== null) return false;
+    // Query the checker after the cheap filters. Generic families now have
+    // an IR type, but an unread pure value still needs no runtime storage.
+    // Concrete mappable types retain their existing storage path.
+    const mapped = L.mapTypeOf(L.checker.getTypeOfSymbol(sym));
+    if (mapped !== null && mapped.kind !== "genericFunc") return false;
     const symText = sym.name;
     const namesSym = (e: ts.Node): boolean =>
       ts.isIdentifier(e) && e.text === symText && L.resolveValueSymbol(e) === sym;
@@ -9060,7 +8736,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
           p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === n
         ) {
           if (!namesSym(n)) return;
-          if (!sideEffectFreeValueExpr(L, p.right)) dead = false;
+          if (!ts.isExpressionStatement(p.parent) || !sideEffectFreeValueExpr(L, p.right)) dead = false;
           return;
         }
         // Import/export specifiers, and every other occurrence, count as

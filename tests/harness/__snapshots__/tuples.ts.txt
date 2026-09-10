@@ -37,13 +37,6 @@ tuples.ts:25:33 - error SC1090: spread elements in tuple literals (positions mus
      |                                 ^~~~~~~
   26 | 
 
-tuples.ts:31:13 - error SC1090: '.length' of a computed tuple expression (the arity is a constant — bind the tuple to a const first) is not supported yet
-
-  30 | }
-  31 | console.log(mk().length);
-     |             ^~~~~~~~~~~
-  32 | 
-
 tuples.ts:35:13 - error SC1090: '.join()' on arrays of this element type (number, string, and boolean arrays join — unions of those with undefined/null arms too, the units printing empty like JS) is not supported yet
 
   34 | const recs: { id: number }[] = [{ id: 1 }];

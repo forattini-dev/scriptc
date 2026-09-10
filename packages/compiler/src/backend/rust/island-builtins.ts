@@ -1,5 +1,6 @@
 import type { IrExpr } from "../../ir/nodes.js";
 import type { RustIslandContext } from "./island.js";
+import { emitIslandValue } from "./island-values.js";
 
 type JsOperation = Extract<IrExpr, { kind: "jsOp" }>;
 
@@ -9,10 +10,14 @@ export function emitRustIslandBuiltin(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string | null {
-  const promiseAll = emitPromiseAll(expr, context, emitExpr);
-  if (promiseAll !== null) return promiseAll;
+  // Object.create must retain native prototype identity even in a mixed graph.
   const objectCreate = emitObjectCreate(expr, context, emitExpr);
   if (objectCreate !== null) return objectCreate;
+  // These specializations consume native dynamic variants. Engine handles
+  // must reach the realm so callbacks, prototypes and Promise jobs stay there.
+  if (context.hasEmbeddedModules()) return null;
+  const promiseAll = emitPromiseAll(expr, context, emitExpr);
+  if (promiseAll !== null) return promiseAll;
   const regexp = emitRegExpConstructor(expr, context, emitExpr);
   if (regexp !== null) return regexp;
   const numberPredicate = emitNumberPredicate(expr, context, emitExpr);
@@ -65,7 +70,24 @@ function emitObjectCreate(
   const dyn = context.dynTypeName();
   const prototype = context.nextName("sc_island_prototype");
   const object = context.nextName("sc_island_object");
+  if (context.hasEmbeddedModules()) {
+    // Marshaling a native map as JSON snapshots its properties and loses live
+    // delegation. Engine prototypes retain their handles and realm behavior.
+    const receiver = context.nextName("sc_island_object_constructor");
+    const islandPrototype = emitIslandValue("&sc_prototype", context);
+    return `{ let ${receiver} = runtime::island_global_get("Object"); let ${prototype} = ${emitExpr(prototypeExpr)}; match ${prototype} { ` +
+      `sc_prototype @ ${dyn}::Object(..) => { let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); runtime::map_set_prototype(&${object}, sc_prototype); ${dyn}::Object(${object}) }, ` +
+      `sc_prototype => ${dyn}::Island(runtime::island_call_method(&${receiver}, "create", &[${islandPrototype}])), } }`;
+  }
   return `{ let ${prototype} = ${emitExpr(prototypeExpr)}; let ${object}: runtime::JsMap<runtime::JsString, ${dyn}> = runtime::map_new(); match ${prototype} { ${dyn}::Null => sc_dyn_mark_null_proto(&${object}), sc_prototype @ ${dyn}::Object(..) => runtime::map_set_prototype(&${object}, sc_prototype), value => sc_dyn_arg_type_fail("prototype", "an object or null", &value), }; ${dyn}::Object(${object}) }`;
+}
+
+/** The receiver lookup is intrinsic only for these exact call signatures.
+ * Admission visits the returned input so nested engine use stays visible. */
+export function nativeNumberPredicateInput(expr: JsOperation): IrExpr | null {
+  if (expr.op !== "callMethod" || !isGlobal(expr.args[0], "Number") || expr.args.length !== 2 ||
+      (expr.name !== "isInteger" && expr.name !== "isSafeInteger")) return null;
+  return expr.args[1] ?? null;
 }
 
 function emitNumberPredicate(
@@ -73,10 +95,8 @@ function emitNumberPredicate(
   context: RustIslandContext,
   emitExpr: (expr: IrExpr) => string,
 ): string | null {
-  if (expr.op !== "callMethod" || !isGlobal(expr.args[0], "Number") || expr.args.length !== 2 ||
-      (expr.name !== "isInteger" && expr.name !== "isSafeInteger")) return null;
-  const argument = expr.args[1];
-  if (argument === undefined) return null;
+  const argument = nativeNumberPredicateInput(expr);
+  if (argument === null) return null;
   const dyn = context.dynTypeName();
   const value = context.nextName("sc_island_number");
   const predicate = expr.name === "isInteger" ? "number_is_integer" : "number_is_safe_integer";

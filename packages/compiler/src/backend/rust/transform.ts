@@ -625,8 +625,8 @@ export class RustTransformEmitter {
     }
     const values = expr.args.map(() => this.context.nextTemporary());
     const result = expr.type.kind === "f64"
-      ? `match ${values[1]}.as_ref() { "readableHighWaterMark" | "readableLength" => runtime::readable_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_number_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`
-      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&sc_transform)), "readable" | "readableEnded" | "readableObjectMode" => runtime::readable_bool_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_bool_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`;
+      ? `match ${values[1]}.as_ref() { sc_name if sc_name == "readableHighWaterMark" || sc_name == "readableLength" => runtime::readable_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_number_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`
+      : `match ${values[1]}.as_ref() { sc_name if sc_name == "allowHalfOpen" => runtime::duplex_allow_half_open(&runtime::transform_duplex(&sc_transform)), sc_name if sc_name == "readable" || sc_name == "readableEnded" || sc_name == "readableObjectMode" => runtime::readable_bool_prop(&runtime::transform_readable(&sc_transform), &${values[1]}), _ => runtime::writable_bool_prop(&runtime::transform_writable(&sc_transform), &${values[1]}), }`;
     const handle = this.transformHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
     return `{ ${this.bind(expr.args, values)} let sc_transform = ${handle}; ${result} }`;
   }

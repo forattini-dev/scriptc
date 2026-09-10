@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-10T18:29:53.213418+00:00",
+  "sourceFingerprint": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "distFingerprint": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b",
+  "consumerInputCount": 117,
+  "sourceDistConsumerAndExecutableIdentitiesVerified": true,
+  "originalArtworkFontRendererAndThemeVerified": true,
+  "measurementInputUnchangedExceptOutputPath": true,
+  "nativeBinaryBytes": 4072912,
+  "gateAcceptedAtObservation": false,
+  "gateLanesAtObservation": {
+    "plain": {
+      "status": "running",
+      "started": "2026-09-10T18:28:02.110687+00:00",
+      "freeDiskBefore": 88217722880
+    }
+  },
+  "completionProven": false,
+  "remaining": [
+    "Complete both full gate lanes",
+    "Measure current accepted binary against compiled Bun under quiet conditions",
+    "Review raw results and publish final repository checkpoint"
+  ]
+}

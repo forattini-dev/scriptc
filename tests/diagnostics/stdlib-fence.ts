@@ -20,7 +20,7 @@ const parsedMs = Date.parse("2024-01-01");
 const fmt = new Intl.NumberFormat();
 
 // Constructors.
-const d = new Date(2024, 0); // the local-time year/month field constructor stays fenced
+const d = new Date(2024, 0); // local calendar construction now lowers
 const mutableDate = new Date(0);
 mutableDate.setUTCFullYear(2024); // mutation is outside the read-only Date slice
 const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity

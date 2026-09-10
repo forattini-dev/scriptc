@@ -25,7 +25,7 @@ fn open_file_numeric(path: &JsString, flags: i32, mode: u32) -> std::io::Result<
     // rustix owns the descriptor; conversion to File transfers ownership
     // through safe APIs. Match Node's non-inheritable descriptors.
     let flags = OFlags::from_bits_retain(flags as u32) | OFlags::CLOEXEC;
-    open(path.as_ref(), flags, Mode::from_bits_truncate(mode))
+    open(path.to_utf8_lossy(), flags, Mode::from_bits_truncate(mode))
         .map(std::fs::File::from).map_err(std::io::Error::from)
 }
 

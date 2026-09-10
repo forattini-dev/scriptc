@@ -50,7 +50,7 @@ pub fn island_value_typeof(value: &IslandValue) -> JsString {
 }
 
 pub fn island_value_string(value: &JsString) -> IslandValue {
-    IslandValue(JsValue::from(boa_engine::JsString::from(value.as_ref())))
+    IslandValue(JsValue::from(island_string(value)))
 }
 
 pub fn island_value_bytes(value: &JsBytes<u8>) -> IslandValue {
@@ -90,7 +90,7 @@ pub fn island_host_argument_string(arguments: &[IslandHostArgument], index: usiz
     else {
         throw_type_error(format!("expected string at argument {index}"));
     };
-    string(&value.to_std_string_lossy())
+    string_from_utf16(&value.iter().collect::<Vec<_>>())
 }
 
 pub fn island_host_argument_number(arguments: &[IslandHostArgument], index: usize) -> f64 {
@@ -131,13 +131,24 @@ pub fn island_value_object(fields: Vec<(JsString, IslandValue)>) -> IslandValue 
         let mut object = ObjectInitializer::new(&mut state.context);
         for (key, value) in fields {
             object.property(
-                boa_engine::JsString::from(key.as_ref()),
+                island_string(key.as_ref()),
                 value.0,
                 Attribute::WRITABLE | Attribute::ENUMERABLE | Attribute::CONFIGURABLE,
             );
         }
         IslandValue(object.build().into())
     })
+}
+
+/// CopyDataProperties preserves symbol keys and property-value identity.
+pub fn island_copy_data_properties(target: &IslandValue, source: &IslandValue) {
+    with_island_state(|state| {
+        let Some(target) = target.0.as_object() else {
+            throw_type_error("object spread target is not an object".to_owned());
+        };
+        target.copy_data_properties(&source.0, Vec::<boa_engine::property::PropertyKey>::new(), &mut state.context)
+            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
+    });
 }
 
 pub fn island_value_array(values: Vec<IslandValue>) -> IslandValue {
@@ -216,8 +227,8 @@ fn island_construct_regexp(
             .into());
     };
     let args = [
-        JsValue::from(boa_engine::JsString::from(source.as_ref())),
-        JsValue::from(boa_engine::JsString::from(flags.as_ref())),
+        JsValue::from(island_string(source)),
+        JsValue::from(island_string(flags)),
     ];
     Ok(regexp.construct(&args, None, context)?.into())
 }
@@ -233,7 +244,7 @@ fn island_parse_json(value: &JsString, context: &mut Context) -> JsResult<JsValu
             .with_message("Embedded JSON.parse is not callable")
             .into());
     };
-    let input = JsValue::from(boa_engine::JsString::from(value.as_ref()));
+    let input = JsValue::from(island_string(value));
     parse.call(&JsValue::from(json), &[input], context)
 }
 
@@ -284,7 +295,7 @@ pub fn island_strict_equal_number(value: &IslandValue, other: f64) -> bool {
 pub fn island_strict_equal_string(value: &IslandValue, other: &JsString) -> bool {
     value
         .0
-        .strict_equals(&JsValue::from(boa_engine::JsString::from(other.as_ref())))
+        .strict_equals(&JsValue::from(island_string(other)))
 }
 
 pub fn island_get_property(value: &IslandValue, name: &str) -> IslandValue {
@@ -532,158 +543,7 @@ pub fn island_eval(code: &JsString) -> JsString {
     })
 }
 
-/// Why an embedded module could not be made available.
-///
-/// `Coded` is a scriptc-level refusal carrying a Node error code (the key
-/// is not in the build's table, or the module never finished evaluating);
-/// `Engine` is the module's own thrown value. Static `island_import`
-/// raises either as a throw at the import site; dynamic
-/// `island_import_dyn` turns either into a rejection, which is where Node
-/// puts a dynamic import's failure.
-enum IslandImportFailure {
-    Coded(String, &'static str),
-    Engine(BoaJsError),
-}
-
-/// Evaluate one embedded module (once per realm) and answer its namespace.
-///
-/// Both import paths share this: the static form reads one export off the
-/// namespace, the dynamic form hands the whole object across.
-fn island_module_namespace(
-    state: &mut IslandState,
-    key: &str,
-) -> Result<JsValue, IslandImportFailure> {
-    if !state.loader.has_embedded(key) {
-        // A `node:` specifier is never in the embedded table — the build
-        // embeds npm sources, not builtins — so it takes the same
-        // synthesized wrapper the ES loader hands the static graph.
-        if key.starts_with("node:") {
-            return island_builtin_namespace(state, key);
-        }
-        return Err(IslandImportFailure::Coded(
-            format!("Cannot find embedded module '{key}'"),
-            "ERR_MODULE_NOT_FOUND",
-        ));
-    }
-    let loader = state.loader.clone();
-    let module = loader
-        .load(key, &mut state.context)
-        .map_err(IslandImportFailure::Engine)?;
-    if !with_tables(|t| t.evaluated.contains(key)) {
-        island_module_evaluate(state, &module, key)?;
-        // Cache only a successful lifecycle. Marking before evaluation
-        // made a rejected first import expose an unevaluated namespace on
-        // the second import instead of rejecting with the module failure.
-        with_tables(|t| t.evaluated.insert(key.to_owned()));
-    }
-    Ok(module.namespace(&mut state.context).into())
-}
-
-/// A `node:` builtin reached through `import()`.
-///
-/// The wrapper is the loader's own (`island_builtin_wrapper`): it only
-/// calls `__scr_require`, so it links against nothing and can be parsed
-/// and evaluated standalone. Cached per realm, so repeated imports of the
-/// same builtin answer the same namespace, like Node's module cache.
-fn island_builtin_namespace(
-    state: &mut IslandState,
-    key: &str,
-) -> Result<JsValue, IslandImportFailure> {
-    if let Some(module) = with_tables(|t| t.builtins.get(key).cloned()) {
-        return Ok(module.namespace(&mut state.context).into());
-    }
-    let source = island_builtin_wrapper(key);
-    let mut bytes = source.as_bytes();
-    let module = Module::parse(
-        Source::from_reader(&mut bytes, Some(Path::new(key))),
-        None,
-        &mut state.context,
-    )
-    .map_err(IslandImportFailure::Engine)?;
-    island_module_evaluate(state, &module, key)?;
-    with_tables(|t| t.builtins.insert(key.to_owned(), module.clone()));
-    Ok(module.namespace(&mut state.context).into())
-}
-
-/// Load, link and evaluate one module, draining the jobs its evaluation
-/// queues so a rejection is visible now rather than at the next turn.
-fn island_module_evaluate(
-    state: &mut IslandState,
-    module: &Module,
-    key: &str,
-) -> Result<(), IslandImportFailure> {
-    // SCRIPTC_ISLAND_TRACE: name the module whose graph links and
-    // evaluates — an engine panic during compilation (boa's bytecompiler
-    // aborts the process) is otherwise unlocatable.
-    if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
-        eprintln!("scriptc island: evaluate {key}");
-    }
-    let promise = module.load_link_evaluate(&mut state.context);
-    state
-        .context
-        .run_jobs()
-        .map_err(IslandImportFailure::Engine)?;
-    match promise.state() {
-        BoaPromiseState::Fulfilled(_) => Ok(()),
-        BoaPromiseState::Rejected(reason) => {
-            Err(IslandImportFailure::Engine(BoaJsError::from_opaque(reason)))
-        }
-        BoaPromiseState::Pending => Err(IslandImportFailure::Coded(
-            format!("Embedded module '{key}' did not finish evaluating"),
-            "ERR_MODULE_EVALUATION_PENDING",
-        )),
-    }
-}
-
-/// Raise an import failure as a static scriptc throw.
-fn island_import_throw(failure: IslandImportFailure, context: &mut Context) -> ! {
-    match failure {
-        IslandImportFailure::Coded(message, code) => throw_error_code(message, code),
-        IslandImportFailure::Engine(error) => island_eval_error(error, context),
-    }
-}
-
-/// The rejection reason the same failure carries into the realm.
-fn island_import_reason(failure: IslandImportFailure, context: &mut Context) -> BoaJsError {
-    match failure {
-        IslandImportFailure::Coded(message, code) => {
-            let error = boa_engine::JsNativeError::error()
-                .with_message(message)
-                .into_opaque(context);
-            // Node's module errors are recognised by `.code`, so the
-            // rejection reason carries it like the static throw does.
-            let _ = error.set(
-                js_string!("code"),
-                boa_engine::JsString::from(code),
-                false,
-                context,
-            );
-            BoaJsError::from_opaque(error.into())
-        }
-        IslandImportFailure::Engine(error) => error,
-    }
-}
-
-pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
-    with_island_state(|state| {
-        let namespace = island_module_namespace(state, key.as_ref())
-            .unwrap_or_else(|failure| island_import_throw(failure, &mut state.context));
-        // `import * as ns` binds the module namespace object itself (the
-        // C island's scr_jsval_import answers "*" the same way).
-        if export.as_ref() == "*" {
-            return IslandValue(namespace);
-        }
-        let value = namespace
-            .to_object(&mut state.context)
-            .unwrap_or_else(|error| island_eval_error(error, &mut state.context))
-            .get(
-                boa_engine::JsString::from(export.as_ref()),
-                &mut state.context,
-            )
-            .unwrap_or_else(|error| island_eval_error(error, &mut state.context));
-        IslandValue(value)
-    })
-}
+include!("island_import_eval.rs");
 
 /// Dynamic `import(key)` — the embedded module's whole namespace object.
 ///
@@ -693,7 +553,7 @@ pub fn island_import(key: &JsString, export: &JsString) -> IslandValue {
 /// the settlement exactly where `await import(...)` puts it.
 pub fn island_import_dyn(key: &JsString) -> IslandValue {
     with_island_state(|state| {
-        let promise = match island_module_namespace(state, key.as_ref()) {
+        let promise = match island_module_namespace(state, key, None) {
             Ok(namespace) => BoaJsPromise::resolve(namespace, &mut state.context),
             Err(failure) => {
                 let reason = island_import_reason(failure, &mut state.context);
@@ -711,7 +571,7 @@ pub fn island_import_dyn(key: &JsString) -> IslandValue {
 pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
     with_island_state(|state| {
         let loaded: Result<JsValue, IslandImportFailure> = (|| {
-            let url = url::Url::parse(specifier.as_ref()).map_err(|_| {
+            let url = url::Url::parse(specifier).map_err(|_| {
                 IslandImportFailure::Coded(
                     format!("Only file: URLs can be imported at runtime: '{specifier}'"),
                     "ERR_UNSUPPORTED_ESM_URL_SCHEME",
@@ -735,7 +595,7 @@ pub fn island_import_dyn_path(specifier: &JsString) -> IslandValue {
                 .load_external(&path, &mut state.context)
                 .map_err(IslandImportFailure::Engine)?;
             if !with_tables(|t| t.evaluated.contains(&key)) {
-                island_module_evaluate(state, &module, &key)?;
+                island_module_evaluate(state, &module, &key, None)?;
                 with_tables(|t| t.evaluated.insert(key.clone()));
             }
             Ok(module.namespace(&mut state.context).into())
@@ -907,7 +767,7 @@ pub fn island_inspect(value: &IslandValue, _recurse: f64, _depth: f64) -> JsStri
         return inspect_number(number);
     }
     if let Some(text) = value.0.as_string() {
-        return inspect_string(&string(&text.to_std_string_lossy()));
+        return inspect_string(&string_from_utf16(&text.iter().collect::<Vec<_>>()));
     }
     if let Some(boolean) = value.0.as_boolean() {
         return string(&display_bool(boolean));

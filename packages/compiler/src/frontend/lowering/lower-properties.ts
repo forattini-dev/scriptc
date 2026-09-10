@@ -1,5 +1,7 @@
+import { lowerTupleLength } from "./lower-native-tuple.js";
+import { lowerOptionalRecordField } from "./lower-optional-record-field.js";
 import { InternalCompilerError } from "../../errors.js";
-import { DYN, F64, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { DYN, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import * as ts from "../ts7/adapter.js";
 import { isGenericCallableMemberType } from "../types.js";
@@ -9,7 +11,6 @@ import {
   requireObjLitGenericReceiver,
 } from "./lower-calls.js";
 import { exactInstanceClassOf, findGenericMethodOn } from "./lower-classes.js";
-import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import type { Lowerer } from "./lowerer.js";
 import { NARROW_FIRST } from "./surfaces.js";
@@ -60,38 +61,8 @@ export type FieldTarget =
    * ordinary closure values, so bare references to them work (unlike class
    * methods, which have no bound-value form). */
   export function lowerFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    // A generic instance may lower its receiver to a narrower concrete
-    // record than the checker-visible constraint. When that concrete shape
-    // omits an OPTIONAL constraint field, JavaScript still performs the
-    // receiver evaluation and answers undefined. Handle that value case
-    // before fieldTarget (which only describes assignable storage slots).
-    const accessType = L.mapTypeOf(L.typeOf(expr));
-    const absent = accessType ? L.wrappedUndefined(accessType, locOf(expr)) : null;
-    if (absent) {
-      const probed = probeLower(L, expr.expression);
-      if (probed?.type.kind === "record") {
-        const concreteShape = L.shapes.get(probed.type.shapeId);
-        const propertyName = expr.name.text;
-        if (
-          concreteShape &&
-          !concreteShape.indexValue &&
-          !concreteShape.fields.some((f) =>
-            f.name === propertyName ||
-            f.name === `%get:${propertyName}` ||
-            f.name === `%set:${propertyName}`
-          )
-        ) {
-          const receiver = L.lowerExpr(expr.expression);
-          return {
-            kind: "seqExpr",
-            stmts: [{ kind: "exprStmt", expr: receiver, loc: receiver.loc }],
-            result: absent,
-            type: absent.type,
-            loc: locOf(expr),
-          };
-        }
-      }
-    }
+    const optional = lowerOptionalRecordField(L, expr);
+    if (optional) return optional;
     const target = L.fieldTarget(expr);
     if (target) return L.fieldGetExpr(target, locOf(expr), expr);
     if (expr.questionDotToken) return null;
@@ -137,38 +108,12 @@ export type FieldTarget =
         return L.lowerGenericFnValue(expr, objLitGenericFnInfoOf(L, expr, expr.name.text, found));
       }
     }
-    // Dot access to an UNDECLARED key of an index-signature shape
-    // (`bag.count` on `Record<string, number>`): tsc allows it without
-    // noPropertyAccessFromIndexSignature, but the bracket spelling is the
-    // canonical index-signature form here — point at it.
-    if (receiverIr?.kind === "record") {
-      const shape = L.shapes.get(receiverIr.shapeId);
-      if (shape?.indexValue && !shape.fields.some((f) => f.name === expr.name.text)) {
-        L.unsupported(
-          "SC1090",
-          expr,
-          `dot access to index-signature keys (spell it r["${expr.name.text}"] — brackets are the index-signature form)`,
-        );
-      }
-    }
-    // `t.length` on a tuple: the arity CONSTANT (tuples are fixed-shape —
-    // the checker types it as the literal arity too). Folding discards the
-    // receiver's evaluation, so only side-effect-free receivers fold;
-    // anything else (a call result) binds to a const first.
+    // A checker-record can remain a checked-dynamic value after an unknown
+    // guard. Let the caller's dynamic property path inspect that value;
+    // fieldTarget already handles statically represented index records.
     if (receiverIr?.kind === "record" && expr.name.text === "length") {
       const shape = L.shapes.get(receiverIr.shapeId);
-      if (shape?.tuple) {
-        let root: ts.Expression = expr.expression;
-        while (ts.isPropertyAccessExpression(root)) root = root.expression;
-        if (!ts.isIdentifier(root) && root.kind !== ts.SyntaxKind.ThisKeyword) {
-          L.unsupported(
-            "SC1090",
-            expr,
-            "'.length' of a computed tuple expression (the arity is a constant — bind the tuple to a const first)",
-          );
-        }
-        return { kind: "numLit", value: shape.fields.length, type: F64, loc: locOf(expr) };
-      }
+      if (shape?.tuple) return lowerTupleLength(L, checkerArray ?? L.lowerExpr(expr.expression), shape.fields.length, locOf(expr));
     }
     return null;
   }
@@ -239,6 +184,8 @@ export type FieldTarget =
       }
       return null;
     }
+    const optional = lowerOptionalRecordField(L, expr, value);
+    if (optional) return optional;
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new InternalCompilerError(`lowerer bug: unknown union ${value.type.unionId}`);
     const field = expr.name.text;
@@ -542,7 +489,15 @@ export type FieldTarget =
         };
         if (!nameSym || nameSym.name === ts.InternalSymbolName.Index || canonicalized()) {
           const obj = L.lowerExpr(access.expression);
-          return { container: "recordOvf", obj, shapeId: receiverIr.shapeId, field: access.name.text, fieldType: shape.indexValue };
+          // JSDoc record globals can retain dynamic storage. Keep their
+          // keyed target so absence probes observe undefined before narrowing.
+          if (obj.type.kind === "dyn") {
+            return { container: "recordOvf", obj, shapeId: receiverIr.shapeId, field: access.name.text, fieldType: shape.indexValue };
+          }
+          if (obj.type.kind !== "record") return null;
+          const actual = L.shapes.get(obj.type.shapeId);
+          if (!actual?.indexValue || actual.tuple) return null;
+          return { container: "recordOvf", obj, shapeId: obj.type.shapeId, field: access.name.text, fieldType: actual.indexValue };
         }
       }
       return null;

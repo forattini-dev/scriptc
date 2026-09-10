@@ -684,7 +684,11 @@ test("fetch interface object bindings retain the inventory fence code", () => {
   expect(coverage.diagnostics.filter((d) => d.code === "SC2020")).toHaveLength(4);
   const dynamic = analyze(file, { dynamic: true }).coverage;
   expect([...new Set(dynamic.diagnostics.map((d) => d.code))]).toEqual(["SC2020"]);
-  expect(dynamic.diagnostics.filter((d) => d.code === "SC2020")).toHaveLength(2);
+  // Headers.entries and Response.clone are implemented by the engine;
+  // ReadableStream.tee is still an unsupported stub.
+  expect(dynamic.diagnostics.map((d) => d.message)).toEqual([
+    "'ReadableStream.tee' is typed by @types/node but has no scriptc lowering yet",
+  ]);
 });
 
 test("static AbortController method reads fence instead of yielding undefined", () => {
@@ -735,7 +739,7 @@ test("static fetch data properties remain destructurable in JavaScript", () => {
   }
 });
 
-test("unimplemented Response and ReadableStream calls stay fenced under --dynamic", () => {
+test("Response.clone needs --dynamic while unimplemented stream and body calls stay fenced", () => {
   const file = probeFile({
     id: "stdlib.fetch.unimplemented-dynamic-methods",
     source:
@@ -752,7 +756,13 @@ test("unimplemented Response and ReadableStream calls stay fenced under --dynami
     const coverage = analyze(file, { dynamic }).coverage;
     expect(coverage.preflightFailed).toBe(false);
     expect([...new Set(coverage.diagnostics.map((d) => d.code))]).toEqual(["SC2020"]);
-    expect(coverage.diagnostics.filter((d) => d.code === "SC2020")).toHaveLength(5);
+    const members = [
+      ...(dynamic ? [] : ["Response.clone in a static build"]),
+      "Response.blob", "Response.formData", "ReadableStream.tee", "ReadableStream.pipeTo",
+    ];
+    expect(coverage.diagnostics.map((d) => d.message)).toEqual(
+      members.map((member) => `'${member}' is typed by @types/node but has no scriptc lowering yet`),
+    );
   }
 });
 

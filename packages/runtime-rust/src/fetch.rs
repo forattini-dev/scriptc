@@ -136,7 +136,7 @@ pub fn fetch_response_header(response: &JsHttpRequest, name: &JsString) -> Optio
     let lower = name.to_ascii_lowercase();
     http_request_headers(response)
         .into_iter()
-        .find(|(header, _)| header.as_ref() == lower)
+        .find(|(header, _)| header == lower)
         .map(|(_, value)| value)
 }
 

@@ -378,6 +378,7 @@ export const JS_RELAXED_TSC_CODES: ReadonlySet<number> = new Set([
   // properties, capability probes — the lowerer fences unknown members
   // per site with the SC2020 family)
   2322, 2339, 2345, 2349, 2351, 2367, 2554, 2555, 2556, 2769,
+  2575, // overloaded arity variant of 2554; TS sources keep both checks
   2740, // 2322's elaborated "missing the following properties" form
   2305, 2551, 2724, 2731,
   // excess object-literal properties against a JSDoc-inferred contextual

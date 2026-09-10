@@ -1,8 +1,10 @@
 import type { RustDynamicHttpContext } from "./dynamic-http.js";
+import { emitRustWebStreamFromDefinitions } from "./web-stream-from.js";
 
 /** Web Streams share the checked-dynamic value representation with callbacks. */
 export function emitRustDynamicWebStream(context: RustDynamicHttpContext): void {
   if (!context.usesDynamicInvoke()) return;
+  emitRustWebStreamFromDefinitions(context);
   const dyn = context.dynTypeName();
   const source = `
 struct ScWebSource { receiver: ${dyn}, pull: ${dyn}, cancel: ${dyn} }

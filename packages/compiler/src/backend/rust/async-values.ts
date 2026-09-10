@@ -1,3 +1,6 @@
+import { rustJsString } from "./string-literals.js";
+import { emitAsyncResult } from "./async-result.js";
+import { emitAsyncNativeArrayLiteral } from "./async-native-array.js";
 import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
@@ -52,6 +55,8 @@ export interface RustAsyncValueContext {
 
 export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | null {
   switch (expr.kind) {
+    case "dynScalarEq":
+      return [expr.left, expr.right];
     case "libCall":
     case "call":
     case "intrinsic":
@@ -69,6 +74,7 @@ export function rustAsyncExpressionOperands(expr: IrExpr): readonly IrExpr[] | n
       return expr.fields.map((field) => field.value);
     case "bytesIntrinsic":
       return [expr.receiver, ...expr.args];
+    case "dynFrom":
     case "dynCheck":
     case "dynFromJsval":
     case "jsExit":
@@ -89,6 +95,8 @@ export class RustAsyncValueEmitter {
   constructor(private readonly context: RustAsyncValueContext) {}
 
   emitAsyncValue(expr: IrExpr, consume: (value: string) => void): void {
+    const complete = consume;
+    consume = (value) => emitAsyncResult(this.context, value, complete);
     const awaited = this.context.awaitExpression(expr);
     if (awaited !== null) {
       // `await (await load()).method()` first has to construct the OUTER
@@ -102,6 +110,10 @@ export class RustAsyncValueEmitter {
         return;
       }
       this.emitAsyncContinuation(this.context.emitAwaitDependency(awaited), consume, null);
+      return;
+    }
+    if (expr.kind === "dynFrom" && expr.value.kind === "arrayLit" && this.context.containsAsyncSuspension(expr.value)) {
+      emitAsyncNativeArrayLiteral(expr.value, this.context, (value, next) => this.emitAsyncValue(value, next), consume);
       return;
     }
     if (expr.kind === "unionWrap" && this.context.containsAsyncSuspension(expr.value)) {
@@ -272,16 +284,17 @@ export class RustAsyncValueEmitter {
       const entries = expr.fields.filter(field => !field.drop && !field.absent).map(field => {
         const value = (field.overflow ? overflow : values).get(field.name);
         if (value === undefined) this.context.unsupported(`missing async shared record field '${field.name}'`, expr.loc);
-        return `runtime::map_set_by(&${object}, runtime::string("${this.context.rustString(field.name)}"), ${this.context.emitDynFromValue(field.value.type, value, expr.loc)}, |a, b| a == b);`;
+        const boxed = this.context.emitDynFromValue(field.value.type, value, expr.loc);
+        return shape.tuple ? `runtime::array_push(&${object}, ${boxed});` : `runtime::map_set_by(&${object}, ${rustJsString(field.name, text => this.context.rustString(text))}, ${boxed}, |a, b| a == b);`;
       }).join(" ");
-      consume(`{ let ${object} = runtime::map_new(); ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`);
+      consume(`{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`);
       return;
     }
     if (shape.indexValue !== undefined && shape.fields.length === 0) {
       const map = this.context.nextName("sc_async_record");
       const valueType = this.context.rustType(shape.indexValue, expr.loc);
       const entries = overflowValues.map(([name, value]) =>
-        `runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`
+        `runtime::map_set_by(&${map}, ${rustJsString(name, text => this.context.rustString(text))}, ${value}, |left, right| left.as_ref() == right.as_ref());`
       ).join(" ");
       consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} ${map} }`);
       return;
@@ -298,7 +311,7 @@ export class RustAsyncValueEmitter {
     const map = this.context.nextName("sc_async_record");
     const valueType = this.context.rustType(shape.indexValue, expr.loc);
     const entries = overflowValues.map(([name, value]) =>
-      `runtime::map_set_by(&${map}, runtime::string("${this.context.rustString(name)}"), ${value}, |left, right| left.as_ref() == right.as_ref());`
+      `runtime::map_set_by(&${map}, ${rustJsString(name, text => this.context.rustString(text))}, ${value}, |left, right| left.as_ref() == right.as_ref());`
     ).join(" ");
     consume(`{ let ${map}: runtime::JsMap<runtime::JsString, ${valueType}> = runtime::map_new(); ${entries} ${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields}, ${RUST_RECORD_OVERFLOW}: Some(${map}) }) }`);
   }
@@ -325,6 +338,7 @@ export class RustAsyncValueEmitter {
   ): string {
     const shape = this.recordCloneShape(expr);
     if (isSharedRecord(shape)) {
+      if (shape.tuple) return `${sharedRecordName(shape.id)} { object: runtime::array_slice(&${source}.object, 0.0, runtime::array_len(&${source}.object)) }`;
       return `{ let object = runtime::map_new(); let mut index = 0.0; while index < runtime::map_iter_count(&${source}.object) { if runtime::map_iter_live(&${source}.object, index) { runtime::map_set_by(&object, runtime::map_iter_key(&${source}.object, index), runtime::map_iter_value(&${source}.object, index), |a, b| a == b); } index += 1.0; } ${sharedRecordName(shape.id)} { object } }`;
     }
     const fields = shape.fields.map((field) => {

@@ -564,7 +564,7 @@ impl Decoder<'_> {
 pub fn schema_decode<T: ParseArgsValue + JsonValue>(schema: &JsEffect, input: &T) -> Result<T, JsString> {
     let node = schema_node_of(schema);
     let mut decoder = Decoder { path: Vec::new(), _marker: std::marker::PhantomData };
-    decoder.decode(&node, input).map_err(Rc::from)
+    decoder.decode(&node, input).map_err(JsString::from)
 }
 
 /// `S.make(props)`: the props with a Struct's constructor defaults applied (a `tag` field absent from the props is

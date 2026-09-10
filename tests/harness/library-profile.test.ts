@@ -357,13 +357,14 @@ describe("library profile fences", () => {
             { id: "stdlib.math.random", teaching: "randomness is an effect", remediation: "ask the host" },
             { prefix: "node-builtin.fs.", teaching: "files are effects" },
             { id: "stdlib.math.sin", teaching: "trig is host math", remediation: "request it as an effect" },
+            { id: "stdlib.response.clone", teaching: "responses belong to the host" },
           ],
         },
       }),
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.profile.fences).toHaveLength(3);
+    expect(r.profile.fences).toHaveLength(4);
     // The id fence covers exactly its entry; math.random is static, so it
     // carries a detector (the compile-time denial's reach witness).
     expect(r.profile.fences[0]!.declared).toBe("id 'stdlib.math.random'");
@@ -374,11 +375,14 @@ describe("library profile fences", () => {
     const fsIds = r.profile.fences[1]!.surfaces.map((s) => s.id);
     expect(fsIds).toContain("node-builtin.fs.readFileSync");
     expect(fsIds).toContain("node-builtin.fs.promises.readFile");
-    // A fenced dynamic-only surface carries its own refusal code and no
-    // detector: the teaching rides the refusal that already fires.
+    // Trig now has native lowering, so its fence must detect the libCall.
     const sin = r.profile.fences[2]!.surfaces[0]!;
-    expect(sin.code).toBe("SC2012");
-    expect(sin.detector).toBeUndefined();
+    expect(sin.code).toBeUndefined();
+    expect(sin.detector?.libFns).toEqual(["math.sin"]);
+    // Keep a dynamic-only witness: its teaching decorates the existing refusal.
+    const clone = r.profile.fences[3]!.surfaces[0]!;
+    expect(clone.code).toBe("SC2020");
+    expect(clone.detector).toBeUndefined();
   });
 
   test("a fence remediation feeds the trap-remediation lookup through covered codes", () => {
@@ -457,6 +461,7 @@ describe("library profile fences", () => {
       "stdlib.date.getUTCMonth",
       "stdlib.date.getUTCSeconds",
       "stdlib.date.now",
+      "stdlib.date.parse",
       "stdlib.date.toISOString",
       "stdlib.date.valueOf",
     ]);
@@ -473,22 +478,24 @@ describe("library profile fences", () => {
     expect(r.profile.fences[2]!.surfaces.map((s) => s.id)).toEqual(["node-builtin.perf_hooks.performance.now"]);
   });
 
-  test("Date getTime and valueOf fences keep distinct IR witnesses", () => {
+  test("Date getTime, valueOf and parse fences keep distinct IR witnesses", () => {
     const r = loadLibraryProfile(
       writeProfile({
         ...good,
         determinism: {
-          fences: [{ id: "stdlib.date.getTime" }, { id: "stdlib.date.valueOf" }],
+          fences: [
+            { id: "stdlib.date.getTime" },
+            { id: "stdlib.date.valueOf" },
+            { id: "stdlib.date.parse" },
+          ],
         },
       }),
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.profile.fences[0]!.surfaces[0]!.detector?.libFns).toEqual([
-      "date.getTime",
-      "date.parseGetTime",
-    ]);
+    expect(r.profile.fences[0]!.surfaces[0]!.detector?.libFns).toEqual(["date.getTime"]);
     expect(r.profile.fences[1]!.surfaces[0]!.detector?.libFns).toEqual(["date.valueOf"]);
+    expect(r.profile.fences[2]!.surfaces[0]!.detector?.libFns).toEqual(["date.parseGetTime"]);
   });
 
   test("a prefix matching nothing refuses — the spec's illustrative spelling included", () => {

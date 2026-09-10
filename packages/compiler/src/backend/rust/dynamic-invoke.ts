@@ -1,6 +1,7 @@
 import type { RustClosureShape } from "./model.js";
 
 export interface RustDynamicInvokeContext {
+  hasEmbeddedModules(): boolean;
   line(value: string): void;
   pushIndent(): void;
   popIndent(): void;
@@ -211,9 +212,11 @@ class RustDynamicInvokeEmitter {
     this.context.line(`${this.dyn}::Promise(handle) => {`);
     this.context.pushIndent();
     this.context.line("if runtime::promise_handle_identity(&handle) == target.identity() { let reason = runtime::caught_value(runtime::error_new(\"TypeError\", runtime::string(\"Chaining cycle detected for promise #<Promise>\"))); let _ = runtime::promise_reject(target, reason); return; }");
-    this.context.line(`let inner = runtime::promise_from_handle::<${this.dyn}>(&handle);`);
+    // Promise resolution queues NewPromiseResolveThenableJob before attaching
+    // the forwarding reaction. A representation bridge must not add a job.
+    this.context.line(`let inner = runtime::promise_view_from_handle::<${this.dyn}>(&handle);`);
     this.context.line("let forwarded = target.clone();");
-    this.context.line("runtime::promise_then(&inner, Box::new(move |outcome| sc_dyn_promise_settle(&forwarded, outcome)));");
+    this.context.line("runtime::timer_queue_microtask(Box::new(move || runtime::promise_then(&inner, Box::new(move |outcome| sc_dyn_promise_settle(&forwarded, outcome)))));");
     this.context.popIndent();
     this.context.line("},");
     this.context.line("value => { let _ = runtime::promise_fulfill(target, value); },");
@@ -240,20 +243,20 @@ class RustDynamicInvokeEmitter {
     this.close("}");
 
     this.open(`fn sc_dyn_promise_finish_after(target: &runtime::JsPromise<${this.dyn}>, outcome: Result<${this.dyn}, runtime::Caught>, cleanup: ${this.dyn}) {`);
-    this.open("match cleanup {");
-    this.context.line(`${this.dyn}::Promise(handle) => {`);
-    this.context.pushIndent();
-    this.context.line("if runtime::promise_handle_identity(&handle) == target.identity() { let reason = runtime::caught_value(runtime::error_new(\"TypeError\", runtime::string(\"Chaining cycle detected for promise #<Promise>\"))); let _ = runtime::promise_reject(target, reason); return; }");
-    this.context.line(`let inner = runtime::promise_from_handle::<${this.dyn}>(&handle);`);
-    this.context.line("let forwarded = target.clone();");
-    this.open("runtime::promise_then(&inner, Box::new(move |cleanup_outcome| match cleanup_outcome {");
-    this.context.line("Ok(_) => sc_dyn_promise_settle(&forwarded, outcome),");
-    this.context.line("Err(reason) => { let _ = runtime::promise_reject(&forwarded, reason); },");
+    // finally returns PromiseResolve(cleanup).then(valueThunk/thrower), and
+    // the outer reaction adopts that intermediate promise. Even scalar cleanup
+    // runs this chain; directly settling target would skip observable jobs.
+    this.open("let cleanup = match cleanup {");
+    this.context.line(`${this.dyn}::Promise(handle) => runtime::promise_view_from_handle::<${this.dyn}>(&handle),`);
+    this.context.line("value => runtime::promise_resolved(value),");
+    this.close("};");
+    this.context.line(`let continuation = runtime::promise_new::<${this.dyn}>();`);
+    this.context.line("let completed = continuation.clone();");
+    this.open("runtime::promise_then(&cleanup, Box::new(move |cleanup_outcome| match cleanup_outcome {");
+    this.context.line("Ok(_) => sc_dyn_promise_settle(&completed, outcome),");
+    this.context.line("Err(reason) => { let _ = runtime::promise_reject(&completed, reason); },");
     this.close("}));");
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line("_ => sc_dyn_promise_settle(target, outcome),");
-    this.close("}");
+    this.context.line(`sc_dyn_promise_adopt(target, ${this.dyn}::Promise(runtime::promise_to_handle(&continuation)));`);
     this.close("}");
 
     this.open(`fn sc_dyn_promise_finally(handle: &runtime::JsPromiseHandle, callback: ${this.dyn}) -> ${this.dyn} {`);
@@ -361,6 +364,7 @@ class RustDynamicInvokeEmitter {
     this.open(`fn sc_dyn_invoke(recv: &${this.dyn}, method: &str, args: &[${this.dyn}], callee_name: &str) -> ${this.dyn} {`);
     this.open("match recv {");
     this.context.line(`${this.dyn}::Undefined | ${this.dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading '{method}')", sc_dyn_kind(recv))),`);
+    if (this.context.hasEmbeddedModules()) this.context.line(`${this.dyn}::Island(value) => { let args = args.iter().map(sc_dyn_to_island).collect::<Vec<_>>(); sc_dyn_from_island(runtime::island_call_method(value, method, &args)) },`);
     this.emitObjectArm();
     this.emitFunctionArm();
     this.emitNumberArm();
@@ -439,7 +443,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"at" => { let index = sc_dyn_index_arg(args, 0, 0.0, callee_name); let actual = if index < 0.0 { runtime::string_len(text) + index } else { index }; if actual < 0.0 || actual >= runtime::string_len(text) { ${this.dyn}::Undefined } else { ${this.dyn}::String(runtime::string_at(text, index)) } },`);
     this.context.line(`"charAt" => ${this.dyn}::String(runtime::string_char_at(text, sc_dyn_index_arg(args, 0, 0.0, callee_name))),`);
     this.context.line(`"split" => { let limit = match args.get(1) { None | Some(${this.dyn}::Undefined) => u32::MAX as f64, Some(value) => runtime::to_uint32(sc_dyn_to_number(value)) as f64, }; let pieces = match args.first() { None | Some(${this.dyn}::Undefined) => if limit == 0.0 { runtime::array_new(Vec::new()) } else { runtime::array_new(vec![text.clone()]) }, Some(${this.dyn}::Regex(separator)) => runtime::regex_split(text, separator, limit), Some(separator) => runtime::string_split(text, &sc_dyn_to_string(separator), limit), }; sc_dyn_string_array(pieces) },`);
-    this.context.line(`"concat" => { let mut output = text.to_string(); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);
+    this.context.line(`"concat" => { let mut output = runtime::JsStringBuilder::new(); output.push_str(text); for arg in args { output.push_str(sc_dyn_to_string(arg).as_ref()); } ${this.dyn}::String(runtime::string(&output)) },`);
     this.context.line(`"toLocaleString" => ${this.dyn}::String(text.clone()),`);
     this.context.line(`"indexOf" => match args.first() { Some(search) => ${this.dyn}::Number(runtime::string_index_of(text, &sc_dyn_to_string(search), sc_dyn_index_arg(args, 1, 0.0, callee_name))), None => runtime::throw_error("'String.prototype.indexOf' without a search value is not supported yet".to_owned()), },`);
     this.context.line(`"lastIndexOf" => match args.first() { Some(search) => ${this.dyn}::Number(runtime::string_last_index_of(text, &sc_dyn_to_string(search), sc_dyn_last_index_arg(args, callee_name))), None => ${this.dyn}::Number(runtime::string_last_index_of(text, &runtime::string("undefined"), f64::INFINITY)), },`);
@@ -569,7 +573,7 @@ class RustDynamicInvokeEmitter {
     this.context.line(`"setNoDelay" => { let enabled = match args.first() { None | Some(${this.dyn}::Undefined) => true, Some(${this.dyn}::Boolean(value)) => *value, _ => true }; let _ = runtime::net_socket_set_no_delay(socket, enabled); recv.clone() },`);
     this.context.line(`"on" | "once" | "addListener" => {`);
     this.context.pushIndent();
-    this.context.line(`let event = match args.first() { Some(${this.dyn}::String(value)) => value.as_ref(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
+    this.context.line(`let event = match args.first() { Some(${this.dyn}::String(value)) => value.to_utf8_lossy(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
     this.context.line(`let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined);`);
     this.context.line("let traced = callback.clone();");
     this.context.line("let once = method == \"once\";");
@@ -599,8 +603,8 @@ class RustDynamicInvokeEmitter {
   private emitAbortSignalArm(): void {
     this.open(`${this.dyn}::AbortSignal(signal) => match method {`);
     this.context.line(`"throwIfAborted" => { if let Some(reason) = runtime::abort_signal_reason(signal) { runtime::throw_value(reason); } ${this.dyn}::Undefined },`);
-    this.context.line(`"addEventListener" => { let event = match args.first() { Some(${this.dyn}::String(value)) => value.as_ref(), value => sc_dyn_arg_type_fail("type", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined); let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &callback)); if event == "abort" { let traced = callback.clone(); runtime::abort_signal_add_listener(signal, identity, std::rc::Rc::new(move |signal| { let event = runtime::map_new(); runtime::map_set_by(&event, runtime::string("type"), ${this.dyn}::String(runtime::string("abort")), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&event, runtime::string("target"), ${this.dyn}::AbortSignal(signal.clone()), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&event, runtime::string("currentTarget"), ${this.dyn}::AbortSignal(signal.clone()), |left, right| left.as_ref() == right.as_ref()); let _this_guard = sc_dyn_this_push(${this.dyn}::AbortSignal(signal.clone())); let _ = sc_dyn_call(&callback, &[${this.dyn}::Object(event)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer))); } ${this.dyn}::Undefined },`);
-    this.context.line(`"removeEventListener" => { let event = match args.first() { Some(${this.dyn}::String(value)) => value.as_ref(), value => sc_dyn_arg_type_fail("type", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined); let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &callback)); if event == "abort" { runtime::abort_signal_remove_listener(signal, identity); } ${this.dyn}::Undefined },`);
+    this.context.line(`"addEventListener" => { let event = match args.first() { Some(${this.dyn}::String(value)) => value.to_utf8_lossy(), value => sc_dyn_arg_type_fail("type", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined); let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &callback)); if event == "abort" { let traced = callback.clone(); runtime::abort_signal_add_listener(signal, identity, std::rc::Rc::new(move |signal| { let event = runtime::map_new(); runtime::map_set_by(&event, runtime::string("type"), ${this.dyn}::String(runtime::string("abort")), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&event, runtime::string("target"), ${this.dyn}::AbortSignal(signal.clone()), |left, right| left.as_ref() == right.as_ref()); runtime::map_set_by(&event, runtime::string("currentTarget"), ${this.dyn}::AbortSignal(signal.clone()), |left, right| left.as_ref() == right.as_ref()); let _this_guard = sc_dyn_this_push(${this.dyn}::AbortSignal(signal.clone())); let _ = sc_dyn_call(&callback, &[${this.dyn}::Object(event)], "listener"); }), std::rc::Rc::new(move |tracer| runtime::Trace::trace(&traced, tracer))); } ${this.dyn}::Undefined },`);
+    this.context.line(`"removeEventListener" => { let event = match args.first() { Some(${this.dyn}::String(value)) => value.to_utf8_lossy(), value => sc_dyn_arg_type_fail("type", "of type string", value.unwrap_or(&${this.dyn}::Undefined)), }; let callback = args.get(1).cloned().unwrap_or(${this.dyn}::Undefined); let identity = sc_dyn_function_identity(&callback).unwrap_or_else(|| sc_dyn_arg_type_fail("listener", "of type function", &callback)); if event == "abort" { runtime::abort_signal_remove_listener(signal, identity); } ${this.dyn}::Undefined },`);
     this.context.line(`_ => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
     this.close("},");
   }

@@ -75,7 +75,7 @@ impl CryptoDigest {
 /// every other literal — but the island does: `createHash(alg)` takes a
 /// runtime string, so the island needs to ask rather than assert.
 fn crypto_digest_algorithm_opt(algorithm: &JsString) -> Option<CryptoDigest> {
-    match algorithm.as_ref() {
+    match algorithm.to_utf8_lossy() {
         "md5" => Some(CryptoDigest::Md5),
         "sha1" => Some(CryptoDigest::Ring(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY)),
         "sha256" => Some(CryptoDigest::Ring(&ring::digest::SHA256)),
@@ -118,7 +118,7 @@ pub fn crypto_hmac_raw(
 
 fn crypto_hash_digest(algorithm: &JsString, data: &[u8], encoding: &JsString) -> JsString {
     let digest = crypto_digest_algorithm(algorithm).digest(data);
-    decode_bytes(&digest, encoding.as_ref())
+    decode_bytes(&digest, encoding)
 }
 
 /// Reads a Buffer/typed-array handle's bytes. Two handles can be read at
@@ -153,7 +153,7 @@ impl CryptoHmac {
 /// The HMAC counterpart of `crypto_digest_algorithm_opt` — the two tables
 /// carry the same names.
 fn crypto_hmac_algorithm_opt(algorithm: &JsString) -> Option<CryptoHmac> {
-    match algorithm.as_ref() {
+    match algorithm.to_utf8_lossy() {
         "md5" => Some(CryptoHmac::Md5),
         "sha1" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY)),
         "sha256" => Some(CryptoHmac::Ring(ring::hmac::HMAC_SHA256)),
@@ -178,7 +178,7 @@ fn crypto_hmac_digest(
     encoding: &JsString,
 ) -> JsString {
     let tag = crypto_with_bytes(key, |key| crypto_hmac_algorithm(algorithm).sign(key, data));
-    decode_bytes(&tag, encoding.as_ref())
+    decode_bytes(&tag, encoding)
 }
 
 pub fn crypto_hmac_digest_string(

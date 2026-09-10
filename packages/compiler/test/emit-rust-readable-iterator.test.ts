@@ -9,7 +9,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust Readable async iteration preserves buffered push boundaries", async () => {
+test("Rust Readable async iteration coalesces buffered byte chunks", async () => {
   const fixture = resolve("tests/corpus/2813-readable-async-iterator-chunks.ts");
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-readable-iterator-"));
   const result = await compile(fixture, {
@@ -30,7 +30,7 @@ test("Rust Readable async iteration preserves buffered push boundaries", async (
       env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
   ]);
-  expect(node.stdout).toBe("one  4\ntwo 3\n");
+  expect(node.stdout).toBe("one two 7\n");
   expect(rust.stdout).toBe(node.stdout);
   expect(rust.stderr).toBe(node.stderr);
 });

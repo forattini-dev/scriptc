@@ -44,6 +44,29 @@ async function emittedC(name: string, source: string, ext = "ts"): Promise<strin
 }
 
 describe("inheritance codegen", () => {
+  test("an exact constructed subclass keeps direct overridden calls", async () => {
+    const c = await emittedC("exact-subclass", `
+class Base {
+  method(): number { return 1; }
+  get value(): number { return 1; }
+  set value(v: number) { console.log(v); }
+}
+class Derived extends Base {
+  method(): number { return 2; }
+  get value(): number { return 42; }
+}
+const instance: Base = new Derived();
+console.log(instance.method(), instance.value);
+try { instance.value = 9; } catch { console.log("sealed"); }
+`);
+    // Hierarchy metadata still selects the destructor after the Base upcast.
+    // Exact construction removes virtual method slots and indirect calls.
+    expect(c).not.toContain("sc_vs_");
+    expect(c).toMatch(/= sc_f__x25_Derived_method\(/);
+    expect(c).toMatch(/= sc_f__x25_Derived_get_x3a_value\(/);
+    expect(c).toMatch(/sc_f__x25_Derived_set_x3a_value\(/);
+  });
+
   test("standalone classes emit no vtable machinery", async () => {
     const c = await emittedC(
       "standalone",
@@ -85,13 +108,14 @@ class Dog extends Animal {
     return "woof";
   }
 }
-const a: Animal = new Dog("rex");
+const a: Animal = process.argv.length > 1 ? new Dog("rex") : new Animal("base");
 console.log(a.id(), a.speak());
 `,
     );
     // The devirtualized call is a direct sc_f_ call of Animal's id...
     expect(c).toMatch(/sc_f__x25_Animal_id\(/);
-    // ...and id never becomes a vtable slot, while speak does and the
+    // Both runtime-selected classes are instantiated; id stays direct,
+    // while speak becomes a slot and the
     // base-typed call site dispatches through it.
     expect(c).not.toContain("sc_vs_id");
     expect(c).toContain("sc_vs_speak");
@@ -151,7 +175,7 @@ class LoudCell extends Cell {
     return "LOUD " + this._v;
   }
 }
-const c: Cell = new LoudCell();
+const c: Cell = process.argv.length > 1 ? new LoudCell() : new Cell();
 c.v = 3;
 console.log(c.v, c.label);
 `,
@@ -237,7 +261,7 @@ class SealedBox extends Box {
     return 42;
   }
 }
-const b: Box = new SealedBox();
+const b: Box = process.argv.length > 1 ? new SealedBox() : new Box();
 try {
   b.v = 9;
 } catch {

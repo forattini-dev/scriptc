@@ -1,0 +1,52 @@
+{
+  "analysis": {
+    "file": "/home/cyber/Work/reddb.io/scriptc/.red/tmp/worktrees/manual/rust-effect-native/tests/coverage-fixtures/js-gap/gap.js",
+    "dynamic": true,
+    "stats": {
+      "statementsTotal": 5,
+      "statementsFailed": 0,
+      "statementsIsland": 1,
+      "functionsSkipped": 0
+    },
+    "diagnostics": [],
+    "backend": "rust",
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "unreached": {
+      "diagnostics": [],
+      "stats": {
+        "statementsTotal": 0,
+        "statementsFailed": 0,
+        "statementsIsland": 0,
+        "functionsSkipped": 0
+      }
+    },
+    "preflightFailed": false
+  },
+  "build": {
+    "ok": true,
+    "binaryPath": "/tmp/scriptc-coverage-correction-20260910g/native-gap/program",
+    "cPath": "/tmp/scriptc-coverage-correction-20260910g/native-gap/gap.rs",
+    "sourcePath": "/tmp/scriptc-coverage-correction-20260910g/native-gap/gap.rs",
+    "backend": "rust",
+    "safetyProfile": "rust-only",
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "runtimeFences": []
+  },
+  "oracle": {
+    "stdout": "42\n42\n",
+    "stderr": "",
+    "status": 0
+  },
+  "native": {
+    "stdout": "42\n42\n",
+    "stderr": "",
+    "status": 0
+  },
+  "byteParity": true
+}

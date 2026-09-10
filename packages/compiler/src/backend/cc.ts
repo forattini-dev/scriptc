@@ -3,7 +3,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { access, chmod, copyFile, link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { localizeElfObject, mergeAndLocalizeCoffObjects } from "./object-localize.js";
 import { withNativeBuildSlot } from "./native-build-slot.js";
+import { pruneCache } from "./native-cache-prune.js";
 
 const execFileAsync = promisify(execFile);
 const CC_IMPLEMENTATION_PATH = fileURLToPath(import.meta.url);
@@ -818,12 +819,12 @@ export function resolveCc(
       target,
       ...(linux || wasi ? ["-D_GNU_SOURCE"] : []),
       ...(musl ? ["-DSCR_MUSL"] : []),
-      ...(wasi ? ["-D_WASI_EMULATED_SIGNAL", "-D_WASI_EMULATED_PROCESS_CLOCKS"] : []),
+      ...(wasi ? ["-D_WASI_EMULATED_SIGNAL", "-D_WASI_EMULATED_PROCESS_CLOCKS", "-D_WASI_EMULATED_GETPID"] : []),
     ],
     linkArgs: linux
       ? ["-lm"]
       : wasi
-        ? ["-lwasi-emulated-signal", "-lwasi-emulated-process-clocks"]
+        ? ["-lwasi-emulated-signal", "-lwasi-emulated-process-clocks", "-lwasi-emulated-getpid"]
         : [],
   };
 }
@@ -2514,12 +2515,13 @@ async function localizeLibraryObjects(
  * and writes. With caching disabled compileC issues the exact historical
  * command line.
  *
- * Eviction: size-capped LRU over the whole cache root (SCRIPTC_CACHE_MAX_MB,
+ * Eviction: size-capped LRU over scriptc artifact namespaces (SCRIPTC_CACHE_MAX_MB,
  * default 4096). Explicit caps are checked after every successful write; the
  * large default is swept on the first and every 64th write so corpus/watch
  * loops do not repeatedly walk a growing tree. Reads bump mtimes. The harness's
- * oracle cache lives under the same root and is swept by the same pass. Cache
- * trouble is never a build failure — every cache error falls back to a real
+ * oracle cache lives under the same root and is swept by the same pass.
+ * Cargo target directories are owned by Cargo and excluded from this budget.
+ * Cache trouble is never a build failure — every cache error falls back to a real
  * compile. */
 
 /** Resolve the build cache without touching the filesystem. Exported from this
@@ -4567,56 +4569,6 @@ export async function stageRuntimeObjects(
     }),
   );
   return new Map(staged);
-}
-
-/** Size-capped LRU sweep of the whole cache root. A caller-configured cap is
- * enforced after every successful cache write. The 4 GiB default is checked on
- * the first and every 64th write in a long-lived process: a full tree walk per
- * corpus program would otherwise become quadratic as the cache grows. Oldest-
- * mtime files go first until the tree is back under 75% of the cap; reads bump
- * mtimes. Active links use private staged names/hard links, so cache names can
- * be unlinked safely. */
-const rootWriteCounts = new Map<string, number>();
-async function pruneCache(root: string, protectedPaths?: ReadonlySet<string>): Promise<void> {
-  const configuredCap = process.env["SCRIPTC_CACHE_MAX_MB"];
-  const writes = (rootWriteCounts.get(root) ?? 0) + 1;
-  rootWriteCounts.set(root, writes);
-  if (configuredCap === undefined && writes !== 1 && writes % 64 !== 0) return;
-  const capBytes = Number(configuredCap ?? "4096") * 1024 * 1024;
-  if (!Number.isFinite(capBytes) || capBytes <= 0) return;
-  const files: { path: string; size: number; mtimeMs: number }[] = [];
-  const walk = async (dir: string): Promise<void> => {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const ent of entries) {
-      const p = join(dir, ent.name);
-      if (ent.isDirectory()) await walk(p);
-      else if (ent.isFile()) {
-        // Atomic publishers use private names until their data/digest or
-        // metadata stamp is complete. They are active writes, not LRU entries.
-        if (
-          ent.name.startsWith(".scriptc-") ||
-          ent.name.startsWith(".tmp-") ||
-          ent.name.includes(".tmp-")
-        ) continue;
-        if (protectedPaths?.has(p)) continue;
-        const s = await stat(p).catch(() => null);
-        if (s !== null) files.push({ path: p, size: s.size, mtimeMs: s.mtimeMs });
-      }
-    }
-  };
-  await walk(root);
-  let total = files.reduce((n, f) => n + f.size, 0);
-  if (total <= capBytes) return;
-  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
-  for (const f of files) {
-    if (total <= capBytes * 0.75) break;
-    try {
-      await unlink(f.path);
-      total -= f.size;
-    } catch {
-      // A concurrent reader/publisher may already have moved the name.
-    }
-  }
 }
 
 /** Compiles one C program together with the runtime sources.

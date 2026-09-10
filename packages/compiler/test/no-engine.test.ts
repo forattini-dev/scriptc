@@ -23,6 +23,13 @@ test("Rust analysis accepts checked dynamic values without an engine", () => {
   expect(coverage.execution).toEqual({ engine: "none", externalFfi: false });
 });
 
+test("the default Rust backend keeps dynamic hello-world engine-free", () => {
+  const entry = resolve("tests/corpus/001-hello.ts");
+  const { coverage } = analyze(entry, { dynamic: true, allowEngine: false });
+  expect(coverage.diagnostics).toEqual([]);
+  expect(coverage.execution).toEqual({ engine: "none", externalFfi: false });
+});
+
 test("explicit engine evaluation is refused by analysis and build before writing artifacts", async () => {
   const dir = fixture({ "main.ts": 'console.log(__island_eval("1 + 2"));' });
   const entry = join(dir, "main.ts");
@@ -34,6 +41,12 @@ test("explicit engine evaluation is refused by analysis and build before writing
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.diagnostics).toEqual(coverage.diagnostics);
   expect(existsSync(outDir)).toBe(false);
+});
+
+test.each(["isInteger", "isSafeInteger"])("native Number.%s still rejects engine use in its argument", (method) => {
+  const dir = fixture({ "main.ts": `console.log(Number.${method}(__island_eval("42") as any));` });
+  const { coverage } = analyze(join(dir, "main.ts"), { backend: "rust", dynamic: true, allowEngine: false });
+  expect(coverage.diagnostics.some(d => d.code === "SC3003" && d.message.includes("island.eval")), JSON.stringify(coverage.diagnostics)).toBe(true);
 });
 
 test("persisted island pins cannot bypass --no-engine", async () => {
@@ -55,9 +68,9 @@ test("persisted island pins cannot bypass --no-engine", async () => {
   expect(existsSync(join(dir, "out"))).toBe(false);
 });
 
-test("QuickJS cannot be admitted through the C or default backend", () => {
+test("QuickJS cannot be admitted through the C or LLVM backend", () => {
   const entry = resolve("tests/corpus/001-hello.ts");
-  for (const backend of [undefined, "c", "llvm"] as const) {
+  for (const backend of ["c", "llvm"] as const) {
     const { coverage } = analyze(entry, { backend, dynamic: true, allowEngine: false });
     expect(coverage.diagnostics.some((d) => d.code === "SC3003")).toBe(true);
   }

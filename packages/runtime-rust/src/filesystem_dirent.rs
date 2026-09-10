@@ -4,7 +4,7 @@ pub struct FsDirent {
 }
 
 pub fn fs_readdir_types(path: &JsString) -> Vec<FsDirent> {
-    let entries = match std::fs::read_dir(path.as_ref()) {
+    let entries = match std::fs::read_dir(path.to_utf8_lossy()) {
         Ok(entries) => entries,
         Err(error) => throw_fs_error("scandir", path, error),
     };
@@ -21,7 +21,7 @@ pub fn fs_readdir_types(path: &JsString) -> Vec<FsDirent> {
             _ => 0.0,
         };
         rows.push(FsDirent {
-            name: Rc::from(entry.file_name().to_string_lossy().as_ref()),
+            name: JsString::from(entry.file_name().to_string_lossy().as_ref()),
             kind,
         });
     }

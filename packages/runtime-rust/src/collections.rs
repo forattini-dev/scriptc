@@ -1,5 +1,6 @@
 pub struct MapData<K: Clone + 'static, V: HeapValue> {
     entries: Vec<Option<(K, V)>>,
+    view: Option<Rc<dyn MapView<K, V>>>,
     live: usize,
     iteration_depth: usize,
     // Dynamic objects reuse JsMap; this bit preserves Object.create(null).
@@ -10,6 +11,7 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
 
 impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
     fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(view) = &self.view { view.trace(tracer); }
         for (_, value) in self.entries.iter().flatten() {
             value.trace_value(tracer);
         }
@@ -22,6 +24,7 @@ impl<K: Clone + 'static, V: HeapValue> Trace for MapData<K, V> {
 impl<K: Clone + 'static, V: HeapValue> ClearEdges for MapData<K, V> {
     fn clear_edges(&mut self) {
         self.entries.clear();
+        self.view = None;
         self.prototype = None;
     }
 }
@@ -31,6 +34,7 @@ pub type JsMap<K, V> = Gc<MapData<K, V>>;
 pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
     Gc::new(MapData {
         entries: Vec::new(),
+        view: None,
         live: 0,
         iteration_depth: 0,
         null_prototype: false,
@@ -40,10 +44,12 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
 }
 
 pub fn map_mark_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if let Some(view) = map_view(map) { view.mark_null_prototype(); return; }
     map.with_mut(|data| data.null_prototype = true);
 }
 
 pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    if let Some(view) = map_view(map) { return view.has_null_prototype(); }
     map.with(|data| data.null_prototype)
 }
 
@@ -51,6 +57,11 @@ pub fn map_has_null_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V
 /// Node 24 enumerates index keys numerically before UTF-16-sorted names;
 /// map_string_entry_order supplies the index partition at each read.
 pub fn map_mark_module_namespace<V: HeapValue>(map: &JsMap<JsString, V>) {
+    map_mark_namespace_by(map, &|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+}
+
+fn map_mark_namespace_by<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, compare: MapKeyCompare<'_, K>) {
+    if let Some(view) = map_view(map) { view.mark_namespace(compare); return; }
     map.with_mut(|data| {
         data.module_namespace = true;
         data.null_prototype = true;
@@ -59,12 +70,13 @@ pub fn map_mark_module_namespace<V: HeapValue>(map: &JsMap<JsString, V>) {
         data.entries.sort_by(|left, right| {
             let left = &left.as_ref().expect("scriptc: namespace export tombstone").0;
             let right = &right.as_ref().expect("scriptc: namespace export tombstone").0;
-            left.encode_utf16().cmp(right.encode_utf16())
+            compare(left, right)
         });
     });
 }
 
 pub fn map_is_module_namespace<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    if let Some(view) = map_view(map) { return view.is_namespace(); }
     map.with(|data| data.module_namespace)
 }
 
@@ -72,10 +84,12 @@ pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, pr
     if map_is_module_namespace(map) {
         throw_type_error("[object Module] is not extensible".to_owned());
     }
+    if let Some(view) = map_view(map) { view.set_prototype(prototype); return; }
     map.with_mut(|data| data.prototype = Some(prototype));
 }
 
 pub fn map_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> Option<V> {
+    if let Some(view) = map_view(map) { return view.prototype(); }
     map.with(|data| data.prototype.clone())
 }
 
@@ -85,6 +99,7 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if let Some(view) = map_view(map) { view.set(key, value, &equal); return; }
     if map_is_module_namespace(map) {
         throw_type_error("Cannot modify module namespace".to_owned());
     }
@@ -109,6 +124,7 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if let Some(view) = map_view(map) { return view.get(key, &equal); }
     map.with(|data| {
         data.entries
             .iter()
@@ -124,6 +140,7 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if let Some(view) = map_view(map) { return view.has(key, &equal); }
     map.with(|data| {
         data.entries
             .iter()
@@ -138,6 +155,7 @@ where
     V: HeapValue,
     F: Fn(&K, &K) -> bool,
 {
+    if let Some(view) = map_view(map) { return view.delete(key, &equal); }
     if map_is_module_namespace(map) {
         return false;
     }
@@ -159,10 +177,12 @@ where
 }
 
 pub fn map_size<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+    if let Some(view) = map_view(map) { return view.size(); }
     map.with(|data| data.live as f64)
 }
 
 pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if let Some(view) = map_view(map) { view.clear(); return; }
     if map_is_module_namespace(map) {
         throw_type_error("Cannot modify module namespace".to_owned());
     }
@@ -179,15 +199,18 @@ pub fn map_clear<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
 }
 
 pub fn map_iter_count<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> f64 {
+    if let Some(view) = map_view(map) { return view.iter_count(); }
     map.with(|data| data.entries.len() as f64)
 }
 
 pub fn map_iter_live<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> bool {
+    if let Some(view) = map_view(map) { return view.iter_live(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| data.entries[index].is_some())
 }
 
 pub fn map_iter_key<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> K {
+    if let Some(view) = map_view(map) { return view.iter_key(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| {
         data.entries[index]
@@ -199,6 +222,7 @@ pub fn map_iter_key<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: 
 }
 
 pub fn map_iter_value<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index: f64) -> V {
+    if let Some(view) = map_view(map) { return view.iter_value(index); }
     let index = array_index(index, false, map.with(|data| data.entries.len()));
     map.with(|data| {
         data.entries[index]
@@ -210,10 +234,12 @@ pub fn map_iter_value<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, index
 }
 
 pub fn map_iter_enter<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if let Some(view) = map_view(map) { view.iter_enter(); return; }
     map.with_mut(|data| data.iteration_depth += 1);
 }
 
 pub fn map_iter_exit<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if let Some(view) = map_view(map) { view.iter_exit(); return; }
     map.with_mut(|data| {
         data.iteration_depth = data
             .iteration_depth
@@ -236,9 +262,9 @@ fn js_property_index(key: &str) -> Option<u32> {
 fn map_string_entry_order<V: HeapValue>(data: &MapData<JsString, V>) -> Vec<usize> {
     let mut indexes = Vec::new();
     let mut names = Vec::new();
-    for (position, entry) in data.entries.iter().enumerate() {
-        let Some((key, _)) = entry else { continue };
-        if let Some(index) = js_property_index(key) {
+    for position in 0..data.entry_count() {
+        let Some(key) = data.entry_key(position) else { continue };
+        if let Some(index) = js_property_index(&key) {
             indexes.push((index, position));
         } else {
             names.push(position);
@@ -257,11 +283,7 @@ pub fn map_string_keys_js_order<V: HeapValue>(map: &JsMap<JsString, V>) -> JsArr
         map_string_entry_order(data)
             .into_iter()
             .map(|position| {
-                data.entries[position]
-                    .as_ref()
-                    .expect("scriptc: ordered map key points at a tombstone")
-                    .0
-                    .clone()
+                data.entry_key(position).expect("scriptc: ordered map key points at a tombstone")
             })
             .collect()
     }))
@@ -274,10 +296,7 @@ pub fn map_string_entries_js_order<V: HeapValue>(
         map_string_entry_order(data)
             .into_iter()
             .map(|position| {
-                data.entries[position]
-                    .as_ref()
-                    .expect("scriptc: ordered map entry points at a tombstone")
-                    .clone()
+                (data.entry_key(position).expect("scriptc: ordered map entry points at a tombstone"), data.entry_value(position))
             })
             .collect()
     })
@@ -296,7 +315,7 @@ where
     F: Fn(&T, &T) -> bool + Copy,
 {
     let set = set_new();
-    let values = source.with(|data| data.elements.clone());
+    let values = source.with(|data| data.elements().into_owned());
     for value in values {
         map_set_by(&set, normalize(value), true, equal);
     }
@@ -329,9 +348,7 @@ where
 
 pub fn set_to_array<T: ArrayElement>(set: &JsSet<T>) -> JsArray<T> {
     let values = set.with(|data| {
-        data.entries
-            .iter()
-            .filter_map(|entry| entry.as_ref().map(|(value, _)| value.clone()))
+        (0..data.entry_count()).filter_map(|index| data.entry_key(index))
             .collect()
     });
     array_new(values)

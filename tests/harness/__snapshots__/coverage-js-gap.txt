@@ -1,5 +1,7 @@
 scriptc coverage tests/coverage-fixtures/js-gap/gap.js
 
+  backend rust; JavaScript engine none; external FFI no
+
   statements analyzed   5
   compile statically    5  (100%)
 

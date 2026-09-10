@@ -3,7 +3,7 @@
 // 1539), keyed reads and 'in' (corpus 1544), strict equality against
 // scalars AND other dyn values (whole-dyn ===), and logical operators
 // (ToBoolean over the dyn kind), and `throw` (the dyn node rides the
-// exception cell by reference) — those compile now and pin nothing; what
+// exception cell by reference), plus switches — these compile now; what
 // remains outside is rejected specifically, pointing at the checked cast.
 const u = JSON.parse("[1,2]");
 console.log(JSON.parse("1") === JSON.parse("1"));

@@ -1,0 +1,11 @@
+{
+  "started": "2026-09-10T18:27:22.351793+00:00",
+  "sourceBefore": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "distBefore": "2783b4de3edd99bf7a8197e0971614e9519d6d8eff091489fa2e452cb595b1ea",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+  "exitCode": 0,
+  "finished": "2026-09-10T18:27:32.206937+00:00",
+  "sourceAfter": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "distAfter": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b"
+}

@@ -254,11 +254,11 @@ console.log(arr.length);
       label: "tuple map",
       name: "tuple-map-elements",
       producer: "'.map()'",
-      result: "'unknown'-typed values \\(the result array has no static element type — annotate the callback's return\\)",
+      result: "'Set<number>' values \\(arrays of this element kind have no representation — store the values individually\\)",
       line: 3,
       source: `/** @type {[number]} */
 const tuple = [1];
-const arr = tuple.map(() => new Set());
+const arr = tuple.map(() => new Set([1]));
 console.log(arr.length);
 `,
     },
@@ -274,6 +274,19 @@ console.log(arr.length);
       new RegExp(
         `^Uncaught Error: ${quotedProducer} with a callback returning ${result} are not supported yet \\[SC1090 at .*${name}\\.js:${line}\\]\\n$`,
       ),
+    );
+  });
+
+  test("tuple map retains the earlier untyped Set construction fence", async () => {
+    const r = await compileAndRun("tuple-map-untyped-set", `/** @type {[number]} */
+const tuple = [1];
+const arr = tuple.map(() => new Set());
+console.log(arr.length);
+`, "js");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toMatch(
+      /^Uncaught Error: Set elements of type 'any' \(Set elements must be string or number, or a record\/callback\/symbol\/server handle stored under reference identity\) is not supported yet \[SC1090 at .*tuple-map-untyped-set\.js:3\]\n$/,
     );
   });
 

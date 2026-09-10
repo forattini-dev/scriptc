@@ -64,8 +64,11 @@ function emitRustFsWriteCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
-  const [path, data, mode] = expr.args;
+  const [path, data, mode, exclusive] = expr.args;
   if (path === undefined || data === undefined) return null;
+  if (expr.fn === "fs.appendFileModeSync" && expr.args.length === 4 && mode !== undefined && exclusive !== undefined) {
+    return `runtime::fs_append_file_mode(&(${context.emitExpr(path)}), &(${context.emitExpr(data)}), ${context.emitExpr(mode)}, ${context.emitExpr(exclusive)})`;
+  }
   if (expr.fn === "fs.writeFileSync" && expr.args.length === 2) {
     return `runtime::fs_write_file(&(${context.emitExpr(path)}), &(${context.emitExpr(data)}))`;
   }

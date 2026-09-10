@@ -1,4 +1,7 @@
-import type { IrExpr, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
+import { emitIslandValue } from "./island-values.js";
+import { rustJsString } from "./string-literals.js";
+import { nativeIndexedRecordValue } from "../../ir/native-record.js";
+import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { isSharedRecord } from "./shared-records.js";
 import type { IrFuncType } from "./model.js";
 import { emitRustIslandDestructuringFunction } from "./island-destructuring-function.js";
@@ -8,6 +11,7 @@ type IslandExpr = Extract<IrExpr, { kind: "jsMarshal" | "jsOp" | "jsExit" | "jsB
 
 export interface RustIslandContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
+  union(id: string, loc?: SrcLoc): IrUnionDef;
   nextName(prefix: string): string;
   dynTypeName(): string;
   emitClosureDispatch(callee: string, type: IrFuncType, args: string[], loc: SrcLoc): string;
@@ -63,7 +67,7 @@ function emitMarshal(
   if (host !== null) return host;
   if (!context.hasEmbeddedModules() && expr.value.type.kind === "record") {
     const shape = context.records.get(expr.value.type.shapeId);
-    if (!isSharedRecord(shape) && !(shape?.fields.length === 0 && shape.indexValue?.kind === "dyn")) {
+    if (!isSharedRecord(shape) && nativeIndexedRecordValue(expr.value.type, id => context.records.get(id), id => context.union(id, expr.loc)) === undefined) {
       context.unsupported("native record argument requires shared storage for its declared fields and index values", expr.loc);
     }
   }
@@ -104,7 +108,7 @@ function hostArgument(type: IrType, args: string, index: number, context: RustIs
     // An 'unknown' parameter: the engine argument stays a handle inside
     // the checked-dynamic value (typeof, comparisons, and reads ask the
     // realm).
-    case "dyn": return `${dyn}::Island(${handle})`;
+    case "dyn": return `sc_dyn_from_island(${handle})`;
     // An `Error` parameter: the realm's Error copies out as a native one.
     case "object": return type.className === "%Error" ? `sc_dyn_error_unbox(${dyn}::Island(${handle}))` : null;
     // Composites and undefined-armed unions: the jsExit pipeline —
@@ -265,7 +269,17 @@ function emitOperation(
   if (expr.op === "setProp" && expr.name !== undefined && expr.args.length === 2) {
     const receiver = context.nextName("sc_island_receiver");
     const value = context.nextName("sc_island_value");
-    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${value} = ${emitExpr(argOf(expr, 1, context))}; sc_dyn_key_set(&${receiver}, runtime::string("${context.rustString(expr.name)}"), ${value}); }`;
+    if (context.hasEmbeddedModules()) {
+      const dyn = context.dynTypeName();
+      const field = context.nextName("sc_island_property_value");
+      return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; ` +
+        `let ${value} = ${emitExpr(argOf(expr, 1, context))}; match &${receiver} { ` +
+        `${dyn}::Island(sc_receiver) => { ` +
+        `let ${field} = ${emitIslandValue(`&${value}`, context)}; ` +
+        `runtime::island_set_index(sc_receiver, &runtime::island_value_string(&${rustJsString(expr.name, text => context.rustString(text))}), &${field}); }, ` +
+        `_ => sc_dyn_key_set(&${receiver}, ${rustJsString(expr.name, text => context.rustString(text))}, ${value}), } }`;
+    }
+    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${value} = ${emitExpr(argOf(expr, 1, context))}; sc_dyn_key_set(&${receiver}, ${rustJsString(expr.name, text => context.rustString(text))}, ${value}); }`;
   }
   if (expr.op === "setIdx" && expr.args.length === 3) {
     const receiver = context.nextName("sc_island_receiver");
@@ -290,6 +304,13 @@ function emitOperation(
     const target = context.nextName("sc_island_target");
     const source = context.nextName("sc_island_source");
     const dyn = context.dynTypeName();
+    if (context.hasEmbeddedModules()) {
+      const input = context.nextName("sc_island_spread_input");
+      return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; ` +
+        `let ${dyn}::Island(sc_target) = &${target} else { runtime::throw_type_error("object spread target is outside the engine".to_owned()); }; ` +
+        `let ${input} = ${emitIslandValue(`&${source}`, context)}; ` +
+        `runtime::island_copy_data_properties(sc_target, &${input}); ${target} }`;
+    }
     return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { let sc_value = if runtime::map_is_module_namespace(sc_source) { sc_dyn_object_key_get(sc_source, &sc_key, &${source}) } else { sc_value }; sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
   }
   if (expr.op === "defineGetter" && expr.args.length === 3) {
@@ -349,7 +370,7 @@ function emitOperation(
     const dyn = context.dynTypeName();
     const collect = `let ${pack} = ${dyn}::Array(runtime::array_new(Vec::new())); ` +
       `sc_dyn_pack_push_spread(&${pack}, &${leading}, &runtime::empty_string(), true); ` +
-      `sc_dyn_pack_push_spread(&${pack}, &${spread}, &runtime::string("${context.rustString(expr.name)}"), false); ` +
+      `sc_dyn_pack_push_spread(&${pack}, &${spread}, &${rustJsString(expr.name, text => context.rustString(text))}, false); ` +
       `let ${dyn}::Array(${args}) = ${pack} else { unreachable!("scriptc invariant: spread call pack is not an array") }; ` +
       `let ${args} = runtime::array_values(&${args});`;
     if (!context.hasEmbeddedModules()) {
@@ -562,69 +583,6 @@ function emitIslandArguments(args: string, context: RustIslandContext): string {
   return `${args}.iter().map(|sc_arg| ${emitIslandValue("sc_arg", context)}).collect::<Vec<_>>()`;
 }
 
-function emitIslandValue(value: string, context: RustIslandContext, depth = 0): string {
-  const dyn = context.dynTypeName();
-  // A checked-dynamic FUNCTION crossing into the realm (a callback whose
-  // signature the typed host bridge cannot spell — an island-typed
-  // parameter, a rest list): the engine gets a host function that hands
-  // every argument back as a handle, calls the dyn function, and marshals
-  // its result the same way an argument crosses. One level deep: a
-  // callback answering a function is a boundary refusal.
-  const callback = depth > 0
-    ? `runtime::throw_error_code("a callback crossing into the island answered a function (nested callbacks stay island-side)".to_owned(), "SC3001")`
-    // The host function carries the closure's declared arity: libraries
-    // branch on `fn.length` (solid's `createRoot` only hands a disposer
-    // to callbacks declaring one).
-    : `{ let sc_callback = sc_value.clone(); runtime::island_value_host_function(` +
-      `match sc_dyn_key_get(sc_value, &runtime::string("length"), false) { ${dyn}::Number(sc_n) => sc_n as usize, _ => 0 }, ` +
-      `std::rc::Rc::new(move |sc_args| { ` +
-      `let sc_dyn_args: Vec<${dyn}> = (0..sc_args.len()).map(|sc_i| ${dyn}::Island(runtime::island_host_argument_value(sc_args, sc_i))).collect(); ` +
-      `let sc_result = sc_dyn_call(&sc_callback, &sc_dyn_args, "callback"); ` +
-      `match sc_result { ` +
-      `${dyn}::Undefined => runtime::IslandHostResult::Undefined, ` +
-      `${dyn}::Null => runtime::IslandHostResult::Null, ` +
-      `${dyn}::Number(sc_v) => runtime::IslandHostResult::Number(sc_v), ` +
-      `${dyn}::Boolean(sc_v) => runtime::IslandHostResult::Bool(sc_v), ` +
-      `${dyn}::String(sc_v) => runtime::IslandHostResult::String(sc_v), ` +
-      `${dyn}::Bytes(sc_v) | ${dyn}::Buffer(sc_v) => runtime::IslandHostResult::Bytes(runtime::island_bytes_values(&sc_v)), ` +
-      `${dyn}::Island(sc_v) => runtime::IslandHostResult::Island(sc_v), ` +
-      `sc_other => runtime::IslandHostResult::Island(${emitIslandValue("&sc_other", context, depth + 1)}), ` +
-      `} })) }`;
-  return `match ${value} { ` +
-    `${dyn}::Undefined => runtime::island_value_undefined(), ` +
-    `${dyn}::Null => runtime::island_value_null(), ` +
-    `${dyn}::Number(sc_value) => runtime::island_value_number(*sc_value), ` +
-    `${dyn}::Boolean(sc_value) => runtime::island_value_boolean(*sc_value), ` +
-    `${dyn}::String(sc_value) => runtime::island_value_string(sc_value), ` +
-    `${dyn}::Bytes(sc_value) | ${dyn}::Buffer(sc_value) => runtime::island_value_bytes(sc_value), ` +
-    `${dyn}::Array(..) | ${dyn}::Object(..) => runtime::island_value_json(&runtime::json_stringify(${value})), ` +
-    // A native RegExp crosses as its own source+flags, rebuilt by the
-    // realm's RegExp constructor (the `z.string().regex(/^a+$/)` shape).
-    // A fresh engine object per marshal: identity and lastIndex stay
-    // host-side, exactly as SEMANTICS.md states for the C island.
-    `${dyn}::Regex(sc_value) => runtime::island_value_regexp(` +
-    `&runtime::regex_source(sc_value), &runtime::regex_flags(sc_value)), ` +
-    `${dyn}::Island(sc_value) => sc_value.clone(), ` +
-    // A NATIVE promise (an async static callback's answer, a promise-
-    // valued dyn) crosses as a pending engine promise the native one
-    // settles: fulfillment marshals like an argument, rejection as an
-    // engine Error carrying the reason's text. One level: a promise's
-    // fulfillment is never itself a promise (JS flattens), so the nested
-    // marshal keeps the plain arms only. Depth counts FUNCTION nesting:
-    // a dyn callback's own answer (depth 1, the yargs middleware shape)
-    // may be a promise; that promise's fulfillment (depth 2) may not.
-    (depth <= 1
-      ? `${dyn}::Promise(sc_handle) => { let (sc_island_promise, sc_island_resolve, sc_island_reject) = runtime::island_value_pending_promise(); ` +
-        `let sc_native_promise = runtime::promise_from_handle::<${dyn}>(sc_handle); ` +
-        `runtime::promise_then(&sc_native_promise, Box::new(move |sc_outcome| { match sc_outcome { ` +
-        `Ok(sc_fulfilled) => { let _ = runtime::island_call(&sc_island_resolve, &[${emitIslandValue("&sc_fulfilled", context, depth + 1)}]); } ` +
-        `Err(sc_reason) => { let _ = runtime::island_call(&sc_island_reject, &[runtime::island_value_error(&sc_reason)]); } } })); ` +
-        `sc_island_promise }, `
-      : "") +
-    `sc_value if sc_dyn_typeof(sc_value).as_ref() == "function" => ${callback}, ` +
-    `_ => runtime::throw_error_code("embedded module call argument is outside the JSON-safe island subset".to_owned(), "SC3001"), ` +
-    `}`;
-}
 
 function emitOwnedIslandValue(value: string, context: RustIslandContext): string {
   const temporary = context.nextName("sc_island_value");
@@ -650,7 +608,7 @@ function emitObjectLiteral(
         context.unsupported("island object literal key", expr.loc);
       }
       fields.push(
-        `(runtime::string("${context.rustString(key.value.value)}"), ${emitOwnedIslandValue(emitExpr(value), context)})`,
+        `(${rustJsString(key.value.value, text => context.rustString(text))}, ${emitOwnedIslandValue(emitExpr(value), context)})`,
       );
     }
     return `${context.dynTypeName()}::Island(runtime::island_value_object(vec![${fields.join(", ")}]))`;
@@ -732,7 +690,14 @@ function emitGenericPromiseBridge(
     return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::${map}(&${source}, |_| ()) }`;
   }
   if (expr.type.inner.kind === "array" && expr.type.inner.elem.kind === "jsval") {
-    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::${map}(&${source}, |sc_value| match sc_value { ${dyn}::Array(sc_array) => sc_array, sc_value => sc_dyn_check_fail("array", &sc_value), }) }`;
+    // Engine fulfillment retains a realm handle. Check the array brand and
+    // read its elements by index so functions, aliases and cycles stay live.
+    const engineArray = context.hasEmbeddedModules()
+      ? `${dyn}::Island(sc_array) if runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("Array"), "isArray", &[sc_array.clone()])) => { ` +
+        `let sc_length = runtime::island_exit_number(&runtime::island_get_property(&sc_array, "length")); let sc_output = runtime::array_new(Vec::new()); let mut sc_index = 0.0; ` +
+        `while sc_index < sc_length { runtime::array_push(&sc_output, ${dyn}::Island(runtime::island_get_index(&sc_array, &runtime::island_value_number(sc_index)))); sc_index += 1.0; } sc_output }, `
+      : "";
+    return `{ let ${value} = ${emitExpr(expr.value)}; let ${source} = ${adopt}; runtime::${map}(&${source}, |sc_value| match sc_value { ${dyn}::Array(sc_array) => sc_array, ${engineArray}sc_value => sc_dyn_check_fail("array", &sc_value), }) }`;
   }
   context.unsupported("island promise bridge payload", expr.loc);
 }

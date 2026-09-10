@@ -569,7 +569,7 @@ where
     F: Clone + Trace + 'static,
     C: Clone + Trace + 'static,
 {
-    writable.with(|data| match name.as_ref() {
+    writable.with(|data| match name.to_utf8_lossy() {
         "writableLength" | "ws:length" => data.writable_length as f64,
         "writableHighWaterMark" => data.high_water_mark as f64,
         "writableCorked" | "ws:corked" => data.corked as f64,
@@ -588,7 +588,7 @@ where
     F: Clone + Trace + 'static,
     C: Clone + Trace + 'static,
 {
-    writable.with(|data| match name.as_ref() {
+    writable.with(|data| match name.to_utf8_lossy() {
         "writable" => !data.ended && !data.destroyed && data.errored.is_none(),
         "writableEnded" => data.ended,
         "writableFinished" => data.finished,

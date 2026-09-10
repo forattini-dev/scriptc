@@ -1,4 +1,4 @@
-import { recordNewName } from "./shared-records.js";
+import { recordNewName, recordPointerEquality } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { typeKey } from "../../ir/nodes.js";
@@ -206,8 +206,13 @@ export class RustFunctionValueEmitter {
       const compare = `runtime::promise_view_identity(&(${left})) == runtime::promise_view_identity(&(${right}))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
+    if (expr.left.type.kind === "record" && (expr.op === "===" || expr.op === "!==")) {
+      const compare = recordPointerEquality(this.context.records.get(expr.left.type.shapeId), `&(${left})`, `&(${right})`);
+      return expr.op === "!==" ? `!(${compare})` : compare;
+    }
     if (this.context.isTracedHandle(expr.left.type) && (expr.op === "===" || expr.op === "!==")) {
-      const compare = `((${left}).ptr_eq(&(${right})))`;
+      const compare = expr.left.type.kind === "array"
+        ? `runtime::array_ptr_eq(&(${left}), &(${right}))` : `((${left}).ptr_eq(&(${right})))`;
       return expr.op === "!==" ? `!(${compare})` : compare;
     }
     switch (expr.op) {

@@ -1,3 +1,4 @@
+import { isJsonStringifyType } from "../../ir/json-stringify.js";
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -76,7 +77,7 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
       // types the return `string`, so no static consumer can tell), and a
       // runtime handle inside the tree throws (Node would walk its own
       // enumerable props, which the handle does not model).
-      if (!L.jsonSafe(value.type) && value.type.kind !== "dyn") {
+      if (!isJsonStringifyType(value.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) && value.type.kind !== "dyn") {
         // Bare undefined-armed unions get their own wording: Node's
         // stringify of bare undefined is not a string at all — per-type
         // serialization cannot match that exactly, so the fence is

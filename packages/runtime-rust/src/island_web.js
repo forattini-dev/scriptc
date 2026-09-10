@@ -418,6 +418,7 @@
       if (this.name === "InvalidCharacterError") return 5;
       if (this.name === "AbortError") return 20;
       if (this.name === "TimeoutError") return 23;
+      if (this.name === "DataCloneError") return 25;
       return 0;
     }
   }

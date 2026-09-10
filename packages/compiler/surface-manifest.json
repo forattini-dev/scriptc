@@ -3055,7 +3055,7 @@
         "llvm",
         "rust"
       ],
-      "note": "zero arguments, or one milliseconds/date-string argument; values are the read-only TimeClip scalar slice"
+      "note": "zero arguments, one milliseconds/date-string argument, or local calendar components; read-only TimeClip values"
     },
     {
       "id": "stdlib.date.getDate",

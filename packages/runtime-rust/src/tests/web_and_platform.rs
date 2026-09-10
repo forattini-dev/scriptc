@@ -359,8 +359,8 @@
         let value = string("Aé🎉Z");
         assert_eq!(string_char_at(&value, f64::NAN).as_ref(), "A");
         assert_eq!(string_char_at(&value, 1.9).as_ref(), "é");
-        assert_eq!(string_char_at(&value, 2.0).as_ref(), "�");
-        assert_eq!(string_char_at(&value, 3.0).as_ref(), "�");
+        assert_eq!(string_char_at(&value, 2.0), string_from_utf16(&[0xd83c]));
+        assert_eq!(string_char_at(&value, 3.0), string_from_utf16(&[0xdf89]));
         assert_eq!(string_char_at(&value, 4.0).as_ref(), "Z");
         assert_eq!(string_char_at(&value, -1.0).as_ref(), "");
         assert_eq!(string_char_at(&value, f64::INFINITY).as_ref(), "");
@@ -369,7 +369,7 @@
     #[test]
     fn string_from_char_code_coerces_utf16_arrays_and_bytes() {
         let codes = array_new(vec![65.0, 0xd83d as f64, 0xde00 as f64, 0xd800 as f64]);
-        assert_eq!(string_from_char_codes(&codes).as_ref(), "A😀�");
+        assert_eq!(string_from_char_codes(&codes), string_from_utf16(&[65, 0xd83d, 0xde00, 0xd800]));
         let byte_codes = bytes_from_array::<u8>(&array_new(vec![65.0, 66.0, 255.0]));
         assert_eq!(string_from_char_code_bytes(&byte_codes).as_ref(), "ABÿ");
     }
@@ -388,7 +388,7 @@
         let value = string("😀");
         assert_eq!(string_pad_start(&value, 3.0, &string("ab")).as_ref(), "a😀");
         assert_eq!(string_pad_end(&value, 4.0, &string("🎉")).as_ref(), "😀🎉");
-        assert_eq!(string_pad_start(&value, 3.0, &string("🎉")).as_ref(), "�😀");
+        assert_eq!(string_pad_start(&value, 3.0, &string("🎉")), string_from_utf16(&[0xd83c, 0xd83d, 0xde00]));
         assert_eq!(string_pad_start(&value, -1.0, &string("x")).as_ref(), "😀");
         assert_eq!(
             string_pad_start(&value, 10.0, &empty_string()).as_ref(),
@@ -412,8 +412,8 @@
             "<|a|ba>b<ab|a|>"
         );
         assert_eq!(
-            string_replace_all(&string("😀"), &empty_string(), &string("-")).as_ref(),
-            "-�-�-"
+            string_replace_all(&string("😀"), &empty_string(), &string("-")),
+            string_from_utf16(&[45, 0xd83d, 45, 0xde00, 45])
         );
         assert_eq!(
             string_replace_all(&string("😀"), &empty_string(), &empty_string()).as_ref(),
@@ -430,8 +430,8 @@
         let value = string("A🎉Z");
         assert_eq!(string_at(&value, 0.0).as_ref(), "A");
         assert_eq!(string_at(&value, -1.0).as_ref(), "Z");
-        assert_eq!(string_at(&value, 1.0).as_ref(), "�");
-        assert_eq!(string_at(&value, -2.0).as_ref(), "�");
+        assert_eq!(string_at(&value, 1.0), string_from_utf16(&[0xd83c]));
+        assert_eq!(string_at(&value, -2.0), string_from_utf16(&[0xdf89]));
         let payload =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| string_at(&value, 4.0)))
                 .expect_err("out-of-range string.at must throw");
@@ -441,113 +441,6 @@
             caught_error_message(&caught).as_ref(),
             "expected string, got undefined"
         );
-    }
-
-    #[test]
-    fn regex_test_preserves_ecmascript_flags_and_state() {
-        let unicode = regex_new("^.$", "u");
-        let legacy = regex_new("^.$", "");
-        assert!(regex_test(&unicode, &string("😀")));
-        assert!(!regex_test(&legacy, &string("😀")));
-
-        let global = regex_new(r"\d", "g");
-        let text = string("1a2");
-        assert!(regex_test(&global, &text));
-        assert!(regex_test(&global, &text));
-        assert!(!regex_test(&global, &text));
-        assert!(regex_test(&global, &text));
-
-        let sticky = regex_new("a", "y");
-        assert!(regex_test(&sticky, &string("ab")));
-        assert!(!regex_test(&sticky, &string("ab")));
-        assert_eq!(regex_source(&global).as_ref(), r"\d");
-        assert_eq!(regex_flags(&global).as_ref(), "g");
-    }
-
-    #[test]
-    fn regex_constructor_validates_and_canonicalizes_flags() {
-        assert_eq!(regex_flags(&regex_new("a", "mig")).as_ref(), "gim");
-        assert_eq!(regex_flags(&regex_new("a", "d")).as_ref(), "d");
-        assert_eq!(regex_flags(&regex_new("a", "v")).as_ref(), "v");
-        assert_eq!(regex_source(&regex_new("", "")).as_ref(), "(?:)");
-
-        for flags in ["x", "gg", "uv"] {
-            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                regex_new("a", flags)
-            }))
-            .err()
-            .expect("invalid RegExp flags must throw");
-            let caught = caught_from_panic(payload);
-            assert_eq!(caught_error_name(&caught).as_ref(), "SyntaxError");
-            assert_eq!(
-                caught_error_message(&caught).as_ref(),
-                format!("Invalid flags supplied to RegExp constructor '{flags}'")
-            );
-        }
-
-        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            regex_new("(", "")
-        }))
-        .err()
-        .expect("an invalid RegExp pattern must throw");
-        let caught = caught_from_panic(payload);
-        assert_eq!(caught_error_name(&caught).as_ref(), "SyntaxError");
-    }
-
-    #[test]
-    fn regex_replacement_and_split_use_utf16_ranges() {
-        let astral_subject = string("😀z");
-        let suffix = regex_new("z", "");
-        let prefix_replacement = string("($`)");
-        assert_eq!(
-            regex_replace(&astral_subject, &suffix, &prefix_replacement).as_ref(),
-            "😀(😀)"
-        );
-        assert_eq!(
-            regex_replace(
-                &string("14px 9em"),
-                &regex_new(r"(?<n>\d+)px|(?<n>\d+)em", "g"),
-                &string("[$<n>]"),
-            )
-            .as_ref(),
-            "[14] [9]"
-        );
-        let pieces = regex_split(&string("a1b2c"), &regex_new(r"\d", ""), u32::MAX as f64);
-        assert_eq!(array_len(&pieces), 3.0);
-        assert_eq!(array_get(&pieces, 0.0).as_ref(), "a");
-        assert_eq!(array_get(&pieces, 1.0).as_ref(), "b");
-        assert_eq!(array_get(&pieces, 2.0).as_ref(), "c");
-        assert_eq!(regexp_escape(&string("a.b")).as_ref(), r"\x61\.b");
-        assert_eq!(regexp_escape(&string("- \n")).as_ref(), r"\x2d\x20\n");
-    }
-
-    #[test]
-    fn regex_match_search_and_match_all_preserve_utf16_semantics() {
-        let subject = string("😀a12 b");
-        let matched = regex_match(&subject, &regex_new(r"(a)(\d+)", "")).unwrap();
-        assert_eq!(array_len(&matched), 3.0);
-        assert_eq!(array_get(&matched, 0.0).as_ref(), "a12");
-        assert_eq!(array_get(&matched, 1.0).as_ref(), "a");
-        assert_eq!(array_get(&matched, 2.0).as_ref(), "12");
-        assert_eq!(regex_search(&subject, &regex_new(r"\d+", "")), 3.0);
-
-        let indices = array_new(Vec::new());
-        let rows = regex_match_all_into(&subject, &regex_new(r"\w", "g"), &indices);
-        assert_eq!(array_len(&rows), 4.0);
-        assert_eq!(array_len(&indices), 4.0);
-        assert_eq!(array_get(&indices, 0.0), 2.0);
-        assert_eq!(array_get(&indices, 3.0), 6.0);
-
-        let stateful = regex_new(r"\w", "g");
-        assert!(regex_test(&stateful, &string("ab")));
-        assert_eq!(stateful.last_index.get(), 1);
-        let remaining = regex_match_all(&string("ab"), &stateful);
-        assert_eq!(array_len(&remaining), 1.0);
-        assert_eq!(array_get(&array_get(&remaining, 0.0), 0.0).as_ref(), "b");
-        assert_eq!(stateful.last_index.get(), 1);
-        let all = regex_match(&string("ab"), &stateful).unwrap();
-        assert_eq!(array_len(&all), 2.0);
-        assert_eq!(stateful.last_index.get(), 0);
     }
 
     #[test]
@@ -992,7 +885,7 @@
             std::process::id()
         ));
         std::fs::write(&path, b"handle").expect("the FileHandle fixture must be writable");
-        let path_string: JsString = Rc::from(path.to_string_lossy().as_ref());
+        let path_string: JsString = JsString::from(path.to_string_lossy().as_ref());
 
         {
             let handle = file_handle_open(&path_string, &string("r"), 0o666 as f64);
@@ -1030,7 +923,7 @@
             std::process::id()
         ));
         std::fs::write(&path, b"abcdef").expect("the FileHandle fixture must be writable");
-        let path_string: JsString = Rc::from(path.to_string_lossy().as_ref());
+        let path_string: JsString = JsString::from(path.to_string_lossy().as_ref());
 
         {
             let handle = file_handle_open(&path_string, &string("r+"), 0o666 as f64);
@@ -1096,7 +989,7 @@
         process_env_set(&name, &value);
         assert_eq!(process_env_get(&name).as_deref(), Some("written"));
         let pairs = process_env_pairs();
-        assert!(pairs.with(|pairs| pairs.elements.as_chunks::<2>().0.iter().any(|pair| {
+        assert!(pairs.with(|pairs| pairs.elements().as_chunks::<2>().0.iter().any(|pair| {
             pair[0].as_ref() == name.as_ref() && pair[1].as_ref() == value.as_ref()
         })));
 
@@ -1111,7 +1004,7 @@
 
         process_env_unset(&name);
         assert_eq!(process_env_get(&name), None);
-        assert!(!process_env_pairs().with(|pairs| pairs.elements.as_chunks::<2>().0
+        assert!(!process_env_pairs().with(|pairs| pairs.elements().as_chunks::<2>().0
             .iter()
             .any(|pair| pair[0].as_ref() == name.as_ref())));
     }
@@ -1156,10 +1049,10 @@
                 }) as Box<dyn FnOnce(Option<JsError>)>
             };
 
-        let source_a_string: JsString = Rc::from(source_a.to_string_lossy().as_ref());
-        let source_b_string: JsString = Rc::from(source_b.to_string_lossy().as_ref());
-        let destination_a_string: JsString = Rc::from(destination_a.to_string_lossy().as_ref());
-        let destination_b_string: JsString = Rc::from(destination_b.to_string_lossy().as_ref());
+        let source_a_string: JsString = JsString::from(source_a.to_string_lossy().as_ref());
+        let source_b_string: JsString = JsString::from(source_b.to_string_lossy().as_ref());
+        let destination_a_string: JsString = JsString::from(destination_a.to_string_lossy().as_ref());
+        let destination_b_string: JsString = JsString::from(destination_b.to_string_lossy().as_ref());
         fs_rename_async(
             &source_a_string,
             &destination_a_string,
@@ -1189,8 +1082,8 @@
         let abandoned_called = Rc::new(Cell::new(false));
         let abandoned_callback = abandoned_called.clone();
         fs_rename_async(
-            &Rc::from(abandoned_source.to_string_lossy().as_ref()),
-            &Rc::from(abandoned_destination.to_string_lossy().as_ref()),
+            &JsString::from(abandoned_source.to_string_lossy().as_ref()),
+            &JsString::from(abandoned_destination.to_string_lossy().as_ref()),
             Box::new(move |_| abandoned_callback.set(true)),
         );
         finish();

@@ -35,9 +35,9 @@ test.each([
 });
 
 test.each([
-  ["scalar fields", "{ count: 1 }", true],
-  ["nested typed fields", "{ nested: { count: 1 } }", false],
-] as const)("star exports preserve record admission for %s", (_name, value, accepted) => {
+  ["scalar fields", "{ count: 1 }"],
+  ["nested typed fields", "{ nested: { count: 1 } }"],
+] as const)("star exports preserve record admission for %s", (_name, value) => {
   const directory = mkdtempSync(join(tmpdir(), "scriptc-native-star-identity-"));
   try {
     const entry = join(directory, "main.ts");
@@ -46,15 +46,9 @@ test.each([
     writeFileSync(join(directory, "leaf.ts"), `export const state = ${value};`);
     const { coverage } = analyze(entry, { backend: "rust", allowEngine: false });
     expect(coverage.preflightFailed).toBe(false);
-    if (accepted) {
-      expect(coverage.diagnostics).toEqual([]);
-      expect(coverage.execution?.engine).toBe("none");
-    } else {
-      expect(coverage.diagnostics).toEqual([
-        expect.objectContaining({ code: "SC1090", message: expect.stringContaining("export 'state'") }),
-      ]);
-      expect(coverage.diagnostics[0]?.message).toContain("identity");
-    }
+    // Corpus 3147 verifies shared nested identity and writes at runtime.
+    expect(coverage.diagnostics).toEqual([]);
+    expect(coverage.execution?.engine).toBe("none");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

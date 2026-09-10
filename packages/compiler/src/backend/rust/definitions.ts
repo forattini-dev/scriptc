@@ -1,3 +1,10 @@
+import { rustJsStringRef } from "./string-literals.js";
+import { discriminatedJsonGuard } from "./discriminated-records.js";
+import { emitSharedTupleOperation } from "./shared-tuples.js";
+import { emitSharedIteration } from "./shared-iteration.js";
+import { sharedWidthPair } from "./shared-width.js";
+import { sharedDiscriminatedUnion, discriminatedUnionBox } from "./discriminated-records.js";
+import { recordPointerEquality } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
@@ -15,7 +22,7 @@ import { emitRustGeneratorBody } from "./generators.js";
 import type { RustClassMeta, RustClosureShape } from "./model.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustSyncModuleBody } from "./native-module.js";
-import { emitSharedRecordDefinition } from "./shared-records.js";
+import { emitSharedRecordDefinition, isSharedRecord } from "./shared-records.js";
 
 export interface RustDefinitionContext {
   families(): readonly IrFamily[];
@@ -39,7 +46,7 @@ export interface RustDefinitionContext {
   setCurrentAsyncLocals(locals: Set<string> | null): void;
   emitDynamicDefinition(): void;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string, liveRef?: boolean): string;
-  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
+  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc, path?: string): string;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
   assignmentExpr(id: string, value: string, loc: SrcLoc): string;
   emitExpr(expr: IrExpr): string;
@@ -255,8 +262,11 @@ export class RustDefinitionEmitter {
       this.context.line("}");
       this.context.line(`fn sc_closure_identity_${shape.index}(value: &runtime::Gc<${name}>) -> usize {`);
       this.context.pushIndent();
-      this.context.line(eventAdapter
-        ? `value.with(|closure| match closure { ${name}::EventAdapter { identity, .. } => *identity, _ => value.identity(), })`
+      const identityArms: string[] = [];
+      if (eventAdapter) identityArms.push(`${name}::EventAdapter { identity, .. } => *identity,`);
+      if (dynAdapter) identityArms.push(`${name}::DynAdapter { value: Some(source) } => sc_dyn_function_identity(source).unwrap_or_else(|| value.identity()),`);
+      this.context.line(identityArms.length > 0
+        ? `value.with(|closure| match closure { ${identityArms.join(" ")} _ => value.identity(), })`
         : "value.identity()");
       this.context.popIndent();
       this.context.line("}");
@@ -272,8 +282,8 @@ export class RustDefinitionEmitter {
     return this.context.emitDynFromValue(type, value, loc, functionName, liveRef);
   }
 
-  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
-    return this.context.emitDynCheckValue(type, value, loc);
+  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc, path?: string): string {
+    return this.context.emitDynCheckValue(type, value, loc, path);
   }
 
   emitUnionDefinitions(): void {
@@ -358,7 +368,10 @@ export class RustDefinitionEmitter {
             this.context.line(`if matches!(node, runtime::JsonNode::Null) { return Ok(${variant}); }`);
           } else if (arm.kind !== "undefinedT") {
             const type = this.context.rustType(arm);
-            this.context.line(`if let Ok(value) = <${type} as runtime::JsonDecode>::decode_json(node, path) { return Ok(${variant}(value)); }`);
+            const guard = arm.kind === "record" ? discriminatedJsonGuard(this.context, union, arm.shapeId) : undefined;
+            this.context.line(guard
+              ? `if ${guard} { return <${type} as runtime::JsonDecode>::decode_json(node, path).map(${variant}); }`
+              : `if let Ok(value) = <${type} as runtime::JsonDecode>::decode_json(node, path) { return Ok(${variant}(value)); }`);
           }
         });
         this.context.line(`Err(runtime::json_type_error(path, "${this.context.rustString(typeKey({ kind: "union", unionId: union.id }))}", node))`);
@@ -391,6 +404,11 @@ export class RustDefinitionEmitter {
   }
 
   emitUnionEquality(union: IrUnionDef): void {
+    if (sharedDiscriminatedUnion(this.context, union)) {
+      const name = this.context.unionName(union.id);
+      this.context.line(`fn ${this.context.unionEqName(union.id)}(left: &${name}, right: &${name}, _same_value: bool) -> bool { let left = ${discriminatedUnionBox(this.context, union, "left")}; let right = ${discriminatedUnionBox(this.context, union, "right")}; sc_dyn_equal(&left, &right, false) }`);
+      return;
+    }
     const name = this.context.unionName(union.id);
     this.context.line(`fn ${this.context.unionEqName(union.id)}(left: &${name}, right: &${name}, same_value: bool) -> bool {`);
     this.context.pushIndent();
@@ -414,7 +432,12 @@ export class RustDefinitionEmitter {
         case "string":
           comparison = "left.as_ref() == right.as_ref()";
           break;
+        case "record":
+          comparison = recordPointerEquality(this.context.records.get(arm.shapeId), "left", "right");
+          break;
         case "array":
+          comparison = "runtime::array_ptr_eq(left, right)";
+          break;
         case "bytes":
         case "map":
         case "set":
@@ -432,7 +455,6 @@ export class RustDefinitionEmitter {
         case "httpRes":
         case "httpClientReq":
         case "secureCtx":
-        case "record":
         case "func":
           comparison = "left.ptr_eq(right)";
           break;
@@ -516,7 +538,7 @@ export class RustDefinitionEmitter {
       this.context.line("}");
       this.context.popIndent();
       this.context.line("}");
-      if (this.context.isRustJsonCompatible({ kind: "record", shapeId: shape.id })) {
+      if (!isSharedRecord(shape) && this.context.isRustJsonCompatible({ kind: "record", shapeId: shape.id })) {
         this.context.line(`impl runtime::JsonObject for ${struct} {`);
         this.context.pushIndent();
         if (shape.tuple) this.context.line("const IS_ARRAY: bool = true;");
@@ -537,7 +559,7 @@ export class RustDefinitionEmitter {
             : `&${stored}`;
           this.context.line(shape.tuple
             ? `writer.element(&mut first, ${Number(field.name)}, ${value});`
-            : `writer.property(&mut first, "${this.context.rustString(field.name)}", ${value});`);
+            : `writer.property(&mut first, ${rustJsStringRef(field.name, text => this.context.rustString(text))}, ${value});`);
         }
         if (shape.indexValue !== undefined) {
           this.context.line(`runtime::json_write_map_properties(writer, &mut first, self.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"));`);
@@ -564,7 +586,7 @@ export class RustDefinitionEmitter {
             const node = `values.get(${index}).ok_or_else(|| format!("expected index ${index} at {path}"))?`;
             decoded = `<${type} as runtime::JsonDecode>::decode_json(${node}, &runtime::json_index_path(path, ${index}))?`;
           } else {
-            const property = `"${this.context.rustString(field.name)}"`;
+            const property = rustJsStringRef(field.name, text => this.context.rustString(text));
             const path = `runtime::json_property_path(path, ${property})`;
             const optionalTag = field.type.kind === "union"
               ? this.context.union(field.type.unionId).arms.findIndex((arm) => arm.kind === "undefinedT")
@@ -583,7 +605,7 @@ export class RustDefinitionEmitter {
             : this.context.rustType(shape.indexValue);
           const declared = shape.fields.length === 0
             ? "false"
-            : `matches!(key.as_str(), ${shape.fields.map((field) => `"${this.context.rustString(field.name)}"`).join(" | ")})`;
+            : shape.fields.map(field => `key == ${rustJsStringRef(field.name, text => this.context.rustString(text))}`).join(" || ");
           this.context.line(`${RUST_RECORD_OVERFLOW}: Some({`);
           this.context.pushIndent();
           this.context.line(`let overflow: runtime::JsMap<runtime::JsString, ${value}> = runtime::map_new();`);
@@ -591,7 +613,7 @@ export class RustDefinitionEmitter {
           this.context.pushIndent();
           this.context.line(`if ${declared} { continue; }`);
           this.context.line(`let value = <${value} as runtime::JsonDecode>::decode_json(node, &runtime::json_property_path(path, key))?;`);
-          this.context.line("runtime::map_set_by(&overflow, runtime::string(key), value, |left, right| left.as_ref() == right.as_ref());");
+          this.context.line("runtime::map_set_by(&overflow, runtime::string(key), value, |left, right| left == right);");
           this.context.popIndent();
           this.context.line("}");
           this.context.line("overflow");
@@ -956,6 +978,13 @@ export class RustDefinitionEmitter {
   }
 
   emitFunction(fn: IrFunction): void {
+    if (emitSharedIteration(this.context, fn) || emitSharedTupleOperation(this.context, fn)) return;
+    const view = sharedWidthPair(fn, this.context.records, this.context.unions);
+    if (view) {
+      const boxed = this.context.emitDynFromValue(view.source, "sc_width_input", fn.loc);
+      this.context.line(`fn ${mangleFunction(fn.name)}(sc_width_input: ${this.context.rustType(view.source)}) -> ${this.context.rustType(view.target)} { ${this.context.emitDynCheckValue(view.target, boxed, fn.loc)} }`);
+      return;
+    }
     for (const local of fn.locals) {
       this.context.rustType(local.type, fn.loc);
     }

@@ -362,14 +362,10 @@ bool scr_regex_test(ScrRegex *re, ScrStr *s) {
 
 /* ── match ────────────────────────────────────────────────────────────── */
 
-/* s.match(re) for non-g/y regexes: Node's exec-shaped result reduced to
- * the honest slice — a fresh string[] of [whole match, ...captures], or
- * NULL for no match (the compiler wraps the `string[] | null` union). A
- * NONPARTICIPATING capture holds "" where Node's slot is undefined
- * (truthiness tests agree; SEMANTICS.md documents the divergence). g/y
- * regexes abort like test() — a g-flagged match returns EVERY match, a
- * different shape the frontend fences on literals. */
-ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re) {
+/* A fresh optional-string capture row, or NULL for no match. The compiler
+ * supplies its union layout; absent and empty participating captures differ.
+ * g/y retain the existing statefulness fence. All inputs are borrowed. */
+ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re, uint32_t capture_tag, ScrUnion *absent) {
   uint8_t *bc = scr_regex_bc(re);
   if (lre_get_flags(bc) & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) {
     fflush(stdout);
@@ -385,14 +381,14 @@ ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re) {
   if (rc == 1) {
     const uint8_t *ubase = (const uint8_t *)u;
     int count = lre_get_capture_count(bc);
-    out = scr_arr_new(SCR_ELEM_STR, (size_t)count);
+    out = scr_arr_new_ref(scr_union_retain_v, scr_union_release_v, NULL, (size_t)count);
     for (int k = 0; k < count; k++) {
       const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
       if (cs == NULL || ce == NULL) {
-        scr_arr_push_ref(out, scr_str_new("", 0));
+        scr_arr_push_ref(out, scr_union_retain(absent));
       } else {
-        scr_arr_push_ref(
-            out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+        ScrStr *text = scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1));
+        scr_arr_push_ref(out, scr_union_new_ref(capture_tag, text, scr_str_retain_v, scr_str_release_v, NULL));
       }
     }
   }
@@ -421,16 +417,15 @@ double scr_regex_search(ScrStr *s, ScrRegex *re) {
   return out;
 }
 
-/* matchAll(re): every match as its honest slice string[] (whole match +
- * captures, nonparticipating = "" — match()'s rule) drained EAGERLY into
- * a fresh string[][]. The lazy iterator is unobservable across the
+/* matchAll(re): optional-string capture rows drained EAGERLY into
+ * a fresh array of rows. The lazy iterator is unobservable across the
  * lowered surface: strings are immutable and the spec clones the regex at
  * the call, so nothing can perturb the drain. Non-global regexes throw
  * Node's exact TypeError (catchable — replaceAll's stance). Empty matches
  * advance one unit, unicode-aware (AdvanceStringIndex). `indices`, when
  * non-NULL, receives each match's UTF-16 start index (the row's .index —
  * the companion array the for-of-over-matchAll desugar reads). */
-static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices) {
+static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices, uint32_t capture_tag, ScrUnion *absent) {
   uint8_t *bc = scr_regex_bc(re);
   int re_flags = lre_get_flags(bc);
   if (!(re_flags & LRE_FLAG_GLOBAL)) {
@@ -451,14 +446,14 @@ static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices
     if (scr_exec(capture, bc, u, pos, len) != 1) break;
     int start = (int)((capture[0] - ubase) >> 1);
     int end = (int)((capture[1] - ubase) >> 1);
-    ScrArr *row = scr_arr_new(SCR_ELEM_STR, (size_t)capture_count);
+    ScrArr *row = scr_arr_new_ref(scr_union_retain_v, scr_union_release_v, NULL, (size_t)capture_count);
     for (int k = 0; k < capture_count; k++) {
       const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
       if (cs == NULL || ce == NULL) {
-        scr_arr_push_ref(row, scr_str_new("", 0));
+        scr_arr_push_ref(row, scr_union_retain(absent));
       } else {
-        scr_arr_push_ref(
-            row, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+        ScrStr *text = scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1));
+        scr_arr_push_ref(row, scr_union_new_ref(capture_tag, text, scr_str_retain_v, scr_str_release_v, NULL));
       }
     }
     scr_arr_push_ref(out, row);
@@ -470,12 +465,12 @@ static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices
   return out; /* +1 (possibly empty — Node's no-match drain is []) */
 }
 
-ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re) {
-  return scr_regex_match_all_core(s, re, NULL);
+ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re, uint32_t capture_tag, ScrUnion *absent) {
+  return scr_regex_match_all_core(s, re, NULL, capture_tag, absent);
 }
 
-ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices) {
-  return scr_regex_match_all_core(s, re, indices);
+ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices, uint32_t capture_tag, ScrUnion *absent) {
+  return scr_regex_match_all_core(s, re, indices, capture_tag, absent);
 }
 
 /* ── replace / replaceAll ─────────────────────────────────────────────── */

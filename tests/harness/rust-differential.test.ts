@@ -25,6 +25,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { NODE_COMPAT_MATRIX, compile, isRuntimeTargetId, type RuntimeTargetId } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
+import { discardPassedBinary } from "./passed-binary.js";
 import { DRIVER_FIXTURES } from "./driver-fixtures.js";
 import { nodeTransformTypesArgs } from "./oracle-environment.js";
 import { oracleExecutableForTarget, primaryOracleExecutable } from "./node-matrix.js";
@@ -220,6 +221,9 @@ async function build(file: string) {
   const key = hash
     .update(wantsDynamic(file) ? "dyn" : "")
     .update("rust")
+    // Engine matrices may share a worktree: generated sources and binaries
+    // must not overwrite one another while compiling or running.
+    .update(process.env["SCRIPTC_ISLAND_ENGINE"] === "boa" ? "boa" : "v8")
     .update(targetOf(file))
     .update(islandModulesOf(file).join("\0"))
     .digest("hex")
@@ -305,6 +309,7 @@ describe.skipIf(sanitize)(`rust differential corpus (${files.length} programs${s
       expect(rust.exitCode).toBe(expectedExit);
       expect(node.exitCode).toBe(expectedExit);
       claimed.add(rel);
+      discardPassedBinary(cacheDir, res.binaryPath, rel);
     },
   );
 

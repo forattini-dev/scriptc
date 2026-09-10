@@ -7,11 +7,10 @@ import { analyze, compile } from "../src/index.js";
 
 const entry = resolve("packages/compiler/test/fixtures/bun-island/src/main.ts");
 
-/* Embedded npm code importing Bun runtime modules: under --target bun the
- * build proceeds (the island answers the modules with trap tables; only a
- * use throws, naming the member and the runtime); under a Node target the
- * island honestly cannot embed the package. */
-test("--target bun embeds bun:* imports as runtime traps (rust)", async () => {
+/* Embedded npm code uses the native SQLite bridge under --target bun;
+ * unsupported Bun members remain explicit traps. A Node target rejects
+ * packages importing bun:* modules. */
+test("--target bun exposes SQLite and traps unsupported FFI members (rust)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-bun-island-"));
   const result = await compile(entry, {
     outDir: dir,
@@ -31,8 +30,8 @@ test("--target bun embeds bun:* imports as runtime traps (rust)", async () => {
   expect(run.stderr).toBe("");
   expect(run.code).toBe(0);
   expect(run.stdout).toBe(
-    "function function\n" +
-      "the 'Database' of 'bun:sqlite' is not available in a compiled binary (requires the Bun runtime)\n",
+    "function function\n42\n" +
+      "the 'dlopen' of 'bun:ffi' is not available in a compiled binary (requires the Bun runtime)\n",
   );
 });
 

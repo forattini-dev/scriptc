@@ -1,0 +1,32 @@
+{
+  "capturedAt": "2026-09-10T19:02:31.274201+00:00",
+  "sourceFingerprint": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "distFingerprint": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b",
+  "plainPassingLogEntries": 857,
+  "plainFailingLogEntries": 0,
+  "fullGateAccepted": false,
+  "sanitizedStarted": false,
+  "consumerEntriesRetested": 0,
+  "purpose": "Maintainer-requested commit and branch push checkpoint; not release acceptance",
+  "evidenceSha256": {
+    "workspace-build.json": "7b857579fc1e68dc6e1e9ae4113b95b76d590d38d7ffa17cd696cc3ea6c2d3d5",
+    "full-gate-in-progress.json": "5ca2bc0bdfcce08366ee18f6ddcd2c89a8b2c66a81908260b7915fdb908e96fe",
+    "rust-runtime-validation.json": "f12256784b30139743ad66a4c7acc79913efec3f1564d17492cf2844d53b18df",
+    "coverage-correction.json": "f2ebb92b09eeea81834c6e4c08326ac15461c4fe660eb6d7429da7dac2e377c5",
+    "native-dynamic-node-parity.json": "3043f02d5bb8302050a3b3f811c08ebf1075fac5085187b32571d37ee037f4fa",
+    "current-redwall-acceptance.json": "d6afd95fbc707bffdf313c8556e16186475794b5f49939e7110dd73566d25391",
+    "current-redwall-contracts.txt": "082a495f9d552ba7dd97db3e3643f42595265ab8e8f7f6a8b0a45c1008499899",
+    "current-redwall-input-audit.json": "284950faed05f32a5b9e7dd00cf7337a78a05c103a6eecdd5235a8a56e9c760d",
+    "historical-redwall-report.md": "7d52c77e3fc3d1817d24b5804eb677ac95487052118287a037fdab6419fa3e0e",
+    "historical-redwall-samples.json": "965e5a0ea7efe4f00949cfeec296b58310387d02e223e8e5a7226a53a2a02299",
+    "consumer-inventory.json": "6c1181679618962fb1b1f24d620e5e808de7391fb9fe5d9c3c19f3b6d2433fbc"
+  },
+  "stagedWhitespaceCheck": {
+    "status": "two cosmetic warnings retained to preserve frozen gate inputs",
+    "files": [
+      "packages/compiler/src/frontend/lowering/lower-object-index-iteration.ts",
+      "packages/compiler/src/frontend/union-registry.ts"
+    ],
+    "message": "new blank line at EOF"
+  }
+}

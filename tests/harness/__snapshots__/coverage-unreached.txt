@@ -1,5 +1,7 @@
 scriptc coverage tests/coverage-fixtures/unreached.ts
 
+  backend rust; JavaScript engine none; external FFI no
+
   statements analyzed   8
   compile statically    6  (75%)
   (+1 function not analyzed — signature blocked)

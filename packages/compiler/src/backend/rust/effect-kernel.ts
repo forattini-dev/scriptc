@@ -1,3 +1,4 @@
+import { rustJsString } from "./string-literals.js";
 import { recordNewName } from "./shared-records.js";
 /* The effect kernel's Rust emission: `effect.*` lib calls over
  * runtime/effect.rs. Values cross the kernel boxed (`EffectValue`, an
@@ -536,7 +537,7 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
       if (first === undefined || first.kind !== "recordLit") break;
       const fields = first.fields.map((field) => {
         if (field.value.type.kind !== "effect") return context.unsupported("Schema.Struct over a non-schema field", expr.loc);
-        return `(runtime::string("${context.rustString(field.name)}"), ${context.emitExpr(field.value)})`;
+        return `(${rustJsString(field.name, text => context.rustString(text))}, ${context.emitExpr(field.value)})`;
       });
       return `runtime::schema_struct(vec![${fields.join(", ")}])`;
     }

@@ -80,7 +80,7 @@ fn island_fetch_string_list(value: JsValue, context: &mut Context) -> JsResult<J
     let mut values = Vec::with_capacity(length as usize);
     for index in 0..length {
         let value = array.at(index as i64, context)?.to_string(context)?;
-        values.push(Rc::from(value.to_std_string_lossy().as_str()));
+        values.push(JsString::from(value.to_std_string_lossy().as_str()));
     }
     Ok(array_new(values))
 }
@@ -160,15 +160,15 @@ fn island_host_fetch(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let url: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
-    let method: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let url: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let method: JsString = JsString::from(island_host_arg_string(arguments, 1, context)?.as_str());
     let headers = island_fetch_string_list(island_host_arg(arguments, 2), context)?;
     let body = island_host_arg_bytes(arguments, 3, context)?;
     let protocol = island_host_run(
         || url_protocol(&url_new(&url)),
         context,
     )?;
-    let secure = match protocol.as_ref() {
+    let secure = match protocol.to_utf8_lossy() {
         "http:" => false,
         "https:" => true,
         _ => {

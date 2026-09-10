@@ -336,7 +336,7 @@ pub fn http_request_header(request: &JsHttpRequest, name: &JsString) -> Option<J
         request
             .headers
             .iter()
-            .find(|(_, lower, _)| lower.as_ref() == name.to_ascii_lowercase())
+            .find(|(_, lower, _)| lower == name.to_ascii_lowercase())
             .map(|(_, _, value)| value.clone())
     })
 }
@@ -348,13 +348,13 @@ pub fn http_request_headers(request: &JsHttpRequest) -> Vec<(JsString, JsString)
             // Fetch Headers.getSetCookie() exposes each cookie as its own
             // item; unlike ordinary repeated fields, Set-Cookie is never a
             // comma-joined field value.
-            if lower.as_ref() == "set-cookie" {
+            if lower == "set-cookie" {
                 output.push((lower.clone(), value.clone()));
                 continue;
             }
             if let Some((_, combined)) = output
                 .iter_mut()
-                .find(|(name, _): &&mut (JsString, JsString)| name.as_ref() == lower.as_ref())
+                .find(|(name, _): &&mut (JsString, JsString)| name == lower)
             {
                 *combined = string(&format!("{combined}, {value}"));
             } else {

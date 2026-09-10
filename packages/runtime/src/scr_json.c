@@ -1848,7 +1848,44 @@ static bool scr_dyn_to_primitive_result_is_object(const ScrDyn *d) {
  * "Cannot convert object to primitive value" TypeError. Every other
  * kind matches scr_dyn_string_coerce (units RENDER — ToString(null) is
  * "null"). Borrows; +1, or NULL with the exception pending. */
+/* Array ToString invokes each element's string-hint conversion, retaining
+ * the element across hooks that mutate the array. Join captures its initial
+ * length; recursion through the same array contributes an empty string. */
+typedef struct ScrDynStringFrame {
+  const ScrDyn *array;
+  struct ScrDynStringFrame *parent;
+} ScrDynStringFrame;
+static SCR_TL ScrDynStringFrame *scr_dyn_string_stack = NULL;
+
+static ScrStr *scr_dyn_array_string_coerce_js(const ScrDyn *d) {
+  for (ScrDynStringFrame *f = scr_dyn_string_stack; f; f = f->parent) {
+    if (f->array == d) return scr_str_new("", 0);
+  }
+  ScrDynStringFrame frame = {d, scr_dyn_string_stack};
+  scr_dyn_string_stack = &frame;
+  const size_t length = d->v.arr.len;
+  ScrStr *out = scr_str_new("", 0);
+  for (size_t i = 0; i < length; i++) {
+    if (i > 0) {
+      ScrStr *comma = scr_str_new(",", 1);
+      ScrStr *joined = scr_str_concat(out, comma);
+      scr_str_release(out); scr_str_release(comma); out = joined;
+    }
+    ScrDyn *element = scr_dyn_arr_at(d, (double)i);
+    if (element->kind != SCR_DYN_UNDEF && element->kind != SCR_DYN_NULL) {
+      ScrStr *piece = scr_dyn_string_coerce_js(element);
+      scr_dyn_release(element);
+      if (!piece) { scr_str_release(out); scr_dyn_string_stack = frame.parent; return NULL; }
+      ScrStr *joined = scr_str_concat(out, piece);
+      scr_str_release(out); scr_str_release(piece); out = joined;
+    } else { scr_dyn_release(element); }
+  }
+  scr_dyn_string_stack = frame.parent;
+  return out;
+}
+
 ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
+  if (d->kind == SCR_DYN_ARR) return scr_dyn_array_string_coerce_js(d);
   if (d->kind == SCR_DYN_TYPED_REF) {
     ScrDyn *materialized = scr_dyn_typed_ref_materialize(d);
     ScrStr *out = scr_dyn_string_coerce_js(materialized);
@@ -1884,79 +1921,95 @@ ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d) {
   return scr_dyn_string_coerce(d);
 }
 
-/* JS ToNumber over a checked-dynamic value, including OrdinaryToPrimitive's
- * NUMBER hint for object snapshots. This is the numeric twin of
- * scr_dyn_string_coerce_js above: valueOf precedes toString, inherited
- * Object.prototype.valueOf returns the receiver (so conversion continues),
- * and the inherited toString fallback supplies "[object Object]". Borrows d;
- * false means an object hook threw or no primitive value could be produced. */
-bool scr_dyn_number_coerce_js(const ScrDyn *d, double *out) {
+/* Number-hint OrdinaryToPrimitive. Borrows d, returns +1, or NULL with
+ * a pending exception. Keep strings intact for relational comparisons. */
+static ScrDyn *scr_dyn_number_primitive(const ScrDyn *d) {
   if (d->kind == SCR_DYN_TYPED_REF) {
     ScrDyn *materialized = scr_dyn_typed_ref_materialize(d);
-    bool ok = scr_dyn_number_coerce_js(materialized, out);
+    ScrDyn *result = scr_dyn_number_primitive(materialized);
     scr_dyn_release(materialized);
-    return ok;
+    return result;
   }
   switch (d->kind) {
-  case SCR_DYN_NULL:
-    *out = 0.0;
-    return true;
-  case SCR_DYN_BOOL:
-    *out = d->v.b ? 1.0 : 0.0;
-    return true;
-  case SCR_DYN_NUM:
-    *out = d->v.num;
-    return true;
-  case SCR_DYN_STR:
-    *out = scr_string_to_number(d->v.str);
-    return true;
-  case SCR_DYN_UNDEF:
-    *out = NAN;
-    return true;
+  case SCR_DYN_NULL: case SCR_DYN_BOOL: case SCR_DYN_NUM:
+  case SCR_DYN_STR: case SCR_DYN_UNDEF:
+    return scr_dyn_retain((ScrDyn *)d);
   case SCR_DYN_OBJ: {
     static const char *const hint[2] = { "valueOf", "toString" };
     for (int i = 0; i < 2; i++) {
-      ScrDyn *m = scr_dyn_obj_get(d, hint[i], strlen(hint[i])); /* borrowed */
-      if (!m) {
-        if (!d->null_proto && i == 0) {
-          /* Inherited Object.prototype.valueOf returns the object, so the
-           * number-hint protocol advances to toString. */
-          continue;
-        }
-        if (!d->null_proto && i == 1) {
-          *out = NAN; /* Number("[object Object]") */
-          return true;
-        }
-        continue;
+      ScrDyn *m = scr_dyn_obj_get(d, hint[i], strlen(hint[i]));
+      if (!m && i == 1 && !d->null_proto) {
+        ScrStr *text = scr_str_new("[object Object]", 15);
+        ScrDyn *result = scr_dyn_new_str(text);
+        scr_str_release(text);
+        return result;
       }
-      if (m->kind != SCR_DYN_FUNC) continue;
+      if (!m || m->kind != SCR_DYN_FUNC) continue;
       scr_dyn_this_push_dyn(d);
       ScrDyn *r = scr_dyn_call(m, NULL, 0, hint[i]);
       scr_dyn_this_pop();
-      if (!r) return false;
-      if (scr_dyn_to_primitive_result_is_object(r)) {
-        scr_dyn_release(r);
-        continue;
-      }
-      bool ok = scr_dyn_number_coerce_js(r, out);
+      if (!r) return NULL;
+      if (!scr_dyn_to_primitive_result_is_object(r)) return r;
       scr_dyn_release(r);
-      return ok;
     }
     static const char msg[] = "Cannot convert object to primitive value";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
-    return false;
+    return NULL;
   }
   default: {
-    /* Arrays, byte views, functions, promises, and native handles inherit a
-     * valueOf that returns the receiver, then use their existing JS-exact
-     * string rendering for the numeric conversion. */
-    ScrStr *text = scr_dyn_string_coerce(d);
-    if (!text) return false;
-    *out = scr_string_to_number(text);
+    ScrStr *text = scr_dyn_string_coerce_js(d);
+    if (!text) return NULL;
+    ScrDyn *result = scr_dyn_new_str(text);
     scr_str_release(text);
-    return true;
+    return result;
   }
   }
+}
+
+static double scr_dyn_primitive_number(const ScrDyn *d) {
+  switch (d->kind) {
+  case SCR_DYN_NULL: return 0.0;
+  case SCR_DYN_BOOL: return d->v.b ? 1.0 : 0.0;
+  case SCR_DYN_NUM: return d->v.num;
+  case SCR_DYN_STR: return scr_string_to_number(d->v.str);
+  default: return NAN;
+  }
+}
+
+bool scr_dyn_number_coerce_js(const ScrDyn *d, double *out) {
+  ScrDyn *primitive = scr_dyn_number_primitive(d);
+  if (!primitive) return false;
+  *out = scr_dyn_primitive_number(primitive);
+  scr_dyn_release(primitive);
+  return true;
+}
+
+/* Both source operands already evaluated. Coerce left before right for all
+ * four operators; unordered comparisons return NaN, never an ordered tag. */
+double scr_dyn_compare(const ScrDyn *left, const ScrDyn *right) {
+  ScrDyn *l = scr_dyn_number_primitive(left);
+  if (!l) return NAN;
+  ScrDyn *r = scr_dyn_number_primitive(right);
+  if (!r) { scr_dyn_release(l); return NAN; }
+  double result;
+  if (l->kind == SCR_DYN_STR && r->kind == SCR_DYN_STR) {
+    int order = scr_str_cmp_u16(l->v.str, r->v.str);
+    result = order < 0 ? -1.0 : order > 0 ? 1.0 : 0.0;
+  } else {
+    double a = scr_dyn_primitive_number(l), b = scr_dyn_primitive_number(r);
+    result = isnan(a) || isnan(b) ? NAN : a < b ? -1.0 : a > b ? 1.0 : 0.0;
+  }
+  scr_dyn_release(l);
+  scr_dyn_release(r);
+  return result;
+}
+
+/* Value-returning ABI for compiler libCalls; a pending exception is checked
+ * by the caller before this placeholder result can be observed. */
+double scr_dyn_number_coerce_value(const ScrDyn *d) {
+  double result = NAN;
+  (void)scr_dyn_number_coerce_js(d, &result);
+  return result;
 }
 
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
@@ -1966,10 +2019,8 @@ bool scr_dyn_number_coerce_js(const ScrDyn *d, double *out) {
  * ignore silently — the loud choice, SEMANTICS.md). Receiver, key, and
  * value are all BORROWED (the member retains the value in). */
 static const char *scr_dyn_kind_name(const ScrDyn *d);
-/* `key in v` with a RUNTIME key (the compile-time dynHasKey fold, per
- * value): OBJ answers own-member presence, ARR answers 'length' or a
- * valid dense index, every other kind false (tsc admits `in` only on
- * object-typed operands). Borrows both; never throws. */
+/* Native data answers member/index presence. Engine objects preserve their
+ * prototype and proxy semantics. Borrows both; proxy traps can throw. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_TYPED_REF) {
     ScrDyn *materialized = scr_dyn_typed_ref_materialize(v);
@@ -1977,6 +2028,7 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     scr_dyn_release(materialized);
     return out;
   }
+  if (v->kind == SCR_DYN_JSVAL) return scr_dyn_jsval_ops()->has_key(v->v.jsval.cell, key) == 1;
   if (v->kind == SCR_DYN_OBJ) return scr_dyn_obj_get(v, key->data, key->len) != NULL;
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;

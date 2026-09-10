@@ -1,6 +1,0 @@
-ns-import-object/main.ts:8:17 - error SC1013: module namespace objects as first-class values (access 'lib' members directly: lib.<member>) are not supported yet
-
-  7 | console.log(lib.one());
-  8 | const grabbed = lib;
-    |                 ^~~
-  9 | console.log(grabbed.one());

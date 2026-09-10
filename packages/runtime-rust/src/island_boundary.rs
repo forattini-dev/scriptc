@@ -96,9 +96,9 @@ fn island_trap_error(text: &str, code: &'static str, context: &mut Context) -> B
         .trim_start_matches("scriptc: ")
         .to_owned();
     let error = match code {
-        "SC4014" => error_new_code("RangeError", Rc::from(message.as_str()), code),
-        "SC4015" => error_new_code("TypeError", Rc::from(message.as_str()), code),
-        _ => error_new_code("Error", Rc::from(message.as_str()), code),
+        "SC4014" => error_new_code("RangeError", JsString::from(message.as_str()), code),
+        "SC4015" => error_new_code("TypeError", JsString::from(message.as_str()), code),
+        _ => error_new_code("Error", JsString::from(message.as_str()), code),
     };
     island_host_error(&caught_value(error), context)
 }

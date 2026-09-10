@@ -56,7 +56,9 @@ export function emitRustCheckedFsCall(
         `{ if !cfg!(target_os = "macos") { runtime::throw_error_code("The lchmod() method is not implemented".to_owned(), "ERR_METHOD_NOT_IMPLEMENTED"); } ${pathCheck(bound(0), "path", dyn)} let sc_mode = ${modeCheck(bound(1), "mode", dyn, context)}; let sc_path = ${pathString(bound(0), dyn)}; runtime::fs_lchmod(&sc_path, sc_mode); () }`,
       );
     case "fs.readChk":
-      checkedShape(expr, ["dyn", "dyn", "dyn", "dyn", "dyn", "string"], "dyn", context);
+      // The valid callback overload returns void; a rejected JS overload
+      // can remain dynamic. Both validation tails throw before returning.
+      checkedShape(expr, ["dyn", "dyn", "dyn", "dyn", "dyn", "string"], expr.type.kind === "void" ? "void" : "dyn", context);
       return `{ ${bind} ${readChecks(values, dyn, context, expr.loc)} ${fence(value(5))} }`;
     case "fs.streamOptsChk":
       checkedShape(expr, ["dyn", "dyn", "string"], "dyn", context);
@@ -92,7 +94,7 @@ function utf8OnlyOptionsCheck(
   const index = context.nextTemporary();
   const key = context.nextTemporary();
   const entry = context.nextTemporary();
-  return `let sc_utf8_options = match &${value} { ${dyn}::Undefined | ${dyn}::Null => true, ${dyn}::String(sc_encoding) => matches!(sc_encoding.as_ref(), "utf8" | "utf-8"), ${dyn}::Object(${object}) => { let mut sc_utf8 = true; let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(${object}) { if runtime::map_iter_live(${object}, ${index}) { let ${key} = runtime::map_iter_key(${object}, ${index}); let ${entry} = runtime::map_iter_value(${object}, ${index}); if !matches!(&${entry}, ${dyn}::Undefined | ${dyn}::Null) && (${key}.as_ref() != "encoding" || !matches!(&${entry}, ${dyn}::String(sc_encoding) if matches!(sc_encoding.as_ref(), "utf8" | "utf-8"))) { sc_utf8 = false; } } ${index} += 1.0; } sc_utf8 }, _ => false, }; if !sc_utf8_options { ${fence(fenceValue)} }`;
+  return `let sc_utf8_options = match &${value} { ${dyn}::Undefined | ${dyn}::Null => true, ${dyn}::String(sc_encoding) => matches!(sc_encoding.to_utf8_lossy(), "utf8" | "utf-8"), ${dyn}::Object(${object}) => { let mut sc_utf8 = true; let mut ${index} = 0.0; while ${index} < runtime::map_iter_count(${object}) { if runtime::map_iter_live(${object}, ${index}) { let ${key} = runtime::map_iter_key(${object}, ${index}); let ${entry} = runtime::map_iter_value(${object}, ${index}); if !matches!(&${entry}, ${dyn}::Undefined | ${dyn}::Null) && (${key}.as_ref() != "encoding" || !matches!(&${entry}, ${dyn}::String(sc_encoding) if matches!(sc_encoding.to_utf8_lossy(), "utf8" | "utf-8"))) { sc_utf8 = false; } } ${index} += 1.0; } sc_utf8 }, _ => false, }; if !sc_utf8_options { ${fence(fenceValue)} }`;
 }
 
 function modeCheck(

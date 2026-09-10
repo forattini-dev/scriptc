@@ -45,9 +45,9 @@ fn island_child_option_number(options: &boa_engine::JsObject, name: &str, contex
 fn island_child_option_string(options: &boa_engine::JsObject, name: &str, context: &mut Context) -> JsResult<JsString> {
     let value = options.get(boa_engine::JsString::from(name), context)?;
     if value.is_undefined() || value.is_null() {
-        Ok(Rc::from(""))
+        Ok(JsString::from(""))
     } else {
-        Ok(Rc::from(value.to_string(context)?.to_std_string_lossy().as_str()))
+        Ok(JsString::from(value.to_string(context)?.to_std_string_lossy().as_str()))
     }
 }
 
@@ -60,7 +60,7 @@ fn island_child_strings(value: &JsValue, context: &mut Context) -> JsResult<JsAr
         let length = array.length(context)? as usize;
         for index in 0..length {
             let item = array.get(index as u64, context)?;
-            out.push(Rc::from(item.to_string(context)?.to_std_string_lossy().as_str()));
+            out.push(JsString::from(item.to_string(context)?.to_std_string_lossy().as_str()));
         }
     }
     Ok(array_new(out))
@@ -148,7 +148,7 @@ fn island_host_child_spawn(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let command: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let command: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     let args = island_child_strings(&island_host_arg(arguments, 1), context)?;
     let options = island_host_arg(arguments, 2)
         .as_object()
@@ -171,7 +171,7 @@ fn island_host_child_spawn(
     if std::env::var_os("SCRIPTC_ISLAND_TRACE").is_some() {
         eprintln!(
             "scriptc island: spawn #{id} {command} {:?} (pid {:?}, exit {:?})",
-            args.with(|args| args.elements.iter().map(|value| value.to_string()).collect::<Vec<_>>()),
+            args.with(|args| args.elements().iter().map(|value| value.to_string()).collect::<Vec<_>>()),
             child_pid(&child),
             child_exit_code(&child)
         );
@@ -193,7 +193,7 @@ fn island_host_child_kill(
     let Some(child) = island_child(island_net_arg_id(arguments, 0)) else {
         return Ok(JsValue::from(false));
     };
-    let signal: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let signal: JsString = JsString::from(island_host_arg_string(arguments, 1, context)?.as_str());
     Ok(JsValue::from(island_host_run(|| child_kill(&child, &signal), context)?))
 }
 
@@ -245,7 +245,7 @@ fn island_host_child_spawn_sync(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let command: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let command: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     let args = island_child_strings(&island_host_arg(arguments, 1), context)?;
     let options = island_host_arg(arguments, 2)
         .as_object()

@@ -121,23 +121,3 @@ export function isPreinitializedDataPropertyRead(
     (source) => !cycleMembers.has(source),
   ) !== null;
 }
-
-/**
- * The leaf initializer behind an imported const object's literal property
- * chain, or null. Callers may inline it only after independently proving the
- * leaf expression is side-effect-free.
- */
-export function externalStaticDataPropertyInitializer(
-  checker: ts.TypeChecker,
-  expression: ts.Expression,
-): ts.Expression | null {
-  const chain = propertyChain(expression);
-  if (chain === null) return null;
-  const useSource = expression.getSourceFile();
-  return constInitializerOf(
-    checker,
-    chain.root,
-    chain.keys,
-    (source) => source !== useSource,
-  );
-}

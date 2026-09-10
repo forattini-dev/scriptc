@@ -1,5 +1,10 @@
+import { DATE_LIB_FN_SIGS } from "./date-signatures.js";
+import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js";
+import { isJsonStringifyType } from "./json-stringify.js";
+import { regexCaptureLayout } from "./regex-captures.js";
+import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
 import { validateModuleInitCaches } from "./validate-module-inits.js";
-/* IR validation: frontend invariant failures retain the user's source location. */
+import { validRecordDiscriminant } from "./record-discriminant.js";
 import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
 import type {
@@ -17,7 +22,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DATE_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -64,12 +69,12 @@ export const REGEX_INTRINSIC_SIGS: Record<
   { receiver: IrType; argTypes: IrType[]; result: IrType }
 > = {
   test: { receiver: REGEX, argTypes: [STRING], result: BOOL },
-  // match's result is the program-dependent `string[] | null` union —
+  // match's result is the program-dependent optional-string row union —
   // VOID here is the process.envGet sentinel; the regexIntrinsic case
   // checks the union's arms.
   match: { receiver: STRING, argTypes: [REGEX], result: VOID },
-  matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
-  matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
+  matchAll: { receiver: STRING, argTypes: [REGEX], result: VOID },
+  matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: VOID },
   search: { receiver: STRING, argTypes: [REGEX], result: F64 },
   source: { receiver: REGEX, argTypes: [], result: STRING },
   flags: { receiver: REGEX, argTypes: [], result: STRING },
@@ -82,6 +87,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
+  ...NUMERIC_COERCION_SIGS,
+  ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
   "fetch.responseNew": { argTypes: [DYN, DYN], result: DYN },
   "fetch.responseJson": { argTypes: [DYN], result: { kind: "promise", inner: DYN } },
@@ -163,8 +170,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.readFileSync": { argTypes: [STRING, STRING], result: STRING },
   "fs.readFileSyncBuf": { argTypes: [STRING], result: BYTES_U8 },
   "fs.readFileSyncDyn": { argTypes: [STRING, DYN], result: DYN },
-  "fs.writeFileSync": { argTypes: [STRING, STRING], result: VOID },
-  "fs.appendFileSync": { argTypes: [STRING, STRING], result: VOID },
   "fs.existsSync": { argTypes: [STRING], result: BOOL },
   "fs.mkdirSync": { argTypes: [STRING], result: VOID },
   "fs.rmSync": { argTypes: [STRING], result: VOID },
@@ -235,10 +240,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "math.min": { argTypes: [F64, F64], result: F64 },
   "math.max": { argTypes: [F64, F64], result: F64 },
   "math.random": { argTypes: [], result: F64 },
-  "num.parseInt": { argTypes: [STRING, F64], result: F64 },
-  "num.parseFloat": { argTypes: [STRING], result: F64 },
-  "num.fromString": { argTypes: [STRING], result: F64 },
-  "num.isNaN": { argTypes: [F64], result: BOOL },
   "str.encodeUriComponent": { argTypes: [STRING], result: STRING },
   // The base64 globals: the argument is a dyn value (WebIDL ToString
   // runs in the runtime); the zero-argument form always throws.
@@ -348,8 +349,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.renameSync": { argTypes: [STRING, STRING], result: VOID },
   // Callback type is program-dependent (zero params or Error | null).
   "fs.renameCb": { argTypes: [STRING, STRING, null], result: VOID },
-  "fs.writeFileModeSync": { argTypes: [STRING, STRING, F64], result: VOID },
-  "fs.writeFileExclusiveModeSync": { argTypes: [STRING, STRING, F64], result: VOID },
   "fs.mkdirModeSync": { argTypes: [STRING, F64], result: VOID },
   "fs.mkdirRecursiveModeSync": { argTypes: [STRING, F64], result: VOID },
   // Atomics.wait over an Int32Array — the synchronous-sleep idiom.
@@ -798,7 +797,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "emitter.setMaxChk": { argTypes: [null, DYN], result: VOID },
   "emitter.setDefaultMaxChk": { argTypes: [DYN, STRING], result: VOID },
   "fs.readFileSyncBytes": { argTypes: [STRING], result: BYTES_U8 },
-  "fs.writeFileSyncBytes": { argTypes: [STRING, BYTES_U8], result: VOID },
   "fsp.readFileBytes": { argTypes: [STRING], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.deflateSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.deflateSyncLevel": { argTypes: [BYTES_U8, F64], result: BYTES_U8 },
@@ -815,9 +813,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.stdoutWriteBytesCb": { argTypes: [BYTES_U8, STRING, null], result: BOOL },
   "process.stderrWriteBytesCb": { argTypes: [BYTES_U8, STRING, null], result: BOOL },
   "fsp.readFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: STRING } },
-  "fsp.writeFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: VOID } },
-  "fsp.writeFileMode": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: VOID } },
-  "fsp.writeFileExclusiveMode": { argTypes: [STRING, STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.access": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.mkdir": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.mkdirMode": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
@@ -875,7 +870,6 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "error.newCause": { argTypes: [STRING, DYN], result: VOID },
   "error.cause": { argTypes: [null], result: DYN },
   "error.nodeThrow": { argTypes: [F64, STRING, STRING], result: VOID },
-  "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
   // Always throws; the result is the READ's declared type (a typed dummy
   // the unwind abandons) — the libCall case skips the result check.
   "global.undefRead": { argTypes: [STRING], result: VOID },
@@ -1093,7 +1087,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // node:readline: the interface handle is f64; the callbacks' func types
   // are program-dependent (zero-param or (answer: string) — the emitter
   // picks the adapter), so those slots are null like child.onExit's.
-  "rl.create": { argTypes: [], result: F64 },
+  "rl.create": { argTypes: [BOOL], result: F64 },
   "rl.question": { argTypes: [F64, STRING, null], result: VOID },
   "rl.close": { argTypes: [F64], result: VOID },
   "rl.onClose": { argTypes: [F64, null], result: VOID },
@@ -1146,33 +1140,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "number.isNaN": { argTypes: [F64], result: BOOL },
   "number.isInteger": { argTypes: [F64], result: BOOL },
   "number.isSafeInteger": { argTypes: [F64], result: BOOL },
-  "date.now": { argTypes: [], result: F64 },
-  "date.newNow": { argTypes: [], result: DATE_T },
-  "date.newMs": { argTypes: [F64], result: DATE_T },
-  "date.newString": { argTypes: [STRING], result: DATE_T },
-  "date.getTime": { argTypes: [DATE_T], result: F64 },
-  "date.valueOf": { argTypes: [DATE_T], result: F64 },
-  "date.toISOString": { argTypes: [F64], result: STRING },
-  "date.toISOStringValue": { argTypes: [DATE_T], result: STRING },
-  "date.getFullYear": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCFullYear": { argTypes: [DATE_T], result: F64 },
-  "date.getMonth": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCMonth": { argTypes: [DATE_T], result: F64 },
-  "date.getDate": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCDate": { argTypes: [DATE_T], result: F64 },
-  "date.getDay": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCDay": { argTypes: [DATE_T], result: F64 },
-  "date.getHours": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCHours": { argTypes: [DATE_T], result: F64 },
-  "date.getMinutes": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCMinutes": { argTypes: [DATE_T], result: F64 },
-  "date.getSeconds": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCSeconds": { argTypes: [DATE_T], result: F64 },
-  "date.getMilliseconds": { argTypes: [DATE_T], result: F64 },
-  "date.getUTCMilliseconds": { argTypes: [DATE_T], result: F64 },
-  "date.getTimezoneOffset": { argTypes: [DATE_T], result: F64 },
-  "date.parseGetTime": { argTypes: [STRING], result: F64 },
-  "date.utc": { argTypes: [F64, F64, F64, F64, F64, F64, F64], result: F64 },
+  ...DATE_LIB_FN_SIGS,
   "text.decode": { argTypes: [BYTES_U8], result: STRING },
   "text.decodeLegacy": { argTypes: [BYTES_U8, F64], result: STRING },
   "fs.mkdirRecursiveSync": { argTypes: [STRING], result: VOID },
@@ -1548,6 +1516,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
       errors.push({ message: `duplicate union "${u.id}"`, loc: noLoc });
     }
     unionsById.set(u.id, u);
+    if (u.discriminant && !validRecordDiscriminant(u, id => recordsById.get(id))) errors.push({ message: `union ${u.id}: invalid record discriminant`, loc: noLoc });
     if (u.arms.length < 2) {
       errors.push({ message: `union ${u.id}: fewer than 2 arms`, loc: noLoc });
     }
@@ -1585,9 +1554,7 @@ export function validateModule(mod: IrModule): IrValidationError[] {
           loc: noLoc,
         });
       }
-      // classval arms may name UNDECLARED classes: the payload emits as
-      // the class-independent `ScrClassObj *` (see the namesUndeclared
-      // backstop below) — a fenced class's value slot is inert-but-valid.
+      // classval payloads use ScrClassObj pointers even for fenced declarations.
       for (let j = i + 1; j < u.arms.length; j++) {
         if (typeEquals(arm, u.arms[j]!)) {
           errors.push({ message: `union ${u.id}: arms ${i} and ${j} are identical`, loc: noLoc });
@@ -2333,16 +2300,13 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `regexIntrinsic ${e.method} arg ${i}`);
         });
-        if (e.method === "match") {
-          // The `string[] | null` union (program-dependent id) — checked
-          // by arms, like the libCall case checks process.envGet.
+        if (e.method === "match" || e.method === "matchAll" || e.method === "matchAllInto") {
+          const layout = regexCaptureLayout(e.type, (id) => unions.get(id));
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
-          const ok =
-            def &&
-            def.arms.length === 2 &&
-            def.arms.some((a) => a.kind === "array" && a.elem.kind === "string") &&
-            def.arms.some((a) => a.kind === "nullT");
-          if (!ok) err("regexIntrinsic match must be the string[] | null union", e.loc);
+          const valid = e.method === "match"
+            ? def?.arms.length === 2 && def.arms.some((arm) => arm.kind === "nullT")
+            : e.type.kind === "array";
+          if (!layout || !valid) err("regexIntrinsic captures must contain string | undefined slots", e.loc);
           break;
         }
         if (!typeEquals(e.type, sig.result)) {
@@ -3232,7 +3196,7 @@ function validateFunction(
         // literal key naming no declared field) skip the declared check
         // and require the overflow to exist.
         const surfaces = (t: IrType): boolean =>
-          typeEquals(t, e.type) ||
+          typeEquals(t, e.type) || (t.kind === "union" && (unions.get(t.unionId)?.arms.every(surfaces) ?? false)) ||
           (e.type.kind === "union" &&
             (unions.get(e.type.unionId)?.arms.some((a) => typeEquals(a, t)) ?? false)) ||
           e.type.kind === "dyn";
@@ -4829,7 +4793,7 @@ function validateFunction(
         // walker serializes it (scr_dyn_format_j), no emitted serializer.
         if (
           e.value.type.kind !== "dyn" &&
-          !isJsonSafeType(e.value.type, (id) => records.get(id), (id) => unions.get(id))
+          !isJsonStringifyType(e.value.type, (id) => records.get(id), (id) => unions.get(id))
         ) {
           err(`jsonStringify of non-JSON-safe type ${e.value.type.kind}`, e.loc);
         }

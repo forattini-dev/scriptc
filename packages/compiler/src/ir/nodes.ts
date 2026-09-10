@@ -1,3 +1,6 @@
+import { THROWING_COERCION_FNS } from "./coercion-names.js";
+import type { IrNumericCoercionFn } from "./numeric-coercion.js";
+import { nativeRecordCheckSupported } from "./native-record.js";
 import type { IrFunction } from "./functions.js";
 export type { IrFunction } from "./functions.js";
 import { InternalCompilerError } from "../errors.js";
@@ -16,7 +19,6 @@ import { InternalCompilerError } from "../errors.js";
  *   IrStmt must have exhaustive `never` default arms so adding a member
  *   turns into compile errors, not silent misbehavior.
  */
-
 /** Byte-offset span in the original source file. */
 export interface SrcLoc {
   file: string;
@@ -1273,10 +1275,10 @@ export function shapeHasAccessorSlots(shape: IrRecordShape): boolean {
 export interface IrUnionDef {
   /** Frontend-assigned union id (`u0`, `u1`, ...). */
   id: string;
-  /** ≥2 pairwise-distinct arm types in canonical (typeKey-sorted) order;
-   * an arm's index here is its runtime tag. Never void/func/union; the
-   * unit kinds (undefinedT/nullT) are payload-less arms. */
+  /** Canonical arm order defines runtime tags; unit arms have no payload. */
   arms: IrType[];
+  /** String literal domains retained for live shared record views. */
+  discriminant?: { field: string; cases: { shapeId: string; values: string[] }[] };
 }
 
 export interface IrParam {
@@ -1971,7 +1973,7 @@ export type IrLibFn =
    * encodings fence loudly, unknown names throw ERR_UNKNOWN_ENCODING. */
   | "fs.readFileSyncDyn"
   | "fs.writeFileSync"
-  | "fs.appendFileSync"
+  | "fs.appendFileSync" | "fs.appendFileModeSync"
   | "fs.existsSync"
   | "fs.mkdirSync"
   | "fs.rmSync"
@@ -2101,30 +2103,7 @@ export type IrLibFn =
   | "math.acos"
   | "math.atan"
   | "math.atan2"
-  /** The static global parsers/tests (scr_string.c). num.parseInt is
-   * ECMA-262 19.2.5 exactly — JS whitespace, sign, ToInt32 radix (the
-   * frontend completes an omitted radix to 0 = the spec's "undefined":
-   * base 10 with the 0x hex escape), longest digit prefix, and the exact
-   * mathematical value correctly rounded (u64 fast path, bignum beyond —
-   * overflow is ±Infinity). num.isNaN is the NaN self-test on an
-   * already-number argument (tsc pins the argument to number, so no
-   * ToNumber coercion exists to model). Borrow; never throw. */
-  | "num.parseInt"
-  | "num.isNaN"
-  /** ES parseFloat (scr_string.c): the longest StrDecimalLiteral prefix
-   * of the trimmed input (no hex, "Infinity" exact-case), NaN when none —
-   * ECMA-262 19.2.4 over a string argument (non-string arguments keep the
-   * fence: Node would ToNumber-coerce). Borrows; never throws. */
-  | "num.parseFloat"
-  /* ToNumber(string) — ECMA-262 7.1.4.1 StringToNumber (scr_string.c):
-   * trim the JS StrWhiteSpace set, empty/whitespace-only → +0, then the
-   * whole span must be one StrNumericLiteral — signed decimal (Infinity
-   * included, strtod-over-validated-span correct rounding) or unsigned
-   * 0x/0o/0b (exact value, nearest-even; signed forms are NaN) — with
-   * any trailing garbage answering NaN. Number(aString), unary + on
-   * strings, and util.format %d over strings lower here. Borrows; never
-   * throws. */
-  | "num.fromString"
+  | IrNumericCoercionFn
   /** The static URI component codecs (scr_string.c), ECMA-262 Encode/
    * Decode with the component sets over the runtime's UTF-8 strings.
    * str.encodeUriComponent percent-encodes every byte outside the
@@ -3491,12 +3470,6 @@ export type IrLibFn =
    * the replaced expression's own (never materialized — the
    * global.undefRead pattern). May-throw seed. */
   | "error.nodeThrow"
-  /** JS ToString over a dyn value WITH the object protocol (a user
-   * toString/valueOf member is CALLED and its throw propagates;
-   * exhaustion throws "Cannot convert object to primitive value"; units
-   * render "null"/"undefined") — the WHATWG USVString conversions
-   * (URLSearchParams names/values). Borrowed dyn; +1 string. May-throw. */
-  | "dyn.toStringCoerce"
   /** A read of a `declare`d const NOTHING defines (the bundler-define
    * pattern — __VERSION__): always throws the catchable ReferenceError
    * Node raises at the access ("<name> is not defined"). args[0] is the
@@ -3961,7 +3934,7 @@ export type IrLibFn =
   /** node:readline's question/close/async-iterator slice (scr_readline.c, linked under
    * the events gate — these fns imply moduleUsesProcessEvents). The
    * interface value is an f64 handle (the Timeout-id precedent).
-   * rl.create: [] → f64 — createInterface({ input: process.stdin,
+   * rl.create: [outputEnabled: bool] → f64 — createInterface({ input: process.stdin,
    * output: process.stdout }), registering the unit's shared stdin
    * consumer (an OPEN interface keeps the loop alive until close/EOF,
    * Node's semantics). rl.question: [handle, query, cb] — writes the
@@ -4120,6 +4093,7 @@ export type IrLibFn =
   | "date.newNow"
   | "date.newMs"
   | "date.newString"
+  | "date.newComponents"
   | "date.getTime"
   | "date.valueOf"
   | "date.toISOString"
@@ -4151,8 +4125,7 @@ export type IrLibFn =
    * Node's invalid-date getTime. Never throws. */
   | "date.parseGetTime"
   /** `Date.UTC(...)` — seven f64 arguments (the frontend completes the
-   * spec's defaults for omitted trailing parts: month 0, date 1, time
-   * parts 0), the spec's MakeDay/MakeTime/TimeClip exactly: 0–99 years
+   * defaults: month 0, date 1, time parts 0). MakeDay/MakeTime/TimeClip: 0–99 years
    * map to 1900+year, out-of-range months/dates roll over, non-finite
    * parts and out-of-range results answer NaN. Never throws. */
   | "date.utc"
@@ -5904,7 +5877,7 @@ export function canDynCheckTo(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
-  if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  if (isJsonSafeType(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
   if (t.kind === "bytes" && t.elem === "u8") return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
@@ -7363,8 +7336,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "global.undefRead",
   // The compiler-resolved Node-parity throw: always throws, catchably.
   "error.nodeThrow",
-  // USVString coercion runs user toString/valueOf — throws propagate.
-  "dyn.toStringCoerce",
+  // Coercion runs user hooks; failures propagate.
+  ...THROWING_COERCION_FNS,
   "child.kill",
   // The caller's lookup runs synchronously inside the connect call — a
   // throw there propagates like Node's.
@@ -7420,9 +7393,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.structuredClone",
   "dyn.cloneMissing",
   "dyn.cloneTransferFail",
-  // the dyn Object walks throw on null/undefined receivers
   "dyn.objKeys",
   "dyn.hasOwn",
+  "dyn.hasKey", // Engine proxy traps can throw during membership tests.
   "dyn.assign",
   // variadic Object.assign: spread flattening throws V8's spread-call
   // TypeErrors; the final copy throws ToObject on a nullish target
@@ -7444,7 +7417,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.realpathSync",
   "fs.readFileSync",
   "fs.writeFileSync",
-  "fs.appendFileSync",
+  "fs.appendFileSync", "fs.appendFileModeSync",
   "fs.mkdirSync",
   "fs.rmSync",
   "fs.rmdirSync",

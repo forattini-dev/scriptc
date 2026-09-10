@@ -311,7 +311,7 @@ fn host_net_server_listen(args: &[v8e::Value]) -> Result<v8e::HostResult, v8e::E
     let id = arg_id(args, 0);
     let Some(server) = v8_net_server(id) else { return Ok(v8e::HostResult::Undefined) };
     let port = arg_number(args, 1)?;
-    let hostname: JsString = if arg_is_nullish(args, 2) { Rc::from("") } else { arg_js_string(args, 2)? };
+    let hostname: JsString = if arg_is_nullish(args, 2) { JsString::from("") } else { arg_js_string(args, 2)? };
     let listened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| net_server_listen_options(&server, port, &hostname, false)));
     if let Err(payload) = listened {
         if !is_scriptc_unwind(payload.as_ref()) {
@@ -602,7 +602,7 @@ fn host_fetch(args: &[v8e::Value]) -> Result<v8e::HostResult, v8e::Error> {
     let headers = arg_strings(args, 2)?;
     let body = arg_bytes(args, 3)?;
     let protocol = v8_guard(|| url_protocol(&url_new(&url)))?;
-    let secure = match protocol.as_ref() {
+    let secure = match protocol.to_utf8_lossy() {
         "http:" => false,
         "https:" => true,
         _ => return Err(type_error(format!("fetch does not support protocol {protocol}"))),

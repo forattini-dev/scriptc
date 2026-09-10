@@ -1,4 +1,5 @@
 import { recordNewName } from "./shared-records.js";
+import { emitRustWebStreamFrom } from "./web-stream-from.js";
 import type { IrType } from "../../ir/nodes.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
@@ -203,6 +204,8 @@ export function emitRustHttpCall(
   expr: RustLibCallExpr,
   context: RustLibCallContext,
 ): string | null {
+  const streamFrom = emitRustWebStreamFrom(expr, context);
+  if (streamFrom !== null) return streamFrom;
   if (expr.fn === "fetch.abortControllerNew" && expr.args.length === 0 &&
       expr.type.kind === "dyn") {
     return `${context.dynTypeName()}::AbortController(runtime::abort_controller_new())`;
@@ -274,6 +277,23 @@ export function emitRustHttpCall(
     }).join(", ");
     const record = `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`;
     return `{ let ${reader} = ${context.emitExpr(expr.args[0])}; match &${reader} { ${dyn}::FetchReader(sc_reader) => runtime::promise_map(&runtime::fetch_reader_read(sc_reader), |sc_bytes| { let sc_chunk = sc_bytes.map(${dyn}::Bytes); ${record} }), ${dyn}::WebReader(sc_reader) => runtime::web_reader_read_with(sc_reader, |sc_chunk| ${record}), sc_value => sc_dyn_arg_type_fail("this", "an instance of ReadableStreamDefaultReader", sc_value), } }`;
+  }
+  if ((expr.fn === "fetch.responseText" || expr.fn === "fetch.responseBytes") &&
+      expr.args.length === 1 && expr.args[0]?.type.kind === "dyn" &&
+      expr.type.kind === "promise" && expr.type.inner.kind === "union") {
+    // Computed text/bytes dispatch has a shared fulfillment union. Adapt the
+    // representation without inserting another Promise reaction job.
+    const text = expr.fn === "fetch.responseText";
+    const result = context.union(expr.type.inner.unionId, expr.loc);
+    const tag = result.arms.findIndex((arm) => text
+      ? arm.kind === "string"
+      : arm.kind === "bytes" && arm.elem === "u8");
+    if (tag < 0) context.unsupported("Response body result union missing its payload arm", expr.loc);
+    const variant = `${context.unionName(result.id)}::${context.unionVariant(tag)}`;
+    const runtimeFn = text ? "fetch_response_text" : "fetch_response_bytes";
+    const response = context.nextTemporary();
+    const dyn = context.dynTypeName();
+    return `{ let ${response} = ${context.emitExpr(expr.args[0])}; match &${response} { ${dyn}::HttpRequest(sc_response) => runtime::promise_view_map(&runtime::${runtimeFn}(sc_response), |sc_value| ${variant}(sc_value)), sc_value => sc_dyn_arg_type_fail("this", "an instance of Response", sc_value), } }`;
   }
   if (expr.fn === "fetch.responseText" && expr.args.length === 1 &&
       expr.args[0]?.type.kind === "dyn" && expr.type.kind === "promise" &&

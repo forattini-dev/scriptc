@@ -171,7 +171,7 @@ fn assert_dyn_equal_message(
         && expected_lines.len() == 1
         && (!actual_object || !expected_object);
     let chosen_header = if has_message && !message.is_empty() {
-        message.as_ref()
+        message
     } else {
         header
     };

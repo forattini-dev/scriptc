@@ -151,9 +151,13 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
 
   // Top-line numbers stay whole-program: reached statements plus the
   // unreached remainder the analysis lowered anyway. Under --dynamic the
-  // island-lowered statements split out as "compile dynamically" — they
-  // BUILD, but their work runs in the embedded engine, and counting them
-  // as static would overstate how native the program is.
+  // dynamically lowered statements split out as "compile dynamically".
+  // Rust can execute these through its native dynamic runtime without a
+  // JavaScript engine; the execution profile determines the description.
+  const nativeDynamic = input.execution?.engine === "none";
+  const dynamicDescription = nativeDynamic
+    ? "(native dynamic runtime — no JavaScript engine)"
+    : "(island sites — the embedded engine runs them)";
   const un = input.unreached;
   const total = input.stats.statementsTotal + (un?.stats.statementsTotal ?? 0);
   const failed = input.stats.statementsFailed + (un?.stats.statementsFailed ?? 0);
@@ -168,7 +172,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   if (input.dynamic) {
     const ipct = total === 0 ? 0 : Math.floor((island / total) * 100);
     out.push(
-      `  compile dynamically   ${island}  ${c(YELLOW, c(BOLD, `(${ipct}%)`))} ${c(DIM, "(island sites — the embedded engine runs them)")}`,
+      `  compile dynamically   ${island}  ${c(YELLOW, c(BOLD, `(${ipct}%)`))} ${c(DIM, dynamicDescription)}`,
     );
   }
   if (skipped > 0) {
@@ -325,7 +329,7 @@ export function renderCoverage(input: CoverageInput, opts: { color?: boolean; so
   if (failed === 0 && input.diagnostics.length === 0 && unreachedDiags.length === 0) {
     out.push(
       island > 0
-        ? `  ${c(GREEN, "builds with --dynamic")} — no remaining blockers (the island sites above run in the embedded engine).`
+        ? `  ${c(GREEN, "builds with --dynamic")} — no remaining blockers (${nativeDynamic ? "the dynamic sites above use the native runtime" : "the island sites above run in the embedded engine"}).`
         : `  ${c(GREEN, "fully static")} — this program has no dynamic remainder.`,
     );
     return out.join("\n");

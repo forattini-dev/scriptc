@@ -121,7 +121,7 @@ fn island_host_result_value(result: IslandHostResult, context: &mut Context) -> 
         IslandHostResult::Bool(value) => JsValue::from(value),
         IslandHostResult::Number(value) => JsValue::from(value),
         IslandHostResult::String(value) => {
-            JsValue::from(boa_engine::JsString::from(value.as_ref()))
+            JsValue::from(island_string(value.as_ref()))
         }
         IslandHostResult::Bytes(value) => BoaJsUint8Array::from_iter(value, context)?.into(),
         IslandHostResult::Json(value) => island_parse_json(&value, context)?,

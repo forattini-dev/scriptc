@@ -1,3 +1,4 @@
+import { discardPassedBinary } from "./passed-binary.js";
 /* The oracle: every corpus program runs under Node AND as a scriptc-compiled
  * native binary; stdout AND stderr must match byte-for-byte and exit codes
  * must agree (stderr only for exit-0 programs: the uncaught-throw report
@@ -357,7 +358,7 @@ async function runNode(file: string): Promise<RunResult> {
   return res;
 }
 
-async function compileAndRun(file: string): Promise<RunResult> {
+async function compileAndRun(file: string): Promise<RunResult & { binaryPath: string }> {
   // Directory tests hash every sibling file so edits to imports bust the cache.
   const inputs = programInputs(file);
   const dynamic = wantsDynamic(file);
@@ -386,7 +387,7 @@ async function compileAndRun(file: string): Promise<RunResult> {
         result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
     );
   }
-  return runBinary(result.binaryPath, []);
+  return { ...await runBinary(result.binaryPath, []), binaryPath: result.binaryPath };
 }
 
 describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
@@ -421,6 +422,7 @@ describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized
       }
       expect(nodeRes.exitCode).toBe(expectedExit);
       expect(nativeRes.exitCode).toBe(expectedExit);
+      discardPassedBinary(cacheDir, nativeRes.binaryPath, file);
     },
   );
 });

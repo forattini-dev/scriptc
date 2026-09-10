@@ -138,7 +138,7 @@ fn tls_extra_ca_array() -> JsArray<JsString> {
 }
 
 pub fn tls_ca_get(kind: &JsString) -> JsArray<JsString> {
-    match kind.as_ref() {
+    match kind.to_utf8_lossy() {
         "default" => TLS_DEFAULT_CA_CERTIFICATES.with(|certificates| {
             certificates.borrow().clone().unwrap_or_else(tls_bundled_ca_array)
         }),

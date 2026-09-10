@@ -358,34 +358,37 @@ static void scr_dyn_then_entry(ScrFiber *self, void *ap) {
       /* The handler threw: dst rejects with that. */
       scr_promise_reject_pending(a->dst);
     } else if (a->onfin != NULL) {
-      /* finally: a callback returning a PROMISE delays the settlement —
-       * JS awaits it before the chain continues, and its REJECTION
-       * REPLACES the source outcome (a source rejection included, whose
-       * caught record is then dropped). A cleanup FULFILLMENT is
-       * discarded and the source settlement passes through, which is also
-       * the non-thenable case. */
-      bool replaced = false;
+      /* PromiseResolve(cleanup).then(valueThunk/thrower): scalar cleanup
+       * still schedules the continuation reaction. A promise cleanup's await
+       * is that reaction; retain a rejection across the outer adoption job. */
+      ScrCaught *cleanup_error = NULL;
+      if (r->kind != SCR_DYN_PROMISE) scr_await_hop();
       while (r != NULL && r->kind == SCR_DYN_PROMISE) {
         ScrDyn *inner = scr_await_dyn(r->v.promise);
         scr_dyn_release(r);
-        r = inner; /* NULL with the cleanup rejection re-thrown */
+        r = inner;
         if (scr_exc_pending()) {
-          scr_promise_reject_pending(a->dst);
-          replaced = true;
+          cleanup_error = scr_exc_take();
           break;
         }
       }
       scr_dyn_release(r);
-      if (!replaced) {
-        if (rejected) {
-          scr_rethrow(c);
-          scr_promise_reject_pending(a->dst);
-        } else {
-          scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
-        }
+      /* The finally reaction adopts the intermediate promise, so its
+       * forwarding reaction runs after the cleanup continuation above. */
+      scr_await_hop();
+      if (cleanup_error != NULL) {
+        scr_rethrow(cleanup_error);
+        scr_promise_reject_pending(a->dst);
+        scr_caught_release(cleanup_error);
+      } else if (rejected) {
+        scr_rethrow(c);
+        scr_promise_reject_pending(a->dst);
+      } else {
+        scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
       }
     } else {
-      /* Adopt dyn-promise results (JS's resolve walk). */
+      /* NewPromiseResolveThenableJob precedes the forwarding reaction. */
+      if (r->kind == SCR_DYN_PROMISE) scr_await_hop();
       while (r != NULL && r->kind == SCR_DYN_PROMISE) {
         ScrDyn *inner = scr_await_dyn(r->v.promise);
         scr_dyn_release(r);

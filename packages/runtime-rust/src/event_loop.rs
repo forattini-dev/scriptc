@@ -532,6 +532,16 @@ fn run_event_loop_with_first_checkpoint(
             continue;
         }
 
+        #[cfg(feature = "island-v8")]
+        {
+            v8_run_checkpoint();
+            if MICROTASKS.with(|tasks| !tasks.borrow().is_empty())
+                || NEXT_TICKS.with(|tasks| !tasks.borrow().is_empty())
+            {
+                continue;
+            }
+        }
+
         let mut promise_check = PROMISE_CHECKS.with(|checks| checks.borrow_mut().pop_front());
         if promise_check.is_some() {
             while let Some(check) = promise_check {
@@ -543,6 +553,12 @@ fn run_event_loop_with_first_checkpoint(
                 break;
             }
             continue;
+        }
+
+        #[cfg(feature = "island-v8")]
+        {
+            v8_report_unhandled_rejections();
+            if had_unhandled_rejection() { break; }
         }
 
         if fs_renames_dispatch_one() {

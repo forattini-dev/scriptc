@@ -109,6 +109,15 @@ void scr_init(void) {
  * byte-identically to console.log in Node (same inspect rendering), only
  * the stream differs. */
 static void scr_console_write(FILE *out, size_t n, const ScrLogArg *args) {
+#if defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES)
+  /* Independent instances share host streams. Hold their recursive stdio
+   * lock through the whole message, including its newline and flush. */
+#ifdef _WIN32
+  _lock_file(out);
+#else
+  flockfile(out);
+#endif
+#endif
   char numbuf[32];
   for (size_t i = 0; i < n; i++) {
     if (i > 0) fputc(' ', out);
@@ -138,6 +147,13 @@ static void scr_console_write(FILE *out, size_t n, const ScrLogArg *args) {
    * Keep the C buffer only as a formatter coalescing detail: a caller
    * observing a live child must see this line before the next JS turn. */
   fflush(out);
+#if defined(SCR_LIB) && defined(SCR_THREAD_INSTANCES)
+#ifdef _WIN32
+  _unlock_file(out);
+#else
+  funlockfile(out);
+#endif
+#endif
 }
 
 void scr_console_log(size_t n, const ScrLogArg *args) {

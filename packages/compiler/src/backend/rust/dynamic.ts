@@ -1,4 +1,10 @@
+import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminated-records.js";
+import { emitNativeUnionCheck } from "./native-union-check.js";
+import { emitNativeMapCheck } from "./native-map-values.js";
+import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/native-record.js";
+import { emitNativeArrayCheck } from "./native-array-values.js";
 import { emitRustDynamicEquality } from "./dynamic-equality.js";
+import { emitRustDynamicIslandSupport } from "./dynamic-island.js";
 import type { IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
@@ -22,7 +28,7 @@ export class RustDynamicEmitter {
   private readonly dynFrom: RustDynamicFromEmitter;
 
   constructor(private readonly context: RustDynamicContext) {
-    this.dynFrom = new RustDynamicFromEmitter(context);
+    this.dynFrom = new RustDynamicFromEmitter(context, (type, value, loc) => this.emitDynCheckValue(type, value, loc));
   }
 
   emitDynamicDefinition(): void {
@@ -119,6 +125,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     emitRustQuerystringDynImpl(name, this.context);
+    emitRustDynamicIslandSupport(this.context);
     this.context.line(`impl runtime::JsonValue for ${name} {`);
     this.context.pushIndent();
     this.context.line("fn write_json(&self, writer: &mut runtime::JsonWriter) {");
@@ -382,7 +389,7 @@ export class RustDynamicEmitter {
     this.context.line("let key = runtime::map_iter_key(value, index);");
     this.context.line("let field = runtime::map_iter_value(value, index);");
     this.context.line("let field_path = runtime::json_property_path(path, key.as_ref());");
-    this.context.line("fields.push((key.to_string(), sc_dyn_to_json(&field, &field_path)?));");
+    this.context.line("fields.push((key.clone(), sc_dyn_to_json(&field, &field_path)?));");
     this.context.popIndent();
     this.context.line("}");
     this.context.line("index += 1.0;");
@@ -480,6 +487,7 @@ export class RustDynamicEmitter {
     this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
+    if (usesEmbeddedModules) this.context.line("else if runtime::caught_is::<runtime::IslandValue>(&caught) { sc_dyn_from_island(runtime::caught_narrow::<runtime::IslandValue>(&caught)) }");
     this.context.line(`else if ${caughtErrorTest} { sc_dyn_error_box(&${caughtErrorValue}) }`);
     this.context.line(`else { ${name}::Object(runtime::map_new()) }`);
     this.context.popIndent();
@@ -503,7 +511,8 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
-    this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, false),`);
+    this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || runtime::map_prototype(object).is_some_and(|prototype| sc_dyn_has_key(&prototype, key)),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
     this.context.line("_ => false,");
     this.context.popIndent();
@@ -514,6 +523,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || (key.as_ref() == "raw" && runtime::array_raw(array).is_some()) || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
@@ -534,6 +544,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_from_island(runtime::island_get_index(value, &runtime::island_value_string(key))),`);
     this.context.line(`${name}::Undefined | ${name}::Null => {`);
     this.context.pushIndent();
     this.context.line(`if optional { return ${name}::Undefined; }`);
@@ -541,9 +552,9 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Object(object) => sc_dyn_object_key_get(object, key, value),`);
-    this.context.line(`${name}::Number(..) => match key.as_ref() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
-    this.context.line(`${name}::Regex(regex) => match key.as_ref() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
-    this.context.line(`${name}::Url(url) => match key.as_ref() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), "port" => ${name}::String(runtime::url_port(url)), "origin" => ${name}::String(runtime::url_origin(url)), "hash" => ${name}::String(runtime::url_hash(url)), "username" => ${name}::String(runtime::url_username(url)), "password" => ${name}::String(runtime::url_password(url)), _ => ${name}::Undefined, },`);
+    this.context.line(`${name}::Number(..) => match key.to_utf8_lossy() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
+    this.context.line(`${name}::Regex(regex) => match key.to_utf8_lossy() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
+    this.context.line(`${name}::Url(url) => match key.to_utf8_lossy() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), "port" => ${name}::String(runtime::url_port(url)), "origin" => ${name}::String(runtime::url_origin(url)), "hash" => ${name}::String(runtime::url_hash(url)), "username" => ${name}::String(runtime::url_username(url)), "password" => ${name}::String(runtime::url_password(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
     this.context.line(`if key.as_ref() == "length" { ${name}::Number(runtime::array_len(array)) }`);
@@ -570,7 +581,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::TypedBytes(bytes) => { if key.as_ref() == "length" { ${name}::Number(runtime::typed_bytes_len(bytes)) } else if key.as_ref() == "byteLength" { ${name}::Number(runtime::typed_bytes_byte_len(bytes)) } else if key.as_ref() == "constructor" { ${name}::NativeConstructor(runtime::typed_bytes_name(bytes)) } else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::typed_bytes_len(bytes) as usize { ${name}::Number(runtime::typed_bytes_get(bytes, index as f64)) } else { ${name}::Undefined } } else { ${name}::Undefined } },`);
     this.context.line(`${name}::NativeConstructor(name) => if key.as_ref() == "name" { ${name}::String(runtime::string(name)) } else { ${name}::Undefined },`);
     this.context.line(`${name}::NativeMethod(method) => if key.as_ref() == "name" { ${name}::String(runtime::string(method.name())) } else { ${name}::Undefined },`);
-    this.context.line(`${name}::NetSocket(socket) => match key.as_ref() {`);
+    this.context.line(`${name}::NetSocket(socket) => match key.to_utf8_lossy() {`);
     this.context.pushIndent();
     this.context.line(`"destroyed" => ${name}::Boolean(runtime::net_socket_destroyed(socket)),`);
     this.context.line(`"writable" => ${name}::Boolean(runtime::net_socket_writable(socket)),`);
@@ -589,7 +600,7 @@ export class RustDynamicEmitter {
     this.context.line(`match runtime::http_server_timeout_value(server, selector) { Some(runtime::JsHttpTimeout::Undefined) | None => ${name}::Undefined, Some(runtime::JsHttpTimeout::Number(value)) => ${name}::Number(value), Some(runtime::JsHttpTimeout::String(value)) => ${name}::String(value), }`);
     this.context.popIndent();
     this.context.line("},");
-    this.context.line(`${name}::AbortController(signal) => if key.as_ref() == "signal" { ${name}::AbortSignal(signal.clone()) } else { ${name}::Undefined }, ${name}::AbortSignal(signal) => match key.as_ref() { "aborted" => ${name}::Boolean(runtime::abort_signal_aborted(signal)), "reason" => runtime::abort_signal_reason(signal).unwrap_or(${name}::Undefined), _ => ${name}::Undefined, }, ${name}::HttpRequest(request) => sc_dyn_http_request_get(request, key),`);
+    this.context.line(`${name}::AbortController(signal) => if key.as_ref() == "signal" { ${name}::AbortSignal(signal.clone()) } else { ${name}::Undefined }, ${name}::AbortSignal(signal) => match key.to_utf8_lossy() { "aborted" => ${name}::Boolean(runtime::abort_signal_aborted(signal)), "reason" => runtime::abort_signal_reason(signal).unwrap_or(${name}::Undefined), _ => ${name}::Undefined, }, ${name}::HttpRequest(request) => sc_dyn_http_request_get(request, key),`);
     this.context.line(`${name}::HttpHeaders(..) => ${name}::Undefined,`);
     this.context.line(`${name}::FetchBody(request) => if key.as_ref() == "locked" { ${name}::Boolean(runtime::fetch_body_locked(request)) } else { ${name}::Undefined },`);
     this.context.line(`${name}::FetchReader(..) => ${name}::Undefined,`);
@@ -635,12 +646,13 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => runtime::island_set_index(value, &runtime::island_value_string(&key), &sc_dyn_to_island(&field)),`);
     this.context.line(`${name}::Object(object) => { if runtime::map_is_module_namespace(object) { if runtime::map_has_by(object, &key, |left, right| left.as_ref() == right.as_ref()) { runtime::throw_type_error(format!("Cannot assign to read only property '{}' of object '[object Module]'", key)); } runtime::throw_type_error(format!("Cannot add property {}, object is not extensible", key)); } runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()); },`);
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
     this.context.line("let Some(index) = sc_dyn_key_index(&key) else { sc_dyn_key_set_error(value, &key); };");
-    this.context.line(`while runtime::array_len(array) <= index as f64 { runtime::array_push(array, ${name}::Undefined); }`);
+    this.context.line(`while runtime::array_len(array) < index as f64 { runtime::array_push(array, ${name}::Undefined); }`);
     this.context.line("runtime::array_set(array, index as f64, field);");
     this.context.popIndent();
     this.context.line("},");
@@ -695,7 +707,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => runtime::string("[object Object]"),`);
     this.context.line(`${name}::Array(value) => {`);
     this.context.pushIndent();
-    this.context.line("let mut output = String::new();");
+    this.context.line("let mut output = runtime::JsStringBuilder::new();");
     this.context.line("let mut index = 0.0;");
     this.context.line("while index < runtime::array_len(value) {");
     this.context.pushIndent();
@@ -800,9 +812,10 @@ export class RustDynamicEmitter {
     this.context.line("}");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_check_fail(expected: &str, value: &${name}) -> ! {`);
+    this.context.line(`fn sc_dyn_check_fail(expected: &str, value: &${name}) -> ! { sc_dyn_check_fail_at(expected, value, "$" ) }`);
+    this.context.line(`fn sc_dyn_check_fail_at(expected: &str, value: &${name}, path: &str) -> ! {`);
     this.context.pushIndent();
-    this.context.line("runtime::throw_type_error(format!(\"expected {expected} at $, got {}\", sc_dyn_kind(value)))");
+    this.context.line("runtime::throw_type_error(format!(\"expected {expected} at {path}, got {}\", sc_dyn_kind(value)))");
     this.context.popIndent();
     this.context.line("}");
     emitRustDynamicScalarChecks(this.context);
@@ -839,7 +852,9 @@ export class RustDynamicEmitter {
     for (const shape of boxedShapes) {
       const fixedParams = shape.type.restAbi === "jsval" ? shape.type.params.slice(0, -1) : shape.type.params;
       const typedArgs = fixedParams.map((param, index) => {
-        const value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
+        let value = `args.get(${index}).cloned().unwrap_or(${name}::Undefined)`;
+        if (usesEmbeddedModules && (param.kind === "array" || param.kind === "record" || param.kind === "union") &&
+            this.context.isRustJsonCompatible(param)) value = `sc_dyn_typed_island_input(${value})`;
         return this.emitDynCheckValue(param, value);
       });
       if (shape.type.rest === true) {
@@ -854,7 +869,7 @@ export class RustDynamicEmitter {
     this.context.line(this.context.usesDynamicInvoke()
       ? `${name}::NativeMethod(method) => sc_dyn_call_native_method(*method, args),`
       : `${name}::NativeMethod(..) => runtime::throw_type_error(format!("{callee_name} is not a function")),`);
-    if (usesEmbeddedModules) this.context.line(`${name}::Island(callee) => { let sc_args = args.iter().map(|value| match value { ${name}::Undefined => runtime::island_value_undefined(), ${name}::Null => runtime::island_value_null(), ${name}::Number(value) => runtime::island_value_number(*value), ${name}::Boolean(value) => runtime::island_value_boolean(*value), ${name}::String(value) => runtime::island_value_string(value), ${name}::Island(value) => value.clone(), _ => runtime::throw_type_error("embedded module call argument is outside the primitive island subset".to_owned()), }).collect::<Vec<_>>(); let sc_result = runtime::island_call(callee, &sc_args); runtime::json_parse_typed::<${name}>(&runtime::island_json(&sc_result)) },`);
+    if (usesEmbeddedModules) this.context.line(`${name}::Island(callee) => { let sc_args = args.iter().map(sc_dyn_to_island).collect::<Vec<_>>(); sc_dyn_from_island(runtime::island_call(callee, &sc_args)) },`);
     this.context.line("_ => runtime::throw_type_error(format!(\"{callee_name} is not a function\")),");
     this.context.popIndent();
     this.context.line("}");
@@ -1047,32 +1062,32 @@ export class RustDynamicEmitter {
     this.dynFrom.emitDefinitions();
   }
 
-  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string {
+  emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc, path = '"$"'): string {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
-      case "f64": return `sc_dyn_check_number(${value})`;
-      case "bool": return `sc_dyn_check_boolean(${value})`;
-      case "string": return `sc_dyn_check_string(${value})`;
+      case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
+      case "bool": return `sc_dyn_check_boolean_at(${value}, ${path})`;
+      case "string": return `sc_dyn_check_string_at(${value}, ${path})`;
       case "bytes": {
         if (type.elem !== "u8") this.context.unsupported(`dynamic checked cast to bytes<${type.elem}>`, loc);
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) | ${name}::Buffer(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or_else(|| runtime::bytes_copy(&bytes)), value => sc_dyn_check_fail("bytes", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) | ${name}::Buffer(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or_else(|| runtime::bytes_copy(&bytes)), value => sc_dyn_check_fail_at("bytes", &value, ${path}), } }`;
       }
       case "netSocket": {
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::NetSocket(socket) => socket, value => sc_dyn_check_fail("Socket", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::NetSocket(socket) => socket, value => sc_dyn_check_fail_at("Socket", &value, ${path}), } }`;
       }
       case "netServer": {
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::NetServer(server) => server, value => sc_dyn_check_fail("Server", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::NetServer(server) => server, value => sc_dyn_check_fail_at("Server", &value, ${path}), } }`;
       }
       case "httpReq": {
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::HttpRequest(request) => request, value => sc_dyn_check_fail("IncomingMessage", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::HttpRequest(request) => request, value => sc_dyn_check_fail_at("IncomingMessage", &value, ${path}), } }`;
       }
       case "httpRes": {
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::HttpResponse(response) => response, value => sc_dyn_check_fail("ServerResponse", &value), } }`;
+        return `{ let value = ${value}; match value { ${name}::HttpResponse(response) => response, value => sc_dyn_check_fail_at("ServerResponse", &value, ${path}), } }`;
       }
       case "func": return `${this.context.dynFunctionCheckName(this.context.closureShapeForType(type, loc))}(${value})`;
       case "object": {
@@ -1083,21 +1098,24 @@ export class RustDynamicEmitter {
       }
       case "union": {
         const union = this.context.union(type.unionId, loc);
+        if (sharedDiscriminatedUnion(this.context, union)) return discriminatedUnionCheck(this.context, union, value, path);
         const dyn = this.context.dynTypeName();
-        const jsvalArrayTag = union.arms.findIndex((arm) =>
-          arm.kind === "array" && arm.elem.kind === "jsval"
+        const arrayTag = union.arms.findIndex((arm) =>
+          arm.kind === "array"
         );
-        const jsvalArrayExit = jsvalArrayTag >= 0 &&
-          union.arms.some((arm) => arm.kind === "undefinedT") &&
-          union.arms.every((arm, tag) => tag === jsvalArrayTag || this.context.isUnit(arm));
-        if (jsvalArrayExit) {
+        const optionalArrayExit = arrayTag >= 0 &&
+          union.arms.every((arm, tag) => tag === arrayTag || this.context.isUnit(arm));
+        if (optionalArrayExit) {
           const name = this.context.unionName(union.id);
           const units = union.arms.flatMap((arm, tag) => {
             const source = arm.kind === "undefinedT" ? "Undefined" : arm.kind === "nullT" ? "Null" : null;
             return source === null ? [] : [`${dyn}::${source} => ${name}::${this.context.unionVariant(tag)}`];
           });
-          const array = `${dyn}::Array(sc_array) => ${name}::${this.context.unionVariant(jsvalArrayTag)}(sc_array)`;
-          return `{ let value = ${value}; match value { ${units.join(", ")}, ${array}, value => sc_dyn_check_fail("array or undefined", &value), } }`;
+          const arm = union.arms[arrayTag];
+          if (arm === undefined) this.context.unsupported("missing optional array arm", loc);
+          const checked = this.emitDynCheckValue(arm, `${dyn}::Array(sc_array)`, loc, path);
+          const array = `${dyn}::Array(sc_array) => ${name}::${this.context.unionVariant(arrayTag)}(${checked})`;
+          return `{ let value = ${value}; match value { ${units.join(", ")}, ${array}, value => sc_dyn_check_fail_at("array or undefined", &value, ${path}), } }`;
         }
         const errorTag = union.arms.findIndex((arm) =>
           arm.kind === "object" && arm.className === "%Error"
@@ -1109,7 +1127,22 @@ export class RustDynamicEmitter {
           const unionName = this.context.unionName(union.id);
           return `{ let value = ${value}; match value { ${dyn}::Undefined => ${unionName}::${this.context.unionVariant(undefinedTag)}, value => ${unionName}::${this.context.unionVariant(errorTag)}(sc_dyn_error_unbox(value)), } }`;
         }
+        const records = union.arms.flatMap((arm, tag) => arm.kind === "record" ? [{ arm, tag }] : []);
+        const shared = records[0];
+        if (records.length === 1 && shared && isSharedRecord(this.context.records.get(shared.arm.shapeId)) &&
+            union.arms.every((arm, tag) => tag === shared.tag || this.context.isUnit(arm))) {
+          const name = this.context.unionName(union.id);
+          const units = union.arms.flatMap((arm, tag) => {
+            const source = arm.kind === "undefinedT" ? "Undefined" : arm.kind === "nullT" ? "Null" : null;
+            return source === null ? [] : [`${dyn}::${source} => ${name}::${this.context.unionVariant(tag)}`];
+          });
+          const record = `${name}::${this.context.unionVariant(shared.tag)}(${this.emitDynCheckValue(shared.arm, "value", loc, path)})`;
+          return `{ let value = ${value}; match value { ${units.join(", ")}, value => ${record}, } }`;
+        }
         if (!this.context.isRustJsonCompatible(type)) {
+          const native = emitNativeUnionCheck(this.context, union, value,
+            (arm, input, loc) => this.emitDynCheckValue(arm, input, loc, path), loc, path);
+          if (native !== null) return native;
           this.context.unsupported("dynamic checked cast to union", loc);
         }
         const name = this.context.unionName(union.id);
@@ -1119,27 +1152,44 @@ export class RustDynamicEmitter {
           const source = arm.kind === "undefinedT" ? "Undefined" : "Null";
           return [`${dyn}::${source} => ${name}::${this.context.unionVariant(tag)}`];
         });
-        const decode = `let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message))`;
+        const decode = `let node = sc_dyn_to_json(&value, ${path}).unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, ${path}).unwrap_or_else(|message| runtime::throw_type_error(message))`;
         return units.length === 0
           ? `{ let value = ${value}; ${decode} }`
           : `{ let value = ${value}; match value { ${units.join(", ")}, value => { ${decode} }, } }`;
       }
-      case "array":
+      case "array": {
+        const name = this.context.dynTypeName();
+        if (nativeArrayViewSupported(type)) return emitNativeArrayCheck(type, value, name,
+          (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
+        if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
+          return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;
+        }
+        if (!this.context.isRustJsonCompatible(type)) this.context.unsupported("dynamic checked cast to array", loc);
+        const rustType = this.context.rustType(type, loc);
+        return `{ let value = ${value}; match value { ${name}::Array(array) => runtime::array_mapped_source(&array).or_else(|| runtime::live_dyn_ref_get(array.identity())).unwrap_or_else(|| { let node = sc_dyn_to_json(&${name}::Array(array), ${path}).unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, ${path}).unwrap_or_else(|message| runtime::throw_type_error(message)) }), value => sc_dyn_check_fail_at("array", &value, ${path}), } }`;
+      }
       case "record": {
         if (type.kind === "record") {
           const shape = this.context.records.get(type.shapeId);
-          if (isSharedRecord(shape)) return `${recordCheckName(type.shapeId)}(${value})`;
+          if (isSharedRecord(shape)) {
+            const input = this.context.hasEmbeddedModules() && this.context.isRustJsonCompatible(type)
+              ? `sc_dyn_typed_island_input(${value})` : value;
+            return `${recordCheckName(type.shapeId)}_at(${input}, ${path})`;
+          }
+          const indexValue = nativeIndexedRecordValue(type, id => this.context.records.get(id), id => this.context.union(id, loc));
+          if (indexValue !== undefined && indexValue.kind !== "dyn") return emitNativeMapCheck(indexValue, value, this.context.dynTypeName(),
+            (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
           if (shape?.indexValue?.kind === "dyn" && shape.fields.length === 0) {
             const name = this.context.dynTypeName();
-            return `{ let value = ${value}; match value { ${name}::Object(object) => object, value => sc_dyn_check_fail("object", &value), } }`;
+            return `{ let value = ${value}; match value { ${name}::Object(object) => object, value => sc_dyn_check_fail_at("object", &value, ${path}), } }`;
           }
         }
         if (!this.context.isRustJsonCompatible(type)) {
           this.context.unsupported(`dynamic checked cast to '${type.kind}'`, loc);
         }
         const rustType = this.context.rustType(type, loc);
-        const live = type.kind === "array" ? `${this.context.dynTypeName()}::Array(mirror)` : `${this.context.dynTypeName()}::Object(mirror)`;
-        return `{ let value = ${value}; let live: Option<${rustType}> = match &value { ${live} => runtime::live_dyn_ref_get(mirror.identity()), _ => None }; live.unwrap_or_else(|| { let node = sc_dyn_to_json(&value, "$").unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, "$").unwrap_or_else(|message| runtime::throw_type_error(message)) }) }`;
+        const live = `${this.context.dynTypeName()}::Object(mirror)`;
+        return `{ let value = ${value}; let live: Option<${rustType}> = match &value { ${live} => runtime::live_dyn_ref_get(mirror.identity()), _ => None }; live.unwrap_or_else(|| { let node = sc_dyn_to_json(&value, ${path}).unwrap_or_else(|message| runtime::throw_type_error(message)); <${rustType} as runtime::JsonDecode>::decode_json(&node, ${path}).unwrap_or_else(|message| runtime::throw_type_error(message)) }) }`;
       }
       default:
         this.context.unsupported(`dynamic checked cast to '${type.kind}'`, loc);

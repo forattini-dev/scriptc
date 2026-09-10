@@ -197,7 +197,48 @@
   }
 
   /* ── structuredClone ─────────────────────────────────────────────── */
-  const structuredClone = (value, options) => {
+  const structuredClone = function structuredClone(value, options) {
+    if (arguments.length === 0) {
+      const error = new TypeError('The "The value argument must be specified" argument must be specified');
+      error.code = "ERR_MISSING_ARGS";
+      throw error;
+    }
+    const invalidOption = (message) => {
+      const error = new TypeError(message);
+      error.code = "ERR_INVALID_ARG_TYPE";
+      return error;
+    };
+    if (options !== undefined && options !== null) {
+      if (typeof options !== "object" && typeof options !== "function") {
+        throw invalidOption("Failed to execute 'structuredClone': Options cannot be converted to a dictionary");
+      }
+      const transfer = options.transfer;
+      if (transfer !== undefined) {
+        const sequenceError = () => invalidOption("Failed to execute 'structuredClone': transfer in Options can not be converted to sequence.");
+        if (transfer === null || (typeof transfer !== "object" && typeof transfer !== "function")) throw sequenceError();
+        const method = transfer[Symbol.iterator];
+        if (method === undefined || method === null) throw sequenceError();
+        if (typeof method !== "function") throw new TypeError("V?.[SymbolIterator] is not a function");
+        // User getters and iterator methods may throw. Preserve those values
+        // instead of relabelling them as a WebIDL conversion error.
+        const iterator = method.call(transfer);
+        const list = [];
+        for (;;) {
+          const next = iterator?.next;
+          if (next === undefined || next === null) throw sequenceError();
+          if (typeof next !== "function") throw new TypeError("iter?.next is not a function");
+          const result = next.call(iterator);
+          if (result === undefined) throw sequenceError();
+          if (result.done === true) break;
+          list.push(result.value);
+        }
+        // The embedded runtime has no transfer/detachment kernel. Match the
+        // existing C boundary by refusing members instead of ignoring them.
+        if (list.length > 0) {
+          throw new global.DOMException("Found invalid value in transferList.", "DataCloneError");
+        }
+      }
+    }
     const seen = new Map();
     const fail = (what) => {
       throw new global.DOMException(what + " could not be cloned.", "DataCloneError");
@@ -219,6 +260,11 @@
       }
       if (v instanceof Map) { const m = new Map(); seen.set(v, m); for (const [k, x] of v) m.set(clone(k), clone(x)); return m; }
       if (v instanceof Set) { const s = new Set(); seen.set(v, s); for (const x of v) s.add(clone(x)); return s; }
+      if (v instanceof global.DOMException) {
+        const exception = new global.DOMException(v.message, v.name);
+        seen.set(v, exception);
+        return exception;
+      }
       if (v instanceof Error) {
         const e = new (global[v.name] || Error)(v.message);
         seen.set(v, e);

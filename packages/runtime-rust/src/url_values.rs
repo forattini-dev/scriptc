@@ -1,6 +1,6 @@
 use crate::{
     JsArray, JsString, array_get, array_len, array_new, empty_string, path_resolve, string,
-    throw_type_error, throw_type_error_code,
+    throw_type_error, throw_type_error_code, string_to_well_formed,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -200,7 +200,7 @@ fn file_url_path(value: &JsUrl) -> JsString {
         decoded.push(encoded[index]);
         index += 1;
     }
-    Rc::from(String::from_utf8_lossy(&decoded).into_owned())
+    JsString::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
 #[cfg(windows)]
@@ -221,7 +221,7 @@ fn file_url_path(value: &JsUrl) -> JsString {
         .to_file_path()
         .ok()
         .and_then(|path| path.into_os_string().into_string().ok())
-        .map(|path| Rc::from(path.as_str()))
+        .map(|path| JsString::from(path.as_str()))
         .unwrap_or_else(|| throw_type_error("File URL path must be absolute".to_owned()))
 }
 
@@ -272,6 +272,7 @@ fn search_params_from_pairs(
     pairs: Vec<(JsString, JsString)>,
     owner: Option<JsUrl>,
 ) -> JsSearchParams {
+    let pairs = pairs.into_iter().map(|(name, value)| (string_to_well_formed(&name), string_to_well_formed(&value))).collect();
     Rc::new(SearchParamsData {
         pairs: RefCell::new(pairs),
         owner,
@@ -341,6 +342,8 @@ pub fn search_params_with(
     name: &JsString,
     pair_value: &JsString,
 ) -> JsSearchParams {
+    let name = string_to_well_formed(name);
+    let pair_value = string_to_well_formed(pair_value);
     value
         .pairs
         .borrow_mut()
@@ -377,6 +380,8 @@ pub fn url_search(value: &JsUrl) -> JsString {
 }
 
 pub fn search_params_append(value: &JsSearchParams, name: &JsString, pair_value: &JsString) {
+    let name = string_to_well_formed(name);
+    let pair_value = string_to_well_formed(pair_value);
     value
         .pairs
         .borrow_mut()
@@ -385,6 +390,8 @@ pub fn search_params_append(value: &JsSearchParams, name: &JsString, pair_value:
 }
 
 pub fn search_params_set(value: &JsSearchParams, name: &JsString, pair_value: &JsString) {
+    let name = string_to_well_formed(name);
+    let pair_value = string_to_well_formed(pair_value);
     let mut pairs = value.pairs.borrow_mut();
     let mut replaced = false;
     let mut index = 0;
@@ -411,12 +418,14 @@ fn search_params_delete_impl(
     name: &JsString,
     pair_value: Option<&JsString>,
 ) {
+    let name = string_to_well_formed(name);
+    let pair_value = pair_value.map(string_to_well_formed);
     value
         .pairs
         .borrow_mut()
         .retain(|(candidate_name, candidate_value)| {
-            candidate_name.as_ref() != name.as_ref()
-                || pair_value.is_some_and(|expected| candidate_value.as_ref() != expected.as_ref())
+            candidate_name != name.as_ref()
+                || pair_value.as_ref().is_some_and(|expected| candidate_value != expected)
         });
     search_params_sync_owner(value);
 }
@@ -430,32 +439,35 @@ pub fn search_params_delete_value(value: &JsSearchParams, name: &JsString, pair_
 }
 
 pub fn search_params_get(value: &JsSearchParams, name: &JsString) -> Option<JsString> {
+    let name = string_to_well_formed(name);
     value
         .pairs
         .borrow()
         .iter()
-        .find(|(candidate, _)| candidate.as_ref() == name.as_ref())
+        .find(|(candidate, _)| candidate == name.as_ref())
         .map(|(_, pair_value)| pair_value.clone())
 }
 
 pub fn search_params_get_all(value: &JsSearchParams, name: &JsString) -> JsArray<JsString> {
+    let name = string_to_well_formed(name);
     array_new(
         value
             .pairs
             .borrow()
             .iter()
-            .filter(|(candidate, _)| candidate.as_ref() == name.as_ref())
+            .filter(|(candidate, _)| candidate == name.as_ref())
             .map(|(_, pair_value)| pair_value.clone())
             .collect(),
     )
 }
 
 pub fn search_params_has(value: &JsSearchParams, name: &JsString) -> bool {
+    let name = string_to_well_formed(name);
     value
         .pairs
         .borrow()
         .iter()
-        .any(|(candidate, _)| candidate.as_ref() == name.as_ref())
+        .any(|(candidate, _)| candidate == name.as_ref())
 }
 
 pub fn search_params_has_value(
@@ -463,13 +475,15 @@ pub fn search_params_has_value(
     name: &JsString,
     pair_value: &JsString,
 ) -> bool {
+    let name = string_to_well_formed(name);
+    let pair_value = string_to_well_formed(pair_value);
     value
         .pairs
         .borrow()
         .iter()
         .any(|(candidate_name, candidate_value)| {
-            candidate_name.as_ref() == name.as_ref()
-                && candidate_value.as_ref() == pair_value.as_ref()
+            candidate_name == name.as_ref()
+                && candidate_value == pair_value.as_ref()
         })
 }
 

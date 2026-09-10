@@ -569,7 +569,7 @@ pub fn net_socket_on_data(
 }
 
 pub fn net_socket_set_encoding(socket: &JsNetSocket, encoding: &JsString) {
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "utf8" | "utf-8" => socket.with_mut(|socket| socket.encoding_utf8 = true),
         "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2"
         | "ucs-2" | "utf16le" | "utf-16le" => throw_error(format!(
@@ -984,7 +984,13 @@ fn net_socket_connect_one() -> bool {
     let Some(task) = task else {
         return false;
     };
+    let connected = matches!(task, NetTask::SocketConnect(_));
     NET_TASKS.with(|tasks| tasks.borrow_mut().push_back(task));
+    // A worker can finish after this poll's accept check. Preserve accept
+    // priority, queueing completion first so a throwing handler cannot lose it.
+    if connected {
+        net_accept_one();
+    }
     true
 }
 

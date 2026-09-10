@@ -1,3 +1,9 @@
+import { rustByteStoreValue } from "./byte-store.js";
+import type { RustByteReadInput } from "./byte-projections.js";
+import type { RustByteRegions } from "./byte-regions.js";
+import type { RustLocalCells } from "./local-cells.js";
+import type { RustIntegerLoops } from "./integer-loops.js";
+import type { RustIndexRegionPlan } from "./index-regions.js";
 import type { IrClassDef, IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
 import { mangleField, mangleLocal } from "../mangle.js";
@@ -14,6 +20,9 @@ export interface RustLoopTarget {
 }
 
 export interface RustStatementContext {
+  readonly byteRegions: RustByteRegions;
+  readonly localCells: RustLocalCells;
+  readonly integerLoops: RustIntegerLoops;
   readonly loopTargets: RustLoopTarget[];
   readonly completionLoopBoundaries: number[];
   capturedReturnDepth(): number;
@@ -29,6 +38,7 @@ export interface RustStatementContext {
   nextLoopTargetId(): number;
   dynTypeName(): string;
   emitExpr(expr: IrExpr): string;
+  borrowBytesReceiver(expr: IrExpr, later: readonly IrExpr[]): string | null;
   emitRead(id: string, type: IrType, loc: SrcLoc): string;
   emitAssignment(id: string, value: string, loc: SrcLoc): void;
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
@@ -54,11 +64,98 @@ export function emitRustStatements(
 
 class RustStatementEmitter {
   private readonly predeclaredLocals = new Set<string>();
+  private byteRegionDepth = 0;
 
   constructor(private readonly context: RustStatementContext) {}
 
   emit(statements: readonly IrStmt[]): void {
-    for (const statement of statements) this.emitStatement(statement);
+    let fresh: string | null = null;
+    for (const statement of statements) {
+      if (fresh !== null && statement.kind === "for" && this.context.byteRegions.canBorrow(statement, fresh)) {
+        this.emitByteRegion(statement, fresh);
+      } else this.emitStatement(statement);
+      const allocated = this.context.byteRegions.fresh(statement, local => this.context.localIsBoxed(local));
+      if (allocated !== null) fresh = allocated;
+      else if (statement.kind !== "varDecl" || (statement.init?.kind !== "numLit" && statement.init?.kind !== "boolLit")) fresh = null;
+    }
+  }
+
+  private emitByteRegion(statement: IrStmt, output: string): void {
+    this.byteRegionDepth++;
+    try { this.emitByteRegionBody(statement, output); } finally { this.byteRegionDepth--; }
+  }
+
+  private emitByteRegionBody(statement: IrStmt, output: string): void {
+    const indices = this.byteRegionDepth === 1
+      ? this.context.integerLoops.regions.plan(statement, local => this.context.localIsBoxed(local)) : null;
+    const inputs = this.context.byteRegions.inputs(statement, output, local => this.context.localIsBoxed(local))
+      .map(input => ({ ...input, optional: this.context.nextTemporary(), slice: this.context.nextTemporary() }));
+    for (const input of inputs) {
+      if (input.projection !== undefined) {
+        const projection = input.projection, handle = this.context.nextTemporary();
+        const condition = this.context.emitExpr({ ...projection, kind: "unionIsTag", negated: false, type: { kind: "bool" } });
+        this.context.line(`let ${handle} = if ${condition} { Some(${this.context.emitExpr(projection)}) } else { None };`);
+        this.context.line(`runtime::bytes_with_optional_read_slice(${handle}.as_ref(), |${input.optional}| {`);
+      } else this.context.line(`runtime::bytes_with_read_slice(&${mangleLocal(input.localId)}, |${input.optional}| {`);
+      this.context.pushIndent();
+    }
+    this.emitByteInputSelection(statement, output, indices, inputs);
+    for (let i = inputs.length; i > 0; i--) {
+      this.context.popIndent();
+      this.context.line("});");
+    }
+  }
+
+  private emitByteInputSelection(statement: IrStmt, output: string, indices: RustIndexRegionPlan | null,
+    inputs: readonly (RustByteReadInput & { optional: string; slice: string })[]): void {
+    if (inputs.length === 0 && indices === null) this.emitByteOutputRegion(statement, output);
+    else {
+      // Select storage once. Missing projections preserve the previous direct
+      // input/integer fast path; at most three loop bodies, never 2^N.
+      const pattern = inputs.map(input => `Some(${input.slice})`).join(", ");
+      const values = inputs.map(input => input.optional).join(", ");
+      const condition = inputs.length === 0 ? (indices?.guard() ?? "true")
+        : `let (${pattern},) = (${values},)${indices === null ? "" : ` && (${indices.guard()})`}`;
+      this.context.line(`if ${condition} {`);
+      this.context.pushIndent();
+      const restores = inputs.map(input => this.context.byteRegions.bindInput(input, input.slice));
+      try { this.emitIndexedOutputRegion(statement, output, indices); }
+      finally { for (const restore of restores.reverse()) restore(); }
+      this.context.popIndent();
+      this.context.line("} else {");
+      this.context.pushIndent();
+      const direct = inputs.filter(input => input.projection === undefined);
+      if (direct.length !== inputs.length) this.emitByteInputSelection(statement, output, indices, direct);
+      else this.emitByteOutputRegion(statement, output);
+      this.context.popIndent();
+      this.context.line("}");
+    }
+  }
+
+  private emitIndexedOutputRegion(statement: IrStmt, output: string, plan: RustIndexRegionPlan | null): void {
+    if (plan === null) { this.emitByteOutputRegion(statement, output); return; }
+    for (const declaration of plan.declarations()) this.context.line(declaration);
+    const restore = this.context.integerLoops.regions.bind(plan);
+    try { this.emitByteOutputRegion(statement, output); } finally { restore(); }
+  }
+
+  private emitByteOutputRegion(statement: IrStmt, output: string): void {
+    const slice = this.context.nextTemporary();
+    this.context.line(`runtime::bytes_with_mut_slice(&${mangleLocal(output)}, |${slice}| {`);
+    this.context.pushIndent();
+    const restore = this.context.byteRegions.bind(output, slice);
+    try { this.emitStatement(statement); } finally { restore(); }
+    this.context.popIndent();
+    this.context.line("});");
+  }
+
+  private emitIntegerByteRead(expr: IrExpr): string | null {
+    if (expr.kind !== "bytesIntrinsic" || expr.method !== "get" || expr.args.length !== 1 ||
+      expr.args[0] === undefined || expr.receiver.type.kind !== "bytes" || expr.receiver.type.elem !== "u8") return null;
+    const slice = this.context.byteRegions.read(expr.receiver) ?? this.context.byteRegions.read(expr.receiver, true);
+    const index = this.context.integerLoops.index(expr.args[0]);
+    return slice === null || index === undefined ? null
+      : `runtime::bytes_region_get_u8_integer(&*${slice}, ${index})`;
   }
 
   private emitStatement(stmt: IrStmt): void {
@@ -67,7 +164,7 @@ class RustStatementEmitter {
         const local = this.context.local(stmt.localId, stmt.loc);
         if (this.predeclaredLocals.has(local.id)) {
           if (stmt.init !== null) {
-            this.context.line(`runtime::cell_set(&${mangleLocal(local.id)}, ${this.context.emitExpr(stmt.init)});`);
+            this.context.emitAssignment(local.id, this.context.emitExpr(stmt.init), stmt.loc);
           }
           return;
         }
@@ -81,13 +178,19 @@ class RustStatementEmitter {
           this.context.forceBoxedLocal(local.id, true);
         }
         if (this.context.localIsBoxed(local)) {
-          const init = stmt.init === null
-            ? "runtime::cell_empty()"
-            : `runtime::cell_new(${this.context.emitExpr(stmt.init)})`;
-          this.context.line(`let ${local.mutable ? "mut " : ""}${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = ${init};`);
+          this.context.line(this.context.localCells.declaration(local, this.context.rustType(local.type, stmt.loc),
+            stmt.init === null ? null : this.context.emitExpr(stmt.init)));
           return;
         }
         const mutable = local.mutable ? "mut " : "";
+        const indices = this.context.integerLoops.regions.current();
+        const integer = indices?.read(local.id);
+        if (indices !== undefined && integer !== undefined && stmt.init !== null) {
+          const initial = indices.initializer(stmt.init, expr => this.context.emitExpr(expr), expr => this.emitIntegerByteRead(expr));
+          if (initial === null) throw new Error("missing integer-region initializer proof");
+          this.context.line(`let ${mutable}${integer}: i64 = ${initial};`);
+          return;
+        }
         const type = this.context.rustType(local.type, stmt.loc);
         if (stmt.init === null) {
           this.context.line(`let ${mutable}${mangleLocal(local.id)}: ${type};`);
@@ -142,10 +245,29 @@ class RustStatementEmitter {
       }
       case "bytesSet": {
         if (stmt.arr.type.kind !== "bytes") this.context.unsupported("bytesSet on non-bytes", stmt.loc);
+        const storedValue = rustByteStoreValue(stmt.arr.type, stmt.value);
         const bytes = this.context.nextTemporary();
         const index = this.context.nextTemporary();
         const value = this.context.nextTemporary();
-        this.context.line(`{ let ${bytes} = ${this.context.emitExpr(stmt.arr)}; let ${index} = ${this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::bytes_set(&${bytes}, ${index}, ${value}); }`);
+        const integer = this.context.integerLoops.index(stmt.index);
+        const setter = integer === undefined ? "bytes_set" : "bytes_set_usize";
+        const region = this.context.byteRegions.read(stmt.arr);
+        if (region !== null) {
+          const integerValue = stmt.arr.type.elem === "u8" && integer !== undefined
+            ? this.context.integerLoops.regions.current()?.number(storedValue, expr => this.context.emitExpr(expr), expr => this.emitIntegerByteRead(expr))
+              ?? this.emitIntegerByteRead(storedValue) : null;
+          if (integerValue != null) {
+            this.context.line(`{ let ${index} = ${integer}; let ${value} = ${integerValue}; runtime::bytes_region_set_u8_integer(&mut *${region}, ${index}, ${value}); }`);
+            return;
+          }
+          const regionSetter = integer === undefined ? "bytes_region_set" : "bytes_region_set_usize";
+          this.context.line(`{ let ${index} = ${integer ?? this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(storedValue)}; runtime::${regionSetter}(&mut *${region}, ${index}, ${value}); }`);
+          return;
+        }
+        const borrowed = this.context.borrowBytesReceiver(stmt.arr, [stmt.index, stmt.value]);
+        const receiver = borrowed === null ? this.context.emitExpr(stmt.arr) : `&${borrowed}`;
+        const argument = borrowed === null ? `&${bytes}` : bytes;
+        this.context.line(`{ let ${bytes} = ${receiver}; let ${index} = ${integer ?? this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(storedValue)}; runtime::${setter}(${argument}, ${index}, ${value}); }`);
         return;
       }
       case "recordKeySet":
@@ -261,9 +383,17 @@ class RustStatementEmitter {
   private emitFor(stmt: Extract<IrStmt, { kind: "for" }>): void {
     this.context.line("{");
     this.context.pushIndent();
-    if (stmt.init !== null) this.emitStatement(stmt.init);
+    const integerLoop = this.context.integerLoops.match(stmt, local => this.context.localIsBoxed(local));
+    const integer = integerLoop === null ? null : this.context.nextTemporary();
+    if (integerLoop !== null && integer !== null) {
+      this.context.line(`let mut ${integer}: usize = 0; // integer induction`);
+      this.context.integerLoops.bind(integerLoop.localId, integer);
+    } else if (stmt.init !== null) this.emitStatement(stmt.init);
     const loopLabel = this.context.nextLabel("sc_loop");
-    this.context.line(`'${loopLabel}: while ${stmt.cond === null ? "true" : this.context.emitExpr(stmt.cond)} {`);
+    const condition = integerLoop !== null && integer !== null
+      ? `${integer} < runtime::bytes_len_usize(&(${this.context.borrowBytesReceiver(integerLoop.limitReceiver, []) ?? this.context.emitExpr(integerLoop.limitReceiver)}))`
+      : stmt.cond === null ? "true" : this.context.emitExpr(stmt.cond);
+    this.context.line(`'${loopLabel}: while ${condition} {`);
     this.context.pushIndent();
     const continueTarget = this.context.nextLabel("sc_continue");
     this.context.line(`'${continueTarget}: {`);
@@ -282,12 +412,16 @@ class RustStatementEmitter {
     this.context.line("}");
     if (stmt.init?.kind === "varDecl") {
       const initLocal = this.context.local(stmt.init.localId, stmt.loc);
-      if (this.context.localIsBoxed(initLocal)) {
+      if (this.context.localIsBoxed(initLocal) && !this.context.localCells.isStack(initLocal.id)) {
         const name = mangleLocal(initLocal.id);
         this.context.line(`${name} = runtime::cell_new(runtime::cell_get(&${name}));`);
       }
     }
-    if (stmt.update !== null) this.emitStatement(stmt.update);
+    const counted = this.context.integerLoops.regions.current()?.loops.get(stmt);
+    if (counted !== undefined) this.context.line(`${this.context.integerLoops.read(counted)} += 1;`);
+    else if (integer !== null) this.context.line(`${integer} += 1;`);
+    else if (stmt.update !== null) this.emitStatement(stmt.update);
+    if (integerLoop !== null) this.context.integerLoops.unbind(integerLoop.localId);
     this.context.popIndent();
     this.context.line("}");
     this.context.popIndent();
@@ -314,7 +448,7 @@ class RustStatementEmitter {
     this.context.line(`'${continueTarget}: {`);
     this.context.pushIndent();
     this.context.line(this.context.localIsBoxed(local)
-      ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(runtime::array_get(&${array}, ${index}));`
+      ? this.context.localCells.declaration(local, this.context.rustType(local.type, stmt.loc), `runtime::array_get(&${array}, ${index})`)
       : `let ${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = runtime::array_get(&${array}, ${index});`);
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(),
@@ -360,7 +494,7 @@ class RustStatementEmitter {
     this.context.line(`'${continueTarget}: {`);
     this.context.pushIndent();
     this.context.line(this.context.localIsBoxed(local)
-      ? `let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_new(${item});`
+      ? this.context.localCells.declaration(local, this.context.rustType(local.type, stmt.loc), item)
       : `let ${mangleLocal(local.id)}: ${this.context.rustType(local.type, stmt.loc)} = ${item};`);
     this.context.loopTargets.push({
       id: this.context.nextLoopTargetId(), kind: "loop", labels: stmt.labels,
@@ -678,7 +812,7 @@ class RustStatementEmitter {
     for (const local of locals.values()) {
       this.predeclaredLocals.add(local.id);
       this.context.forceBoxedLocal(local.id, true);
-      this.context.line(`let ${mangleLocal(local.id)}: runtime::JsCell<${this.context.rustType(local.type, stmt.loc)}> = runtime::cell_empty();`);
+      this.context.line(this.context.localCells.declaration(local, this.context.rustType(local.type, stmt.loc), null));
     }
 
     this.context.line(`'${switchLabel}: {`);

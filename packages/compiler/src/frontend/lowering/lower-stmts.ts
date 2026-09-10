@@ -1,3 +1,10 @@
+import { lowerDynamicSwitch } from "./lower-dynamic-switch.js";
+import { inferredRegexBindingType } from "./lower-regex-captures.js";
+import { regexCaptureArray } from "../../ir/regex-captures.js";
+import { lowerNativeTupleArrayView, lowerNativeTupleTail } from "./lower-native-tuple.js";
+import { jsArrayInferenceBinding } from "../js-array-field-types.js";
+import { dynamicBindingType } from "./dynamic-binding-type.js";
+import { lowerOpenRecordDelete } from "./lower-open-record.js";
 import { lowerArrayClearAssignment } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Statement lowering: the statement dispatch (lowerStmt), variable
@@ -996,7 +1003,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (!call) return null;
     const sym = L.checker.getSymbolAtLocation(decl.name);
     if (!sym || L.globalsBySymbol.has(sym) || L.tdzPredeclared.has(sym)) return null;
-    const rowsT = arrayOf(arrayOf(STRING));
+    const rowsT = arrayOf(regexCaptureArray(L.unions));
     const declared = L.mapTypeOf(L.typeOf(decl.name));
     if (!declared || !typeEquals(declared, rowsT)) return null;
     const loc = locOf(decl);
@@ -2325,6 +2332,8 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
     from: number,
     restT: IrType | null,): IrExpr {
     const loc = locOf(blame);
+    const tail = lowerNativeTupleTail(L, srcRef(), from, restT, blame);
+    if (tail) return tail;
     const reads: IrExpr[] = [];
     for (let j = from; j < shape.fields.length; j++) {
       const field = shape.fields.find((f) => f.name === String(j));
@@ -2897,14 +2906,6 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
    * lowerVarDecl (module-global assignment for pre-registered file-scope
    * names, declareLocal otherwise), or a nested pattern through its own
    * hidden temp. */
-  /** An island-world ('any'-flavored) checker spelling: bare jsval or an
-   * array of jsvals (`(string | object)[]` absorbed by its jsval arm) —
-   * the shapes the runtime-world local rule keeps DYN when the value
-   * lowered checked-dynamic. */
-  function jsvalFlavoredType(t: IrType): boolean {
-    return t.kind === "jsval" || (t.kind === "array" && t.elem.kind === "jsval");
-  }
-
   export function bindPatternTarget(L: Lowerer, name: ts.BindingName,
     value: IrExpr,
     isLet: boolean,
@@ -2943,7 +2944,7 @@ export function isParseArgsDynCheckerType(L: Lowerer, type: ts.Type): boolean {
         value.type.kind === "dyn" &&
         (() => {
           const mapped = L.mapTypeOf(L.typeOf(name));
-          return mapped === null || (L.dynamic && jsvalFlavoredType(mapped));
+          return mapped === null || (L.dynamic && dynamicBindingType(L, mapped, hostDecl?.type === undefined));
         })();
       const mapped = L.mapTypeOf(L.typeOf(name));
       const genericRecordRest =
@@ -3334,8 +3335,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // to (the island-HANDLE local story). Below that: a never-tainted JS
     // binding type (`const cmd = ['pwd', []]` infers (string | never[])[])
     // is inference residue, not element information — unmappable, so the
-    // dyn initializer keeps the binding checked-dynamic.
-    const bindingTainted = neverTaintedJsType(L, decl.name, L.typeOf(decl.name));
+    const bindingTainted = neverTaintedJsType(L, decl.name, L.typeOf(decl.name)) || jsArrayInferenceBinding(decl.name, L.checker);
     const optionalClassValue =
       init.type.kind === "union" &&
       (() => {
@@ -3375,7 +3375,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // value's world is the honest dispatch, and every use site already
       // handles dyn (validated exits, routed engine ops for wrapped
       // island members).
-      (L.dynamic && init.type.kind === "dyn" && jsvalFlavoredType(L.mapTypeOf(L.typeOf(decl.name)) ?? DYN) ? DYN : null) ??
+      (L.dynamic && init.type.kind === "dyn" && dynamicBindingType(L, L.mapTypeOf(L.typeOf(decl.name)) ?? DYN, decl.type === undefined) ? DYN : null) ??
       (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
       (init.type.kind === "dyn" ? DYN : null);
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
@@ -3410,10 +3410,9 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       }
     }
     // An unannotated binding holding an OOB-SAFE indexed read (`elem |
-    // undefined`) where the checker spells the bare element: the binding
-    // adopts the runtime-honest union. This covers both inferred package JS
-    // and TypeScript's fresh-array probe idioms; an explicit annotation keeps
-    // the caller's checked slot contract.
+    // undefined`) keeps its native union, including inferred package JS and
+    // TypeScript fresh-array probes; explicit annotations retain their checks.
+    if (type?.kind === "array") type = inferredRegexBindingType(L, decl, type);
     let runtimeOptional = false;
     if (
       !decl.type && type !== null && init.type.kind === "union" &&
@@ -3687,9 +3686,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
   /** The switch proper, over an already-lowered discriminant. */
   function lowerSwitchOn(L: Lowerer, stmt: ts.SwitchStatement, labels: string[] | undefined, disc: IrExpr): IrStmt {
     const dk = disc.type.kind;
-    if (dk === "dyn") {
-      L.unsupported("SC1100", stmt.expression, "switch statements on 'unknown' values");
-    }
+    if (dk === "dyn") return lowerDynamicSwitch(L, stmt, labels, disc);
     if (dk === "union") return lowerUnionSwitch(L, stmt, disc);
     if (dk !== "f64" && dk !== "string" && dk !== "bool") {
       L.unsupported("SC1090", stmt.expression, "switch on non-primitive values");
@@ -3955,14 +3952,11 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     };
   }
 
-/** Statement-position `delete`: process.env keys → process.envUnset
-   * (unsetenv), pure `Record<string, T>` keys → recordKeyDelete (the
-   * overflow Map delete), declared OPTIONAL fields → the undefined-arm
-   * write (absence IS the undefined arm; divergence 60). Everything else
-   * fences with the honest reason — a required field is a struct slot no
-   * runtime can remove. */
+/** Delete env/dictionary keys or clear an optional field (divergence 60).
+   * Required fixed record fields cannot be removed. */
   function lowerDeleteStatement(L: Lowerer, expr: ts.DeleteExpression): IrStmt {
     const loc = locOf(expr);
+    const open = lowerOpenRecordDelete(L, expr); if (open) return { kind: "exprStmt", expr: open, loc };
     let target: ts.Expression = expr.expression;
     while (ts.isParenthesizedExpression(target)) target = target.expression;
     if (!ts.isElementAccessExpression(target) && !ts.isPropertyAccessExpression(target)) {
@@ -6297,8 +6291,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     // a plain const identifier binding: the drain records each match's
     // UTF-16 start index into a COMPANION array, and `m.index` in the
     // body reads the current row's entry — the one shape where
-    // RegExpExecArray.index has a lowering (rows are honest string[]
-    // slices everywhere else). const only: a reassigned `let` binding
+    // slots elsewhere). A reassigned `let` binding
     // would decouple the row from its index.
     {
       let src: ts.Expression = stmt.expression;
@@ -6399,22 +6392,12 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           );
         }
       }
+      iterable = lowerNativeTupleArrayView(L, iterable) ?? iterable;
       if (
         iterable.type.kind === "record" &&
         L.shapes.get(iterable.type.shapeId)?.tuple
       ) {
-        // A tuple read PURELY iterates: the positions snapshot into a
-        // fresh array at loop entry and the ordinary array for-of runs
-        // over it — the allowlist-iteration idiom. HOMOGENEOUS tuples
-        // (`["a", "b"] as const`) snapshot at their one position type;
-        // heterogeneous tuples ([string, boolean]) snapshot into the
-        // positions' UNION when it interns, each read wrapping into its
-        // arm — exactly the string|boolean the checker gives the loop
-        // variable. Pure receivers only (the reads re-emit per position);
-        // JS reads positions lazily, so a body that WRITES a later
-        // position of a mutable tuple would observe its old value here —
-        // readonly (as-const) tuples, the shape that actually occurs,
-        // cannot be written at all.
+        // Remaining heterogeneous tuples use the existing positional snapshot.
         const shape = L.shapes.get(iterable.type.shapeId)!;
         const byIndex = [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));
         const first = byIndex[0]?.type;
@@ -6837,7 +6820,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const decl = list.declarations[0]!;
     const name = decl.name as ts.Identifier;
     const loc = locOf(stmt);
-    const rowT = arrayOf(STRING);
+    const rowT = regexCaptureArray(L.unions);
     const rowsT = arrayOf(rowT);
     const idxsT = arrayOf(F64);
     // Lower the drain OUTSIDE the loop's scope frame (its receiver/regex

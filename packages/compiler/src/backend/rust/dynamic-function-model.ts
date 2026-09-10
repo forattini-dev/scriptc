@@ -1,6 +1,18 @@
 import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 import type { IrFuncType } from "./model.js";
 
+/** Values boxed explicitly, or one lazily boxed item of a native stream. */
+export function dynamicBoxedInputType(node: Record<string, unknown>): IrType | undefined {
+  if (node.kind === "dynFrom" || node.kind === "jsMarshal") {
+    return (node.value as { type?: IrType } | undefined)?.type;
+  }
+  if (node.kind === "libCall" && node.fn === "fetch.streamFrom") {
+    const source = (node.args as { type?: IrType }[] | undefined)?.[0]?.type;
+    return source?.kind === "array" ? source.elem : undefined;
+  }
+  return undefined;
+}
+
 /** Register function values nested inside a value crossing into checked dyn.
  * The dynFrom emitter recursively boxes records/arrays/unions, so discovery
  * must make the same walk before Rust closure enums are emitted. */

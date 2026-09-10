@@ -378,18 +378,11 @@ console.log(projected.x);
   });
 }, 120_000);
 
-test("Rust asserted record widths materialize a fresh narrowed copy", async () => {
-  await expectRustSourceOutcome("asserted-width", `
-const source = { id: 9, extra: true };
-const narrowed = source as { id: number };
-console.log(JSON.stringify(narrowed));
-source.id = 10;
-console.log(narrowed.id);
-`, {
-    stdout: '{"id":9}\n9\n',
-    stderr: "",
-    exitCode: 0,
-  });
+test("Rust asserted record widths preserve source identity and keys", async () => {
+  const entryPath = resolve("tests/corpus/3156-native-asserted-record-width.ts");
+  const node = await runToExit(nodeOracleExecutable(), [entryPath]);
+  expect(node).toEqual({ stdout: '{"id":9,"extra":true}\n10\ntrue\n11\n', stderr: "", exitCode: 0 });
+  await expectRustSourceOutcome("asserted-width", await readFile(entryPath, "utf8"), node);
 }, 120_000);
 
 test("constant-folded standalone class instanceof preserves JavaScript results in Rust", async () => {
@@ -2097,56 +2090,56 @@ rmSync(path);
   }
 }, 120_000);
 
-test("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and narrowing", async () => {
+// Each fixture gets an independent deadline: compiling all 24 under one
+// timer can time out on a resource-limited host before semantic assertions run.
+test.each([
+  "1119-switch-union.ts",
+  "1532-union-shared-field-read.ts",
+  "1825-exhaustive-typeof-switch.ts",
+  "1830-enum-numeric-basics.ts",
+  "1835-var-basics.ts",
+  "2398-switch-arm-kill.ts",
+  "2406-switch-clause-sibling-narrow.ts",
+  "2410-stacked-cases-terminality.ts",
+  "2411-exhaustive-switch-terminality.ts",
+  "2419-selector-ternary-union.ts",
+  "2442-union-literal-arm-widening.ts",
+  "2443-union-literal-shadow-narrowing.ts",
+  "2444-union-literal-reducer-spread.ts",
+  "2488-ast-walker.ts",
+  "2493-switch-unit-cases.ts",
+  "800-switch-basics.ts",
+  "801-switch-lazy-tests.ts",
+  "803-switch-rc-stress.ts",
+  "804-switch-braced-blocks.ts",
+  "830-let-uninitialized.ts",
+  "971-unions-switch.ts",
+  "982-exceptions-rc-stress.ts",
+  "983-exceptions-control-flow.ts",
+  "987-exceptions-result-unions.ts",
+])("Rust switch dispatch preserves lazy tests, fallthrough, shared scope, and narrowing: %s", async (fixture) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-switch-"));
-  for (const fixture of [
-    "1119-switch-union.ts",
-    "1532-union-shared-field-read.ts",
-    "1825-exhaustive-typeof-switch.ts",
-    "1830-enum-numeric-basics.ts",
-    "1835-var-basics.ts",
-    "2398-switch-arm-kill.ts",
-    "2406-switch-clause-sibling-narrow.ts",
-    "2410-stacked-cases-terminality.ts",
-    "2411-exhaustive-switch-terminality.ts",
-    "2419-selector-ternary-union.ts",
-    "2442-union-literal-arm-widening.ts",
-    "2443-union-literal-shadow-narrowing.ts",
-    "2444-union-literal-reducer-spread.ts",
-    "2488-ast-walker.ts",
-    "2493-switch-unit-cases.ts",
-    "800-switch-basics.ts",
-    "801-switch-lazy-tests.ts",
-    "803-switch-rc-stress.ts",
-    "804-switch-braced-blocks.ts",
-    "830-let-uninitialized.ts",
-    "971-unions-switch.ts",
-    "982-exceptions-rc-stress.ts",
-    "983-exceptions-control-flow.ts",
-    "987-exceptions-result-unions.ts",
-  ]) {
-    const entryPath = resolve("tests/corpus", fixture);
-    const result = await compile(entryPath, {
-      outDir: dir,
-      outPath: join(dir, fixture.slice(0, -3)),
-      backend: "rust",
-      optimization: "dev",
-    });
-    expect(
-      result.ok,
-      result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
-    ).toBe(true);
-    if (!result.ok) continue;
-    const nodeArgs = await nodeCorpusArgs(entryPath);
-    const [node, rust] = await Promise.all([
-      runToExit(nodeOracleExecutable(), nodeArgs),
-      runToExit(result.binaryPath, [], {
-        ...process.env,
-        SCRIPTC_RUST_HEAP_AUDIT: "1",
-      }),
-    ]);
-    expect(rust, fixture).toEqual(node);
-  }
+  const entryPath = resolve("tests/corpus", fixture);
+  const result = await compile(entryPath, {
+    outDir: dir,
+    outPath: join(dir, fixture.slice(0, -3)),
+    backend: "rust",
+    optimization: "dev",
+  });
+  expect(
+    result.ok,
+    result.ok ? fixture : `${fixture}: ${result.diagnostics.map((diag) => diag.message).join("; ")}`,
+  ).toBe(true);
+  if (!result.ok) return;
+  const nodeArgs = await nodeCorpusArgs(entryPath);
+  const [node, rust] = await Promise.all([
+    runToExit(nodeOracleExecutable(), nodeArgs),
+    runToExit(result.binaryPath, [], {
+      ...process.env,
+      SCRIPTC_RUST_HEAP_AUDIT: "1",
+    }),
+  ]);
+  expect(rust, fixture).toEqual(node);
 }, 120_000);
 
 test("Rust dynamic prototype dispatch preserves array mutation and string conversion", async () => {

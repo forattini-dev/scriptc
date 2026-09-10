@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -20,7 +20,7 @@ test("mixed program: percentage and grouped blockers", async () => {
 });
 
 test("dynamic-capable blockers split from static rejections", async () => {
-  // SC2010/SC2011/SC2012 sites group under "runs with --dynamic";
+  // SC2010/SC2011 sites group under "runs with --dynamic";
   // constructs no flag fixes stay under "blockers".
   await expect(report(fixture("dynamic-mix.ts"))).toMatchFileSnapshot(
     "__snapshots__/coverage-dynamic-mix.txt",
@@ -64,10 +64,10 @@ test("settled generic rest-order fences count each source statement once", () =>
   expect(coverage.stats.statementsFailed).toBe(2);
 });
 
-test("JS inference gaps land where 'any' lands: SC2011 static, island dynamic", async () => {
-  // The js-gap fixture's tsconfig turns noImplicitAny off, so the untyped
-  // parameter types `any` — the static analysis reports the site as
-  // dynamic-capable (SC2011) while the JSDoc-typed neighbor stays static.
+test("JS numeric inference and native dynamic execution need no JavaScript engine", async () => {
+  // The unannotated parameter is inferred from its numeric use in static
+  // mode. Explicit dynamic mode uses the native dynamic runtime; the
+  // JSDoc-typed neighbor remains static in both reports.
   await expect(report(fixture("js-gap/gap.js"))).toMatchFileSnapshot(
     "__snapshots__/coverage-js-gap.txt",
   );
@@ -99,8 +99,8 @@ test("lazy edges inventory: unresolvable require()/import() targets mark as lazy
 test("lazy builtin edges mark in the builtins table, __require sites included", async () => {
   // The esbuild-require fixture routes external requires through the
   // bundle's __require helper — its literal call sites collect as require
-  // edges, so the builtins table lists node:os/node:tty (shimmed) and
-  // node:stream as a lazy trap (unshimmed, reached only by the
+  // edges, so the builtins table lists node:os/node:tty/node:http2 (shimmed) and
+  // node:_http_agent as a lazy trap (unshimmed, reached only by the
   // never-called require) without failing the build.
   await expect(
     report(join(repoRoot, "tests/fixtures/npm/cases/esbuild-require/main.ts"), { dynamic: true }),
@@ -235,17 +235,20 @@ test("external host mappings take precedence over overlapping npm-static package
   expect(coverage.diagnostics.some((d) => d.code === "SC1010" && d.message.includes("'slash'"))).toBe(true);
 });
 
-test("CLI accepts repeatable --external-types mappings for coverage", () => {
+test.each([
+  { entry: "main.ts", status: 1, verdict: "SC1010" },
+  { entry: "type-only.ts", status: 0, verdict: "fully static" },
+])("CLI accepts repeatable --external-types mappings: $entry exits $status", ({ entry, status, verdict }) => {
   const root = fixture("external-types");
   const scriptcCli = join(repoRoot, "packages/cli/src/main.ts");
-  const out = execFileSync(
+  const cli = spawnSync(
     process.execPath,
     [
       "--import",
       "tsx",
       scriptcCli,
       "coverage",
-      join(root, "main.ts"),
+      join(root, entry),
       "--external-types",
       `@native-sdk/core=${join(root, "native-sdk-core.d.ts")}`,
       "--external-types",
@@ -253,9 +256,17 @@ test("CLI accepts repeatable --external-types mappings for coverage", () => {
     ],
     { cwd: repoRoot, encoding: "utf8" },
   );
-  expect(out).toContain("statements analyzed");
-  expect(out).toContain("@native-sdk/core");
-  expect(out).not.toContain("Cannot find module");
+  expect(cli.error).toBeUndefined();
+  expect(cli.signal).toBeNull();
+  expect(cli.status).toBe(status);
+  expect(cli.stdout).toContain("statements analyzed");
+  expect(cli.stdout).toContain(verdict);
+  expect(cli.stdout).not.toContain("Cannot find module");
+  if (status === 1) {
+    // Declarations unblock type checking but cannot provide a host runtime.
+    expect(cli.stdout).toContain("@native-sdk/core");
+    expect(cli.stdout).toContain("no runtime implementation or scriptc lowering was provided");
+  }
 });
 
 test("external type mappings reject TypeScript paths patterns", () => {

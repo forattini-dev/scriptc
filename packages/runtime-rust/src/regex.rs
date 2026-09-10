@@ -46,20 +46,21 @@ fn validate_regex_flags(flags: &str) -> String {
         .collect()
 }
 
-pub fn regex_new(pattern: &str, flags: &str) -> JsRegex {
+pub fn regex_new<S: JsStringSource + ?Sized>(pattern: &S, flags: &str) -> JsRegex {
     let flags = validate_regex_flags(flags);
-    let source = if pattern.is_empty() { "(?:)" } else { pattern };
+    let pattern = pattern.to_js_string();
+    let source = if pattern.is_empty() { string("(?:)") } else { pattern };
     let parsed_flags = regress::Flags::from(flags.as_str());
     let unicode = flags.contains('u') || flags.contains('v');
     let compiled = if unicode {
-        regress::Regex::from_unicode(source.chars().map(u32::from), parsed_flags)
+        regress::Regex::from_unicode(char::decode_utf16(source.encode_utf16()).map(|unit| match unit { Ok(ch) => u32::from(ch), Err(error) => u32::from(error.unpaired_surrogate()) }), parsed_flags)
     } else {
         regress::Regex::from_unicode(source.encode_utf16().map(u32::from), parsed_flags)
     }
     .unwrap_or_else(|error| throw_syntax_error_trap(error.to_string()));
     Rc::new(RegexData {
         compiled,
-        source: string(source),
+        source,
         flags: string(&flags),
         unicode,
         global: flags.contains('g'),
@@ -93,8 +94,8 @@ fn advance_string_index(units: &[u16], index: usize, unicode: bool) -> usize {
     index.saturating_add(1)
 }
 
-fn string_from_utf16(units: &[u16]) -> JsString {
-    Rc::from(String::from_utf16_lossy(units))
+pub fn string_from_utf16(units: &[u16]) -> JsString {
+    JsString::from_utf16(units)
 }
 
 pub fn string_from_char_codes(codes: &JsArray<f64>) -> JsString {
@@ -129,18 +130,28 @@ pub fn regex_hits(regex: &JsRegex, text: &JsString) -> bool {
     regex_find(regex, &units, 0, false).is_some()
 }
 
-fn regex_match_row(units: &[u16], matched: &regress::Match) -> JsArray<JsString> {
+fn regex_match_row<T: ArrayElement>(
+    units: &[u16],
+    matched: &regress::Match,
+    capture: &impl Fn(Option<JsString>) -> T,
+) -> JsArray<T> {
     let mut values = Vec::with_capacity(matched.captures.len() + 1);
-    values.push(string_from_utf16(&units[matched.range()]));
+    values.push(capture(Some(string_from_utf16(&units[matched.range()]))));
     for group in &matched.captures {
-        values.push(group.as_ref().map_or_else(empty_string, |range| {
-            string_from_utf16(&units[range.clone()])
-        }));
+        values.push(capture(
+            group
+                .as_ref()
+                .map(|range| string_from_utf16(&units[range.clone()])),
+        ));
     }
     array_new(values)
 }
 
-pub fn regex_match(subject: &JsString, regex: &JsRegex) -> Option<JsArray<JsString>> {
+pub fn regex_match<T: ArrayElement>(
+    subject: &JsString,
+    regex: &JsRegex,
+    capture: impl Fn(Option<JsString>) -> T,
+) -> Option<JsArray<T>> {
     let units: Vec<u16> = subject.encode_utf16().collect();
     if regex.global {
         regex.last_index.set(0);
@@ -152,7 +163,7 @@ pub fn regex_match(subject: &JsString, regex: &JsRegex) -> Option<JsArray<JsStri
             };
             let start = matched.start();
             let end = matched.end();
-            values.push(string_from_utf16(&units[matched.range()]));
+            values.push(capture(Some(string_from_utf16(&units[matched.range()]))));
             position = if start == end {
                 advance_string_index(&units, end, regex.unicode)
             } else {
@@ -173,7 +184,7 @@ pub fn regex_match(subject: &JsString, regex: &JsRegex) -> Option<JsArray<JsStri
             .last_index
             .set(matched.as_ref().map_or(0, regress::Match::end));
     }
-    matched.map(|matched| regex_match_row(&units, &matched))
+    matched.map(|matched| regex_match_row(&units, &matched, &capture))
 }
 
 pub fn regex_search(subject: &JsString, regex: &JsRegex) -> f64 {
@@ -181,11 +192,12 @@ pub fn regex_search(subject: &JsString, regex: &JsRegex) -> f64 {
     regex_find(regex, &units, 0, regex.sticky).map_or(-1.0, |matched| matched.start() as f64)
 }
 
-fn regex_match_all_impl(
+fn regex_match_all_impl<T: ArrayElement>(
     subject: &JsString,
     regex: &JsRegex,
     indices: Option<&JsArray<f64>>,
-) -> JsArray<JsArray<JsString>> {
+    capture: impl Fn(Option<JsString>) -> T,
+) -> JsArray<JsArray<T>> {
     if !regex.global {
         throw_type_error(
             "String.prototype.matchAll called with a non-global RegExp argument".to_owned(),
@@ -203,7 +215,7 @@ fn regex_match_all_impl(
         if let Some(indices) = indices {
             array_push(indices, start as f64);
         }
-        rows.push(regex_match_row(&units, &matched));
+        rows.push(regex_match_row(&units, &matched, &capture));
         position = if start == end {
             advance_string_index(&units, end, regex.unicode)
         } else {
@@ -213,16 +225,21 @@ fn regex_match_all_impl(
     array_new(rows)
 }
 
-pub fn regex_match_all(subject: &JsString, regex: &JsRegex) -> JsArray<JsArray<JsString>> {
-    regex_match_all_impl(subject, regex, None)
+pub fn regex_match_all<T: ArrayElement>(
+    subject: &JsString,
+    regex: &JsRegex,
+    capture: impl Fn(Option<JsString>) -> T,
+) -> JsArray<JsArray<T>> {
+    regex_match_all_impl(subject, regex, None, capture)
 }
 
-pub fn regex_match_all_into(
+pub fn regex_match_all_into<T: ArrayElement>(
     subject: &JsString,
     regex: &JsRegex,
     indices: &JsArray<f64>,
-) -> JsArray<JsArray<JsString>> {
-    regex_match_all_impl(subject, regex, Some(indices))
+    capture: impl Fn(Option<JsString>) -> T,
+) -> JsArray<JsArray<T>> {
+    regex_match_all_impl(subject, regex, Some(indices), capture)
 }
 
 fn regex_put_substitution(
@@ -506,5 +523,5 @@ pub fn regexp_escape(value: &JsString) -> JsString {
             output.push(ch);
         }
     }
-    Rc::from(output)
+    JsString::from(output)
 }

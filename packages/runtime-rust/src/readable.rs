@@ -985,7 +985,7 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    match name.as_ref() {
+    match name.to_utf8_lossy() {
         "readableLength" | "rs:length" => readable_length(readable),
         "readableHighWaterMark" | "rs:highWaterMark" => {
             readable.with(|data| data.high_water_mark as f64)
@@ -1001,7 +1001,7 @@ where
     L: Clone + Trace + 'static,
     R: Clone + Trace + 'static,
 {
-    readable.with(|data| match name.as_ref() {
+    readable.with(|data| match name.to_utf8_lossy() {
         "readable" => !data.ended && !data.destroyed && data.errored.is_none(),
         "readableEnded" => data.ended,
         "rs:ended" => data.eof,

@@ -258,7 +258,7 @@ fn island_host_srv_res_head(
     };
     let status = island_host_arg_number(arguments, 1, context)?;
     if !island_host_arg(arguments, 2).is_null_or_undefined() {
-        let message: JsString = Rc::from(island_host_arg_string(arguments, 2, context)?.as_str());
+        let message: JsString = JsString::from(island_host_arg_string(arguments, 2, context)?.as_str());
         http_response_status_message_set(&response, &message);
     }
     let flat = island_fetch_string_list(island_host_arg(arguments, 3), context)?;
@@ -420,10 +420,10 @@ fn island_host_http_start(
             )
             .into());
     }
-    let hostname: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let hostname: JsString = JsString::from(island_host_arg_string(arguments, 1, context)?.as_str());
     let port = island_host_arg_number(arguments, 2, context)?;
-    let path: JsString = Rc::from(island_host_arg_string(arguments, 3, context)?.as_str());
-    let method: JsString = Rc::from(island_host_arg_string(arguments, 4, context)?.as_str());
+    let path: JsString = JsString::from(island_host_arg_string(arguments, 3, context)?.as_str());
+    let method: JsString = JsString::from(island_host_arg_string(arguments, 4, context)?.as_str());
     let timeout = island_host_arg_number(arguments, 5, context)?;
     let headers = island_fetch_string_list(island_host_arg(arguments, 6), context)?;
     let callbacks = island_net_arg_callbacks(arguments, 7)?;

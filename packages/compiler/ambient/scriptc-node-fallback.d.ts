@@ -1009,7 +1009,10 @@ declare module "node:fs" {
   /* The bare-encoding spelling — the options record's encoding key alone. */
   export function writeFileSync(path: string, data: string, encoding: "utf8" | "utf-8"): void;
   export function writeFileSync(path: string, data: Uint8Array): void;
-  export function appendFileSync(path: string, data: string): void;
+  export function appendFileSync(path: string, data: string, options?: {
+    mode?: number; encoding?: "utf8" | "utf-8"; flag?: string; [option: string]: unknown;
+  }): void;
+  export function appendFileSync(path: string, data: string, encoding: "utf8" | "utf-8"): void;
   export function existsSync(path: string): boolean;
   export function mkdirSync(path: string): void;
   export function mkdirSync(path: string, options: { recursive?: boolean; mode?: number }): void;

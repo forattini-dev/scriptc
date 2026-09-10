@@ -7,8 +7,8 @@ export function emitRustReadlineCall(
   const stdinCall = emitRustStdinCall(expr, context);
   if (stdinCall !== null) return stdinCall;
   const [handle, query, callbackExpr] = expr.args;
-  if (expr.fn === "rl.create" && expr.args.length === 0 && expr.type.kind === "f64") {
-    return "runtime::readline_create()";
+  if (expr.fn === "rl.create" && expr.args.length === 1 && handle?.type.kind === "bool" && expr.type.kind === "f64") {
+    return `runtime::readline_create_with_output(${context.emitExpr(handle)})`;
   }
   if (expr.fn === "rl.close" && expr.args.length === 1 && handle?.type.kind === "f64") {
     return `runtime::readline_close(${context.emitExpr(handle)})`;

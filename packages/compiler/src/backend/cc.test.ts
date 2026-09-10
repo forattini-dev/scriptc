@@ -2056,7 +2056,7 @@ test("native cache warming seeds exact runtime and vendor families without compl
     if (oldVendorCacheDir === undefined) delete process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"];
     else process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"] = oldVendorCacheDir;
   }
-}, 120_000);
+});
 
 test("damaged shared vendor archives are rejected and rebuilt before linking", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-vendor-integrity-"));
@@ -2123,17 +2123,16 @@ test("dynamic builds promote staged vendor archives before bounded LRU eviction"
     delete process.env["SCRIPTC_CACHE_MAX_MB"];
     delete process.env["SCRIPTC_TEST_VENDOR_CACHE_DIR"];
     await writeFile(cPath, "int main(void) { return 0; }\n");
-    await warmNativeCaches({ profiles: ["dynamic"] });
+    await compileC({ cPath, outPath, cacheIdentity: TEST_CACHE_IDENTITY, dynamic: true });
 
     const vendorRoot = join(cacheRoot, "vendor");
-    const engineDir = (await readdir(vendorRoot)).find((name) =>
-      /^3c8f3d689539-plain-/.test(name)
-    );
+    const engineDir = (await readdir(vendorRoot)).find((name) => /^3c8f3d689539-plain-/.test(name));
     expect(engineDir).toBeDefined();
     const engineArchive = join(vendorRoot, engineDir!, "libqjs.a");
     const initialBytes = await cacheTreeBytes(cacheRoot);
-    const capMb = Math.max(4, Math.ceil(initialBytes * 2 / (1024 * 1024)));
-    const filler = join(cacheRoot, "filler.bin");
+    // Retain one more executable below the 75% LRU watermark, plus metadata headroom.
+    const capMb = Math.max(4, Math.ceil((initialBytes + (await stat(outPath)).size + 65) / (0.75 * 1024 * 1024)) + 1);
+    const filler = join(cacheRoot, "bin", "filler.bin");
     const staleArchiveTime = new Date("2000-01-01T00:00:00.000Z");
     const fillerTime = new Date("2001-01-01T00:00:00.000Z");
     await writeFile(filler, Buffer.alloc(capMb * 1024 * 1024));
@@ -2144,7 +2143,7 @@ test("dynamic builds promote staged vendor archives before bounded LRU eviction"
     await compileC({
       cPath,
       outPath,
-      cacheIdentity: TEST_CACHE_IDENTITY,
+      cacheIdentity: `${TEST_CACHE_IDENTITY}-lru-miss`,
       dynamic: true,
     });
 
@@ -2572,115 +2571,115 @@ exec "$@"
 
 test.skipIf(process.platform === "win32")(
   "implicit headers changed during the final compile cannot poison the old key",
-  async () => {
-    const dir = await mkdtemp(join(tmpdir(), "scriptc-cache-final-header-race-"));
-    scratch.push(dir);
-    const cacheRoot = join(dir, "cache");
-    const binDir = join(dir, "bin");
-    const header = join(dir, "implicit-race.h");
-    const cPath = join(dir, "program.c");
-    const signal = join(dir, "final-compile-started");
-    const release = join(dir, "final-compile-release");
-    const oldCacheDir = process.env["SCRIPTC_CACHE_DIR"];
-    const oldNoCache = process.env["SCRIPTC_NO_CACHE"];
-    const oldDisableCcache = process.env["SCRIPTC_TEST_DISABLE_CCACHE"];
-    const oldPath = process.env["PATH"];
-    const oldRealClang = process.env["SCRIPTC_TEST_REAL_CLANG"];
-    const oldImplicitHeader = process.env["SCRIPTC_TEST_IMPLICIT_HEADER"];
-    const oldRaceSignal = process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"];
-    const oldRaceRelease = process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"];
-    const realClang = (oldPath ?? "")
-      .split(delimiter)
-      .map((entry) => join(entry === "" ? process.cwd() : entry, "clang"))
-      .find((candidate) => existsSync(candidate));
-    expect(realClang).toBeDefined();
+  async (context) => {
+    const work = (async () => {
+      const dir = await mkdtemp(join(tmpdir(), "scriptc-cache-final-header-race-"));
+      scratch.push(dir);
+      const cacheRoot = join(dir, "cache");
+      const binDir = join(dir, "bin");
+      const header = join(dir, "implicit-race.h");
+      const cPath = join(dir, "program.c");
+      const signal = join(dir, "final-compile-started");
+      const release = join(dir, "final-compile-release");
+      const oldCacheDir = process.env["SCRIPTC_CACHE_DIR"];
+      const oldNoCache = process.env["SCRIPTC_NO_CACHE"];
+      const oldDisableCcache = process.env["SCRIPTC_TEST_DISABLE_CCACHE"];
+      const oldPath = process.env["PATH"];
+      const oldRealClang = process.env["SCRIPTC_TEST_REAL_CLANG"];
+      const oldImplicitHeader = process.env["SCRIPTC_TEST_IMPLICIT_HEADER"];
+      const oldRaceSignal = process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"];
+      const oldRaceRelease = process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"];
+      const realClang = executableOnPath("clang");
+      expect(realClang).toBeDefined();
 
-    const waitForSignal = async (): Promise<void> => {
-      const deadline = Date.now() + 10_000;
-      while (!existsSync(signal)) {
-        if (Date.now() > deadline) throw new Error("timed out waiting for final compilation");
-        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      const waitForSignal = async (): Promise<void> => {
+        while (!existsSync(signal)) {
+          context.signal.throwIfAborted();
+          await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+        }
+      };
+
+      let firstBuild: Promise<void> | undefined;
+      try {
+        await mkdir(binDir);
+        const wrapper = join(binDir, "clang");
+        await writeFile(
+          wrapper,
+          `#!/bin/sh
+  for arg in "$@"; do
+    case "$arg" in
+      */scriptc-cache-build-*/program.c|*/scriptc-cache-build-*/program.ll)
+        if [ ! -e "$SCRIPTC_TEST_FINAL_RACE_SIGNAL" ]; then
+          : > "$SCRIPTC_TEST_FINAL_RACE_SIGNAL"
+          while [ ! -e "$SCRIPTC_TEST_FINAL_RACE_RELEASE" ]; do sleep 0.01; done
+        fi
+        break
+        ;;
+    esac
+  done
+  exec "$SCRIPTC_TEST_REAL_CLANG" -include "$SCRIPTC_TEST_IMPLICIT_HEADER" "$@"
+  `,
+        );
+        await chmod(wrapper, 0o755);
+        await writeFile(
+          cPath,
+          '#include <stdio.h>\nint main(void) { puts(SCRIPTC_IMPLICIT_RACE); return 0; }\n',
+        );
+        await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "one"\n');
+        process.env["SCRIPTC_CACHE_DIR"] = cacheRoot;
+        process.env["SCRIPTC_TEST_DISABLE_CCACHE"] = "1";
+        process.env["SCRIPTC_TEST_REAL_CLANG"] = realClang!;
+        process.env["SCRIPTC_TEST_IMPLICIT_HEADER"] = header;
+        process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"] = signal;
+        process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"] = release;
+        process.env["PATH"] = `${binDir}${delimiter}${oldPath ?? ""}`;
+        trustInstrumentedCompilerWrapper();
+        delete process.env["SCRIPTC_NO_CACHE"];
+
+        const firstOut = join(dir, "first");
+        firstBuild = compileC({ cPath, outPath: firstOut, cacheIdentity: TEST_CACHE_IDENTITY });
+        await Promise.race([
+          waitForSignal(),
+          firstBuild.then(() => {
+            throw new Error("compile completed without reaching the final-build barrier");
+          }),
+        ]);
+        await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "two"\n');
+        await writeFile(release, "go");
+        await firstBuild;
+        expect(execFileSync(firstOut, { encoding: "utf8" }).trim()).toBe("two");
+
+        // The first executable was compiled from `two` after its key captured
+        // `one`, so it must not be published. Restoring `one` must rebuild it.
+        await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "one"\n');
+        const secondOut = join(dir, "second");
+        await compileC({ cPath, outPath: secondOut, cacheIdentity: TEST_CACHE_IDENTITY });
+        expect(execFileSync(secondOut, { encoding: "utf8" }).trim()).toBe("one");
+        expect(await completeArtifacts(cacheRoot, "bin")).toHaveLength(1);
+      } finally {
+        await writeFile(release, "go");
+        await firstBuild?.catch(() => undefined);
+        if (oldCacheDir === undefined) delete process.env["SCRIPTC_CACHE_DIR"];
+        else process.env["SCRIPTC_CACHE_DIR"] = oldCacheDir;
+        if (oldNoCache === undefined) delete process.env["SCRIPTC_NO_CACHE"];
+        else process.env["SCRIPTC_NO_CACHE"] = oldNoCache;
+        if (oldDisableCcache === undefined) delete process.env["SCRIPTC_TEST_DISABLE_CCACHE"];
+        else process.env["SCRIPTC_TEST_DISABLE_CCACHE"] = oldDisableCcache;
+        if (oldPath === undefined) delete process.env["PATH"];
+        else process.env["PATH"] = oldPath;
+        if (oldRealClang === undefined) delete process.env["SCRIPTC_TEST_REAL_CLANG"];
+        else process.env["SCRIPTC_TEST_REAL_CLANG"] = oldRealClang;
+        if (oldImplicitHeader === undefined) delete process.env["SCRIPTC_TEST_IMPLICIT_HEADER"];
+        else process.env["SCRIPTC_TEST_IMPLICIT_HEADER"] = oldImplicitHeader;
+        if (oldRaceSignal === undefined) delete process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"];
+        else process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"] = oldRaceSignal;
+        if (oldRaceRelease === undefined) delete process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"];
+        else process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"] = oldRaceRelease;
       }
-    };
-
-    try {
-      await mkdir(binDir);
-      const wrapper = join(binDir, "clang");
-      await writeFile(
-        wrapper,
-        `#!/bin/sh
-for arg in "$@"; do
-  case "$arg" in
-    */scriptc-cache-build-*/program.c|*/scriptc-cache-build-*/program.ll)
-      if [ ! -e "$SCRIPTC_TEST_FINAL_RACE_SIGNAL" ]; then
-        : > "$SCRIPTC_TEST_FINAL_RACE_SIGNAL"
-        while [ ! -e "$SCRIPTC_TEST_FINAL_RACE_RELEASE" ]; do sleep 0.01; done
-      fi
-      break
-      ;;
-  esac
-done
-exec "$SCRIPTC_TEST_REAL_CLANG" -include "$SCRIPTC_TEST_IMPLICIT_HEADER" "$@"
-`,
-      );
-      await chmod(wrapper, 0o755);
-      await writeFile(
-        cPath,
-        '#include <stdio.h>\nint main(void) { puts(SCRIPTC_IMPLICIT_RACE); return 0; }\n',
-      );
-      await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "one"\n');
-      process.env["SCRIPTC_CACHE_DIR"] = cacheRoot;
-      process.env["SCRIPTC_TEST_DISABLE_CCACHE"] = "1";
-      process.env["SCRIPTC_TEST_REAL_CLANG"] = realClang!;
-      process.env["SCRIPTC_TEST_IMPLICIT_HEADER"] = header;
-      process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"] = signal;
-      process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"] = release;
-      process.env["PATH"] = `${binDir}${delimiter}${oldPath ?? ""}`;
-      trustInstrumentedCompilerWrapper();
-      delete process.env["SCRIPTC_NO_CACHE"];
-
-      const firstOut = join(dir, "first");
-      const firstBuild = compileC({
-        cPath,
-        outPath: firstOut,
-        cacheIdentity: TEST_CACHE_IDENTITY,
-      });
-      await Promise.race([
-        waitForSignal(),
-        firstBuild.then(() => {
-          throw new Error("compile completed without reaching the final-build barrier");
-        }),
-      ]);
-      await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "two"\n');
-      await writeFile(release, "go");
-      await firstBuild;
-      expect(execFileSync(firstOut, { encoding: "utf8" }).trim()).toBe("two");
-
-      // The first executable was compiled from `two` after its key captured
-      // `one`, so it must not be published. Restoring `one` must rebuild it.
-      await writeFile(header, '#define SCRIPTC_IMPLICIT_RACE "one"\n');
-      const secondOut = join(dir, "second");
-      await compileC({ cPath, outPath: secondOut, cacheIdentity: TEST_CACHE_IDENTITY });
-      expect(execFileSync(secondOut, { encoding: "utf8" }).trim()).toBe("one");
-      expect(await completeArtifacts(cacheRoot, "bin")).toHaveLength(1);
-    } finally {
-      if (oldCacheDir === undefined) delete process.env["SCRIPTC_CACHE_DIR"];
-      else process.env["SCRIPTC_CACHE_DIR"] = oldCacheDir;
-      if (oldNoCache === undefined) delete process.env["SCRIPTC_NO_CACHE"];
-      else process.env["SCRIPTC_NO_CACHE"] = oldNoCache;
-      if (oldDisableCcache === undefined) delete process.env["SCRIPTC_TEST_DISABLE_CCACHE"];
-      else process.env["SCRIPTC_TEST_DISABLE_CCACHE"] = oldDisableCcache;
-      if (oldPath === undefined) delete process.env["PATH"];
-      else process.env["PATH"] = oldPath;
-      if (oldRealClang === undefined) delete process.env["SCRIPTC_TEST_REAL_CLANG"];
-      else process.env["SCRIPTC_TEST_REAL_CLANG"] = oldRealClang;
-      if (oldImplicitHeader === undefined) delete process.env["SCRIPTC_TEST_IMPLICIT_HEADER"];
-      else process.env["SCRIPTC_TEST_IMPLICIT_HEADER"] = oldImplicitHeader;
-      if (oldRaceSignal === undefined) delete process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"];
-      else process.env["SCRIPTC_TEST_FINAL_RACE_SIGNAL"] = oldRaceSignal;
-      if (oldRaceRelease === undefined) delete process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"];
-      else process.env["SCRIPTC_TEST_FINAL_RACE_RELEASE"] = oldRaceRelease;
-    }
+    })();
+    // Timeout/cancellation must release and drain the build before the next test.
+    context.onTestFinished(() => work.catch(() => undefined));
+    await work;
   },
 );
 

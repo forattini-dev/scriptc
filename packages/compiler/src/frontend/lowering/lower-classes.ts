@@ -1,3 +1,4 @@
+import { lowerDateNew } from "./lower-date-constructor.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Class lowering: shape collection over the single-inheritance graph
  * (fields, methods, accessors, overrides), constructor/member lowering with
@@ -6,7 +7,7 @@ import { InternalCompilerError } from "../../errors.js";
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DATE_T, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
@@ -27,8 +28,8 @@ import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUn
 import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 import { classExpressionRunsOnceInEsbuildInitializer } from "./esbuild-once.js";
 import { errorWithCause } from "./lower-error-message.js";
-import { exactClassOfReceiver } from "./lower-class-bindings.js";
-export { exactClassOfReceiver } from "./lower-class-bindings.js";
+import { exactClassOfReceiver, exactInstanceClassOf } from "./lower-class-bindings.js";
+export { exactClassOfReceiver, exactInstanceClassOf, probeExactInstanceClassOf } from "./lower-class-bindings.js";
 
 export interface ClassInfo {
   def: IrClassDef;
@@ -3309,72 +3310,6 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     );
   }
 
-/** The receiver's EXACT runtime class, when the expression proves it: a
-   * `new C(...)` expression directly, or a const binding initialized with
-   * one (the binding can never be reassigned to a subclass instance).
-   * The class is read off the mapped INITIALIZER type — a `const b: Base =
-   * new D()` receiver is exactly D, not its annotation. Distinct from
-   * exactClassOfReceiver, which answers for CLASS-VALUE receivers. */
-  export function exactInstanceClassOf(L: Lowerer, expr: ts.Expression): ClassInfo | null {
-    let e: ts.Expression = expr;
-    while (ts.isParenthesizedExpression(e)) e = e.expression;
-    const classOfNew = (n: ts.Expression): ClassInfo | null => {
-      if (!ts.isNewExpression(n)) return null;
-      const exact = exactClassOfReceiver(L, n.expression);
-      // Ordinary and once-created class values name their concrete runtime
-      // class more precisely than the checker result (an Error subclass can
-      // otherwise widen to Error). A generic constructor names only its
-      // family, so defer that one case to the constructed instance below.
-      if (exact && !exact.generic) return exact;
-      // The constructed value's type is more precise than the constructor
-      // value for generic classes: `new Box(1)` maps to the concrete
-      // `Box<number>` instance, while the callee itself names only the
-      // generic family. Keep that instance-first rule; the constructor
-      // probes below are fallbacks for once-created/optional class values
-      // whose checker result has no independently mappable instance type.
-      const constructed = L.mapTypeOf(L.typeOf(n));
-      if (constructed?.kind === "object") {
-        const info = L.classes.get(constructed.className);
-        if (info) return info;
-      }
-      if (exact) return exact;
-      if (ts.isIdentifier(n.expression)) {
-        // This helper is a read-only inference probe and also runs during
-        // collectGlobals, before any function context exists. peekLocal is
-        // phase-safe and avoids mutating capture state when called later
-        // from expression/member lowering.
-        const stored = (L.peekLocal(n.expression) ?? L.globalOf(n.expression))?.type;
-        if (stored?.kind === "union") {
-          const arms = L.unions.get(stored.unionId)?.arms ?? [];
-          const classArms = arms.filter((arm) => arm.kind === "classval");
-          const classArm = classArms[0];
-          if (
-            classArms.length === 1 && classArm !== undefined &&
-            arms.every((arm) => arm.kind === "classval" || isUnitType(arm))
-          ) {
-            return L.classes.get(classArm.className) ?? null;
-          }
-        }
-      }
-      return null;
-    };
-    const direct = classOfNew(e);
-    if (direct) return direct;
-    if (!ts.isIdentifier(e)) return null;
-    const symbol = L.resolveValueSymbol(e);
-    const decl = symbol ? L.checker.valueDeclarationOf(symbol) : undefined;
-    if (
-      !decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
-      !ts.isVariableDeclarationList(decl.parent) ||
-      (decl.parent.flags & ts.NodeFlags.Const) === 0
-    ) {
-      return null;
-    }
-    let init: ts.Expression = decl.initializer;
-    while (ts.isParenthesizedExpression(init)) init = init.expression;
-    return classOfNew(init);
-  }
-
 /** `const r: Repo = new MemRepo()` where EVERY member of the annotation's
    * checker type is a generic-callable method (`interface Repo { get<T>(id:
    * string): T }`): the record shape maps EMPTY — generic members are
@@ -4841,39 +4776,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (symbol && symbol.name === "URLSearchParams" && L.isStdlibSymbol(symbol)) {
         return lowerSearchParamsNew(L, expr, loc);
       }
-      // Date's read-only value slice: store the constructor's TimeClip'd
-      // epoch milliseconds as the scalar date kind. That is sufficient
-      // for every getter and toISOString; identity and setters stay
-      // fenced, so copying the scalar cannot create an observable lie.
       if (symbol && symbol.name === "Date" && L.isStdlibSymbol(symbol)) {
-        const args = expr.arguments ?? [];
-        if (args.some(ts.isSpreadElement) || args.length > 1) {
-          L.noLowering(
-            `new Date with ${args.length} arguments`,
-            expr,
-            "new Date(), new Date(milliseconds), and new Date(dateString) are supported; the local-time year/month field constructor has no lowering",
-            symbol,
-          );
-        }
-        if (args.length === 0) {
-          return { kind: "libCall", fn: "date.newNow", args: [], type: DATE_T, loc };
-        }
-        const arg = L.lowerExpr(args[0]!);
-        if (arg.type.kind === "f64") {
-          return { kind: "libCall", fn: "date.newMs", args: [arg], type: DATE_T, loc };
-        }
-        if (arg.type.kind === "string") {
-          return { kind: "libCall", fn: "date.newString", args: [arg], type: DATE_T, loc };
-        }
-        if (arg.type.kind === "date") {
-          return arg;
-        }
-        L.noLowering(
-          `new Date of '${L.fmt(arg.type)}' values`,
-          args[0]!,
-          "pass milliseconds, a date string, or another Date value",
-          symbol,
-        );
+        return lowerDateNew(L, expr);
       }
       // `new StringDecoder(encoding?)` (node:string_decoder): the decoder
       // is a two-field record — the CANONICAL encoding name (aliases fold

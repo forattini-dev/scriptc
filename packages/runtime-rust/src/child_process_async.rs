@@ -94,17 +94,17 @@ fn detached_launcher() -> Option<&'static str> {
 fn detached_program(command: &JsString, cwd: &JsString) -> std::io::Result<std::path::PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
-    let command_path = std::path::Path::new(command.as_ref());
+    let command_path = std::path::Path::new(command.to_utf8_lossy());
     let candidates: Vec<std::path::PathBuf> = if command_path.components().count() > 1 {
         let candidate = if command_path.is_absolute() || cwd.is_empty() {
             command_path.to_path_buf()
         } else {
-            std::path::Path::new(cwd.as_ref()).join(command_path)
+            std::path::Path::new(cwd.to_utf8_lossy()).join(command_path)
         };
         vec![candidate]
     } else {
         let path = process_env_get(&string("PATH")).unwrap_or_else(|| string("/bin:/usr/bin"));
-        std::env::split_paths(std::ffi::OsStr::new(path.as_ref()))
+        std::env::split_paths(std::ffi::OsStr::new(path.to_utf8_lossy()))
             .map(|directory| directory.join(command_path))
             .collect()
     };
@@ -139,7 +139,7 @@ fn child_command(
         let mut child_command = Command::new(launcher);
         child_command.arg(program);
         arguments.with(|arguments| {
-            child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+            child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
         });
         return Ok(child_command);
     }
@@ -149,9 +149,9 @@ fn child_command(
         let _ = cwd;
     }
 
-    let mut child_command = Command::new(command.as_ref());
+    let mut child_command = Command::new(command.to_utf8_lossy());
     arguments.with(|arguments| {
-        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+        child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
     });
     #[cfg(unix)]
     if detached {
@@ -284,15 +284,15 @@ pub fn child_spawn_options(
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.as_chunks::<2>().0 {
-                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            for pair in pairs.elements().as_chunks::<2>().0 {
+                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
             }
         });
     } else {
         process_env_apply(&mut child_command);
     }
     if !cwd.is_empty() {
-        child_command.current_dir(cwd.as_ref());
+        child_command.current_dir(cwd.to_utf8_lossy());
     }
     child_command.stdin(match stdin_mode {
         1 => Stdio::inherit(),

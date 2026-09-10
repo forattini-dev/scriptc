@@ -1,3 +1,6 @@
+import { discriminatedViewSupported, lowerDiscriminatedView } from "./lower-discriminated-view.js";
+import { jsArrayInferenceBinding, jsArrayInferenceExpression } from "../js-array-field-types.js";
+import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import { fsConstantValue } from "./fs-constants.js";
 import { InternalCompilerError } from "../../errors.js";
 import { isNpmStaticTypeFile } from "../npm-static-types.js";
@@ -144,6 +147,7 @@ export type WidthLift =
   | { how: "clsWidth" }
   | { how: "narrow" }
   | { how: "dynIn" }
+  | { how: "dynView" }
   | { how: "upcast" }
   | { how: "funcAdapt" };
 
@@ -682,7 +686,7 @@ export function uncheckedOverloadHandleCall(L: Lowerer, expr: ts.Expression | un
  * `never` at the ROOT stays out (`for (const v of [])`'s loop var — the
  * dead read the f64 mapping is FOR). */
 export function neverTaintedJsType(L: Lowerer, node: ts.Node, t: ts.Type): boolean {
-  if (!isJsSourceFile(node.getSourceFile())) return false;
+  if (!isJsSourceFile(node.getSourceFile())) return jsArrayInferenceExpression(node, L.checker);
   const walk = (x: ts.Type, depth: number): boolean => {
     if (depth === 0) return false;
     if (x.isUnionType()) return ts.constituentTypes(x).some((a) => walk(a, depth - 1));
@@ -3688,9 +3692,8 @@ export class Lowerer {
 
   irTypeOf(node: ts.Node): IrType {
     const t = this.typeOf(node);
-    // A never-tainted JS type (neverTaintedJsType) maps — never rides as
-    // f64 — but must not: pre-empt the mapping so the JS fallback below
-    // answers instead.
+    // Inferred JS array residues must not invent a numeric or unit-only ABI.
+    if (jsArrayInferenceBinding(node, this.checker)) return DYN;
     const mapped = neverTaintedJsType(this, node, t) ? null : this.mapTypeOf(t);
     if (!mapped) {
       // The checked-dynamic declaration fallback (dynFallbackType): a
@@ -3833,15 +3836,12 @@ export class Lowerer {
     return def ? def.arms.findIndex((a) => typeEquals(a, arm)) : -1;
   }
 
-  /** Implicit union construction. Wherever a value flows into a typed slot
-   * (initializer, assignment, call argument, return, field write, record
-   * literal field, ternary arm) whose expected type is a union and the
-   * value's type is one of its arms, wrap it in a `unionWrap` carrying the
-   * arm's canonical tag. Same-union values pass through untouched; anything
-   * else (including a DIFFERENT union) is left for requireExactShape, which
-   * rejects union mismatches with SC2003. */
+  /** Coerce typed slots with checked shared views, canonical union wraps
+   * and structural adapters; incompatible pairs keep their shape fences. */
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
     rejectNativeImportCopy(this, expr, expected);
+    const sharedUnion = lowerDiscriminatedView(this, expr, expected);
+    if (sharedUnion) return sharedUnion;
     // Island boundary, both directions. IN: any static value flowing into
     // an any-typed slot marshals implicitly (tsc allows the assignment;
     // the marshal is where its semantics live). OUT: an 'any' value
@@ -3998,15 +3998,14 @@ export class Lowerer {
           false);
       const bytesOk = expected.kind === "bytes" && expected.elem === "u8";
       const errorOk = expected.kind === "object" && expected.className === "%Error";
-      // ADAPTABLE function targets (the checked-dynamic function
-      // boundary's OUT direction — `const wrapped: F = mustCall(fn)`):
-      // check callable-kind, then unwrap an identical boxed signature
-      // directly or adapt through a per-target shim that dynChecks
-      // arguments/results per F.
-      const funcOk =
-        expected.kind === "func" &&
-        canAdaptDynFuncTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
-      if (this.jsonSafe(expected) || undefArmedOk || bytesOk || errorOk || funcOk) {
+      // Callable slots validate the function and adapt its signature.
+      // Shared native records validate members while retaining their map.
+      // Composite method signatures stay fenced until parameter and result
+      // representations can preserve their aliases across the boundary.
+      const callableOrRecordOk =
+        (expected.kind === "func" && canAdaptDynFuncTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) ||
+        nativeRecordCheckSupported(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+      if (this.jsonSafe(expected) || undefArmedOk || bytesOk || errorOk || callableOrRecordOk) {
         return { kind: "dynCheck", value: expr, type: expected, loc: expr.loc };
       }
       return expr;
@@ -4355,9 +4354,7 @@ export class Lowerer {
    * Null when the pair isn't in the relation — callers keep their fences. */
   widthLiftPlan(src: IrType, dst: IrType): WidthLift | null {
     if (typeEquals(src, dst)) return { how: "copy" };
-    // An 'unknown' (dyn) DESTINATION slot: the static→dyn conversion —
-    // dynFrom, a DEEP COPY (`{ v: 5 }` into `{ v: unknown }`, `number[]`
-    // into `unknown[]` — tsc's top type over the width family's copies).
+    if (discriminatedViewSupported(this, src, dst)) return { how: "dynView" };
     if (dst.kind === "dyn" && src.kind !== "dyn" && this.dynConvertible(src)) {
       return { how: "dynIn" };
     }
@@ -4530,6 +4527,7 @@ export class Lowerer {
         if (!helper) throw new InternalCompilerError("lowerer bug: planned narrow lift failed to intern");
         return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
+      case "dynView": return { kind: "dynCheck", value: { kind: "dynFrom", value, type: DYN, loc }, type: dst, loc };
       case "dynIn": {
         if (dst.kind !== "dyn") throw new InternalCompilerError("lowerer bug: dynIn lift against a non-dyn slot");
         return { kind: "dynFrom", value, type: DYN, loc };
@@ -7010,8 +7008,8 @@ export class Lowerer {
     if (!def || !def.arms.some((a) => a.kind === "undefinedT")) return t;
     const rest = def.arms.filter((a) => a.kind !== "undefinedT");
     if (rest.length === 1) return rest[0]!;
-    // Removing an arm keeps canonical (typeKey-sorted) order.
-    return { kind: "union", unionId: this.unions.intern(rest) };
+
+    return { kind: "union", unionId: this.unions.intern(rest, def.discriminant) };
   }
 
   /** The interned `T | undefined` union over a non-union arm type — the ABI

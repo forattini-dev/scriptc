@@ -48,7 +48,7 @@ function tlsOptionsValidation(
   for (const [key, label] of [["minVersion", "minimum"], ["maxVersion", "maximum"]] as const) {
     const value = context.nextTemporary();
     const rendered = context.nextTemporary();
-    checks.push(`let ${value} = ${optionValue(options, key, dyn)}; if !matches!(&${value}, ${dyn}::Undefined) { let sc_valid = matches!(&${value}, ${dyn}::String(sc_text) if matches!(sc_text.as_ref(), "TLSv1" | "TLSv1.1" | "TLSv1.2" | "TLSv1.3")); if !sc_valid { let ${rendered} = match &${value} { ${dyn}::String(sc_text) => runtime::json_stringify(sc_text).to_string(), sc_value => runtime::ParseArgsValue::parse_args_inspect_lite(sc_value), }; runtime::throw_type_error_code(format!("{${rendered}} is not a valid ${label} TLS protocol version"), "ERR_TLS_INVALID_PROTOCOL_VERSION"); } }`);
+    checks.push(`let ${value} = ${optionValue(options, key, dyn)}; if !matches!(&${value}, ${dyn}::Undefined) { let sc_valid = matches!(&${value}, ${dyn}::String(sc_text) if matches!(sc_text.to_utf8_lossy(), "TLSv1" | "TLSv1.1" | "TLSv1.2" | "TLSv1.3")); if !sc_valid { let ${rendered} = match &${value} { ${dyn}::String(sc_text) => runtime::json_stringify(sc_text).to_string(), sc_value => runtime::ParseArgsValue::parse_args_inspect_lite(sc_value), }; runtime::throw_type_error_code(format!("{${rendered}} is not a valid ${label} TLS protocol version"), "ERR_TLS_INVALID_PROTOCOL_VERSION"); } }`);
   }
   for (const key of ["handshakeTimeout", "keepAliveInitialDelay"] as const) {
     const value = context.nextTemporary();
@@ -284,7 +284,7 @@ export function emitRustTlsCall(
     const value = context.nextTemporary();
     const fence = context.nextTemporary();
     const dyn = context.dynTypeName();
-    return `{ let ${value} = ${context.emitExpr(arg)}; let ${fence} = ${context.emitExpr(expr.args[1])}; match &${value} { ${dyn}::String(sc_type) if matches!(sc_type.as_ref(), "default" | "system" | "bundled" | "extra") => runtime::throw_error_code(${fence}.to_string(), "SC2020"), ${dyn}::String(..) => sc_dyn_arg_value_fail("type", "is invalid", &${value}), sc_type => sc_dyn_arg_type_fail("type", "of type string", sc_type), } }`;
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${fence} = ${context.emitExpr(expr.args[1])}; match &${value} { ${dyn}::String(sc_type) if matches!(sc_type.to_utf8_lossy(), "default" | "system" | "bundled" | "extra") => runtime::throw_error_code(${fence}.to_string(), "SC2020"), ${dyn}::String(..) => sc_dyn_arg_value_fail("type", "is invalid", &${value}), sc_type => sc_dyn_arg_type_fail("type", "of type string", sc_type), } }`;
   }
   if ((expr.fn === "tls.connect" || expr.fn === "tls.connectCb") &&
       (expr.args.length === 3 || expr.args.length === 4)) {

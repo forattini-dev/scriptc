@@ -25,6 +25,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
   context.line("match value {");
   context.pushIndent();
+  if (context.hasEmbeddedModules()) context.line(`${name}::Island(value) => return sc_dyn_island_object_walk(value, mode),`);
   context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
   context.line(`${name}::Object(object) => for (key, field) in runtime::map_string_entries_js_order(object) { let field = if mode != 0 && runtime::map_is_module_namespace(object) { sc_dyn_object_key_get(object, &key, value) } else { field }; sc_dyn_obj_walk_push(&output, mode, key, field); },`);
   context.line(`${name}::Array(array) => {`);

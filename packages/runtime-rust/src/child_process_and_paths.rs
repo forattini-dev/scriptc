@@ -72,7 +72,7 @@ fn run_sync_child(
 }
 
 fn is_self_reexec(command: &JsString, arguments: &JsArray<JsString>) -> bool {
-    let Some(first) = arguments.with(|arguments| arguments.elements.first().cloned()) else {
+    let Some(first) = arguments.with(|arguments| arguments.elements().first().cloned()) else {
         return false;
     };
     let Ok(executable) = std::env::current_exe() else {
@@ -80,7 +80,7 @@ fn is_self_reexec(command: &JsString, arguments: &JsArray<JsString>) -> bool {
     };
     let resolve = |path: &str| std::fs::canonicalize(path).unwrap_or_else(|_| path.into());
     let executable = resolve(executable.to_string_lossy().as_ref());
-    resolve(command.as_ref()) == executable && resolve(first.as_ref()) == executable
+    resolve(command) == executable && resolve(first.as_ref()) == executable
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -100,18 +100,18 @@ pub fn child_exec_sync(
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let mut child_command = Command::new(command.as_ref());
+    let mut child_command = Command::new(command.to_utf8_lossy());
     arguments.with(|arguments| {
-        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+        child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
     });
     if !cwd.is_empty() {
-        child_command.current_dir(cwd.as_ref());
+        child_command.current_dir(cwd.to_utf8_lossy());
     }
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.as_chunks::<2>().0 {
-                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            for pair in pairs.elements().as_chunks::<2>().0 {
+                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
             }
         });
     } else {
@@ -175,7 +175,7 @@ pub fn child_exec_sync(
         let display = if shell {
             arguments.with(|arguments| {
                 arguments
-                    .elements
+                    .elements()
                     .get(1)
                     .cloned()
                     .unwrap_or_else(|| command.clone())
@@ -183,12 +183,12 @@ pub fn child_exec_sync(
         } else {
             let mut display = command.to_string();
             arguments.with(|arguments| {
-                for argument in &arguments.elements {
+                for argument in arguments.elements().iter() {
                     display.push(' ');
                     display.push_str(argument);
                 }
             });
-            Rc::from(display)
+            JsString::from(display)
         };
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = if stderr.is_empty() {
@@ -205,7 +205,7 @@ pub fn child_exec_sync(
             dom: None,
         });
     }
-    Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())
+    JsString::from(String::from_utf8_lossy(&output.stdout).as_ref())
 }
 
 pub fn child_exec_capture(
@@ -218,18 +218,18 @@ pub fn child_exec_capture(
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
-    let mut child_command = Command::new(command.as_ref());
+    let mut child_command = Command::new(command.to_utf8_lossy());
     arguments.with(|arguments| {
-        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+        child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
     });
     if !cwd.is_empty() {
-        child_command.current_dir(cwd.as_ref());
+        child_command.current_dir(cwd.to_utf8_lossy());
     }
     if has_env {
         child_command.env_clear();
         env_pairs.with(|pairs| {
-            for pair in pairs.elements.as_chunks::<2>().0 {
-                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            for pair in pairs.elements().as_chunks::<2>().0 {
+                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
             }
         });
     } else {
@@ -253,7 +253,7 @@ pub fn child_exec_capture(
     if output.timed_out || !output.status.success() {
         let mut display = command.to_string();
         arguments.with(|arguments| {
-            for argument in &arguments.elements {
+            for argument in arguments.elements().iter() {
                 display.push(' ');
                 display.push_str(argument);
             }
@@ -273,8 +273,8 @@ pub fn child_exec_capture(
     Gc::new(SpawnResultData {
         status: Some(0.0),
         signal: None,
-        stdout: Rc::from(String::from_utf8_lossy(&output.stdout).as_ref()),
-        stderr: Rc::from(String::from_utf8_lossy(&output.stderr).as_ref()),
+        stdout: JsString::from(String::from_utf8_lossy(&output.stdout).as_ref()),
+        stderr: JsString::from(String::from_utf8_lossy(&output.stderr).as_ref()),
         error: None,
     })
 }
@@ -336,15 +336,15 @@ fn child_spawn_sync_core(
 ) -> JsSpawnResult {
     use std::process::{Command, Stdio};
 
-    let mut child_command = Command::new(command.as_ref());
+    let mut child_command = Command::new(command.to_utf8_lossy());
     if !cwd.is_empty() {
-        child_command.current_dir(cwd.as_ref());
+        child_command.current_dir(cwd.to_utf8_lossy());
     }
     if let Some(pairs) = env_pairs {
         child_command.env_clear();
         pairs.with(|pairs| {
-            for pair in pairs.elements.as_chunks::<2>().0 {
-                child_command.env(pair[0].as_ref(), pair[1].as_ref());
+            for pair in pairs.elements().as_chunks::<2>().0 {
+                child_command.env(pair[0].to_utf8_lossy(), pair[1].to_utf8_lossy());
             }
         });
     } else {
@@ -354,7 +354,7 @@ fn child_spawn_sync_core(
         child_command.arg(SELF_REEXEC_MARKER);
     }
     arguments.with(|arguments| {
-        child_command.args(arguments.elements.iter().map(|value| value.as_ref()));
+        child_command.args(arguments.elements().iter().map(|value| value.to_utf8_lossy()));
     });
     child_command.stdin(if to_int32(stdin_mode) == 2 {
         Stdio::inherit()
@@ -407,8 +407,8 @@ fn child_spawn_sync_core(
                     output.status.code().map(f64::from)
                 },
                 signal,
-                stdout: Rc::from(String::from_utf8_lossy(&output.stdout).as_ref()),
-                stderr: Rc::from(String::from_utf8_lossy(&output.stderr).as_ref()),
+                stdout: JsString::from(String::from_utf8_lossy(&output.stdout).as_ref()),
+                stderr: JsString::from(String::from_utf8_lossy(&output.stderr).as_ref()),
                 error: output.timed_out.then(|| JsError {
                     identity: Rc::new(()),
                     name: "Error".to_owned(),
@@ -502,7 +502,7 @@ pub fn child_spawn_sync_stdio(
     kill_signal: &JsString,
     stdio: &JsString,
 ) -> JsSpawnResult {
-    let (stdin_mode, stdout_mode, stderr_mode) = match stdio.as_ref() {
+    let (stdin_mode, stdout_mode, stderr_mode) = match stdio.to_utf8_lossy() {
         "pipe" => (0.0, 0.0, 0.0),
         "ignore" => (0.0, 1.0, 1.0),
         "inherit" => (2.0, 2.0, 2.0),
@@ -585,9 +585,9 @@ fn stats_platform_fields(_metadata: &std::fs::Metadata) -> (f64, f64) {
 
 pub fn fs_stat(path: &JsString, follow: bool) -> JsStats {
     let result = if follow {
-        std::fs::metadata(path.as_ref())
+        std::fs::metadata(path.to_utf8_lossy())
     } else {
-        std::fs::symlink_metadata(path.as_ref())
+        std::fs::symlink_metadata(path.to_utf8_lossy())
     };
     let metadata = match result {
         Ok(metadata) => metadata,
@@ -694,24 +694,24 @@ fn normalize_posix(path: &str) -> String {
 }
 
 pub fn path_normalize(path: &JsString) -> JsString {
-    Rc::from(normalize_posix(path))
+    JsString::from(normalize_posix(path))
 }
 
 pub fn path_join(parts: &JsArray<JsString>) -> JsString {
     let joined = parts.with(|data| {
-        data.elements
+        data.elements()
             .iter()
             .filter(|part| !part.is_empty())
-            .map(|part| part.as_ref())
+            .map(|part| part.to_utf8_lossy())
             .collect::<Vec<_>>()
             .join("/")
     });
-    Rc::from(normalize_posix(&joined))
+    JsString::from(normalize_posix(&joined))
 }
 
 pub fn path_resolve(parts: &JsArray<JsString>) -> JsString {
     let mut inputs = parts.with(|data| {
-        data.elements
+        data.elements()
             .iter()
             .map(|part| part.to_string())
             .collect::<Vec<_>>()
@@ -735,7 +735,7 @@ pub fn path_resolve(parts: &JsArray<JsString>) -> JsString {
     if normalized.len() > 1 {
         normalized.truncate(normalized.trim_end_matches('/').len());
     }
-    Rc::from(if normalized.starts_with('/') {
+    JsString::from(if normalized.starts_with('/') {
         normalized
     } else {
         format!("/{normalized}")
@@ -767,20 +767,20 @@ pub fn path_dirname(path: &JsString) -> JsString {
     match end {
         None => string(if root { "/" } else { "." }),
         Some(1) if root => string("//"),
-        Some(end) => Rc::from(&path[..end]),
+        Some(end) => JsString::from(&path[..end]),
     }
 }
 
 pub fn path_basename(path: &JsString, suffix: &JsString) -> JsString {
     let trimmed = path.trim_end_matches('/');
-    if !suffix.is_empty() && trimmed == suffix.as_ref() {
+    if !suffix.is_empty() && trimmed == suffix {
         return empty_string();
     }
     let mut basename = trimmed.rsplit('/').next().unwrap_or("");
-    if !suffix.is_empty() && suffix.len() < basename.len() && basename.ends_with(suffix.as_ref()) {
+    if !suffix.is_empty() && suffix.len() < basename.len() && basename.ends_with(suffix.to_utf8_lossy()) {
         basename = &basename[..basename.len() - suffix.len()];
     }
-    Rc::from(basename)
+    JsString::from(basename)
 }
 
 pub fn path_extname(path: &JsString) -> JsString {
@@ -791,7 +791,7 @@ pub fn path_extname(path: &JsString) -> JsString {
     if dot == 0 || basename == ".." {
         return empty_string();
     }
-    Rc::from(&basename[dot..])
+    JsString::from(&basename[dot..])
 }
 
 pub fn path_relative(from: &JsString, to: &JsString) -> JsString {
@@ -812,5 +812,5 @@ pub fn path_relative(from: &JsString, to: &JsString) -> JsString {
         .count();
     let mut result = vec![".."; from_parts.len() - common];
     result.extend(to_parts[common..].iter().copied());
-    Rc::from(result.join("/"))
+    JsString::from(result.join("/"))
 }

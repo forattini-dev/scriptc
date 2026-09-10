@@ -1,3 +1,5 @@
+import { emitProtectedAsyncResult } from "./async-result.js";
+import { emitAsyncNativeArrayLiteral } from "./async-native-array.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { mangleLocal } from "../mangle.js";
@@ -103,6 +105,7 @@ export interface RustAsyncControlContext {
 
 export class RustAsyncControlEmitter {
   private loopControl: RustAsyncLoopControl | null = null;
+  private insideProtectedSegment = false;
 
   constructor(readonly context: RustAsyncControlContext) {}
 
@@ -615,7 +618,7 @@ export class RustAsyncControlEmitter {
     this.context.line(`let ${segment} = runtime::promise_try_segment::<${this.context.rustType(fn.returnType, loc)}, _>(|| {`);
     this.context.pushIndent();
     let terminal: "await" | "return" | null = null;
-    this.withAsyncLocals(new Set(this.context.currentAsyncLocals() ?? []), () => {
+    this.withProtectedSegment(true, () => this.withAsyncLocals(new Set(this.context.currentAsyncLocals() ?? []), () => {
       for (let index = 0; index < statements.length; index += 1) {
         const current = statements[index];
         if (current === undefined) break;
@@ -765,7 +768,7 @@ export class RustAsyncControlEmitter {
         }
         if (current.kind === "varDecl") this.context.currentAsyncLocals()?.add(current.localId);
       }
-    });
+    }));
     if (terminal === null) this.context.line("runtime::AsyncCompletion::Fallthrough");
     this.context.popIndent();
     this.context.line("});");
@@ -860,12 +863,12 @@ export class RustAsyncControlEmitter {
     this.context.pushIndent();
     this.context.line(`Ok(${value}) => {`);
     this.context.pushIndent();
-    this.withAsyncLocals(new Set(continuationLocals), () => consume(value));
+    this.withProtectedSegment(false, () => this.withAsyncLocals(new Set(continuationLocals), () => consume(value)));
     this.context.popIndent();
     this.context.line("},");
     this.context.line("Err(reason) => {");
     this.context.pushIndent();
-    this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown("reason"));
+    this.withProtectedSegment(false, () => this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown("reason")));
     this.context.popIndent();
     this.context.line("},");
     this.context.popIndent();
@@ -882,9 +885,17 @@ export class RustAsyncControlEmitter {
     handlers: RustAsyncHandlers,
     consume: (value: string) => void,
   ): void {
+    const complete = consume;
+    consume = (value) => emitProtectedAsyncResult(this.context, value,
+      this.insideProtectedSegment ? null : (reason) => this.withAsyncLocals(new Set(exitLocals), () => handlers.thrown(reason)), complete);
     const awaited = this.awaitExpression(expr);
     if (awaited !== null) {
       this.emitAsyncProtectedContinuation(this.emitAwaitDependency(awaited), exitLocals, handlers, consume);
+      return;
+    }
+    if (expr.kind === "dynFrom" && expr.value.kind === "arrayLit" && this.containsAsyncSuspension(expr.value)) {
+      emitAsyncNativeArrayLiteral(expr.value, this.context,
+        (value, next) => this.emitAsyncProtectedValue(value, exitLocals, handlers, next), consume);
       return;
     }
     if (expr.kind === "unionWrap" && this.containsAsyncSuspension(expr.value)) {
@@ -991,9 +1002,7 @@ export class RustAsyncControlEmitter {
     if (this.containsAsyncSuspension(expr)) {
       this.context.unsupported("nested async value inside a Rust protected segment", expr.loc);
     }
-    const value = this.context.nextName("sc_async_value");
-    this.context.line(`let ${value} = ${this.context.emitExpr(expr)};`);
-    consume(value);
+    consume(this.context.emitExpr(expr));
   }
 
   emitAsyncProtectedForOf(
@@ -1026,31 +1035,11 @@ export class RustAsyncControlEmitter {
       this.emitAsyncProtectedSequence(remaining, exitLocals, handlers, loc);
       return;
     }
-    if (this.containsAsyncSuspension(arg)) {
-      this.emitAsyncProtectedValue(
-        arg,
-        exitLocals,
-        handlers,
-        (value) => {
-          this.emitAsyncProtectedConsole(expr, remaining, exitLocals, handlers, loc, index + 1, [
-            ...values,
-            { name: value, type: arg.type, loc: arg.loc },
-          ]);
-        },
-      );
-      return;
-    }
-    const value = this.context.nextName("sc_async_argument");
-    this.context.line(`let ${value} = ${this.context.emitExpr(arg)};`);
-    this.emitAsyncProtectedConsole(
-      expr,
-      remaining,
-      exitLocals,
-      handlers,
-      loc,
-      index + 1,
-      [...values, { name: value, type: arg.type, loc: arg.loc }],
-    );
+    this.emitAsyncProtectedValue(arg, exitLocals, handlers, (value) => {
+      this.emitAsyncProtectedConsole(expr, remaining, exitLocals, handlers, loc, index + 1, [
+        ...values, { name: value, type: arg.type, loc: arg.loc },
+      ]);
+    });
   }
 
   emitAsyncCatch(
@@ -1112,6 +1101,13 @@ export class RustAsyncControlEmitter {
     }
   }
 
+  private withProtectedSegment<T>(inside: boolean, emit: () => T): T {
+    const previous = this.insideProtectedSegment;
+    this.insideProtectedSegment = inside;
+    try { return emit(); }
+    finally { this.insideProtectedSegment = previous; }
+  }
+
   withAsyncLocals<T>(locals: Set<string>, emit: () => T): T {
     const previous = this.context.currentAsyncLocals();
     this.context.setCurrentAsyncLocals(locals);
@@ -1151,7 +1147,7 @@ export class RustAsyncControlEmitter {
     ].join(", ")});`;
     this.context.line(`fn ${helper}(${params.join(", ")}) {`);
     this.context.pushIndent();
-    this.withAsyncLocals(new Set(liveLocals), () => this.emitAsyncStatements(statements, onComplete));
+    this.withProtectedSegment(false, () => this.withAsyncLocals(new Set(liveLocals), () => this.emitAsyncStatements(statements, onComplete)));
     this.context.popIndent();
     this.context.line("}");
     return () => {

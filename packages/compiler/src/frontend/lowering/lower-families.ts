@@ -14,7 +14,7 @@ import { inferTypeParamBindings, internGenericInstance, type GenericFnInfo, type
 
 export interface FamilyDemand { key: string; params: ParamShape[]; ret: IrType; call: ts.CallExpression; rsig: ts.Signature }
 export interface FamilyBuild { id: string; impls: GenericFnInfo[]; demands: Map<string, FamilyDemand> }
-interface FamilyRegistry { builds: Map<string, FamilyBuild>; implsByNode: Map<ts.Node, GenericFnInfo>; counter: number }
+interface FamilyRegistry { builds: Map<string, FamilyBuild>; implsByNode: Map<ts.Node, Map<FnCtx | undefined, GenericFnInfo>>; counter: number }
 
 /** The instantiation key of a demand — the same signature identity internGenericInstance keys its table on. */
 function genericInstanceKey(params: ParamShape[], ret: IrType): string {
@@ -56,7 +56,11 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
   const r = registry(L);
   const id = familyId ?? familyIdOf(L.checker, L.typeOf(node));
   if (id === null) L.unsupported("SC1090", node, "a generic function value whose signature has no family identity");
-  const existing = r.implsByNode.get(node);
+  // One AST node can occur in several specializations of its enclosing
+  // generic function. Each frame owns different locals and capture types;
+  // reusing another frame's implementation also skips boxing these locals.
+  const owner = L.fnStack.at(-1);
+  const existing = r.implsByNode.get(node)?.get(owner);
   if (existing !== undefined && existing.family !== undefined) {
     if (existing.family.id !== id) L.unsupported("SC1090", node, "one generic function value joining two families");
     return { kind: "familyClosure", familyId: id, impl: existing.qualifiedName, captures: existing.family.captureSources, type: { kind: "genericFunc", familyId: id }, loc };
@@ -131,7 +135,9 @@ export function lowerFamilyImpl(L: Lowerer, node: FamilyFn, familyId: string | n
     instances: new Map(),
     family: { id, captures: scratch.captures ?? [], captureSources: scratch.captureSources, captureSymbols, origins, cast },
   };
-  r.implsByNode.set(node, info);
+  let frameImpls = r.implsByNode.get(node);
+  if (frameImpls === undefined) { frameImpls = new Map(); r.implsByNode.set(node, frameImpls); }
+  frameImpls.set(owner, info);
   build.impls.push(info);
   for (const demand of build.demands.values()) familyInstance(L, info, demand);
   return { kind: "familyClosure", familyId: id, impl: info.qualifiedName, captures: info.family!.captureSources, type: { kind: "genericFunc", familyId: id }, loc };

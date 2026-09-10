@@ -85,7 +85,7 @@ pub fn math_min(left: f64, right: f64) -> f64 {
 pub fn math_max_array(values: &JsArray<f64>) -> f64 {
     values.with(|values| {
         values
-            .elements
+            .elements()
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, math_max)
@@ -95,7 +95,7 @@ pub fn math_max_array(values: &JsArray<f64>) -> f64 {
 pub fn math_min_array(values: &JsArray<f64>) -> f64 {
     values.with(|values| {
         values
-            .elements
+            .elements()
             .iter()
             .copied()
             .fold(f64::INFINITY, math_min)
@@ -553,7 +553,7 @@ pub fn intl_number_format_en_us(value: f64) -> JsString {
                 .expect("scriptc: Intl formatter emitted non-ASCII fraction digits"),
         );
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
@@ -567,7 +567,7 @@ pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
     }
     let fraction_count = digits as usize;
     if !value.is_finite() || value.abs() >= 1e21 {
-        return Rc::from(format_number(value));
+        return JsString::from(format_number(value));
     }
 
     let negative = value < 0.0;
@@ -631,7 +631,7 @@ pub fn number_to_fixed(value: f64, fraction_digits: f64) -> JsString {
             decimal.as_bytes()[index - leading_zeros] as char
         });
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn number_to_fixed_default(value: f64) -> JsString {
@@ -697,7 +697,7 @@ pub fn number_to_exponential(value: f64) -> JsString {
         output.push('+');
     }
     output.push_str(&exponent.to_string());
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn number_to_precision(value: f64, precision: f64) -> JsString {
@@ -707,7 +707,7 @@ pub fn number_to_precision(value: f64, precision: f64) -> JsString {
         precision.trunc()
     };
     if !value.is_finite() {
-        return Rc::from(format_number(value));
+        return JsString::from(format_number(value));
     }
     if !(1.0..=100.0).contains(&precision) {
         throw_range_error("toPrecision() argument must be between 1 and 100".to_owned());
@@ -765,7 +765,7 @@ pub fn number_to_precision(value: f64, precision: f64) -> JsString {
         }
         output.push_str(&digits);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn number_to_radix_string(value: f64, radix: f64) -> JsString {
@@ -775,7 +775,7 @@ pub fn number_to_radix_string(value: f64, radix: f64) -> JsString {
     }
     let radix = radix as u32;
     if radix == 10 {
-        return Rc::from(format_number(value));
+        return JsString::from(format_number(value));
     }
     if value.is_nan() {
         return string("NaN");
@@ -866,7 +866,7 @@ pub fn number_to_radix_string(value: f64, radix: f64) -> JsString {
         integer_cursor -= 1;
         buffer[integer_cursor] = b'-';
     }
-    Rc::from(
+    JsString::from(
         std::str::from_utf8(&buffer[integer_cursor..fraction_cursor])
             .expect("scriptc: radix formatter emitted non-ASCII digits"),
     )

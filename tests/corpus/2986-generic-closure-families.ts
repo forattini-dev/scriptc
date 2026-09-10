@@ -1,3 +1,4 @@
+// @rust-only
 // Generic function VALUES compiled as closure families: a factory returning a generic closure (the effect
 // `tags.make("location")` shape, implemented as a plain arrow cast into the generic slot), a generic arrow
 // with its own type parameters, and both instantiated at several argument types.

@@ -1,4 +1,5 @@
-import { isSharedRecord, sharedRecordName } from "./shared-records.js";
+import type { RustLocalCells } from "./local-cells.js";
+import { isSharedRecord, sharedRecordName, recordPointerEquality } from "./shared-records.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
@@ -14,7 +15,7 @@ export interface RustValueContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
   readonly unions: ReadonlyMap<string, IrUnionDef>;
   currentFunction(): IrFunction | null;
-  isForcedBoxed(id: string): boolean;
+  readonly localCells: RustLocalCells;
   line(value: string): void;
   emitExpr(expr: IrExpr): string;
   classMetaOf(name: string, loc?: SrcLoc): RustClassMeta;
@@ -145,6 +146,7 @@ export class RustValueEmitter {
       this.context.unsupported(`global read type '${type.kind}'`, loc);
     }
     const local = this.local(id, loc);
+    if (this.context.localCells.isStack(id)) return `${mangleLocal(id)}.get().expect("scriptc: read of an uninitialized captured binding")`;
     if (this.localIsBoxed(local)) {
       return local.tdz
         ? `runtime::cell_get_tdz(&${mangleLocal(id)}, "${this.context.rustString(local.name)}")`
@@ -167,6 +169,7 @@ export class RustValueEmitter {
       this.context.unsupported(`global assignment type '${global.type.kind}'`, loc);
     }
     const local = this.local(id, loc);
+    if (this.context.localCells.isStack(id)) return `${mangleLocal(id)}.set(Some(${value}));`;
     if (this.localIsBoxed(local)) return `runtime::cell_set(&${mangleLocal(id)}, ${value});`;
     return `${mangleLocal(id)} = ${value};`;
   }
@@ -178,7 +181,7 @@ export class RustValueEmitter {
   }
 
   localIsBoxed(local: IrFunction["locals"][number]): boolean {
-    return this.context.isForcedBoxed(local.id)
+    return this.context.localCells.has(local.id)
       || local.boxed === true
       || this.context.currentFunction()?.async === true
       || this.context.currentFunction()?.generator !== undefined;
@@ -369,8 +372,9 @@ export class RustValueEmitter {
       case "func":
         return `${this.functionIdentity(left, type, loc)} == ${this.functionIdentity(right, type, loc)}`;
       case "array":
+        return `runtime::array_ptr_eq(${left}, ${right})`;
       case "record":
-        return `${left}.ptr_eq(${right})`;
+        return recordPointerEquality(this.context.records.get(type.shapeId), left, right);
       case "object":
         if (type.className === RUNTIME_EMITTER_CLASS) return `${left} == ${right}`;
         if (type.className === "%Readable") return `runtime::readable_ptr_eq(${left}, ${right})`;
@@ -389,7 +393,7 @@ export class RustValueEmitter {
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
-    if (type.kind === "record") return `${left}.ptr_eq(${right})`;
+    if (type.kind === "record") return recordPointerEquality(this.context.records.get(type.shapeId), left, right);
     if (type.kind === "func") {
       return `${this.functionIdentity(left, type, loc)} == ${this.functionIdentity(right, type, loc)}`;
     }
@@ -446,6 +450,9 @@ export class RustValueEmitter {
         if (visiting.has(key)) return true;
         const shape = this.context.records.get(type.shapeId);
         if (shape === undefined) return false;
+        // Shared wrappers implement both JSON traits; required callable fields
+        // reject decoding through Result rather than lacking the trait.
+        if (isSharedRecord(shape)) return true;
         const next = new Set(visiting).add(key);
         return shape.fields.every((field) => this.isRustJsonCompatible(field.type, next)) &&
           (shape.indexValue === undefined || this.isRustJsonCompatible(shape.indexValue, next));

@@ -1,5 +1,7 @@
 scriptc coverage tests/fixtures/npm/cases/lazy-traps/main.ts
 
+  backend rust; JavaScript engine v8; external FFI no
+
   statements analyzed   23
   compile statically    12  (52%)
   compile dynamically   11  (47%) (island sites — the embedded engine runs them)

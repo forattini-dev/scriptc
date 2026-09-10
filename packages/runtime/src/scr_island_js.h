@@ -34,8 +34,11 @@ static const char isl_modules_bootstrap[] =
      * actually needed wasm, often behind a feature-detect or fallback
      * catch. The constructor-shaped members stay synchronous throws (so
      * does `new Module()` under real wasm on bad bytes). */
-    "  if (typeof globalThis.WebAssembly === 'undefined') {\n"
-    "    const die = (what) => () => {\n"
+    /* This is scriptc's execution policy, not a missing-global polyfill.
+     * V8 exposes WebAssembly, but our host does not drive its asynchronous
+     * compilation tasks. Install the same catchable refusal on every engine. */
+    "  {\n"
+    "    const die = (what) => function () {\n"
     "      throw new Error('WebAssembly.' + what + ' is not supported in scriptc binaries (the embedded engine has no wasm runtime)');\n"
     "    };\n"
     /* The reason carries the __scr_wasm_stub marker (non-enumerable):

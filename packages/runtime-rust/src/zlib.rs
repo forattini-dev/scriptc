@@ -7,19 +7,22 @@ const ZLIB_BUF_ERROR: &str = "Z_BUF_ERROR";
 
 /// Compress bytes with Node's default zlib wrapper and compression level.
 pub fn zlib_deflate_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
-    bytes_from_elements(zlib_compress_bytes(&bytes_u8_values(input), true))
+    let output = zlib_with_input(input, |source| zlib_compress_bytes(source, true));
+    bytes_from_elements(output)
 }
 
 /// A frontend-validated integer compression level.
 pub fn zlib_deflate_sync_level(input: &JsBytes<u8>, level: f64) -> JsBytes<u8> {
     assert!((-1.0..=9.0).contains(&level) && level.fract() == 0.0, "scriptc: invalid native deflate level");
     let compression = if level == -1.0 { Compression::default() } else { Compression::new(level as u32) };
-    bytes_from_elements(zlib_compress_bytes_level(&bytes_u8_values(input), true, compression))
+    let output = zlib_with_input(input, |source| zlib_compress_bytes_level(source, true, compression));
+    bytes_from_elements(output)
 }
 
 /// deflateRawSync: the same DEFLATE stream with no zlib wrapper.
 pub fn zlib_deflate_raw_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
-    bytes_from_elements(zlib_compress_bytes(&bytes_u8_values(input), false))
+    let output = zlib_with_input(input, |source| zlib_compress_bytes(source, false));
+    bytes_from_elements(output)
 }
 
 /// Inflate bytes carrying a zlib wrapper. Invalid input throws a catchable
@@ -47,13 +50,15 @@ pub fn zlib_inflate_raw_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
 /// zlib itself writes at the default level (no name, no extra fields, an
 /// unset mtime, OS 3), then the CRC32 and the input length.
 pub fn zlib_gzip_sync(input: &JsBytes<u8>) -> JsBytes<u8> {
-    let source = bytes_u8_values(input);
-    let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
-    output.extend_from_slice(&zlib_compress_bytes(&source, false));
-    let mut crc = Crc::new();
-    crc.update(&source);
-    output.extend_from_slice(&crc.sum().to_le_bytes());
-    output.extend_from_slice(&(source.len() as u32).to_le_bytes());
+    let output = zlib_with_input(input, |source| {
+        let mut output = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
+        output.extend_from_slice(&zlib_compress_bytes(source, false));
+        let mut crc = Crc::new();
+        crc.update(source);
+        output.extend_from_slice(&crc.sum().to_le_bytes());
+        output.extend_from_slice(&(source.len() as u32).to_le_bytes());
+        output
+    });
     bytes_from_elements(output)
 }
 
@@ -239,3 +244,17 @@ fn has_zlib_header(input: &[u8]) -> bool {
     };
     method & 0x0f == 8 && method >> 4 <= 7 && (u16::from(method) << 8 | u16::from(flags)) % 31 == 0
 }
+
+/// Compression is synchronous and cannot call JS or mutate the input. Borrow
+/// direct storage, including offset views; preserve materialization for views
+/// backed by other element types. Callers create the GC result after this scope.
+fn zlib_with_input<R>(input: &JsBytes<u8>, body: impl FnOnce(&[u8]) -> R) -> R {
+    bytes_with_read_slice(input, |source| match source {
+        Some(source) => body(source),
+        None => body(&bytes_u8_values(input)),
+    })
+}
+
+#[cfg(test)]
+#[path = "zlib.test.rs"]
+mod zlib_input_tests;

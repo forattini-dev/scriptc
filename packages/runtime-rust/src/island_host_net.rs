@@ -267,7 +267,7 @@ fn island_host_net_connect(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let port = island_host_arg_number(arguments, 0, context)?;
-    let hostname: JsString = Rc::from(island_host_arg_string(arguments, 1, context)?.as_str());
+    let hostname: JsString = JsString::from(island_host_arg_string(arguments, 1, context)?.as_str());
     let callbacks = island_net_arg_callbacks(arguments, 2)?;
     let socket = island_host_run(|| net_socket_connect(port, &hostname), context)?;
     let id = island_net_next_id();
@@ -547,9 +547,9 @@ fn island_host_net_server_listen(
     };
     let port = island_host_arg_number(arguments, 1, context)?;
     let hostname: JsString = if island_host_arg(arguments, 2).is_null_or_undefined() {
-        Rc::from("")
+        JsString::from("")
     } else {
-        Rc::from(island_host_arg_string(arguments, 2, context)?.as_str())
+        JsString::from(island_host_arg_string(arguments, 2, context)?.as_str())
     };
     let listened = island_host_guard(|| {
         net_server_listen_options(&server, port, &hostname, false);

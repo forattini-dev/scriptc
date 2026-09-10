@@ -71,7 +71,7 @@ fn assert_shape_matches(state: &AssertShapeState) -> bool {
             return false;
         };
         match expected {
-            AssertShapeExpected::String(expected) => actual.as_ref() == expected.as_ref(),
+            AssertShapeExpected::String(expected) => actual.as_ref() == expected,
             AssertShapeExpected::Regex { matched, .. } => *matched,
         }
     })

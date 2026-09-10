@@ -1,3 +1,6 @@
+import { lowerNumericParser } from "./lower-numeric-parser.js";
+import { lowerAbsenceProbe } from "./lower-exprs.js";
+import { lowerFsWriteOptions } from "./lower-fs-write-options.js";
 import { fsConstantValue } from "./fs-constants.js";
 import { lowerDeflateLevel } from "./lower-zlib.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -24,7 +27,6 @@ import {
   builtinModuleFnOf,
   FS_READDIR_DOCUMENTED_OPTIONS,
   FS_WATCH_DOCUMENTED_OPTIONS,
-  FS_WRITE_FILE_DOCUMENTED_OPTIONS,
   QS_PARSE_DOCUMENTED_OPTIONS,
   QS_STRINGIFY_DOCUMENTED_OPTIONS,
   READLINE_DOCUMENTED_OPTIONS,
@@ -1267,11 +1269,9 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         return { kind: "libCall", fn: "dc.tracingChannel", args: [name], type: F64, loc };
       }
     }
-    // readline.createInterface({ input: process.stdin, output:
-    // process.stdout }): exactly that options shape — the runtime reads
-    // fd 0 and writes prompts to stdout, so any OTHER stream would be a
-    // lie. `terminal` is accepted only as the literal false (the pipe
-    // behavior this implements); other members fence by name.
+    // Read from stdin; an explicit stdout output enables prompts. Without
+    // output, Node still answers questions but writes no prompt. Other
+    // streams and terminal editing remain named admission fences.
     if (bi.module === "readline" && bi.member === "createInterface") {
       const optsNode = expr.arguments.length === 1 ? expr.arguments[0] : undefined;
       if (!optsNode || !ts.isObjectLiteralExpression(optsNode)) {
@@ -1281,7 +1281,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           "the supported form is createInterface({ input: process.stdin, output: process.stdout })",
         );
       }
-      let sawInput = false;
+      let sawInput = false, sawOutput = false;
       for (const p of optsNode.properties) {
         if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) {
           L.noLowering(
@@ -1303,6 +1303,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           }
           sawInput = true;
         } else if (member === "output") {
+          sawOutput = true;
           if (streamOf(p.initializer) !== "stdout") {
             L.noLowering(
               "createInterface with a non-stdout output",
@@ -1352,7 +1353,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
           "pass { input: process.stdin, output: process.stdout }",
         );
       }
-      return { kind: "libCall", fn: "rl.create", args: [], type: F64, loc };
+      return { kind: "libCall", fn: "rl.create", args: [boolLit(sawOutput, loc)], type: F64, loc };
     }
     // The Buffer forms of fs: readFileSync(path)/readFile(path) with NO
     // encoding read raw bytes (Node returns a Buffer there), and
@@ -1602,118 +1603,8 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         return { kind: "libCall", fn: "fs.writeFileSyncBytes", args: [path, data], type: VOID, loc };
       }
     }
-    // writeFileSync(p, data, options) / fs.promises.writeFile(p, data,
-    // options): the lowered options are a literal
-    // `{ mode?: <number>, encoding?: "utf8" }` — the mode is open(2)'s
-    // O_CREAT argument (creation only; an existing file keeps its
-    // permissions, exactly Node), and the encoding may only spell the
-    // utf8 the runtime writes anyway. String data only — Buffer options
-    // remain outside the static surface.
-    const syncWriteOptions = bi.module === "fs" && bi.member === "writeFileSync";
-    const promiseWriteOptions = bi.module === "fs/promises" && bi.member === "writeFile";
-    if ((syncWriteOptions || promiseWriteOptions) && expr.arguments.length === 3) {
-      const optsNode = expr.arguments[2]!;
-      const operation = promiseWriteOptions ? "fs.promises.writeFile" : "writeFileSync";
-      const plainFn: IrLibFn = promiseWriteOptions ? "fsp.writeFile" : "fs.writeFileSync";
-      const modeFn: IrLibFn = promiseWriteOptions ? "fsp.writeFileMode" : "fs.writeFileModeSync";
-      const exclusiveModeFn: IrLibFn = promiseWriteOptions
-        ? "fsp.writeFileExclusiveMode"
-        : "fs.writeFileExclusiveModeSync";
-      const resultType: IrType = promiseWriteOptions ? { kind: "promise", inner: VOID } : VOID;
-      type WriteOptionValue = { kind: "effect" | "mode"; value: IrExpr };
-      let exclusive = false;
-      // The runtime needs only `mode`, but every source option value is an
-      // ordinary JS expression. Stage path/data and then evaluate the option
-      // values in object-literal order before issuing the write; otherwise a
-      // call/getter statically typed as the accepted utf8 literal can vanish.
-      const finishWrite = (optionValues: WriteOptionValue[]): IrExpr => {
-        const path = L.lowerExprExpecting(expr.arguments[0]!, STRING);
-        const data = L.lowerExprExpecting(expr.arguments[1]!, STRING);
-        const pathLocal = L.declareHiddenLocal("%writePath", STRING);
-        const dataLocal = L.declareHiddenLocal("%writeData", STRING);
-        const stmts: IrStmt[] = [
-          { kind: "varDecl", localId: pathLocal.id, init: path, loc: path.loc },
-          { kind: "varDecl", localId: dataLocal.id, init: data, loc: data.loc },
-        ];
-        let mode: IrExpr | null = null;
-        for (const option of optionValues) {
-          if (option.kind === "effect") {
-            stmts.push({ kind: "exprStmt", expr: option.value, loc: option.value.loc });
-            continue;
-          }
-          const modeLocal = L.declareHiddenLocal("%writeMode", F64);
-          stmts.push({ kind: "varDecl", localId: modeLocal.id, init: option.value, loc: option.value.loc });
-          mode = varRef(modeLocal.id, modeLocal.type, loc);
-        }
-        const writeMode = mode ?? (exclusive
-          ? { kind: "numLit", value: 0o666, type: F64, loc } satisfies IrExpr
-          : null);
-        const result: IrExpr = {
-          kind: "libCall",
-          fn: exclusive ? exclusiveModeFn : writeMode ? modeFn : plainFn,
-          args: writeMode
-            ? [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc), writeMode]
-            : [varRef(pathLocal.id, pathLocal.type, loc), varRef(dataLocal.id, dataLocal.type, loc)],
-          type: resultType,
-          loc,
-        };
-        return { kind: "seqExpr", stmts, result, type: resultType, loc };
-      };
-      // The bare-encoding spelling — writeFileSync(p, data, "utf-8") — is
-      // the options record's encoding key alone: utf8 is what the runtime
-      // writes anyway, so string data takes the plain write. Any OTHER
-      // encoding name changes bytes and keeps the fence below.
-      {
-        const t = L.typeOf(optsNode);
-        if (
-          t.isStringLiteralType() && (t.value === "utf8" || t.value === "utf-8") &&
-          L.mapTypeOf(L.typeOf(expr.arguments[1]!))?.kind === "string"
-        ) {
-          return finishWrite([{ kind: "effect", value: L.lowerExprExpecting(optsNode, STRING) }]);
-        }
-      }
-      const optionValues: WriteOptionValue[] = [];
-      let ok = ts.isObjectLiteralExpression(optsNode);
-      if (ok) {
-        for (const p of (optsNode as ts.ObjectLiteralExpression).properties) {
-          const m = optionMember(p);
-          if (!m) { ok = false; break; }
-          if (m.name === "mode") {
-            optionValues.push({ kind: "mode", value: L.lowerExprExpecting(m.value, F64) });
-          } else if (m.name === "encoding") {
-            const t = L.typeOf(m.value);
-            if (!t.isStringLiteralType() || (t.value !== "utf8" && t.value !== "utf-8")) { ok = false; break; }
-            optionValues.push({ kind: "effect", value: L.lowerExprExpecting(m.value, STRING) });
-          } else if (m.name === "flag") {
-            const t = L.typeOf(m.value);
-            if (!t.isStringLiteralType() || t.value !== "wx") {
-              L.noLowering(
-                `${operation} with the flag option`,
-                p,
-                "the supported flags are Node's default 'w' and exclusive-create 'wx'",
-              );
-            }
-            optionValues.push({ kind: "effect", value: L.lowerExprExpecting(m.value, STRING) });
-            exclusive = true;
-          } else {
-            // The options-record stance: documented keys with no lowering
-            // fence by name; undocumented keys drop like Node.
-            fenceOrDropOptionKey(
-              L, p, m.name, operation, FS_WRITE_FILE_DOCUMENTED_OPTIONS,
-              'the supported options are { mode: <number>, encoding: "utf8", flag: "wx" }',
-            );
-          }
-        }
-      }
-      if (!ok || L.mapTypeOf(L.typeOf(expr.arguments[1]!))?.kind !== "string") {
-        L.noLowering(
-          `${operation} with 3 arguments`,
-          optsNode,
-          'the supported options are { mode: <number>, encoding: "utf8", flag: "wx" } over string data',
-        );
-      }
-      return finishWrite(optionValues);
-    }
+    const writeOptions = lowerFsWriteOptions(L, expr, bi, loc);
+    if (writeOptions) return writeOptions;
     if (bi.module === "zlib" && bi.member === "deflateSync" && expr.arguments.length === 2) return lowerDeflateLevel(L, expr);
     if (bi.module === "zlib" && expr.arguments.length >= 1) {
       const dataIr = L.mapTypeOf(L.typeOf(expr.arguments[0]!));
@@ -6939,8 +6830,8 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
 };
 
 /** Method calls on THE `Number` global: predicates lower over f64 values;
- * parseFloat/parseInt share the native global-parser IR for exact string
- * inputs (parseInt accepts its omitted radix as 0). Shapes that still need
+ * parseFloat/parseInt share native primitive conversion with the globals
+ * (parseInt accepts its omitted radix as 0). Shapes that still need
  * JavaScript coercion retain the dynamic fallback. Null for non-Number
  * receivers. */
   export function lowerNumberStaticCall(L: Lowerer, call: ts.CallExpression,
@@ -6992,25 +6883,9 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           call,
         );
       }
-      const lowered = call.arguments.map((arg) => L.lowerExpr(arg));
-      const value = lowered[0]!;
-      if (member === "parseFloat" && value.type.kind === "string") {
-        return { kind: "libCall", fn: "num.parseFloat", args: [value], type: F64, loc };
-      }
-      const radix = lowered[1];
-      if (member === "parseInt" && value.type.kind === "string" &&
-          (radix === undefined || radix.type.kind === "f64")) {
-        return {
-          kind: "libCall",
-          fn: "num.parseInt",
-          args: [
-            value,
-            radix ?? { kind: "numLit", value: 0, type: F64, loc },
-          ],
-          type: F64,
-          loc,
-        };
-      }
+      const lowered = call.arguments.map(arg => lowerAbsenceProbe(L, arg) ?? L.lowerExpr(arg));
+      const parsed = lowerNumericParser(L, member, lowered[0]!, lowered[1]);
+      if (parsed) return parsed;
       L.requireDynamicApi(`'Number.${member}'`, call);
       const callee: IrExpr = { kind: "jsOp", op: "globalGet", name: member, args: [], type: JSVAL, loc };
       const args = lowered.map((arg, index) => L.jsvalIn(arg, call.arguments[index]!));

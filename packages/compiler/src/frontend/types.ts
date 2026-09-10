@@ -1,14 +1,19 @@
-import { InternalCompilerError } from "../errors.js";
+import { regexGroupsType } from "./regex-types.js";
+import { regexCaptureArray } from "../ir/regex-captures.js";
+import { UnionRegistry } from "./union-registry.js";
+export { UnionRegistry } from "./union-registry.js";
+import { recordUnionDiscriminant } from "./union-discriminants.js";
+import { mapObjectIterationValueAlias } from "./object-iteration-types.js"; import { InternalCompilerError } from "../errors.js";
 import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
-import type { IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
+import type { IrRecordShape, IrType } from "../ir/nodes.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 import { isNpmStaticTypeFile } from "./npm-static-types.js";
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
+import { mapJsArrayField } from "./js-array-field-types.js";
 import { accessorSlotProp } from "../ir/nodes.js";
-// typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
-// helper interning); re-exported here so frontend call sites keep their
-// import path.
+// typeKey lives in ir/nodes.ts for backend helper interning; re-export it
+// here to preserve frontend import paths.
 export { typeKey };
 /** The ambient TYPE names of the fetch slice. Under --dynamic their
  * values live in the embedded engine and map to island handles (jsval).
@@ -311,93 +316,6 @@ export class ShapeRegistry {
 
   get(shapeId: string): IrRecordShape | undefined {
     return this.byId.get(shapeId);
-  }
-}
-
-/** The frontend's union interner — mirrors ShapeRegistry. A union's
- * canonical identity is its typeKey-sorted arm list; two ts unions whose
- * arms map to the same IR types share one unionId (and later one runtime
- * tag numbering: an arm's index in the canonical list IS its tag). Owned by
- * the Lowerer; threaded through mapType exactly like ShapeRegistry. */
-export class UnionRegistry {
-  private readonly byKey = new Map<string, string>();
-  private readonly byId = new Map<string, IrUnionDef>();
-  /** All interned unions in first-seen (`u0`, `u1`, ...) order. */
-  readonly unions: IrUnionDef[] = [];
-  /** ts.Types currently being mapped — a back-reference to one is the
-   * recursive knot passing through a union (`type Tree = Leaf | Branch`
-   * whose Branch arm carries `Tree[]`, the optional field `a?: A` of a
-   * mutually recursive pair): mapType answers a NAMED RECURSIVE UNION
-   * (recursiveRef) whose arms fill in when the outer frame completes. */
-  readonly inProgress = new Set<ts.Type>();
-  /** Recursive union ids, keyed by checker type identity — the
-   * ShapeRegistry.recIds story exactly (per-declaration identity, byKey
-   * folding one-level unfoldings in). */
-  private readonly recIds = new Map<ts.Type, string>();
-  private readonly pendingRec = new Set<string>();
-
-  /** The union id a back-reference to an in-progress union resolves to:
-   * reuses the type's persistent recursive id or mints a PLACEHOLDER
-   * entry (empty arms) the outer frame finalizes. */
-  recursiveRef(t: ts.Type): string {
-    let id = this.recIds.get(t);
-    if (id === undefined) {
-      id = `u${this.unions.length}`;
-      const def: IrUnionDef = { id, arms: [] };
-      this.byId.set(id, def);
-      this.unions.push(def);
-      this.recIds.set(t, id);
-      this.pendingRec.add(id);
-    }
-    return id;
-  }
-
-  /** The FINALIZED recursive union for a checker type — undefined while
-   * never mapped, mid-construction, or permanently failed. */
-  recursiveUnionFor(t: ts.Type): string | undefined {
-    const id = this.recIds.get(t);
-    return id !== undefined && !this.pendingRec.has(id) ? id : undefined;
-  }
-
-  /** True when a back-reference minted a placeholder for `t` that the
-   * outer frame has not (yet) finalized. */
-  recursivePending(t: ts.Type): boolean {
-    const id = this.recIds.get(t);
-    return id !== undefined && this.pendingRec.has(id);
-  }
-
-  /** Completes a recursive placeholder with its canonical arm list and
-   * registers the structural key (first writer wins, like shapes). */
-  finalizeRecursive(t: ts.Type, arms: IrType[]): string {
-    const id = this.recIds.get(t);
-    if (id === undefined) throw new InternalCompilerError("union registry bug: finalizeRecursive without a placeholder");
-    if (this.pendingRec.has(id)) {
-      const def = this.byId.get(id)!;
-      def.arms.push(...arms);
-      this.pendingRec.delete(id);
-      const key = JSON.stringify(arms.map(typeKey));
-      if (!this.byKey.has(key)) this.byKey.set(key, id);
-    }
-    return id;
-  }
-
-  /** Interns a canonical (typeKey-sorted, deduplicated) arm list, returning
-   * its unionId. */
-  intern(arms: IrType[]): string {
-    const key = JSON.stringify(arms.map(typeKey));
-    let id = this.byKey.get(key);
-    if (id === undefined) {
-      id = `u${this.unions.length}`;
-      const def: IrUnionDef = { id, arms };
-      this.byKey.set(key, id);
-      this.byId.set(id, def);
-      this.unions.push(def);
-    }
-    return id;
-  }
-
-  get(unionId: string): IrUnionDef | undefined {
-    return this.byId.get(unionId);
   }
 }
 
@@ -937,7 +855,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `await fn()` result): a CONDITIONAL type the checker keeps symbolic
     // inside the body — the object-gated utility-alias hook below never
     // sees it, so it resolves here, before the flag dispatch.
-    const viaAwaited = mapGenericAwaitedAlias(type, ctx);
+    const viaAwaited = mapGenericAwaitedAlias(type, ctx) ?? mapObjectIterationValueAlias(type, ctx);
     if (viaAwaited !== null) {
       contextResolutions++;
       return viaAwaited;
@@ -1465,6 +1383,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // values to the supported kinds (see isSupportedMapValue); anything
   // outside stays unmapped — callers report the component fence (SC2009)
   // naming the offending half, as does the `new Map` lowering per site.
+  const groupsType = regexGroupsType(widened, ctx);
+  if (groupsType) return groupsType;
   const psym = widened.getSymbol();
   const isStdlibInterface = (name: string): boolean =>
     psym?.name === name &&
@@ -1746,25 +1666,19 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("RegExp")) {
     return { kind: "regex" };
   }
-  // Typed arrays are mapped by stdlib provenance, including generic backing
-  // buffer declarations. Views retain their owner in the native runtime.
-  // RegExpMatchArray (s.match's result) IS a string[] here — the honest
-  // slice: [whole match, ...captures] (a nonparticipating capture reads
-  // "" — SEMANTICS.md). The `.index`/`.input`/`.groups` extras fence per
-  // member like any other unlowered array property.
-  if (isStdlibInterface("RegExpMatchArray")) return arrayOf(STRING);
+  // Regex results preserve absent captures as undefined despite the stdlib's
+  // string index signature. Metadata properties keep their separate lowerings.
+  if (isStdlibInterface("RegExpMatchArray")) return regexCaptureArray(ctx.unions);
   // TemplateStringsArray (a tag function's first parameter): a string[] —
   // the cooked spans the templateStrings site value carries. The `.raw`
-  // extra fences per member like RegExpMatchArray's `.index`/`.input`.
   if (isStdlibInterface("TemplateStringsArray")) return arrayOf(STRING);
-  // RegExpExecArray (matchAll's row type): the same honest slice.
-  if (isStdlibInterface("RegExpExecArray")) return arrayOf(STRING);
+  if (isStdlibInterface("RegExpExecArray")) return regexCaptureArray(ctx.unions);
   // RegExpStringIterator<RegExpExecArray> (matchAll's checker result): the
   // VALUE-position spelling of the eager drain — the intrinsic already
-  // materializes string[][] (lazy vs eager is unobservable: strings are
+  // materializes optional-string rows (lazy vs eager is unobservable: strings are
   // immutable and the spec clones the regex at the call), so a stored
   // `const urlMatches = output.matchAll(re)` types as exactly that array.
-  if (isStdlibInterface("RegExpStringIterator")) return arrayOf(arrayOf(STRING));
+  if (isStdlibInterface("RegExpStringIterator")) return arrayOf(regexCaptureArray(ctx.unions));
   // NodeJS.Timeout / the fallback `Timeout` interface (setTimeout's return)
   // maps to F64 — the numeric timer handle. The `.ref`/`.unref`/`.hasRef`
   // methods lower over that handle (loop-liveness bookkeeping); `Timeout |
@@ -2879,7 +2793,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (contextResolutions !== sensitivityAtEntry) return null;
         return { kind: "union", unionId: unions.finalizeRecursive(widened, arms) };
       }
-      return { kind: "union", unionId: unions.intern(arms) };
+      return { kind: "union", unionId: unions.intern(arms, recordUnionDiscriminant(widened, arms, ctx, part => mapType(part, ctx))) };
     } finally {
       unions.inProgress.delete(widened);
     }
@@ -3325,7 +3239,7 @@ export function withUndefinedArm(t: IrType, unions: UnionRegistry): IrType | nul
     if (def.arms.some((a) => a.kind === "undefinedT")) return t;
     const arms = [...def.arms, UNDEFINED_T];
     arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
-    return { kind: "union", unionId: unions.intern(arms) };
+    return { kind: "union", unionId: unions.intern(arms, def.discriminant) };
   }
   if (
     t.kind === "void" || t.kind === "map" || t.kind === "date" || t.kind === "dyn" ||
@@ -3560,7 +3474,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     let v: IrType | null = null;
     for (const info of indexInfos) {
       if (!stringKey(info.keyType) && !(info.keyType.flags & ts.TypeFlags.Number)) return null;
-      const iv = mapType(info.valueType, ctx);
+      const iv = info.valueType.flags & ts.TypeFlags.Undefined ? unitOnlyUnion(ctx.unions) : mapType(info.valueType, ctx) ?? (!ctx.dynamic && (info.valueType.flags & ts.TypeFlags.Any) !== 0 && (widened.getAliasSymbol() !== undefined || checker.getPropertiesOfType(widened).length > 0) ? DYN : null);
       // A jsval-valued signature absorbs the shape: `Record<string,
       // JSONValue>` (a package's own JSON alias) and `Record<string, any>`
       // are one island object — the overflow map has no handle slot, and
@@ -3652,9 +3566,9 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // as `object` and the lib's `Object`: assignments convert at the site
     // (sources outside the checked-dynamic tree fence there, exactly as unknown does), reads
     // narrow back out through the same checked casts. The type INFERRED
-    // from an empty object literal (`const o = {}`) stays the empty record
-    // — it describes a value the program built, not an annotation that
-    // admits everything — and computed empties (`Partial<T>` in a generic
+    // from a TS empty object literal stays the empty record. JS empty
+    // literals remain open to indexed writes and therefore need shared dyn
+    // storage. Computed empties (`Partial<T>` in a generic
     // body) returned null above. Empty shapes WITH an index signature
     // (`Record<string, T>`) are not empty: the signature is the shape.
     if (
@@ -3662,7 +3576,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       indexValue === undefined &&
       checker.getCallSignatures(widened).length === 0 &&
       checker.getConstructSignatures(widened).length === 0 &&
-      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d)))
+      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d) && !isJsSourceFile(d.getSourceFile())))
     ) {
       return DYN;
     }
@@ -3754,7 +3668,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // its data fields, and calls of the member monomorphize per call
       // site against the defining object literal's declaration.
       if (isGenericCallableMemberType(fieldTs, checker)) continue;
-      let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
+      let pt = mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
       // `any`), which would absorb the whole shape into the dynamic tier.

@@ -65,7 +65,7 @@ fn td_error(output: &mut String) {
 pub fn text_decode(bytes: &JsBytes<u8>) -> JsString {
     let input = td_input(bytes);
     let input = input.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&input);
-    Rc::from(String::from_utf8_lossy(input).as_ref())
+    JsString::from(String::from_utf8_lossy(input).as_ref())
 }
 
 fn td_single_byte(input: &[u8], encoding: usize) -> JsString {
@@ -80,11 +80,11 @@ fn td_single_byte(input: &[u8], encoding: usize) -> JsString {
             },
         );
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_x_user_defined(input: &[u8]) -> JsString {
-    Rc::from(
+    JsString::from(
         input
             .iter()
             .map(|byte| {
@@ -147,7 +147,7 @@ fn td_utf16(input: &[u8], big_endian: bool) -> JsString {
     if index < input.len() {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_gb18030(input: &[u8]) -> JsString {
@@ -231,7 +231,7 @@ fn td_gb18030(input: &[u8]) -> JsString {
     if first != 0 || second != 0 || third != 0 {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_big5(input: &[u8]) -> JsString {
@@ -274,7 +274,7 @@ fn td_big5(input: &[u8]) -> JsString {
     if lead != 0 {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_euc_jp(input: &[u8]) -> JsString {
@@ -331,7 +331,7 @@ fn td_euc_jp(input: &[u8]) -> JsString {
     if lead != 0 {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_shift_jis(input: &[u8]) -> JsString {
@@ -381,7 +381,7 @@ fn td_shift_jis(input: &[u8]) -> JsString {
     if lead != 0 {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 fn td_euc_kr(input: &[u8]) -> JsString {
@@ -420,7 +420,7 @@ fn td_euc_kr(input: &[u8]) -> JsString {
     if lead != 0 {
         td_error(&mut output);
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -638,7 +638,7 @@ fn td_iso_2022_jp(input: &[u8]) -> JsString {
             }
         }
     }
-    Rc::from(output)
+    JsString::from(output)
 }
 
 pub fn text_decode_legacy(bytes: &JsBytes<u8>, encoding: f64) -> JsString {

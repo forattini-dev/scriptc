@@ -1,7 +1,9 @@
 scriptc coverage tests/coverage-fixtures/js-gap/gap.js
 
+  backend rust; JavaScript engine none; external FFI no
+
   statements analyzed   5
   compile statically    4  (80%)
-  compile dynamically   1  (20%) (island sites — the embedded engine runs them)
+  compile dynamically   1  (20%) (native dynamic runtime — no JavaScript engine)
 
-  builds with --dynamic — no remaining blockers (the island sites above run in the embedded engine).
+  builds with --dynamic — no remaining blockers (the dynamic sites above use the native runtime).

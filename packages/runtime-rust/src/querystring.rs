@@ -28,7 +28,7 @@ pub fn querystring_unescape(value: &JsString) -> JsString {
         index += 1;
     }
 
-    Rc::from(String::from_utf8_lossy(&bytes).into_owned())
+    JsString::from(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[derive(Clone)]
@@ -47,7 +47,7 @@ impl HeapValue for QuerystringParsedValue {
 
 fn querystring_piece(bytes: Vec<u8>, encoded: bool) -> JsString {
     let value: JsString =
-        Rc::from(String::from_utf8(bytes).expect("querystring scan preserves UTF-8"));
+        JsString::from(String::from_utf8(bytes).expect("querystring scan preserves UTF-8"));
     if encoded && !value.is_empty() {
         querystring_unescape(&value)
     } else {
@@ -64,12 +64,12 @@ fn querystring_add_pair(
 ) {
     let key = querystring_piece(key, key_encoded);
     let value = querystring_piece(value, value_encoded);
-    match map_get_by(output, &key, |left, right| left.as_ref() == right.as_ref()) {
+    match map_get_by(output, &key, |left, right| left == right) {
         None => map_set_by(
             output,
             key,
             QuerystringParsedValue::String(value),
-            |left, right| left.as_ref() == right.as_ref(),
+            |left, right| left == right,
         ),
         Some(QuerystringParsedValue::String(previous)) => {
             let values = array_new(vec![previous, value]);
@@ -77,7 +77,7 @@ fn querystring_add_pair(
                 output,
                 key,
                 QuerystringParsedValue::Strings(values),
-                |left, right| left.as_ref() == right.as_ref(),
+                |left, right| left == right,
             );
         }
         Some(QuerystringParsedValue::Strings(values)) => {
@@ -256,5 +256,5 @@ pub fn querystring_stringify<T: QuerystringDyn>(
             output.push_str(&querystring_escape(&value.querystring_scalar()));
         }
     }
-    Rc::from(output)
+    JsString::from(output)
 }

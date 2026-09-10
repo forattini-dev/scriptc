@@ -16,14 +16,12 @@ pub use url_values::*;
 
 static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
 
-/// Owned JavaScript string handle for the static Rust heap.
-///
-/// `Rc` keeps aliasing explicit and thread-confined. Later heap object
-/// families use the same owning-handle rule and add tracing for cycles.
-pub type JsString = Rc<str>;
+mod js_string;
+pub use js_string::{JsString, JsStringBuilder, JsStringSource, Utf16Units};
 
 include!("regex.rs");
 include!("clock_and_date.rs");
+include!("date_components.rs");
 include!("heap.rs");
 include!("live_refs.rs");
 include!("diagnostics_channel.rs");
@@ -42,6 +40,8 @@ include!("ffi_callbacks.rs");
 include!("ffi_foreign.rs");
 #[cfg(all(feature = "island-eval", feature = "island-v8"))]
 compile_error!("scriptc-runtime: island-eval (boa) and island-v8 are mutually exclusive island engines");
+#[cfg(feature = "island-eval")]
+include!("island_string.rs");
 #[cfg(feature = "island-eval")]
 include!("island_boundary.rs");
 #[cfg(any(feature = "island-eval", feature = "island-v8"))]
@@ -80,6 +80,7 @@ include!("inspect.rs");
 include!("assert_messages.rs");
 include!("assert_shapes.rs");
 include!("arrays.rs");
+include!("array_views.rs");
 include!("bytes.rs");
 include!("bytes_encoding.rs");
 include!("zlib.rs");
@@ -87,12 +88,14 @@ include!("text_decoder.rs");
 include!("md5.rs");
 include!("crypto.rs");
 include!("collections.rs");
+include!("map_views.rs");
 include!("event_emitter.rs");
 include!("readable.rs");
 include!("writable.rs");
 include!("duplex.rs");
 include!("transform.rs");
 include!("strings_and_process.rs");
+include!("string_utf16_ops.rs");
 include!("number_parse.rs");
 include!("target_config.rs");
 include!("string_search.rs");
@@ -135,6 +138,7 @@ include!("abort.rs");
 include!("fetch.rs");
 include!("fetch_reader.rs");
 include!("web_stream.rs");
+include!("web_stream_from.rs");
 include!("http_agent.rs");
 include!("tls_ca.rs");
 include!("tls_client.rs");
@@ -150,10 +154,14 @@ mod tests {
     include!("tests/target_config.rs");
     include!("tests/generators.rs");
     include!("tests/web_and_platform.rs");
+    include!("numeric_ops.test.rs");
+    include!("regex.test.rs");
     include!("tests/event_loop_order.rs");
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
     include!("promise_views.test.rs");
+    include!("array_views.test.rs");
+    include!("readline.test.rs");
     include!("tests/heap_pressure.rs");
     include!("effect_state.test.rs");
     include!("effect_pubsub.test.rs");
@@ -161,20 +169,26 @@ mod tests {
     include!("effect_context.test.rs");
     include!("effect_runners.test.rs");
     include!("filesystem_open_numeric.test.rs");
+    include!("filesystem_append.test.rs");
     include!("tests/text_decoder.rs");
     include!("tests/windows_paths.rs");
     include!("tests/querystring.rs");
     include!("tests/zlib.rs");
     include!("tests/inspect.rs");
     include!("tests/net_and_http.rs");
+    include!("network.test.rs");
     include!("tests/http_framing.rs");
     include!("tests/fetch_reader.rs");
     include!("web_stream.test.rs");
+    include!("web_stream_from.test.rs");
     include!("native_module.test.rs");
     include!("collections.test.rs");
+    include!("map_views.test.rs");
     include!("tests/dgram.rs");
     include!("tests/child_process.rs");
     include!("tests/tls.rs");
+    #[cfg(any(feature = "island-eval", feature = "island-v8"))]
+    include!("island_import_eval.test.rs");
     #[cfg(feature = "island-eval")]
     include!("tests/island_modules.rs");
     #[cfg(feature = "island-eval")]

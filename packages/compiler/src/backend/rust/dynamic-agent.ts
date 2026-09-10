@@ -31,7 +31,7 @@ export function emitRustDynamicAgent(context: RustDynamicAgentContext): void {
   close("}");
 
   open(`fn sc_dyn_http_agent_get(agent: &runtime::JsHttpAgent, key: &runtime::JsString) -> ${dyn} {`);
-  open("match key.as_ref() {");
+  open("match key.to_utf8_lossy() {");
   line(`"maxSockets" => ${dyn}::Number(runtime::http_agent_max_sockets(agent)),`);
   line(`"maxFreeSockets" => ${dyn}::Number(runtime::http_agent_max_free_sockets(agent)),`);
   line(`"keepAlive" => ${dyn}::Boolean(runtime::http_agent_keep_alive(agent)),`);
@@ -46,7 +46,7 @@ export function emitRustDynamicAgent(context: RustDynamicAgentContext): void {
   close("}");
 
   open(`fn sc_dyn_http_agent_set(agent: &runtime::JsHttpAgent, key: &runtime::JsString, value: &${dyn}) -> bool {`);
-  line(`let ${dyn}::Number(value) = value else { if matches!(key.as_ref(), "defaultPort" | "maxSockets" | "maxFreeSockets" | "keepAliveMsecs") { sc_dyn_arg_type_fail(key, "of type number", value); } return false; };`);
+  line(`let ${dyn}::Number(value) = value else { if matches!(key.to_utf8_lossy(), "defaultPort" | "maxSockets" | "maxFreeSockets" | "keepAliveMsecs") { sc_dyn_arg_type_fail(key, "of type number", value); } return false; };`);
   line("runtime::http_agent_number_set(agent, key, *value)");
   close("}");
 

@@ -189,7 +189,7 @@ pub fn path_win32_join(parts: &JsArray<JsString>) -> JsString {
     let (mut joined, first_length) = parts.with(|data| {
         let mut joined = Vec::new();
         let mut first_length = 0usize;
-        for part in data.elements.iter().filter(|part| !part.is_empty()) {
+        for part in data.elements().iter().filter(|part| !part.is_empty()) {
             if joined.is_empty() {
                 first_length = part.len();
             } else {
@@ -242,11 +242,11 @@ pub fn path_win32_join(parts: &JsArray<JsString>) -> JsString {
     } else {
         normalize_windows_path(&joined)
     };
-    Rc::from(String::from_utf8(result).expect("scriptc: Windows path must remain UTF-8"))
+    JsString::from(String::from_utf8(result).expect("scriptc: Windows path must remain UTF-8"))
 }
 
 pub fn path_win32_normalize(path: &JsString) -> JsString {
-    Rc::from(
+    JsString::from(
         String::from_utf8(normalize_windows_path(path.as_bytes()))
             .expect("scriptc: normalized Windows path must remain UTF-8"),
     )
@@ -325,7 +325,7 @@ fn windows_cwd() -> Vec<u8> {
 
 fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
     let inputs = parts.with(|data| {
-        data.elements
+        data.elements()
             .iter()
             .map(|part| part.as_bytes().to_vec())
             .collect::<Vec<_>>()
@@ -349,7 +349,7 @@ fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
                     && (inputs[0].is_empty() || inputs[0] == b".")
                     && cwd.first().is_some_and(|byte| windows_path_separator(*byte)));
             if fast {
-                return Rc::from(
+                return JsString::from(
                     String::from_utf8(cwd).expect("scriptc: Windows cwd must remain UTF-8"),
                 );
             }
@@ -407,7 +407,7 @@ fn resolve_windows_path(parts: &JsArray<JsString>, cwd: &[u8]) -> JsString {
     if result.is_empty() {
         result.push(b'.');
     }
-    Rc::from(String::from_utf8(result).expect("scriptc: resolved Windows path must remain UTF-8"))
+    JsString::from(String::from_utf8(result).expect("scriptc: resolved Windows path must remain UTF-8"))
 }
 
 pub fn path_win32_resolve(parts: &JsArray<JsString>) -> JsString {
@@ -485,11 +485,11 @@ fn relative_windows_path(from: &JsString, to: &JsString, cwd: &[u8]) -> JsString
         if to_length > length {
             if to_lower[(to_start + index) as usize] == b'\\' {
                 let start = to_start + index + 1;
-                return Rc::from(&resolved_to[start as usize..to_end as usize]);
+                return JsString::from(&resolved_to[start as usize..to_end as usize]);
             }
             if index == 2 {
                 let start = to_start + index;
-                return Rc::from(&resolved_to[start as usize..to_end as usize]);
+                return JsString::from(&resolved_to[start as usize..to_end as usize]);
             }
         }
         if from_length > length {
@@ -525,7 +525,7 @@ fn relative_windows_path(from: &JsString, to: &JsString, cwd: &[u8]) -> JsString
     if to_end > to_start {
         result.extend_from_slice(&resolved_to.as_bytes()[to_start as usize..to_end as usize]);
     }
-    Rc::from(String::from_utf8(result).expect("scriptc: relative Windows path must remain UTF-8"))
+    JsString::from(String::from_utf8(result).expect("scriptc: relative Windows path must remain UTF-8"))
 }
 
 pub fn path_win32_relative(from: &JsString, to: &JsString) -> JsString {
@@ -546,14 +546,14 @@ fn windows_namespaced_path(path: &JsString, cwd: &[u8]) -> JsString {
             .get(2)
             .is_some_and(|byte| matches!(*byte, b'?' | b'.'))
     {
-        return Rc::from(format!("\\\\?\\UNC\\{}", &resolved[2..]));
+        return JsString::from(format!("\\\\?\\UNC\\{}", &resolved[2..]));
     }
     if bytes.len() > 2
         && windows_device_root(bytes[0])
         && bytes[1] == b':'
         && bytes[2] == b'\\'
     {
-        return Rc::from(format!("\\\\?\\{resolved}"));
+        return JsString::from(format!("\\\\?\\{resolved}"));
     }
     resolved
 }
@@ -630,7 +630,7 @@ pub fn path_win32_dirname(path: &JsString) -> JsString {
     if end == 0 && root_end.is_none() {
         string(".")
     } else {
-        Rc::from(&path[..end])
+        JsString::from(&path[..end])
     }
 }
 
@@ -680,7 +680,7 @@ pub fn path_win32_basename(path: &JsString, suffix: &JsString) -> JsString {
         } else if end == -1 {
             end = length;
         }
-        return Rc::from(&path[start as usize..end as usize]);
+        return JsString::from(&path[start as usize..end as usize]);
     }
 
     for index in (start..length).rev() {
@@ -697,7 +697,7 @@ pub fn path_win32_basename(path: &JsString, suffix: &JsString) -> JsString {
     if end == -1 {
         empty_string()
     } else {
-        Rc::from(&path[start as usize..end as usize])
+        JsString::from(&path[start as usize..end as usize])
     }
 }
 
@@ -744,6 +744,6 @@ pub fn path_win32_extname(path: &JsString) -> JsString {
     {
         empty_string()
     } else {
-        Rc::from(&path[start_dot..end])
+        JsString::from(&path[start_dot..end])
     }
 }

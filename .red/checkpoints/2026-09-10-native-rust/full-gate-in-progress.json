@@ -1,0 +1,111 @@
+{
+  "started": "2026-09-10T18:28:01.596064+00:00",
+  "pid": 1524639,
+  "starttimeTicks": "232360476",
+  "head": "143bd19c658985f257738b0338d8476767bb9b6a",
+  "sourceBefore": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+  "distBefore": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b",
+  "accepted": false,
+  "lanes": {
+    "plain": {
+      "status": "running",
+      "started": "2026-09-10T18:28:02.110687+00:00",
+      "freeDiskBefore": 88217722880
+    }
+  },
+  "reason": "Full local fallback: Sandbox image unavailable. Recover from terminal F disk exhaustion, reviewed G coverage-contract corrections and native dynamic report fix. No test exclusions.",
+  "reviewedSourceDelta": {
+    "previousGate": "/tmp/scriptc-consolidation-gate-20260910f/gate.json",
+    "reconstructedPreviousSourceFingerprint": "b57fbc7b43fe38db47a830befc29f7ccd62ebf6b99100422a75e4ecbe7111885",
+    "sourceFingerprint": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+    "distFingerprint": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b",
+    "implementationChanged": true,
+    "changedFiles": {
+      "packages/compiler/test/ts7/baselines/order-parity.json": {
+        "before": "/tmp/scriptc-order-baselines-20260910f/baseline-before.json",
+        "afterSha256": "6db502eff519c80ffd715f49c9be56f23989553223755c2c7b157945b6f91914"
+      },
+      "packages/compiler/test/cc-driver.test.ts": {
+        "before": "/tmp/scriptc-order-baselines-20260910f/cc-driver.test.ts.before",
+        "afterSha256": "d1ff804045c77d09328077d3fd05e4431fd20e36e64ddd20dd8872b346c0460b"
+      },
+      "tests/harness/dyncheck.test.ts": {
+        "before": "/tmp/scriptc-order-baselines-20260910f/dyncheck.test.ts.before",
+        "afterSha256": "940d7f07540f3e5296a9ec16237d6b81847a77561b35368795a2f8a9bf66f0e0"
+      },
+      "packages/compiler/test/native-import-admission.test.ts": {
+        "before": "/tmp/scriptc-final-gate-inputs-20260910g/native-import-admission.before.ts",
+        "afterSha256": "239dc447b87b8664dc1f511fcb6ddb9fdf8ac8983a1b6dd398f78b7788b4a5d4"
+      },
+      "tests/harness/coverage.test.ts": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/coverage.test.ts",
+        "afterSha256": "1e17960832235fac1457e11846dc7c467219dd389bb176d57b7f7bf893dab451"
+      },
+      "tests/harness/__snapshots__/coverage-unreached.txt": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/__snapshots__/coverage-unreached.txt",
+        "afterSha256": "d9090810166455eec14cbd67f77cab0cc5beae2be6b771fffdc7742472fe25ab"
+      },
+      "tests/harness/__snapshots__/coverage-js-gap.txt": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/__snapshots__/coverage-js-gap.txt",
+        "afterSha256": "4752e3a47a59686ba689956439d79f099ec00a16105294992d489697d8a04ac9"
+      },
+      "tests/harness/__snapshots__/coverage-js-gap-dynamic.txt": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/__snapshots__/coverage-js-gap-dynamic.txt",
+        "afterSha256": "19d8e41b6987fcd7d6abd6ce3606a35f946ed486ddd293a75cb7de90406b0a7d"
+      },
+      "tests/harness/__snapshots__/coverage-npm-lazy-traps.txt": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/__snapshots__/coverage-npm-lazy-traps.txt",
+        "afterSha256": "26fc21b8567dcf6bc63bd7c315b8b7cb3dee91e08cf9d76ed317dd3e95f93b68"
+      },
+      "tests/harness/__snapshots__/coverage-npm-lazy-builtin.txt": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/tests/harness/__snapshots__/coverage-npm-lazy-builtin.txt",
+        "afterSha256": "a28ef222c7dd85c7d76bb5ebb459922bdb38845512784fc31519396f9744d791"
+      },
+      "packages/compiler/src/coverage/report.ts": {
+        "before": "/tmp/scriptc-coverage-correction-20260910g/before/packages/compiler/src/coverage/report.ts",
+        "afterSha256": "58d7d4b184174866e0b0ae9834f04b040eaa98d20c993f917f61c38071cab2c4"
+      }
+    },
+    "addedFiles": {
+      "tests/corpus/3169-native-import-shared-views/main.ts": "775ea5c1e38a94ef92805a2c6e0e20628b334fc9387edfee7b838233f101e51c",
+      "tests/corpus/3169-native-import-shared-views/module.ts": "e1c2a72551b1d69eca5e376f873438b62d9b221c1e487b23f67328f641c8f985",
+      "tests/dogfood/rust-validation-contract-refresh.md": "f09eac42058aaf7b502f72620f11a63b67ef1a792015321fa52f013817f94271"
+    },
+    "codeGenerationChanged": false,
+    "implementationChangeScope": [
+      "packages/compiler/src/coverage/report.ts"
+    ],
+    "previousAttempt": "/tmp/scriptc-consolidation-gate-20260910g/gate.json",
+    "coverageCorrectionEvidence": "/tmp/scriptc-coverage-correction-20260910g/review.json"
+  },
+  "workspaceBuild": {
+    "started": "2026-09-10T18:27:22.351793+00:00",
+    "sourceBefore": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+    "distBefore": "2783b4de3edd99bf7a8197e0971614e9519d6d8eff091489fa2e452cb595b1ea",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+    "exitCode": 0,
+    "finished": "2026-09-10T18:27:32.206937+00:00",
+    "sourceAfter": "19261bc34af3e6e62d6ae5687c9f24d0c5846a2c8a53fe53afda2fb895ddf4e6",
+    "distAfter": "f03cc9a950ee8379dfc878899cb95e6b0676f4c14ed3828d69c17fa6d493287b"
+  },
+  "overlayConfigSha256": "919fcf6cd3494d168f09352dc858e3882ebb3c01070da954e949edcca9117ac2",
+  "sequencerSha256": "f8dd4da90d115eef407f956b3a84fb445dfe462562396f41b140d1bc6b7ffea3",
+  "command": [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "--maxWorkers=1",
+    "--reporter=verbose",
+    "--config=/tmp/scriptc-consolidation-gate-20260910h/config.mts"
+  ],
+  "tools": {
+    "node": "v24.15.0",
+    "bun": "1.4.1",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+    "zig": "0.13.0"
+  }
+}

@@ -4,4 +4,4 @@ scriptc coverage tests/fixtures/node-types/import-fences.ts
   compile statically    3  (75%)
 
   blockers:
-      ×2  the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe)  SC1010
+      ×2  the 'inspector' module (it drives the V8 inspector protocol — debugger, profiler, heap access — and a compiled binary embeds no V8 engine to inspect)  SC1010

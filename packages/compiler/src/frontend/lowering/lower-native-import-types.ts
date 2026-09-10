@@ -29,31 +29,50 @@ export function nativeImportTargetOf(L: Lowerer, call: ts.CallExpression): ts.So
 export function nativeImportHandleType(L: Lowerer, expr: ts.Expression | undefined): IrType | null {
   if (L.dynamic) return null;
   const seen = new Set<ts.Node>();
-  const visit = (value: ts.Expression | undefined): IrType | null => {
-    if (!value || seen.has(value)) return null;
+  // This runs before expression lowering's depth fence. Both transparent
+  // wrappers and identifier chains can be arbitrarily deep, so keep the DFS
+  // on an explicit stack. These handles have at most one Promise layer.
+  const pending: { node: ts.Node | undefined; awaited: boolean }[] = [{ node: expr, awaited: false }];
+  while (pending.length > 0) {
+    const candidate = pending.pop();
+    if (!candidate) break;
+    const { node: value, awaited } = candidate;
+    if (!value || seen.has(value)) continue;
     seen.add(value);
-    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isTypeAssertion(value) || ts.isNonNullExpression(value)) return visit(value.expression);
+    if (ts.isVariableDeclaration(value)) {
+      if (ts.isIdentifier(value.name)) pending.push({ node: value.initializer, awaited });
+      continue;
+    }
+    if (ts.isParameter(value)) {
+      if (L.jsvalParamOverrides.has(value)) return JSVAL;
+      continue;
+    }
+    if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isTypeAssertion(value) || ts.isNonNullExpression(value)) {
+      pending.push({ node: value.expression, awaited });
+      continue;
+    }
     if (ts.isAwaitExpression(value)) {
-      const inner = visit(value.expression);
-      return inner?.kind === "promise" ? inner.inner : inner;
+      pending.push({ node: value.expression, awaited: true });
+      continue;
     }
     if (ts.isCallExpression(value)) {
-      return nativeImportTargetOf(L, value) ? { kind: "promise", inner: JSVAL } : null;
+      if (nativeImportTargetOf(L, value)) return awaited ? JSVAL : { kind: "promise", inner: JSVAL };
+      continue;
     }
-    if (!ts.isIdentifier(value)) return null;
+    if (!ts.isIdentifier(value)) continue;
     let symbol = L.checker.getSymbolAtLocation(value);
-    if (!symbol) return null;
+    if (!symbol) continue;
     if (symbol.flags & ts.SymbolFlags.Alias) symbol = L.checker.getAliasedSymbol(symbol);
-    for (const decl of L.checker.declarationsOf(symbol)) {
-      if (ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name)) {
-        const type = visit(decl.initializer);
-        if (type) return type;
+    const declarations = L.checker.declarationsOf(symbol);
+    // Reverse pushes preserve the recursive walk's declaration precedence.
+    for (let index = declarations.length - 1; index >= 0; index--) {
+      const declaration = declarations[index];
+      if (declaration && (ts.isVariableDeclaration(declaration) || ts.isParameter(declaration))) {
+        pending.push({ node: declaration, awaited });
       }
-      if (ts.isParameter(decl) && L.jsvalParamOverrides.has(decl)) return JSVAL;
     }
-    return null;
-  };
-  return visit(expr);
+  }
+  return null;
 }
 
 /** The storage type behind a promise-valued expression whose CHECKER type

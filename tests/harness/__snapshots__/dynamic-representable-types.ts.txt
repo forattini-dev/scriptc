@@ -16,23 +16,23 @@ dynamic-representable-types.ts:10:5 - error SC2011: values of type 'any[]' have 
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
-dynamic-representable-types.ts:11:7 - error SC2011: values of type '{ workItem: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+dynamic-representable-types.ts:11:7 - error SC2009: values of type '{ workItem: any; width: string; }' cannot be compiled: the record shape is supported, but its member 'workItem' has type 'any', which does not compile
 
   10 | var evolving = []; // never used — the tsc-clean evolving-array shape
   11 | const rec = { workItem: {} as any, width: "10px" };
      |       ^~~
   12 | const fn: (v: any) => string = (v) => String(v);
 
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-dynamic-representable-types.ts:11:13 - error SC2011: values of type '{ workItem: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+dynamic-representable-types.ts:11:13 - error SC2009: values of type '{ workItem: any; width: string; }' cannot be compiled: the record shape is supported, but its member 'workItem' has type 'any', which does not compile
 
   10 | var evolving = []; // never used — the tsc-clean evolving-array shape
   11 | const rec = { workItem: {} as any, width: "10px" };
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   12 | const fn: (v: any) => string = (v) => String(v);
 
-  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
 dynamic-representable-types.ts:14:7 - error SC2011: values of type '[number, (string | undefined)?]' have no static representation but run in the embedded dynamic engine, which this build does not include
 

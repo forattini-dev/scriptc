@@ -1,0 +1,530 @@
+{
+  "schema": 1,
+  "createdAt": "2026-09-10T18:28:18.997Z",
+  "entry": "/tmp/scriptc-redwall-contracts-20260909/main.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "target": "bun"
+  },
+  "compiler": {
+    "commit": "143bd19c658985f257738b0338d8476767bb9b6a",
+    "dirty": true,
+    "distSha256": "463bbbd0ad4411465bdd1407b71078eb935c93649d18c0ebb99039e363271a33",
+    "runtimeSourceSha256": "3a82ae40dde1fdf916db1805485ded30f7702a0be9d20ba552dd72b60760103c",
+    "runtimeLockSha256": "9dd16d6e4943477af04e215db04e285389b1cccfeaf0964ac8063d9f984a558d",
+    "node": "v24.15.0",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "consumer": {
+    "root": "/home/cyber/Work/reddb.io/red-dev",
+    "commit": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+    "dirty": false
+  },
+  "analysis": {
+    "preflightFailed": false,
+    "diagnostics": [],
+    "runtimeFences": [],
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "sources": [
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/package.json",
+        "sha256": "4e34ac1c108e4fa5b13148abbf362770a6535a96beff15ea06ecc753bbc3317a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/agents.ts",
+        "sha256": "b67d9d43b9cda75c0e96fa5c2b9e628b5bb463e26142caaf06f72248fd3b4d66"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/apps.ts",
+        "sha256": "494855ca3b0db11fb9b5c9d4a7f607ae04a4ff96fee809bb5b8c5e762530768e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/capture.ts",
+        "sha256": "d8a99e355f9e71c8a5a711a1de2dd1c8477298a9c44b42eba91d9f7423173622"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/index.ts",
+        "sha256": "1346481c35495e17150398fddc1d86194939a9d87ac3ba37b9f8700bcd13b6d2"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/input.ts",
+        "sha256": "7da85e987f7cee555a2f2360538a53042b58f344c1ea52c28d65ca5f7ab868be"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/panels.ts",
+        "sha256": "183569c2582d9ff07963280090d861a8f7de23332167439b3750f17597bebbc6"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/reserved.ts",
+        "sha256": "1837b1de2937d90d9c5f74b2790f0b32e93a276f2e6b3295c2ae17358db952bb"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/terminal-surfaces.ts",
+        "sha256": "4695b6ea727c31a45d2cc32cc10df96a6bedd8a799bf668450c57a4bb642a403"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/terminal.ts",
+        "sha256": "7f59fcd4995f5fccee042647e42be0d5ebd5511fac73f2aa2d529d4cbaddbcee"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/types.ts",
+        "sha256": "8095728cd553386ce75fd391c1d0641a5ee6cb1ea4a2f35045e7867f36163076"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/actions/validate.ts",
+        "sha256": "532d7992d1b03396c6894eaad1e38601f4a105c269938b99adb350e5bd3c9eb6"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-update.ts",
+        "sha256": "cb6fa7c27aa42d6130a137bd9fc6c82c7f6d4556d87cfb265a1721e924106410"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-usage.ts",
+        "sha256": "5f1c30890d490b6f5563aa321aa2d0b2d306095c734123152ac3e8ca295b2c14"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/agents.ts",
+        "sha256": "0b7ec2ef523058e8a929cc1a1aa6dfc893629128f54dee9a26e95081f2765ada"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/alacritty.ts",
+        "sha256": "ee0739b74447a9e4d23eec5df6b139bfc4d5e94d59703b44b6f75c5912c0c24a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/apt-upgrade.ts",
+        "sha256": "81d29071658c7d3d3ed78e77615542992bd13cc706baaae5de9098988d679f3c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/blender.ts",
+        "sha256": "94f2af1ed1fa6172b39e552cffe960431587a7187d4d670510f0af335e613bba"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/blesh.ts",
+        "sha256": "29cad7377cfb6e35a794021fe72e4316c4c7f0820c3cba5884b72bd6e94b2944"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/bounded-command.ts",
+        "sha256": "21bd789c32cc0d126c89c6ee120849f72758ef9499f3378a926aa8abf30873b5"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/brand.ts",
+        "sha256": "970f72512f4b79dd69c84eea19ff16ebf006415f8f98567261c8e8aa04e384d3"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+        "sha256": "92ab067dd07a5faf721f7d0ef8793a52ba6792ea3530d523a1cd13643585e816"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/checksum.ts",
+        "sha256": "5f1ddde75a5c8249b8fb08c0a76a4a4f1a52b892a3f4d47caf319ffe1838198d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/claude-keybindings.ts",
+        "sha256": "671a6e42f51f4402a17f73a521191b12ce2f8eb4631f8ea4a135c1be6ce4bfd1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+        "sha256": "6f7102135dbd18af1e40fafdc058d47273ea95dbbf33c8821cfe054a75a54b86"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/codex-statusline.ts",
+        "sha256": "e4b3ee25109e6915bde72809d25aac34f343ad371a511c20542cf0fba63b5f4e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/converge.ts",
+        "sha256": "246938a36af4193e0df72e6c95bc4ad4e1370c8046067e73470c343f10cee81b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/default-agent.ts",
+        "sha256": "1975aa6f83d6d9c03712226c6af97cfca6ced27e11d0a13fe8a4633af5cf9ff2"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/docker.ts",
+        "sha256": "7bc2101269cd3a64b8880a8defd55c0f3a0d3c82e150457697cf121310eefec0"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+        "sha256": "e613910ce3d570a305f87c2e729e8848e4103fa052eb496fadf1cc821cbe69ac"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/drift.ts",
+        "sha256": "c66d45bc1b58d0b14866c47c405027379d8524300b680c6429c3dee5a60939ee"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/firstrun.ts",
+        "sha256": "4f7aa4920ca486bfab722e62506db40f9f451e004cfa8ca5d69caff93540f9d6"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/github-rate.ts",
+        "sha256": "7e5d259a22f3eaa6e41e016533ec5e950f06603fd33634566e2df000c0e982c6"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/github-token.ts",
+        "sha256": "095fc2dcbe48d730f75f97aee73e57133a085db8df105a99ee6942a29ead420b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/gnome-keys.ts",
+        "sha256": "36627c285fa07c76eb6583f57c9fc008b11d66eb08170207b576df53799fff3b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/herdr.ts",
+        "sha256": "384c5ca34e31f9fd271fefba734b9bf7ad1a5dedc9fa9e25a9ef205c3ba4e781"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+        "sha256": "32d5984a4775ecccf5bbdf5ae80e224c00a043ba486eb5a5b2d0ba0092833cb1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/hotkeys.ts",
+        "sha256": "c59c5bc33c36f59fd62a710d0db124ac03c63fe10c24c87f30442df13ee5626e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/keys.ts",
+        "sha256": "e28010833511a3fe3919e8ff8d9c34c0e7ef9fbc57a93c97231ba04c5cded83b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/lan-address.ts",
+        "sha256": "38f433d6e20bf8ccbbde1524794f7e868e4c060a29a6c124608c388331fc1d8d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/legacy-install.ts",
+        "sha256": "7d61be171cf42d50f47b48f6bafafefb7f99ce877887a5ab3b80f5e5b245759e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/log.ts",
+        "sha256": "e15564b7f2fb6569cc8e725f19a9322bbbbe503ffb3106adbaae231b3091916a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+        "sha256": "ca045e72d9610cb1997a62317d9445b542114a432d624c06c545725fd18dfe08"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/mise-config.ts",
+        "sha256": "a03f35707dd66a97137da7cc54f160a04da52afcef21de005cd56c955dc24319"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/nine-router.ts",
+        "sha256": "01d19e548b89ac3639ea31d2251f1e59fe78c9aea3e5edc8bdd1e1f81a86b2ec"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/offline-depot.ts",
+        "sha256": "6390d02dfbae6fb5f90c05bbe38352ca1b349fed2510354c0bc64c37e7b4cf6e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/owned-config.ts",
+        "sha256": "04d2e0ba7d70cd459481652ef81d2166fa95c05ad66f06cc80ebaf9a6b81aaf1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/owned-state.ts",
+        "sha256": "a09242a69d53725933486e5d1c30073aebb839daea77f4d65ac61b068df6f20e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/platform.ts",
+        "sha256": "3b242b06a955f8b03897ff7eef1cde220592dd42ec82b3d379d205d517f483fb"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/png.ts",
+        "sha256": "5874aae08db1a0dfe1327d3a8c5bde9512209a1cbfb7d4b3c203f03c3427a7a7"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/pointer-theme.ts",
+        "sha256": "7dc175646992872650dff1f7a8ca0d3b554f1975f6680669a2205a0659be8258"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/preferences.ts",
+        "sha256": "a00821fa84591cccc337a0afb33c607d1a67387b99d3a34f86db4d7e38dfc19d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/privileged.ts",
+        "sha256": "e3d9f167ecedf144bf14ec7626f1317b7613346d624f96a4639c389df829043a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/process-heartbeat.ts",
+        "sha256": "93dee23b5ab0688e61337f8970c521b6fa78743b93fa2fef01b1951e81f6aba2"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/product-skill.ts",
+        "sha256": "acdd579a7b20c334f820251fc258c0db82832aceedfdf935248be638e165c84c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/providers.ts",
+        "sha256": "8890c8abbb10d62f3de937c02ac110c08eb2616d9b06ceacd5ec561983459953"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/puppeteer.ts",
+        "sha256": "bee794e5d3ac5db737a653f5e1cbfa95445e6664b721b9a5dcc3846d4cf52381"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-family.ts",
+        "sha256": "649fdce5a65223157f27134655272a383da2ad791fe2f5ffdca9159223905dec"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+        "sha256": "21a6ceb6e5070f271f30fa853057d35f97fca01bb1c9b5b50161b2fe84434398"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-adopt.ts",
+        "sha256": "408c965a077efd2a1cf92f9b9992f6b747a109c9fbb96bdcc4841a97ea3e1970"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-checkout.ts",
+        "sha256": "401d08eb33623929634da8bc6acbf8a3b61b8551505dcf489fd27297aa2ac1a5"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-companions.ts",
+        "sha256": "ab83e3b5569027521b61c78c491696e62124c73d7d57d3ef81d495c117b2ff22"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-ext.ts",
+        "sha256": "fa52f2afe154615d55a7d9b9be04199ce7d209c8034a63ea181174db38c2e464"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-hosts.ts",
+        "sha256": "86c2b89c4860092fa1062827ac3834fa0c9a04c1ed7e7a0bcfb95c30c909aa96"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-mise-plugin.ts",
+        "sha256": "207d2f129d7b9367f59164f471b7ded3da68af1f2123b96e0ee556f114fc1f32"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-plugins.ts",
+        "sha256": "767ea4d6c018dc1081218f8c75ed2a6f00a812c18a2d017db413bb1c011b59a1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-registration.ts",
+        "sha256": "c3b8f13570acdb2e8599c280e04562234653e656d047b29eb11381cc08978392"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-root.ts",
+        "sha256": "3299eed3b98bddaa4b267cc6f86c58a483011c0c7019be1a457cdf2d79e6b23c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+        "sha256": "28331559d244dea6b2614a395f9924455f1c09aaa5c2e6553a868a47bf050d61"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-bin.ts",
+        "sha256": "92155cc83322ccadfcc8b8aa4e86c4e48e87bbe23556af8d5799685cf0197208"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-charset.ts",
+        "sha256": "affc64ffda073ed991ce5d52a06d81716166aab1344e329b5f1adbba80888b80"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-font.ts",
+        "sha256": "e7ee8816f8780fac13d0bcfe310fd7184a48ed5183bb494d5d4b7d7dc794428b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-hook.ts",
+        "sha256": "efd8d9136098b73b97f4e41e6f01ef999a9c0670c662702f6f4fee8297a43041"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-render.ts",
+        "sha256": "2977305cc13e7f3d687a285d09d500030a622f7571b7c16dd7ffae801da99487"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall.ts",
+        "sha256": "d93b2736dbc7616c7935eecc11c625d45314ee0c51d7ee5008ca76b35ff358c1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/rights.ts",
+        "sha256": "012e14a3616bd169dfe7fb7cca4844ddddfcd4fb5d2b99ac171925fd231ede15"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/runtimes.ts",
+        "sha256": "5b7b0d074782d4f5a9e100b80735be0370a3320916f3f9caf7343b97c69c4b72"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/shadow-repair.ts",
+        "sha256": "66d8235c236e1a842520bb46f63b26cd3391c8c4974d18b9c91b8aea92a9170a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/shadowed.ts",
+        "sha256": "5063feb7aaf54b6f4118c46c95a132112f8864a876f74ecfbf37d0bbb65149ce"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/shared-root.ts",
+        "sha256": "b9226aed727e2017e999ba81289da37f412616d269e457b5272917527162ef4c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/ssh-server.ts",
+        "sha256": "6c9f36caf74260e98af6b456b39a80dcbbf9e29d640d75f6940b3ef3b7787e0d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/staged-update.ts",
+        "sha256": "a60d8b9bed52a933b028b3b5a10bdef76bec2fce804d1b3f1fbfce85b5817a35"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/temp.ts",
+        "sha256": "9266f9768d15bfafeb1e76557da757bafb664ae49384798d47665b6a7e0a778e"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/terminal-cursor.ts",
+        "sha256": "7b7aaab9a7e831d173fb9e8a61e077e39338001ac6283b1346d8f194ae2c5620"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/terminal-surfaces.ts",
+        "sha256": "e2174beed550451e1f9bf291971f3a1a7057a6d48fbe6219e3d469f5cf99731c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/theme-apply.ts",
+        "sha256": "7cf9f8db405cbe03957872ee3a807566a9eccaf36336482488a4c9f1dbb5d910"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/theme-editors.ts",
+        "sha256": "0e13d498bd159c50caa3049e6b0e165f3a9a5898f97576b06e480981444c2c0b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/themes.ts",
+        "sha256": "23b3dd7b0f14da38f4ba6ceba7f8c843c6aaa6740918a3fa4caf888627929986"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/transcript.ts",
+        "sha256": "2025a90a2d39271edf13af9e0dabd43b1edc9cdc936254eefb06ad77cfc5373d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/trigger.ts",
+        "sha256": "e9c0b12936a8b8f4511d5255e7f85b93f9878f048bc769b3cff9da8615579377"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/ttf.ts",
+        "sha256": "c850a236cd581d23cf5395ff0ed1344de54dc503a622d808a9faa22e39f98f26"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-chrome.ts",
+        "sha256": "68802362822051c3efd1d2c5416860d364e2be7f4a686119615f094dc673232a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+        "sha256": "adf7a0ed0531a685b995f26aba175e8d535f05eac537106b8c7d8ec02b9754ee"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+        "sha256": "32a4bda4ee09ea9b5c444f1570c9b21e02887a3323ff63ee332201e4397fdc95"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-theme.ts",
+        "sha256": "a7c5f5068addd35f493eeebbfefa3f9707ee14058f18dcdb9adcb0a6ccc76282"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/typeset.ts",
+        "sha256": "f55e38ab594dfb5eb5c8563bedd08607315eaecf0f476558d50a14755dcec118"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/ui.ts",
+        "sha256": "0077e4e346dc15a880ebe20955e18d6c47ee2ab61010b674f75b42e438b57c01"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/unattended.ts",
+        "sha256": "76367d993d9e79f70e47ef855e301460d3fc9e86204a832525b1eb468ef9a0f5"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/verify-install.ts",
+        "sha256": "58dde7cd459155dae0031c01ea1aa3475aec92fb2e95b9f192510a749cbb1f07"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+        "sha256": "f0d37829c0a17294aa281546de3200d06a6790e63aa3354ff4c2582a1f5b8021"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/watch-schedule.ts",
+        "sha256": "5e3d2288cb38eef5d64ff55ef5ea9d5618fbe3f75a2878c3dae8f7b69cc68f30"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-console-mode.ts",
+        "sha256": "15dd05b44ed3d3b26cece40acf8c5987aca303ef517d7560211bde3750dcc051"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-env.ts",
+        "sha256": "e1d9d58e95f2b133c44985663388cb6e6e6a2a914cfd28211b5f61946c7421e3"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-hidden.ts",
+        "sha256": "71bf68392ea8017ce14268beb9c79d9d6daa4ab25b2b286de063338b610f45d5"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-output.ts",
+        "sha256": "6883c3c25c093bd3081979696a0a82b1d44e9f8db9d16f5c9e41e52ad436a086"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-path.ts",
+        "sha256": "74f0e4cb1f2b97e0069e063a1a84183e548514d57d883ff59de631a209b4f917"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-theme.ts",
+        "sha256": "ff36cb8e0b03f712c1ded8a83cbc214c013f9619fbc2684beb24fba1e940ae6f"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/workload-policy.ts",
+        "sha256": "a42a9a70dcc91b6dd25110235318560e78e62b4f0894d7245d65d40cc0b4154d"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/workstation-lock.ts",
+        "sha256": "f761dcb8535c9eb606821e126fcdc93e5cdf53a0994c71060504dae8f7ee364a"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/workstation-rollback.ts",
+        "sha256": "b539847d966ae2d801b50ec4cfcd3ad1c1ea3ec2e6275c542d85bc541a619d3b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl-provision.ts",
+        "sha256": "867884be04198bc9b8e330cac2d8a18e16e14368335b40dd98c4ff0f1852df65"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl-sync.ts",
+        "sha256": "6a05d9ed4cae5d7fd1a6cec3fa1f1f1fdec192b5e1e2fd37c5e0d1dfa438aec1"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl-tuning.ts",
+        "sha256": "23fe4f73edf80f9f4fedff09492916e61e11f90d828f14fe14f6184cf210267b"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl.ts",
+        "sha256": "821b17b14cde9cb0e16e931b4f60f071f11318fde9eb39cfd061d24e0db1ab1c"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/src/zellij-layer.ts",
+        "sha256": "8fabdee51cbdbcfc45bedc12b13eaed8e50e0b70ecd9e35d28899a56e8cbfc61"
+      },
+      {
+        "file": "/home/cyber/Work/reddb.io/red-dev/vendor/brand/tokens/tokens.json",
+        "sha256": "a9505806e857bb9352875f8cdae2b1c11f27b2455a738e13d7d4ab802b284205"
+      },
+      {
+        "file": "/tmp/scriptc-redwall-contracts-20260909/main.ts",
+        "sha256": "deb8f465245be262e45a063b6f35f3db1b7ac837e62d246b24902fa71e2fcece"
+      }
+    ]
+  },
+  "build": {
+    "ok": true,
+    "milliseconds": 57436.225263,
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "runtimeFences": [],
+    "binary": "/tmp/scriptc-boundary-redwall-20260910h/redwall/program",
+    "binarySha256": "8639cf5dc45a2feb2945aaeed38c928de5c689e7fc79175149cd461f59a8c140",
+    "generatedSourceSha256": "759a105d30ccb021b5f8a647cc706138f54d1a983a47455fce9efbaed2c26b36"
+  },
+  "contract": {
+    "command": [
+      "bun",
+      "test",
+      "--timeout",
+      "60000",
+      "--preload",
+      "/tmp/scriptc-redwall-contracts-20260909/preload.ts",
+      "/home/cyber/Work/reddb.io/red-dev/src/redwall-render.test.ts"
+    ],
+    "cwd": "/home/cyber/Work/reddb.io/red-dev",
+    "exitCode": 0,
+    "signal": null,
+    "error": null
+  }
+}

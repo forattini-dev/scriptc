@@ -1,4 +1,5 @@
 // @dynamic
+// @no-deprecation
 // The island plumbing the vercel CLI's graph exercised into existence,
 // pinned differentially against Node: URL's live search/searchParams
 // coupling, Blob/File (and node:buffer's re-export), Event/EventTarget/

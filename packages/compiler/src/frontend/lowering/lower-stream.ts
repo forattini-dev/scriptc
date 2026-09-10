@@ -36,6 +36,7 @@ import { newFnCtx, own } from "./lowerer.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
 import { probeLower } from "./lower-exprs.js";
+import { streamArgumentTypeError } from "./stream-argument-validation.js";
 import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boolLit, numLit, strLit } from "../../ir/build.js";
 
@@ -1128,12 +1129,6 @@ export function streamClassAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Exp
 
 /* ── the module functions (finished / pipeline — the callback forms) ──── */
 
-/** Node's pipeline stage ladder text (lib/internal/streams/pipeline.js's
- * makeAsyncIterable — every stage position renders the same "body"
- * clause). finished() keeps its narrower isNodeStream wording. */
-const PIPELINE_STAGE_EXPECTED =
-  "of type function or an instance of Blob, ReadableStream, WritableStream, Stream, Iterable, AsyncIterable, or Promise or { readable, writable } pair";
-
 /** A stream-rooted argument, lowered — or the pointed fence (pipeline's
  * iterable/generator/function stages have no lowering yet). `what` picks
  * the validation ladder: finished() rejects EVERY non-stream through
@@ -1144,39 +1139,8 @@ function lowerStreamArg(L: Lowerer, node: ts.Expression, what: "finished" | "pip
   const v = L.lowerExpr(node);
   const info = v.type.kind === "object" ? L.classes.get(v.type.className) : undefined;
   if (!streamSidesOf(L, info)) {
-    // A provably-non-stream value in a JS source (the invalid-input
-    // probes: finished({}, cb), pipeline(42, dst, cb)): Node's gate
-    // throws ERR_INVALID_ARG_TYPE before any watcher exists.
-    const argTypeThrow = (argName: string, expected: string): never => {
-      throw new StreamArgTypeThrow({
-        kind: "libCall",
-        fn: "error.argTypeThrow",
-        args: [
-          { kind: "strLit", value: argName, type: STRING, loc: locOf(node) },
-          { kind: "strLit", value: expected, type: STRING, loc: locOf(node) },
-          { kind: "dynFrom", value: v, type: DYN, loc: locOf(node) },
-        ],
-        type: VOID,
-        loc: locOf(node),
-      });
-    };
-    if (isJsSourceFile(node.getSourceFile()) && L.dynConvertible(v.type)) {
-      if (what === "pipeline") {
-        // Strings and arrays are iterables — VALID pipeline stages in
-        // Node — and a record carrying a readable/writable member may be
-        // the duplex-pair form; none of those shapes has a lowering, so
-        // they take the pointed fence below, never a throw.
-        const pairish = v.type.kind === "record" &&
-          (L.shapes.get(v.type.shapeId)?.fields ?? []).some((f) => f.name === "readable" || f.name === "writable");
-        if ((v.type.kind === "record" && !pairish) || v.type.kind === "f64" ||
-            v.type.kind === "bool" || v.type.kind === "nullT") {
-          argTypeThrow("body", PIPELINE_STAGE_EXPECTED);
-        }
-      } else if (v.type.kind === "record" || v.type.kind === "string" || v.type.kind === "f64" ||
-                 v.type.kind === "bool" || v.type.kind === "array" || v.type.kind === "nullT") {
-        argTypeThrow("stream", "an instance of ReadableStream, WritableStream, or Stream");
-      }
-    }
+    const argumentError = streamArgumentTypeError(L, node, v, what);
+    if (argumentError) throw new StreamArgTypeThrow(argumentError);
     L.noLowering(
       `${what} over a '${L.fmt(v.type)}'`,
       node,

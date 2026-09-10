@@ -4,11 +4,12 @@
  * text, span — the full structured diagnostic) and module evaluation
  * order (baselines/order-parity.json).
  *
- * The baselines were recorded from the typescript@5.9.3 program.ts lane at
+ * The original baselines were recorded from the typescript@5.9.3 program.ts lane at
  * the phase-4 flip commit — the last commit where both frontends shipped —
  * after the phase-2/3 parity sweeps held the two lanes byte-identical over
- * this same entry set. So "matches the baseline" IS "matches 5.9.3",
- * without keeping the deleted 5.9.3 pipeline alive to ask.
+ * that entry set. Later fixtures and intentional admission changes have
+ * reviewed native baselines; they are not observations from the deleted
+ * 5.9.3 pipeline. Unchanged original records still pin its behavior.
  *
  * ── tsgo UPGRADE PLAYBOOK ────────────────────────────────────────────────
  * This suite (order-parity here; parity.test.ts / resolver-parity.test.ts /
@@ -133,7 +134,7 @@ if (UPDATE) {
     writeFileSync(baselinePath, JSON.stringify({ entries: record }, null, 1) + "\n");
   });
 } else {
-  describe(`preflight/order canary vs recorded 5.9.3 baselines (${entries.length} entries${FULL ? ", full sweep" : ""})`, () => {
+  describe(`preflight/order canary vs reviewed baselines (${entries.length} entries${FULL ? ", full sweep" : ""})`, () => {
     test.for(chunks.map((c) => [`${c[0]!.slice(repoRoot.length + 1)} … +${c.length - 1}`, c] as const))(
       "%s",
       async ([, chunk]) => {
@@ -141,13 +142,16 @@ if (UPDATE) {
           await new Promise((r) => setImmediate(r)); // keep the worker RPC alive
           const name = entry.slice(repoRoot.length + 1);
           const recorded = baseline.entries[rel(entry)];
-          expect(
+          // A chunk is only an RPC scheduling boundary. Report every entry's
+          // failure instead of letting its first missing record hide the rest.
+          expect.soft(
             recorded,
             `${name}: no recorded baseline — new fixture? re-record with SCRIPTC_UPDATE_BASELINES=1 (see the playbook comment)`,
           ).toBeDefined();
+          if (recorded === undefined) continue;
           const native = nativeAnswer(host, entry);
-          expect(native.order, `${name}: module evaluation order`).toEqual(recorded!.order);
-          expect(native.diags, `${name}: preflight diagnostics`).toEqual(recorded!.diags);
+          expect.soft(native.order, `${name}: module evaluation order`).toEqual(recorded.order);
+          expect.soft(native.diags, `${name}: preflight diagnostics`).toEqual(recorded.diags);
         }
       },
     );

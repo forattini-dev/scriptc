@@ -3,7 +3,7 @@
  * selection independently of the host platform.
  */
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -126,7 +126,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/corpus", fixture);
     const outDir = await mkdtemp("/tmp/scriptc-wasi-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath });
+    const result = await compile(entry, { outDir, outPath, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
     expect(result.cPath.endsWith(".ll")).toBe(true);
@@ -141,6 +141,20 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     expect(wasm.exitCode).toBe(expectedExitCode(entry));
     expect(node.exitCode).toBe(expectedExitCode(entry));
     if (wasm.exitCode === 0) expect(wasm.stderr).toBe(node.stderr);
+  });
+
+  test("the default Rust backend refuses WASI without selecting another backend", async () => {
+    const outDir = await mkdtemp("/tmp/scriptc-wasi-rust-refusal-");
+    const result = await compile(join(repoRoot, "tests/corpus/001-hello.ts"), {
+      outDir,
+      outPath: join(outDir, "program.wasm"),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0]?.code).toBe("SC3001");
+      expect(result.diagnostics[0]?.message).toMatch(/rust backend does not support this target for wasm32-wasi/);
+    }
   });
 
   test("the explicit LLVM pin emits wasm", async () => {
@@ -205,6 +219,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
       outDir,
       outPath: join(outDir, "program.wasm"),
       dynamic: true,
+      backend: "llvm",
     });
     if (!result.ok) {
       throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
@@ -219,6 +234,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
       outDir,
       outPath: join(outDir, "program.wasm"),
       dynamic: true,
+      backend: "llvm",
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -238,6 +254,28 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const result = await compile(join(repoRoot, "tests/corpus", fixture), {
       outDir,
       outPath: join(outDir, "program.wasm"),
+      backend: "llvm",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0]?.code).toBe("SC3002");
+      expect(result.diagnostics[0]?.message).toMatch(message);
+    }
+  });
+
+  test.each([
+    ["node:fs", "realpathSync", '"."', /filesystem canonical paths/],
+    ["node:fs", "chmodSync", '".", 0o755', /filesystem permission changes/],
+    ["node:fs/promises", "chmod", '".", 0o755', /filesystem permission changes/],
+  ] as const)("reports unavailable %s %s before the WASI toolchain", async (module, api, args, message) => {
+    const outDir = await mkdtemp("/tmp/scriptc-wasi-fs-capability-");
+    const entry = join(outDir, "main.ts");
+    await writeFile(entry, `import { ${api} } from "${module}";\n${api}(${args});\n`);
+    const result = await compile(entry, {
+      outDir,
+      outPath: join(outDir, "program.wasm"),
+      backend: "llvm",
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -251,7 +289,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/corpus/1100-island-eval-basics.ts");
     const outDir = await mkdtemp("/tmp/scriptc-wasi-dynamic-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath, dynamic: true });
+    const result = await compile(entry, { outDir, outPath, dynamic: true, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
 
@@ -267,7 +305,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/corpus/2633-island-promise-crossing.js");
     const outDir = await mkdtemp("/tmp/scriptc-wasi-dynamic-promise-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath, dynamic: true });
+    const result = await compile(entry, { outDir, outPath, dynamic: true, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
 
@@ -283,7 +321,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/fixtures/npm/cases/namespace/main.ts");
     const outDir = await mkdtemp("/tmp/scriptc-wasi-npm-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath, dynamic: true });
+    const result = await compile(entry, { outDir, outPath, dynamic: true, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
 
@@ -302,7 +340,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/fixtures/npm/cases", fixture, "main.ts");
     const outDir = await mkdtemp("/tmp/scriptc-wasi-npm-pending-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath, dynamic: true });
+    const result = await compile(entry, { outDir, outPath, dynamic: true, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
 
@@ -318,7 +356,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const entry = join(repoRoot, "tests/fixtures/npm/cases/zlib-shims/main.ts");
     const outDir = await mkdtemp("/tmp/scriptc-wasi-npm-zlib-");
     const outPath = join(outDir, "program.wasm");
-    const result = await compile(entry, { outDir, outPath, dynamic: true });
+    const result = await compile(entry, { outDir, outPath, dynamic: true, backend: "llvm" });
     if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     expect(result.backend).toBe("llvm");
 
@@ -337,7 +375,7 @@ describe.skipIf(!zigOnPath())("wasm32-wasi differential", () => {
     const result = await execFileAsync(process.execPath, [
       "--import", loader,
       join(repoRoot, "packages/cli/src/main.ts"),
-      "run", entry,
+      "run", entry, "--backend", "llvm", "--target", "node24",
       "--no-keep-c",
       "-o", join(outDir, "program.wasm"),
     ]);

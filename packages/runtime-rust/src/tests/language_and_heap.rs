@@ -190,7 +190,7 @@
     fn uri_codecs_match_ecmascript_sets_utf8_and_errors() {
         let unchanged = string("AZaz09-_.!~*'()");
         let encoded = string_encode_uri_component(&unchanged);
-        assert!(Rc::ptr_eq(&unchanged, &encoded));
+        assert!(JsString::ptr_eq(&unchanged, &encoded));
         assert_eq!(
             string_encode_uri_component(&string("a b;c/d?é€💩")).as_ref(),
             "a%20b%3Bc%2Fd%3F%C3%A9%E2%82%AC%F0%9F%92%A9"
@@ -313,7 +313,7 @@
     fn string_well_formed_methods_follow_the_utf8_storage_invariant() {
         for value in [string(""), string("plain"), string("é€"), string("😀")] {
             assert!(string_is_well_formed(&value));
-            assert!(Rc::ptr_eq(&value, &string_to_well_formed(&value)));
+            assert!(JsString::ptr_eq(&value, &string_to_well_formed(&value)));
         }
     }
 
@@ -357,7 +357,7 @@
         let record = map_new();
         for (key, value) in [("name", "n"), ("10", "ten"), ("2", "two"), ("tail", "t")] {
             map_set_by(&record, string(key), string(value), |left, right| {
-                left.as_ref() == right.as_ref()
+                left == right
             });
         }
         let keys = map_string_keys_js_order(&record);
@@ -423,22 +423,22 @@
         {
             let values = array_new(vec![10.0, 20.0, 30.0, 40.0, 50.0]);
             let middle = array_slice(&values, -4.0, -2.0);
-            assert_eq!(middle.with(|data| data.elements.clone()), vec![20.0, 30.0]);
+            assert_eq!(middle.with(|data| data.elements().into_owned()), vec![20.0, 30.0]);
             let fractional = array_slice(&values, 1.7, 3.2);
             assert_eq!(
-                fractional.with(|data| data.elements.clone()),
+                fractional.with(|data| data.elements().into_owned()),
                 vec![20.0, 30.0]
             );
 
             let removed = array_splice(&values, -2.0, 1.8);
-            assert_eq!(removed.with(|data| data.elements.clone()), vec![40.0]);
+            assert_eq!(removed.with(|data| data.elements().into_owned()), vec![40.0]);
             assert_eq!(
-                values.with(|data| data.elements.clone()),
+                values.with(|data| data.elements().into_owned()),
                 vec![10.0, 20.0, 30.0, 50.0]
             );
             assert_eq!(array_shift(&values), 10.0);
             assert_eq!(
-                values.with(|data| data.elements.clone()),
+                values.with(|data| data.elements().into_owned()),
                 vec![20.0, 30.0, 50.0]
             );
             assert_eq!(array_len(&array_splice(&values, 0.0, f64::NAN)), 0.0);
@@ -462,36 +462,36 @@
             let source = array_new(vec![1.0, 2.0, 3.0, 4.0]);
             let reversed = array_to_reversed(&source);
             assert_eq!(
-                reversed.with(|data| data.elements.clone()),
+                reversed.with(|data| data.elements().into_owned()),
                 vec![4.0, 3.0, 2.0, 1.0]
             );
             assert_eq!(
-                source.with(|data| data.elements.clone()),
+                source.with(|data| data.elements().into_owned()),
                 vec![1.0, 2.0, 3.0, 4.0]
             );
 
             let items = array_new(vec![8.0, 9.0]);
             let spliced = array_to_spliced(&source, 1.0, 2.0, &items);
             assert_eq!(
-                spliced.with(|data| data.elements.clone()),
+                spliced.with(|data| data.elements().into_owned()),
                 vec![1.0, 8.0, 9.0, 4.0]
             );
             assert_eq!(
                 array_to_spliced(&source, f64::NAN, 0.0, &array_new(vec![6.0]))
-                    .with(|data| data.elements.clone()),
+                    .with(|data| data.elements().into_owned()),
                 vec![6.0, 1.0, 2.0, 3.0, 4.0]
             );
 
             assert_eq!(
-                array_with(&source, -1.0, 9.0).with(|data| data.elements.clone()),
+                array_with(&source, -1.0, 9.0).with(|data| data.elements().into_owned()),
                 vec![1.0, 2.0, 3.0, 9.0]
             );
             assert_eq!(
-                array_with(&source, 1.9, 7.0).with(|data| data.elements.clone()),
+                array_with(&source, 1.9, 7.0).with(|data| data.elements().into_owned()),
                 vec![1.0, 7.0, 3.0, 4.0]
             );
             assert_eq!(
-                array_with(&source, f64::NAN, 6.0).with(|data| data.elements.clone()),
+                array_with(&source, f64::NAN, 6.0).with(|data| data.elements().into_owned()),
                 vec![6.0, 2.0, 3.0, 4.0]
             );
             for (index, message) in [

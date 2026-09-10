@@ -30,15 +30,6 @@ generic-value-bindings.ts:15:20 - error SC1090: generic functions as values with
      |                    ^~~~~~
   16 | 
 
-generic-value-bindings.ts:19:7 - error SC2005: values of type '<T>(x: T) => T' cannot be compiled: the signature keeps its type parameters, and a compiled function is always one concrete signature (generic functions monomorphize per pinned signature — declarations, methods, and never-reassigned bindings holding a generic arrow/function expression, an alias of a registered generic function, or a function initializer under a generic-signature annotation)
-
-  18 | // fence reports, and the alias falls back to the ordinary binding story.
-  19 | const flipAlias = flip;
-     |       ^~~~~~~~~
-  20 | console.log(flipAlias(5));
-
-  hint: annotate the destination with a concrete signature (e.g. '(x: number) => number'), instantiate explicitly ('f<number>'), or call the generic function directly
-
 generic-value-bindings.ts:19:19 - error SC2004: uses of 'flip' inherit the blocker on its declaration
 
   18 | // fence reports, and the alias falls back to the ordinary binding story.
@@ -47,15 +38,6 @@ generic-value-bindings.ts:19:19 - error SC2004: uses of 'flip' inherit the block
   20 | console.log(flipAlias(5));
 
   hint: the declaration of 'flip' did not compile — fix the diagnostic reported there and these sites clear with it
-
-generic-value-bindings.ts:20:13 - error SC2004: uses of 'flipAlias' inherit the blocker on its declaration
-
-  19 | const flipAlias = flip;
-  20 | console.log(flipAlias(5));
-     |             ^~~~~~~~~
-  21 | 
-
-  hint: the declaration of 'flipAlias' did not compile — fix the diagnostic reported there and these sites clear with it
 
 generic-value-bindings.ts:25:17 - error SC1090: generic arrow/function-expression bindings declared inside functions (the compiled instantiations of 'inner' are module functions and cannot capture the enclosing frame — declare the binding at module scope) are not supported yet
 
@@ -73,23 +55,9 @@ generic-value-bindings.ts:26:10 - error SC2004: uses of 'inner' inherit the bloc
 
   hint: the declaration of 'inner' did not compile — fix the diagnostic reported there and these sites clear with it
 
-generic-value-bindings.ts:39:13 - error SC1090: results that are themselves generic functions ('<U>(y: U) => string' keeps its type parameters — no call-site instantiation pins them, and the returned value would need the producing call's frame; restructure to one generic function taking all arguments) are not supported yet
-
-  38 | const curried = <T>(x: T) => <U>(y: U): string => `${x}|${y}`;
-  39 | console.log(curried(1)("a"));
-     |             ^~~~~~~~~~
-  40 | 
-
 generic-value-bindings.ts:51:15 - error SC1090: calls of the generic method 'm' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet
 
   50 | function throughParam(a: Amb): void {
   51 |   console.log(a.m(4));
      |               ^~~~~~
   52 | }
-
-generic-value-bindings.ts:56:14 - error SC1090: generic arrow/function expressions outside a never-reassigned module-scope binding (only `const f = <T>(x: T) => ...` bindings and top-level generic function declarations monomorphize) is not supported yet
-
-  55 | // A generic lambda outside any monomorphizable home (an IIFE).
-  56 | console.log((<T>(x: T): T => x)(5));
-     |              ^~~~~~~~~~~~~~~~~
-  57 | 

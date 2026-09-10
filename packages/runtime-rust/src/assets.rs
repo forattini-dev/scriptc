@@ -29,8 +29,8 @@ fn asset_safe_name(name: &str) -> String {
 }
 
 pub fn asset_file(content_base64: &JsString, name: &JsString) -> JsString {
-    let bytes = bytes_base64_decode(content_base64.as_ref());
-    let file_name = asset_safe_name(name.as_ref());
+    let bytes = bytes_base64_decode(content_base64);
+    let file_name = asset_safe_name(name);
     // A content hash prefixes the name: two assets sharing a basename (two
     // packages' icons.png) keep distinct files, and the write is idempotent
     // for repeated imports of one document.

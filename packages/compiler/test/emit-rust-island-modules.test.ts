@@ -190,6 +190,17 @@ describe.sequential("Rust island module system", () => {
     ];
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("broken module evaluation\nbroken module evaluation\n");
+    expect(rust.stderr).toBe("");
+  });
+
+  test("an ignored failed import remains an unhandled rejection", async () => {
+    const fixture = "dynamic-import-unhandled-rejection.ts";
+    await expect(execFileAsync(nodeOracleExecutable(), [join(fixtures, fixture)])).rejects.toMatchObject({
+      code: 1, stderr: expect.stringContaining("broken module evaluation"),
+    });
+    await expect(run(await build(fixture))).rejects.toMatchObject({
+      code: 1, stderr: "UnhandledPromiseRejection: Error: broken module evaluation\n",
+    });
   });
 
   test("Object.keys follows the runtime shape of a package-returned record", async () => {

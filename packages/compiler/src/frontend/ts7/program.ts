@@ -224,9 +224,19 @@ export class Ts7Host {
     const project = snapshot.getProject(configPath);
     if (!project) {
       snapshot.dispose();
+      this.releaseProgram(configPath);
       throw new InternalCompilerError(`ts7 createProgram: project failed to open for ${first}`);
     }
     return new Ts7Program(project, snapshot, this, !programOwnsHost);
+  }
+
+  /** Snapshot release does not close TS7's ref-counted open project. Leave
+   * live sibling snapshots alone while unloading this program from the next
+   * server snapshot, then drop its compiler-owned virtual config. */
+  releaseProgram(configPath: string): void {
+    if (this.closed) return;
+    this.api.updateSnapshot({ closeProjects: [configPath] }).dispose();
+    this.virtualFiles.delete(tsgoPath(configPath));
   }
 
   getTimingInfo(): unknown {
@@ -237,6 +247,7 @@ export class Ts7Host {
     if (this.closed) return;
     this.closed = true;
     this.api.close();
+    this.virtualFiles.clear();
   }
 }
 
@@ -246,6 +257,7 @@ export class Ts7Host {
 export class Ts7Program {
   private sourceFilesCache: readonly SourceFile[] | null = null;
   private checkerFacade: CheckerFacade | null = null;
+  private disposed = false;
 
   constructor(
     /** The underlying TS7 project (program + checker + emitter). */
@@ -315,8 +327,11 @@ export class Ts7Program {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.snapshot.dispose();
-    if (!this.sharedHost) this.host.close();
+    if (this.sharedHost) this.host.releaseProgram(this.project.configFileName);
+    else this.host.close();
   }
 }
 

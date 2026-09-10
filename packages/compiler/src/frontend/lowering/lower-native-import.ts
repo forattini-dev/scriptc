@@ -85,7 +85,7 @@ function identitySafe(L: Lowerer, type: IrType): boolean {
   if (type.kind === "union") return L.unions.get(type.unionId)?.arms.every(arm => arm.kind !== "record" && identitySafe(L, arm)) ?? false;
   if (type.kind === "record") {
     const shape = L.shapes.get(type.shapeId);
-    return !!shape && nativeRecordShapeSupported(shape, L.unions);
+    return !!shape && nativeRecordShapeSupported(shape, L.unions, id => L.shapes.get(id));
   }
   return ["f64", "bool", "string", "nullT", "undefinedT", "void", "jsval", "dyn"].includes(type.kind);
 }

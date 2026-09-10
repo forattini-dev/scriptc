@@ -105,7 +105,7 @@ fn v8_host_object() -> v8e::Value {
             Ok(v8e::HostResult::Undefined)
         }),
         member("readStdin", 0, |_| {
-            let encoding: JsString = Rc::from("utf8");
+            let encoding: JsString = JsString::from("utf8");
             host_string(&fs_read_fd(0.0, &encoding))
         }),
         member("promiseState", 1, |args| {
@@ -377,7 +377,7 @@ fn stats_row(stats: &JsStats) -> v8e::Value {
 fn host_fs(args: &[v8e::Value]) -> Result<v8e::HostResult, v8e::Error> {
     let operation = arg_string(args, 0)?;
     let fd_op = matches!(operation.as_str(), "close" | "read" | "write" | "fstat" | "ftruncate" | "fsync");
-    let path: JsString = if fd_op { Rc::from("") } else { arg_js_string(args, 1)? };
+    let path: JsString = if fd_op { JsString::from("") } else { arg_js_string(args, 1)? };
     let number = |index: usize| arg_number(args, index);
     let nothing = || Ok(v8e::HostResult::Undefined);
     match operation.as_str() {
@@ -460,7 +460,7 @@ fn option_number(options: &v8e::Value, name: &str) -> Result<f64, v8e::Error> {
 
 fn option_string(options: &v8e::Value, name: &str) -> Result<JsString, v8e::Error> {
     let value = v8e::get(options, name)?;
-    if v8e::is_undefined(&value) || v8e::is_null(&value) { Ok(Rc::from("")) } else { Ok(Rc::from(v8e::to_string(&value)?.as_str())) }
+    if v8e::is_undefined(&value) || v8e::is_null(&value) { Ok(JsString::from("")) } else { Ok(JsString::from(v8e::to_string(&value)?.as_str())) }
 }
 
 fn exit_arguments(code: Option<f64>, signal: Option<JsString>) -> Vec<v8e::Value> {

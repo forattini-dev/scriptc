@@ -54,6 +54,7 @@ static void scr_rl_oom(void) {
 typedef struct ScrRl {
   double id;
   bool closed;
+  bool output;
   bool dead; /* created after stdin ended: close fires at question() */
   ScrClosure *q_cb; /* pending question's callback (owned), or NULL */
   void (*q_fn)(ScrClosure *, ScrStr *);
@@ -300,7 +301,9 @@ static void scr_rl_cleanup_atexit(void) {
   }
 }
 
-double scr_rl_create(void) {
+double scr_rl_create(void) { return scr_rl_create_with_output(true); }
+
+double scr_rl_create_with_output(bool output) {
   static bool cleanup_registered = false;
   if (!cleanup_registered) {
     cleanup_registered = true;
@@ -309,6 +312,7 @@ double scr_rl_create(void) {
   ScrRl *rl = calloc(1, sizeof *rl);
   if (!rl) scr_rl_oom();
   rl->id = scr_rl_next_id++;
+  rl->output = output;
   rl->next = scr_rls;
   scr_rls = rl;
   if (scr_stdin_ended()) {
@@ -342,7 +346,7 @@ void scr_rl_question(double id, const ScrStr *query, ScrClosure *cb /*moves*/,
   /* The prompt writes to stdout under pipes too (Node's question does), and
    * must be visible before input arrives even though it has no trailing
    * newline. */
-  scr_stdio_write(1, query->data, query->len);
+  if (rl->output) scr_stdio_write(1, query->data, query->len);
   if (rl->dead) {
     /* Created after stdin ended: pinned against Node — the prompt still
      * writes, but the DESTROYED stream delivers nothing and 'close'

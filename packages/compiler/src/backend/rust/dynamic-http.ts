@@ -22,7 +22,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
 
   open(`fn sc_dyn_http_request_get(request: &runtime::JsHttpRequest, key: &runtime::JsString) -> ${dyn} {`);
-  open("match key.as_ref() {");
+  open("match key.to_utf8_lossy() {");
   line(`"status" if runtime::http_request_is_fetch_response(request) => ${dyn}::Number(runtime::http_request_status_code(request).unwrap_or(200.0)),`);
   line(`"ok" if runtime::http_request_is_fetch_response(request) => { let status = runtime::http_request_status_code(request).unwrap_or(200.0); ${dyn}::Boolean((200.0..300.0).contains(&status)) },`);
   line(`"statusText" if runtime::http_request_is_fetch_response(request) => ${dyn}::String(runtime::http_request_status_message(request).unwrap_or_else(runtime::empty_string)),`);
@@ -47,7 +47,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
 
   open(`fn sc_dyn_http_response_get(response: &runtime::JsHttpResponse, key: &runtime::JsString) -> ${dyn} {`);
-  open("match key.as_ref() {");
+  open("match key.to_utf8_lossy() {");
   line(`"statusCode" => ${dyn}::Number(runtime::http_response_status_get(response)),`);
   line(`"statusMessage" => ${dyn}::String(runtime::http_response_status_message_get(response)),`);
   line(`"headersSent" => ${dyn}::Boolean(runtime::http_response_headers_sent(response)),`);
@@ -60,7 +60,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   close("}");
 
   open(`fn sc_dyn_http_response_set(response: &runtime::JsHttpResponse, key: &runtime::JsString, value: &${dyn}) -> bool {`);
-  open("match key.as_ref() {");
+  open("match key.to_utf8_lossy() {");
   line(`"statusCode" => { let ${dyn}::Number(value) = value else { sc_dyn_arg_type_fail("statusCode", "of type number", value); }; runtime::http_response_status_set(response, *value); true },`);
   line(`"statusMessage" => { let ${dyn}::String(value) = value else { sc_dyn_arg_type_fail("statusMessage", "of type string", value); }; runtime::http_response_status_message_set(response, value); true },`);
   line("_ => false,");
@@ -105,7 +105,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line(`"pipe" => { let destination = match args.first() { Some(${dyn}::HttpResponse(response)) => response, value => sc_dyn_arg_type_fail("destination", "an instance of ServerResponse", value.unwrap_or(&${dyn}::Undefined)), }; runtime::http_request_pipe_response(request, destination); args[0].clone() },`);
   line('"on" | "once" | "addListener" => {');
   context.pushIndent();
-  line(`let event = match args.first() { Some(${dyn}::String(value)) => value.as_ref(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
+  line(`let event = match args.first() { Some(${dyn}::String(value)) => value.to_utf8_lossy(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
   line(`let callback = args.get(1).cloned().unwrap_or(${dyn}::Undefined);`);
   line(`if sc_dyn_function_identity(&callback).is_none() { sc_dyn_arg_type_fail("listener", "of type function", &callback); }`);
   line("let traced = callback.clone();");
@@ -195,7 +195,7 @@ export function emitRustDynamicHttp(context: RustDynamicHttpContext): void {
   line('"end" => sc_dyn_http_response_end(response, recv, args),');
   line('"on" | "once" | "addListener" => {');
   context.pushIndent();
-  line(`let event = match args.first() { Some(${dyn}::String(value)) => value.as_ref(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
+  line(`let event = match args.first() { Some(${dyn}::String(value)) => value.to_utf8_lossy(), _ => runtime::throw_type_error(format!("{callee_name} is not a function")), };`);
   line(`let callback = args.get(1).cloned().unwrap_or(${dyn}::Undefined);`);
   line(`if sc_dyn_function_identity(&callback).is_none() { sc_dyn_arg_type_fail("listener", "of type function", &callback); }`);
   line("let traced = callback.clone();");

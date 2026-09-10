@@ -66,17 +66,11 @@ test("a computed import still requires an explicit supported runtime path", () =
 
 
 test.each([
-  ["nested object identity", "export const state = { nested: { count: 0 } };", "identity"],
-  ["typed index record", "export const state: Record<string, number> = { count: 0 };", "identity"],
-  ["typed index callback argument", "export function update(state: Record<string, number>): void { state.count = 1; }", "identity"],
-  ["typed index callback result", "export function state(): Record<string, number> { return { count: 0 }; }", "identity"],
   ["array identity", "export const values = [1, 2];", "identity"],
   ["namespace thenable", "export function then(): void {}", "thenable"],
   ["namespace JSON hook", "export function toJSON(): string { return \"custom\"; }", "coercion"],
   ["namespace coercion hook", "export function toString(): string { return \"custom\"; }", "coercion"],
-  ["async nested object result", "export async function state() { return { nested: { count: 0 } }; }", "identity"],
   ["async array result", "export async function state() { return [1, 2]; }", "identity"],
-  ["async nested record argument", "export async function update(state: { values: number[] }): Promise<void> { state.values.push(1); }", "identity"],
   ["record union result", "export function state(flag: boolean): { count: number } | null { return flag ? { count: 0 } : null; }", "identity"],
 ] as const)("native import refuses unsupported %s explicitly", (_name, dependency, detail) => {
   const coverage = coverageOf(`async function main(): Promise<void> { await import("./module.ts"); } main();`, dependency);
@@ -85,20 +79,27 @@ test.each([
 });
 
 test.each([
+  "export const state = { nested: { count: 0 } };",
+  "export const state: Record<string, number> = { count: 0 };",
+  "export function update(state: Record<string, number>): void { state.count = 1; }",
+  "export function state(): Record<string, number> { return { count: 0 }; }",
+  "export async function state() { return { nested: { count: 0 } }; }",
+  "export async function update(state: { values: number[] }): Promise<void> { state.values.push(1); }",
   "export const state = { count: 0 };",
   "export const state: { count: number; label?: string; [key: string]: unknown } = { count: 0 };",
   "export function update(state: Record<string, unknown>): void { state.count = 1; }",
   "export function state(): Record<string, unknown> { return { count: 0 }; }",
   "export async function update(state: { count: number }): Promise<void> { state.count++; }",
   "export async function state() { return { count: 0 }; }",
-])("native imports admit shared scalar records: %s", dependency => {
+])("native imports admit shared records: %s", dependency => {
   const coverage = coverageOf(`async function main(): Promise<void> { await import("./module.ts"); } main();`, dependency);
   expect(coverage.preflightFailed).toBe(false);
   expect(coverage.diagnostics).toEqual([]);
   expect(coverage.execution?.engine).toBe("none");
 });
 
-test("native record arguments cannot silently copy nested typed arrays", () => {
+test("native record arguments admit shared wider records containing typed arrays", () => {
+  // 3169-native-import-shared-views pins identity and mutations at execution.
   const coverage = coverageOf(`
     async function main(): Promise<void> {
       const ns = await import("./module.ts");
@@ -108,7 +109,8 @@ test("native record arguments cannot silently copy nested typed arrays", () => {
     main();
   `, "export function update(state: { count: number }): void { state.count++; }");
   expect(coverage.preflightFailed).toBe(false);
-  expect(coverage.diagnostics.some(d => d.code === "SC3001" && d.message.includes("shared storage"))).toBe(true);
+  expect(coverage.diagnostics).toEqual([]);
+  expect(coverage.execution?.engine).toBe("none");
 });
 
 

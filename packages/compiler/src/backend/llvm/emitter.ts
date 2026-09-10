@@ -1,3 +1,5 @@
+import { NUMERIC_COERCION_RUNTIME_NAMES } from "./numeric-coercion.js";
+import { regexCaptureLayout } from "../../ir/regex-captures.js";
 import type { LlvmTargetOptions } from "./target-options.js";
 export type { LlvmTargetOptions } from "./target-options.js";
 import { assertNativeModuleBackend } from "../native-module-support.js";
@@ -102,7 +104,6 @@ import {
 import { DK, LlDyn } from "./dyn.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import { LlWalkers } from "./walkers.js";
-
 interface LlStreamTypedRefAdapter {
   snapshot: string;
   commit: string;
@@ -241,15 +242,13 @@ function llStrBytes(text: string): string {
  * Throwing members (MAY_THROW_LIB_FNS) and everything unlisted refuse by
  * name. */
 const LIB_FN_SYMS: Record<string, string> = {
+  ...NUMERIC_COERCION_RUNTIME_NAMES,
   "util.parseArgs": "scr_util_parse_args",
   "math.maxArr": "scr_math_max_arr",
   "math.minArr": "scr_math_min_arr",
   "math.min": "scr_math_min",
   "math.max": "scr_math_max",
   "math.random": "scr_math_random",
-  "num.parseInt": "scr_parse_int",
-  "num.parseFloat": "scr_parse_float",
-  "num.fromString": "scr_string_to_number",
   "math.round": "scr_math_round",
   "math.sqrt": "sqrt",
   "math.hypot": "hypot",
@@ -354,6 +353,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "date.newNow": "scr_date_now",
   "date.newMs": "scr_date_new_ms",
   "date.newString": "scr_date_parse_get_time",
+  "date.newComponents": "scr_date_new_components",
   "date.getTime": "scr_date_get_time",
   "date.valueOf": "scr_date_get_time",
   "date.parseGetTime": "scr_date_parse_get_time",
@@ -376,14 +376,14 @@ const LIB_FN_SYMS: Record<string, string> = {
   "date.getUTCMilliseconds": "scr_date_get_milliseconds",
   "date.getTimezoneOffset": "scr_date_get_timezone_offset",
   "fs.existsSync": "scr_fs_exists",
-  // ── the throwing slice (MAY_THROW_LIB_FNS members): the generic path
-  // emits the standard pending check after each — emit-exprs.ts's finish.
+  // Throwing calls use the generic pending-error check, like C emission.
   "process.cpuPrevValidate": "scr_cpu_prev_validate",
   "date.toISOString": "scr_date_to_iso",
   "date.toISOStringValue": "scr_date_to_iso",
   "process.chdir": "scr_process_chdir",
   "fs.writeFileSync": "scr_fs_write_file",
   "fs.appendFileSync": "scr_fs_append_file",
+  "fs.appendFileModeSync": "scr_fs_append_file_mode",
   "fs.mkdirSync": "scr_fs_mkdir",
   "fs.mkdirRecursiveSync": "scr_fs_mkdir_recursive",
   "fs.mkdtempSync": "scr_fs_mkdtemp",
@@ -439,7 +439,6 @@ const LIB_FN_SYMS: Record<string, string> = {
   "buffer.isUtf8": "scr_bytes_is_utf8",
   // The checked-dynamic compare/equals validators (scr_bytes_io.c):
   // Node's argument ladders throw catchably (MAY_THROW_LIB_FNS).
-  "dyn.toStringCoerce": "scr_dyn_string_coerce_js",
   "buffer.compareChk": "scr_buffer_compare_chk",
   "bytes.equalsChk": "scr_bytes_equals_chk",
   "bytes.compareChk": "scr_bytes_compare_chk",
@@ -7680,14 +7679,14 @@ class LlEmitter {
           B.line(`store i1 ${inR}, ptr ${slot}`);
         }
         B.br(lj);
-        // An ISLAND-held receiver fences loudly (Node asks the real
-        // engine object — `false` would be a silent wrong answer); the
-        // helper answers false for every other kind, so this arm is a
-        // plain unconditional call.
+        // Preserve engine prototype/proxy semantics and typed references.
+        // The runtime lookup borrows the interned key and the receiver.
+        // Native object/array fast paths above remain allocation-free.
+        // The pending check below propagates a proxy's throwing has trap.
         B.startBlock(lNotArr);
-        this.declare(`declare zeroext i1 @scr_dyn_isl_fence(ptr, ptr)`);
+        this.declare(`declare zeroext i1 @scr_dyn_has_key(ptr, ptr)`);
         const fenced = B.tmp();
-        B.line(`${fenced} = call zeroext i1 @scr_dyn_isl_fence(ptr ${d.name}, ptr ${this.cstr("'in'")})`);
+        B.line(`${fenced} = call zeroext i1 @scr_dyn_has_key(ptr ${d.name}, ptr ${this.internLiteral(e.key)})`);
         B.line(`store i1 ${fenced}, ptr ${slot}`);
         B.br(lj);
         B.startBlock(lj);
@@ -11287,8 +11286,10 @@ class LlEmitter {
     const method = e.method;
     const r = this.emitExpr(e.receiver);
     const args = e.args.map((a) => this.emitExpr(a));
+    const capture = regexCaptureLayout(e.type, (id) => this.unionsById.get(id));
+    const captureArgs = capture ? `, i32 ${capture.stringTag}, ptr ${this.unitInstanceRef(capture.id, capture.undefinedTag)}` : "";
     const fallible = (sym: string, argText: string): LlValue => {
-      this.declare(`declare ptr @${sym}(${argText.split(", ").map(() => "ptr").join(", ")})`);
+      this.declare(`declare ptr @${sym}(${argText.split(", ").map((arg) => arg.split(" ")[0]).join(", ")})`);
       const t = B.tmp();
       B.line(`${t} = call ptr @${sym}(${argText})`);
       const out = this.own({ name: t, type: e.type });
@@ -11297,13 +11298,11 @@ class LlEmitter {
     };
     switch (method) {
       case "matchAll":
-        // Every match drained eagerly into a fresh +1 string[][]; throws
-        // Node's TypeError on a non-global regex (catchable).
-        return fallible("scr_regex_match_all", `ptr ${r.name}, ptr ${args[0]!.name}`);
+        // Eager optional-string rows; non-global regexes throw.
+        return fallible("scr_regex_match_all", `ptr ${r.name}, ptr ${args[0]!.name}${captureArgs}`);
       case "matchAllInto":
-        // matchAll's companion-index form: args[1] (a number[]) also
-        // receives each match's UTF-16 start index.
-        return fallible("scr_regex_match_all_into", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`);
+        // The companion array receives each UTF-16 start index.
+        return fallible("scr_regex_match_all_into", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}${captureArgs}`);
       case "replaceAll":
         return fallible("scr_regex_replace_all", `ptr ${r.name}, ptr ${args[0]!.name}, ptr ${args[1]!.name}`);
       case "split":
@@ -11324,16 +11323,15 @@ class LlEmitter {
         return { name: t, type: e.type };
       }
       case "match": {
-        // +1 string[] or NULL from the runtime; the `string[] | null`
-        // union wraps type-directedly, the envGet convention.
+        // Nullable rows contain optional-string union slots.
         if (e.type.kind !== "union") throw new InternalCompilerError("llvm emitter bug: match result not a union");
         const def = this.unionsById.get(e.type.unionId);
         const arrTag = def ? def.arms.findIndex((a) => a.kind === "array") : -1;
         const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
         if (arrTag < 0 || nullTag < 0 || !def) throw new InternalCompilerError("llvm emitter bug: match union lacks its arms");
-        this.declare(`declare ptr @scr_regex_match(ptr, ptr)`);
+        this.declare(`declare ptr @scr_regex_match(ptr, ptr, i32, ptr)`);
         const raw = B.tmp();
-        B.line(`${raw} = call ptr @scr_regex_match(ptr ${r.name}, ptr ${args[0]!.name})`);
+        B.line(`${raw} = call ptr @scr_regex_match(ptr ${r.name}, ptr ${args[0]!.name}${captureArgs})`);
         return this.wrapNullable(raw, raw, def.arms[arrTag]!, arrTag, e.type, nullTag);
       }
       case "search": {
@@ -12676,12 +12674,12 @@ class LlEmitter {
       return out;
     }
     if (e.fn === "rl.create") {
-      // readline interface handles are runtime IDs (doubles); an open
-      // interface holds the loop.
+      // Interface IDs hold the loop; output is independently optional.
       this.usesTimers = true;
-      this.declare(`declare double @scr_rl_create()`);
+      const output = this.emitExpr(e.args[0]!);
+      this.declare(`declare double @scr_rl_create_with_output(i1)`);
       const t = B.tmp();
-      B.line(`${t} = call double @scr_rl_create()`);
+      B.line(`${t} = call double @scr_rl_create_with_output(i1 ${output.name})`);
       return { name: t, type: e.type };
     }
     if (e.fn === "rl.question") {

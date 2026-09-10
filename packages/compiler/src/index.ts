@@ -1,5 +1,6 @@
 import { llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
 import { InternalCompilerError } from "./errors.js";
+import { ffiNativeBuildDetail } from "./ffi/native-build-detail.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { buildCacheRoot, CcCompileError, clearCcCaches, compileC, compileLibArchive, executableNativeEnvironmentFingerprint, mobileLibraryTarget, mobileTargetRefusal, prepareBuildCacheRoot, pruneBuildCache, resolveCc, targetPlatform } from "./backend/cc.js";
@@ -268,23 +269,6 @@ export type CompileResult =
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
 
-
-/** Clang may print every warning from the generated/runtime translation
- * units before the actionable linker failure. Keep the source diagnostic
- * precise by starting at the first portable linker marker; if the driver
- * supplied no recognizable marker, retain only its bounded tail. */
-function ffiNativeBuildDetail(err: CcCompileError): string {
-  const lines = err.stderr.trim().split(/\r?\n/);
-  const linkerMarker = lines.findIndex((line) =>
-    /(?:Undefined symbols|undefined reference to|unresolved external symbol|duplicate symbol|library not found for|cannot find -l|unable to find library|file format not recognized|linker command failed|fatal error LNK|lld-link: error)/i.test(line)
-  );
-  const relevant = linkerMarker >= 0 ? lines.slice(linkerMarker) : lines.slice(-40);
-  const output = relevant.join("\n").trim();
-  return (
-    `${err.driver} ${linkerMarker >= 0 ? "could not link the generated program" : "failed while building the generated program"}` +
-    (output.length > 0 ? `:\n${output}` : "")
-  );
-}
 
 export interface AnalyzeResult {
   coverage: CoverageInput;
@@ -1173,6 +1157,16 @@ async function compileTracked(
       });
     } catch (error) {
       if (!(error instanceof RustCompileError)) throw error;
+      if (ffi !== null) {
+        return {
+          ok: false,
+          diagnostics: [ffiNativeBuildDiag(
+            ffiNativeBuildDetail({ driver: "rustc", stderr: error.stderr }),
+            opts.ffiProfilePath ?? entryPath,
+          )],
+          sourceTexts,
+        };
+      }
       throw new InternalCompilerError(
         `${error.message}${error.stderr === "" ? "" : `\n${error.stderr}`}`,
       );

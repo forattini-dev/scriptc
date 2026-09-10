@@ -141,19 +141,23 @@ pub fn inspect_number(value: f64) -> JsString {
     }
 }
 
-fn inspect_quote(value: &str) -> String {
-    let quote = if !value.contains('\'') {
+fn inspect_quote<S: JsStringSource + ?Sized>(value: &S) -> String {
+    let units: Vec<u16> = value.utf16_units().collect();
+    let quote = if !units.contains(&39) {
         '\''
-    } else if !value.contains('"') {
+    } else if !units.contains(&34) {
         '"'
-    } else if !value.contains('`') && !value.contains("${") {
+    } else if !units.contains(&96) && !units.windows(2).any(|pair| pair == [36, 123]) {
         '`'
     } else {
         '\''
     };
-    let mut output = String::with_capacity(value.len() + 2);
+    let mut output = String::with_capacity(units.len() + 2);
     output.push(quote);
-    for character in value.chars() {
+    for item in char::decode_utf16(units) {
+        let character = match item { Ok(ch) => ch, Err(error) => {
+            output.push_str(&format!("\\u{:04x}", error.unpaired_surrogate())); continue;
+        } };
         match character {
             '\\' => output.push_str("\\\\"),
             '\'' if quote == '\'' => output.push_str("\\'"),
@@ -178,49 +182,28 @@ fn inspect_quote(value: &str) -> String {
 }
 
 pub fn inspect_string(value: &JsString) -> JsString {
-    let total_units = inspect_utf16_len(value);
-    let (visible, visible_units, trailer) = if total_units > 10_000 {
-        let mut units = 0usize;
-        let mut end = 0usize;
-        for (offset, character) in value.char_indices() {
-            let width = character.len_utf16();
-            if units + width > 10_000 {
-                break;
-            }
-            units += width;
-            end = offset + character.len_utf8();
-        }
-        let remaining = total_units - 10_000;
-        (
-            &value[..end],
-            10_000,
-            format!(
-                "... {remaining} more character{}",
-                if remaining == 1 { "" } else { "s" }
-            ),
-        )
-    } else {
-        (value.as_ref(), total_units, String::new())
-    };
+    let units: Vec<u16> = value.encode_utf16().collect();
+    let visible_units = units.len().min(10_000);
+    let visible = &units[..visible_units];
     let indentation = INSPECT_FRAMES.with(|frames| frames.borrow().len() * 2);
     let should_split = visible_units > 16
         && visible_units > 80usize.saturating_sub(indentation + 4)
-        && visible.contains('\n');
+        && visible.contains(&10);
     let mut output = if should_split {
-        visible
-            .split_inclusive('\n')
-            .map(inspect_quote)
+        visible.split_inclusive(|unit| *unit == 10)
+            .map(|part| inspect_quote(&string_from_utf16(part)))
             .collect::<Vec<_>>()
             .join(&format!(" +\n{}", " ".repeat(indentation + 2)))
-    } else {
-        inspect_quote(visible)
-    };
-    output.push_str(&trailer);
+    } else { inspect_quote(&string_from_utf16(visible)) };
+    if units.len() > visible_units {
+        let remaining = units.len() - visible_units;
+        output.push_str(&format!("... {remaining} more character{}", if remaining == 1 { "" } else { "s" }));
+    }
     string(&output)
 }
 
 pub fn inspect_key(value: &JsString) -> JsString {
-    if value.as_ref() == "__proto__" {
+    if value == "__proto__" {
         return string("['__proto__']");
     }
     let mut characters = value.chars();
@@ -319,13 +302,13 @@ fn error_inspect_style(name: &JsString, decl_name: &str) -> JsString {
     if !name.as_ref().ends_with("Error") {
         return name.clone();
     }
-    if name.as_ref() == decl_name {
+    if name == decl_name {
         return name.clone();
     }
-    if decl_name.contains(name.as_ref()) {
+    if decl_name.contains(name.to_utf8_lossy()) {
         return string(decl_name);
     }
-    string(&format!("{decl_name} [{}]", name.as_ref()))
+    string(&format!("{decl_name} [{}]", name))
 }
 
 /// The stackless `[style: message]` bracket of a USER Error subclass

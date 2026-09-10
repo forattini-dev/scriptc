@@ -1,3 +1,4 @@
+import { discardPassedBinary } from "./passed-binary.js";
 /* The dual-backend differential: tier membership is AUTO-DISCOVERED by
  * attempting the LLVM build on every corpus program. A program the tier
  * claims must be byte-identical through BOTH backends — stdout (always),
@@ -299,6 +300,8 @@ describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sani
       expect(llvm.exitCode).toBe(expectedExit);
       expect(c.exitCode).toBe(expectedExit);
       expect(node.exitCode).toBe(expectedExit);
+      discardPassedBinary(cacheDir, llvmRes.binaryPath, rel);
+      discardPassedBinary(cacheDir, cRes.binaryPath, rel);
     },
   );
 

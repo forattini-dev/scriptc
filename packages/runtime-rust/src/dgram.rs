@@ -122,7 +122,7 @@ fn dgram_port(port: f64) -> u16 {
 fn dgram_ipv4(host: &JsString, port: u16, bind: bool) -> Result<std::net::SocketAddr, String> {
     let address = if host.is_empty() && bind {
         std::net::Ipv4Addr::UNSPECIFIED
-    } else if host.as_ref() == "localhost" {
+    } else if host == "localhost" {
         std::net::Ipv4Addr::LOCALHOST
     } else {
         host.parse::<std::net::Ipv4Addr>()

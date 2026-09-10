@@ -80,7 +80,7 @@ pub fn fs_watch(
     callback: Option<FsWatchCallback>,
     trace: Option<FsWatchTrace>,
 ) -> JsFsWatcher {
-    let metadata = std::fs::metadata(path.as_ref())
+    let metadata = std::fs::metadata(path.to_utf8_lossy())
         .unwrap_or_else(|error| throw_fs_error("watch", path, error));
     let stamp = FsWatchStamp {
         exists: true,
@@ -93,7 +93,7 @@ pub fn fs_watch(
         },
     };
     let watcher = Gc::new(FsWatcherData {
-        path: std::path::PathBuf::from(path.as_ref()),
+        path: std::path::PathBuf::from(path.to_utf8_lossy()),
         stamp,
         closed: false,
         callback,

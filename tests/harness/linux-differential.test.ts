@@ -43,7 +43,7 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { npmCases } from "./npm-cases.js";
+import { npmCases, npmOracleFlags } from "./npm-cases.js";
 import { normalizeNodeTestOutput } from "./node-test-normalize.js";
 import { eventLoopCases, type StdinScript } from "./event-loop-cases.js";
 
@@ -733,7 +733,7 @@ describe.skipIf(!enabled)(`linux differential (${target})`, () => {
         const binary = await crossCompileNpmCase(c.entry);
         for (const argv of c.argvs ?? [[]]) {
           const [nodeRes, nativeRes] = await Promise.all([
-            runInContainer(["node", inContainer(c.entry), ...argv]),
+            runInContainer(["node", ...npmOracleFlags(c.entry), inContainer(c.entry), ...argv]),
             runInContainer([inContainer(binary), ...argv]),
           ]);
           const label = argv.join(" ");

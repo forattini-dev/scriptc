@@ -1,0 +1,789 @@
+{
+  "schema": 1,
+  "createdAt": "2026-09-10T04:51:01.163Z",
+  "spec": {
+    "path": "/tmp/scriptc-final-redwall-20260910a/bun-spec.json",
+    "sha256": "cdb36301e9458a36b4217f366c17c6e71eccad5b4043834d1b7abeaa8d2bba95",
+    "bytes": 860
+  },
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "release": "7.0.0-28-generic",
+    "cpus": 8,
+    "cpu": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+    "node": "v24.15.0",
+    "limits": {
+      "cpu.max": "100000 100000",
+      "memory.high": "2147483648",
+      "memory.max": "3221225472",
+      "memory.swap.max": "0"
+    },
+    "time": "time (GNU Time) UNKNOWN"
+  },
+  "measurement": "fresh process per sample; warmup included in output checks; GNU time CPU seconds and peak RSS KiB; elapsed includes process launch; alternating candidate order",
+  "runs": 11,
+  "warmup": 1,
+  "inputs": [
+    {
+      "path": "/tmp/scriptc-byte-writes-20260909/input.json",
+      "sha256": "fbdea659709622d9c35146be5e4326fcea7c08df3f098b8606f4737ec6c3cce2",
+      "bytes": 849
+    },
+    {
+      "path": "/tmp/scriptc-redwall-borrowed-reads-20260909/art.png",
+      "sha256": "05bfd40b726f055ccea9b9627433f425d6f45b21497832c94046687af62cddbf",
+      "bytes": 52123
+    },
+    {
+      "path": "/tmp/scriptc-redwall-borrowed-reads-20260909/font.ttf",
+      "sha256": "38a7991ab543f48520284a3e8f69678830873dcfa5e4c303a1912ae66c4e6ee6",
+      "bytes": 6860
+    }
+  ],
+  "cases": [
+    {
+      "name": "rust-final",
+      "command": [
+        "/tmp/scriptc-final-redwall-20260910a/redwall/program",
+        "/tmp/scriptc-byte-writes-20260909/input.json"
+      ],
+      "cwd": "/tmp/scriptc-byte-writes-20260909",
+      "artifacts": [
+        "/tmp/scriptc-byte-writes-20260909/output.png"
+      ],
+      "executable": {
+        "path": "/tmp/scriptc-final-redwall-20260910a/redwall/program",
+        "sha256": "08be688f4d3838370aa1bb4c2a6d3b577db69ad488871d3fbb3078bc6f760a9d",
+        "bytes": 4072624
+      },
+      "acceptance": {
+        "path": "/tmp/scriptc-final-redwall-20260910a/redwall/acceptance.json",
+        "sha256": "2edf08e0e8c9ddac0883e2ce47f30f87407a5f90b8df860bedcf20f1cde69bb6",
+        "bytes": 22208,
+        "compiler": {
+          "commit": "143bd19c658985f257738b0338d8476767bb9b6a",
+          "dirty": true,
+          "distSha256": "5887203c3062b4fe33ad6c5c2cd202c14345095488b0d5b5e31b68ba315fb8d6",
+          "runtimeSourceSha256": "3a82ae40dde1fdf916db1805485ded30f7702a0be9d20ba552dd72b60760103c",
+          "runtimeLockSha256": "9dd16d6e4943477af04e215db04e285389b1cccfeaf0964ac8063d9f984a558d",
+          "node": "v24.15.0",
+          "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+        },
+        "consumer": {
+          "root": "/home/cyber/Work/reddb.io/red-dev",
+          "commit": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+          "dirty": false
+        }
+      }
+    },
+    {
+      "name": "bun",
+      "command": [
+        "/tmp/scriptc-final-redwall-20260910a/bun-program",
+        "/tmp/scriptc-byte-writes-20260909/input.json"
+      ],
+      "cwd": "/tmp/scriptc-byte-writes-20260909",
+      "artifacts": [
+        "/tmp/scriptc-byte-writes-20260909/output.png"
+      ],
+      "executable": {
+        "path": "/tmp/scriptc-final-redwall-20260910a/bun-program",
+        "sha256": "55b8f30c03970d449dc7141b996b9ba082040f0b150d974b9661c2f6b2ef887a",
+        "bytes": 81413600
+      },
+      "acceptance": null
+    }
+  ],
+  "samples": [
+    {
+      "candidate": "rust-final",
+      "round": -1,
+      "warmup": true,
+      "loadAverage": [
+        3.13,
+        3.88,
+        3.83
+      ],
+      "elapsedMs": 565.91523,
+      "userSeconds": 0.53,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.56,
+      "peakRssKiB": 78672,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": -1,
+      "warmup": true,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 1287.395346,
+      "userSeconds": 0.55,
+      "systemSeconds": 0.09,
+      "cpuSeconds": 0.64,
+      "peakRssKiB": 138544,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 0,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 610.20513,
+      "userSeconds": 0.55,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.6000000000000001,
+      "peakRssKiB": 139200,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 0,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 551.4715579999997,
+      "userSeconds": 0.51,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.54,
+      "peakRssKiB": 78664,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 1,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 552.4509320000002,
+      "userSeconds": 0.5,
+      "systemSeconds": 0.04,
+      "cpuSeconds": 0.54,
+      "peakRssKiB": 78788,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 1,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 610.0095630000001,
+      "userSeconds": 0.55,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.6000000000000001,
+      "peakRssKiB": 137676,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 2,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 641.9228989999992,
+      "userSeconds": 0.57,
+      "systemSeconds": 0.06,
+      "cpuSeconds": 0.6299999999999999,
+      "peakRssKiB": 136840,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 2,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 616.51775,
+      "userSeconds": 0.57,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.6,
+      "peakRssKiB": 78856,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 3,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 586.0472179999997,
+      "userSeconds": 0.54,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.5700000000000001,
+      "peakRssKiB": 78724,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 3,
+      "warmup": false,
+      "loadAverage": [
+        3.12,
+        3.86,
+        3.82
+      ],
+      "elapsedMs": 613.010542,
+      "userSeconds": 0.55,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.6000000000000001,
+      "peakRssKiB": 138072,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 4,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 677.9739630000004,
+      "userSeconds": 0.61,
+      "systemSeconds": 0.06,
+      "cpuSeconds": 0.6699999999999999,
+      "peakRssKiB": 138920,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 4,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 657.3467020000007,
+      "userSeconds": 0.61,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.64,
+      "peakRssKiB": 78832,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 5,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 615.2269660000002,
+      "userSeconds": 0.57,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.6,
+      "peakRssKiB": 78976,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 5,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 607.0938159999987,
+      "userSeconds": 0.55,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.6000000000000001,
+      "peakRssKiB": 137216,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 6,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 608.909592,
+      "userSeconds": 0.54,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.5900000000000001,
+      "peakRssKiB": 141164,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 6,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 562.1056850000004,
+      "userSeconds": 0.52,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.55,
+      "peakRssKiB": 78808,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 7,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 558.2914970000002,
+      "userSeconds": 0.52,
+      "systemSeconds": 0.03,
+      "cpuSeconds": 0.55,
+      "peakRssKiB": 78976,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 7,
+      "warmup": false,
+      "loadAverage": [
+        3.03,
+        3.83,
+        3.81
+      ],
+      "elapsedMs": 661.8101619999998,
+      "userSeconds": 0.59,
+      "systemSeconds": 0.06,
+      "cpuSeconds": 0.6499999999999999,
+      "peakRssKiB": 136408,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 8,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 678.9812070000007,
+      "userSeconds": 0.61,
+      "systemSeconds": 0.06,
+      "cpuSeconds": 0.6699999999999999,
+      "peakRssKiB": 138680,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 8,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 590.4937870000012,
+      "userSeconds": 0.54,
+      "systemSeconds": 0.04,
+      "cpuSeconds": 0.5800000000000001,
+      "peakRssKiB": 78768,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 9,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 586.6412579999997,
+      "userSeconds": 0.54,
+      "systemSeconds": 0.04,
+      "cpuSeconds": 0.5800000000000001,
+      "peakRssKiB": 78800,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 9,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 639.2478659999997,
+      "userSeconds": 0.58,
+      "systemSeconds": 0.05,
+      "cpuSeconds": 0.63,
+      "peakRssKiB": 140948,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "bun",
+      "round": 10,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 738.3105159999996,
+      "userSeconds": 0.66,
+      "systemSeconds": 0.07,
+      "cpuSeconds": 0.73,
+      "peakRssKiB": 138236,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    },
+    {
+      "candidate": "rust-final",
+      "round": 10,
+      "warmup": false,
+      "loadAverage": [
+        3.19,
+        3.85,
+        3.82
+      ],
+      "elapsedMs": 679.024397000001,
+      "userSeconds": 0.62,
+      "systemSeconds": 0.04,
+      "cpuSeconds": 0.66,
+      "peakRssKiB": 78940,
+      "output": {
+        "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exitCode": 0,
+        "artifacts": [
+          {
+            "sha256": "4d351ba412958507f0d266c76aebb64e83ff6eebaf9ab0a8886ee99ec5e065c6",
+            "bytes": 108881
+          }
+        ]
+      },
+      "matches": true
+    }
+  ],
+  "equivalence": true,
+  "summary": [
+    {
+      "candidate": "rust-final",
+      "executableBytes": 4072624,
+      "elapsedMs": {
+        "min": 551.4715579999997,
+        "median": 586.6412579999997,
+        "max": 679.024397000001
+      },
+      "cpuSeconds": {
+        "min": 0.54,
+        "median": 0.5800000000000001,
+        "max": 0.66
+      },
+      "peakRssKiB": {
+        "min": 78664,
+        "median": 78808,
+        "max": 78976
+      }
+    },
+    {
+      "candidate": "bun",
+      "executableBytes": 81413600,
+      "elapsedMs": {
+        "min": 607.0938159999987,
+        "median": 639.2478659999997,
+        "max": 738.3105159999996
+      },
+      "cpuSeconds": {
+        "min": 0.5900000000000001,
+        "median": 0.6299999999999999,
+        "max": 0.73
+      },
+      "peakRssKiB": {
+        "min": 136408,
+        "median": 138236,
+        "max": 141164
+      }
+    }
+  ]
+}

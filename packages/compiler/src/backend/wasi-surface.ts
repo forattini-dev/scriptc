@@ -21,6 +21,9 @@ export function moduleWasiUnavailableSurface(mod: IrModule): { surface: string; 
     ["tls.", "network sockets (WASI Preview 1 has no socket API)"],
     ["fetch.", "network-backed fetch (WASI Preview 1 has no socket API)"],
     ["fs.watch", "filesystem watching (WASI Preview 1 has no notification API)"],
+    ["fs.realpath", "filesystem canonical paths (the WASI runtime has no realpath implementation)"],
+    ["fs.chmod", "filesystem permission changes (WASI Preview 1 has no chmod API)"],
+    ["fsp.chmod", "filesystem permission changes (WASI Preview 1 has no chmod API)"],
     ["watcher.", "filesystem watching (WASI Preview 1 has no notification API)"],
   ];
   const kinds: ReadonlyMap<string, string> = new Map([

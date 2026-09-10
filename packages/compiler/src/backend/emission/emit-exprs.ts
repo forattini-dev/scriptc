@@ -1,10 +1,12 @@
+import { emitNumericCoercion, isNumericCoercionFn } from "./emit-numeric-coercion.js";
+import { regexCaptureLayout } from "../../ir/regex-captures.js";
 import { dynPromiseAdapter } from "./emit-dynamic-promise.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, F64, IrExpr, IrRecordShape, IrType, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, MAY_THROW_STR_METHODS, RUNTIME_ERROR_CLASSES, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordClone, mangleRecordNew, mangleRecordStruct, mangleVtStruct } from "../mangle.js";
 import { OVERFLOW_MEMBER } from "./emit-shapes.js";
@@ -1367,36 +1369,35 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = E.emitExpr(e.receiver);
         const args = e.args.map((a) => E.emitExpr(a));
         const method = e.method;
+        const capture = regexCaptureLayout(e.type, (id) => E.unionsById.get(id));
+        const captureArgs = capture ? `, ${capture.stringTag}, ${E.unitInstanceRef(capture.id, capture.undefinedTag)}` : "";
         switch (method) {
           case "test":
             return E.newTemp(e.type, `scr_regex_test(${r.name}, ${args[0]!.name})`);
           case "match": {
-            // +1 string[] or NULL from the runtime; the `string[] | null`
-            // union wraps type-directedly, the process.envGet convention.
             if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: match result not a union");
             const def = E.unionsById.get(e.type.unionId);
             const arrTag = def ? def.arms.findIndex((a) => a.kind === "array") : -1;
             const nullTag = def ? def.arms.findIndex((a) => a.kind === "nullT") : -1;
-            if (arrTag < 0 || nullTag < 0) {
+            const arrayType = def?.arms[arrTag];
+            if (!arrayType || arrTag < 0 || nullTag < 0) {
               throw new InternalCompilerError("emitter bug: match union lacks its arms");
             }
-            const m = E.newTemp(arrayOf(STRING), `scr_regex_match(${r.name}, ${args[0]!.name})`);
+            const m = E.newTemp(arrayType, `scr_regex_match(${r.name}, ${args[0]!.name}${captureArgs})`);
             E.moveTemp(m); // moves into the union box when present; NULL otherwise
             const present = `scr_union_new_ref(${arrTag}, ${m.name}, &scr_arr_retain_v, &scr_arr_release_v, NULL)`;
             const absent = E.unitInstanceRef(e.type.unionId, nullTag);
             return E.newTemp(e.type, `${m.name} ? ${present} : ${absent}`);
           }
           case "matchAll":
-            // Every match drained eagerly into a fresh +1 string[][];
-            // throws Node's TypeError on a non-global regex (catchable —
-            // fallibleTemp's pending check).
-            return E.fallibleTemp(e.type, `scr_regex_match_all(${r.name}, ${args[0]!.name})`);
+            // Eager optional-string rows; non-global regexes throw.
+            return E.fallibleTemp(e.type, `scr_regex_match_all(${r.name}, ${args[0]!.name}${captureArgs})`);
           case "matchAllInto":
             // matchAll's companion-index form: args[1] (a number[]) also
             // receives each match's UTF-16 start index.
             return E.fallibleTemp(
               e.type,
-              `scr_regex_match_all_into(${r.name}, ${args[0]!.name}, ${args[1]!.name})`,
+              `scr_regex_match_all_into(${r.name}, ${args[0]!.name}, ${args[1]!.name}${captureArgs})`,
             );
           case "search":
             // First-match index or -1 — a plain double; never throws.
@@ -2804,9 +2805,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "dynHasKey": {
         // `"k" in pkg`: a kind-guarded presence answer, computed against
         // the literal key at compile time — no allocation, borrowed box.
-        // An ISLAND-held receiver fences loudly (Node asks the real
-        // engine object — `false` would be a silent wrong answer), so
-        // the temp rides the fallible path.
+        // Engine-held and typed-reference receivers use the runtime lookup;
+        // a proxy's has trap can throw, so the temp is fallible.
+        // The interned key is borrowed; native object/array fast paths stay inline.
         const d = E.emitExpr(e.value);
         const keyBytes = Buffer.from(e.key, "utf8");
         const keyLit = cStringLiteral(keyBytes);
@@ -2817,7 +2818,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             : /^(0|[1-9][0-9]*)$/.test(e.key) && Number(e.key) <= Number.MAX_SAFE_INTEGER
               ? `${d.name}->v.arr.len > ${e.key}`
               : "false";
-        const test = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : scr_dyn_isl_fence(${d.name}, "'in'"))`;
+        const test = `(${d.name}->kind == SCR_DYN_OBJ ? (${objTest}) : ${d.name}->kind == SCR_DYN_ARR ? (${arrTest}) : scr_dyn_has_key(${d.name}, (ScrStr *)&${E.internLiteral(e.key)}))`;
         return E.fallibleTemp(e.type, e.negated ? `!${test}` : test);
       }
       case "dynScalarEq": {
@@ -3116,6 +3117,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return t;
         };
         const fn = e.fn;
+        if (isNumericCoercionFn(fn)) return finish(emitNumericCoercion(fn, args.map(value => value.name)));
         switch (fn) {
           case "fetch.start":
             E.usesTimers = true;
@@ -3230,7 +3232,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_define_props(${arg(0)}, ${arg(1)})`);
           case "dyn.hasKey":
             // `k in v` with a runtime key: the dyn presence answer (both
-            // borrowed, no allocation, never throws).
+            // borrowed; engine proxy traps can throw).
             return finish(`scr_dyn_has_key(${arg(0)}, ${arg(1)})`);
           case "dyn.keySet":
             // Keyed write on a dyn receiver: all three borrowed (the
@@ -3260,8 +3262,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // set) — args[2] carries the call's source spelling.
             return finish(`scr_dyn_to_string_method(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "fs.readFileSync":
-            // args[1] is the (always-"utf8") encoding: evaluated for
-            // JS-exact side-effect order, ignored by the runtime.
             return finish(`scr_fs_read_file(${arg(0)})`);
           case "fs.readFileSyncBuf":
             return finish(`scr_fs_read_file_bytes(${arg(0)})`);
@@ -3269,6 +3269,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_read_file_sync_dyn(${arg(0)}, ${arg(1)})`);
           case "fs.writeFileSync":
             return finish(`scr_fs_write_file(${arg(0)}, ${arg(1)})`);
+          case "fs.appendFileModeSync":
+            return finish(`scr_fs_append_file_mode(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "fs.appendFileSync":
             return finish(`scr_fs_append_file(${arg(0)}, ${arg(1)})`);
           case "fs.existsSync":
@@ -3545,15 +3547,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_math_max(${arg(0)}, ${arg(1)})`);
           case "math.random":
             return finish(`scr_math_random()`);
-          // The static global parsers/tests (scr_string.c). Borrow; no throw.
-          case "num.parseInt":
-            return finish(`scr_parse_int(${arg(0)}, ${arg(1)})`);
-          case "num.parseFloat":
-            return finish(`scr_parse_float(${arg(0)})`);
-          case "num.fromString":
-            return finish(`scr_string_to_number(${arg(0)})`);
-          case "num.isNaN":
-            return finish(`(bool)isnan(${arg(0)})`);
           // The URI codecs (scr_string.c). Borrow; results +1. decode
           // throws the spec's catchable URIError on bad hex or invalid
           // UTF-8 octets (may-throw seed set); the encoders never throw.
@@ -5451,10 +5444,6 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_http2_stream_pending(${arg(0)})`);
           case "http2.streamSession":
             return finish(`scr_http2_stream_session(${arg(0)})`);
-          case "dyn.toStringCoerce":
-            // +1 string or NULL with the exception pending (user
-            // toString/valueOf throws propagate). Borrows the dyn.
-            return finish(`scr_dyn_string_coerce_js(${arg(0)})`);
           case "error.nodeThrow":
             // The compiler-resolved Node-parity throw (always throws —
             // the typed dummy is abandoned by the pending check's
@@ -6959,7 +6948,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // interface is a stdin consumer — the loop must run.
           case "rl.create":
             E.usesTimers = true;
-            return finish(`scr_rl_create()`);
+            return finish(`scr_rl_create_with_output(${arg(0)})`);
           case "rl.question": {
             E.usesTimers = true;
             const cbT = e.args[2]!.type;
@@ -7026,11 +7015,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // The bounded date-string parse (X509 validity + ECMA format);
             // NaN elsewhere. Never throws.
             return finish(`scr_date_parse_get_time(${arg(0)})`);
+          case "date.newComponents":
           case "date.utc":
-            // MakeDay/MakeTime/TimeClip over seven completed number
-            // arguments; NaN outside the time range. Never throws.
+            // Seven completed components; local construction converts before TimeClip.
             return finish(
-              `scr_date_utc(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
+              `${fn === "date.utc" ? "scr_date_utc" : "scr_date_new_components"}(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
             );
           case "date.getFullYear":
             return finish(`scr_date_get_full_year(${arg(0)}, false)`);
@@ -7112,8 +7101,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "atomics.wait":
             return finish(`scr_atomics_wait(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "fs.readFdSync":
-            // args[1] is the (always-"utf8") encoding: evaluated for
-            // JS-exact side-effect order, ignored by the runtime.
+            // Evaluate the encoding argument for effects; the runtime reads UTF-8.
+            // The descriptor remains borrowed by this whole-file operation.
             return finish(`scr_fs_read_fd(${arg(0)})`);
           case "fs.readFdSyncBytes":
             return finish(`scr_fs_read_fd_bytes(${arg(0)})`);

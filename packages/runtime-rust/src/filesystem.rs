@@ -176,20 +176,20 @@ fn fs_creation_mode(mode: f64) -> u32 {
 }
 
 pub fn fs_read_file(path: &JsString) -> JsString {
-    match std::fs::read(path.as_ref()) {
-        Ok(bytes) => Rc::from(String::from_utf8_lossy(&bytes).as_ref()),
+    match std::fs::read(path.to_utf8_lossy()) {
+        Ok(bytes) => JsString::from(String::from_utf8_lossy(&bytes).as_ref()),
         Err(error) => throw_fs_error("open", path, error),
     }
 }
 
 pub fn fs_write_file(path: &JsString, data: &JsString) {
-    if let Err(error) = std::fs::write(path.as_ref(), data.as_bytes()) {
+    if let Err(error) = std::fs::write(path.to_utf8_lossy(), data.as_bytes()) {
         throw_fs_error("open", path, error);
     }
 }
 
 pub fn fs_read_file_bytes(path: &JsString) -> JsBytes<u8> {
-    match std::fs::read(path.as_ref()) {
+    match std::fs::read(path.to_utf8_lossy()) {
         Ok(bytes) => bytes_from_vec(bytes),
         Err(error) => throw_fs_error("open", path, error),
     }
@@ -199,7 +199,7 @@ pub fn fs_write_file_bytes(path: &JsString, data: &JsBytes<u8>) {
     let result = data.with(|data| {
         let storage = data.storage.borrow();
         std::fs::write(
-            path.as_ref(),
+            path.to_utf8_lossy(),
             &storage[data.offset..data.offset + data.length],
         )
     });
@@ -213,7 +213,7 @@ pub fn fs_append_file(path: &JsString, data: &JsString) {
     let mut file = match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path.as_ref())
+        .open(path.to_utf8_lossy())
     {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
@@ -224,29 +224,29 @@ pub fn fs_append_file(path: &JsString, data: &JsString) {
 }
 
 pub fn fs_exists(path: &JsString) -> bool {
-    std::fs::exists(path.as_ref()).unwrap_or(false)
+    std::fs::exists(path.to_utf8_lossy()).unwrap_or(false)
 }
 
 pub fn fs_mkdir(path: &JsString) {
-    if let Err(error) = std::fs::create_dir(path.as_ref()) {
+    if let Err(error) = std::fs::create_dir(path.to_utf8_lossy()) {
         throw_fs_error("mkdir", path, error);
     }
 }
 
 pub fn fs_rm(path: &JsString) {
-    if let Err(error) = std::fs::remove_file(path.as_ref()) {
+    if let Err(error) = std::fs::remove_file(path.to_utf8_lossy()) {
         throw_fs_error("rm", path, error);
     }
 }
 
 pub fn fs_rmdir(path: &JsString) {
-    if let Err(error) = std::fs::remove_dir(path.as_ref()) {
+    if let Err(error) = std::fs::remove_dir(path.to_utf8_lossy()) {
         throw_fs_error("rmdir", path, error);
     }
 }
 
 pub fn fs_readdir(path: &JsString) -> JsArray<JsString> {
-    let entries = match std::fs::read_dir(path.as_ref()) {
+    let entries = match std::fs::read_dir(path.to_utf8_lossy()) {
         Ok(entries) => entries,
         Err(error) => throw_fs_error("scandir", path, error),
     };
@@ -256,14 +256,14 @@ pub fn fs_readdir(path: &JsString) -> JsArray<JsString> {
             Ok(entry) => entry,
             Err(error) => throw_fs_error("scandir", path, error),
         };
-        names.push(Rc::from(entry.file_name().to_string_lossy().as_ref()));
+        names.push(JsString::from(entry.file_name().to_string_lossy().as_ref()));
     }
     array_new(names)
 }
 
 pub fn fs_realpath(path: &JsString) -> JsString {
-    match std::fs::canonicalize(path.as_ref()) {
-        Ok(resolved) => Rc::from(resolved.to_string_lossy().as_ref()),
+    match std::fs::canonicalize(path.to_utf8_lossy()) {
+        Ok(resolved) => JsString::from(resolved.to_string_lossy().as_ref()),
         Err(error) => throw_fs_error("lstat", path, error),
     }
 }
@@ -280,8 +280,8 @@ pub fn fs_mkdtemp(prefix: &JsString) -> JsString {
             "{:06x}",
             (nanos ^ tick ^ u64::from(std::process::id())) & 0xff_ffff
         );
-        let candidate: JsString = Rc::from(format!("{prefix}{suffix}"));
-        match std::fs::create_dir(candidate.as_ref()) {
+        let candidate: JsString = JsString::from(format!("{prefix}{suffix}"));
+        match std::fs::create_dir(candidate.to_utf8_lossy()) {
             Ok(()) => return candidate,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => throw_fs_error("mkdtemp", &candidate, error),
@@ -314,25 +314,25 @@ pub fn fs_lchmod(path: &JsString, mode: f64) {
 }
 
 pub fn fs_mkdir_recursive(path: &JsString) {
-    if let Err(error) = std::fs::create_dir_all(path.as_ref()) {
+    if let Err(error) = std::fs::create_dir_all(path.to_utf8_lossy()) {
         throw_fs_error("mkdir", path, error);
     }
 }
 
 pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
-    let metadata = match std::fs::symlink_metadata(path.as_ref()) {
+    let metadata = match std::fs::symlink_metadata(path.to_utf8_lossy()) {
         Ok(metadata) => metadata,
         Err(error) if force && error.kind() == std::io::ErrorKind::NotFound => return,
         Err(error) => throw_fs_error("lstat", path, error),
     };
     let result = if metadata.is_dir() {
         if recursive {
-            std::fs::remove_dir_all(path.as_ref())
+            std::fs::remove_dir_all(path.to_utf8_lossy())
         } else {
-            std::fs::remove_dir(path.as_ref())
+            std::fs::remove_dir(path.to_utf8_lossy())
         }
     } else {
-        std::fs::remove_file(path.as_ref())
+        std::fs::remove_file(path.to_utf8_lossy())
     };
     if let Err(error) = result {
         throw_fs_error("rm", path, error);
@@ -340,19 +340,19 @@ pub fn fs_rm_options(path: &JsString, recursive: bool, force: bool) {
 }
 
 pub fn fs_unlink(path: &JsString) {
-    if let Err(error) = std::fs::remove_file(path.as_ref()) {
+    if let Err(error) = std::fs::remove_file(path.to_utf8_lossy()) {
         throw_fs_error("unlink", path, error);
     }
 }
 
 pub fn fs_copy_file(from: &JsString, to: &JsString) {
-    if let Err(error) = std::fs::copy(from.as_ref(), to.as_ref()) {
+    if let Err(error) = std::fs::copy(from.to_utf8_lossy(), to.to_utf8_lossy()) {
         throw_fs_error2("copyfile", from, to, error);
     }
 }
 
 pub fn fs_rename(from: &JsString, to: &JsString) {
-    if let Err(error) = std::fs::rename(from.as_ref(), to.as_ref()) {
+    if let Err(error) = std::fs::rename(from.to_utf8_lossy(), to.to_utf8_lossy()) {
         throw_fs_error2("rename", from, to, error);
     }
 }
@@ -589,7 +589,7 @@ fn fs_renames_finish() {
 pub fn fs_chmod(path: &JsString, mode: f64) {
     use std::os::unix::fs::PermissionsExt;
     let permissions = std::fs::Permissions::from_mode(to_uint32(mode));
-    if let Err(error) = std::fs::set_permissions(path.as_ref(), permissions) {
+    if let Err(error) = std::fs::set_permissions(path.to_utf8_lossy(), permissions) {
         throw_fs_error("chmod", path, error);
     }
 }
@@ -606,7 +606,7 @@ pub fn fs_chmod(path: &JsString, _mode: f64) {
 }
 
 pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
-    if let Err(error) = std::fs::metadata(path.as_ref()) {
+    if let Err(error) = std::fs::metadata(path.to_utf8_lossy()) {
         throw_fs_error("chown", path, error);
     }
     if uid == -1.0 && gid == -1.0 {
@@ -616,7 +616,7 @@ pub fn fs_chown(path: &JsString, uid: f64, gid: f64) {
     let status = std::process::Command::new("chown")
         .arg(owner)
         .arg("--")
-        .arg(path.as_ref())
+        .arg(path.to_utf8_lossy())
         .status();
     if !status.is_ok_and(|status| status.success()) {
         throw_fs_error(
@@ -640,7 +640,7 @@ pub fn fs_write_file_mode(path: &JsString, data: &JsString, mode: f64) {
         .create(true)
         .truncate(true)
         .mode(mode)
-        .open(path.as_ref())
+        .open(path.to_utf8_lossy())
     {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
@@ -668,7 +668,7 @@ pub fn fs_write_file_exclusive_mode(path: &JsString, data: &JsString, mode: f64)
     }
     #[cfg(not(unix))]
     let _ = mode;
-    let mut file = match options.open(path.as_ref()) {
+    let mut file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
     };
@@ -682,7 +682,7 @@ pub fn fs_mkdir_mode(path: &JsString, mode: f64, recursive: bool) {
     use std::os::unix::fs::DirBuilderExt;
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(recursive).mode(to_uint32(mode));
-    if let Err(error) = builder.create(path.as_ref()) {
+    if let Err(error) = builder.create(path.to_utf8_lossy()) {
         throw_fs_error("mkdir", path, error);
     }
 }
@@ -697,7 +697,7 @@ pub fn fs_mkdir_mode(path: &JsString, _mode: f64, recursive: bool) {
 }
 
 pub fn fs_access(path: &JsString, mode: f64) {
-    if let Err(error) = std::fs::metadata(path.as_ref()) {
+    if let Err(error) = std::fs::metadata(path.to_utf8_lossy()) {
         throw_fs_error("access", path, error);
     }
     let mode = to_int32(mode);
@@ -707,7 +707,7 @@ pub fn fs_access(path: &JsString, mode: f64) {
         }
         let status = std::process::Command::new("test")
             .arg(flag)
-            .arg(path.as_ref())
+            .arg(path.to_utf8_lossy())
             .status();
         if !status.is_ok_and(|status| status.success()) {
             throw_fs_error(
@@ -783,7 +783,7 @@ fn file_id(_file: &std::fs::File) -> i32 {
 
 pub fn fs_open(path: &JsString, flags: &JsString) -> f64 {
     let options = fs_open_options(flags);
-    let file = match options.open(path.as_ref()) {
+    let file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
     };
@@ -839,7 +839,7 @@ pub fn file_handle_open(path: &JsString, flags: &JsString, mode: f64) -> JsFileH
     }
     #[cfg(not(unix))]
     let _ = mode;
-    let file = match options.open(path.as_ref()) {
+    let file = match options.open(path.to_utf8_lossy()) {
         Ok(file) => file,
         Err(error) => throw_fs_error("open", path, error),
     };

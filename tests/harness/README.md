@@ -11,6 +11,15 @@ oracle. This separation is intentional: Node-major releases can disagree on
 observable errors, and such differences must not be mislabeled as native
 backend regressions.
 
+The npm fixtures also recognize the corpus's `// @no-deprecation` directive
+in the first four lines. Only explicitly marked programs run the Node oracle
+with `--no-deprecation`, in both the local and Linux container npm lanes.
+`island-web-plumbing`, `misc-shims`, and `util-shims` use this configuration
+to test deprecated APIs' values and errors without Node's process-specific
+deprecation notices. Captured stdout, stderr, and exit status retain their
+existing comparisons; no captured Node stderr is filtered. These cases do
+not certify parity of built-in deprecation warning events or rendering.
+
 One deliberate exception to raw byte-compare: `node:test` programs (tests/harness/node-test.test.ts over tests/fixtures/node-test) cannot live in the corpus because Node's spec reporter embeds a real duration in EVERY result line — no node:test program has deterministic stdout, under Node itself included. Those fixtures still run both lanes against the Node oracle, but with one documented normalization applied to both sides (durations, stack frames, the inspect property block); everything else — symbols, indentation, directives, summary counts, the failing-section "test at" locations and error messages — must match byte-exactly, plus exit-code parity against the fixture's `// @exit:` line. Fixtures never console.log inside test bodies: Node's reporter stream lags console output racily, so mixed programs aren't byte-comparable against any oracle.
 
 The LLVM backend rides the same two lanes through its own dual-backend differential (tests/harness/llvm-differential.test.ts): every corpus program is ATTEMPTED through `--backend=llvm`; programs the tier claims must be byte-identical through both backends AND against the Node oracle (stdout always, stderr for exit-0 programs, exit codes), and programs outside the tier must refuse with exactly one SC3001 diagnostic naming the first unsupported IR construct — never wrong code, never a silent fallback. Tier membership is auto-discovered (attempt + catch the refusal), the survey's six trivial-tier programs are pinned as a floor, and the run prints the claimed count plus the refusal histogram (the next phase's queue). Under `SCRIPTC_SAN=1` the emitted .ll's `sanitize_address` attribute opts the LLVM-emitted functions into ASan instrumentation too.

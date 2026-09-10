@@ -1060,10 +1060,11 @@ void scr_regex_release_v(void *re);
 ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags);
 
 bool scr_regex_test(ScrRegex *re, ScrStr *s); /* aborts on /g or /y */
-/* s.match(re): +1 string[] of [whole, ...captures] (nonparticipating
- * captures hold "" — SEMANTICS.md), or NULL for no match. Aborts on /g
- * or /y like test(). Borrows both. */
-ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re);
+/* s.match(re): +1 optional-string capture row or NULL for no match.
+ * capture_tag and absent describe the compiler's union layout.
+ * Aborts on /g or /y like test(). Borrows all inputs. */
+struct ScrUnion;
+ScrArr *scr_regex_match(ScrStr *s, ScrRegex *re, uint32_t capture_tag, struct ScrUnion *absent);
 /* s.search(re): the first match's UTF-16 index, or -1 — a fresh exec from
  * position 0 (Symbol.search never touches lastIndex, so no flag fence:
  * /g is irrelevant, /y anchors at 0). Borrows both; never throws. */
@@ -1078,13 +1079,13 @@ ScrStr *scr_regex_replace_all(ScrStr *s, ScrRegex *re, ScrStr *rep);
  * limit uses ToUint32; the no-limit wrapper supplies 2^32-1. */
 ScrArr *scr_regex_split(ScrStr *s, ScrRegex *re);
 ScrArr *scr_regex_split_limit(ScrStr *s, ScrRegex *re, double limit);
-/* matchAll drained eagerly: +1 string[][] of honest match slices; throws
+/* matchAll drained eagerly: +1 array of optional-string capture rows; throws
  * Node's TypeError on a non-global regex (catchable). */
-ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re);
+ScrArr *scr_regex_match_all(ScrStr *s, ScrRegex *re, uint32_t capture_tag, struct ScrUnion *absent);
 /* matchAll + the companion-index drain: also pushes each match's UTF-16
  * start index (f64) onto `indices` — the .index the for-of-over-matchAll
  * desugar reads. Same throw/result contract as scr_regex_match_all. */
-ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices);
+ScrArr *scr_regex_match_all_into(ScrStr *s, ScrRegex *re, ScrArr *indices, uint32_t capture_tag, struct ScrUnion *absent);
 
 /* ── maps (scr_map.c) ───────────────────────────────────────────────
  * ES Map<K, V> with the compact-dict layout: a dense, insertion-ordered
@@ -2260,6 +2261,7 @@ void scr_fs_rename(ScrStr *oldpath, ScrStr *newpath);
  * thread. raw returns 0 on success or a positive errno value on failure. */
 int scr_fs_rename_raw(const ScrStr *oldpath, const ScrStr *newpath);
 void scr_fs_rename_error(int error, const ScrStr *oldpath, const ScrStr *newpath);
+void scr_fs_append_file_mode(ScrStr *path, ScrStr *data, double mode, bool exclusive);
 void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode);
 void scr_fs_write_file_exclusive_mode(ScrStr *path, ScrStr *data, double mode);
 void scr_fs_mkdir_mode(ScrStr *path, double mode);
@@ -3317,8 +3319,8 @@ void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value
  * non-object kinds throw Node's catchable TypeErrors (strict-mode
  * wording). All three operands BORROWED (the value is retained in). */
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
-/* `key in v` with a runtime key — the dynHasKey fold per value (OBJ own
- * members, ARR length/valid indices, false elsewhere). Never throws. */
+/* `key in v`: native members/array indices or engine prototype lookup.
+ * Borrows both operands; engine proxy traps can throw catchably. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key);
 /* Bare `typeof v` on a dyn value: the dyn kind's JS answer (+1 string;
  * null answers "object"). Never throws. */
@@ -3339,6 +3341,8 @@ ScrStr *scr_dyn_string_coerce(const ScrDyn *d);
  * Borrows; +1 or NULL with the exception pending. */
 ScrStr *scr_dyn_string_coerce_js(const ScrDyn *d);
 bool scr_dyn_number_coerce_js(const ScrDyn *d, double *out);
+double scr_dyn_number_coerce_value(const ScrDyn *d);
+double scr_dyn_compare(const ScrDyn *left, const ScrDyn *right);
 
 /* `d instanceof TypeError` (and the other builtin error classes) on a
  * checked-dynamic value: the from_error cache resolves the dyn encoding
@@ -3567,6 +3571,7 @@ typedef struct ScrDynJsvalOps {
    * bridges with the ENGINE's message. +1, or NULL with the exception
    * pending. */
   ScrDyn *(*iter_drain)(ScrJsval *cell, bool spread, const ScrStr *spell);
+  int (*has_key)(ScrJsval *cell, const ScrStr *k); /* inherited too; -1 = pending */
 } ScrDynJsvalOps;
 
 /* The allocator view the gated constructor uses (installs the ops);
@@ -4121,6 +4126,7 @@ bool scr_stdin_ended(void);
  * adapter owns the +1 line and fulfills the `string | undefined` promise
  * it captured. Never throws. */
 double scr_rl_create(void);
+double scr_rl_create_with_output(bool output);
 void scr_rl_question(double id, const ScrStr *query, ScrClosure *cb /*moves*/,
                       void (*fn)(ScrClosure *, ScrStr *));
 void scr_rl_next_line(double id, ScrClosure *cb /*moves*/,
@@ -4810,6 +4816,7 @@ ScrStr *scr_intl_num_format_en_us(double x);
  * mutation are frontend-fenced; construction, storage, getters, and ISO
  * formatting are exact over this representation. */
 double scr_date_now(void); /* integer ms since epoch, like Node */
+double scr_date_new_components(double y, double mo, double d, double h, double mi, double s, double ms);
 double scr_date_new_ms(double ms); /* TimeClip (NaN when invalid) */
 double scr_date_get_time(double ms);
 /* Node's exact ISO 8601 UTC format (expanded ±YYYYYY years outside

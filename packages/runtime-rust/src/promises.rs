@@ -376,7 +376,7 @@ pub fn promise_all<T>(entries: &JsArray<JsPromise<T>>) -> JsPromise<JsArray<T>>
 where
     T: HeapValue + ArrayElement,
 {
-    let entries = entries.with(|data| data.elements.clone());
+    let entries = entries.with(|data| data.elements().into_owned());
     if entries.is_empty() {
         return promise_resolved(array_new(Vec::new()));
     }
@@ -444,7 +444,7 @@ where
 }
 
 pub fn promise_all_void(entries: &JsArray<JsPromise<()>>) -> JsPromise<()> {
-    let entries = entries.with(|data| data.elements.clone());
+    let entries = entries.with(|data| data.elements().into_owned());
     if entries.is_empty() {
         return promise_resolved(());
     }

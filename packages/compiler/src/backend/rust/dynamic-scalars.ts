@@ -13,14 +13,15 @@ export function emitRustDynamicScalarChecks(context: RustDynamicScalarContext): 
     ["boolean", "bool", "Boolean"],
     ["string", "runtime::JsString", "String"],
   ] as const) {
-    context.line(`fn sc_dyn_check_${expected}(value: ${name}) -> ${rustType} {`);
+    context.line(`fn sc_dyn_check_${expected}(value: ${name}) -> ${rustType} { sc_dyn_check_${expected}_at(value, "$" ) }`);
+    context.line(`fn sc_dyn_check_${expected}_at(value: ${name}, path: &str) -> ${rustType} {`);
     context.pushIndent();
     // An island HANDLE holding the scalar exits strictly (a typed
     // callback's parameter arriving through the dyn bridge).
     const island = context.hasEmbeddedModules()
       ? `${name}::Island(handle) => runtime::island_exit_${expected}(&handle), `
       : "";
-    context.line(`match value { ${name}::${variant}(value) => value, ${island}value => sc_dyn_check_fail("${expected}", &value) }`);
+    context.line(`match value { ${name}::${variant}(value) => value, ${island}value => sc_dyn_check_fail_at("${expected}", &value, path) }`);
     context.popIndent();
     context.line("}");
   }

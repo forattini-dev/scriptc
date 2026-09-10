@@ -30703,6 +30703,52 @@ static JSResolveResultEnum js_resolve_export(JSContext *ctx,
     return ret;
 }
 
+/* scriptc: keep the original import request and complete UTF-16 names.
+   The general engine formatter uses fixed 64/256-byte diagnostic buffers. */
+static void js_throw_missing_export(JSContext *ctx, JSAtom specifier,
+                                    JSAtom export_name)
+{
+    JSValue module_text, export_text, message, error;
+    JSStackFrame *sf;
+    StringBuffer buffer;
+
+    module_text = JS_AtomToString(ctx, specifier);
+    if (JS_IsException(module_text))
+        return;
+    export_text = JS_AtomToString(ctx, export_name);
+    if (JS_IsException(export_text)) {
+        JS_FreeValue(ctx, module_text);
+        return;
+    }
+    string_buffer_init(ctx, &buffer, 0);
+    string_buffer_puts8(&buffer, "The requested module '");
+    string_buffer_concat_value(&buffer, module_text);
+    string_buffer_puts8(&buffer, "' does not provide an export named '");
+    string_buffer_concat_value(&buffer, export_text);
+    string_buffer_putc8(&buffer, '\'');
+    JS_FreeValue(ctx, module_text);
+    JS_FreeValue(ctx, export_text);
+    message = string_buffer_end(&buffer);
+    if (JS_IsException(message))
+        return;
+    error = JS_NewObjectProtoClass(ctx, ctx->native_error_proto[JS_SYNTAX_ERROR],
+                                  JS_CLASS_ERROR);
+    if (JS_IsException(error)) {
+        JS_FreeValue(ctx, message);
+        return;
+    }
+    if (JS_DefinePropertyValue(ctx, error, JS_ATOM_message, message,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) < 0) {
+        JS_FreeValue(ctx, error);
+        return;
+    }
+    sf = ctx->rt->current_stack_frame;
+    if (!ctx->rt->in_out_of_memory &&
+        (!sf || JS_GetFunctionBytecode(sf->cur_func) == NULL))
+        build_backtrace(ctx, error, JS_UNDEFINED, NULL, 0, 0, 0);
+    JS_Throw(ctx, error);
+}
+
 static void js_resolve_export_throw_error(JSContext *ctx,
                                           JSResolveResultEnum res,
                                           JSModuleDef *m, JSAtom export_name)
@@ -31202,7 +31248,12 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
             m1 = m->req_module_entries[me->u.req_module_idx].module;
             ret = js_resolve_export(ctx, &res_m, &res_me, m1, me->local_name);
             if (ret != JS_RESOLVE_RES_FOUND) {
-                js_resolve_export_throw_error(ctx, ret, m, me->export_name);
+                if (ret == JS_RESOLVE_RES_NOT_FOUND)
+                    js_throw_missing_export(ctx,
+                        m->req_module_entries[me->u.req_module_idx].module_name,
+                        me->local_name);
+                else
+                    js_resolve_export_throw_error(ctx, ret, m, me->export_name);
                 goto fail;
             }
         }
@@ -31255,7 +31306,12 @@ static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
                 ret = js_resolve_export(ctx, &res_m,
                                         &res_me, m1, mi->import_name);
                 if (ret != JS_RESOLVE_RES_FOUND) {
-                    js_resolve_export_throw_error(ctx, ret, m1, mi->import_name);
+                    if (ret == JS_RESOLVE_RES_NOT_FOUND)
+                        js_throw_missing_export(ctx,
+                            m->req_module_entries[mi->req_module_idx].module_name,
+                            mi->import_name);
+                    else
+                        js_resolve_export_throw_error(ctx, ret, m1, mi->import_name);
                     goto fail;
                 }
                 if (res_me->local_name == JS_ATOM__star_) {

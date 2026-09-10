@@ -10,7 +10,7 @@
  * - The two size/stability pins: a regex-free program must not reference
  *   the regex runtime at all (byte-identical link line — its C names no
  *   ScrRegex symbol), and a regex-USING static binary pays libregexp
- *   (~110KB), never the ~620KB engine class: well under 300KB.
+ *   never the complete engine. Measured budgets live in native-size-budgets.
  *
  * SCRIPTC_SAN=1 builds the programs with ASan + the RC audit.
  */
@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { C_REGEX_SIZE_LIMIT, C_STATIC_SIZE_LIMIT } from "./native-size-budgets.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -143,38 +144,10 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
     const plainC = readFileSync(plainBuild.cPath, "utf8");
     expect(plainC).not.toContain("ScrRegex");
     expect(plainC).not.toContain("scr_regex");
-    // The class bounds are page-granular (macOS rounds segments to 16KB,
-    // so a few hundred bytes of new runtime can tip a whole page): the net
-    // loop hooks, the console/process/child surface (the piped-stream
-    // slice included — scr_child.c is always linked), the
-    // fs-scandir/Math-static slice, the path.win32 port, and the Buffer
-    // numeric/encoding/search families (~11KB of always-linked bytes
-    // runtime) each cost pages — regex linkage would be a ~110KB jump
-    // above the static class, the engine a ~620KB one. The regex class
-    // carries scr_assert.c (the regex link switch has always pulled it),
-    // so the assert.throws shape machinery — the Comparison diff renderer
-    // and the throws/rejects helpers — re-based it by a page, and the
-    // dyn-assert machinery (the compact:false dyn renderer plus the real
-    // myers line-diff printer) re-based it by another; the primitive-
-    // prototype formatters (toExponential/toFixed0, Date.UTC, String.raw)
-    // re-based the static class by one more; the ambient-receiver stack,
-    // the %j dyn stringify walk, and the runtime-encoding readFileSync
-    // form (all in always-linked TUs) tipped the regex class one more
-    // page; positioned readSync's cross-platform pread seam tipped the
-    // Mach-O regex class by one further page. Native Response construction
-    // and mutable constructed Headers added another page to both Darwin
-    // classes; the Linux bounds were rebased by the same 16KB while
-    // preserving their existing cushion.
-    // The canonical Ubuntu 24.04/clang Sandbox measures 387,600 bytes for
-    // the plain binary and 540,232 with regex linked. The Linux bounds leave
-    // roughly one ELF page of growth. Current Mach-O toolchains measure
-    // 398,024 bytes for the plain binary, whose bound likewise leaves about
-    // one native page; neither cushion can hide an engine-sized jump.
-    expect(statSync(plainBuild.binaryPath).size).toBeLessThan(
-      process.platform === "linux" ? 408_000 : 415_000,
-    );
-    expect(statSync(regexBuild.binaryPath).size).toBeLessThan(
-      process.platform === "linux" ? 561_000 : 545_000,
-    );
+    const plainSize = statSync(plainBuild.binaryPath).size;
+    const regexSize = statSync(regexBuild.binaryPath).size;
+    expect(plainSize).toBeLessThan(C_STATIC_SIZE_LIMIT);
+    expect(regexSize).toBeLessThan(C_REGEX_SIZE_LIMIT);
+    expect(regexSize - plainSize).toBeGreaterThan(100_000);
   });
 });

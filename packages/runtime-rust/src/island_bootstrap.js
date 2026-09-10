@@ -46,8 +46,8 @@
  * island's does-not-provide throw — a fence, not a wrong answer. */
 (host) => {
   'use strict';
-  if (typeof globalThis.WebAssembly === 'undefined') {
-    const die = (what) => () => {
+  {
+    const die = (what) => function () {
       throw new Error('WebAssembly.' + what + ' is not supported in scriptc binaries (the embedded engine has no wasm runtime)');
     };
     const dieAsync = (what) => () => {

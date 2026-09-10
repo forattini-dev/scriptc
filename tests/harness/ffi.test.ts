@@ -1103,8 +1103,9 @@ test("retained release calls reject an inline function literal", async () => {
   }
 });
 
-test("a missing FFI symbol is an SC5004 diagnostic, not a rejected compile", async () => {
-  const outDir = join(cacheRoot, "missing-symbol");
+test.each(sanitize ? ["c", "llvm"] as const : ["rust", "c", "llvm"] as const)(
+  "a missing FFI symbol is an SC5004 diagnostic, not a rejected compile (%s)", async (backend) => {
+  const outDir = join(cacheRoot, `missing-symbol-${backend}`);
   mkdirSync(outDir, { recursive: true });
   const entry = join(outDir, "main.ts");
   const profilePath = join(outDir, "profile.json");
@@ -1134,7 +1135,7 @@ test("a missing FFI symbol is an SC5004 diagnostic, not a rejected compile", asy
   );
 
   const result = await compile(entry, {
-    backend: sanitize ? "c" : "rust",
+    backend,
     outDir,
     outPath: join(outDir, "program"),
     sanitize,
@@ -1145,6 +1146,8 @@ test("a missing FFI symbol is an SC5004 diagnostic, not a rejected compile", asy
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]?.code).toBe("SC5004");
     expect(result.diagnostics[0]?.message).toContain(missingSymbol);
+    expect(result.diagnostics[0]?.message).toContain("could not link the generated program");
+    expect(result.diagnostics[0]?.loc.file).toBe(profilePath);
     expect(result.diagnostics[0]?.message).not.toContain("CcCompileError");
   }
 });

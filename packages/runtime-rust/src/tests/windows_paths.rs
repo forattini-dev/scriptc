@@ -1,7 +1,7 @@
 #[test]
 fn windows_path_join_handles_drives_unc_and_dot_segments() {
     let join = |parts: &[&str]| {
-        path_win32_join(&array_new(parts.iter().map(|part| string(part)).collect()))
+        path_win32_join(&array_new(parts.iter().map(string).collect()))
     };
     for (parts, expected) in [
         (
@@ -32,7 +32,7 @@ fn windows_path_join_handles_drives_unc_and_dot_segments() {
 #[test]
 fn windows_path_family_matches_node_drive_and_unc_rules() {
     let resolve = |parts: &[&str]| {
-        path_win32_resolve(&array_new(parts.iter().map(|part| string(part)).collect()))
+        path_win32_resolve(&array_new(parts.iter().map(string).collect()))
     };
     assert_eq!(path_win32_normalize(&string("C:/temp//foo/../bar/")).as_ref(), "C:\\temp\\bar\\");
     assert_eq!(resolve(&["C:\\base\\dir", "..\\file.txt"]).as_ref(), "C:\\base\\file.txt");
@@ -67,7 +67,7 @@ fn windows_path_family_matches_the_committed_node_oracle() {
                 digit(pair[0]) * 16 + digit(pair[1])
             })
             .collect::<Vec<_>>();
-        Rc::from(String::from_utf8(bytes).expect("scriptc: path oracle must be UTF-8"))
+        JsString::from(String::from_utf8(bytes).expect("scriptc: path oracle must be UTF-8"))
     }
 
     let oracle = std::fs::read_to_string(

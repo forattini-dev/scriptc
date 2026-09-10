@@ -39,6 +39,18 @@
 
 #include "quickjs.h"
 
+#if defined(__wasi__)
+#include "scr_island_alloc.h"
+#define isl_malloc_size scr_island_alloc_size
+#define isl_heap_malloc scr_island_alloc_malloc
+#define isl_heap_calloc scr_island_alloc_calloc
+#define isl_heap_realloc scr_island_alloc_realloc
+#define isl_heap_free scr_island_alloc_free
+#else
+#define isl_heap_malloc malloc
+#define isl_heap_calloc calloc
+#define isl_heap_realloc realloc
+#define isl_heap_free free
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 #define isl_malloc_size malloc_size
@@ -50,6 +62,7 @@
 #else
 #include <malloc.h>
 #define isl_malloc_size malloc_usable_size
+#endif
 #endif
 
 /* Engine stack budget FOR FIBER ENTRIES: HALF the fiber stack size
@@ -86,24 +99,30 @@ static long isl_live_allocs = 0;
 
 static void *isl_calloc(void *opaque, size_t count, size_t size) {
   (void)opaque;
-  void *p = calloc(count, size);
+  void *p = isl_heap_calloc(count, size);
   if (p) isl_live_allocs++;
   return p;
 }
 static void *isl_malloc(void *opaque, size_t size) {
   (void)opaque;
-  void *p = malloc(size);
+  void *p = isl_heap_malloc(size);
   if (p) isl_live_allocs++;
   return p;
 }
 static void isl_free(void *opaque, void *ptr) {
   (void)opaque;
   if (ptr) isl_live_allocs--;
-  free(ptr);
+  isl_heap_free(ptr);
 }
 static void *isl_realloc_fn(void *opaque, void *ptr, size_t size) {
+#ifdef __wasi__
+  if (ptr && size == 0) {
+    isl_free(opaque, ptr);
+    return NULL;
+  }
+#endif
   (void)opaque;
-  void *p = realloc(ptr, size);
+  void *p = isl_heap_realloc(ptr, size);
   if (!ptr && p) isl_live_allocs++;
   return p;
 }
@@ -1300,6 +1319,19 @@ static int isl_dynjs_has_own(ScrJsval *cell, const ScrStr *k) {
   return b > 0 ? 1 : 0;
 }
 
+static int isl_dynjs_has_key(ScrJsval *cell, const ScrStr *k) {
+  isl_entry();
+  JSAtom key = JS_NewAtomLen(isl_ctx, k->data, k->len);
+  if (key == JS_ATOM_NULL) {
+    isl_bridge_exception();
+    return -1;
+  }
+  int result = JS_HasProperty(isl_ctx, cell->v, key);
+  JS_FreeAtom(isl_ctx, key);
+  if (result < 0) isl_bridge_exception();
+  return result;
+}
+
 static bool isl_dynjs_assign(ScrJsval *cell, const ScrDyn *src) {
   ScrJsval *sj = scr_jsval_from_dyn(src);
   if (!sj) return false;
@@ -1365,6 +1397,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_assign,
   isl_dynjs_to_json,
   isl_dynjs_iter_drain,
+  isl_dynjs_has_key,
 };
 
 ScrDyn *scr_dyn_from_jsval(ScrJsval *cell) {

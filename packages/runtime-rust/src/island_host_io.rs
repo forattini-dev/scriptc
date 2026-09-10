@@ -51,7 +51,7 @@ fn island_host_error(caught: &Caught, context: &mut Context) -> BoaJsError {
             .with_message("scriptc: the island host caught a non-Error throw")
             .into();
     }
-    let native = match caught_error_name(caught).as_ref() {
+    let native = match caught_error_name(caught).to_utf8_lossy() {
         "TypeError" => boa_engine::JsNativeError::typ(),
         "RangeError" => boa_engine::JsNativeError::range(),
         "ReferenceError" => boa_engine::JsNativeError::reference(),
@@ -65,7 +65,7 @@ fn island_host_error(caught: &Caught, context: &mut Context) -> BoaJsError {
     if let Some(code) = caught_error_code(caught) {
         let stamped = object.set(
             js_string!("code"),
-            JsValue::from(boa_engine::JsString::from(code.as_ref())),
+            JsValue::from(island_string(code.as_ref())),
             false,
             context,
         );
@@ -179,9 +179,9 @@ fn island_host_fs(
         "close" | "read" | "write" | "fstat" | "ftruncate" | "fsync"
     );
     let path: JsString = if fd_op {
-        Rc::from("")
+        JsString::from("")
     } else {
-        Rc::from(island_host_arg_string(arguments, 1, context)?.as_str())
+        JsString::from(island_host_arg_string(arguments, 1, context)?.as_str())
     };
     let number = |index: usize, context: &mut Context| island_host_arg_number(arguments, index, context);
 
@@ -275,14 +275,14 @@ fn island_host_fs(
             island_host_run(|| IslandFsAnswer::Text(fs_readlink(&path)), context)?
         }
         "copyFile" => {
-            let destination: JsString = Rc::from(island_host_arg_string(arguments, 2, context)?.as_str());
+            let destination: JsString = JsString::from(island_host_arg_string(arguments, 2, context)?.as_str());
             island_host_run(|| {
                 fs_copy_file(&path, &destination);
                 IslandFsAnswer::Nothing
             }, context)?
         }
         "rename" => {
-            let destination: JsString = Rc::from(island_host_arg_string(arguments, 2, context)?.as_str());
+            let destination: JsString = JsString::from(island_host_arg_string(arguments, 2, context)?.as_str());
             island_host_run(|| {
                 fs_rename(&path, &destination);
                 IslandFsAnswer::Nothing
@@ -294,7 +294,7 @@ fn island_host_fs(
         // caller's buffer: the host argument copy is eager, so filling the
         // argument in place would not reach the realm.
         "open" => {
-            let flags: JsString = Rc::from(island_host_arg_string(arguments, 2, context)?.as_str());
+            let flags: JsString = JsString::from(island_host_arg_string(arguments, 2, context)?.as_str());
             island_host_run(|| IslandFsAnswer::Number(fs_open(&path, &flags)), context)?
         }
         "close" => {
@@ -431,7 +431,7 @@ fn island_host_digest(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let algorithm: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let algorithm: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     let data = island_host_arg_bytes(arguments, 1, context)?;
     let digest = island_host_run(|| crypto_digest_raw(&algorithm, &data), context)?;
     match digest {
@@ -446,7 +446,7 @@ fn island_host_hmac(
     arguments: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let algorithm: JsString = Rc::from(island_host_arg_string(arguments, 0, context)?.as_str());
+    let algorithm: JsString = JsString::from(island_host_arg_string(arguments, 0, context)?.as_str());
     let key = island_host_arg_bytes(arguments, 1, context)?;
     let data = island_host_arg_bytes(arguments, 2, context)?;
     let tag = island_host_run(|| crypto_hmac_raw(&algorithm, &key, &data), context)?;
@@ -481,7 +481,7 @@ fn island_host_uuid(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let uuid = island_host_run(crypto_random_uuid, context)?;
-    Ok(JsValue::from(boa_engine::JsString::from(uuid.as_ref())))
+    Ok(JsValue::from(island_string(uuid.as_ref())))
 }
 
 /* ── zlib ──────────────────────────────────────────────────────────── */

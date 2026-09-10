@@ -155,15 +155,15 @@ test("zigcc resolves to `zig cc`; linux triples add their libc target flags", ()
   expect(win.targetArgs).toEqual(["-target", "x86_64-windows-gnu"]);
   expect(win.linkArgs).toEqual([]);
 
-  // WASI uses wasi-libc's explicit emulation archives for the small signal
-  // and process-clock surface retained by the portable runtime.
+  // WASI uses wasi-libc's explicit emulation archives for signal handling,
+  // process clocks and the placeholder process ID.
   const wasi = resolveCc({ SCRIPTC_CC: "zigcc", SCRIPTC_TARGET: "wasm32-wasi" });
   expect(wasi.targetArgs).toEqual([
     "-target", "wasm32-wasi", "-D_GNU_SOURCE",
-    "-D_WASI_EMULATED_SIGNAL", "-D_WASI_EMULATED_PROCESS_CLOCKS",
+    "-D_WASI_EMULATED_SIGNAL", "-D_WASI_EMULATED_PROCESS_CLOCKS", "-D_WASI_EMULATED_GETPID",
   ]);
   expect(wasi.linkArgs).toEqual([
-    "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks",
+    "-lwasi-emulated-signal", "-lwasi-emulated-process-clocks", "-lwasi-emulated-getpid",
   ]);
 });
 

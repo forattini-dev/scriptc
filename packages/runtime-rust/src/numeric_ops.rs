@@ -47,16 +47,22 @@ pub fn process_stderr_write(value: &JsString) -> bool {
 }
 
 pub fn to_int32(value: f64) -> i32 {
-    if !value.is_finite() || value == 0.0 {
-        return 0;
-    }
-    let truncated = value.trunc();
-    let modulo = truncated.rem_euclid(4_294_967_296.0);
-    if modulo >= 2_147_483_648.0 {
-        (modulo - 4_294_967_296.0) as i32
+    // Truncate the binary64 significand and retain its low 32 integer bits.
+    // This is ToInt32's modulo without floating-point division. Exponents
+    // below zero truncate to zero; at 84 and above every representable finite
+    // double is a multiple of 2^32. The same guard handles NaN and infinities.
+    let bits = value.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32 - 1023;
+    if !(0..84).contains(&exponent) { return 0; }
+    let significand = (bits & 0x000f_ffff_ffff_ffff) | 0x0010_0000_0000_0000;
+    let magnitude = if exponent >= 52 {
+        (significand << (exponent - 52)) as u32
     } else {
-        modulo as i32
-    }
+        (significand >> (52 - exponent)) as u32
+    };
+    // Negate AFTER truncation; unsigned wrapping preserves the modulo for
+    // negative values, including those outside the signed integer range.
+    (if bits >> 63 != 0 { magnitude.wrapping_neg() } else { magnitude }) as i32
 }
 
 pub fn to_uint32(value: f64) -> u32 {

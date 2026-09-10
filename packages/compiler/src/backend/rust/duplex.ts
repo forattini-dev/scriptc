@@ -498,8 +498,8 @@ export class RustDuplexEmitter {
     const values = expr.args.map(() => this.context.nextTemporary());
     const duplex = this.duplexHandle(this.requiredValue(values, 0, expr.loc), receiver.type, expr.loc);
     const result = expr.type.kind === "f64"
-      ? `match ${values[1]}.as_ref() { "readableHighWaterMark" | "readableLength" => runtime::readable_prop(&runtime::duplex_readable(&sc_duplex), &${values[1]}), _ => runtime::writable_number_prop(&runtime::duplex_writable(&sc_duplex), &${values[1]}), }`
-      : `match ${values[1]}.as_ref() { "allowHalfOpen" => runtime::duplex_allow_half_open(&sc_duplex), "readable" | "readableEnded" => runtime::readable_prop(&runtime::duplex_readable(&sc_duplex), &${values[1]}) != 0.0, _ => runtime::writable_bool_prop(&runtime::duplex_writable(&sc_duplex), &${values[1]}), }`;
+      ? `match ${values[1]}.as_ref() { sc_name if sc_name == "readableHighWaterMark" || sc_name == "readableLength" => runtime::readable_prop(&runtime::duplex_readable(&sc_duplex), &${values[1]}), _ => runtime::writable_number_prop(&runtime::duplex_writable(&sc_duplex), &${values[1]}), }`
+      : `match ${values[1]}.as_ref() { sc_name if sc_name == "allowHalfOpen" => runtime::duplex_allow_half_open(&sc_duplex), sc_name if sc_name == "readable" || sc_name == "readableEnded" => runtime::readable_prop(&runtime::duplex_readable(&sc_duplex), &${values[1]}) != 0.0, _ => runtime::writable_bool_prop(&runtime::duplex_writable(&sc_duplex), &${values[1]}), }`;
     return `{ ${this.bind(expr.args, values)} let sc_duplex = ${duplex}; ${result} }`;
   }
 

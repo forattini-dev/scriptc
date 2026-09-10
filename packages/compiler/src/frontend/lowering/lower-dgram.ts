@@ -14,6 +14,9 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, SrcLoc, STRING, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
 import { boolLit } from "../../ir/build.js";
+import { isFreshObjectWithout } from "./literal-shapes.js";
+
+const SIGNAL_CAPABILITIES: ReadonlySet<string> = new Set(["aborted"]);
 
 const DGRAM_SURFACE_HINT =
   "bind, connect, send, address, close, unref/ref, and on/once of " +
@@ -169,15 +172,16 @@ export function lowerDgramDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
         // fence — abort-driven close has no lowering yet.
         const raw = L.lowerExpr(prop.initializer);
         const provablyNot = raw.type.kind === "string" || raw.type.kind === "f64" ||
-          raw.type.kind === "bool" || raw.type.kind === "record" || raw.type.kind === "array";
-        if (provablyNot && L.dynConvertible(raw.type)) {
+          raw.type.kind === "bool" || raw.type.kind === "array" ||
+          raw.kind === "dynArrLit" || isFreshObjectWithout(raw, SIGNAL_CAPABILITIES);
+        if (provablyNot && (raw.type.kind === "dyn" || L.dynConvertible(raw.type))) {
           return {
             kind: "libCall",
             fn: "error.propTypeThrow",
             args: [
               { kind: "strLit", value: "options.signal", type: STRING, loc },
               { kind: "strLit", value: "an instance of AbortSignal", type: STRING, loc },
-              { kind: "dynFrom", value: raw, type: DYN, loc },
+              raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc },
             ],
             type: DGRAMSOCK_T,
             loc,

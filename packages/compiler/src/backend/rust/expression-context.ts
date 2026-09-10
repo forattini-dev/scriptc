@@ -1,3 +1,5 @@
+import type { RustByteRegions } from "./byte-regions.js";
+import type { RustIntegerLoops } from "./integer-loops.js";
 // The context every Rust expression sub-emitter sees: the emitter's
 // surface as one interface (split from expressions.ts so the class and
 // its contract each stay under the file-line cap).
@@ -5,6 +7,8 @@ import type { IrFamily } from "../../ir/nodes.js";
 import type { IrClassDef, IrExpr, IrFfiImport, IrFunction, IrLibCallback, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 export interface RustExpressionContext {
+  readonly byteRegions: RustByteRegions;
+  readonly integerLoops: RustIntegerLoops;
   readonly chainValues: Map<string, string>;
   readonly classMeta: ReadonlyMap<string, RustClassMeta>;
   readonly closureShapes: ReadonlyMap<string, RustClosureShape>;
@@ -15,6 +19,7 @@ export interface RustExpressionContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
   nextName(prefix: string): string;
   currentFunction(): IrFunction | null;
+  localIsBoxed(local: IrFunction["locals"][number]): boolean;
   emitSequence(statements: readonly IrStmt[], emitResult: () => string): string;
   assignmentExpr(id: string, value: string, loc: SrcLoc): string;
   classAllocation(meta: RustClassMeta, args: readonly string[], loc: SrcLoc): string;

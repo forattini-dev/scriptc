@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
+import { C_STATIC_SIZE_LIMIT } from "./native-size-budgets.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -383,13 +384,11 @@ console.log(greet("world"), 6 * 7);
     ]);
     const staticSize = statSync(stat.binaryPath).size;
     const dynamicSize = statSync(dyn.binaryPath).size;
-    // The class is toolchain-specific and page-granular. The canonical
-    // Ubuntu 24.04/clang Sandbox measures 387,600 bytes; current Mach-O
-    // toolchains measure 398,024 bytes. Each bound leaves roughly one native
-    // page of growth while staying far below the >1MB jump measured when the
-    // engine is linked.
-    expect(staticSize).toBeLessThan(process.platform === "linux" ? 392_000 : 415_000);
+    // Keep the measured base-runtime budget and an independent engine-cost
+    // separation: a baseline update must not silently retire the linkage gate.
+    expect(staticSize).toBeLessThan(C_STATIC_SIZE_LIMIT);
     expect(dynamicSize).toBeGreaterThan(500_000);
+    expect(dynamicSize - staticSize).toBeGreaterThan(500_000);
   });
 
   /* ── the `any` boundary (validated exits) ─────────────────────────────

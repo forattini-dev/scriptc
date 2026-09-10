@@ -12,6 +12,7 @@ pub struct WebStreamData<T: HeapValue> {
     source: Option<Rc<dyn WebStreamSource<T>>>,
     started: bool,
     pulling: bool,
+    prefetch: bool,
     pull_again: bool,
     close_requested: bool,
     closed: bool,
@@ -92,9 +93,15 @@ impl<T: HeapValue> ClearEdges for WebReaderData<T> {
 }
 
 pub fn web_stream_new<T: HeapValue>(source: Rc<dyn WebStreamSource<T>>) -> JsWebStream<T> {
+    web_stream_new_with_prefetch(source, true)
+}
+
+fn web_stream_new_with_prefetch<T: HeapValue>(
+    source: Rc<dyn WebStreamSource<T>>, prefetch: bool,
+) -> JsWebStream<T> {
     Gc::new(WebStreamData {
         queue: VecDeque::new(), reader: None, source: Some(source), started: false,
-        pulling: false, pull_again: false, close_requested: false, closed: false, error: None,
+        pulling: false, prefetch, pull_again: false, close_requested: false, closed: false, error: None,
     })
 }
 
@@ -108,7 +115,7 @@ pub fn web_stream_locked<T: HeapValue>(stream: &JsWebStream<T>) -> bool {
 
 pub fn web_stream_desired_size<T: HeapValue>(stream: &JsWebStream<T>) -> Option<f64> {
     stream.with(|s| if s.error.is_some() { None } else if s.closed { Some(0.0) }
-        else { Some(1.0 - s.queue.len() as f64) })
+        else { Some(f64::from(u8::from(s.prefetch)) - s.queue.len() as f64) })
 }
 
 pub fn web_stream_start<T: HeapValue>(stream: &JsWebStream<T>, start: &JsPromise<T>) {
@@ -123,7 +130,7 @@ fn web_stream_pull<T: HeapValue>(stream: &JsWebStream<T>) {
     let pending = web_stream_reader(stream).is_some_and(|r| r.with(|r| !r.pending.is_empty()));
     let source = stream.with_mut(|s| {
         if !s.started || s.close_requested || s.closed || s.error.is_some() ||
-            (!pending && !s.queue.is_empty()) { return None; }
+            (!pending && (!s.prefetch || !s.queue.is_empty())) { return None; }
         let source = s.source.as_ref()?.clone();
         if !source.has_pull() { return None; }
         if s.pulling { s.pull_again = true; return None; }

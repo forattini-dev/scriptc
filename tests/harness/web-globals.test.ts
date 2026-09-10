@@ -72,7 +72,7 @@ async function islandEval(name: string, js: string): Promise<string> {
 }
 
 describe(`island web globals (scriptc-only${sanitize ? ", sanitized" : ""})`, () => {
-  test("the subset is present; the fenced-by-absence globals are not", async () => {
+  test("web globals follow each backend's load boundaries", async () => {
     const out = await islandEval(
       "web-presence",
       `[
@@ -87,15 +87,23 @@ describe(`island web globals (scriptc-only${sanitize ? ", sanitized" : ""})`, ()
     // Blob/File and the Event triple joined the subset when the vercel
     // CLI's graph started loading undici (its fileapi classes extend
     // Event and buffer.Blob at LOAD); structuredClone joined with the
-    // globals lane (the HTML StructuredSerialize subset, cycles
-    // included); WritableStream/FormData/WebSocket stay fenced by
-    // absence.
+    // globals lane (the HTML StructuredSerialize subset, cycles included).
+    // C leaves WritableStream/FormData/WebSocket absent. Rust provides loadable
+    // globals and refuses unsupported WebSocket construction explicitly.
     expect(out).toBe(
       "function function function function function function " +
         "function function function object object " +
         "function function function function function " +
-        "undefined function undefined undefined",
+        (sanitize ? "undefined function undefined undefined" : "function function function function"),
     );
+  });
+
+  test.skipIf(sanitize)("Rust loadable WebSocket refuses construction explicitly", async () => {
+    const out = await islandEval("web-socket-constructor-fence", `(() => {
+      try { new WebSocket('wss://example.invalid'); return 'unexpected success'; }
+      catch (error) { return error.name + ': ' + error.message; }
+    })()`);
+    expect(out).toBe("NotSupportedError: WebSocket (wss://example.invalid) is not supported in the scriptc island yet");
   });
 
   test("structuredClone clones deep (cycles included) and validates options like Node", async () => {
@@ -126,7 +134,7 @@ describe(`island web globals (scriptc-only${sanitize ? ", sanitized" : ""})`, ()
         "DataCloneError:t:true",
         'TypeError/ERR_MISSING_ARGS: The "The value argument must be specified" argument must be specified',
         "TypeError/ERR_INVALID_ARG_TYPE: Failed to execute 'structuredClone': Options cannot be converted to a dictionary",
-        "TypeError/ERR_INVALID_ARG_TYPE: Failed to execute 'structuredClone': transfer in Options cannot be converted to sequence.",
+        "TypeError/ERR_INVALID_ARG_TYPE: Failed to execute 'structuredClone': transfer in Options can not be converted to sequence.",
         "true",
         "DataCloneError/25: () => {} could not be cloned.",
       ].join(" | "),

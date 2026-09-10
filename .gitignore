@@ -1,5 +1,6 @@
 node_modules/
 # test-fixture packages are TEST DATA, committed on purpose
+!packages/compiler/test/fixtures/bun-island/node_modules/
 !tests/diagnostics/npm-imports/node_modules/
 !tests/fixtures/commander-calc/node_modules/
 !tests/fixtures/island-modules/node_modules/
@@ -35,3 +36,6 @@ tmp-*/
 .env.local
 .env*
 *.tsbuildinfo
+
+# Scratch space the redcode tooling keeps inside the checkout: worktrees and run state, never sources.
+.red/tmp/

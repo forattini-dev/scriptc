@@ -1,5 +1,6 @@
 {
   "name": "wscopyroot",
   "private": true,
+  "type": "module",
   "workspaces": ["members/*"]
 }

@@ -1,3 +1,4 @@
+import { rustJsString } from "./string-literals.js";
 import type { IrFamily } from "../../ir/nodes.js";
 import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
 import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
@@ -657,8 +658,8 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
       expr.args.length === 1 && arg !== undefined) {
     return `runtime::date_to_iso(${context.emitExpr(arg)})`;
   }
-  if (expr.fn === "date.utc" && expr.args.length === 7) {
-    return `runtime::date_utc(${expr.args.map((value) => context.emitExpr(value)).join(", ")})`;
+  if ((expr.fn === "date.utc" || expr.fn === "date.newComponents") && expr.args.length === 7) {
+    return `runtime::${expr.fn === "date.utc" ? "date_utc" : "date_new_components"}(${expr.args.map((value) => context.emitExpr(value)).join(", ")})`;
   }
   const dateGetter = new Map<string, [string, boolean]>([
     ["date.getFullYear", ["date_get_full_year", false]],
@@ -1012,7 +1013,7 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     const nameField = context.classFieldName(receiverExpr.type.className, "name", expr.loc);
     const messageField = context.classFieldName(receiverExpr.type.className, "message", expr.loc);
     const codeField = context.classFieldName(receiverExpr.type.className, "%code", expr.loc);
-    return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; let ${message} = ${context.emitExpr(expr.args[1])}; ${receiver}.with_mut(|object| { object.${nameField} = runtime::string("${context.rustString(error.lib)}"); object.${messageField} = ${message}; object.${codeField} = runtime::empty_string(); }); }`;
+    return `{ let ${receiver} = ${context.emitExpr(receiverExpr)}; let ${message} = ${context.emitExpr(expr.args[1])}; ${receiver}.with_mut(|object| { object.${nameField} = ${rustJsString(error.lib, text => context.rustString(text))}; object.${messageField} = ${message}; object.${codeField} = runtime::empty_string(); }); }`;
   }
   if (expr.fn === "error.new" && expr.args.length === 1 && arg !== undefined && expr.type.kind === "object") {
     const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);

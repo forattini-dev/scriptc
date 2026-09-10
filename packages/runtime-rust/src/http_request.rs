@@ -19,7 +19,7 @@ pub fn http_request_on_data(
 }
 
 pub fn http_request_set_encoding(request: &JsHttpRequest, encoding: &JsString) {
-    match encoding.as_ref() {
+    match encoding.to_utf8_lossy() {
         "utf8" | "utf-8" => request.with_mut(|request| request.encoding_utf8 = true),
         "ascii" | "latin1" | "binary" | "base64" | "base64url" | "hex" | "ucs2"
         | "ucs-2" | "utf16le" | "utf-16le" => throw_error(format!(

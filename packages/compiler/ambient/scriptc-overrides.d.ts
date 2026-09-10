@@ -31,12 +31,15 @@ interface String {
 /* Object.values/entries with the actual field-value union, not the lib's
  * `any` (the lib's precise overloads only cover index-signature and
  * ArrayLike sources). A PRECISION override, not a divergence: the lowering
- * emits the field list statically and the values are exactly T[keyof T] —
- * without this the result would be `any`-typed and drag every downstream
+ * emits each member's field list and values. Distribute over object unions:
+ * keyof (A | B) only sees shared keys and could otherwise yield never.
+ * A keyless structural type can still hide own values; use unknown for it.
+ * Without this the result would be `any`-typed and drag every downstream
  * use into the island. */
+type ScriptcObjectValue<T extends object> = T extends unknown ? keyof T extends never ? unknown : T[keyof T] : never;
 interface ObjectConstructor {
-  values<T extends object>(o: T): Array<T[keyof T]>;
-  entries<T extends object>(o: T): Array<[string, T[keyof T]]>;
+  values<T extends object>(o: T): Array<ScriptcObjectValue<T>>;
+  entries<T extends object>(o: T): Array<[string, ScriptcObjectValue<T>]>;
 }
 
 /* `parse` returns `unknown`, not the lib's `any` — the dynamic boundary. A

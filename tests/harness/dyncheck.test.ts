@@ -935,21 +935,22 @@ console.log(\`\${eng.a} \${eng.fresh}\`);
     expect(r.stdout).toBe("2 x\n");
   });
 
-  test("'in' over an island-held unknown fences (never a silent false)", async () => {
+  test("'in' over an island-held unknown preserves engine membership", async () => {
     const r = await compileAndRun(
       "jsval-in",
       `/** @returns {any} */
 function mint() { return { a: 1 }; }
 const eng = mint();
 /** @param {object} bag */
-function has(bag) { return "a" in bag; }
-console.log(has(eng));
+function has(bag) { console.log("a" in bag, "missing" in bag, "toString" in bag); }
+has(eng);
 `,
       "cjs",
       true,
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain("'in' on an island value held in 'unknown' is not supported yet");
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("true false true\n");
+    expect(r.stderr).toBe("");
   });
 
   test("a wrapped island value RC-balances through catch-and-continue fences", async () => {

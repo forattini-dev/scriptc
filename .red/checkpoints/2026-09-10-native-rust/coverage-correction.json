@@ -1,0 +1,41 @@
+{
+  "at": "2026-09-10T18:26:51.188582+00:00",
+  "files": {
+    "tests/harness/coverage.test.ts": {
+      "beforeSha256": "a53a87f2ca8c566f948d51498f0e4392f09e9ada6d03b4d4e8afd384f089c1ba",
+      "afterSha256": "1e17960832235fac1457e11846dc7c467219dd389bb176d57b7f7bf893dab451"
+    },
+    "tests/harness/__snapshots__/coverage-unreached.txt": {
+      "beforeSha256": "5a35fb584ff4f11cfc2bba8c4676c49450ff9a87629c20734ec0d69baf02414b",
+      "afterSha256": "d9090810166455eec14cbd67f77cab0cc5beae2be6b771fffdc7742472fe25ab"
+    },
+    "tests/harness/__snapshots__/coverage-js-gap.txt": {
+      "beforeSha256": "cf6db180f915e0e27d7c52f7d2d0ed22fcf6d9e495c2d6763cdb5ce7450e518e",
+      "afterSha256": "4752e3a47a59686ba689956439d79f099ec00a16105294992d489697d8a04ac9"
+    },
+    "tests/harness/__snapshots__/coverage-js-gap-dynamic.txt": {
+      "beforeSha256": "9daf3067e65860844f3cef4d1e1494dd6faf56752e6c3048d307d554d9877d68",
+      "afterSha256": "19d8e41b6987fcd7d6abd6ce3606a35f946ed486ddd293a75cb7de90406b0a7d"
+    },
+    "tests/harness/__snapshots__/coverage-npm-lazy-traps.txt": {
+      "beforeSha256": "384af8d513d42a5ad30a520a6eadf6de46201a5a14ce3dea91c4c1f97e576d5f",
+      "afterSha256": "26fc21b8567dcf6bc63bd7c315b8b7cb3dee91e08cf9d76ed317dd3e95f93b68"
+    },
+    "tests/harness/__snapshots__/coverage-npm-lazy-builtin.txt": {
+      "beforeSha256": "76195295c86e4e77992858efd1ed70ea41be2ac1d8cadeea36db965d0913bbda",
+      "afterSha256": "a28ef222c7dd85c7d76bb5ebb459922bdb38845512784fc31519396f9744d791"
+    },
+    "packages/compiler/src/coverage/report.ts": {
+      "beforeSha256": "35a09eff89555e24ea9acd8a061b452068570d6fcb7b1e0eceef755204f53ffd",
+      "afterSha256": "58d7d4b184174866e0b0ae9834f04b040eaa98d20c993f917f61c38071cab2c4"
+    },
+    "tests/dogfood/rust-validation-contract-refresh.md": {
+      "beforeSha256": "3ba0ff914724df7209ee8b8757d425ed87a0aaf4d1f27edcb40059c206f53470",
+      "afterSha256": "f09eac42058aaf7b502f72620f11a63b67ef1a792015321fa52f013817f94271"
+    }
+  },
+  "focusedTests": 31,
+  "nativeNodeByteParity": true,
+  "fullGate": "pending",
+  "codeGenerationChanged": false
+}
