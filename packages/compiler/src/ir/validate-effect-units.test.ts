@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { type IrExpr, type IrModule } from "./nodes.js";
+import { type IrExpr, type IrModule } from "./ir.js";
 import { validateModule } from "./validate.js";
 import { deserializeModule, serializeModule } from "./serialize.js";
 

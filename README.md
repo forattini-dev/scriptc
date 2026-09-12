@@ -1,6 +1,6 @@
 # scriptc
 
-scriptc compiles TypeScript and JavaScript to native executables through Rust. Rust is the primary and default backend: the TypeScript frontend builds a typed IR, the Rust backend emits memory-safe code, and `rustc` produces the executable. C and direct LLVM emission remain explicitly selectable compatibility and comparison backends.
+scriptc compiles TypeScript and JavaScript through a typed IR to native executables, with Rust as the primary and default backend. It also emits readable Rust/C, LLVM IR, assembly, objects, and WebAssembly through explicitly selected compatible backends. Unsupported constructs produce diagnostics without switching backends.
 
 Static builds include a small native runtime, but no Node or JavaScript engine. Code that cannot compile statically is reported as a diagnostic. For code that requires a JavaScript engine, `--dynamic` opts in explicitly. Rust uses V8 by default (Boa is optional); C/LLVM use quickjs-ng. The native mission uses `--no-engine` and statically admitted npm sources.
 
@@ -8,7 +8,7 @@ scriptc is experimental and targets macOS, Linux, Windows, and WebAssembly via W
 
 ## Installation
 
-The compiler requires Node.js 24 or newer, Cargo, and rustc. Explicit C/LLVM builds require clang. The executables it produces do not require Node.
+The compiler requires Node.js 24 or newer. Default native builds require Cargo and rustc. Source outputs (`--emit=ir|c|rust|llvm`) require only Node. LLVM assembly/object output uses the matching platform helper; LLVM executables additionally need a linker and SDK/sysroot. Explicit C and sanitizer builds require a C compiler. Generated executables do not require Node.
 
 ```console
 $ npm install -g scriptc
@@ -69,6 +69,37 @@ arrays, records, unions, optional fields, and circular-value errors. Typed
 Common string searches, slicing, trimming, repetition, case conversion, and
 UTF-16 indexed access are also available. Basic synchronous filesystem,
 process, POSIX path, typed-array, and `Buffer` workflows are supported too.
+Or stop at a source-level compiler artifact without invoking clang, an archiver, or a linker:
+
+```console
+$ scriptc build hello.ts --emit=ir >/dev/null
+$ ls .scriptc/
+hello.ir.json
+$ scriptc build hello.ts --emit=c >/dev/null
+$ ls .scriptc/
+hello.c
+$ scriptc build hello.ts --emit=llvm >/dev/null
+$ ls .scriptc/
+hello.ll
+$ scriptc build hello.ts --emit=asm >/dev/null
+$ ls .scriptc/
+hello.s
+$ scriptc build hello.ts --emit=obj >/dev/null
+$ ls .scriptc/
+hello.o
+```
+
+`--emit=obj` writes a relocatable program object, not a standalone library. It
+has undefined `scr_*` runtime references and a required
+`scr_runtime_abi_v1` marker; `scriptc build --lib --profile ...` remains the
+self-contained archive interface. Matching helpers support macOS arm64/x64, Linux glibc/musl arm64/x64, Windows x64 MSVC, and WASI targets. macOS helpers require macOS 15+ and emit macOS 14.0 artifacts. Sanitized assembly/object emission is rejected until the helper's AddressSanitizer pipeline matches the executable path.
+
+External object consumption is experimental. Use
+`--print=native-link-info` to emit the object and print a versioned JSON recipe
+containing its target, `main` entry, exact `@scriptc/runtime` source pack,
+required system libraries, FFI inputs, and ABI marker. The recipe never uses
+hidden scriptc cache paths. See [`examples/native-object`](./examples/native-object)
+for C-driver and direct Apple-linker builds.
 
 ## Use Node APIs
 
@@ -109,6 +140,9 @@ $ scriptc coverage hello.ts
 ## Build WebAssembly
 
 Cross-target builds currently require an explicit C/LLVM backend and Zig.
+
+Install Zig and make sure the `zig` executable is available on your `PATH`. `SCRIPTC_CC=zigcc` is scriptc's selector for invoking Zig's `cc` subcommand; `zigcc` is not a standalone executable.
+
 The WASI compatibility path is not validated at this checkpoint: the local
 smoke failed compiling C runtime references to `realpath`, `chmod` and
 `DT_SOCK`. See the [native gate follow-up](./tests/dogfood/native-gate.md).
@@ -156,7 +190,32 @@ not a claim established by the default selection.
 
 ```console
 $ pnpm install && pnpm -r build
+$ vercel link && vercel env pull  # writes a project-scoped VERCEL_OIDC_TOKEN
 $ pnpm test:sandbox
 ```
 
-The test corpus runs each program under Node and as a compiled native binary, then compares stdout, stderr, and exit codes byte for byte. The full gate also runs the corpus with AddressSanitizer and the runtime reference-count audit.
+The normal workspace build needs no local LLVM installation. To rebuild a
+native helper/runtime pack, install CMake, Ninja, and the pinned LLVM 22
+development package on that target host, then run the matching
+`@scriptc/llvm-<platform>` and `@scriptc/runtime-<platform>` `build:native`
+scripts. The macOS full test suite also uses those generated artifacts.
+
+`pnpm test:sandbox` loads `.env.local`, preflights Vercel authentication and
+project access, and uses the managed `vercel/sandbox/universal` image by
+default. It installs the repository-pinned Node, pnpm, and LLVM toolchain plus
+ScriptC dependencies in each disposable Sandbox before building the uploaded
+worktree. Set
+`SCRIPTC_SANDBOX_IMAGE` to a fully qualified VCR reference only to use the
+optional prebuilt image from `pnpm test:sandbox:image`.
+The prebuilt image keeps the roughly four-minute fast path; cold managed-image
+runs take longer because they install the pinned toolchain in each Sandbox.
+
+`VERCEL_OIDC_TOKEN` is preferred. For access-token authentication, set
+`VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`; team and project are
+never inferred from `SCRIPTC_SANDBOX_IMAGE`. The legacy VCR command used by
+`pnpm test:sandbox:image` cannot authenticate with an OIDC JWT, so image builds
+use `VERCEL_TOKEN` when available or the existing Vercel CLI login; OIDC claims
+still select the VCR team and project. The test corpus runs each program
+under Node and as a compiled native binary, then compares stdout, stderr, and
+exit codes byte for byte. The full gate also runs the corpus with
+AddressSanitizer and the runtime reference-count audit.

@@ -2,7 +2,7 @@ import { isJsonStringifyType } from "../../ir/json-stringify.js";
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
 import { InternalCompilerError } from "../../errors.js";
-import { DYN, JSVAL, STRING, type IrExpr } from "../../ir/nodes.js";
+import { DYN, JSVAL, STRING, type IrExpr } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
 

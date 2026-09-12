@@ -1,4 +1,4 @@
-import type { IrExpr, IrModule, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrModule, SrcLoc } from "../../ir/ir.js";
 import { nativeNumberPredicateInput } from "./island-builtins.js";
 import { hasRustEmbeddedModules } from "./embedded-modules.js";
 

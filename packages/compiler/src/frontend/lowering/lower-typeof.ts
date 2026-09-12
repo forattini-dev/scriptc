@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, STRING, type IrExpr, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, STRING, type IrExpr, type SrcLoc } from "../../ir/ir.js";
 import { activeRuntimeTarget } from "../../compat/runtime-target.js";
 import type { Lowerer } from "./lowerer.js";
 

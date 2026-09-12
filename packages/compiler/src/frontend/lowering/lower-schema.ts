@@ -5,7 +5,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import type { KernelSchemaClass } from "../kernel.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, IrLibFn, IrLocal, IrParam, IrStmt, IrType, STRING, SrcLoc, UNDEFINED_T, arrayOf, isSupportedArrayElem } from "../../ir/ir.js";
 import { boolLit, numLit, strLit } from "../../ir/build.js";
 import { effectNamespaceOf } from "./lower-effect.js";
 import { SCHEMA_SLOT, isDecoratedSchema } from "../kernel-types.js";

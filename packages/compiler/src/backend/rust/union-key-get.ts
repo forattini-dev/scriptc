@@ -1,5 +1,5 @@
-import type { IrExpr, IrType } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import type { IrExpr, IrType } from "../../ir/ir.js";
+import { typeKey } from "../../ir/ir.js";
 import { mangleField } from "../mangle.js";
 import type { RustExpressionContext } from "./expressions.js";
 import { emitRustRecordKeyGetValues } from "./indexed-records.js";

@@ -1,6 +1,6 @@
 /* Type-directed RC/trace/box dispatch tables of the LLVM backend, the
  * cycle-capability fixpoint, and per-record-shape emission — the .ll
- * mirror of the C emitter's emit-types.ts + emit-shapes.ts slice that the
+ * mirror of the C emitter's types.ts + shapes.ts slice that the
  * phase-2 tier needs. Everything here follows the SAME contracts the C
  * backend compiled into the runtime: `_v` adapters where a container
  * stores RC entry points as data, per-shape retain/release/new (and
@@ -10,8 +10,8 @@
  *
  * Anything outside the tier refuses loudly (LlvmUnsupportedError naming
  * the type kind) — the tables never guess. */
-import type { IrModule, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { funcOf, isRefCounted, mapOf, POINTER_KINDS, runtimeRcStem, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/nodes.js";
+import type { IrModule, IrRecordShape, IrType } from "../../ir/ir.js";
+import { funcOf, isRefCounted, mapOf, POINTER_KINDS, runtimeRcStem, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, VOID } from "../../ir/ir.js";
 import {
   mangleClassRelease,
   mangleClassRetain,
@@ -217,7 +217,7 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
       return "@scr_closure_trace_v";
     case "promise":
       // Promises are unconditionally cycle-capable (a rejection payload
-      // is an arbitrary thrown value) — emit-shapes.ts's row.
+      // is an arbitrary thrown value) — shapes.ts's row.
       host.declare(`declare void @scr_promise_trace_v(ptr, ptr, ptr)`);
       return "@scr_promise_trace_v";
     case "union":
@@ -268,7 +268,7 @@ export function traceArg(host: ShapeHost, t: IrType): string {
 
 /* ── arrays ───────────────────────────────────────────────────────────── */
 
-/** Runtime accessor suffix for an element type (matches emit-types.ts:
+/** Runtime accessor suffix for an element type (matches types.ts:
  * f64 and bool unboxed, everything refcounted through the `_ref` family). */
 export function elemAccess(elem: IrType): "f64" | "bool" | "ref" {
   return elem.kind === "f64" ? "f64" : elem.kind === "bool" ? "bool" : "ref";
@@ -421,10 +421,10 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
  * targets and obj-12 on wasm32,
  * so mark-live is one i32 store at obj-16 (scr_cyc_mark_live inlined —
  * the runtime's is a static inline with no external symbol). */
-function retainBody(host: ShapeHost, fnName: string, traced: boolean): string[] {
+export function retainBody(host: ShapeHost, fnName: string, traced: boolean, comment = ""): string[] {
   const S = host.sizeType;
   return [
-    `define internal ptr @${fnName}(ptr %o) ${FN_ATTRS} {`,
+    `define internal ptr @${fnName}(ptr %o) ${FN_ATTRS} {${comment ? ` ; ${comment}` : ""}`,
     `entry:`,
     `  %isnull = icmp eq ptr %o, null`,
     `  br i1 %isnull, label %done, label %check`,
@@ -443,6 +443,47 @@ function retainBody(host: ShapeHost, fnName: string, traced: boolean): string[] 
     `  ret ptr %o`,
     `}`,
   ];
+}
+
+/** Common NULL/immortal/decrement skeleton for ordinary object releases.
+ * `freeBody` owns the zero-ref teardown and must leave the current block at
+ * its end; traced objects also get the possible-cycle-root branch. */
+export function releaseBody(
+  host: ShapeHost,
+  fnName: string,
+  traced: boolean,
+  freeBody: string[],
+  comment = "",
+): string[] {
+  const S = host.sizeType;
+  const lines = [
+    `define internal void @${fnName}(ptr %o) ${FN_ATTRS} {${comment ? ` ; ${comment}` : ""}`,
+    `entry:`,
+    `  %isnull = icmp eq ptr %o, null`,
+    `  br i1 %isnull, label %done, label %check`,
+    `check:`,
+    `  %rc = load ${S}, ptr %o`,
+    `  %imm = icmp eq ${S} %rc, -1`,
+    `  br i1 %imm, label %done, label %dec`,
+    `dec:`,
+    `  %n = sub ${S} %rc, 1`,
+    `  store ${S} %n, ptr %o`,
+    `  %dead = icmp eq ${S} %n, 0`,
+    `  br i1 %dead, label %free, label %${traced ? "root" : "done"}`,
+    `free:`,
+    ...freeBody,
+    `  br label %done`,
+  ];
+  if (traced) {
+    host.declare(`declare void @scr_cyc_on_release(ptr)`);
+    lines.push(
+      `root:`,
+      `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
+      `  br label %done`,
+    );
+  }
+  lines.push(`done:`, `  ret void`, `}`);
+  return lines;
 }
 
 /** Per-record-shape LLVM emission: the named struct types (returned as
@@ -481,53 +522,30 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     // release: NULL-tolerant, immortal-skip; at rc == 0 release every
     // refcounted member (runtime releases are NULL-tolerant) and free —
     // traced shapes route through the collector (on_dead/on_release,
-    // scr_cyc_free) exactly like emit-shapes.ts.
-    const rel: string[] = [
-      `define internal void @${mangleRecordRelease(shape.id)}(ptr %o) ${FN_ATTRS} {`,
-      `entry:`,
-      `  %isnull = icmp eq ptr %o, null`,
-      `  br i1 %isnull, label %done, label %check`,
-      `check:`,
-      `  %rc = load ${host.sizeType}, ptr %o`,
-      `  %imm = icmp eq ${host.sizeType} %rc, -1`,
-      `  br i1 %imm, label %done, label %dec`,
-      `dec:`,
-      `  %n = sub ${host.sizeType} %rc, 1`,
-      `  store ${host.sizeType} %n, ptr %o`,
-      `  %dead = icmp eq ${host.sizeType} %n, 0`,
-      `  br i1 %dead, label %free, label %${traced ? "root" : "done"}`,
-      `free:`,
-    ];
+    // scr_cyc_free) exactly like shapes.ts.
+    const freeBody: string[] = [];
     if (traced) {
       host.declare(`declare void @scr_cyc_on_dead(ptr)`);
-      rel.push(`  call void @scr_cyc_on_dead(ptr %o)`);
+      freeBody.push(`  call void @scr_cyc_on_dead(ptr %o)`);
     }
     let t = 0;
     for (const m of refMembers) {
-      rel.push(
+      freeBody.push(
         `  %f${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${m.index}`,
         `  %v${t} = load ptr, ptr %f${t}`,
         `  call void ${releaseSym(host, m.type)}(ptr %v${t}) ; ${m.name}`,
       );
       t++;
     }
-    rel.push(`  call void @scr_obj_free_note()`);
+    freeBody.push(`  call void @scr_obj_free_note()`);
     if (traced) {
       host.declare(`declare void @scr_cyc_free(ptr)`);
-      host.declare(`declare void @scr_cyc_on_release(ptr)`);
-      rel.push(
-        `  call void @scr_cyc_free(ptr %o)`,
-        `  br label %done`,
-        `root:`,
-        `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
-        `  br label %done`,
-      );
+      freeBody.push(`  call void @scr_cyc_free(ptr %o)`);
     } else {
       host.declare(`declare void @free(ptr)`);
-      rel.push(`  call void @free(ptr %o)`, `  br label %done`);
+      freeBody.push(`  call void @free(ptr %o)`);
     }
-    rel.push(`done:`, `  ret void`, `}`, ``);
-    defs.push(...rel);
+    defs.push(...releaseBody(host, mangleRecordRelease(shape.id), traced, freeBody), ``);
 
     // new: zeroed allocation (+ the overflow map on index-signature
     // shapes), rc = 1, alloc note. Traced shapes allocate with the
@@ -557,7 +575,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     nw.push(`  store ${host.sizeType} 1, ptr %o`);
     if (shape.indexValue) {
       // The overflow map (string-keyed): value handling is type-directed
-      // exactly like emit-shapes.ts's overflowNewC.
+      // exactly like shapes.ts's overflowNewC.
       host.declare(`declare ptr @scr_map_new(i32, i32, ptr, ptr, ptr)`);
       const v = shape.indexValue;
       const valKind = v.kind === "f64" ? 0 : v.kind === "bool" ? 1 : 2;

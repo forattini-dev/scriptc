@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
-import { DATE_T, DYN, F64, isUnitType, typeKey, type IrExpr } from "../../ir/nodes.js";
+import { DATE_T, DYN, F64, isUnitType, typeKey, type IrExpr } from "../../ir/ir.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";
 

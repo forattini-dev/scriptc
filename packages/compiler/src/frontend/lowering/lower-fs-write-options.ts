@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, F64, STRING, VOID, type IrExpr, type IrLibFn, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, F64, STRING, VOID, type IrExpr, type IrLibFn, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { varRef } from "../../ir/build.js";
 import { fenceOrDropOptionKey, FS_WRITE_FILE_DOCUMENTED_OPTIONS } from "./surfaces.js";
 

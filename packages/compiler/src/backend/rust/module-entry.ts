@@ -1,4 +1,4 @@
-import type { IrFunction, IrGlobal, IrLibSection, IrModule } from "../../ir/nodes.js";
+import type { IrFunction, IrGlobal, IrLibSection, IrModule } from "../../ir/ir.js";
 import { emitRustLibraryEntries } from "./library-entry.js";
 import { emitRustProgramEntry } from "./program-entry.js";
 

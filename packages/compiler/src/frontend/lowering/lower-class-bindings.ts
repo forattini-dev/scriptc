@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { isUnitType } from "../../ir/nodes.js";
+import { isUnitType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";

@@ -1,4 +1,4 @@
-import type { IrClassDef, IrExpr, IrFunction, IrType } from "../../ir/nodes.js";
+import type { IrClassDef, IrExpr, IrFunction, IrType } from "../../ir/ir.js";
 
 export type IrFuncType = Extract<IrType, { kind: "func" }>;
 type IrLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;

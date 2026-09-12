@@ -7,7 +7,7 @@
  * yet is a named refusal (the census in the plan file orders the work). */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js"; import { numLit } from "../../ir/build.js";
-import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/nodes.js"; import { newFnCtx } from "./lowerer.js";
+import { BOOL, DYN, EFFECT_T, IrExpr, canConvertToDyn, IrLibFn, IrLocal, IrType, STRING, SrcLoc, arrayOf, isSupportedArrayElem } from "../../ir/ir.js"; import { newFnCtx } from "./lowerer.js";
 import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";

@@ -1,6 +1,6 @@
 import { lowerNativeTupleArrayEquality } from "./lower-native-tuple.js";
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, STRING, type IrExpr, type IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, STRING, type IrExpr, type IrType } from "../../ir/ir.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import { locOf } from "../program.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";

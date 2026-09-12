@@ -922,8 +922,8 @@ function makeStream(env) {
     c.default = c;
     return c;
   });
-    /* stream/web re-exports the web prelude's classes; names the
-     * prelude does not carry stay undefined (honest absence). */
+    /* Re-export only constructors installed by this engine's prelude.
+     * The Rust prelude implements a larger surface than the C island. */
   builtins['stream/web'] = memo(() => {
     const g = globalThis;
     const w = {
@@ -935,6 +935,9 @@ function makeStream(env) {
       ReadableStreamDefaultController: g.ReadableStreamDefaultController,
       WritableStreamDefaultWriter: g.WritableStreamDefaultWriter,
     };
+    for (const key of Object.keys(w)) {
+      if (w[key] === undefined) delete w[key];
+    }
     w.default = w;
     return w;
   });

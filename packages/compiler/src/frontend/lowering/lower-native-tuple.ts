@@ -1,6 +1,6 @@
 import { InternalCompilerError } from "../../errors.js";
 import type * as ts from "../ts7/adapter.js";
-import { DYN, F64, JSVAL, STRING, arrayOf, typeEquals, type IrExpr, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { DYN, F64, JSVAL, STRING, arrayOf, typeEquals, type IrExpr, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { nativeArrayViewSupported } from "../../ir/native-record.js";
 import { nativeTupleElement } from "../../ir/native-tuple.js";
 import { numLit } from "../../ir/build.js";

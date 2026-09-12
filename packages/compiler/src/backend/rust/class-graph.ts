@@ -1,4 +1,4 @@
-import type { IrFunction, SrcLoc } from "../../ir/nodes.js";
+import type { IrFunction, SrcLoc } from "../../ir/ir.js";
 import type { RustClassMeta } from "./model.js";
 
 /** Link class metadata into its inheritance forest (base/children,

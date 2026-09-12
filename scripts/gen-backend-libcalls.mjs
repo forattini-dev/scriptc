@@ -43,7 +43,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LIB_FN_SIGS } from "../packages/compiler/src/ir/validate.ts";
+import { LIB_FN_SIGS } from "../packages/compiler/src/ir/validate.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = path.join(root, "packages/compiler/src/coverage/backend-libcalls.ts");
@@ -51,7 +51,7 @@ const outPath = path.join(root, "packages/compiler/src/coverage/backend-libcalls
 /** The emitter source root of each backend — where that backend decides,
  * for one libCall spelling, whether it has a lowering at all. */
 const BACKEND_ROOTS = {
-  c: "packages/compiler/src/backend/emission",
+  c: "packages/compiler/src/backend/c",
   llvm: "packages/compiler/src/backend/llvm",
   rust: "packages/compiler/src/backend/rust",
 };

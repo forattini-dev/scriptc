@@ -1,4 +1,4 @@
-import { F64, STRING, type IrExpr } from "../../ir/nodes.js";
+import { F64, STRING, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";

@@ -1,0 +1,5 @@
+import-meta-computed.ts:1:18 - error SC1090: 'import.meta' (module-loader metadata has no equivalent in a compiled binary) is not supported yet
+
+  1 | const computed = import.meta["url"];
+    |                  ^~~~~~~~~~~
+  2 | console.log(computed);

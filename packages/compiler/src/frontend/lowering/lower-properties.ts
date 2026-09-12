@@ -1,10 +1,10 @@
 import { lowerTupleLength } from "./lower-native-tuple.js";
 import { lowerOptionalRecordField } from "./lower-optional-record-field.js";
 import { InternalCompilerError } from "../../errors.js";
-import { DYN, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { DYN, JSVAL, STRING, UNDEFINED_T, VOID, canExitIslandToType, isUnitType, type IrExpr, type IrStmt, type IrType, type SrcLoc, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import * as ts from "../ts7/adapter.js";
-import { isGenericCallableMemberType } from "../types.js";
+import { isGenericCallableMemberType } from "../type-mapper.js";
 import {
   objLitGenericFnInfoOf,
   objLitGenericFnNodeOf,

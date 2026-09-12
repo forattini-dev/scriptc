@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, JSVAL, type IrExpr, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, JSVAL, type IrExpr, type SrcLoc } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** A Web constructor implemented by the embedded realm must perform

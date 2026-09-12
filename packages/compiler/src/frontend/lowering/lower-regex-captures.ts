@@ -1,4 +1,4 @@
-import { BOOL, STRING, UNDEFINED_T, type IrExpr, type IrType } from "../../ir/nodes.js";
+import { BOOL, STRING, UNDEFINED_T, type IrExpr, type IrType } from "../../ir/ir.js";
 import { nodeThrowExpr } from "./lowerer.js";
 import * as ts from "../ts7/adapter.js";
 import { regexGroupsType } from "../regex-types.js";

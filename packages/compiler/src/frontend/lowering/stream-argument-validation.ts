@@ -1,4 +1,4 @@
-import { DYN, type IrExpr, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, type IrExpr, STRING, VOID } from "../../ir/ir.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import type * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";

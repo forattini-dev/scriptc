@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrStmt } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrStmt } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 import { combineIntegerRanges, integerLiteral, mergeIntegerRanges, type IntegerRange } from "./integer-ranges.js";
 

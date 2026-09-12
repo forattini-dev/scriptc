@@ -1,6 +1,6 @@
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 import type { RustDynamicHttpContext } from "./dynamic-http.js";
-import type { IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrType, SrcLoc } from "../../ir/ir.js";
 
 function streamItem(type: IrType, value: string, context: RustLibCallContext, loc: SrcLoc): string {
   const dyn = context.dynTypeName();

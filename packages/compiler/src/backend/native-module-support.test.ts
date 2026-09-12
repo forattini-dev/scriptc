@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
-import { type IrExpr, type IrModule, JSVAL, VOID } from "../ir/nodes.js";
+import { type IrExpr, type IrModule, JSVAL, VOID } from "../ir/ir.js";
 import { validateModule } from "../ir/validate.js";
-import { emitModule } from "./emission/emitter.js";
+import { emitModule } from "./c/c-emitter.js";
 import { emitLlvmModule } from "./llvm/emitter.js";
 import { emitRustModule } from "./rust/emitter.js";
 import { rustEngineRequirement } from "./rust/runtime-features.js";

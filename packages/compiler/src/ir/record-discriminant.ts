@@ -1,4 +1,4 @@
-import type { IrRecordShape, IrUnionDef } from "./nodes.js";
+import type { IrRecordShape, IrUnionDef } from "./ir.js";
 
 /** Every record arm must own a distinct nonempty string-literal domain. */
 export function validRecordDiscriminant(union: IrUnionDef, getRecord: (id: string) => IrRecordShape | undefined): boolean {

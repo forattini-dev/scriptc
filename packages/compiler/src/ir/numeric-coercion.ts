@@ -1,4 +1,4 @@
-import { DYN, F64, STRING, BOOL, type IrType } from "./nodes.js";
+import { DYN, F64, STRING, BOOL, type IrType } from "./ir.js";
 
 /** The parsers consume strings after source argument evaluation and ToString.
  * parseInt uses the longest digit prefix and ToInt32(radix); parseFloat uses

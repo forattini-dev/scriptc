@@ -1,4 +1,4 @@
-import { DATE_T, F64, STRING } from "./nodes.js";
+import { DATE_T, F64, STRING } from "./ir.js";
 
 export const DATE_LIB_FN_SIGS = {
   "date.now": { argTypes: [], result: F64 },

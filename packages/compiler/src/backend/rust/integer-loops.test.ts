@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { IrExpr, IrFunction, IrModule, IrStmt } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrModule, IrStmt } from "../../ir/ir.js";
 import { emitRustModule } from "./emitter.js";
 import { validateModule } from "../../ir/validate.js";
 import { RustIntegerLoops } from "./integer-loops.js";

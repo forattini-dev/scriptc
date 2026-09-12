@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
-import type { IrType, IrUnionDef } from "../ir/nodes.js";
-import type { TypeMapperCtx } from "./types.js";
+import type { IrType, IrUnionDef } from "../ir/ir.js";
+import type { TypeMapperCtx } from "./type-mapper.js";
 
 /** Retain a common string-literal field whose domains are disjoint by shape.
  * Layouts still erase literals; source spelling order never chooses an arm. */

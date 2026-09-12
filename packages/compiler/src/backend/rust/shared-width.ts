@@ -1,4 +1,4 @@
-import type { IrFunction, IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
+import type { IrFunction, IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
 import { nativeRecordCheckSupported, nativeArrayViewSupported } from "../../ir/native-record.js";
 
 /** Compiler-generated structural projections become reference views in Rust.

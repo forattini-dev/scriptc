@@ -1,7 +1,7 @@
 import { emitIslandValue } from "./island-values.js";
 import { rustJsString } from "./string-literals.js";
 import { nativeIndexedRecordValue } from "../../ir/native-record.js";
-import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { isSharedRecord } from "./shared-records.js";
 import type { IrFuncType } from "./model.js";
 import { emitRustIslandDestructuringFunction } from "./island-destructuring-function.js";

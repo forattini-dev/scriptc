@@ -1,8 +1,8 @@
 import type { RustLocalCells } from "./local-cells.js";
 import { isSharedRecord, sharedRecordName, recordPointerEquality } from "./shared-records.js";
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/ir.js";
 import { mangleFunction, mangleGlobal, mangleLocal, mangleRecordStruct } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 

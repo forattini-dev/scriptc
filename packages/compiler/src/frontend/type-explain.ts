@@ -2,7 +2,7 @@
  * names a member; this one names a signature's parameter or return, so the dynamic-family diagnostic can say which
  * part of `(input: X) => Y` blocks the whole function. */
 import * as ts from "./ts7/adapter.js";
-import { TypeMapperCtx, mapType } from "./types.js";
+import { TypeMapperCtx, mapType } from "./type-mapper.js";
 
 /** The STATIC reason a SIGNATURE type did not map: the first parameter or the return that has no static shape.
  * The record twin of this (describeRecordMemberBlocker) names a member; this one names a slot, so the

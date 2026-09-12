@@ -1,4 +1,4 @@
-import { RUNTIME_ERROR_CLASSES, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/ir.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 
 /** Distinct native tags select an arm without a JSON round trip. Two arrays,

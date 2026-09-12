@@ -6,4 +6,7 @@ export interface LlvmTargetOptions {
   /** Library archive assembly may move the volatile identity getters into a
    * separate translation unit. Public/direct emission keeps them by default. */
   emitLibraryIdentity?: boolean;
+  /** Program objects carry a strong reference to the matching runtime ABI
+   * marker so manual links against an incompatible runtime fail loudly. */
+  runtimeAbiMarker?: boolean;
 }

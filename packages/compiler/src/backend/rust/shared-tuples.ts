@@ -1,4 +1,4 @@
-import type { IrFunction, IrRecordShape } from "../../ir/nodes.js";
+import type { IrFunction, IrRecordShape } from "../../ir/ir.js";
 import { nativeTupleElement } from "../../ir/native-tuple.js";
 import { mangleField, mangleFunction, mangleRecordStruct } from "../mangle.js";
 import type { RustDefinitionContext } from "./definitions.js";

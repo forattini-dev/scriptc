@@ -1,4 +1,4 @@
-import type { IrExpr, IrLibFn, SrcLoc } from "./nodes.js";
+import type { IrExpr, IrLibFn, SrcLoc } from "./ir.js";
 
 // These positions box program payloads rather than passing native units
 // through an ordinary call ABI. Keep callback and handle slots excluded.

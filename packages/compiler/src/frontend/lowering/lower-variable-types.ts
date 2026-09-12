@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { isJsSourceFile } from "../program.js";
-import { DYN, JSVAL, type IrType } from "../../ir/nodes.js";
+import { DYN, JSVAL, type IrType } from "../../ir/ir.js";
 import { dynFallbackType, importCallHandleType, uncheckedOverloadHandleCall, type Lowerer } from "./lowerer.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
 

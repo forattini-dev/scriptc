@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, typeEquals, typeKey, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, typeEquals, typeKey, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { probeLower } from "./lower-probe.js";

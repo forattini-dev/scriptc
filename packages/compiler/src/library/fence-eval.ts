@@ -17,7 +17,7 @@
  *   - a fenced STATIC entry is policed against the COMPILED module graph:
  *     the emit pass lowers only reachability-discovered bodies, so the
  *     module IR *is* the reached graph — the same ground the sidecar's
- *     `deterministic` attestation stands on (ir/nodes.ts's
+ *     `deterministic` attestation stands on (ir/ir.ts's
  *     moduleLibNondeterministicSurface). Fence evaluation reuses that
  *     posture with one generic walk collecting the reached surface facts
  *     (libCall spellings, str/arr/map/set intrinsic methods); each fenced
@@ -60,7 +60,7 @@ import {
   STATIC_NUMBER_METHODS,
   STR_METHODS,
 } from "../frontend/lowering/surfaces.js";
-import type { IrModule, SrcLoc } from "../ir/nodes.js";
+import type { IrModule, SrcLoc } from "../ir/ir.js";
 import { compilerReleaseVersion } from "./sidecar.js";
 
 /** One raw fence declaration as the profile spelled it (validated for
@@ -166,9 +166,7 @@ function fenceTaxonomy(): FenceTaxonomy {
   for (const [mod, members] of Object.entries(BUILTIN_MODULE_CONSTS)) {
     for (const member of Object.keys(members!)) foldedIds.add(`${builtinRootId(mod)}.${member}`);
   }
-  for (const member of Object.keys(STATIC_MATH_PROPS)) {
-    foldedIds.add(`stdlib.math.${member}`);
-  }
+  for (const member of Object.keys(STATIC_MATH_PROPS)) foldedIds.add(`stdlib.math.${member}`);
   const ambientFns = new Map(AMBIENT_SURFACE_FNS.map((row) => [row.id, row.fns as readonly string[]]));
   taxonomy = { byId, ids: manifest.entries.map((e) => e.id), builtinFns, builtinRoots, foldedIds, ambientFns };
   return taxonomy;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { checkPreflightTs7 } from "../src/frontend/program.js";
-import { Ts7Host } from "../src/frontend/ts7/program.js";
+import { Ts7Host } from "../src/frontend/ts7/program-adapter.js";
 
 const source = `import { read } from "node:fs";
 read(3, new Uint8Array(4), 0, 4, () => {});

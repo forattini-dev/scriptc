@@ -1,4 +1,4 @@
-import type { IrFunction, IrLocal } from "../../ir/nodes.js";
+import type { IrFunction, IrLocal } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 
 /** Cells forced by Rust control-flow emission need initialization tracking,

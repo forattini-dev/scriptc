@@ -3,6 +3,7 @@ import { copyFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { expect, test } from "vitest";
 import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.js";
 import { compile } from "../src/index.js";
@@ -31,7 +32,7 @@ test("Rust imports a computed file URL beside the native executable", async () =
   const env = { ...process.env, NODE_NO_WARNINGS: "1" };
   const [node, rust] = await Promise.all([
     execFileAsync(nodeOracleExecutable(), [entry], { env }),
-    execFileAsync(result.binaryPath, [], {
+    execFileAsync(result.binaryPath, [pathToFileURL(result.binaryPath).href], {
       env: { ...env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
     }),
   ]);

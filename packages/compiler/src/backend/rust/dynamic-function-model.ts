@@ -1,4 +1,4 @@
-import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
+import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
 import type { IrFuncType } from "./model.js";
 
 /** Values boxed explicitly, or one lazily boxed item of a native stream. */

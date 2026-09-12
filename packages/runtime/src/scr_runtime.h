@@ -18,7 +18,13 @@
 /* ── libc shims ─────────────────────────────────────────────────────────
  * Win32's missing POSIX/BSD functions live in scr_win.c. Zig's musl sysroot
  * additionally lacks arc4random_buf; scr_musl.c supplies it from Linux's
- * getrandom syscall. Both files are selected by cc.ts only for their target. */
+ * getrandom syscall. Both files are selected by native-toolchain.ts only for their target. */
+#if defined(_WIN32) && defined(_MSC_VER)
+/* MSVC's C headers do not define POSIX ssize_t. Keep the runtime's byte-count
+ * interfaces pointer-sized on Windows without requiring a Windows SDK header
+ * (and leave the Zig/MinGW compatibility route's native typedef intact). */
+typedef intptr_t ssize_t;
+#endif
 #ifdef _WIN32
 #include <time.h> /* time_t / struct tm for the gmtime_r shim */
 char *stpcpy(char *dst, const char *src);
@@ -53,6 +59,10 @@ void arc4random_buf(void *buf, size_t n);
  * flush-at-exit, RC audit registration (when built with -DSCR_RC_AUDIT).
  * JavaScript-visible writes flush before returning. */
 void scr_init(void);
+/* Program objects emitted by the bundled LLVM helper reference this symbol.
+ * Its versioned spelling makes a mismatched manual runtime link fail before
+ * the program can start. */
+void scr_runtime_abi_v1(void);
 
 /* ── the trap funnel (scr_console.c; scr_library.c under -DSCR_LIB) ──────
  * Every unrecoverable runtime trap — OOM, semantic range traps, internal-
@@ -104,7 +114,8 @@ typedef struct ScrBytes ScrBytes;
  * Every trap the runtime DETECTS arrives structured: the funnel assembles
  * the baseline human line into field 0 unchanged, a stable code for the
  * trap kind (the compiler registry's runtime family — SC4013–SC4019 plus
- * the SC4025 unregistered-callback trap, classified in scr_library.c), the
+ * the SC4025 unregistered-callback and SC4026 callback-re-entry traps,
+ * classified in scr_library.c), the
  * entry symbol recorded by the trapping
  * entry's prologue, and the profile's remediation for that code when the
  * program TU's overlay table declares one (the whole fourth field is
@@ -129,16 +140,23 @@ void scr_library_set_sink(ScrLibSinkFn fn, void *ctx); /* latest wins */
  *
  * Registration is a pure store like the sink's (no entry prologue, no
  * poison guard, legal before init); latest wins, NULL clears, and
- * registrations persist across init/reset. Slots are per-copy of this
+ * registrations persist across init/reset. While a host callback is active,
+ * its registration entry is rejected before name dispatch or a store, just
+ * like every runtime-touching ABI entry. Slots are per-copy of this
  * state, exactly the sink's story: per-archive under abi.localize_runtime,
  * per-thread instance under abi.instance_per_thread (SCR_TL) — a callback
  * registered on thread T fires only for T's instance. The host's callback
  * runs on the calling thread inside the entry's dynamic extent and must
- * NOT call back into any library entry (registration symbols included) or
- * unwind/longjmp across library frames: read the borrowed buffers, copy
- * what outlives the call, return. Buffer parameters are borrowed for the
- * duration of the call only. */
-#define SCR_LIB_MAX_CALLBACKS 32 /* keep in step with LIB_MAX_CALLBACKS (library/profile.ts) */
+ * NOT call back into any library entry (exports, init, reset, collect, sink
+ * registration, or callback registration) or unwind/longjmp across library
+ * frames: read the borrowed buffers, copy what outlives the call, return.
+ * A re-entry is a detected SC4026 trap: it poisons only this library
+ * instance, delivers exactly once to the already-registered sink, names the
+ * attempted inner ABI symbol in structured field 2, then aborts if the sink
+ * returns. A later host-loop turn may enter normally after the callback has
+ * returned. Buffer parameters are borrowed for the duration of the call
+ * only. */
+#define SCR_LIB_MAX_CALLBACKS 32 /* keep in step with LIB_MAX_CALLBACKS (library/library-profile.ts) */
 /* The stored shape: generated call sites cast a slot's pointer to the
  * channel's typed shape before calling. */
 typedef void (*ScrLibCbFn)(void);
@@ -147,6 +165,15 @@ void scr_library_cb_set(size_t slot, ScrLibCbFn fn, void *ctx);
  * trap_msg (never returns NULL). */
 ScrLibCbFn scr_library_cb_require(size_t slot, const char *trap_msg);
 void *scr_library_cb_ctx(size_t slot);
+/* Generated typed call sites bracket only the actual host-function call.
+ * End is reached only after a normal return; an illegal unwind deliberately
+ * leaves the depth active so the next ABI entry is rejected. */
+void scr_library_callback_begin(void);
+void scr_library_callback_end(void);
+/* Registration wrappers bypass scr_library_entry because their normal path
+ * is a pure store. They call this first so callback-time registration is
+ * rejected before dispatch, NULL handling, or mutation. */
+void scr_library_callback_entry_guard(const char *entry_symbol);
 
 /* Entry prologue: aborts deterministically when the library is poisoned (a
  * trap already fired — no profile entry may run again; recovery is process
@@ -155,10 +182,11 @@ void *scr_library_cb_ctx(size_t slot);
  * entry_symbol is the generated entry's external symbol exactly as the
  * host linked it (a static string in the program TU): the prologue records
  * it in the funnel's current-entry slot so a detected trap's structured
- * message can name the trapping entry — sound as a single static slot
- * because exactly one core is ever live and entries never nest. Init and
- * the mode entries (reset, collect) record theirs too; the identity
- * getters and sink registration touch no runtime and never trap. */
+ * message can name the trapping entry. A host callback's attempted nested
+ * entry is rejected first and replaces this slot with that inner symbol.
+ * Init and the mode entries (reset, collect) record theirs too. The two
+ * profile identity getters are the explicit pure-data exception: they touch
+ * no mutable runtime state and remain callable before init and after poison. */
 void scr_library_entry(bool reset_arena, const char *entry_symbol);
 void scr_library_arena_reset(void);
 /* The mode-provided collect entry's body: arena reset + a full cycle
@@ -196,7 +224,8 @@ _Noreturn void scr_trap_len(const char *msg, size_t len);
  * (both emissions emit identical data) and consumed by the funnel when it
  * assembles a detected trap's structured message: flat triples of
  * (code, teaching-or-NULL, remediation-or-NULL), one per runtime trap code
- * (the SC4013–SC4019 family plus SC4025) the profile declares text for;
+ * (the SC4013–SC4019 family plus SC4025 and SC4026) the profile declares
+ * text for;
  * _len counts triples. A declared teaching replaces the baseline human line as field 0;
  * a declared remediation becomes the optional fourth field. */
 extern const char *const scr_library_trap_overlays[];
@@ -598,9 +627,11 @@ void scr_throw_error_msg_code(int kind, const char *message, size_t len, const c
 void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg);
 
 /* ── string methods ─────────────────────────────────────────────────
- * ECMA-262 observable semantics (UTF-16 code units) computed over the
- * UTF-8 storage by scanning — O(n) per call, correctness first. All double
- * index/count arguments go through ToIntegerOrInfinity (NaN → 0, trunc
+ * ECMA-262 observable semantics over UTF-8 storage with UTF-16 code-unit
+ * indices. A per-instance side cache keeps length/cursor state and sparse
+ * navigation checkpoints for large strings, making warmed
+ * non-local indexed operations bounded by one checkpoint interval. All
+ * double index/count arguments go through ToIntegerOrInfinity (NaN → 0, trunc
  * toward zero, ±Infinity kept), exactly like JS. Every function borrows its
  * ScrStr arguments; functions returning ScrStr* return a +1 reference.
  *
@@ -626,6 +657,10 @@ double scr_str_code_point_at(ScrStr *s, double i);
  * after fromIndex (clamped to [0, length]), or -1. Empty needle returns the
  * clamped fromIndex per spec. */
 double scr_str_index_of(ScrStr *s, ScrStr *needle, double fromIndex);
+
+/* lastIndexOf(needle): the one-argument form returns the last occurrence's
+ * UTF-16 index, or -1. Empty needle returns length. */
+double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position);
 
 /* includes(needle) — no position argument. Empty needle → true. */
 bool scr_str_includes(ScrStr *s, ScrStr *needle);
@@ -1018,7 +1053,7 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep);
 ScrStr *scr_str_raw(ScrArr *raw, ScrArr *subs);
 
 /* ── regular expressions (scr_regex.c — linked ONLY when the program
- * contains a regex literal; see cc.ts) ────────────────────────────────
+ * contains a regex literal; see native-toolchain.ts) ────────────────────────────────
  * The engine is quickjs-ng's libregexp (the same bytecode interpreter the
  * dynamic island uses), compiled standalone. A ScrRegex is today ALWAYS an
  * immortal interned literal: the compiler emits one static per distinct
@@ -4470,7 +4505,7 @@ void scr_island_set_fetch(void (*boot)(void *jsctx), bool (*pending)(void),
 
 /* ── the island's node:http/https client bridge (scr_net_island.c) ────
  * The one TU referencing BOTH the socket units and the island (the
- * scr_zlib_island.c precedent): cc.ts compiles it exactly when a
+ * scr_zlib_island.c precedent): native-toolchain.ts compiles it exactly when a
  * --dynamic build links the socket units, and the emitted main calls
  * scr_net_island_install before any island entry. `attach` runs while
  * the island builds its bootstrap host object (jsctx and host_obj are
@@ -4771,14 +4806,12 @@ ScrStr *scr_bool_to_scrstr(bool b); /* interned "true"/"false" */
 /* ── String surface (scr_lib.c) ───────────────────────────────────────
  * fromCharCode: ONE packed f64[] of UTF-16 code units — ToUint16 each,
  * adjacent surrogate pairs combine, lone surrogates become U+FFFD
- * (divergence 1's policy). lastIndexOf: last occurrence at or before its
- * ToIntegerOrInfinity-clamped UTF-16 position (-1 absent; empty needle
- * finds that position). Borrowed args; the string result is +1; neither throws. */
+ * (divergence 1's policy). Borrowed args; the string result is +1; neither
+ * throws. */
 ScrStr *scr_str_from_char_code(ScrArr *codes);
 /* The spread-typed-array form (String.fromCharCode(...bytes) — the
  * magic-number ASCII probe); same semantics per element. */
 ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes);
-double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position);
 
 /* ── Number statics (scr_lib.c) ───────────────────────────────────────
  * JS-exact by construction: Number.isFinite/isNaN/isInteger/isSafeInteger
@@ -5177,7 +5210,7 @@ ScrBytes *scr_bytes_concat_len(const ScrArr *list, double total);
 ScrBytes *scr_bytes_concat(const ScrArr *list); /* +1 */
 
 /* ── util.inspect (scr_inspect.c — linked ONLY when the program calls
- * util.inspect/format; see cc.ts) ─────────────────────────────────────
+ * util.inspect/format; see native-toolchain.ts) ─────────────────────────────────────
  * The runtime half of the static inspect rendering: the compiler
  * synthesizes one traversal helper per static type; these entries own
  * Node's exact scalar formatting and the layout engine (frames,
@@ -5295,7 +5328,7 @@ bool scr_process_stderr_write_bytes(const ScrBytes *b, const ScrStr *encoding);
 void scr_fs_throw(int e, const char *op, const ScrStr *path);
 
 /* ── zlib (scr_zlib.c — compiled and linked with -lz only when the
- * program uses zlib, like scr_regex.c/libregexp; see cc.ts) ──────────
+ * program uses zlib, like scr_regex.c/libregexp; see native-toolchain.ts) ──────────
  * deflateSync/inflateSync over u8 bytes with Node's default options
  * (zlib format, default level/windowBits). deflate never throws (OOM
  * aborts); inflate of corrupt input THROWS Node's error catchably
@@ -5319,7 +5352,7 @@ ScrBytes *scr_zlib_inflate_mode(const ScrBytes *data, double mode);
 void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program
- * uses the net surface, like scr_events.c; see cc.ts) ─────────────────
+ * uses the net surface, like scr_events.c; see native-toolchain.ts) ─────────────────
  * TCP servers and sockets over the unit's own readiness poller
  * (scr_platform.h: kqueue on macOS/BSD, epoll on Linux): refcounted handles
  * whose listeners MOVE in and drop at settlement (the ScrChild ownership
@@ -5423,9 +5456,14 @@ void scr_net_sock_release_v(void *p);
 ScrNetServer *scr_net_create_server(ScrClosure *handler /*moves, nullable*/, ScrNetConnFn fn); /* +1 */
 void scr_net_listen(ScrNetServer *s, double port, ScrClosure *cb /*moves, nullable*/);
 /* listen({ port, host, ipv6Only, reusePort }): host is an IP literal ("" =
- * the dual-stack any default); ipv6Only sets IPV6_V6ONLY before the bind. */
+ * the dual-stack any default); ipv6Only sets IPV6_V6ONLY before the bind.
+ * The old entry point ignores reusePort and is retained for old IR. */
 void scr_net_listen_opts(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
                           bool ipv6_only, ScrClosure *cb /*moves, nullable*/);
+/* Additive ABI for listen({ port, host, ipv6Only, reusePort }): reuse_port
+ * requests the platform matrix documented in scr_net.c. Unsupported
+ * platforms and kernels fail asynchronously; they never fall back to an
+ * ordinary single listener. */
 void scr_net_listen_opts_reuse_port(ScrNetServer *s, double port, ScrStr *host /*borrowed*/,
                                     bool ipv6_only, bool reuse_port,
                                     ScrClosure *cb /*moves, nullable*/);
@@ -5725,7 +5763,7 @@ long scr_secure_ctx_live_count(void);
 
 /* ── node:tls, the CA-store introspection slice (scr_tls_ca.c — its own
  * unit and link gate; NO mbedTLS, so a getCACertificates-only binary never
- * builds the archive; cc.ts also compiles it whenever scr_tls.c does). The
+ * builds the archive; native-toolchain.ts also compiles it whenever scr_tls.c does). The
  * HOST roots (Windows' system certificate stores, the established bundle probe on
  * POSIX) stand in for both Node's compiled-in Mozilla roots ('bundled',
  * rootCertificates) and the platform store ('system') — the established
@@ -5751,7 +5789,7 @@ ScrArr *scr_tls_ca_root(void);        /* +1; === getCACertificates("bundled") */
  * ERR_CRYPTO_OPERATION_FAILED and leaves the set unchanged. Borrows. */
 void scr_tls_ca_set_default(ScrArr *certs);
 /* scr_tls.c's anchor consult: true iff setDefaultCACertificates ran;
- * *pem/*len then carry the concatenated NUL-terminated blocks (len 0 =
+ * *pem and *len then carry the concatenated NUL-terminated blocks (len 0 =
  * the empty set — verification fails, Node's own consequence), and *gen
  * a counter that bumps per set so the parsed chain re-parses on change. */
 bool scr_tls_ca_default_override(const char **pem, size_t *len, uint64_t *gen);

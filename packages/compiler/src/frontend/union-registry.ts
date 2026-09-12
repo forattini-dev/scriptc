@@ -1,6 +1,6 @@
 import type * as ts from "./ts7/adapter.js";
 import { InternalCompilerError } from "../errors.js";
-import { typeKey, type IrType, type IrUnionDef } from "../ir/nodes.js";
+import { typeKey, type IrType, type IrUnionDef } from "../ir/ir.js";
 
 /** The frontend's union interner — mirrors ShapeRegistry. A union's
  * canonical identity is its typeKey-sorted arm list; two ts unions whose

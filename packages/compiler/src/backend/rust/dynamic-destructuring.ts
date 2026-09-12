@@ -1,4 +1,4 @@
-import type { IrExpr, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, SrcLoc } from "../../ir/ir.js";
 
 type DynamicDestructureExpr = Extract<IrExpr, { kind: "dynDestrCheck" }>;
 

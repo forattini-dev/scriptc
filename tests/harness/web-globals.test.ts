@@ -19,6 +19,7 @@ import { compile } from "@scriptc/compiler";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
+const fixturesRoot = join(repoRoot, "tests/fixtures");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
@@ -63,6 +64,33 @@ async function compileAndRun(name: string, source: string): Promise<RunResult> {
   }
 }
 
+/** Compiles and runs a fixture whose imports must be embedded from npm. */
+async function compileFixtureAndRun(name: string, entry: string, backend: "c" | "rust" = sanitize ? "c" : "rust"): Promise<RunResult> {
+  const outDir = join(cacheDir, `web-${name}`);
+  mkdirSync(outDir, { recursive: true });
+  const result = await compile(entry, {
+    backend,
+    outPath: join(outDir, name),
+    outDir,
+    sanitize,
+    dynamic: true,
+  });
+  if (!result.ok) {
+    throw new Error(
+      "web-globals fixture failed to compile:\n" +
+        result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
+    );
+  }
+  try {
+    const { stdout, stderr } = await execFileAsync(result.binaryPath, [], { encoding: "utf8" });
+    return { stdout, stderr, exitCode: 0 };
+  } catch (err) {
+    const e = err as { code?: unknown; stdout?: string; stderr?: string };
+    if (typeof e.code !== "number") throw err;
+    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", exitCode: e.code };
+  }
+}
+
 /** Evaluates island code that must produce a one-line string. */
 async function islandEval(name: string, js: string): Promise<string> {
   const r = await compileAndRun(name, `console.log(__island_eval(${JSON.stringify(js)}));\n`);
@@ -75,26 +103,80 @@ describe(`island web globals (scriptc-only${sanitize ? ", sanitized" : ""})`, ()
   test("web globals follow each backend's load boundaries", async () => {
     const out = await islandEval(
       "web-presence",
-      `[
-        typeof ReadableStream, typeof TransformStream, typeof TextEncoder,
-        typeof TextDecoder, typeof TextDecoderStream, typeof URLSearchParams,
-        typeof btoa, typeof atob, typeof Headers, typeof crypto, typeof console,
-        typeof Blob, typeof File, typeof Event, typeof EventTarget, typeof CustomEvent,
-        typeof WritableStream, typeof structuredClone, typeof FormData,
-        typeof WebSocket,
-      ].join(' ')`,
+      `JSON.stringify({
+        ReadableStream: typeof ReadableStream,
+        TransformStream: typeof TransformStream,
+        TextEncoder: typeof TextEncoder,
+        TextDecoder: typeof TextDecoder,
+        TextDecoderStream: typeof TextDecoderStream,
+        URLSearchParams: typeof URLSearchParams,
+        btoa: typeof btoa,
+        atob: typeof atob,
+        Headers: typeof Headers,
+        crypto: typeof crypto,
+        console: typeof console,
+        Blob: typeof Blob,
+        File: typeof File,
+        Event: typeof Event,
+        EventTarget: typeof EventTarget,
+        CustomEvent: typeof CustomEvent,
+        MessageEvent: typeof MessageEvent,
+        WritableStream: typeof WritableStream,
+        structuredClone: typeof structuredClone,
+        FormData: typeof FormData,
+        WebSocket: typeof WebSocket,
+        URL: typeof URL,
+        Buffer: typeof Buffer,
+        setImmediate: typeof setImmediate,
+        clearImmediate: typeof clearImmediate,
+      })`,
     );
     // Blob/File and the Event triple joined the subset when the vercel
     // CLI's graph started loading undici (its fileapi classes extend
     // Event and buffer.Blob at LOAD); structuredClone joined with the
     // globals lane (the HTML StructuredSerialize subset, cycles included).
-    // C leaves WritableStream/FormData/WebSocket absent. Rust provides loadable
-    // globals and refuses unsupported WebSocket construction explicitly.
-    expect(out).toBe(
-      "function function function function function function " +
-        "function function function object object " +
-        "function function function function function " +
-        (sanitize ? "undefined function undefined undefined" : "function function function function"),
+    // MessageEvent is part of both web preludes. Rust also initializes its
+    // Node globals with the island; C loads them with its module bootstrap.
+    // Loadability does not imply support for WebSocket construction.
+    expect(JSON.parse(out)).toEqual({
+      ReadableStream: "function",
+      TransformStream: "function",
+      TextEncoder: "function",
+      TextDecoder: "function",
+      TextDecoderStream: "function",
+      URLSearchParams: "function",
+      btoa: "function",
+      atob: "function",
+      Headers: "function",
+      crypto: "object",
+      console: "object",
+      Blob: "function",
+      File: "function",
+      Event: "function",
+      EventTarget: "function",
+      CustomEvent: "function",
+      MessageEvent: "function",
+      WritableStream: sanitize ? "undefined" : "function",
+      structuredClone: "function",
+      FormData: sanitize ? "undefined" : "function",
+      WebSocket: sanitize ? "undefined" : "function",
+      URL: sanitize ? "undefined" : "function",
+      Buffer: sanitize ? "undefined" : "function",
+      setImmediate: sanitize ? "undefined" : "function",
+      clearImmediate: sanitize ? "undefined" : "function",
+    });
+  });
+
+  test("node:stream/web exposes only the implemented module constructors", async () => {
+    const result = await compileFixtureAndRun(
+      "web-stream-module-presence",
+      join(fixturesRoot, "npm/divergent/web-stream-module-presence.ts"),
+      "c",
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout.trimEnd()).toBe(
+      "function function function function function function function false false false false false false false",
     );
   });
 

@@ -1,4 +1,4 @@
-import { DYN, type IrExpr, type SrcLoc } from "../../ir/nodes.js";
+import { DYN, type IrExpr, type SrcLoc } from "../../ir/ir.js";
 
 export function dynamicMethodInvoke(
   receiver: IrExpr,

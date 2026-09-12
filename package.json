@@ -28,6 +28,9 @@
     "manifest": "tsx scripts/surface-manifest.mjs",
     "manifest:parity": "tsx scripts/manifest-parity.mjs",
     "dogfood:scoreboard": "node scripts/dogfood-scoreboard.mjs",
+    "node-compat": "pnpm --filter @internal/compatibility run update",
+    "node-compat:backlog": "pnpm --filter @internal/compatibility run backlog --",
+    "node-compat:check": "pnpm --filter @internal/compatibility run check",
     "scriptc": "tsx packages/cli/src/main.ts"
   },
   "devDependencies": {

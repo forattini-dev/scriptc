@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, isUnitType, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
-import type { IrExpr, IrFunction, IrStmt, IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, isUnitType, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrStmt, IrType } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";
 import { objectIterOverIndexShape, type ObjectIterationResult } from "./lower-object-index-iteration.js";

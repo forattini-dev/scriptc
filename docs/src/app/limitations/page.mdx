@@ -79,8 +79,8 @@ const who = process.argv.length > 2 ? process.argv[2] : "world";
 
 ## Dynamic-tier limits
 
-- **The island is quickjs-ng, not V8** — correct, but slower for CPU-bound dependency code. The win is startup, size, memory, deployment shape.
-- **Engine-thrown error *messages* are quickjs-ng's, not V8's** — the error type and the throw itself match (a bad `Number.prototype.toFixed` receiver is a `TypeError` either way), but the wording is the engine's: `not a number` where V8 writes `Number.prototype.toFixed requires that 'this' be a Number`. The vendored engine is an unmodified upstream snapshot and its prebuilt archive is cached by upstream commit, so this text is deliberately not patched. Match on error type, not message text.
+- **The embedded engine follows the backend.** Rust uses V8 for dynamic islands by default, with Boa available as an alternative. C and LLVM use quickjs-ng.
+- **Engine-thrown error messages can differ from Node's.** The wording depends on the selected embedded engine and its version. For portable error handling, match the error type rather than engine-specific message text.
 - **The island's Node builtins are shims** — reimplementations, reported per-builtin in the coverage report, not the real modules.
 - **Island microtask interleaving**: static fibers drain first, then the engine's jobs at loop quiescence — a static `await` racing a package promise resolves in a documented, deterministic order that can differ from Node's interleaving.
 - **Top-level `await` in embedded ESM packages** is not supported yet. It does compile in your program's own ESM graph and in npm packages compiled through `--npm-static`; the remaining limit is package code running inside the `--dynamic` island.
@@ -95,3 +95,8 @@ The production <code>wasm32-wasi</code> target supports the complete executable 
 - `scriptc run` does not forward extra CLI arguments to the program — `build` and invoke the binary directly.
 - Native FFI is a direct, manifest-declared C ABI link surface. Formats 2–5 cover call-scoped callbacks, copied string/byte callback parameters, explicitly released retained callbacks, and asynchronous foreign-thread delivery. Variadic calls, structs by value, owned pointer/string/byte returns, runtime dynamic-library loading, and library-mode builds remain unsupported. See [Native FFI](/ffi).
 - Numbers are JS-exact f64 everywhere. Integer inference and ownership analysis — the systems-language performance ceiling — are roadmap, not shipped.
+
+
+## ESM module identity
+
+Direct reads of <code>import.meta.url</code>, <code>import.meta.filename</code>, and <code>import.meta.dirname</code> identify the original source module. The entry and imported modules retain distinct identities after compilation. Use <code>import.meta.main</code> to detect direct execution: comparing <code>import.meta.url</code> with <code>process.argv[1]</code> is not a portable native entry check, because the latter identifies the executable. This replaces the fork's earlier executable-valued <code>import.meta.url</code> behavior. These direct metadata reads are lowered natively in ESM, including builds that enable <code>--dynamic</code>. Bare metadata objects, computed reads, writes, and loader operations such as <code>import.meta.resolve</code> retain explicit diagnostics in native lowering.

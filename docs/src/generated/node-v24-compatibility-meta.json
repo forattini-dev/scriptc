@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 3,
+  "implementationScope": {
+    "static": "Shared frontend lowering and C runtime inventory; per-backend admission is recorded separately in the compiler surface manifest.",
+    "dynamic": "C/LLVM quickjs-ng island runtime. These statuses do not describe the Rust V8 or Boa engines."
+  },
+  "nodeVersion": "24.15.0",
+  "nodeCommit": "848430679556aed0bd073f2bc263331ad84fa119",
+  "artifactVersion": "b1c35b7aebf73b0860b3",
+  "rowCount": 3662
+}

@@ -1,7 +1,7 @@
 import { recordNewName } from "./shared-records.js";
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import { typeKey } from "../../ir/ir.js";
 import { mangleField, mangleLocal, mangleRecordStruct } from "../mangle.js";
 
 export interface RustGeneratorBodyContext {

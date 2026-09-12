@@ -1,3 +1,5 @@
+include!("network_loop.rs");
+
 /// Final safe point for generated executables.
 ///
 /// The optional audit is test-only instrumentation: production binaries pay
@@ -13,7 +15,7 @@ pub fn finish() {
     fs_watchers_finish();
     children_finish();
     child_streams_finish();
-    net_finish();
+    loop_net_finish();
     dgram_finish();
     tls_ca_finish();
     diagnostics_finish();
@@ -573,7 +575,7 @@ fn run_event_loop_with_first_checkpoint(
         if stdin_dispatch_one() {
             continue;
         }
-        if net_dispatch_one() {
+        if loop_net_dispatch_one() {
             continue;
         }
         if dgram_dispatch_one() {
@@ -591,7 +593,7 @@ fn run_event_loop_with_first_checkpoint(
             || children_referenced_pending()
             || children_failed_pending()
             || child_streams_pending()
-            || net_pending()
+            || loop_net_pending()
             || dgram_pending()
             || ffi_foreign_pending();
         if !has_referenced_work {
@@ -673,7 +675,7 @@ fn run_event_loop_with_first_checkpoint(
         if ffi_foreign_pending() {
             let wait = event_loop_wait_timeout(
                 next_due,
-                net_pending()
+                loop_net_pending()
                     || dgram_pending()
                     || children_referenced_pending()
                     || child_streams_pending(),
@@ -696,7 +698,7 @@ fn run_event_loop_with_first_checkpoint(
         if stdin_pending() {
             let wait = event_loop_wait_timeout(
                 next_due,
-                net_pending()
+                loop_net_pending()
                     || dgram_pending()
                     || children_referenced_pending()
                     || child_streams_pending(),
@@ -704,10 +706,10 @@ fn run_event_loop_with_first_checkpoint(
             stdin_wait(wait);
             continue;
         }
-        if net_pending() {
+        if loop_net_pending() {
             let wait =
                 next_due.and_then(|due| due.checked_duration_since(std::time::Instant::now()));
-            net_wait(wait);
+            loop_net_wait(wait);
             continue;
         }
         if dgram_pending() {

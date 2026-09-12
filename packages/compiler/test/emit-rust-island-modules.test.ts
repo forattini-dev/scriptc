@@ -18,7 +18,7 @@ import { compile } from "../src/index.js";
 const execFileAsync = promisify(execFile);
 const fixtures = resolve("tests/fixtures/island-modules");
 
-async function build(fixtureName: string): Promise<string> {
+async function build(fixtureName: string, optimization: "dev" | "release" = "dev"): Promise<string> {
   const fixture = join(fixtures, fixtureName);
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-island-modules-"));
   const result = await compile(fixture, {
@@ -26,7 +26,7 @@ async function build(fixtureName: string): Promise<string> {
     outPath: join(dir, "program"),
     backend: "rust",
     dynamic: true,
-    optimization: "dev",
+    optimization,
   });
   expect(
     result.ok,
@@ -74,13 +74,19 @@ describe.sequential("Rust island module system", () => {
     expect(rust.stdout).toBe("EventEmitter\n");
   });
 
-  test("a closure with mixed primitive parameters crosses as a host function", async () => {
+  test.each(["dev", "release"] as const)("a closure with mixed primitive parameters crosses as a host function (%s)", async (optimization) => {
     const [node, rust] = [
-      await execFileAsync(nodeOracleExecutable(), [join(fixtures, "closure-mixed.ts")]),
-      await run(await build("closure-mixed.ts")),
+      // The fixture uses ESM syntax under the repository's typeless package.
+      // Exclude only Node's package-configuration warning from program stderr.
+      await execFileAsync(nodeOracleExecutable(), [
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        join(fixtures, "closure-mixed.ts"),
+      ]),
+      await run(await build("closure-mixed.ts", optimization)),
     ];
     expect(rust.stdout).toBe(node.stdout);
     expect(rust.stdout).toBe("2:3|3.5:0\n");
+    expect(rust.stderr).toBe(node.stderr);
   });
 
   // The four island operations the Rust backend used to refuse outright

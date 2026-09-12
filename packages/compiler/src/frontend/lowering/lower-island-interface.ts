@@ -6,7 +6,7 @@ import {
   IrType,
   JSVAL,
   SrcLoc,
-} from "../../ir/nodes.js";
+} from "../../ir/ir.js";
 
 /**
  * Adapt a dynamic module namespace to a static record of async methods.

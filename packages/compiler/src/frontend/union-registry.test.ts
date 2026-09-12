@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { type IrType, type IrUnionDef } from "../ir/nodes.js";
-import { UnionRegistry, withUndefinedArm } from "./types.js";
+import { type IrType, type IrUnionDef } from "../ir/ir.js";
+import { UnionRegistry, withUndefinedArm } from "./type-mapper.js";
 
 const arms: IrType[] = [{ kind: "record", shapeId: "a" }, { kind: "record", shapeId: "b" }];
 const discriminant: IrUnionDef["discriminant"] = { field: "kind", cases: [

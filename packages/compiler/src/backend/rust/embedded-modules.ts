@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
-import { NPM_COMPRESS_MIN, type IrModule } from "../../ir/nodes.js";
+import { NPM_COMPRESS_MIN, type IrModule } from "../../ir/ir.js";
 
 export function hasRustEmbeddedModules(mod: IrModule): boolean {
   return (mod.embedded?.modules.length ?? 0) > 0;

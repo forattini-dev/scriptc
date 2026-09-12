@@ -1,7 +1,7 @@
 import * as ts from "./ts7/adapter.js";
-import { DYN, type IrType, typeKey } from "../ir/nodes.js";
-import { mapType, type TypeMapperCtx } from "./types.js";
-import { overridesDtsPath } from "./shared.js";
+import { DYN, type IrType, typeKey } from "../ir/ir.js";
+import { mapType, type TypeMapperCtx } from "./type-mapper.js";
+import { overridesDtsPath } from "./dts-paths.js";
 
 /** The intrinsic's conditional alias stays symbolic inside generic bodies.
  * Resolve it against this instantiation's record layouts, like T[keyof T]. */

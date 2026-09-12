@@ -1,5 +1,5 @@
 import { isSharedRecord, recordNewName, sharedRecordName } from "./shared-records.js";
-import type { IrExpr, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrRecordShape, IrType, SrcLoc } from "../../ir/ir.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 

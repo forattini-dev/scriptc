@@ -1,6 +1,6 @@
 import { nativeTupleElement } from "./native-tuple.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
-import type { IrRecordShape, IrType, IrUnionDef } from "./nodes.js";
+import type { IrRecordShape, IrType, IrUnionDef } from "./ir.js";
 
 /** Shared native records admit scalars and methods whose arguments/results
  * need no composite copy at the dynamic boundary. Arrays and scalar indexed

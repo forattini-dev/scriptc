@@ -3,8 +3,8 @@
  * `Object.assign(schema, methods)` idiom) — is a record of the plain part's fields plus a hidden schema slot; every
  * schema site unwraps the slot, every static reads the field. */
 import * as ts from "./ts7/adapter.js";
-import { EFFECT_T, type IrRecordShape, type IrType } from "../ir/nodes.js";
-import { mapType, type TypeMapperCtx } from "./types.js";
+import { EFFECT_T, type IrRecordShape, type IrType } from "../ir/ir.js";
+import { mapType, type TypeMapperCtx } from "./type-mapper.js";
 
 export const SCHEMA_SLOT = "%schema";
 

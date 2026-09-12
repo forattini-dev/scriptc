@@ -1,0 +1,6 @@
+import-meta-dynamic.ts:2:13 - error SC1090: 'import.meta' (module-loader metadata has no equivalent in a compiled binary) is not supported yet
+
+  1 | // @dynamic
+  2 | const url = import.meta["url"];
+    |             ^~~~~~~~~~~
+  3 | console.log(url);

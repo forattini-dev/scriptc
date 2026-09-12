@@ -141,9 +141,11 @@ test("a later flagless compile retains its ordinary npm engine boundary", async 
   });
 });
 
-test("a changed declaration invalidates prior callback admission", async () => {
+test.for(backends)("a changed declaration invalidates prior callback admission with %s", async (backend) => {
   await fixture(async (dir, entry, pkg) => {
-    const options = { backend: "c" as const, npmStatic: "auto" as const, allowEngine: false,
+    // This checks declaration invalidation before code generation. Dev mode
+    // keeps the native prerequisite small while covering every backend.
+    const options = { backend, optimization: "dev" as const, npmStatic: "auto" as const, allowEngine: false,
       outDir: join(dir, "out"), outPath: join(dir, "out/program"),
       sanitize: process.env["SCRIPTC_SAN"] === "1",
     };

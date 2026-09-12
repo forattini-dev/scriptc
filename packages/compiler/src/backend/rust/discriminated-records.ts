@@ -1,5 +1,5 @@
 import { rustJsString } from "./string-literals.js";
-import type { IrRecordShape, IrUnionDef } from "../../ir/nodes.js";
+import type { IrRecordShape, IrUnionDef } from "../../ir/ir.js";
 import { validRecordDiscriminant } from "../../ir/record-discriminant.js";
 import { isSharedRecord, recordCheckName } from "./shared-records.js";
 

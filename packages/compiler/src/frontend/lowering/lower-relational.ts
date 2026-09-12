@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, F64, type IrExpr } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, type IrExpr } from "../../ir/ir.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 
 export function relationalOperator(op: ts.SyntaxKind): "<" | "<=" | ">" | ">=" | undefined {

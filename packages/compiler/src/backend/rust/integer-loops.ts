@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/ir.js";
 import { matchIntegerBytesForLoop } from "../../ir/integer-loops.js";
 import { RustIndexRegions } from "./index-regions.js";
 

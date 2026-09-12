@@ -1,4 +1,4 @@
-import type { IrExpr, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, SrcLoc } from "../../ir/ir.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
 const CHECKED_FS_CALLS = new Set([

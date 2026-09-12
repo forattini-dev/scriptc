@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { UnionRegistry } from "../frontend/union-registry.js";
-import { NULL_T, STRING, arrayOf, type IrType } from "./nodes.js";
+import { NULL_T, STRING, arrayOf, type IrType } from "./ir.js";
 import { regexCaptureArray, regexCaptureLayout } from "./regex-captures.js";
 
 test("regex result ABI retains distinct participating and absent capture tags", () => {

@@ -1,6 +1,6 @@
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { IrModule, SrcLoc } from "../ir/nodes.js";
+import type { IrModule, SrcLoc } from "../ir/ir.js";
 import { LlvmUnsupportedError } from "./llvm/unsupported.js";
 
 /** Native module evaluation has a Rust implementation; other emitters must

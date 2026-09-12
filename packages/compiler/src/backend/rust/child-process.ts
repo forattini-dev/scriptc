@@ -1,4 +1,4 @@
-import type { IrType } from "../../ir/nodes.js";
+import type { IrType } from "../../ir/ir.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 
 type IrFuncType = Extract<IrType, { kind: "func" }>;

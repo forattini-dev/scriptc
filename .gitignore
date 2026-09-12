@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 # test-fixture packages are TEST DATA, committed on purpose
 !packages/compiler/test/fixtures/bun-island/node_modules/
 !tests/diagnostics/npm-imports/node_modules/
@@ -16,6 +17,14 @@ node_modules/
 !tests/fixtures/gateway-e2e/node_modules/
 !tests/fixtures/node-types/node_modules/
 dist/
+/packages/llvm-darwin-arm64/bin/
+/packages/runtime-darwin-arm64/artifacts/
+/packages/runtime-darwin-arm64/runtime-pack.json
+/packages/runtime-darwin-arm64/.runtime-pack-*
+/packages/llvm-*/bin/
+/packages/runtime-*/artifacts/
+/packages/runtime-*/runtime-pack.json
+/packages/runtime-*/.runtime-pack-*
 !tests/fixtures/fetch/node_modules/eventsource-parser/dist/
 !tests/fixtures/npm/node_modules/*/dist/
 !tests/fixtures/npm/workspace/*/dist/
@@ -39,3 +48,4 @@ tmp-*/
 
 # Scratch space the redcode tooling keeps inside the checkout: worktrees and run state, never sources.
 .red/tmp/
+.env*.local

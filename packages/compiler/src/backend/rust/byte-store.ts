@@ -1,4 +1,4 @@
-import type { IrExpr, IrType } from "../../ir/nodes.js";
+import type { IrExpr, IrType } from "../../ir/ir.js";
 
 /** ToUint8(x & 255) = ToUint8(x) for every number, including NaN and
  * infinities. The byte store already truncates and keeps the low eight bits.

@@ -8,7 +8,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("Rust executables call manifest-bound native value functions", async () => {
+test.each(["dev", "release"] as const)("Rust %s executables call manifest-bound native value functions", async (optimization) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-ffi-scalar-"));
   const nativeSource = join(dir, "native.c");
   const nativeObject = join(dir, "native.o");
@@ -387,7 +387,7 @@ test("Rust executables call manifest-bound native value functions", async () => 
     outDir: dir,
     outPath,
     backend: "rust",
-    optimization: "dev",
+    optimization,
     ffiProfilePath: profilePath,
   });
   expect(

@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/ir.js";
 import { rustByteLocalKey, rustByteProjection, type RustByteReadInput } from "./byte-projections.js";
 import { rustByteReadInputs } from "./byte-read-regions.js";
 

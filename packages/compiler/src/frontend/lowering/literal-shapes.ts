@@ -1,4 +1,4 @@
-import type { IrExpr } from "../../ir/nodes.js";
+import type { IrExpr } from "../../ir/ir.js";
 
 /** Prove absence only on a freshly constructed dynamic object with known
  * own keys. Variables, spreads, computed keys and prototype overrides may

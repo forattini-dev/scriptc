@@ -24,8 +24,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BACKEND_LIB_CALLS } from "../packages/compiler/src/coverage/backend-libcalls.ts";
-import { generateSurfaceManifest } from "../packages/compiler/src/coverage/surface-manifest.ts";
+import { BACKEND_LIB_CALLS } from "../packages/compiler/src/coverage/backend-libcalls.js";
+import { generateSurfaceManifest } from "../packages/compiler/src/coverage/surface-manifest.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const version = JSON.parse(readFileSync(path.join(root, "packages/cli/package.json"), "utf8")).version;

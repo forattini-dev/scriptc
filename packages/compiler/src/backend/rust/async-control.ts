@@ -1,7 +1,7 @@
 import { emitProtectedAsyncResult } from "./async-result.js";
 import { emitAsyncNativeArrayLiteral } from "./async-native-array.js";
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 import { emitAwaitDependency } from "./async-await.js";
 import { asyncTrampolineCall } from "./async-trampoline.js";

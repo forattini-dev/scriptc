@@ -34,12 +34,12 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NODE_COMPAT_MATRIX } from "../packages/compiler/src/compat/node-matrix.ts";
-import { compatTargetList } from "../packages/compiler/src/compat/profile-schema.ts";
+import { NODE_COMPAT_MATRIX } from "../packages/compiler/src/compat/node-matrix.js";
+import { compatTargetList } from "../packages/compiler/src/compat/profile-schema.js";
 import {
   primaryOracleExecutable,
   resolveMatrixExecutable,
-} from "../tests/harness/node-matrix.ts";
+} from "../tests/harness/node-matrix.js";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 

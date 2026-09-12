@@ -55,27 +55,10 @@ import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { provenanceEntryFor, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
-import {
-  ADOPTED_OPTIONS,
-  BUN_MODULE_MEMBER_ALIASES,
-  ambientDtsPath,
-  canonicalBuiltinModule,
-  clearWorkspacePackages,
-  fallbackDtsPath,
-  isJsSourceFileName,
-  isNodeTypesPath,
-  isRelativeSpecifier,
-  isRuntimeSourceFileName,
-  isWorkspacePackageName,
-  JS_ANY_OPERATOR_CODES,
-  JS_RELAXED_TSC_CODES,
-  overridesDtsPath,
-  registerWorkspacePackage,
-  SUPPORTED_NODE_MODULES,
-  isTrapRuntimeModule,
-  tsgoPath,
-  unsupportedModuleFeatureOf,
-  workspacePackageOfPath, KERNEL_MODULES } from "./shared.js";
+import { ADOPTED_OPTIONS, isJsSourceFileName, isRuntimeSourceFileName, JS_ANY_OPERATOR_CODES, JS_RELAXED_TSC_CODES } from "./tsc-codes.js";
+import { BUN_MODULE_MEMBER_ALIASES, canonicalBuiltinModule, SUPPORTED_NODE_MODULES, isTrapRuntimeModule, unsupportedModuleFeatureOf, KERNEL_MODULES } from "./builtin-modules.js";
+import { ambientDtsPath, fallbackDtsPath, isNodeTypesPath, overridesDtsPath, tsgoPath } from "./dts-paths.js";
+import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
 import { trackedFileExists } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
@@ -1657,7 +1640,7 @@ function resolveNpmImport7(
     // resolves and runs it exactly like any installed package, so it IS an
     // npm import; the realpath'd answer escaping node_modules must not
     // refuse the edge. Registered so path-keyed package attribution
-    // (shared.ts) recognizes the package's real files. Anything else
+    // (workspace-registry.ts) recognizes the package's real files. Anything else
     // whose answer left node_modules stays refused.
     if (resolved.workspaceDir === undefined) return null;
     registerWorkspacePackage(resolved.packageName, resolved.workspaceDir);
@@ -2998,19 +2981,25 @@ const nodeBuiltinNames: ReadonlySet<string> = new Set(builtinModules);
  * recognizers, the CJS export-identity analysis, ordered imports,
  * resolution, locations), exported under the names the 5.9.3 program.ts
  * established (the phase-2 port kept every spelling); the world-neutral
- * helpers re-export from shared.ts. */
+ * helpers re-export from their focused modules. */
 
 export {
   ambientDtsPath,
-  builtinDefaultImportModule,
-  canonicalBuiltinModule,
   fallbackDtsPath,
   isNodeTypesPath,
-  npmPackageNameOf,
   overridesDtsPath,
+} from "./dts-paths.js";
+
+export {
+  builtinDefaultImportModule,
+  canonicalBuiltinModule,
   SUPPORTED_BUILTIN_MODULES,
+} from "./builtin-modules.js";
+
+export {
+  npmPackageNameOf,
   workspacePackageOfPath,
-} from "./shared.js";
+} from "./workspace-registry.js";
 
 export {
   requireSpecOf7 as requireSpecOf,

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { nativeTupleElement } from "./native-tuple.js";
 import { nativeRecordCheckSupported } from "./native-record.js";
-import { DYN, F64, STRING, type IrRecordShape, type IrType } from "./nodes.js";
+import { DYN, F64, STRING, type IrRecordShape, type IrType } from "./ir.js";
 const tuple = (types: IrType[]): IrRecordShape => ({ id: "tuple", tuple: true, fields: types.map((type, index) => ({ name: String(index), type })) });
 
 test.each([F64, STRING, DYN])("homogeneous dense scalar tuples have a shared array element: %j", element => {

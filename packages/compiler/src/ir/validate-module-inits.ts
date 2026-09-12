@@ -1,5 +1,5 @@
-import type { IrFunction, IrGlobal, IrType, SrcLoc } from "./nodes.js";
-import { typeEquals, typeKey, VOID } from "./nodes.js";
+import type { IrFunction, IrGlobal, IrType, SrcLoc } from "./ir.js";
+import { typeEquals, typeKey, VOID } from "./ir.js";
 
 /** Evaluation caches are module-owned mutable promise slots. */
 export function validateModuleInitCaches(

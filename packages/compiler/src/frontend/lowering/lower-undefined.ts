@@ -1,4 +1,4 @@
-import { UNDEFINED_T, type IrExpr, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { UNDEFINED_T, type IrExpr, type IrType, type SrcLoc } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** The absent value of an undefined-armed union. This is also a speculative

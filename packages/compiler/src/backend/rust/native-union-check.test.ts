@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { F64, STRING, arrayOf, funcOf, type IrType } from "../../ir/nodes.js";
+import { F64, STRING, arrayOf, funcOf, type IrType } from "../../ir/ir.js";
 import { planNativeUnionVariants } from "./native-union-check.js";
 
 test("native union dispatch refuses arms that need structural disambiguation", () => {

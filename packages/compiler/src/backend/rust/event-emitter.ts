@@ -1,5 +1,5 @@
-import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, typeKey } from "../../ir/nodes.js";
+import type { IrExpr, IrType, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, typeKey } from "../../ir/ir.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 import { RustReadableEmitter, type RustReadableContext } from "./readable.js";
 import { RustWritableEmitter, type RustWritableContext } from "./writable.js";

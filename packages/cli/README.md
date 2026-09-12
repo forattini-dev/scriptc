@@ -1,6 +1,6 @@
 # scriptc
 
-Compile ordinary TypeScript and JavaScript to small, fast native executables or WASI WebAssembly modules — no Node, no V8, no JavaScript engine in the artifact. What compiles behaves byte-for-byte like Node.
+Compile ordinary TypeScript and JavaScript to small, fast native executables or WASI WebAssembly modules — no Node, no V8, no JavaScript engine in the artifact.
 
 ```console
 $ cat fib.ts
@@ -22,7 +22,7 @@ $ scriptc build fib.ts -o fib && ./fib
 $ npm install -g scriptc
 ```
 
-Requires Node.js 24 or newer, Cargo and rustc on PATH. Explicit `--backend c` and `--backend llvm` builds require clang.
+Requires Node.js 24 or newer. The default Rust backend requires Cargo and rustc. Explicit LLVM executable builds use the platform helper and runtime pack where available, plus a linker driver and SDK/sysroot; explicit C and sanitizer builds require a C compiler. Source outputs (`--emit=ir|c|rust|llvm`) require only Node. Native assembly/object output uses the matching LLVM helper.
 
 Rust is the primary and default backend, currently targeting native builds. It emits
 `#![forbid(unsafe_code)]` Rust and invokes `rustc` directly, without translating
@@ -63,6 +63,19 @@ Rust reuses its compiled runtime through Cargo caching. Its whole-program startu
 - `scriptc build <file.ts>` — compile to a native executable or selected target artifact
 - `scriptc run <file.ts>` — compile and run
 - `scriptc coverage <file.ts>` — what compiles statically, and why the rest doesn't
+
+`scriptc build app.ts --emit=ir|c|llvm|asm|obj` selects serialized typed IR,
+readable C, textual LLVM IR, target assembly, or a relocatable program object
+as the one primary artifact. `--emit=exe` is the default. Assembly/object
+emission uses the matching helper on supported macOS, Linux, and Windows hosts
+(and produces WASI artifacts when that target is selected).
+Objects retain undefined `scr_*` runtime references plus the
+`scr_runtime_abi_v1` compatibility marker; they are not library archives.
+External consumption is experimental and requires the exact matching runtime.
+`scriptc build app.ts --print=native-link-info -o app.o` prints the versioned
+JSON target/runtime/link recipe without performing a link.
+`--emit=asm|obj --sanitize` is rejected until ASan pipeline parity is
+available.
 
 For embedder-hosted modules that are not installed npm packages, coverage can
 map an exact bare specifier to a local declaration with repeatable

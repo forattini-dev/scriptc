@@ -1,7 +1,7 @@
 import * as ts from "./ts7/adapter.js";
-import { DYN, type IrType } from "../ir/nodes.js";
+import { DYN, type IrType } from "../ir/ir.js";
 import { isJsSourceFile } from "./program.js";
-import type { TypeMapperCtx } from "./types.js";
+import type { TypeMapperCtx } from "./type-mapper.js";
 
 /** JS object fields initialized with empty arrays can accumulate values.
  * Their inferred never element is inference residue, not a numeric ABI.

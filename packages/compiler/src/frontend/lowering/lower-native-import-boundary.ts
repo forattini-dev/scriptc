@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import type { IrExpr, IrType } from "../../ir/nodes.js";
+import type { IrExpr, IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
 

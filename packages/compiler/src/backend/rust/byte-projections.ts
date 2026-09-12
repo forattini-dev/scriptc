@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction } from "../../ir/ir.js";
 
 export interface RustByteReadInput {
   key: string;

@@ -3,10 +3,10 @@
 import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import { enableCompileCache } from "node:module";
-import { arch } from "node:process";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { LEGACY_C_EXECUTABLE_WARNING, shouldWarnLegacyCExecutable } from "./legacy-c-warning.js";
 import { CLI_OPTIONS, USAGE } from "./usage.js";
 
 // Node 24 can persist V8's compiled module bytecode. scriptc's CLI imports
@@ -55,6 +55,9 @@ async function tryFastPath(): Promise<number | null> {
   const [command, inputArg] = positionals;
   if (
     (command !== "build" && command !== "run") || inputArg === undefined ||
+    (values.emit !== undefined && values.emit !== "exe") ||
+    values.print !== undefined ||
+    values["emit-ir"] ||
     values.lib || values.engine === false || values["from-c"] || values["provenance-sources"] ||
     (values["external-types"] ?? []).length > 0
   ) return null;
@@ -85,14 +88,13 @@ async function tryFastPath(): Promise<number | null> {
   }
 
   let startup: typeof import("@scriptc/compiler/startup-cache");
-  let driver: ReturnType<typeof import("@scriptc/compiler/startup-cache")["resolveCc"]>;
+  let buildPlatform: string;
   try {
     startup = await import("@scriptc/compiler/startup-cache");
-    driver = startup.resolveCc();
+    buildPlatform = startup.configuredTargetPlatform();
   } catch {
     return null;
   }
-  const buildPlatform = startup.targetPlatform(driver);
   if (command === "run" && buildPlatform === "wasi") return null;
   const input = resolve(inputArg);
   // The runtime target joins the cache key exactly as the full CLI
@@ -105,7 +107,7 @@ async function tryFastPath(): Promise<number | null> {
     return null;
   }
   const outDir = values.out ? dirname(resolve(values.out)) : join(dirname(input), ".scriptc");
-  const stem = basename(input).replace(/\.(ts|js|mjs|cjs|c|ll)$/, "");
+  const stem = basename(input).replace(/\.(ts|mts|cts|js|mjs|cjs|c|ll)$/, "");
   const defaultName = buildPlatform === "win32"
     ? `${stem}.exe`
     : buildPlatform === "wasi"
@@ -116,7 +118,25 @@ async function tryFastPath(): Promise<number | null> {
   const ffiBytes = ffiPath === null ? null : await readFile(ffiPath).catch(() => null);
   if (ffiPath !== null && ffiBytes === null) return null;
   const root = await startup.prepareBuildCacheRoot(startup.resolveBuildCacheRoot());
-  const nativeEnvironment = await startup.executableNativeEnvironmentFingerprint().catch(() => null);
+  // This must exactly mirror the ordinary LLVM executable's route in the
+  // full compiler. Otherwise a valid helper/runtime-pack cache entry has a
+  // different target/compiler identity and bootstrap must unnecessarily load
+  // the whole compiler graph to rediscover it.
+  const helperRuntimePackTarget = backend !== "c" && !values.sanitize
+    ? startup.precompiledRuntimePackTarget()
+    : null;
+  const helperObjectRoute = helperRuntimePackTarget !== null;
+  let nativeEnvironment: string | null;
+  try {
+    nativeEnvironment = helperObjectRoute
+      ? await startup.executableLinkerEnvironmentFingerprint(
+        process.env,
+        helperRuntimePackTarget.defaultLinker,
+      )
+      : await startup.executableNativeEnvironmentFingerprint();
+  } catch {
+    nativeEnvironment = null;
+  }
   if (nativeEnvironment === null) return null;
   const hit = await startup.readRoutedExecutableCache(root, {
     entryPath: input,
@@ -129,20 +149,36 @@ async function tryFastPath(): Promise<number | null> {
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
     npmStatic,
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },
-    target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${arch}`,
+    target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}:${
+      helperObjectRoute ? "runtime-pack" : "driver-tu"
+    }`,
     runtimeTarget,
     islandModules,
     islandSourceStore: startup.resolveIslandSourceStore(
       values["island-store"] === "raw" || values["island-store"] === "deflate" ? values["island-store"] : undefined,
     ),
-    compiler: [process.env["SCRIPTC_CC"] ?? "clang"],
+    compiler: [helperObjectRoute
+      ? startup.resolvePlatformLinker(process.env, helperRuntimePackTarget.defaultLinker)
+      : (process.env["SCRIPTC_CC"] ?? "clang")],
     nativeEnvironment,
     nodeVersion: process.version,
   });
   if (hit === null) return null;
+  if (shouldWarnLegacyCExecutable({
+    executable: true,
+    fromC: false,
+    backend,
+    sanitize: values.sanitize,
+  })) {
+    process.stderr.write(LEGACY_C_EXECUTABLE_WARNING);
+  }
   if (hit.native.llvmRefusal !== undefined) {
     process.stderr.write(`scriptc: backend c (llvm refused: ${hit.native.llvmRefusal})\n`);
   }
+  // Source-primary invocations can replace a previously cached executable.
+  // A routed hit restores that executable without loading the full compiler,
+  // so mirror its output-kind cleanup before returning from the fast path.
+  await rm(join(outDir, `${stem}.ir.json`), { force: true });
   if (!values["keep-c"]) await rm(hit.cPath, { force: true });
   if (command === "build") {
     process.stdout.write(`${outPath}\n`);

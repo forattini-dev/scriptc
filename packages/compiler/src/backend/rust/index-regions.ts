@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrLocal, IrStmt } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 import { RustIntegerCallPlan } from "./integer-calls.js";
 import { combineIntegerRanges, integerLiteral, mergeIntegerRanges, type IntegerRange as Interval } from "./integer-ranges.js";

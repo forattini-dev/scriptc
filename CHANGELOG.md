@@ -86,6 +86,17 @@ All notable changes to scriptc will be documented in this file.
 
 - This is a prerelease intended for installation in real projects and Rust-backend compatibility testing. Stable LLVM and C behavior remains available unchanged, and npm installs this line through the `next` dist-tag.
 
+## 0.0.36
+
+### Fixes
+
+- **Library host-callback re-entry now traps deterministically.** Entering an export or library control/registration ABI symbol while a synchronous host callback is active delivers the structured `SC4026` diagnostic to the existing panic sink, attributes the attempted inner symbol, and poisons only that library instance.
+
+### Features
+
+- **macOS arm64 executables use release-built runtime packs.** LLVM-tier builds now emit the program object through the bundled helper and link feature-selected, hashed runtime/vendor artifacts without compiling C on the user's machine. Explicit C, LLVM fallback, and sanitizer builds retain the external C-toolchain path.
+- **Builds can stop at typed IR, readable C, or textual LLVM IR.** `scriptc build --emit=ir|c|llvm` writes one primary source artifact with stable default suffixes and requires only Node—no external compiler, archiver, linker, or executable cache. `--emit=exe` remains the default, and executable builds retain the former additive `--emit-ir` flag for one release with a deprecation warning; library mode keeps its additive `--emit-ir` option.
+
 <!-- release:end -->
 
 ## 0.0.35

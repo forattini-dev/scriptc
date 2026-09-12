@@ -1,5 +1,5 @@
-import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
-import { typeKey } from "../../ir/nodes.js";
+import type { IrExpr, IrType, SrcLoc } from "../../ir/ir.js";
+import { typeKey } from "../../ir/ir.js";
 import type { IrFuncType } from "./model.js";
 import { RustStreamPromiseEmitter } from "./stream-promises.js";
 

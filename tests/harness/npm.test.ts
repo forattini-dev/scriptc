@@ -253,7 +253,25 @@ describe(`npm differential (${cases.length} programs${sanitize ? ", sanitized" :
       const rejection = c.name === "promise-bridge-unhandled" ? "TypeError: dropped"
         : c.name === "commander-calc" && argv.length === 2 && argv[0] === "fail" && argv[1] === "flat tire"
           ? "Error: cannot compute: flat tire" : undefined;
+      // These fixtures intentionally exhaust the loop with parked C fibers.
+      // Pin the existing runtime audit notice, as the orphan-promise test
+      // above does; never normalize arbitrary stderr or Rust audit output.
+      const parkedFibers = sanitize && backend !== "rust"
+        ? new Map([
+            ["abandoned-handles", 1],
+            ["promise-bridge-forever", 1],
+            ["top-level-await-pending-exit-code", 2],
+            ["top-level-await-pending-exit-listener", 2],
+          ]).get(c.name)
+        : undefined;
       for (const stream of ["stdout", "stderr"] as const) {
+        if (stream === "stderr" && parkedFibers !== undefined) {
+          expect(nativeRes.stderr, label).toEqual(Buffer.concat([
+            nodeRes.stderr,
+            Buffer.from(`scriptc RC audit skipped: ${parkedFibers} fiber(s) never resumed\n`),
+          ]));
+          continue;
+        }
         if (stream === "stderr" && c.fatalLink !== undefined) {
           expect(nodeRes.exitCode, label).toBe(1);
           expect(nodeRes.stdout, label).toEqual(Buffer.alloc(0));

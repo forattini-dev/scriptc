@@ -1,7 +1,7 @@
 import * as ts from "../ts7/adapter.js";
 import { isCjsJsFile, pathAliasesProgramModule, resolveImport } from "../program.js";
 import { isIslandModulePath } from "../tiering.js";
-import { JSVAL, type IrType } from "../../ir/nodes.js";
+import { JSVAL, type IrType } from "../../ir/ir.js";
 import { importCallHandleType, type Lowerer } from "./lowerer.js";
 
 /** A literal import whose namespace and evaluation both belong to the

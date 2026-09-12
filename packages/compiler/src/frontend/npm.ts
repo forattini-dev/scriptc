@@ -88,13 +88,14 @@
 import { dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsBunVisibleExportsOf } from "./cjs-bun-exports.js";
+import { packageNameOfSpecifier as packageNameOf } from "./workspace-registry.js";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { trackedDirectoryExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 import { hasEsmSyntax, npmExecutableSource } from "./npm-typescript.js";
 import { activeRuntimeConditions, activeRuntimeTarget } from "../compat/runtime-target.js";
 import { isBunModuleSpecifier, rewriteBunModuleImports } from "./bun-island-rewrite.js";
 import { isNodeModulesPath, resolveEmbedPathAlias, resolveExports, resolvePackageImports } from "./resolve.js";
-import { textAssetExtensionOf, workspacePackageOfPath } from "./shared.js";
+import { textAssetExtensionOf, workspacePackageOfPath } from "./workspace-registry.js";
 
 /** The embedded graph resolves with the ACTIVE RUNTIME TARGET's conditions
  * (node24/node26: node; bun: bun then node; plus --conditions) beside the
@@ -790,12 +791,6 @@ interface PkgJson {
   type?: string;
   exports?: unknown;
   imports?: unknown;
-}
-
-/** Package name from a specifier ("@scope/pkg/sub" → "@scope/pkg"). */
-function packageNameOf(specifier: string): string {
-  const parts = specifier.split("/");
-  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
 }
 
 /** Package name from a PATH into node_modules ("…/node_modules/@s/p/d/x.js"

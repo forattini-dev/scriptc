@@ -1,4 +1,4 @@
-import type { IrModule } from "../../ir/nodes.js";
+import type { IrModule } from "../../ir/ir.js";
 import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 
 export interface RustProgramEntryOptions {

@@ -1,6 +1,6 @@
 import type * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, arrayOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
-import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, arrayOf, isUnitType, typeEquals, typeKey } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/ir.js";
 import { countedFor, varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
 

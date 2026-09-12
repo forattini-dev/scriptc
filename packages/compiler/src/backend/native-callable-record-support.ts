@@ -1,5 +1,5 @@
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { IrExpr, IrModule, IrType, SrcLoc } from "../ir/nodes.js";
+import type { IrExpr, IrModule, IrType, SrcLoc } from "../ir/ir.js";
 import { nativeIndexedRecordValue, nativeRecordCheckSupported } from "../ir/native-record.js";
 
 /** C/LLVM's record builders copy fields. Newly admitted callable record

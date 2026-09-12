@@ -5,9 +5,9 @@ import { emitSharedIteration } from "./shared-iteration.js";
 import { sharedWidthPair } from "./shared-width.js";
 import { sharedDiscriminatedUnion, discriminatedUnionBox } from "./discriminated-records.js";
 import { recordPointerEquality } from "./shared-records.js";
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
 import {
   mangleClassStruct,
   mangleField,

@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { BOOL, DYN, STRING, type IrExpr, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, STRING, type IrExpr, type SrcLoc } from "../../ir/ir.js";
 import { nodeThrowExpr, type Lowerer } from "./lowerer.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
 

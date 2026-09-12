@@ -1,4 +1,4 @@
-import { DYN, type IrExpr, type IrType, typeEquals } from "../../ir/nodes.js";
+import { DYN, type IrExpr, type IrType, typeEquals } from "../../ir/ir.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import type { Lowerer } from "./lowerer.js";
 

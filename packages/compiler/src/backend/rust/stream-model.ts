@@ -1,5 +1,5 @@
-import type { IrType } from "../../ir/nodes.js";
-import { DYN, typeKey, VOID } from "../../ir/nodes.js";
+import type { IrType } from "../../ir/ir.js";
+import { DYN, typeKey, VOID } from "../../ir/ir.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 
 type StreamNode = Record<string, unknown>;

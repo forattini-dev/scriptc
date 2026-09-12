@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { isNodeEsmFile, locOf, orderedImportsOf } from "../program.js";
-import { BOOL, VOID, arrayOf, type IrExpr, type IrFunction, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, VOID, arrayOf, type IrExpr, type IrFunction, type IrStmt, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { type Lowerer, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";

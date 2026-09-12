@@ -1,4 +1,4 @@
-import type { IrStmt } from "../../ir/nodes.js";
+import type { IrStmt } from "../../ir/ir.js";
 import type { RustAsyncControlEmitter } from "./async-control.js";
 
 /** `if` with a suspension in a branch (or loop control under a suspended

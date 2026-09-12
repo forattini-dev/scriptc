@@ -1,5 +1,5 @@
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrModule, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape } from "./model.js";
 
 export interface RustDynamicContext {

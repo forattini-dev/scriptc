@@ -8,7 +8,7 @@ import { recordNewName } from "./shared-records.js";
  * runtime's traced closures (the child-listener pattern). */
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
-import { typeEquals, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { typeEquals, type IrType, type SrcLoc } from "../../ir/ir.js";
 import { unboxEffectDynamic } from "./effect-dynamic.js";
 
 /** A typed value boxed for the kernel. UNION values travel as their ARM: a producer typed by one arm (`Effect.fail(new

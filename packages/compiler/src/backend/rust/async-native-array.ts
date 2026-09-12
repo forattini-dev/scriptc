@@ -1,5 +1,5 @@
 import { nativeDynamicArrayLiteral } from "./native-array-values.js";
-import type { IrExpr, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrType, SrcLoc } from "../../ir/ir.js";
 
 interface AsyncArrayContext {
   line(value: string): void;

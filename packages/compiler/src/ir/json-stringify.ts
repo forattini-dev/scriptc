@@ -1,4 +1,4 @@
-import { isJsonSafeType, typeKey, type IrRecordShape, type IrType, type IrUnionDef } from "./nodes.js";
+import { isJsonSafeType, typeKey, type IrRecordShape, type IrType, type IrUnionDef } from "./ir.js";
 
 /** Encoding may write undefined array slots as null; decoding must still
  * reject null where a string | undefined value is required. */

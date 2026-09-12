@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { IrExpr, IrFunction } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction } from "../../ir/ir.js";
 import { RustIntegerCallPlan } from "./integer-calls.js";
 
 const loc = { file: "numeric-helper.ts", start: 0, end: 1 };

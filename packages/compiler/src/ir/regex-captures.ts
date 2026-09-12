@@ -1,4 +1,4 @@
-import { STRING, UNDEFINED_T, arrayOf, type IrType, type IrUnionDef } from "./nodes.js";
+import { STRING, UNDEFINED_T, arrayOf, type IrType, type IrUnionDef } from "./ir.js";
 
 /** The standard library's string index signature omits absent captures. */
 export function regexCaptureArray(unions: { intern(arms: IrType[]): string }): IrType {

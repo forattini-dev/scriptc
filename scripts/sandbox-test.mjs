@@ -8,9 +8,12 @@ import { pipeline } from "node:stream/promises";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
+  sandboxBootstrapCommand,
   sandboxImageConfig,
   sandboxRunnerConfig,
   sandboxTestWorkerAllocation,
+  sandboxVercelConfig,
+  sandboxVercelEnvironment,
 } from "./sandbox-config.mjs";
 import {
   sandboxHostSchedule,
@@ -47,7 +50,7 @@ const invariantCaseShardedFiles = [
 // They are sanitizer-invariant and use their own shard variable so the
 // independent cases can spread across the once lane's Sandboxes without
 // colliding with corpus case selection.
-const cacheCaseShardedFiles = ["packages/compiler/src/backend/cc.test.ts"];
+const cacheCaseShardedFiles = ["packages/compiler/src/backend/native-toolchain.test.ts"];
 const caseShardedFiles = [
   ...laneCaseShardedFiles,
   ...invariantCaseShardedFiles,
@@ -70,7 +73,7 @@ const invariantRemoteFiles = [
   "packages/compiler/test/ts7/facade.test.ts",
   "packages/compiler/test/ts7/order-parity.test.ts",
   "packages/compiler/test/ts7/parity.test.ts",
-  "packages/compiler/test/ts7/program.test.ts",
+  "packages/compiler/test/ts7/program-adapter.test.ts",
   "packages/compiler/test/ts7/resolver-parity.test.ts",
   // These C runtime units compile with ASan + SCR_RC_AUDIT themselves.
   "packages/runtime/test/array.test.ts",
@@ -182,7 +185,9 @@ Usage:
   pnpm test:sandbox [--lane plain|san|both] [--shards 8] [--remote-only] [--keep]
 
 Environment:
-  SCRIPTC_SANDBOX_IMAGE     Fully qualified VCR image (required; may be in .env.local)
+  VERCEL_OIDC_TOKEN         Preferred project-scoped Sandbox credential
+  VERCEL_TOKEN              Access-token fallback; also set VERCEL_TEAM_ID + VERCEL_PROJECT_ID
+  SCRIPTC_SANDBOX_IMAGE     Optional fully qualified VCR image (default: vercel/sandbox/universal)
   SCRIPTC_SANDBOX_VCPUS     vCPUs per sandbox (default: 8)
   SCRIPTC_SANDBOX_TIMEOUT   sandbox and command timeout (default: 45m)
   SCRIPTC_TEST_WORKERS      Vitest workers per sandbox (default: 4)
@@ -191,7 +196,11 @@ Environment:
   process.exit(0);
 }
 
-const { project, sandboxImage: image, team } = sandboxImageConfig();
+const imageConfig = sandboxImageConfig();
+const { sandboxImage: image } = imageConfig;
+const bootstrapCommand = sandboxBootstrapCommand(imageConfig.custom);
+const vercelConfig = sandboxVercelConfig();
+const vercelProcessEnv = sandboxVercelEnvironment(vercelConfig);
 const {
   vcpus,
   testWorkers,
@@ -266,12 +275,20 @@ function lineWriter(destination, prefix, handleLine) {
 function run(
   command,
   args,
-  { env = {}, exitMarker, idleTimeoutMs, label, quiet = false, timeoutMs } = {},
+  {
+    baseEnv = process.env,
+    env = {},
+    exitMarker,
+    idleTimeoutMs,
+    label,
+    quiet = false,
+    timeoutMs,
+  } = {},
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: root,
-      env: { ...process.env, NO_UPDATE_NOTIFIER: "1", ...env },
+      env: { ...baseEnv, NO_UPDATE_NOTIFIER: "1", ...env },
       stdio: quiet ? "ignore" : ["ignore", "pipe", "pipe"],
     });
     children.add(child);
@@ -352,13 +369,25 @@ function run(
   });
 }
 
-const scopeArgs = ["--scope", team, "--project", project];
+const scopeArgs = vercelConfig.scopeArgs;
 const vercel = ([group, command, ...args], options) =>
-  run("vercel", [group, command, ...scopeArgs, ...args], options);
+  run("vercel", [group, command, ...scopeArgs, ...args], {
+    ...options,
+    baseEnv: vercelProcessEnv,
+  });
 // `vercel sandbox exec` does not propagate the remote process's exit code.
 // Print a per-command nonce after it finishes and enforce that status here.
 const shellQuote = (value) => `'${value.replaceAll("'", `'\"'\"'`)}'`;
-const execIn = async (worker, command, args, env = {}, task = "", wallTimeoutMs = 15 * 60_000) => {
+const execIn = async (
+  worker,
+  command,
+  args,
+  env = {},
+  task = "",
+  wallTimeoutMs = 15 * 60_000,
+  workdir = "/workspace",
+  idleTimeoutMs = 90_000,
+) => {
   const envArgs = Object.entries(env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
   const exitMarker = `__SCRIPTC_REMOTE_EXIT_${randomBytes(12).toString("hex")}__`;
   const statusPath = `/tmp/${exitMarker}.status`;
@@ -373,7 +402,7 @@ const execIn = async (worker, command, args, env = {}, task = "", wallTimeoutMs 
     "--timeout",
     sandboxTimeout,
     "--workdir",
-    "/workspace",
+    workdir,
     ...envArgs,
     worker.name,
     "sh",
@@ -383,7 +412,7 @@ const execIn = async (worker, command, args, env = {}, task = "", wallTimeoutMs 
   try {
     await vercel(commandArgs, {
       exitMarker,
-      idleTimeoutMs: 90_000,
+      idleTimeoutMs,
       label,
       timeoutMs: wallTimeoutMs,
     });
@@ -401,7 +430,7 @@ const execIn = async (worker, command, args, env = {}, task = "", wallTimeoutMs 
         "--timeout",
         "1m",
         "--workdir",
-        "/workspace",
+        workdir,
         worker.name,
         "sh",
         "-c",
@@ -416,6 +445,46 @@ const execIn = async (worker, command, args, env = {}, task = "", wallTimeoutMs 
     );
   }
 };
+
+async function preflight() {
+  const customImage = imageConfig.custom ? "custom VCR image" : "managed fallback image";
+  console.log("Sandbox preflight:");
+  console.log(`  auth:  ${vercelConfig.authSource}`);
+  console.log(`  scope: ${vercelConfig.scopeSource}`);
+  console.log(`  image: ${image} (${customImage})`);
+  console.log(`  shape: ${workers.length} sandboxes, ${vcpus} vCPUs each`);
+
+  try {
+    await run("vercel", ["--version"], {
+      baseEnv: vercelProcessEnv,
+      label: "preflight CLI",
+      timeoutMs: 30_000,
+    });
+  } catch (cause) {
+    throw new Error(
+      "Sandbox preflight could not run the repository's Vercel CLI; run `pnpm install` first",
+      { cause },
+    );
+  }
+
+  try {
+    await vercel(["sandbox", "list", "--limit", "1"], {
+      label: "preflight access",
+      timeoutMs: 60_000,
+    });
+  } catch (cause) {
+    const credentialHint = vercelConfig.oidc
+      ? "Refresh VERCEL_OIDC_TOKEN with `vercel env pull` and verify that it belongs to a Sandbox-enabled project."
+      : vercelConfig.authToken
+        ? "Verify VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID and confirm that project can use Sandbox."
+        : "Run `vercel login` and `vercel link`, or provide VERCEL_OIDC_TOKEN.";
+    throw new Error(
+      `Sandbox preflight could not access the selected Vercel project. ${credentialHint}`,
+      { cause },
+    );
+  }
+  console.log("Sandbox preflight passed.\n");
+}
 
 async function createArchive(path) {
   const git = spawn("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
@@ -476,7 +545,7 @@ async function createWorker(worker) {
     } catch {
       console.warn(`[${worker.label}] create completion was not confirmed; checking the Sandbox...`);
       try {
-        await execIn(worker, "true", [], {}, "create status", 60_000);
+        await execIn(worker, "true", [], {}, "create status", 60_000, "/");
         return;
       } catch (error) {
         if (attempt === 2) throw error;
@@ -507,6 +576,7 @@ async function uploadArchive(worker, archive) {
           {},
           "copy status",
           60_000,
+          "/",
         );
         return;
       } catch (error) {
@@ -573,7 +643,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         ["sandbox", "remove", ...scopeArgs, ...created],
         {
           cwd: root,
-          env: { ...process.env, NO_UPDATE_NOTIFIER: "1" },
+          env: { ...vercelProcessEnv, NO_UPDATE_NOTIFIER: "1" },
           stdio: "inherit",
           timeout: 30_000,
         },
@@ -589,6 +659,7 @@ const suiteStarted = Date.now();
 let failure;
 
 try {
+  await preflight();
   console.log(
     `Running ${lanes.join("+")} corpus lanes in ${workers.length} ${vcpus}-vCPU sandboxes from ${image} (${shardCount} shards/lane).`,
   );
@@ -608,6 +679,17 @@ try {
     );
 
     await allWorkers("Preparing worktree", async (worker) => {
+      if (bootstrapCommand) {
+        await execIn(
+          worker,
+          bootstrapCommand.prepareWorkspace.command,
+          bootstrapCommand.prepareWorkspace.args,
+          {},
+          "workspace",
+          2 * 60_000,
+          bootstrapCommand.prepareWorkspace.workdir,
+        );
+      }
       await execIn(
         worker,
         remoteWorkspaceReset.command,
@@ -624,9 +706,21 @@ try {
         "",
         2 * 60_000,
       );
+      if (bootstrapCommand) {
+        await execIn(
+          worker,
+          bootstrapCommand.install.command,
+          bootstrapCommand.install.args,
+          {},
+          "bootstrap",
+          15 * 60_000,
+          bootstrapCommand.install.workdir,
+          5 * 60_000,
+        );
+      }
       await execIn(worker, "pnpm", ["install", "--frozen-lockfile"], {}, "", 2 * 60_000);
       await execIn(worker, "pnpm", ["build"], {}, "", 2 * 60_000);
-    });
+    }, imageConfig.custom ? workers.length : 8);
 
     await allWorkers("Testing", async (worker) => {
       const sharedTestEnv = {

@@ -1,6 +1,6 @@
 /* The IR rules of closure FAMILIES (generic function values). A family value carries one implementation's captures;
  * a family call names an instantiation every implementation has a compiled body for. */
-import { IrExpr, IrFamily, IrLocal, IrType, SrcLoc, typeEquals } from "./nodes.js";
+import { IrExpr, IrFamily, IrLocal, IrType, SrcLoc, typeEquals } from "./ir.js";
 
 export interface FamilyValidationCtx {
   families: Map<string, IrFamily>;

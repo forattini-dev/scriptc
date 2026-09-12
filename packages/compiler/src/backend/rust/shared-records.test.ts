@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DYN, F64, STRING, VOID, funcOf, type IrModule, type IrRecordShape, type IrStmt } from "../../ir/nodes.js";
+import { DYN, F64, STRING, VOID, funcOf, type IrModule, type IrRecordShape, type IrStmt } from "../../ir/ir.js";
 import { validateModule } from "../../ir/validate.js";
 import { isSharedRecord, planSharedRecords } from "./shared-records.js";
 

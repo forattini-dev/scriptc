@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { DYN, F64, VOID, funcOf, type IrModule, type IrType } from "../ir/nodes.js";
+import { DYN, F64, VOID, funcOf, type IrModule, type IrType } from "../ir/ir.js";
 import { validateModule } from "../ir/validate.js";
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 

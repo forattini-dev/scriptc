@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrLocal } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrLocal } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 
 interface BytesBorrowContext {

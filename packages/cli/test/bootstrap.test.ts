@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { release as osRelease, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
@@ -8,6 +8,8 @@ import { expect, test } from "vitest";
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../../..");
 const bootstrap = join(repoRoot, "packages/cli/dist/bootstrap.js");
+const runtimePackHost = process.platform === "darwin" && process.arch === "arm64" &&
+  Number.parseInt(osRelease().split(".", 1)[0] ?? "", 10) >= 24;
 
 test("bootstrap serves version and help without loading the compiler graph", async () => {
   const preloadDir = await mkdtemp(join(tmpdir(), "scriptc-bootstrap-preload-"));
@@ -31,13 +33,26 @@ test("bootstrap serves version and help without loading the compiler graph", asy
   }
 });
 
-test("explicit LLVM builds use the routed cache and source edits fall through", async () => {
+test.each([
+  { name: "external driver", runtimePack: "0" },
+  ...(runtimePackHost ? [{ name: "runtime pack", runtimePack: "1" }] : []),
+])("explicit LLVM $name builds use the routed cache and source edits fall through", async ({ runtimePack }) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-bootstrap-cache-"));
   const cacheRoot = join(dir, "cache");
   const entry = join(dir, "main.ts");
-  const outPath = join(dir, process.platform === "win32" ? "program.exe" : "program");
+  const outDir = join(dir, ".scriptc");
+  const outPath = join(outDir, process.platform === "win32" ? "main.exe" : "main");
   const preload = join(dir, "reject-full-compiler.mjs");
-  const env = { ...process.env, SCRIPTC_CACHE_DIR: cacheRoot, SCRIPTC_TIMING: "1" };
+  // Whole-executable replay is proven for the external driver and the Apple
+  // system linker. Other runtime-pack targets deliberately cache only the
+  // frontend until their transitive linker inputs have a complete proof.
+  const env = {
+    ...process.env,
+    SCRIPTC_CACHE_DIR: cacheRoot,
+    SCRIPTC_TIMING: "1",
+    SCRIPTC_RUNTIME_PACK: runtimePack,
+    SCRIPTC_LEGACY_C_PIPELINE: "1",
+  };
   const build = (rejectFullCompiler = false): Promise<{ stderr: string }> =>
     execFileAsync(process.execPath, [
       ...(rejectFullCompiler ? ["--import", preload] : []),
@@ -68,6 +83,14 @@ test("explicit LLVM builds use the routed cache and source edits fall through", 
     expect((await build()).stderr).not.toContain("scriptc lowering");
     expect((await execFileAsync(outPath)).stdout).toBe("one\n");
 
+    // A source-primary build may replace the cached executable between exact
+    // invocations. The shipped bootstrap must not leave its stale IR sibling
+    // behind, whether cache validation returns directly or falls through.
+    const staleIr = join(outDir, "main.ir.json");
+    await writeFile(staleIr, "stale source-primary IR\n");
+    await expect(build()).resolves.toBeDefined();
+    await expect(readFile(staleIr)).rejects.toMatchObject({ code: "ENOENT" });
+
     // Route metadata can be evicted independently of the executable payload.
     // One full-compiler fallback must repair it so the following invocation is
     // once again able to run with the package root import forbidden.
@@ -82,11 +105,11 @@ test("explicit LLVM builds use the routed cache and source edits fall through", 
     expect((await build()).stderr).toContain("scriptc lowering");
     expect((await build()).stderr).not.toContain("scriptc lowering");
     expect((await execFileAsync(outPath)).stdout).toBe("two\n");
-    expect(await readFile(join(dir, "main.ll"), "utf8")).toContain("two");
+    expect(await readFile(join(outDir, "main.ll"), "utf8")).toContain("two");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
-}, 120_000);
+}, 300_000);
 
 test.each(["default", "rust"])("installed CLI builds Rust with %s selection", async (selection) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-cli-rust-"));
@@ -116,3 +139,37 @@ registerHooks({ load(url, context, nextLoad) {
     await rm(dir, { recursive: true, force: true });
   }
 }, 120_000);
+test.skipIf(!runtimePackHost)(
+  "bootstrap cache hits retain the legacy C executable warning",
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scriptc-bootstrap-legacy-warning-"));
+    const cacheRoot = join(dir, "cache");
+    const entry = join(dir, "main.ts");
+    const outPath = join(dir, "program");
+    const env = {
+      ...process.env,
+      SCRIPTC_CACHE_DIR: cacheRoot,
+      SCRIPTC_CC: "clang",
+      SCRIPTC_TIMING: "1",
+    };
+    delete env.SCRIPTC_NO_CACHE;
+    const build = () => execFileAsync(
+      process.execPath,
+      [bootstrap, "build", entry, "--backend", "llvm", "-o", outPath],
+      { env, maxBuffer: 4 * 1024 * 1024 },
+    );
+    try {
+      await writeFile(entry, 'console.log("legacy warning");\n');
+      const first = await build();
+      expect(first.stderr).toContain("deprecated legacy C executable path");
+      expect(first.stderr).toContain("scriptc lowering");
+
+      const cached = await build();
+      expect(cached.stderr).toContain("deprecated legacy C executable path");
+      expect(cached.stderr).not.toContain("scriptc lowering");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);

@@ -1,4 +1,4 @@
-import type { IrType } from "../../ir/nodes.js";
+import type { IrType } from "../../ir/ir.js";
 
 type Convert = (type: IrType, value: string, path?: string) => string;
 

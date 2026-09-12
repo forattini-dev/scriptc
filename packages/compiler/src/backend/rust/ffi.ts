@@ -1,4 +1,4 @@
-import { isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrLibCallback, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, type IrExpr, type IrFfiCallbackParam, type IrFfiImport, type IrLibCallback, type IrType, type SrcLoc } from "../../ir/ir.js";
 import type { IrFuncType } from "./model.js";
 
 type IrFfiCall = Extract<IrExpr, { kind: "ffiCall" }>;

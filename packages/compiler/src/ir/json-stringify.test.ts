@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { UnionRegistry } from "../frontend/union-registry.js";
 import { isJsonStringifyType } from "./json-stringify.js";
-import { STRING, UNDEFINED_T, arrayOf, funcOf, isJsonSafeType, type IrType } from "./nodes.js";
+import { STRING, UNDEFINED_T, arrayOf, funcOf, isJsonSafeType, type IrType } from "./ir.js";
 
 test("undefined array slots can encode without widening the JSON decoder domain", () => {
   const unions = new UnionRegistry();

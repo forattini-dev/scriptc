@@ -1,4 +1,4 @@
-import type { IrExpr } from "../../ir/nodes.js";
+import type { IrExpr } from "../../ir/ir.js";
 import type { RustExpressionContext } from "./expressions.js";
 
 type OptionalChainContext = Pick<RustExpressionContext,

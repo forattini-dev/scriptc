@@ -2,7 +2,7 @@ import { countedFor, varRef } from "../../ir/build.js";
 import {
   DYN, F64, STRING, VOID, arrayOf, funcOf, typeKey,
   type IrExpr, type IrLocal, type IrStmt, type IrType, type SrcLoc,
-} from "../../ir/nodes.js";
+} from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** A typed source mapped into unknown[] needs no dynamic source/callback

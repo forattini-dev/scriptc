@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { beforeAll, expect, test } from "vitest";
@@ -15,7 +15,7 @@ beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
   await execFileAsync("clang", [
     "-std=c11", "-O1", "-Wall", "-Wextra",
-    "-fsanitize=address", "-DSCR_RC_AUDIT",
+    "-fsanitize=address", "-DSCR_RC_AUDIT", "-DSCR_SIDX_TEST",
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE"] : []),
     "-o", bin,
     join(testDir, "test_string.c"),
@@ -33,8 +33,10 @@ beforeAll(async () => {
   ]);
 });
 
-// Runs against the committed case file (generated once from Node via
-// gen-string-cases.mjs — see that file to regenerate). Covers UTF-16
+// Runs against the committed case file generated from Node via
+// gen-string-cases.mjs. The test below also verifies the checked-in oracle
+// against the generator, so an accidental stale result cannot be masked by
+// the platform-specific native-runtime allowlist. Covers UTF-16
 // length/charCodeAt/indexOf/includes/startsWith/endsWith/slice/repeat/
 // trim/trimStart/trimEnd/split/padStart/padEnd/charAt plus parseInt over
 // ASCII, Latin-1, CJK, astral, and combining-mark strings, including the
@@ -62,6 +64,23 @@ const LINUX_PARSEINT_ULP: ReadonlyMap<string, string> = new Map([
     "312e34333632383736373934333233363333652b3435",
   ],
 ]);
+
+test("committed string oracle matches Node", async () => {
+  const caseFile = join(testDir, "string-cases.txt");
+  const [{ stdout }, committed] = await Promise.all([
+    execFileAsync(process.execPath, [join(testDir, "gen-string-cases.mjs")], {
+      maxBuffer: 2 * 1024 * 1024,
+    }),
+    readFile(caseFile, "utf8"),
+  ]);
+  // V8's implementation-defined rounding for these two large base-36
+  // integers varies with the platform libm, just like the native lane.
+  // Canonicalize only the two already documented exact alternatives.
+  const canonical = (text: string): string => process.platform !== "linux" ? text : text
+    .replace("parseInt\t39303037313939323534373430393933\t36\t312e39383936393836313136303331383037652b3234", "parseInt\t39303037313939323534373430393933\t36\t312e39383936393836313136303331383132652b3234")
+    .replace("parseInt\t313233343536373839303132333435363738393031323334353637383930\t36\t312e34333632383736373934333233363333652b3435", "parseInt\t313233343536373839303132333435363738393031323334353637383930\t36\t312e343336323837363739343332333633652b3435");
+  expect(canonical(committed)).toBe(canonical(stdout));
+});
 
 test("string methods match Node on committed oracle cases", async () => {
   const r = await execFileAsync(bin, [join(testDir, "string-cases.txt")]).then(

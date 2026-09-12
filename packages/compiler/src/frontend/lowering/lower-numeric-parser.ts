@@ -1,4 +1,4 @@
-import { DYN, F64, STRING, isUnitType, typeKey, type IrExpr, type IrType } from "../../ir/nodes.js";
+import { DYN, F64, STRING, isUnitType, typeKey, type IrExpr, type IrType } from "../../ir/ir.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { droppableStatic } from "./lower-exprs.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";

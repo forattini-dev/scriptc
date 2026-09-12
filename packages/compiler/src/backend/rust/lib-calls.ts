@@ -1,7 +1,7 @@
 import { rustJsString } from "./string-literals.js";
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_ERROR_CLASSES } from "../../ir/ir.js";
 import { emitRustDynamicLibCall } from "./lib-calls-dynamic.js";
 import { emitRustChildProcessCall } from "./child-process.js";
 import { emitRustEffectCall } from "./effect-kernel.js";

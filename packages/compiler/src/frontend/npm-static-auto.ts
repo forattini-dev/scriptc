@@ -4,11 +4,12 @@
  * Library mode additionally diagnoses runtime-only packages lacking types;
  * executable auto retains its existing eligibility/fallback policy. */
 import type { NpmStaticStatus } from "../coverage/report.js";
-import type { SrcLoc } from "../ir/nodes.js";
+import type { SrcLoc } from "../ir/ir.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./program.js";
 import { npmStaticIneligibleReason, npmStaticPackageOfPath } from "./npm-static.js";
 import { resolveBareModule } from "./resolve.js";
-import { isRelativeSpecifier, isRuntimeSourceFileName } from "./shared.js";
+import { isRelativeSpecifier } from "./workspace-registry.js";
+import { isRuntimeSourceFileName } from "./tsc-codes.js";
 
 export function detectAutoPackages(
   load: LoadResult,

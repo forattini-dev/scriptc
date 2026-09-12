@@ -12,8 +12,9 @@
  *   SC2xxx  scriptc type rules (types we cannot compile yet)
  *   SC3xxx  backend/target coverage: the program is valid, but the selected
  *            alternate backend or execution target does not include it
- *            (SC3001 — backend refusal; SC3002 — target refusal, minted
- *            in index.ts; SC3003 — no-engine admission, execution-profile.ts)
+ *            (SC3001 — backend refusal; SC3002 — target refusal;
+ *            SC3003 — no-engine admission; SC3004 — helper code generation;
+ *            SC3005 — helper installation/version failure)
  *   SC4xxx  library-mode/profile refusals (the library-emission mode): profile
  *            malformed (SC4001), export unresolved (SC4002), unmappable
  *            signature (SC4003), async/generator export (SC4004), the
@@ -41,9 +42,11 @@
  *            not fit ±(2^53 − 1), or is negative at a u64 slot), the
  *            host-callback surface (SC4024 — a signature-only ambient
  *            function reference the profile's callbacks section cannot
- *            serve), and the unregistered-callback runtime trap (SC4025 —
- *            a structured trap-teaching code in the funnel-classified
- *            family, not a refusal)
+ *            serve), the unregistered-callback runtime trap (SC4025 — a
+ *            structured trap-teaching code in the funnel-classified family,
+ *            not a refusal), and callback-time library re-entry (SC4026 —
+ *            the distinct detected trap for an attempted ABI entry while a
+ *            host callback handler is active)
  *   SC5xxx  native FFI: malformed manifests (SC5001), a configured
  *            binding that is not an ambient function declaration
  *            (SC5002), and a TypeScript signature that does not match its
@@ -51,7 +54,7 @@
  *            failures while applying a valid profile (SC5004)
  *   SC9xxx  internal compiler errors (still source-anchored)
  */
-import type { SrcLoc } from "../ir/nodes.js";
+import type { SrcLoc } from "../ir/ir.js";
 
 /* Internal prioritization buckets. NEVER rendered to users — user-facing
  * output says only what is and isn't supported (plus hints); scheduling is
@@ -70,6 +73,24 @@ export interface ScrDiagnostic {
    * recognizably the profile's. Only library-mode refusals carry one —
    * the text always arrives prefixed `from the '<profile name>' profile:`. */
   note?: string;
+}
+
+/** SC3002/SC3004/SC3005 — native-helper target, installation, and execution
+ * failures. These are ordinary build diagnostics: a missing optional package
+ * or malformed LLVM input must never surface as an internal compiler error. */
+export function nativeCodegenDiag(
+  code: "SC3002" | "SC3005" | "SC3004",
+  message: string,
+  file: string,
+): ScrDiagnostic {
+  return {
+    code,
+    message,
+    loc: { file, start: 0, end: 0 },
+    ...(code === "SC3005"
+      ? { hint: "reinstall scriptc with optional dependencies enabled for this host" }
+      : {}),
+  };
 }
 
 /* ── SC5xxx: native FFI ───────────────────────────────────────────────── */
@@ -552,7 +573,7 @@ export function intersectionTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnost
  * key-value domains, array and tuple elements, union arms, function
  * parameters/returns, and record members. The container is not the blocker
  * — `detail` (computed by describeComponentBlocker/
- * describeRecordMemberBlocker in frontend/types.ts, which mirror mapType's
+ * describeRecordMemberBlocker in frontend/type-mapper.ts, which mirror mapType's
  * own rules) names the component and the slot it cannot fill. */
 export function componentTypeDiag(typeText: string, detail: string, loc: SrcLoc): ScrDiagnostic {
   return {
@@ -983,6 +1004,10 @@ export const LIB_INBOUND_BYTES_TRAP_CODE = "SC4012";
  *           like SC4012, but the trap site is inside compiled code, so
  *           the funnel assembles it and field 2 names the entry the
  *           host called)
+ *   SC4026  library ABI entry invoked from a host callback ("scriptc:
+ *           library entry ..."): the callback-time guard poisons the
+ *           affected instance and the funnel assembles the attempted inner
+ *           ABI symbol in field 2
  *
  * There is no arithmetic/div-by-zero kind: JS division never traps, so the
  * runtime has no such site. The list here is the compile-time face of the
@@ -997,6 +1022,7 @@ export const LIB_RUNTIME_TRAP_CODES = [
   "SC4018",
   "SC4019",
   "SC4025",
+  "SC4026",
 ] as const;
 
 /** SC4024 — a host-callback reference the profile cannot serve. Library

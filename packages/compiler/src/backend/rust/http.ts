@@ -1,6 +1,6 @@
 import { recordNewName } from "./shared-records.js";
 import { emitRustWebStreamFrom } from "./web-stream-from.js";
-import type { IrType } from "../../ir/nodes.js";
+import type { IrType } from "../../ir/ir.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
 

@@ -283,6 +283,7 @@ test("Rust library init starts byte-identical sessions", async () => {
       "session start counter=0",
       "bump: 1 2",
       "note: 1 2",
+      "indexed: 72100",
       "recall: a,b",
       "",
     ].join("\n");

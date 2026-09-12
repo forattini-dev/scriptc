@@ -18,8 +18,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { provenanceEntryFor } from "./provenance-registry.js";
-import { isRelativeSpecifier, isRuntimeSourceFileName, isTsSourceFileName } from "./shared.js";
+import { isRelativeSpecifier } from "./workspace-registry.js";
+import { isRuntimeSourceFileName, isTsSourceFileName } from "./tsc-codes.js";
 import { trackedAccessibleEntries, trackedDirectoryExists, trackedExists, trackedFileExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { packageNameOfSpecifier } from "./workspace-registry.js";
 
 function isFile(path: string): boolean {
   return trackedFileExists(path);
@@ -514,7 +516,7 @@ export function resolveRelativeAsset(fromFileName: string, specifier: string): s
 export function resolveBareAsset(fromFileName: string, specifier: string): string | null {
   if (isRelativeSpecifier(specifier) || specifier.startsWith("#") || specifier.startsWith("node:")) return null;
   if (NON_ASSET_EXTENSIONS.some((ext) => specifier.toLowerCase().endsWith(ext))) return null;
-  const pkgName = packagePrefixOf(specifier);
+  const pkgName = packageNameOfSpecifier(specifier);
   if (pkgName === null) return null;
   const rest = specifier.slice(pkgName.length).replace(/^\//, "");
   const subpath = rest === "" ? "." : `./${rest}`;
@@ -700,9 +702,9 @@ export function resolveProjectImport(fromFile: string, specifier: string): strin
  * fails does a second identical walk run admitting the JavaScript files
  * themselves. An untyped package with an @types twin therefore answers the
  * @types files; an untyped package without one answers its own .js. */
-type NmPass = "types" | "js";
+type ResolutionPass = "types" | "js";
 
-function extensionsFor(pass: NmPass, flavor: "plain" | "x" | "m" | "c"): string[] {
+function extensionsFor(pass: ResolutionPass, flavor: "plain" | "x" | "m" | "c"): string[] {
   if (pass === "types") {
     switch (flavor) {
       case "m": return [".mts", ".d.mts"];
@@ -724,7 +726,7 @@ function extensionsFor(pass: NmPass, flavor: "plain" | "x" | "m" | "c"): string[
  * extension addition, then directory index. The npm-static runtime pass also
  * accepts an explicit TypeScript source target: package-authored `scriptc`
  * conditions are compiler entries, not files Node must execute directly. */
-function loadTargetInPass(pkgDir: string, target: string, pass: NmPass): string | null {
+function loadTargetInPass(pkgDir: string, target: string, pass: ResolutionPass): string | null {
   const path = join(pkgDir, target);
   if (pass === "types") {
     if (/\.(d\.ts|d\.mts|d\.cts|ts|tsx|mts|cts)$/.test(path) && isFile(path)) return path;
@@ -769,7 +771,7 @@ function loadTargetInPass(pkgDir: string, target: string, pass: NmPass): string 
 
 /** node_modules file-or-directory resolution for a package-internal path (a
  * subpath without exports, the root lookup), for one pass. */
-function loadPathInPass(pkgDir: string, rel: string, pass: NmPass): string | null {
+function loadPathInPass(pkgDir: string, rel: string, pass: ResolutionPass): string | null {
   const base = rel === "." ? pkgDir : join(pkgDir, rel);
   if (rel !== ".") {
     const viaFile = loadTargetInPass(pkgDir, rel, pass);
@@ -816,13 +818,6 @@ export interface BareResolution {
   workspaceDir?: string;
 }
 
-/** Package name prefix of a bare specifier ("@scope/pkg/sub" → "@scope/pkg",
- * "pkg/sub" → "pkg"). */
-function packagePrefixOf(specifier: string): string {
-  const parts = specifier.split("/");
-  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
-}
-
 /** The DefinitelyTyped name mangling: "@scope/pkg" → "scope__pkg". */
 function mangleScopedName(name: string): string {
   return name.startsWith("@") ? name.slice(1).replace("/", "__") : name;
@@ -850,7 +845,7 @@ export function resolveBareModule(
    * --npm-static set (the auto-detection probe); default follows the set. */
   mode?: "js-only",
 ): BareResolution | null {
-  const pkgName = packagePrefixOf(specifier);
+  const pkgName = packageNameOfSpecifier(specifier);
   const rest = specifier.slice(pkgName.length).replace(/^\//, "");
   const subpath = rest === "" ? "." : `./${rest}`;
   // An opted-in --npm-static package resolves to its RUNTIME SOURCE: the js
@@ -859,7 +854,7 @@ export function resolveBareModule(
   const npmStatic = mode === "js-only" || isNpmStaticPackage(pkgName);
   const conditions = npmStatic ? npmStaticExportConditions() : exportConditions();
 
-  const inPackage = (nmPkgDir: string, name: string, pass: NmPass): BareResolution | null => {
+  const inPackage = (nmPkgDir: string, name: string, pass: ResolutionPass): BareResolution | null => {
     // A workspace link: the answer's realpath escaped node_modules, so the
     // package directory is a symlink into the project. Stamp the realpath'd
     // package root so callers can classify (and register) the package.
@@ -912,7 +907,7 @@ export function resolveBareModule(
     return withWorkspace(packageAnswer(answerDir, name, file));
   };
 
-  const passOnce = (pass: NmPass): BareResolution | null => {
+  const passOnce = (pass: ResolutionPass): BareResolution | null => {
     for (let dir = dirname(resolve(fromFile)); ; ) {
       const nm = join(dir, "node_modules");
       if (isDirectory(nm)) {

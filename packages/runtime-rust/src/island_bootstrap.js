@@ -3519,6 +3519,9 @@ function makeStream(env) {
       ReadableStreamDefaultController: g.ReadableStreamDefaultController,
       WritableStreamDefaultWriter: g.WritableStreamDefaultWriter,
     };
+    for (const key of Object.keys(w)) {
+      if (w[key] === undefined) delete w[key];
+    }
     w.default = w;
     return w;
   });

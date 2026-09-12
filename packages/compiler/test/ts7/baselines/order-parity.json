@@ -5518,6 +5518,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2676-record-clone-overrides.ts": {
+   "order": [
+    "<repo>/tests/corpus/2676-record-clone-overrides.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2676-top-level-await-ambiguous/main.ts": {
    "order": [
     "<repo>/tests/corpus/2676-top-level-await-ambiguous/main.ts"
@@ -5541,6 +5547,12 @@
   "<repo>/tests/corpus/2678-date-instances.ts": {
    "order": [
     "<repo>/tests/corpus/2678-date-instances.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2678-large-string-sparse-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/2678-large-string-sparse-index.ts"
    ],
    "diags": []
   },
@@ -5652,27 +5664,34 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2692-inline-record-assert-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/2692-inline-record-assert-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2692-string-accumulation.ts": {
+   "order": [
+    "<repo>/tests/corpus/2692-string-accumulation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2693-math-constants.ts": {
+   "order": [
+    "<repo>/tests/corpus/2693-math-constants.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2700-wasi-core.ts": {
    "order": [
     "<repo>/tests/corpus/2700-wasi-core.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/2820-crypto-sha512-chain.ts": {
+  "<repo>/tests/corpus/2701-import-meta/main.mjs": {
    "order": [
-    "<repo>/tests/corpus/2820-crypto-sha512-chain.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2821-crypto-hmac-chain.ts": {
-   "order": [
-    "<repo>/tests/corpus/2821-crypto-hmac-chain.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts": {
-   "order": [
-    "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts"
+    "<repo>/tests/corpus/2701-import-meta/module with space.mjs",
+    "<repo>/tests/corpus/2701-import-meta/main.mjs"
    ],
    "diags": []
   },
@@ -5694,33 +5713,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/3028-error-optional-message.ts": {
-   "order": [
-    "<repo>/tests/corpus/3028-error-optional-message.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/3029-error-message-coercion.js": {
-   "order": [
-    "<repo>/tests/corpus/3029-error-message-coercion.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/303-break-continue.ts": {
    "order": [
     "<repo>/tests/corpus/303-break-continue.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/3030-error-message-order.js": {
-   "order": [
-    "<repo>/tests/corpus/3030-error-message-order.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/3031-js-var-error-inheritance.js": {
-   "order": [
-    "<repo>/tests/corpus/3031-js-var-error-inheritance.js"
    ],
    "diags": []
   },
@@ -6958,6 +6953,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/dynamic-import/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import/helper.ts",
+    "<repo>/tests/diagnostics/dynamic-import/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/dynamic-representable-types.ts": {
    "order": [
     "<repo>/tests/diagnostics/dynamic-representable-types.ts"
@@ -7228,6 +7230,42 @@
      "hint": "export declarations directly: export function f() {}"
     }
    ]
+  },
+  "<repo>/tests/diagnostics/import-meta-bare.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-bare.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/import-meta-computed.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-computed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/import-meta-destructure.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-destructure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/import-meta-dynamic.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-dynamic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/import-meta-resolve.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-resolve.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/import-meta-write.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-write.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/diagnostics/imports.ts": {
    "order": [
@@ -7586,6 +7624,13 @@
   "<repo>/tests/diagnostics/npm-imports/main.ts": {
    "order": [
     "<repo>/tests/diagnostics/npm-imports/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/ns-import-object/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/ns-import-object/lib.ts",
+    "<repo>/tests/diagnostics/ns-import-object/main.ts"
    ],
    "diags": []
   },
@@ -8363,6 +8408,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2820-crypto-sha512-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/2820-crypto-sha512-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2821-crypto-hmac-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/2821-crypto-hmac-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts": {
+   "order": [
+    "<repo>/tests/corpus/2822-crypto-timing-safe-equal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3028-error-optional-message.ts": {
+   "order": [
+    "<repo>/tests/corpus/3028-error-optional-message.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3029-error-message-coercion.js": {
+   "order": [
+    "<repo>/tests/corpus/3029-error-message-coercion.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3030-error-message-order.js": {
+   "order": [
+    "<repo>/tests/corpus/3030-error-message-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3031-js-var-error-inheritance.js": {
+   "order": [
+    "<repo>/tests/corpus/3031-js-var-error-inheritance.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3034-web-stream-constructor.ts": {
    "order": [
     "<repo>/tests/corpus/3034-web-stream-constructor.ts"
@@ -8888,18 +8975,6 @@
   "<repo>/tests/corpus/3118-native-int32-double-bits.ts": {
    "order": [
     "<repo>/tests/corpus/3118-native-int32-double-bits.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2676-record-clone-overrides.ts": {
-   "order": [
-    "<repo>/tests/corpus/2676-record-clone-overrides.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2692-inline-record-assert-index.ts": {
-   "order": [
-    "<repo>/tests/corpus/2692-inline-record-assert-index.ts"
    ],
    "diags": []
   },
@@ -11472,6 +11547,13 @@
   "<repo>/tests/corpus/3169-native-import-shared-views/main.ts": {
    "order": [
     "<repo>/tests/corpus/3169-native-import-shared-views/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3170-import-meta-dynamic/main.mjs": {
+   "order": [
+    "<repo>/tests/corpus/3170-import-meta-dynamic/module with space.mjs",
+    "<repo>/tests/corpus/3170-import-meta-dynamic/main.mjs"
    ],
    "diags": []
   }

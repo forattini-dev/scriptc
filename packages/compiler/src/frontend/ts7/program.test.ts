@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { API } from "typescript/unstable/sync";
-import { Ts7Host } from "./program.js";
+import { Ts7Host } from "./program-adapter.js";
 
 test("disposing a shared-host program unloads its project and preserves live siblings", () => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-ts7-lifecycle-"));

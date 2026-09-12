@@ -1,6 +1,6 @@
 import type { RustLibCallContext } from "./lib-calls.js";
 import type { RustExpressionContext } from "./expression-context.js";
-import type { IrExpr } from "../../ir/nodes.js";
+import type { IrExpr } from "../../ir/ir.js";
 
 type DynamicContext = Pick<RustLibCallContext, "dynTypeName" | "hasErrorClassRoots" | "errorValueName">;
 

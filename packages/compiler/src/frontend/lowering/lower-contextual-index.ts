@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { UNDEFINED_T, type IrType } from "../../ir/nodes.js";
+import { UNDEFINED_T, type IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** Optional destinations must observe a missing array element before any

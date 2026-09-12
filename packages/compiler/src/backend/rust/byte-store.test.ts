@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { IrExpr, IrModule } from "../../ir/nodes.js";
+import type { IrExpr, IrModule } from "../../ir/ir.js";
 import { validateModule } from "../../ir/validate.js";
 import { emitRustModule } from "./emitter.js";
 const loc = { file: "byte-store.ts", start: 0, end: 1 };

@@ -1,4 +1,4 @@
-import type { IrLocal, IrParam, IrStmt, IrType, SrcLoc } from "./nodes.js";
+import type { IrLocal, IrParam, IrStmt, IrType, SrcLoc } from "./ir.js";
 
 export interface IrFunction {
   /** Original TS name (mangling is a backend concern). Lifted lambdas get

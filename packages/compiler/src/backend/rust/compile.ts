@@ -63,6 +63,9 @@ async function compileRustUnbounded(options: RustCompileOptions): Promise<void> 
   await mkdir(dirname(options.outPath), { recursive: true });
   const rustcArgs = [
     ...rustcBaseArgs(options.sourcePath, context, options.optimization),
+    // Optimize across the generated program and runtime in release executables.
+    // Keep library objects available for the separate native localization pass.
+    ...(options.optimization === "dev" ? [] : ["-C", "lto=fat"]),
     // The runtime rlib carries std's debug sections; without stripping they
     // dominate a small executable. Library archives keep their symbols for
     // the nm/ld localization pass, so this applies to executables only.
@@ -187,7 +190,7 @@ async function prepareRustBuild(
     "--manifest-path", manifestPath,
     "--target-dir", targetDir,
     "--locked",
-    "--offline",
+    // Let Cargo populate cold caches and honor its explicit offline configuration.
     "--message-format=json-render-diagnostics",
     "--no-default-features",
     ...(runtimeFeatures.length === 0 ? [] : ["--features", runtimeFeatures.join(",")]),

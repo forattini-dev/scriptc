@@ -4,9 +4,9 @@ Install the CLI from npm and compile your first binary in a couple of minutes.
 
 ## Prerequisites
 
-- **Cargo and rustc** — Rust is the primary and default native backend.
-- **Node ≥ 24** — to run the compiler. The binaries it produces need no Node at all.
-- **clang** — required when explicitly selecting the C/LLVM backends; see [platform support](/platforms).
+- **Node ≥ 24** — to run the compiler. Generated executables need no Node.
+- **Cargo and rustc** — for the default Rust native backend.
+- **Native tools** — explicit C/LLVM builds use the compiler or helper/linker described in [platform support](/platforms). Source outputs require only Node.
 
 ## Install
 
@@ -87,6 +87,7 @@ The package's JS is embedded into the binary at build time — the executable ne
 
 ## Next steps
 
-- [CLI Reference](/cli) — every command and flag, including `--emit-ir`, `--backend llvm`, and `--sanitize`.
+- [CLI Reference](/cli) — every command and flag, including `--emit`, `--backend llvm`, and `--sanitize`.
+- [Native Program Objects](/native-objects) — consume `app.o` from an external C or linker build.
 - [Platform Support](/platforms) — cross-compiling to Linux and Windows with zig.
 - [Limitations](/limitations) — what doesn't compile yet.

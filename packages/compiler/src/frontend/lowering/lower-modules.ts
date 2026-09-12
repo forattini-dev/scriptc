@@ -10,13 +10,14 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isIslandModulePath } from "../tiering.js";
-import { isRelativeSpecifier, isRuntimeSourceFileName, isKernelModule } from "../shared.js"; import { kernelServiceIdOf } from "../kernel.js";
+import { isRelativeSpecifier } from "../workspace-registry.js";
+import { isRuntimeSourceFileName } from "../tsc-codes.js";
+import { isKernelModule } from "../builtin-modules.js"; import { kernelServiceIdOf } from "../kernel.js";
 import { resolveBareAsset, resolveRelativeAsset } from "../resolve.js";
 import { trackedReadFile, trackedReadFileBytes } from "../input-tracker.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
-import type { CycleEdge } from "../program.js";
+import { type CycleEdge, canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsJsFile, isJsSourceFile, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, pathAliasesProgramModule, requireSpecOf, resolveImport, resolveNpmImport } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
-import { DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
+import { DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/ir.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, importCallHandleType, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, textCodecBindingDecl } from "./lower-builtins.js";
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishGenericBindingUnitOf } from "./lower-calls.js";
@@ -25,9 +26,8 @@ import { streamClassAliasDecl } from "./lower-stream.js";
 import { stdlibGlobalAliasDecl } from "./surfaces.js";
 import { collectNamespaceStmt, nsAliasVarDeclOf, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
 import { collectExpandoMembers } from "./lower-expando.js";
-import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
-import type { ClassInfo } from "./lower-classes.js";
-import { decoratorNodesOf, probeExactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
+import { isUnitOnlyTsType, unitOnlyUnion } from "../type-mapper.js";
+import { type ClassInfo, decoratorNodesOf, probeExactInstanceClassOf, genericIfaceBindingKeepsClass, guaranteedDecorationThrow } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { esbuildOnceAssignedClassExpression } from "./esbuild-once.js";
 
@@ -44,20 +44,20 @@ export interface FileParts {
    * postorder, entry last), computed by preflight. Single-file programs
    * (tests, coverage on broken files) may arrive with an empty order — fall
    * back to the entry alone. */
-  export function splitFiles(L: Lowerer): FileParts[] {
-    const files = (L.moduleOrder.length > 0 ? L.moduleOrder : [L.entry])
+  export function splitFiles(lowerer: Lowerer): FileParts[] {
+    const files = (lowerer.moduleOrder.length > 0 ? lowerer.moduleOrder : [lowerer.entry])
       // Island modules (--island-module) embed as engine source instead.
-      .filter((sf) => sf === L.entry || !isIslandModulePath(sf.fileName));
+      .filter((sf) => sf === lowerer.entry || !isIslandModulePath(sf.fileName));
     return files.map((sf) => {
       const fp: FileParts = { sf, fnDecls: [], classDecls: [], topStmts: [] };
       for (const stmt of sf.statements) {
         if (ts.isFunctionDeclaration(stmt)) fp.fnDecls.push(stmt);
-        else if (ts.isClassDeclaration(stmt)) { if (L.dynamic || kernelServiceIdOf(L.checker, stmt) === null) fp.classDecls.push(stmt); } // a kernel service key class is a value, not a class
+        else if (ts.isClassDeclaration(stmt)) { if (lowerer.dynamic || kernelServiceIdOf(lowerer.checker, stmt) === null) fp.classDecls.push(stmt); } // a kernel service key class is a value, not a class
         // Namespaces: ambient/type-only ones are zero-runtime and skip;
         // instantiated bodies FLATTEN into this file's parts (functions/
         // classes hoist under namespace-qualified names, statements join
         // the init body in source order) — lower-namespaces.ts.
-        else if (ts.isModuleDeclaration(stmt)) collectNamespaceStmt(L, stmt, fp);
+        else if (ts.isModuleDeclaration(stmt)) collectNamespaceStmt(lowerer, stmt, fp);
         else if (
           ts.isInterfaceDeclaration(stmt) ||
           ts.isTypeAliasDeclaration(stmt) ||
@@ -194,33 +194,33 @@ export interface FileParts {
    * cross-module references fall out for free. Runs in both passes —
    * signatures are cheap and calls resolve against them; only BODY lowering
    * is reachability-gated. */
-  export function collectProgram(L: Lowerer, parts: FileParts[]): void {
-    L.collecting = true;
+  export function collectProgram(lowerer: Lowerer, parts: FileParts[]): void {
+    lowerer.collecting = true;
     try {
-      for (const fp of parts) for (const decl of fp.classDecls) L.collectClassShape(decl);
-      for (const fp of parts) for (const decl of fp.fnDecls) L.collectSignature(decl);
+      for (const fp of parts) for (const decl of fp.classDecls) lowerer.collectClassShape(decl);
+      for (const fp of parts) for (const decl of fp.fnDecls) lowerer.collectSignature(decl);
     } finally {
-      L.collecting = false;
+      lowerer.collecting = false;
     }
     // Globals are top-level (always reachable), so their collection reports
     // eagerly — including deferred-class flushes their types trigger. The
     // coverage remainder still needs the registrations but the emit pass
     // already reported the diagnostics; discard the duplicates.
-    if (L.remainder) {
-      L.diagSink = [];
+    if (lowerer.remainder) {
+      lowerer.diagSink = [];
       try {
-        for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
-        L.collectNpmImports(parts);
-        L.collectJsonImports(parts);
-        L.collectAssetImports(parts);
+        for (const fp of parts) lowerer.collectGlobals(fp.sf, fp.topStmts);
+        lowerer.collectNpmImports(parts);
+        lowerer.collectJsonImports(parts);
+        lowerer.collectAssetImports(parts);
       } finally {
-        L.diagSink = null;
+        lowerer.diagSink = null;
       }
     } else {
-      for (const fp of parts) L.collectGlobals(fp.sf, fp.topStmts);
-      L.collectNpmImports(parts);
-      L.collectJsonImports(parts);
-      L.collectAssetImports(parts);
+      for (const fp of parts) lowerer.collectGlobals(fp.sf, fp.topStmts);
+      lowerer.collectNpmImports(parts);
+      lowerer.collectJsonImports(parts);
+      lowerer.collectAssetImports(parts);
     }
   }
 
@@ -237,14 +237,14 @@ export interface FileParts {
    * builds here too; its failures are ordinary diagnostics at the import
    * site. Type-only imports are free either way: the .d.ts is a type
    * surface, not code. */
-  export function collectNpmImports(L: Lowerer, parts: FileParts[]): void {
-    const builder = L.dynamic ? new NpmGraphBuilder() : null;
+  export function collectNpmImports(lowerer: Lowerer, parts: FileParts[]): void {
+    const builder = lowerer.dynamic ? new NpmGraphBuilder() : null;
     for (const fp of parts) {
       // Program modules classified ISLAND that this file imports: their
       // edges take the npm path below (the module's own source embeds,
       // the bindings are engine handles).
       const islandDeps = new Map<ts.Statement, ts.SourceFile>();
-      for (const { stmt, dep } of orderedImportsOf(L.program, fp.sf)) {
+      for (const { stmt, dep } of orderedImportsOf(lowerer.program, fp.sf)) {
         if (dep !== null && dep !== fp.sf && isIslandModulePath(dep.fileName)) islandDeps.set(stmt, dep);
       }
       for (const stmt of fp.sf.statements) {
@@ -293,7 +293,7 @@ export interface FileParts {
         // selects its package), the declaration mapping promises no npm or
         // island runtime implementation; the preflight/import-use SC1010
         // fences are the whole story.
-        if (L.externalTypes.has(spec)) continue;
+        if (lowerer.externalTypes.has(spec)) continue;
         const islandDep = islandDeps.get(stmt);
         const npm = islandDep !== undefined ? null : resolveNpmImport(fp.sf.fileName, spec);
         // --npm-static: an opted-in package that made it through preflight
@@ -305,7 +305,7 @@ export interface FileParts {
           npm !== null &&
           isNpmStaticPackage(npm.packageName) &&
           isRuntimeSourceFileName(npm.typesFile) &&
-          L.program.getSourceFile(npm.typesFile) !== undefined
+          lowerer.program.getSourceFile(npm.typesFile) !== undefined
         ) {
           continue;
         }
@@ -334,7 +334,7 @@ export interface FileParts {
         // link — nothing to embed, no island requirement, in EITHER mode.
         if (npm !== null && probeNodeImportRefusal(fp.sf.fileName, spec) !== null) continue;
         if (!builder) { // a kernel module (effect) is served natively (lower-effect.ts); any other package needs the engine
-          if (!isKernelModule(spec)) L.pushDiag(requiresDynamicImportDiag(npm?.packageName ?? relPkg ?? spec, locOf(stmt)));
+          if (!isKernelModule(spec)) lowerer.pushDiag(requiresDynamicImportDiag(npm?.packageName ?? relPkg ?? spec, locOf(stmt)));
           continue;
         }
         const before = builder.errors.length;
@@ -344,12 +344,12 @@ export interface FileParts {
             ? (builder.addImport(fp.sf.fileName, spec), builder.entryOf(fp.sf.fileName, spec))
             : builder.addFileImport(fp.sf.fileName, spec);
         for (const err of builder.errors.slice(before)) {
-          L.pushDiag(npmEmbedFailedDiag(err.message, locOf(stmt)));
+          lowerer.pushDiag(npmEmbedFailedDiag(err.message, locOf(stmt)));
         }
         if (entryKey === null) continue; // resolution failed — reported above
         const loc = locOf(stmt);
-        const byStmt = L.npmInitActions.get(fp.sf) ?? new Map<ts.Statement, IrStmt[]>();
-        L.npmInitActions.set(fp.sf, byStmt);
+        const byStmt = lowerer.npmInitActions.get(fp.sf) ?? new Map<ts.Statement, IrStmt[]>();
+        lowerer.npmInitActions.set(fp.sf, byStmt);
         const actions = byStmt.get(stmt) ?? [];
         byStmt.set(stmt, actions);
         const importExpr = (exportName: string): IrExpr => ({
@@ -368,34 +368,34 @@ export interface FileParts {
           loc,
         });
         const bindSymbol = (symbol: ts.Symbol, name: string, exportName: string): void => {
-          let g = L.globalsBySymbol.get(symbol);
+          let g = lowerer.globalsBySymbol.get(symbol);
           if (!g) {
             g = {
-              id: `%g.npm.${L.globalsList.length}`,
+              id: `%g.npm.${lowerer.globalsList.length}`,
               name,
               type: JSVAL,
               mutable: false,
             };
-            L.globalsBySymbol.set(symbol, g);
-            L.globalsList.push(g);
+            lowerer.globalsBySymbol.set(symbol, g);
+            lowerer.globalsList.push(g);
           }
           actions.push({ kind: "assign", localId: g.id, value: importExpr(exportName), loc });
         };
         const bind = (nameNode: ts.Identifier | ts.StringLiteral, exportName: string): void => {
-          let symbol = L.checker.getSymbolAtLocation(nameNode);
+          let symbol = lowerer.checker.getSymbolAtLocation(nameNode);
           if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
-            symbol = L.checker.getAliasedSymbol(symbol);
+            symbol = lowerer.checker.getAliasedSymbol(symbol);
           }
           if (!symbol) return;
           bindSymbol(symbol, nameNode.text, exportName);
         };
         if (exportStarIsland) {
-          const exportsOf = L.checker.getSymbolAtLocation(exportStarIsland)?.getExports();
+          const exportsOf = lowerer.checker.getSymbolAtLocation(exportStarIsland)?.getExports();
           for (const [key, exportSym] of exportsOf ?? []) {
             const name = String(key);
             if (name === "default") continue; // `export *` never forwards default
             let target = exportSym;
-            if (target.flags & ts.SymbolFlags.Alias) target = L.checker.getAliasedSymbol(target);
+            if (target.flags & ts.SymbolFlags.Alias) target = lowerer.checker.getAliasedSymbol(target);
             if (!(target.flags & ts.SymbolFlags.Value)) continue; // type-only export
             bindSymbol(target, name, name);
           }
@@ -427,19 +427,19 @@ export interface FileParts {
       }
     }
     if (builder) {
-      for (const fp of parts) collectDynamicImports(L, builder, fp.sf);
-      for (const fp of parts) collectCreateRequires(L, builder, fp.sf);
+      for (const fp of parts) collectDynamicImports(lowerer, builder, fp.sf);
+      for (const fp of parts) collectCreateRequires(lowerer, builder, fp.sf);
       const graph = builder.finish();
       if (graph.modules.length > 0) {
         const bunRuntimeModules = graph.lazyTraps.filter((t) => t.bunTrap).map((t) => t.specifier).sort();
-        L.npmEmbedded = {
+        lowerer.npmEmbedded = {
           modules: graph.modules,
           edges: graph.edges,
           ...(bunRuntimeModules.length > 0 ? { bunRuntimeModules } : {}),
         };
       }
-      if (graph.builtins.length > 0) L.npmBuiltins = graph.builtins;
-      if (graph.lazyTraps.length > 0) L.npmLazyTraps = graph.lazyTraps;
+      if (graph.builtins.length > 0) lowerer.npmBuiltins = graph.builtins;
+      if (graph.lazyTraps.length > 0) lowerer.npmLazyTraps = graph.lazyTraps;
     }
   }
 
@@ -454,7 +454,7 @@ export interface FileParts {
    * specifiers are skipped — the lowering owns that fence (the module
    * graph is a build-time artifact; there is nothing to embed for a
    * runtime-computed name). */
-  function collectDynamicImports(L: Lowerer, builder: NpmGraphBuilder, sf: ts.SourceFile): void {
+  function collectDynamicImports(lowerer: Lowerer, builder: NpmGraphBuilder, sf: ts.SourceFile): void {
     const visit = (node: ts.Node): void => {
       if (
         ts.isCallExpression(node) &&
@@ -464,12 +464,12 @@ export interface FileParts {
         ts.isStringLiteralLike(node.arguments[0])
       ) {
         const spec = node.arguments[0].text;
-        if (L.externalTypes.has(spec)) {
+        if (lowerer.externalTypes.has(spec)) {
           ts.forEachChild(node, visit);
           return;
         }
         const mapKey = `${sf.fileName}\u0000${spec}`;
-        if (!L.dynImports.has(mapKey)) {
+        if (!lowerer.dynImports.has(mapKey)) {
           // The program's OWN modules first, by the checker's resolution
           // (tsc already resolved "./helper.js" to helper.ts): a compiled
           // module has no runtime namespace object — the per-site fence
@@ -481,10 +481,10 @@ export interface FileParts {
           // static resolution preflight already proved); a compiled module
           // reached through the alias is a program-module import() like a
           // relative one.
-          const modSym = L.checker.getSymbolAtLocation(node.arguments[0]);
+          const modSym = lowerer.checker.getSymbolAtLocation(node.arguments[0]);
           const ownModuleFile = modSym === undefined
             ? undefined
-            : L.checker.declarationsOf(modSym).find(
+            : lowerer.checker.declarationsOf(modSym).find(
               (d): d is ts.SourceFile => ts.isSourceFile(d) && !d.isDeclarationFile,
             );
           const ownModule = ownModuleFile !== undefined;
@@ -506,19 +506,19 @@ export interface FileParts {
             ? ({ kind: "module", key: islandOwn } as const)
             : ownModule
             ? ({ kind: "program-module" } as const)
-            : pathAliasesProgramModule(L.program, spec) !== null
+            : pathAliasesProgramModule(lowerer.program, spec) !== null
               ? ({ kind: "program-module-aliased", from: spec } as const)
               : builder.addDynamicImport(sf.fileName, spec);
-          L.dynImports.set(mapKey, res);
+          lowerer.dynImports.set(mapKey, res);
           if (res.kind === "unsupported-builtin") {
-            L.pushDiag(
+            lowerer.pushDiag(
               npmEmbedFailedDiag(
                 `'${spec}' is a Node builtin the island does not provide a shim for`,
                 locOf(node),
               ),
             );
           } else if (res.kind === "unresolved") {
-            L.pushDiag(npmEmbedFailedDiag(res.message, locOf(node)));
+            lowerer.pushDiag(npmEmbedFailedDiag(res.message, locOf(node)));
           }
         }
       }
@@ -536,10 +536,10 @@ export interface FileParts {
    * are the lowering's own arms — only resolvable installed packages
    * register here; resolution failures are diagnostics at the call
    * expression, exactly like static npm imports at their statements. */
-  function collectCreateRequires(L: Lowerer, builder: NpmGraphBuilder, sf: ts.SourceFile): void {
+  function collectCreateRequires(lowerer: Lowerer, builder: NpmGraphBuilder, sf: ts.SourceFile): void {
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
-        const cr = createRequireSpecOf(L, node);
+        const cr = createRequireSpecOf(lowerer, node);
         const spec = cr?.spec ?? null;
         if (
           cr !== null &&
@@ -554,13 +554,13 @@ export interface FileParts {
             ? spec.split("/").slice(0, 2).join("/")
             : spec.split("/")[0]!;
           const mapKey = `${cr.baseFile.fileName}\u0000${spec}`;
-          if (!L.createRequireImports.has(mapKey) && !isNpmStaticPackage(pkgName)) {
+          if (!lowerer.createRequireImports.has(mapKey) && !isNpmStaticPackage(pkgName)) {
             const before = builder.errors.length;
             const entryKey = builder.addRequire(cr.baseFile.fileName, spec);
             for (const err of builder.errors.slice(before)) {
-              L.pushDiag(npmEmbedFailedDiag(err.message, locOf(node)));
+              lowerer.pushDiag(npmEmbedFailedDiag(err.message, locOf(node)));
             }
-            L.createRequireImports.set(
+            lowerer.createRequireImports.set(
               mapKey,
               entryKey === null
                 ? ""
@@ -634,7 +634,7 @@ export interface FileParts {
    * checker type is NOT string fences (the ambient said something neither
    * loader can serve). Named/namespace bindings kept their preflight
    * fences. */
-  export function collectAssetImports(L: Lowerer, parts: FileParts[]): void {
+  export function collectAssetImports(lowerer: Lowerer, parts: FileParts[]): void {
     const byDocument = new Map<string, IrGlobal>();
     for (const fp of parts) {
       for (const stmt of fp.sf.statements) {
@@ -644,23 +644,23 @@ export interface FileParts {
         const spec = stmt.moduleSpecifier.text;
         const assetPath = resolveRelativeAsset(fp.sf.fileName, spec) ?? resolveBareAsset(fp.sf.fileName, spec);
         if (assetPath === null) continue;
-        const nameSym = L.checker.getSymbolAtLocation(clause.name);
+        const nameSym = lowerer.checker.getSymbolAtLocation(clause.name);
         if (!nameSym) continue;
-        const target = nameSym.flags & ts.SymbolFlags.Alias ? L.checker.getAliasedSymbol(nameSym) : null;
-        const tsType = L.typeOf(clause.name);
-        const mapped = L.mapTypeOf(tsType);
+        const target = nameSym.flags & ts.SymbolFlags.Alias ? lowerer.checker.getAliasedSymbol(nameSym) : null;
+        const tsType = lowerer.typeOf(clause.name);
+        const mapped = lowerer.mapTypeOf(tsType);
         // The runtime value IS a string (the path or the content) — a
         // jsval-mapped ambient (`any` from a missing declaration) accepts
         // it too; only an ambient that CLAIMS a non-string shape fences
         // (that claim is the project's own lie about the loader).
         if (!mapped || (mapped.kind !== "string" && mapped.kind !== "jsval")) {
           if (process.env["SCRIPTC_TRACE_FENCE"]) {
-            process.stderr.write(`[asset] ${spec} | tsType=${L.checker.typeToString(tsType).slice(0, 80)} | mapped=${mapped ? mapped.kind : "null"}\n`);
+            process.stderr.write(`[asset] ${spec} | tsType=${lowerer.checker.typeToString(tsType).slice(0, 80)} | mapped=${mapped ? mapped.kind : "null"}\n`);
           }
           // badType diagnoses and throws PoisonError; the poison is this
           // binding's alone — the next asset import still collects.
           try {
-            L.badType(clause.name, tsType);
+            lowerer.badType(clause.name, tsType);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
           }
@@ -673,33 +673,33 @@ export interface FileParts {
         // Bun's FILE loader (a path).
         const attribute = attributeValueOf(stmt);
         if (attribute !== null && attribute !== "text" && attribute !== "file") {
-          L.unsupported("SC1090", clause.name, `the '${spec}' import with type attribute '${attribute}' (only 'type: "text"' and 'type: "file"' serve assets)`);
+          lowerer.unsupported("SC1090", clause.name, `the '${spec}' import with type attribute '${attribute}' (only 'type: "text"' and 'type: "file"' serve assets)`);
           continue;
         }
         const isText = attribute === "text" || (attribute === null && assetPath.toLowerCase().endsWith(".txt"));
         const content = isText ? trackedReadFile(assetPath) : trackedReadFileBytes(assetPath);
         if (content === null) {
-          L.unsupported("SC1090", clause.name, `the '${spec}' asset file (readable at check time, unreadable at lowering — the asset went missing)`);
+          lowerer.unsupported("SC1090", clause.name, `the '${spec}' asset file (readable at check time, unreadable at lowering — the asset went missing)`);
           continue;
         }
-        let g = (target !== null ? L.globalsBySymbol.get(target) : undefined) ?? byDocument.get(assetPath);
+        let g = (target !== null ? lowerer.globalsBySymbol.get(target) : undefined) ?? byDocument.get(assetPath);
         if (!g) {
           g = {
-            id: `%g.asset.${L.globalsList.length}`,
+            id: `%g.asset.${lowerer.globalsList.length}`,
             name: clause.name.text,
             type: STRING,
             mutable: false,
           };
           byDocument.set(assetPath, g);
-          L.globalsList.push(g);
+          lowerer.globalsList.push(g);
         }
-        if (target !== null) L.globalsBySymbol.set(target, g);
+        if (target !== null) lowerer.globalsBySymbol.set(target, g);
         // The BINDING's own symbol too: an ambient-typed default import has
         // no program module to alias onto, so reads must find the global
         // through this symbol directly.
-        L.globalsBySymbol.set(nameSym, g);
-        const actions = L.jsonInitActions.get(fp.sf) ?? [];
-        L.jsonInitActions.set(fp.sf, actions);
+        lowerer.globalsBySymbol.set(nameSym, g);
+        const actions = lowerer.jsonInitActions.get(fp.sf) ?? [];
+        lowerer.jsonInitActions.set(fp.sf, actions);
         const value: IrExpr = isText
           ? { kind: "strLit", value: content as string, type: STRING, loc: locOf(clause.name) }
           : {
@@ -736,7 +736,7 @@ export interface FileParts {
    * unsupported-type diagnostic at the binding site. Preflight already
    * fenced named/namespace JSON imports plus the destructuring and bare
    * require spellings, and kept .json files out of the module order. */
-  export function collectJsonImports(L: Lowerer, parts: FileParts[]): void {
+  export function collectJsonImports(lowerer: Lowerer, parts: FileParts[]): void {
     // The module cache in miniature: one global per DOCUMENT, whatever the
     // spelling that reached it. The ESM form's alias symbol is the natural
     // key (importers of the same document alias one symbol); the CommonJS
@@ -745,21 +745,21 @@ export interface FileParts {
     const byDocument = new Map<string, IrGlobal>();
     for (const fp of parts) {
       for (const { name, site, spec } of jsonBindingSitesOf(fp.sf)) {
-        const nameSym = L.checker.getSymbolAtLocation(name);
+        const nameSym = lowerer.checker.getSymbolAtLocation(name);
         if (!nameSym) continue;
-        const target = (nameSym.flags & ts.SymbolFlags.Alias) ? L.checker.getAliasedSymbol(nameSym) : null;
-        let jsonSf = target ? L.checker.declarationsOf(target)[0]?.getSourceFile() : undefined;
+        const target = (nameSym.flags & ts.SymbolFlags.Alias) ? lowerer.checker.getAliasedSymbol(nameSym) : null;
+        let jsonSf = target ? lowerer.checker.declarationsOf(target)[0]?.getSourceFile() : undefined;
         if ((!jsonSf || !jsonSf.fileName.endsWith(".json")) && spec !== null) {
           // The require form: tsgo need not model the binding as an alias
           // onto the JSON module, so the specifier resolves directly.
-          jsonSf = resolveImport(L.program, fp.sf, spec) ?? undefined;
+          jsonSf = resolveImport(lowerer.program, fp.sf, spec) ?? undefined;
         }
         if (!jsonSf || !jsonSf.fileName.endsWith(".json")) continue;
         try {
-          const tsType = L.typeOf(name);
-          const mapped = L.mapTypeOf(tsType);
-          if (!mapped || !L.comptimeBakeable(mapped)) {
-            L.badType(name, tsType);
+          const tsType = lowerer.typeOf(name);
+          const mapped = lowerer.mapTypeOf(tsType);
+          if (!mapped || !lowerer.comptimeBakeable(mapped)) {
+            lowerer.badType(name, tsType);
           }
           // tsgo tolerates JSON shapes strict JSON.parse rejects (a leading
           // `//` comment — importAttributes11), so no SC0001 guarantees a
@@ -769,32 +769,32 @@ export interface FileParts {
           try {
             parsed = JSON.parse(jsonSf.text);
           } catch (e) {
-            L.pushDiag(invalidJsonModuleDiag(
+            lowerer.pushDiag(invalidJsonModuleDiag(
               jsonSf.fileName,
               e instanceof Error ? e.message : String(e),
               locOf(site),
             ));
             throw new PoisonError();
           }
-          const value = L.comptimeValueToIr(parsed, mapped, "$", name);
-          let g = (target !== null ? L.globalsBySymbol.get(target) : undefined) ??
+          const value = lowerer.comptimeValueToIr(parsed, mapped, "$", name);
+          let g = (target !== null ? lowerer.globalsBySymbol.get(target) : undefined) ??
             byDocument.get(jsonSf.fileName);
           if (!g) {
             g = {
-              id: `%g.json.${L.globalsList.length}`,
+              id: `%g.json.${lowerer.globalsList.length}`,
               name: name.text,
               type: mapped,
               mutable: false,
             };
             byDocument.set(jsonSf.fileName, g);
-            L.globalsList.push(g);
+            lowerer.globalsList.push(g);
           }
-          if (target !== null) L.globalsBySymbol.set(target, g);
+          if (target !== null) lowerer.globalsBySymbol.set(target, g);
           // The BINDING's own symbol too: a require declaration tsgo does
           // not alias onto the module has nothing else for reads to find.
-          L.globalsBySymbol.set(nameSym, g);
-          const actions = L.jsonInitActions.get(fp.sf) ?? [];
-          L.jsonInitActions.set(fp.sf, actions);
+          lowerer.globalsBySymbol.set(nameSym, g);
+          const actions = lowerer.jsonInitActions.get(fp.sf) ?? [];
+          lowerer.jsonInitActions.set(fp.sf, actions);
           actions.push({ kind: "assign", localId: g.id, value, loc: locOf(site) });
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;
@@ -815,7 +815,7 @@ export interface FileParts {
    * deferred: the reference flushes those diagnostics. Methods whose
    * bodies were not lowered leave the def's method list, so vtable slots
    * exist exactly for emitted overrides. */
-  export function moduleArtifacts(L: Lowerer, functions: IrFunction[]): {
+  export function moduleArtifacts(lowerer: Lowerer, functions: IrFunction[]): {
     classes: IrClassDef[];
     records: IrRecordShape[];
     unions: IrUnionDef[];
@@ -850,7 +850,7 @@ export interface FileParts {
       }
     };
     visit(functions);
-    visit(L.globalsList);
+    visit(lowerer.globalsList);
     // The builtin error classes ride EVERY module: the runtime's own throws
     // (JSON/dynCheck/regex failures) mint instances of them whether or not
     // user code mentions Error, and the uncaught printer tells Error
@@ -872,23 +872,23 @@ export interface FileParts {
         // Declared fields AND the index-signature value type: an
         // overflow-valued shape (`{ [key: string]: {script?: string} }`)
         // references its value shape through indexValue alone.
-        const shape = L.shapes.get(pendingShapes.pop()!);
+        const shape = lowerer.shapes.get(pendingShapes.pop()!);
         visit(shape?.fields);
         if (shape?.indexValue) visit(shape.indexValue);
       }
-      while (pendingUnions.length > 0) visit(L.unions.get(pendingUnions.pop()!)?.arms);
+      while (pendingUnions.length > 0) visit(lowerer.unions.get(pendingUnions.pop()!)?.arms);
       while (pendingClasses.length > 0) {
         const name = pendingClasses.pop()!;
-        const info = L.classes.get(name);
+        const info = lowerer.classes.get(name);
         if (!info) {
           // Referenced by an emitted type but never registered: collection
           // deferred its diagnostics — a reached reference makes them count.
-          L.flushDeferredClass(name);
+          lowerer.flushDeferredClass(name);
           continue;
         }
         visit(info.def.fields);
         if (info.base) visit([{ className: info.base.def.name }]);
-        if (L.inHierarchy(info)) {
+        if (lowerer.inHierarchy(info)) {
           let root = info;
           while (root.base) root = root.base;
           const wholeTree = (c: ClassInfo): void => {
@@ -899,9 +899,9 @@ export interface FileParts {
         }
       }
     }
-    const reachable = L.reachableForArtifacts ?? L.reachable;
+    const reachable = lowerer.reachableForArtifacts ?? lowerer.reachable;
     return {
-      classes: [...L.classes.values()]
+      classes: [...lowerer.classes.values()]
         .map((c) => c.def)
         .filter((def) => classNames.has(def.name))
         .map((def) => {
@@ -926,8 +926,8 @@ export interface FileParts {
             ...(abstractMethods.length > 0 ? { abstractMethods } : {}),
           };
         }),
-      records: L.shapes.shapes.filter((r) => shapeIds.has(r.id)),
-      unions: L.unions.unions.filter((u) => unionIds.has(u.id)),
+      records: lowerer.shapes.shapes.filter((r) => shapeIds.has(r.id)),
+      unions: lowerer.unions.unions.filter((u) => unionIds.has(u.id)),
     };
   }
 
@@ -936,16 +936,16 @@ export interface FileParts {
    * reference them without capture). Block-scoped vars inside nested
    * statements keep their different symbols and stay locals. */
   /** JS collection failures defer to runtime fences: the registration's
- * diagnostics move off the build (into L.runtimeFences) — the declaring
+ * diagnostics move off the build (into lowerer.runtimeFences) — the declaring
  * statement re-fails during init lowering and compiles to the
  * runtimeFence trap there, and every use site cascades to its own trap.
  * TypeScript files keep eager collection reports. */
-function deferJsCollectionDiags(L: Lowerer, sf: ts.SourceFile, diagsBefore: number): void {
+function deferJsCollectionDiags(lowerer: Lowerer, sf: ts.SourceFile, diagsBefore: number): void {
   if (!isJsSourceFile(sf)) return;
-  const captured = L.diags.splice(diagsBefore);
+  const captured = lowerer.diags.splice(diagsBefore);
   const ice = captured.filter((d) => d.code === "SC9001");
-  if (ice.length > 0) L.diags.push(...ice);
-  L.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
+  if (ice.length > 0) lowerer.diags.push(...ice);
+  lowerer.runtimeFences.push(...captured.filter((d) => d.code !== "SC9001"));
 }
 
 /** A scalar-literal expression a single-value `module.exports =` can carry
@@ -969,7 +969,7 @@ function cjsScalarLiteral(e: ts.Expression): boolean {
  * an expando class member constructs a TYPED instance — corpus 2032), as
  * does everything else (object/array literals have their own rules;
  * typed-but-unmappable initializers keep the %init-local adoption). */
-function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): boolean {
+function jsDynHoldableInitializer(lowerer: Lowerer, init: ts.Expression | undefined): boolean {
   if (init === undefined) return true;
   let e: ts.Expression = init;
   while (ts.isParenthesizedExpression(e)) e = e.expression;
@@ -977,7 +977,7 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   if (ts.isIdentifier(e) && e.text === "undefined") return true;
   if (
     (ts.isCallExpression(e) || ts.isPropertyAccessExpression(e) || ts.isIdentifier(e)) &&
-    (L.typeOf(e).flags & ts.TypeFlags.Any) !== 0
+    (lowerer.typeOf(e).flags & ts.TypeFlags.Any) !== 0
   ) {
     return true;
   }
@@ -990,22 +990,22 @@ function jsDynHoldableInitializer(L: Lowerer, init: ts.Expression | undefined): 
   // idiom. Non-dyn residues (pure single-signature function types, typed
   // arrays) keep their static stories.
   if (ts.isCallExpression(e)) {
-    const t = L.typeOf(e);
-    if (L.mapTypeOf(t) === null && dynFallbackType(L, e, t)?.kind === "dyn") return true;
+    const t = lowerer.typeOf(e);
+    if (lowerer.mapTypeOf(t) === null && dynFallbackType(lowerer, e, t)?.kind === "dyn") return true;
   }
   return false;
 }
 
-export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.Statement[]): void {
+export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts.Statement[]): void {
     // Segment-tagged so mangled names can't collide across files (user
     // identifiers cannot contain '.'): entry globals "e.<name>", others
     // "m<i>.<name>".
-    const rawTag = L.fileTag.get(sf) ?? "";
+    const rawTag = lowerer.fileTag.get(sf) ?? "";
     const tag = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
     // Expando function members (`foo.bar = 12` anywhere in the file)
     // register their module globals first — reads inside function bodies
     // collected earlier in this pass must resolve them (lower-expando.ts).
-    collectExpandoMembers(L, sf);
+    collectExpandoMembers(lowerer, sf);
     for (const stmt of topStmts) {
       // `export default <expr>`: the module's `default` binding is a const
       // module global (registered under the checker's default-export
@@ -1032,11 +1032,11 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       // resolveValueSymbol's default-snapshot walk instead of chasing the
       // alias to the live let.
       if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
-        const symbol = defaultExportSymbolOf(L, sf);
+        const symbol = defaultExportSymbolOf(lowerer, sf);
         if (!symbol) continue;
         if (symbol.flags & ts.SymbolFlags.Alias) {
-          const target = L.checker.getAliasedSymbol(symbol);
-          const vd = L.checker.valueDeclarationOf(target);
+          const target = lowerer.checker.getAliasedSymbol(symbol);
+          const vd = lowerer.checker.valueDeclarationOf(target);
           const mutableVar =
             vd !== undefined &&
             ts.isVariableDeclaration(vd) &&
@@ -1061,30 +1061,30 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             ts.isClassExpression(inner) && !isJsSourceFile(sf) &&
             inner.typeParameters === undefined &&
             (decoratorNodesOf(inner).length > 0 || inner.members.some((m) => decoratorNodesOf(m).length > 0)) &&
-            guaranteedDecorationThrow(L, inner) !== null
+            guaranteedDecorationThrow(lowerer, inner) !== null
           ) {
             continue;
           }
         }
         try {
-          let tsType = L.typeOf(stmt.expression);
+          let tsType = lowerer.typeOf(stmt.expression);
           // tsgo answers `any` at some export-assignment EXPRESSION
           // positions (a bare literal default) — the SYMBOL's type is the
           // declared truth and serves as the fallback.
           if (tsType.flags & ts.TypeFlags.Any) {
-            const symType = L.checker.getTypeOfSymbol(symbol);
+            const symType = lowerer.checker.getTypeOfSymbol(symbol);
             if (!(symType.flags & ts.TypeFlags.Any)) tsType = symType;
           }
-          let type = L.mapTypeOf(tsType) ?? dynFallbackType(L, stmt.expression, tsType) ?? L.badType(stmt.expression, tsType);
+          let type = lowerer.mapTypeOf(tsType) ?? dynFallbackType(lowerer, stmt.expression, tsType) ?? lowerer.badType(stmt.expression, tsType);
           // `export default undefined` — the unit-only union, like any
           // unit-only binding (`export default null` maps via mapType).
           if (type.kind === "void" && isUnitOnlyTsType(tsType)) {
-            type = unitOnlyUnion(L.unions);
+            type = unitOnlyUnion(lowerer.unions);
           }
-          if (type.kind === "void") L.badType(stmt.expression, tsType);
+          if (type.kind === "void") lowerer.badType(stmt.expression, tsType);
           const g: IrGlobal = { id: `%g.${tag}default`, name: "default", type, mutable: false };
-          L.globalsBySymbol.set(symbol, g);
-          L.globalsList.push(g);
+          lowerer.globalsBySymbol.set(symbol, g);
+          lowerer.globalsList.push(g);
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;
           // diagnostic already recorded; lowering the statement poisons too
@@ -1105,20 +1105,20 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // importers never see. The statement lowering owns the diagnostic.
         const cjs = cjsExportDiscardReason(stmt) === null ? cjsExportAssignmentOf(stmt) : null;
         const registerExport = (nameNode: ts.Node, name: string, typeNode: ts.Node): void => {
-          const diagsBefore = L.diags.length;
+          const diagsBefore = lowerer.diags.length;
           try {
             // tsgo answers no symbol at the attachment site's NAME (no
             // expando synthesis); the module symbol's exports table still
             // names the member — the same identity use sites resolve.
-            const symbol = L.checker.getSymbolAtLocation(nameNode) ?? L.cjsModuleExportSymbol(sf, name);
-            if (!symbol || L.globalsBySymbol.has(symbol)) return;
+            const symbol = lowerer.checker.getSymbolAtLocation(nameNode) ?? lowerer.cjsModuleExportSymbol(sf, name);
+            if (!symbol || lowerer.globalsBySymbol.has(symbol)) return;
             // JS exports whose strict type has no mapping take the
             // checked-dynamic fallback (implicit-any function exports —
             // common/tls's `exports.check = function (certs) {...}` —
             // keep func-ness with dyn pieces; everything else is dyn).
-            const strict = L.checker.getTypeOfSymbol(symbol);
-            const t = L.mapTypeOf(strict) ?? dynFallbackType(L, nameNode, strict);
-            if (!t || t.kind === "void") L.badType(typeNode, strict);
+            const strict = lowerer.checker.getTypeOfSymbol(symbol);
+            const t = lowerer.mapTypeOf(strict) ?? dynFallbackType(lowerer, nameNode, strict);
+            if (!t || t.kind === "void") lowerer.badType(typeNode, strict);
             // `module.exports.Strings = Strings` naming a dyn-HOLDING
             // const (the JS file-scope object-literal identity story): the
             // export ALIASES the const's own dyn global — one storage, one
@@ -1133,12 +1133,12 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               let rhs: ts.Node = typeNode;
               while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
               if (ts.isIdentifier(rhs)) {
-                const vSym = L.checker.getSymbolAtLocation(rhs);
-                const vG = vSym && L.globalsBySymbol.get(vSym);
+                const vSym = lowerer.checker.getSymbolAtLocation(rhs);
+                const vG = vSym && lowerer.globalsBySymbol.get(vSym);
                 if (vG?.type.kind === "dyn") {
                   if (!vG.mutable) {
-                    L.globalsBySymbol.set(symbol, vG);
-                    for (const d of L.checker.declarationsOf(symbol)) L.globalsByDeclNode.set(d, vG);
+                    lowerer.globalsBySymbol.set(symbol, vG);
+                    for (const d of lowerer.checker.declarationsOf(symbol)) lowerer.globalsByDeclNode.set(d, vG);
                     return;
                   }
                   // A mutable (`let`) dyn source: separate DYN storage IS
@@ -1147,24 +1147,24 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   // export). The id must not collide with the let's own
                   // `%g.<tag><name>` global.
                   const g: IrGlobal = { id: `%g.${tag}%export.${name}`, name, type: DYN, mutable: false };
-                  L.globalsBySymbol.set(symbol, g);
-                  for (const d of L.checker.declarationsOf(symbol)) L.globalsByDeclNode.set(d, g);
-                  L.globalsList.push(g);
+                  lowerer.globalsBySymbol.set(symbol, g);
+                  for (const d of lowerer.checker.declarationsOf(symbol)) lowerer.globalsByDeclNode.set(d, g);
+                  lowerer.globalsList.push(g);
                   return;
                 }
               }
             }
             const g: IrGlobal = { id: `%g.${tag}${name}`, name, type: t, mutable: false };
-            L.globalsBySymbol.set(symbol, g);
+            lowerer.globalsBySymbol.set(symbol, g);
             // Importer aliases resolve to a DISTINCT late-bound symbol with
             // the same declaration — key the node too (globalOf's fallback).
-            for (const d of L.checker.declarationsOf(symbol)) L.globalsByDeclNode.set(d, g);
-            L.globalsList.push(g);
+            for (const d of lowerer.checker.declarationsOf(symbol)) lowerer.globalsByDeclNode.set(d, g);
+            lowerer.globalsList.push(g);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
             // diagnostic recorded; the statement lowering poisons too —
             // both defer to the statement's runtime fence in JS files.
-            deferJsCollectionDiags(L, sf, diagsBefore);
+            deferJsCollectionDiags(lowerer, sf, diagsBefore);
           }
         };
         if (cjs?.kind === "member" && ts.isIdentifier(cjs.name)) {
@@ -1173,7 +1173,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // builtin-derived classes); importers re-resolve to the class
           // symbol (cjsMemberExportClassSymbol) and the class registry
           // applies unchanged.
-          if (L.cjsMemberExportClassSymbol(cjs.expr) !== null) continue;
+          if (lowerer.cjsMemberExportClassSymbol(cjs.expr) !== null) continue;
           registerExport(cjs.name, cjs.name.text, cjs.value);
           continue;
         }
@@ -1199,18 +1199,18 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           // fallback like every JS binding.
           const fnValued = ts.isFunctionExpression(rhs) || ts.isArrowFunction(rhs);
           if (cjsScalarLiteral(rhs) || fnValued) {
-            const diagsBefore = L.diags.length;
+            const diagsBefore = lowerer.diags.length;
             try {
-              const strict = L.typeOf(rhs);
-              const t = L.mapTypeOf(strict) ?? (fnValued ? dynFallbackType(L, rhs, strict) : null);
+              const strict = lowerer.typeOf(rhs);
+              const t = lowerer.mapTypeOf(strict) ?? (fnValued ? dynFallbackType(lowerer, rhs, strict) : null);
               if (t && t.kind !== "void") {
                 const g: IrGlobal = { id: `%g.${tag}exports`, name: "exports", type: t, mutable: false };
-                L.globalsByDeclNode.set(cjs.expr, g);
-                L.globalsList.push(g);
+                lowerer.globalsByDeclNode.set(cjs.expr, g);
+                lowerer.globalsList.push(g);
               }
             } catch (e) {
               if (!(e instanceof PoisonError)) throw e;
-              deferJsCollectionDiags(L, sf, diagsBefore);
+              deferJsCollectionDiags(lowerer, sf, diagsBefore);
             }
           }
           continue;
@@ -1239,34 +1239,34 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       // statement lowering.
       if (ts.isImportEqualsDeclaration(stmt)) {
         if (ts.isExternalModuleReference(stmt.moduleReference) || stmt.isTypeOnly) continue;
-        const aliasSym = L.checker.getSymbolAtLocation(stmt.name);
-        if (!aliasSym || !(aliasSym.flags & ts.SymbolFlags.Alias) || L.globalsBySymbol.has(aliasSym)) continue;
-        const target = L.checker.getAliasedSymbol(aliasSym);
-        const vd = L.checker.valueDeclarationOf(target);
+        const aliasSym = lowerer.checker.getSymbolAtLocation(stmt.name);
+        if (!aliasSym || !(aliasSym.flags & ts.SymbolFlags.Alias) || lowerer.globalsBySymbol.has(aliasSym)) continue;
+        const target = lowerer.checker.getAliasedSymbol(aliasSym);
+        const vd = lowerer.checker.valueDeclarationOf(target);
         const mutableVar =
           vd !== undefined &&
           ts.isVariableDeclaration(vd) &&
           !vd.getSourceFile().isDeclarationFile &&
           (ts.getCombinedNodeFlags(vd) & ts.NodeFlags.Const) === 0;
         if (!mutableVar) continue;
-        const diagsBefore = L.diags.length;
+        const diagsBefore = lowerer.diags.length;
         try {
-          let type = L.irTypeOf(stmt.name);
-          if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(stmt.name))) {
-            type = unitOnlyUnion(L.unions);
+          let type = lowerer.irTypeOf(stmt.name);
+          if (type.kind === "void" && isUnitOnlyTsType(lowerer.typeOf(stmt.name))) {
+            type = unitOnlyUnion(lowerer.unions);
           }
-          if (type.kind === "void") L.badType(stmt.name, L.typeOf(stmt.name));
+          if (type.kind === "void") lowerer.badType(stmt.name, lowerer.typeOf(stmt.name));
           const g: IrGlobal = {
             id: `%g.${tag}${nsPathPrefix(stmt)}%alias.${stmt.name.text}%${stmt.getStart()}`,
             name: stmt.name.text,
             type,
             mutable: false,
           };
-          L.globalsBySymbol.set(aliasSym, g);
-          L.globalsList.push(g);
+          lowerer.globalsBySymbol.set(aliasSym, g);
+          lowerer.globalsList.push(g);
         } catch (e) {
           if (!(e instanceof PoisonError)) throw e;
-          deferJsCollectionDiags(L, sf, diagsBefore);
+          deferJsCollectionDiags(lowerer, sf, diagsBefore);
         }
         continue;
       }
@@ -1277,7 +1277,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       // statements continue into the main registration below, which also
       // owns the special forms — requires, aliases, promisify).
       if (!ts.isVariableStatement(stmt)) {
-        collectNestedVarGlobals(L, sf, stmt, tag);
+        collectNestedVarGlobals(lowerer, sf, stmt, tag);
         continue;
       }
       // CommonJS require declarations are alias plumbing (preflight owns
@@ -1293,7 +1293,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           (stmt.declarationList.flags & ts.NodeFlags.Const) !== 0
         ) {
           for (const decl of stmt.declarationList.declarations) {
-            stdlibGlobalAliasDecl(L, decl.name, decl.initializer);
+            stdlibGlobalAliasDecl(lowerer, decl.name, decl.initializer);
           }
         }
         continue;
@@ -1323,14 +1323,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // provenanceElidedConstDecl). Checked FIRST: the mixin/promisify
         // probes below would otherwise claim the call-initializer shape
         // and put its fences on the build.
-        if (provenanceElidedConstDecl(L, decl)) continue;
+        if (provenanceElidedConstDecl(lowerer, decl)) continue;
         // `const Event = ServerEvent` — an ALIAS of a module namespace:
         // pure plumbing, no storage (nsAliasVarDeclOf; the statement
         // lowering skips by the same test).
         if (
           isConst &&
           ts.isIdentifier(decl.name) &&
-          nsAliasVarDeclOf(L, L.checker.getSymbolAtLocation(decl.name) ?? ({} as ts.Symbol)) === decl
+          nsAliasVarDeclOf(lowerer, lowerer.checker.getSymbolAtLocation(decl.name) ?? ({} as ts.Symbol)) === decl
         ) {
           continue;
         }
@@ -1343,7 +1343,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         if (
           isConst &&
           ts.isIdentifier(decl.name) &&
-          numericIteratorSourceOf(L, decl.initializer) !== null
+          numericIteratorSourceOf(lowerer, decl.initializer) !== null
         ) {
           continue;
         }
@@ -1356,7 +1356,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // registration, and the statement lowering re-fences at its own
         // site (pushDiag dedupes), exactly the per-probe recovery the
         // alias/generic-fn registrations below already use.
-        const classifyDiagsBefore = L.diags.length;
+        const classifyDiagsBefore = lowerer.diags.length;
         const classified = (() => {
           try {
             // A TRAP declaration at file scope — the initializer's chain roots
@@ -1368,10 +1368,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // lowers, so hoisted-function references resolve the trap), and
             // the statement lowering emits the throw at its position.
             // Written bindings keep ordinary storage (trapDeclRootOf).
-            if (trapDeclRootOf(L, decl) !== null) {
+            if (trapDeclRootOf(lowerer, decl) !== null) {
               for (const nameNode of boundIdentifiersOf(decl.name)) {
-                const sym = L.checker.getSymbolAtLocation(nameNode);
-                if (sym) L.trapBindings.add(sym);
+                const sym = lowerer.checker.getSymbolAtLocation(nameNode);
+                if (sym) lowerer.trapBindings.add(sym);
               }
               return true;
             }
@@ -1381,7 +1381,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // lowering emits nothing by the same test.
             if (
               ts.isIdentifier(decl.name) &&
-              nullishGenericBindingUnitOf(L, L.checker.getSymbolAtLocation(decl.name) ?? null) !== null
+              nullishGenericBindingUnitOf(lowerer, lowerer.checker.getSymbolAtLocation(decl.name) ?? null) !== null
             ) {
               return true;
             }
@@ -1390,7 +1390,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // type fence for a value the program never consumes.
             if (
               ts.isIdentifier(decl.name) &&
-              deadUnmappableBinding(L, L.checker.getSymbolAtLocation(decl.name) ?? null, decl)
+              deadUnmappableBinding(lowerer, lowerer.checker.getSymbolAtLocation(decl.name) ?? null, decl)
             ) {
               return true;
             }
@@ -1401,7 +1401,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // collection failure; TS keeps the eager report (the
             // statement lowering re-fences at its own site — pushDiag
             // dedupes).
-            deferJsCollectionDiags(L, sf, classifyDiagsBefore);
+            deferJsCollectionDiags(lowerer, sf, classifyDiagsBefore);
           }
           return false;
         })();
@@ -1415,10 +1415,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // by name; the statement lowering skips (or re-fences — pushDiag
         // dedupes) by the same test.
         {
-          const gfnNode = bindingGenericFnNodeOf(decl) ?? bindingContextualGenericFnNodeOf(L, decl);
+          const gfnNode = bindingGenericFnNodeOf(decl) ?? bindingContextualGenericFnNodeOf(lowerer, decl);
           if (gfnNode) {
             try {
-              bindingGenericFnInfoOf(L, decl, gfnNode);
+              bindingGenericFnInfoOf(lowerer, decl, gfnNode);
             } catch (e) {
               if (!(e instanceof PoisonError)) throw e;
             }
@@ -1434,7 +1434,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         {
           let aliased = false;
           try {
-            aliased = bindingGenericFnAliasInfoOf(L, decl) !== null;
+            aliased = bindingGenericFnAliasInfoOf(lowerer, decl) !== null;
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
             aliased = true; // fenced by name — no global either way
@@ -1447,9 +1447,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // value references resolve through genericFnsBySymbol, and the
         // statement lowering skips by the same test.
         {
-          const implicitNode = implicitLocalFnNodeOf(L, decl);
+          const implicitNode = implicitLocalFnNodeOf(lowerer, decl);
           if (implicitNode) {
-            implicitLocalFnInfoOf(L, decl, implicitNode);
+            implicitLocalFnInfoOf(lowerer, decl, implicitNode);
             continue;
           }
         }
@@ -1458,7 +1458,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // branch above): no global exists — calls instantiate the class
         // inside per site (lower-mixins.ts); the statement lowering skips
         // by the same test.
-        if (isMixinFnBinding(L, decl)) continue;
+        if (isMixinFnBinding(lowerer, decl)) continue;
         // `const Thing1 = Tagged(Derived)` — a mixin RESULT binding: the
         // binding provably holds that one call's class object forever
         // (const), so it registers like a class declaration
@@ -1472,9 +1472,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           let init: ts.Expression = decl.initializer;
           while (ts.isParenthesizedExpression(init)) init = init.expression;
           if (ts.isCallExpression(init)) {
-            const bindSym = L.checker.getSymbolAtLocation(decl.name);
+            const bindSym = lowerer.checker.getSymbolAtLocation(decl.name);
             try {
-              if (mixinResultBindingClassOf(L, bindSym)) continue;
+              if (mixinResultBindingClassOf(lowerer, bindSym)) continue;
             } catch (e) {
               if (!(e instanceof PoisonError)) throw e;
               continue;
@@ -1486,7 +1486,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // Their values never exist, so no global storage is allocated.
         if (ts.isIdentifier(decl.name) && decl.initializer && isConst) {
           try {
-            if (L.promisifiedExecFileDecl(decl.name, decl.initializer)) continue;
+            if (lowerer.promisifiedExecFileDecl(decl.name, decl.initializer)) continue;
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
             continue;
@@ -1500,38 +1500,38 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // `const require = createRequire(import.meta.url)` at file scope:
         // compile-time plumbing — no global storage; the statement
         // lowering skips it by the same test.
-        if (isConst && createRequireBindingDecl(L, decl.name, decl.initializer)) continue;
+        if (isConst && createRequireBindingDecl(lowerer, decl.name, decl.initializer)) continue;
         // `const fs = require("node:fs")` through that binding at file
         // scope — a namespace import in const clothing, same story.
-        if (isConst && createRequireNamespaceDecl(L, decl.name, decl.initializer)) continue;
+        if (isConst && createRequireNamespaceDecl(lowerer, decl.name, decl.initializer)) continue;
         // `const { createSign } = crypto` over a builtin NAMESPACE binding
         // at file scope: alias plumbing like the destructured-require form
         // — no storage (the statement lowering skips by the same test).
-        if (builtinNamespaceDestructureModuleOf(L, decl) !== null) continue;
+        if (builtinNamespaceDestructureModuleOf(lowerer, decl) !== null) continue;
         // `const { NGHTTP2_CANCEL } = http2.constants` at file scope: a
         // destructure over the baked constants table — alias plumbing, no
         // global storage (the statement lowering skips it by the same
         // test).
-        if (L.builtinConstantsDestructureDecl(decl.name, decl.initializer)) continue;
+        if (lowerer.builtinConstantsDestructureDecl(decl.name, decl.initializer)) continue;
         // `const Writable = stream.Writable` at file scope: a stream
         // class through the namespace binding — alias plumbing, no
         // global storage (the statement lowering skips it by the same
         // test).
-        if (isConst && streamClassAliasDecl(L, decl.name, decl.initializer)) continue;
+        if (isConst && streamClassAliasDecl(lowerer, decl.name, decl.initializer)) continue;
         // `const process = globalThis.process` at file scope: a stdlib-
         // global snapshot — alias plumbing, no global storage (see
         // stdlibGlobalAliasDecl; the statement lowering skips it by the
         // same test).
-        if (isConst && stdlibGlobalAliasDecl(L, decl.name, decl.initializer)) continue;
+        if (isConst && stdlibGlobalAliasDecl(lowerer, decl.name, decl.initializer)) continue;
         // Stored default TextEncoder/TextDecoder instances are the same
         // compile-time alias plumbing as their statement lowering: calls
         // trace this const initializer, so no module global exists.
-        if (isConst && textCodecBindingDecl(L, decl.name, decl.initializer)) continue;
+        if (isConst && textCodecBindingDecl(lowerer, decl.name, decl.initializer)) continue;
         // Destructuring declarations register EVERY bound identifier (the
         // desugar in the init function assigns the pre-registered globals,
         // exactly like plain declarations).
         for (const nameNode of boundIdentifiersOf(decl.name)) {
-          const diagsBefore = L.diags.length;
+          const diagsBefore = lowerer.diags.length;
           try {
             // esbuild's lazy ESM transform declares module classes as
             // `var C;` and assigns `C = class {}` inside its clearing-once
@@ -1541,21 +1541,21 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             if (
               isJsSourceFile(sf) && ts.isIdentifier(decl.name) && nameNode === decl.name
             ) {
-              const assigned = esbuildOnceAssignedClassExpression(L, decl);
+              const assigned = esbuildOnceAssignedClassExpression(lowerer, decl);
               if (assigned) {
-                const symbol = L.checker.getSymbolAtLocation(nameNode);
-                if (symbol && !L.globalsBySymbol.has(symbol)) {
-                  const info = L.lowerClassExpressionInfo(assigned);
+                const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+                if (symbol && !lowerer.globalsBySymbol.has(symbol)) {
+                  const info = lowerer.lowerClassExpressionInfo(assigned);
                   const classType: IrType = { kind: "classval", className: info.def.name };
                   const g: IrGlobal = {
                     id: `%g.${tag}${nsPrefix}${nameNode.text}`,
                     name: nameNode.text,
-                    type: L.withUndefinedArm(classType),
+                    type: lowerer.withUndefinedArm(classType),
                     mutable: true,
                   };
-                  L.globalsBySymbol.set(symbol, g);
-                  L.globalsList.push(g);
-                  noteVarGlobalEntryInit(L, sf, g);
+                  lowerer.globalsBySymbol.set(symbol, g);
+                  lowerer.globalsList.push(g);
+                  noteVarGlobalEntryInit(lowerer, sf, g);
                 }
                 continue;
               }
@@ -1570,15 +1570,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // declarations only: a destructured array literal binds its
             // pieces, not the array.
             if (
-              isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode)) &&
               ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.initializer !== undefined && ts.isArrayLiteralExpression(decl.initializer)
             ) {
-              const symbol = L.checker.getSymbolAtLocation(nameNode);
+              const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
               if (symbol) {
                 const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
-                L.globalsBySymbol.set(symbol, g);
-                L.globalsList.push(g);
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
               }
               continue;
             }
@@ -1602,16 +1602,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               decl.initializer !== undefined && ts.isObjectLiteralExpression(decl.initializer) &&
               decl.initializer.properties.every((p) => {
                 if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
-                const mt = L.mapTypeOf(L.typeOf(p.initializer));
+                const mt = lowerer.mapTypeOf(lowerer.typeOf(p.initializer));
                 return mt === null || mt.kind === "dyn" ||
-                  canConvertToDyn(mt, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+                  canConvertToDyn(mt, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id));
               })
             ) {
-              const symbol = L.checker.getSymbolAtLocation(nameNode);
-              if (symbol && !L.globalsBySymbol.has(symbol)) {
+              const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+              if (symbol && !lowerer.globalsBySymbol.has(symbol)) {
                 const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
-                L.globalsBySymbol.set(symbol, g);
-                L.globalsList.push(g);
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
               }
               continue;
             }
@@ -1629,21 +1629,21 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // the checked-dynamic tree would trade their working typed representation for
             // fences.
             if (
-              isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode)) &&
               ts.isIdentifier(decl.name) && nameNode === decl.name &&
-              jsDynHoldableInitializer(L, decl.initializer) &&
-              dynFallbackType(L, nameNode, L.typeOf(nameNode))?.kind === "dyn"
+              jsDynHoldableInitializer(lowerer, decl.initializer) &&
+              dynFallbackType(lowerer, nameNode, lowerer.typeOf(nameNode))?.kind === "dyn"
             ) {
-              const symbol = L.checker.getSymbolAtLocation(nameNode);
-              if (symbol && !L.globalsBySymbol.has(symbol)) {
+              const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+              if (symbol && !lowerer.globalsBySymbol.has(symbol)) {
                 const g: IrGlobal = { id: `%g.${tag}${nsPrefix}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
-                L.globalsBySymbol.set(symbol, g);
-                L.globalsList.push(g);
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
                 // Mutable dyn globals hold the dyn undefined from module
                 // entry (the main path's rule below): a closure called
                 // above the declaration reads undefined instead of
                 // faulting on NULL.
-                if (g.mutable) noteVarGlobalEntryInit(L, sf, g);
+                if (g.mutable) noteVarGlobalEntryInit(lowerer, sf, g);
               }
               continue;
             }
@@ -1655,16 +1655,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // and separately-declared functions reach the same engine
             // object.
             if (
-              L.dynamic && isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              lowerer.dynamic && isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode)) &&
               ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.initializer !== undefined && ts.isObjectLiteralExpression(decl.initializer) &&
               decl.initializer.properties.some((p) => ts.isGetAccessorDeclaration(p))
             ) {
-              const symbol = L.checker.getSymbolAtLocation(nameNode);
-              if (symbol && !L.globalsBySymbol.has(symbol)) {
+              const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+              if (symbol && !lowerer.globalsBySymbol.has(symbol)) {
                 const g: IrGlobal = { id: `%g.${tag}${nsPrefix}${nameNode.text}`, name: nameNode.text, type: JSVAL, mutable: isLet };
-                L.globalsBySymbol.set(symbol, g);
-                L.globalsList.push(g);
+                lowerer.globalsBySymbol.set(symbol, g);
+                lowerer.globalsList.push(g);
               }
               continue;
             }
@@ -1675,26 +1675,26 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // and closures created in the init body capture it normally.
             // References from separately-declared functions cascade to
             // their own per-site runtime fences.
-            if (isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode))) continue;
+            if (isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode))) continue;
             // `var p1 = import("./m")` at file scope: the global holds the
             // island promise/handle — the import expression's only
             // production — whatever the checker's namespace type mapped to
             // (lowerVarDecl's rule at module scope; the init body assigns
             // it).
-            const handleT = nativeImportHandleType(L, decl.initializer) ?? (
-              L.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name
+            const handleT = nativeImportHandleType(lowerer, decl.initializer) ?? (
+              lowerer.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name
                 ? (importCallHandleType(decl.initializer) ??
                   // An unchecked-overload call result stores the handle,
                   // exactly the local rule (uncheckedOverloadHandleCall).
-                  (uncheckedOverloadHandleCall(L, decl.initializer) ? JSVAL : null))
+                  (uncheckedOverloadHandleCall(lowerer, decl.initializer) ? JSVAL : null))
                 : null);
             const storedDynValue = (() => {
               if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return false;
               let init: ts.Expression = decl.initializer;
               while (ts.isParenthesizedExpression(init)) init = init.expression;
               if (ts.isIdentifier(init)) {
-                const symbol = L.resolveValueSymbol(init);
-                return symbol !== null && L.globalsBySymbol.get(symbol)?.type.kind === "dyn";
+                const symbol = lowerer.resolveValueSymbol(init);
+                return symbol !== null && lowerer.globalsBySymbol.get(symbol)?.type.kind === "dyn";
               }
               if (
                 !ts.isCallExpression(init) || init.arguments.length !== 0 ||
@@ -1704,18 +1704,18 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
               let receiver: ts.Expression = init.expression.expression;
               while (ts.isParenthesizedExpression(receiver)) receiver = receiver.expression;
               if (!ts.isIdentifier(receiver)) return false;
-              const symbol = L.resolveValueSymbol(receiver);
-              return symbol !== null && L.globalsBySymbol.get(symbol)?.type.kind === "dyn";
+              const symbol = lowerer.resolveValueSymbol(receiver);
+              return symbol !== null && lowerer.globalsBySymbol.get(symbol)?.type.kind === "dyn";
             })();
             const storedOptionalClassValue = (() => {
               if (!ts.isIdentifier(decl.name) || nameNode !== decl.name || decl.initializer === undefined) return null;
               let init: ts.Expression = decl.initializer;
               while (ts.isParenthesizedExpression(init)) init = init.expression;
               if (!ts.isIdentifier(init)) return null;
-              const symbol = L.resolveValueSymbol(init);
-              const source = symbol === null ? undefined : L.globalsBySymbol.get(symbol);
+              const symbol = lowerer.resolveValueSymbol(init);
+              const source = symbol === null ? undefined : lowerer.globalsBySymbol.get(symbol);
               if (source?.type.kind !== "union") return null;
-              const arms = L.unions.get(source.type.unionId)?.arms ?? [];
+              const arms = lowerer.unions.get(source.type.unionId)?.arms ?? [];
               return arms.filter((arm) => arm.kind === "classval").length === 1 &&
                 arms.every((arm) => arm.kind === "classval" || isUnitType(arm))
                 ? source.type
@@ -1724,13 +1724,13 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             const exactNewClass =
               isJsSourceFile(sf) && decl.type === undefined &&
               ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
-                ? probeExactInstanceClassOf(L, decl.initializer)
+                ? probeExactInstanceClassOf(lowerer, decl.initializer)
                 : null;
             let type = storedDynValue
               ? DYN
               : storedOptionalClassValue ??
                 (exactNewClass ? { kind: "object", className: exactNewClass.def.name } : null) ??
-                handleT ?? inferredRegexBindingType(L, decl, L.irTypeOf(nameNode));
+                handleT ?? inferredRegexBindingType(lowerer, decl, lowerer.irTypeOf(nameNode));
             // An evolving-`any` array's DERIVED file-scope binding under
             // --dynamic (`const kept = fns.filter(...)` where `fns`
             // registered array<jsval> at its `any[]` declaration): the
@@ -1741,10 +1741,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // element array (lowerVarDecl's adoption, the file-scope
             // face). Annotated declarations keep the validated boundary.
             if (
-              L.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name &&
+              lowerer.dynamic && ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.type === undefined && decl.initializer !== undefined &&
               type.kind === "array" && type.elem.kind !== "jsval" &&
-              handleArrayPreservingCall(L, decl.initializer)
+              handleArrayPreservingCall(lowerer, decl.initializer)
             ) {
               type = arrayOf(JSVAL);
             }
@@ -1755,9 +1755,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // monomorphize against) — see genericIfaceBindingKeepsClass.
             if (
               type.kind === "record" && ts.isIdentifier(decl.name) && nameNode === decl.name &&
-              genericIfaceBindingKeepsClass(L, decl, type)
+              genericIfaceBindingKeepsClass(lowerer, decl, type)
             ) {
-              const initT = L.mapTypeOf(L.typeOf(decl.initializer!));
+              const initT = lowerer.mapTypeOf(lowerer.typeOf(decl.initializer!));
               if (initT?.kind === "object") type = initT;
             }
             // A file-scope PATTERN over an ISLAND-bound source (`export
@@ -1767,8 +1767,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // primitives exit eagerly to their static type, everything
             // else stores the HANDLE (a func-typed slot could never take
             // the engine value the desugar assigns).
-            if (L.dynamic && !ts.isIdentifier(decl.name) && decl.initializer !== undefined) {
-              const srcT = L.mapTypeOf(L.typeOf(decl.initializer));
+            if (lowerer.dynamic && !ts.isIdentifier(decl.name) && decl.initializer !== undefined) {
+              const srcT = lowerer.mapTypeOf(lowerer.typeOf(decl.initializer));
               const island =
                 srcT !== null &&
                 (srcT.kind === "jsval" || srcT.kind === "f64" || srcT.kind === "bool" ||
@@ -1780,10 +1780,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // File-scope unit-only bindings (`var x: undefined`, `const
             // y: void = undefined`) ride the unit-only union, exactly
             // like function-scope locals (lowerVarDecl's rule).
-            if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(nameNode))) {
-              type = unitOnlyUnion(L.unions);
+            if (type.kind === "void" && isUnitOnlyTsType(lowerer.typeOf(nameNode))) {
+              type = unitOnlyUnion(lowerer.unions);
             }
-            if (type.kind === "void") L.badType(nameNode, L.typeOf(nameNode));
+            if (type.kind === "void") lowerer.badType(nameNode, lowerer.typeOf(nameNode));
             // A JS file-scope FUNCTION binding whose unannotated return
             // infers a record (`const wrapped = function () { return
             // expectedResult; }`): the closure VALUE lowers with a dyn
@@ -1807,36 +1807,36 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // type admits ANY later non-nullish assignment, so the static
             // empty struct cannot hold the binding's future.
             if (isLet && type.kind === "record" && isJsSourceFile(sf)) {
-              const shape = L.shapes.get(type.shapeId);
+              const shape = lowerer.shapes.get(type.shapeId);
               if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
             }
-            const symbol = L.checker.getSymbolAtLocation(nameNode);
+            const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
             // Merged `var` redeclarations (`var y = 1; ...; var y = 2;` —
             // one symbol) register exactly one global; later declarations
             // are plain assignments.
-            if (!symbol || L.globalsBySymbol.has(symbol)) continue;
+            if (!symbol || lowerer.globalsBySymbol.has(symbol)) continue;
             const g: IrGlobal = {
               id: `%g.${tag}${nsPrefix}${nameNode.text}`,
               name: nameNode.text,
               type,
               mutable: isLet,
             };
-            L.globalsBySymbol.set(symbol, g);
-            L.globalsList.push(g);
+            lowerer.globalsBySymbol.set(symbol, g);
+            lowerer.globalsList.push(g);
             // Mutable checked-dynamic LET globals ride the same entry
             // init: a closure called above the declaration statement
             // reads the dyn undefined instead of faulting on NULL — the
             // dyn face of let's documented pre-declaration window (Node
             // throws the TDZ ReferenceError there).
             if (isVarDeclared(decl) || (g.type.kind === "dyn" && g.mutable)) {
-              noteVarGlobalEntryInit(L, sf, g);
+              noteVarGlobalEntryInit(lowerer, sf, g);
             }
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
             // diagnostic already recorded; lowering the statement poisons
             // too — and in a JS file BOTH defer to the statement's
             // runtime fence (deferJsCollectionDiags).
-            deferJsCollectionDiags(L, sf, diagsBefore);
+            deferJsCollectionDiags(lowerer, sf, diagsBefore);
           }
         }
       }
@@ -1850,7 +1850,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * answers the receiver's own array type). Registration runs in source
    * order, so the root's global — declared above, TDZ-guaranteed — is
    * already in the table. */
-  function handleArrayPreservingCall(L: Lowerer, e: ts.Expression): boolean {
+  function handleArrayPreservingCall(lowerer: Lowerer, e: ts.Expression): boolean {
     const PRESERVING = new Set(["filter", "slice", "splice", "concat"]);
     let cur = e;
     for (;;) {
@@ -1865,8 +1865,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       break;
     }
     if (!ts.isIdentifier(cur)) return false;
-    const sym = L.checker.getSymbolAtLocation(cur);
-    const g = sym ? L.globalsBySymbol.get(sym) : undefined;
+    const sym = lowerer.checker.getSymbolAtLocation(cur);
+    const g = sym ? lowerer.globalsBySymbol.get(sym) : undefined;
     return g?.type.kind === "array" && g.type.elem.kind === "jsval";
   }
 
@@ -1879,7 +1879,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * a value). Other types need nothing: tsc's flow analysis rejects their
    * direct early reads, and closure reads share let's documented
    * zero/NULL divergence window. */
-  function noteVarGlobalEntryInit(L: Lowerer, sf: ts.SourceFile, g: IrGlobal): void {
+  function noteVarGlobalEntryInit(lowerer: Lowerer, sf: ts.SourceFile, g: IrGlobal): void {
     // 'any' globals need the entry init exactly like undefined-armed
     // unions: tsc never guards `any` reads, so `var x: any;` is readable
     // before any assignment and its slot must hold its world's undefined
@@ -1887,9 +1887,9 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     // rather than a C-level NULL (an op or validated exit on NULL is
     // memory-unsafe, not a TypeError).
     if (g.type.kind !== "union" && g.type.kind !== "jsval" && g.type.kind !== "dyn") return;
-    const inits = L.varGlobalEntryInits.get(sf) ?? [];
+    const inits = lowerer.varGlobalEntryInits.get(sf) ?? [];
     inits.push(g);
-    L.varGlobalEntryInits.set(sf, inits);
+    lowerer.varGlobalEntryInits.set(sf, inits);
   }
 
 /** The nested half of module-scope `var` hoisting: a `var` inside a
@@ -1902,7 +1902,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * scope). Registration mirrors the main path's identifier story:
    * JS-unmappable types register nothing (per-site fences own the
    * references), everything else gets a mutable global. */
-  function collectNestedVarGlobals(L: Lowerer, sf: ts.SourceFile, stmt: ts.Statement, tag: string): void {
+  function collectNestedVarGlobals(lowerer: Lowerer, sf: ts.SourceFile, stmt: ts.Statement, tag: string): void {
     const lists: ts.VariableDeclarationList[] = [];
     // Iterative walk (walkPreorder): this sweep sees every non-var top-level
     // statement whole — the binderBinaryExpressionStress bare ~6500-term
@@ -1926,29 +1926,29 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     for (const list of lists) {
       for (const decl of list.declarations) {
         for (const nameNode of boundIdentifiersOf(decl.name)) {
-          const diagsBefore = L.diags.length;
+          const diagsBefore = lowerer.diags.length;
           try {
-            if (isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode))) continue;
-            let type = L.irTypeOf(nameNode);
+            if (isJsSourceFile(sf) && !lowerer.mapTypeOf(lowerer.typeOf(nameNode))) continue;
+            let type = lowerer.irTypeOf(nameNode);
             // Nested-var unit-only bindings take the unit-only union too
             // (the top-level registration's rule).
-            if (type.kind === "void" && isUnitOnlyTsType(L.typeOf(nameNode))) {
-              type = unitOnlyUnion(L.unions);
+            if (type.kind === "void" && isUnitOnlyTsType(lowerer.typeOf(nameNode))) {
+              type = unitOnlyUnion(lowerer.unions);
             }
-            if (type.kind === "void") L.badType(nameNode, L.typeOf(nameNode));
+            if (type.kind === "void") lowerer.badType(nameNode, lowerer.typeOf(nameNode));
             if (type.kind === "record" && isJsSourceFile(sf)) {
-              const shape = L.shapes.get(type.shapeId);
+              const shape = lowerer.shapes.get(type.shapeId);
               if (shape && shape.fields.length === 0 && !shape.indexValue && !shape.tuple) type = DYN;
             }
-            const symbol = L.checker.getSymbolAtLocation(nameNode);
-            if (!symbol || L.globalsBySymbol.has(symbol)) continue;
+            const symbol = lowerer.checker.getSymbolAtLocation(nameNode);
+            if (!symbol || lowerer.globalsBySymbol.has(symbol)) continue;
             const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type, mutable: true };
-            L.globalsBySymbol.set(symbol, g);
-            L.globalsList.push(g);
-            noteVarGlobalEntryInit(L, sf, g);
+            lowerer.globalsBySymbol.set(symbol, g);
+            lowerer.globalsList.push(g);
+            noteVarGlobalEntryInit(lowerer, sf, g);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
-            deferJsCollectionDiags(L, sf, diagsBefore);
+            deferJsCollectionDiags(lowerer, sf, diagsBefore);
           }
         }
       }
@@ -1960,8 +1960,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * the default's global by it makes every importer resolve to the same
    * storage through the ordinary globalOf path. Null for modules without
    * a default export (or non-module files). */
-  export function defaultExportSymbolOf(L: Lowerer, sf: ts.SourceFile): ts.Symbol | null {
-    const moduleSym = L.checker.getSymbolAtLocation(sf);
+  export function defaultExportSymbolOf(lowerer: Lowerer, sf: ts.SourceFile): ts.Symbol | null {
+    const moduleSym = lowerer.checker.getSymbolAtLocation(sf);
     return moduleSym?.getExports().get(ts.InternalSymbolName.Default as ts.__String) ?? null;
   }
 
@@ -1973,14 +1973,14 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * and body lowering all key that one identity — which is also what a
    * default import's alias chain resolves to. */
   export function declSymbolOf(
-    L: Lowerer,
+    lowerer: Lowerer,
     decl: ts.FunctionDeclaration | ts.ClassDeclaration,
   ): ts.Symbol | undefined {
-    if (decl.name) return L.checker.getSymbolAtLocation(decl.name);
+    if (decl.name) return lowerer.checker.getSymbolAtLocation(decl.name);
     const isDefault = ts.canHaveModifiers(decl) &&
       ts.getModifiers(decl)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword) === true;
     if (!isDefault) return undefined;
-    const sym = defaultExportSymbolOf(L, decl.getSourceFile());
+    const sym = defaultExportSymbolOf(lowerer, decl.getSourceFile());
     return sym ?? undefined;
   }
 
@@ -1997,10 +1997,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * registration (collection reported the blocker) re-lowers the
    * expression so the expression's OWN diagnostic wins when it has one,
    * then poisons. */
-  export function lowerDefaultExport(L: Lowerer, stmt: ts.ExportAssignment): IrStmt | null {
-    const symbol = defaultExportSymbolOf(L, stmt.getSourceFile());
-    if (symbol && symbol.flags & ts.SymbolFlags.Alias && !L.globalsBySymbol.has(symbol)) return null;
-    const g = symbol ? L.globalsBySymbol.get(symbol) : undefined;
+  export function lowerDefaultExport(lowerer: Lowerer, stmt: ts.ExportAssignment): IrStmt | null {
+    const symbol = defaultExportSymbolOf(lowerer, stmt.getSourceFile());
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias && !lowerer.globalsBySymbol.has(symbol)) return null;
+    const g = symbol ? lowerer.globalsBySymbol.get(symbol) : undefined;
     if (!g) {
       // A provably-throwing decorated class expression registered no
       // storage (the registration pass skipped it): the statement IS the
@@ -2012,15 +2012,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
           ts.isClassExpression(inner) && !isJsSourceFile(stmt.getSourceFile()) &&
           inner.typeParameters === undefined &&
           (decoratorNodesOf(inner).length > 0 || inner.members.some((m) => decoratorNodesOf(m).length > 0)) &&
-          guaranteedDecorationThrow(L, inner) !== null
+          guaranteedDecorationThrow(lowerer, inner) !== null
         ) {
-          return { kind: "exprStmt", expr: L.lowerExpr(stmt.expression), loc: locOf(stmt) };
+          return { kind: "exprStmt", expr: lowerer.lowerExpr(stmt.expression), loc: locOf(stmt) };
         }
       }
-      L.lowerExpr(stmt.expression);
-      L.badType(stmt.expression, L.typeOf(stmt.expression));
+      lowerer.lowerExpr(stmt.expression);
+      lowerer.badType(stmt.expression, lowerer.typeOf(stmt.expression));
     }
-    const value = L.lowerExprExpecting(stmt.expression, g.type);
+    const value = lowerer.lowerExprExpecting(stmt.expression, g.type);
     return { kind: "assign", localId: g.id, value, loc: locOf(stmt) };
   }
 
@@ -2030,10 +2030,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
    * nesting), CommonJS require statements call dependency inits inline in
    * their bodies, and the run-once guards turn every revisit (diamonds,
    * re-imports, re-requires) into a cache hit. */
-  export function buildMain(L: Lowerer): IrFunction {
-    const loc: SrcLoc = { file: L.entry.fileName, start: 0, end: 0 };
-    const entryInit = L.initNameOf.get(L.entry);
-    const isAsync = L.asyncInitFiles.has(L.entry);
+  export function buildMain(lowerer: Lowerer): IrFunction {
+    const loc: SrcLoc = { file: lowerer.entry.fileName, start: 0, end: 0 };
+    const entryInit = lowerer.initNameOf.get(lowerer.entry);
+    const isAsync = lowerer.asyncInitFiles.has(lowerer.entry);
     const initCall: IrExpr | null =
       entryInit !== undefined
         ? {
@@ -2063,15 +2063,15 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
     // never runs. The init still lowers — the program must otherwise
     // compile, exactly like Node parses every module before its
     // fetch/instantiate phases refuse the graph.
-    if (L.startupCrash !== null) {
-      const crashLoc: SrcLoc = L.startupCrash.loc;
+    if (lowerer.startupCrash !== null) {
+      const crashLoc: SrcLoc = lowerer.startupCrash.loc;
       body.unshift({
         kind: "throw",
         value: {
           kind: "libCall",
           fn: "error.new",
-          args: [{ kind: "strLit", value: L.startupCrash.message, type: STRING, loc: crashLoc }],
-          type: { kind: "object", className: L.startupCrash.className },
+          args: [{ kind: "strLit", value: lowerer.startupCrash.message, type: STRING, loc: crashLoc }],
+          type: { kind: "object", className: lowerer.startupCrash.className },
           loc: crashLoc,
         },
         loc: crashLoc,

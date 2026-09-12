@@ -28,7 +28,7 @@ import {
   generateSurfaceManifest,
   ir,
   LIB_FN_SIGS,
-  renderAll,
+  renderDiagnostics,
   renderSurfaceManifest,
   resolveLibraryFences,
   type SurfaceManifest,
@@ -41,7 +41,7 @@ const readJson = (p: string): { version: string } =>
 
 // The version spine: the release workflow keys on packages/cli (the
 // published `scriptc` package); sync-versions.mjs stamps the same string
-// into runtime and compiler.
+// into runtime, the native LLVM helper, and compiler.
 const releaseVersion = readJson("packages/cli/package.json").version;
 
 const committed = readFileSync(manifestPath, "utf8");
@@ -65,10 +65,25 @@ describe("surface manifest generation", () => {
   test("the version spine is the exact published version string", () => {
     const parsed = JSON.parse(committed) as SurfaceManifest;
     expect(parsed.compilerVersion).toBe(releaseVersion);
-    // The three packages publish in lockstep; a drifted stamp would make
+    // The compiler and every shipped native package publish in lockstep; a drifted stamp would make
     // the spine ambiguous for a version pin.
     expect(readJson("packages/compiler/package.json").version).toBe(releaseVersion);
     expect(readJson("packages/runtime/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-darwin-arm64/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-darwin-x64/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-linux-x64-gnu/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-linux-arm64-gnu/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-linux-x64-musl/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-linux-arm64-musl/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-win32-x64-msvc/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/runtime-wasm32-wasi/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-darwin-arm64/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-darwin-x64/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-linux-x64-gnu/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-linux-arm64-gnu/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-linux-x64-musl/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-linux-arm64-musl/package.json").version).toBe(releaseVersion);
+    expect(readJson("packages/llvm-win32-x64-msvc/package.json").version).toBe(releaseVersion);
   });
 
   test("schema: ids unique and sorted, enums valid, codes on every non-static entry", () => {
@@ -238,10 +253,11 @@ const PROBES: Probe[] = [
   { id: "node-builtin.perf_hooks.performance.now", source: "console.log(performance.now() >= 0);\n" },
   { id: "node-builtin.path.join", source: 'import { join } from "node:path";\nconsole.log(join("a", "b"));\n' },
   { id: "node-builtin.os.EOL", source: 'import { EOL } from "node:os";\nconsole.log(EOL.length);\n' },
+  { id: "stdlib.math.PI", source: "console.log(Math.PI);\n" },
+  { id: "stdlib.math.E", source: "console.log(Math.E);\n" },
   // status dynamic-only — refused with the entry's code statically,
   // analyzed clean under --dynamic
   { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
-  { id: "stdlib.math.PI", source: "console.log(Math.PI);\n" },
   { id: "stdlib.string.replace", source: 'console.log("aa".replace("a", "b"));\n' },
   {
     id: "stdlib.headers.entries",
@@ -367,7 +383,7 @@ describe("surface manifest sampling harness", () => {
       if (!result.ok) {
         expect.unreachable(
           `${probe.id} is listed static but did not compile:\n` +
-            renderAll(result.diagnostics, result.sourceTexts, { color: false }),
+            renderDiagnostics(result.diagnostics, result.sourceTexts, { color: false }),
         );
       }
       const dyn = analyze(file, { dynamic: true }).coverage;
@@ -801,7 +817,7 @@ test("constructing a spread RequestInit does not apply fetch conversion fences",
 
 /* ── attestation ↔ fence parity: the ask-5 §4 invariant's ground ─────────
  * The library sidecar's `deterministic` attestation demotes on libCall
- * spellings by prefix (ir/nodes.ts's LIB_NONDETERMINISTIC_PREFIXES); the
+ * spellings by prefix (ir/ir.ts's LIB_NONDETERMINISTIC_PREFIXES); the
  * profile's determinism fences deny surfaces by manifest id. The §4
  * invariant — a program that compiles under full fences attests
  * deterministic: true — holds only if every spelling the attestation

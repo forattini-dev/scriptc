@@ -1,5 +1,5 @@
 import type { RustExpressionContext } from "./expression-context.js";
-import type { IrExpr, IrType } from "../../ir/nodes.js";
+import type { IrExpr, IrType } from "../../ir/ir.js";
 
 type ArrayType = Extract<IrType, { kind: "array" }>;
 type Convert = (type: IrType, value: string, path?: string) => string;

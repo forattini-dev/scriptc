@@ -1,4 +1,4 @@
-import { typeEquals, type IrRecordShape, type IrType } from "./nodes.js";
+import { typeEquals, type IrRecordShape, type IrType } from "./ir.js";
 
 /** Dense homogeneous scalar tuples can share the native array representation. */
 export function nativeTupleElement(shape: IrRecordShape | undefined): IrType | undefined {

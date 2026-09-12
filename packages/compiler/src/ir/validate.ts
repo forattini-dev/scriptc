@@ -5,7 +5,7 @@ import { regexCaptureLayout } from "./regex-captures.js";
 import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
 import { validateModuleInitCaches } from "./validate-module-inits.js";
 import { validRecordDiscriminant } from "./record-discriminant.js";
-import type { IrFamily } from "./nodes.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
+import type { IrFamily } from "./ir.js"; import { validateCallFamily, validateFamilyClosure } from "./validate-families.js";
 import { validateEffectUnitArgument } from "./validate-effect-units.js";
 import type {
   IrClassDef,
@@ -21,8 +21,8 @@ import type {
   IrType,
   IrUnionDef,
   SrcLoc,
-} from "./nodes.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./nodes.js";
+} from "./ir.js";
+import { arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canConvertToDyn, canDynCheckTo, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, EFFECT_T, CHILDSTREAM_T, DGRAMSOCK_T, DYN, DYN_HANDLE_KINDS, F64, ffiClassType, ffiSourceParamTypes, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, islandPromisePayloadTag, isFfiCallbackParam, isFfiContextParam, isFfiReleaseParam, isJsonSafeType, isRefCounted, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, shapeHasAccessorSlots, SPAWNRES_T, STATS_T, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID } from "./ir.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -379,7 +379,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.listenCb": { argTypes: [NETSERVER_T, F64, { kind: "func", params: [], ret: VOID }], result: VOID },
   "net.listenOpts": { argTypes: [NETSERVER_T, F64, STRING, BOOL], result: VOID },
   // The callback slot is a zero-param void closure OR its
-  // `(() => void) | undefined` optional-binding union (checked specially).
+  // `(() => void) | undefined` union; reusePort adds BOOL before the callback.
   "net.listenOptsCb": { argTypes: [NETSERVER_T, F64, STRING, BOOL, null], result: VOID },
   "net.listenOptsReusePort": { argTypes: [NETSERVER_T, F64, STRING, BOOL, BOOL], result: VOID },
   "net.listenOptsReusePortCb": { argTypes: [NETSERVER_T, F64, STRING, BOOL, BOOL, null], result: VOID },
@@ -4821,7 +4821,7 @@ function validateFunction(
         // marker object caughtToDyn builds) as a fresh runtime error.
         const errorOk = e.type.kind === "object" && e.type.className === "%Error";
         // ADAPTABLE function targets unwrap or wrap the checked-dynamic tree's function
-        // kind (the checked-dynamic function boundary, nodes.ts).
+        // kind (the checked-dynamic function boundary, ir.ts).
         const funcOk =
           e.type.kind === "func" &&
           canAdaptDynFuncTo(e.type, (id) => records.get(id), (id) => unions.get(id));

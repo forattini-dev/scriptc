@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { nativeRecordCheckSupported } from "./native-record.js";
-import { BOOL, DYN, F64, STRING, VOID, type IrRecordShape, type IrType } from "./nodes.js";
+import { BOOL, DYN, F64, STRING, VOID, type IrRecordShape, type IrType } from "./ir.js";
 
 const admitted = (member: IrType): boolean => nativeRecordCheckSupported(
   { kind: "record", shapeId: "api" },

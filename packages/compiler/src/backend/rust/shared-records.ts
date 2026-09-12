@@ -1,7 +1,7 @@
 import { rustJsString } from "./string-literals.js";
 import { emitSharedTupleDefinition } from "./shared-tuples.js";
 import { sharedWidthPair } from "./shared-width.js";
-import type { IrModule, IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
+import type { IrModule, IrRecordShape, IrType, IrUnionDef } from "../../ir/ir.js";
 import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustDefinitionContext } from "./definitions.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";

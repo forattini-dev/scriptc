@@ -8,12 +8,13 @@ import { Sheet, SheetTrigger, SheetContent, SheetTitle } from "@/components/ui/s
 const links = [
   { name: "Home", href: "/" },
   { name: "Docs", href: "/introduction" },
+  { name: "Compatibility", href: "/compatibility" },
 ];
 
 function isCurrent(href: string, pathname: string): boolean {
   if (href === "/") return pathname === "/";
-  // Docs owns every other page.
-  return pathname !== "/";
+  if (href === "/compatibility") return pathname === "/compatibility";
+  return pathname !== "/" && pathname !== "/compatibility";
 }
 
 export function HeaderNav() {

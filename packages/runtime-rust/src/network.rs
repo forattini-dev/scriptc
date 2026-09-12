@@ -226,6 +226,7 @@ fn net_port(value: f64) -> u16 {
 }
 
 fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> JsNetSocket {
+    net_register_loop_hooks();
     stream
         .set_nonblocking(true)
         .unwrap_or_else(|error| throw_error(format!("connect {}", fs_error_code(&error))));
@@ -257,6 +258,7 @@ fn net_socket_new(stream: std::net::TcpStream, server: Option<JsNetServer>) -> J
 }
 
 pub fn net_server_new() -> JsNetServer {
+    net_register_loop_hooks();
     Gc::new(NetServerData {
         listener: None,
         port: 0,
@@ -326,6 +328,7 @@ pub fn net_server_on_close(
 }
 
 fn net_server_register(server: &JsNetServer) {
+    net_register_loop_hooks();
     NET_SERVERS.with(|servers| {
         let mut servers = servers.borrow_mut();
         if !servers.iter().any(|candidate| candidate.ptr_eq(server)) {
@@ -484,6 +487,7 @@ pub fn net_server_close(server: &JsNetServer) {
 }
 
 pub fn net_socket_connect_deferred(port: f64, host: &JsString) -> JsNetSocket {
+    net_register_loop_hooks();
     let port = net_port(port);
     let host = host.to_string();
     let socket = Gc::new(NetSocketData {
@@ -1169,31 +1173,5 @@ fn net_socket_read_one() -> bool {
             true
         }
         None => false,
-    }
-}
-
-fn net_dispatch_one() -> bool {
-    if let Some(task) = NET_TASKS.with(|tasks| tasks.borrow_mut().pop_front()) {
-        net_dispatch_task(task);
-        return true;
-    }
-    http_tls_dispatch_one()
-        || net_accept_one()
-        || net_socket_connect_one()
-        || tls_socket_dispatch_one()
-        || net_socket_flush_one()
-        || net_socket_read_one()
-}
-
-fn net_finish() {
-    http_tls_finish();
-    NET_TASKS.with(|tasks| tasks.borrow_mut().clear());
-    let servers = NET_SERVERS.with(|servers| std::mem::take(&mut *servers.borrow_mut()));
-    for server in servers {
-        server.with_mut(ClearEdges::clear_edges);
-    }
-    let sockets = NET_SOCKETS.with(|sockets| std::mem::take(&mut *sockets.borrow_mut()));
-    for socket in sockets {
-        socket.with_mut(ClearEdges::clear_edges);
     }
 }

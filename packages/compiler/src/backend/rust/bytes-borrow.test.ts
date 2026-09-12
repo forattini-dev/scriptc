@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { IrExpr, IrFunction, IrModule } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrModule } from "../../ir/ir.js";
 import { validateModule } from "../../ir/validate.js";
 import { mangleLocal } from "../mangle.js";
 import { emitRustModule } from "./emitter.js";

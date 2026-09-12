@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { validRecordDiscriminant } from "./record-discriminant.js";
-import { type IrRecordShape, type IrUnionDef } from "./nodes.js";
+import { type IrRecordShape, type IrUnionDef } from "./ir.js";
 const shapes: IrRecordShape[] = ["a", "b"].map(id => ({ id, fields: [{ name: "kind", type: { kind: "string" } }] }));
 const get = (id: string) => shapes.find(shape => shape.id === id);
 const union = (): IrUnionDef => ({ id: "u", arms: [{ kind: "record", shapeId: "a" }, { kind: "record", shapeId: "b" }],

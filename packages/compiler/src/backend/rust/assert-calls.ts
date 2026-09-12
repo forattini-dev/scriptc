@@ -1,7 +1,7 @@
 // The assert.* library calls (node:assert's static ladder): split from
 // lib-calls.ts so the dispatcher stays under the file-line cap.
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
-import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES } from "../../ir/ir.js";
 
 export function emitRustAssertCall(
   expr: RustLibCallExpr,

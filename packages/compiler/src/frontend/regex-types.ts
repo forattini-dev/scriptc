@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
-import type { TypeMapperCtx } from "./types.js";
-import { STRING, UNDEFINED_T, type IrType } from "../ir/nodes.js";
+import type { TypeMapperCtx } from "./type-mapper.js";
+import { STRING, UNDEFINED_T, type IrType } from "../ir/ir.js";
 
 /** Map only the standard library's groups property; user dictionaries keep
  * their own declared value types. This also covers indexed-access aliases. */

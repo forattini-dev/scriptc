@@ -1,5 +1,5 @@
-import type { IrClassDef, IrExpr, IrFunction, IrModule, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import type { IrClassDef, IrExpr, IrFunction, IrModule, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
 import { mangleClassStruct, mangleField, mangleFunction } from "../mangle.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 

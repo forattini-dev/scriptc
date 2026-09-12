@@ -1,4 +1,4 @@
-import type { IrFunction } from "../../ir/nodes.js";
+import type { IrFunction } from "../../ir/ir.js";
 import { mangleGlobal } from "../mangle.js";
 import type { RustDefinitionContext } from "./definitions.js";
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";

@@ -5,8 +5,8 @@ import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/nat
 import { emitNativeArrayCheck } from "./native-array-values.js";
 import { emitRustDynamicEquality } from "./dynamic-equality.js";
 import { emitRustDynamicIslandSupport } from "./dynamic-island.js";
-import type { IrType, SrcLoc } from "../../ir/nodes.js";
-import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/nodes.js";
+import type { IrType, SrcLoc } from "../../ir/ir.js";
+import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
 import { emitRustDynamicInvoke } from "./dynamic-invoke.js";
 import { emitRustDynamicWebStream } from "./dynamic-web-stream.js";
 import { emitRustDynamicHttp } from "./dynamic-http.js";

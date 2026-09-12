@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
-import { BYTES_U8, F64, type IrExpr } from "../../ir/nodes.js";
+import { BYTES_U8, F64, type IrExpr } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** The fixed-level deflate option used by deterministic PNG encoders.

@@ -3755,8 +3755,8 @@ static const char isl_modules_bootstrap[] =
     "    c.default = c;\n"
     "    return c;\n"
     "  });\n"
-    /* stream/web re-exports the web prelude's classes; names the
-     * prelude does not carry stay undefined (honest absence). */
+    /* Re-export only constructors installed by this engine's prelude.
+     * The Rust prelude implements a larger surface than the C island. */
     "  builtins['stream/web'] = memo(() => {\n"
     "    const g = globalThis;\n"
     "    const w = {\n"
@@ -3768,6 +3768,9 @@ static const char isl_modules_bootstrap[] =
     "      ReadableStreamDefaultController: g.ReadableStreamDefaultController,\n"
     "      WritableStreamDefaultWriter: g.WritableStreamDefaultWriter,\n"
     "    };\n"
+    "    for (const key of Object.keys(w)) {\n"
+    "      if (w[key] === undefined) delete w[key];\n"
+    "    }\n"
     "    w.default = w;\n"
     "    return w;\n"
     "  });\n"

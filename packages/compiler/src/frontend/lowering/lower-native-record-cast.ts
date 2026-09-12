@@ -1,5 +1,5 @@
 import type * as ts from "../ts7/adapter.js";
-import { DYN, type IrExpr, type IrType } from "../../ir/nodes.js";
+import { DYN, type IrExpr, type IrType } from "../../ir/ir.js";
 import { nativeIndexedRecordValue } from "../../ir/native-record.js";
 import { locOf } from "../program.js";
 import type { Lowerer } from "./lowerer.js";

@@ -403,6 +403,7 @@ fn http_tls_start(
     connection: Rc<RefCell<HttpClientConnection>>,
     output: Vec<u8>,
 ) {
+    net_register_loop_hooks();
     let (host, port, method, trust, reject_unauthorized, timeout) = request.with(|request| {
         (
             request.host.to_string(),

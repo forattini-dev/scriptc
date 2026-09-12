@@ -8,7 +8,7 @@
  * .test.ts. */
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
-import { NPM_COMPRESS_MIN, type IrModule } from "../../ir/nodes.js";
+import { NPM_COMPRESS_MIN, type IrModule } from "../../ir/ir.js";
 import { emitRustEmbeddedModules } from "./embedded-modules.js";
 
 type EmbeddedModule = NonNullable<IrModule["embedded"]>["modules"][number];

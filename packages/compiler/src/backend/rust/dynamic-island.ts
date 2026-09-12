@@ -1,4 +1,4 @@
-import type { IrExpr } from "../../ir/nodes.js";
+import type { IrExpr } from "../../ir/ir.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
 import { emitIslandValue } from "./island-values.js";
 

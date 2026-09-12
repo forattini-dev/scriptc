@@ -1,4 +1,4 @@
-import type { IrGlobal, IrLibSection } from "../../ir/nodes.js";
+import type { IrGlobal, IrLibSection } from "../../ir/ir.js";
 import { mangleFnClosure, mangleFunction, mangleGlobal } from "../mangle.js";
 
 export interface RustLibraryEntryOptions {

@@ -1,4 +1,4 @@
-import type { IrFunction, IrStmt, SrcLoc } from "../../ir/nodes.js";
+import type { IrFunction, IrStmt, SrcLoc } from "../../ir/ir.js";
 import { mangleLocal } from "../mangle.js";
 import type { RustAsyncControlContext, RustAsyncHandlers } from "./async-control.js";
 

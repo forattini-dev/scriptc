@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { newFnCtx, type FnCtx } from "./lowerer.js";
-import { IrExpr, IrFamily, IrLocal, IrParam, IrType, SrcLoc, typeKey } from "../../ir/nodes.js";
+import { IrExpr, IrFamily, IrLocal, IrParam, IrType, SrcLoc, typeKey } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { familyIdOf } from "../families.js";
 import { inferTypeParamBindings, internGenericInstance, type GenericFnInfo, type GenericInstance, type ParamShape } from "./lower-calls.js";

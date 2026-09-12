@@ -1,4 +1,4 @@
-import { moduleEmbedsBuiltin, moduleUsesFetch, type IrModule, type SrcLoc } from "../ir/nodes.js";
+import { moduleEmbedsBuiltin, moduleUsesFetch, type IrModule, type SrcLoc } from "../ir/ir.js";
 
 /** APIs that require host capabilities absent from portable WASI Preview 1.
  * These are target diagnostics, not backend-tier gaps: the same language IR

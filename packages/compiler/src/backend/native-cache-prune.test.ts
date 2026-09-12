@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from "
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { pruneBuildCache } from "./cc.js";
+import { pruneBuildCache } from "./native-toolchain.js";
 
 const scratch: string[] = [];
 afterEach(async () => {

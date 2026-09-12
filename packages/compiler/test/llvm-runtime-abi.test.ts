@@ -34,7 +34,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
-import { resolveCc, runtimeSrcDir } from "../src/backend/cc.js";
+import { emitLlvmModule } from "../src/backend/llvm/emitter.js";
+import { resolveCc, runtimeSrcDir } from "../src/backend/native-toolchain.js";
+import { RUNTIME_ABI_MARKER } from "../src/backend/runtime-abi.js";
+import type { IrModule } from "../src/ir/ir.js";
 import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -224,6 +227,29 @@ function checkDeclare(d: LlDeclare, protos: Map<string, CProto>): string | undef
 }
 
 describe("LLVM backend declares match scr_runtime.h prototypes", () => {
+  test("externally linkable objects reference the versioned runtime marker", async () => {
+    const loc = { file: "/source/abi-marker.ts", start: 0, end: 0 };
+    const mod: IrModule = {
+      irVersion: 1,
+      sourceFile: loc.file,
+      entry: "%main",
+      functions: [{
+        id: "%main",
+        name: "main",
+        params: [],
+        locals: [],
+        returnType: { kind: "void" },
+        body: [{ kind: "return", value: null, loc }],
+        loc,
+      }],
+    };
+    const llvm = emitLlvmModule(mod, { runtimeAbiMarker: true });
+    expect(llvm).toContain(`declare void @${RUNTIME_ABI_MARKER}()`);
+    expect(llvm).toContain(`call void @${RUNTIME_ABI_MARKER}()`);
+    expect(await readFile(headerPath, "utf8")).toContain(`void ${RUNTIME_ABI_MARKER}(void);`);
+    expect(await readFile(join(repoRoot, "packages/runtime/src/scr_console.c"), "utf8"))
+      .toContain(`void ${RUNTIME_ABI_MARKER}(void) {}`);
+  });
   test("ScrBytes structural type matches the C runtime layout", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "scriptc-llvm-layout-"));
     const cPath = join(outDir, "scr-bytes-layout.c");

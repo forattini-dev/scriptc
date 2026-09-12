@@ -1,5 +1,5 @@
 import { InternalCompilerError } from "../../errors.js";
-import { BOOL, DYN, F64, isUnitType, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, isUnitType, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { droppableStatic } from "./lower-exprs.js";
 

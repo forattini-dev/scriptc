@@ -1,7 +1,7 @@
 export const USAGE = `scriptc — TypeScript/JavaScript to native and WebAssembly executables (experimental)
 
 Usage:
-  scriptc build <file.ts|.js> [options]     compile to an executable target artifact
+  scriptc build <file.ts|.js> [options]     compile to an executable or source artifact
   scriptc run <file.ts|.js> [options]       compile and run
   scriptc coverage <file.ts|.js>            how much compiles statically, and why not
   scriptc coverage <file.ts|.js> --dynamic  what a --dynamic build compiles, and what still blocks it
@@ -17,7 +17,11 @@ Usage:
                                             for the current compiler/SDK/target
 
 Options:
-  -o, --out <path>   output path (default: .scriptc/<name>[.exe|.wasm])
+  -o, --out <path>   primary output path (default: .scriptc/<name><suffix>)
+      --emit <kind>  primary output: ir, c, llvm, asm, obj, or exe
+                     (default: exe). asm/obj use the matching platform helper
+      --print <kind> print machine-readable metadata instead of the output path
+                     (native-link-info implies --emit=obj and never links)
       --target <t>   runtime target the binary reproduces: node24 (default),
                      node26, or bun. Selects the ambient type surface
                      (@types/node or @types/bun), the export/imports
@@ -62,7 +66,8 @@ Options:
       --keep-c       keep the generated program TU next to the executable
                      (default; the .ll, .c, or .rs source selected by backend)
       --no-keep-c    delete the generated program TU after compiling
-      --emit-ir      also write the IR as JSON next to the executable
+      --emit-ir      also write IR beside an executable or library archive;
+                     deprecated for executables: use --emit=ir for primary IR
       --sanitize     build with ASan + runtime RC audit
       --dynamic      explicitly embed a JS engine (static stays the default)
       --no-engine    reject JavaScript engines and deferred unsupported operations;
@@ -93,6 +98,8 @@ Options:
 
 export const CLI_OPTIONS = {
   out: { type: "string", short: "o" },
+  emit: { type: "string" },
+  print: { type: "string" },
   backend: { type: "string" },
   target: { type: "string" },
   conditions: { type: "string", multiple: true },

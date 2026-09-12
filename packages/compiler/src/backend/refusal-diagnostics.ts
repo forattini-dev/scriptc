@@ -1,5 +1,5 @@
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { SrcLoc } from "../ir/nodes.js";
+import type { SrcLoc } from "../ir/ir.js";
 import type { LlvmUnsupportedError } from "./llvm/emitter.js";
 import type { RustUnsupportedError } from "./rust/emitter.js";
 

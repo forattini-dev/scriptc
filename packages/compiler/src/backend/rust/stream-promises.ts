@@ -1,5 +1,5 @@
-import type { IrFamily } from "../../ir/nodes.js";
-import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import type { IrExpr, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { IrFuncType, RustClosureShape } from "./model.js";
 import type { RustStreamModel } from "./stream-model.js";
 

@@ -1,5 +1,5 @@
-import type { IrFamily } from "../../ir/nodes.js";
-import { typeEquals, type IrExpr, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/nodes.js";
+import type { IrFamily } from "../../ir/ir.js";
+import { typeEquals, type IrExpr, type IrType, type IrUnionDef, type SrcLoc } from "../../ir/ir.js";
 
 type NullishExpr = Extract<IrExpr, { kind: "nullish" }>;
 

@@ -1,5 +1,5 @@
-import type { IrRecordShape, IrType } from "../../ir/nodes.js";
-import { typeEquals } from "../../ir/nodes.js";
+import type { IrRecordShape, IrType } from "../../ir/ir.js";
+import { typeEquals } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** Can every value reached by a dynamic record key surface as `type`? */

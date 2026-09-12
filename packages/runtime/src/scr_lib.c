@@ -117,19 +117,44 @@ static SCR_TL ScrStr *scr_versions_node_str = NULL; /* interned process.versions
 static SCR_TL ScrStr *scr_navigator_user_agent_str = NULL;
 static SCR_TL ScrStr *scr_versions_openssl_str = NULL; /* interned process.versions.openssl */
 
+/* Keep lazy process values out of the startup cleanup root.  The executable
+ * linker can discard an otherwise-unused getter, but an unconditional atexit
+ * callback that mentions every cache would still retain each cache cell (and
+ * its symbol) in a tiny hello-world.  Each getter below instead registers its
+ * own cleanup only when the value is first materialized.  That is equivalent
+ * at process exit and retains the RC-audit cleanup guarantee for the values a
+ * program actually observes. */
 static void scr_lib_cleanup(void) {
   scr_arr_release(scr_argv_arr);
   scr_argv_arr = NULL;
+}
+
+static void scr_process_platform_cleanup(void) {
   scr_str_release(scr_platform_str);
   scr_platform_str = NULL;
+}
+
+static void scr_process_exec_path_cleanup(void) {
   scr_str_release(scr_exec_path_str);
   scr_exec_path_str = NULL;
+}
+
+static void scr_process_arch_cleanup(void) {
   scr_str_release(scr_arch_str);
   scr_arch_str = NULL;
+}
+
+static void scr_process_versions_node_cleanup(void) {
   scr_str_release(scr_versions_node_str);
   scr_versions_node_str = NULL;
+}
+
+static void scr_navigator_user_agent_cleanup(void) {
   scr_str_release(scr_navigator_user_agent_str);
   scr_navigator_user_agent_str = NULL;
+}
+
+static void scr_process_versions_openssl_cleanup(void) {
   scr_str_release(scr_versions_openssl_str);
   scr_versions_openssl_str = NULL;
 }
@@ -174,7 +199,15 @@ void scr_lib_init(int argc, char **argv) {
  * atexit handlers); the interned process values above still intern lazily
  * on first read, so the library reset seam releases them here instead —
  * scr_library_reset (scr_library.c) calls this every session reset. */
-void scr_lib_session_cleanup(void) { scr_lib_cleanup(); }
+void scr_lib_session_cleanup(void) {
+  scr_lib_cleanup();
+  scr_process_platform_cleanup();
+  scr_process_exec_path_cleanup();
+  scr_process_arch_cleanup();
+  scr_process_versions_node_cleanup();
+  scr_navigator_user_agent_cleanup();
+  scr_process_versions_openssl_cleanup();
+}
 #endif
 
 /* Raw argv accessors for the island's process shim (scr_island.c): the
@@ -214,6 +247,9 @@ ScrStr *scr_process_platform(void) {
 #else
     scr_platform_str = scr_str_new("unknown", 7);
 #endif
+#ifndef SCR_LIB
+    atexit(scr_process_platform_cleanup);
+#endif
   }
   return scr_str_retain(scr_platform_str);
 }
@@ -233,6 +269,9 @@ ScrStr *scr_process_arch(void) {
 #else
     scr_arch_str = scr_str_new("unknown", 7);
 #endif
+#ifndef SCR_LIB
+    atexit(scr_process_arch_cleanup);
+#endif
   }
   return scr_str_retain(scr_arch_str);
 }
@@ -247,6 +286,9 @@ ScrStr *scr_process_versions_node(void) {
   if (!scr_versions_node_str) {
     scr_versions_node_str =
         scr_str_new(SCR_NODE_COMPAT_VERSION, sizeof(SCR_NODE_COMPAT_VERSION) - 1);
+#ifndef SCR_LIB
+    atexit(scr_process_versions_node_cleanup);
+#endif
   }
   return scr_str_retain(scr_versions_node_str);
 }
@@ -255,6 +297,9 @@ ScrStr *scr_navigator_user_agent(void) {
   static const char value[] = "Node.js/" SCR_NODE_COMPAT_MAJOR;
   if (!scr_navigator_user_agent_str) {
     scr_navigator_user_agent_str = scr_str_new(value, sizeof(value) - 1);
+#ifndef SCR_LIB
+    atexit(scr_navigator_user_agent_cleanup);
+#endif
   }
   return scr_str_retain(scr_navigator_user_agent_str);
 }
@@ -271,6 +316,9 @@ ScrStr *scr_process_versions_openssl(void) {
   if (!scr_versions_openssl_str) {
     scr_versions_openssl_str =
         scr_str_new(SCR_OPENSSL_COMPAT_VERSION, sizeof(SCR_OPENSSL_COMPAT_VERSION) - 1);
+#ifndef SCR_LIB
+    atexit(scr_process_versions_openssl_cleanup);
+#endif
   }
   return scr_str_retain(scr_versions_openssl_str);
 }
@@ -311,6 +359,9 @@ ScrStr *scr_process_exec_path(void) {
     const char *use = realpath(raw, resolved) != NULL ? resolved : raw;
 #endif
     scr_exec_path_str = scr_str_new(use, strlen(use));
+#ifndef SCR_LIB
+    atexit(scr_process_exec_path_cleanup);
+#endif
   }
   return scr_str_retain(scr_exec_path_str);
 }
@@ -4258,7 +4309,7 @@ ScrStr *scr_crypto_x509_valid_to_str(ScrStr *pem) {
   return scr_x509_validity_raw((const uint8_t *)pem->data, pem->len, true);
 }
 
-/* ── String surface (fromCharCode / lastIndexOf) ─────────────────────── */
+/* ── String surface (fromCharCode) ────────────────────────────────────── */
 
 /* String.fromCharCode core over n UTF-16 code units read through
  * `unit(src, i)` (already ToUint16'd): combine adjacent surrogate pairs,
@@ -4324,38 +4375,6 @@ static uint32_t scr_fcc_bytes_unit(void *src, size_t i) {
  * ToUint16 the packed-array form applies. */
 ScrStr *scr_str_from_char_code_bytes(ScrBytes *codes) {
   return scr_str_from_units(codes->len, scr_fcc_bytes_unit, codes);
-}
-
-/* UTF-16 unit count of the UTF-8 prefix ending at byte offset `end`
- * (ScrStr storage is well-formed, so lead bytes decide the advance). */
-static size_t scr_lib_u16_units(const char *s, size_t end) {
-  size_t units = 0;
-  for (size_t i = 0; i < end;) {
-    unsigned char b = (unsigned char)s[i];
-    size_t adv = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
-    units += adv == 4 ? 2 : 1;
-    i += adv;
-  }
-  return units;
-}
-
-/* lastIndexOf(needle, position): last occurrence at or before the clamped
- * UTF-16 position. A byte-wise reverse scan is boundary-safe: a well-formed
- * needle's first byte is never a continuation byte. */
-double scr_str_last_index_of(ScrStr *s, ScrStr *needle, double position) {
-  double length = (double)scr_lib_u16_units(s->data, s->len);
-  position = isnan(position) ? length : trunc(position);
-  if (position < 0.0) position = 0.0;
-  if (position > length) position = length;
-  if (needle->len == 0) return position;
-  if (needle->len > s->len) return -1.0;
-  for (size_t i = s->len - needle->len + 1; i-- > 0;) {
-    if (memcmp(s->data + i, needle->data, needle->len) == 0) {
-      double index = (double)scr_lib_u16_units(s->data, i);
-      if (index <= position) return index;
-    }
-  }
-  return -1.0;
 }
 
 /* ── Date, the read-only value slice ───────────────────────────────────

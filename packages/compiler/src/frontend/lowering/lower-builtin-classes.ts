@@ -4,9 +4,9 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { BOOL, DYN, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, UNDEFINED_T } from "../../ir/nodes.js";
+import { BOOL, DYN, IrType, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, UNDEFINED_T } from "../../ir/ir.js";
 import { isNodeTypesPath } from "../program.js";
-import { typeKey } from "../types.js";
+import { typeKey } from "../type-mapper.js";
 
 /** The builtin Error hierarchy (Error + TypeError/RangeError/SyntaxError)
  * as eagerly-registered ClassInfos: mapType names them the moment a lib

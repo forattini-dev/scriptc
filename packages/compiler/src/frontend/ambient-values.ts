@@ -1,8 +1,8 @@
-import { BOOL, F64, JSVAL, STRING, funcOf, type IrType } from "../ir/nodes.js";
+import { BOOL, F64, JSVAL, STRING, funcOf, type IrType } from "../ir/ir.js";
 import * as ts from "./ts7/adapter.js";
-import type { TypeMapperCtx } from "./types.js";
+import type { TypeMapperCtx } from "./type-mapper.js";
 import type { Lowerer } from "./lowering/lowerer.js";
-import type { IrExpr, SrcLoc } from "../ir/nodes.js";
+import type { IrExpr, SrcLoc } from "../ir/ir.js";
 
 /** Map standard-library values whose runtime representation is not their
  * declaration's structural interface. Provenance is part of this seam: a

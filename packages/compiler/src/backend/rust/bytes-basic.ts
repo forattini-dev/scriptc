@@ -1,4 +1,4 @@
-import type { IrExpr } from "../../ir/nodes.js";
+import type { IrExpr } from "../../ir/ir.js";
 
 type BytesIntrinsic = Extract<IrExpr, { kind: "bytesIntrinsic" }>;
 

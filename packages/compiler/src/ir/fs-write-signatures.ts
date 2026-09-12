@@ -1,4 +1,4 @@
-import { BOOL, BYTES_U8, F64, STRING, VOID, type IrLibFn, type IrType } from "./nodes.js";
+import { BOOL, BYTES_U8, F64, STRING, VOID, type IrLibFn, type IrType } from "./ir.js";
 
 /** Whole-file writes, including creation-only modes and exclusive append. */
 export const FS_WRITE_LIB_SIGS = {

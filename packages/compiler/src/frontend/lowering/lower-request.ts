@@ -1,5 +1,5 @@
 import * as ts from "../ts7/adapter.js";
-import { JSVAL, type IrExpr } from "../../ir/nodes.js";
+import { JSVAL, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { lowerIslandObjectLiteral } from "./lower-island.js";
 import type { Lowerer } from "./lowerer.js";

@@ -1,4 +1,4 @@
-import type { IrExpr, IrFunction, IrType } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrType } from "../../ir/ir.js";
 import { mangleFunction } from "../mangle.js";
 import type { RustDefinitionContext } from "./definitions.js";
 import { isSharedRecord } from "./shared-records.js";

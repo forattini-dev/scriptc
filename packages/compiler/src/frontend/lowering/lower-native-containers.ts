@@ -1,7 +1,7 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
 import { numLit, strLit, varRef } from "../../ir/build.js";
-import { BOOL, F64, STRING, VOID, arrayOf, typeEquals, typeKey, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
+import { BOOL, F64, STRING, VOID, arrayOf, typeEquals, typeKey, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** Dense arrays can be cleared without introducing holes or changing identity.

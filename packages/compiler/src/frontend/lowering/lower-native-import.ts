@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
-import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrExpr, type IrStmt, type IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, JSVAL, STRING, VOID, canMarshalTypedFuncIntoIsland, type IrExpr, type IrStmt, type IrType } from "../../ir/ir.js";
 import { type Lowerer, newFnCtx } from "./lowerer.js";
 import { nativeImportTargetOf } from "./lower-native-import-types.js";
 import { nativeModuleExports } from "./lower-native-import-exports.js";

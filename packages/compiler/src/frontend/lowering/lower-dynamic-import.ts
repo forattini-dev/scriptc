@@ -1,6 +1,6 @@
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
-import { JSVAL, STRING, type IrExpr } from "../../ir/nodes.js";
+import { JSVAL, STRING, type IrExpr } from "../../ir/ir.js";
 import { InternalCompilerError } from "../../errors.js";
 import { type Lowerer, PoisonError } from "./lowerer.js";
 import { lowerJsonDynamicImport, lowerOwnModuleImport } from "./lower-island.js";

@@ -1,5 +1,5 @@
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { IrModule } from "../ir/nodes.js";
+import type { IrModule } from "../ir/ir.js";
 import { islandEngineFeature, rustEngineRequirement } from "./rust/runtime-features.js";
 
 /** Composition of the emitted executable, not a transitive safety claim. */

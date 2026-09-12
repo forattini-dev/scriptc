@@ -1,4 +1,4 @@
-import type { IrType } from "../../ir/nodes.js";
+import type { IrType } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** Keep checked-dynamic storage when a binding's checker type contains

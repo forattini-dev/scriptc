@@ -6,7 +6,7 @@
  * Each row names the backends whose emitter sources NAME that libCall
  * spelling — a lowering exists there. Emitter roots:
  *
- *   c    packages/compiler/src/backend/emission
+ *   c    packages/compiler/src/backend/c
  *   llvm packages/compiler/src/backend/llvm
  *   rust packages/compiler/src/backend/rust
  *

@@ -4,7 +4,7 @@ import { InternalCompilerError } from "../errors.js";
  * already decide support — the diagnostics registry (diagnostic.ts), the
  * unsupported-syntax dispatch tables and stdlib/builtin lowering tables
  * (lowering/surfaces.ts), and the supported-builtin-module list
- * (frontend/shared.ts). Nothing here is hand-maintained: adding a table
+ * (frontend/builtin-modules.ts). Nothing here is hand-maintained: adding a table
  * row changes the manifest on the next generation, and the staleness test
  * (tests/harness/surface-manifest.test.ts) fails until the committed file
  * is regenerated (`pnpm manifest`).
@@ -48,7 +48,7 @@ import { BACKEND_IDS, BACKEND_LIB_CALLS, type BackendId } from "./backend-libcal
 /* Re-exported here so a consumer of the manifest reaches the backend
  * column and the generated table it is derived from through one module. */
 export { BACKEND_IDS, BACKEND_LIB_CALLS, type BackendId } from "./backend-libcalls.js";
-import type { IrLibFn } from "../ir/nodes.js";
+import type { IrLibFn } from "../ir/ir.js";
 import { FENCE_CODES, UNSUPPORTED } from "../diagnostics/diagnostic.js";
 import { FETCH_COMPAT_PROJECTION } from "../compat/fetch-profile.js";
 import { NODE_COMPAT_MATRIX } from "../compat/node-matrix.js";
@@ -61,7 +61,7 @@ import {
   compatTargetList,
 } from "../compat/profile-schema.js";
 import { NODE24_URL_COMPAT_PROFILE } from "../compat/url-profile.js";
-import { SUPPORTED_BUILTIN_MODULES, SUPPORTED_NODE_MODULES } from "../frontend/shared.js";
+import { SUPPORTED_BUILTIN_MODULES, SUPPORTED_NODE_MODULES } from "../frontend/builtin-modules.js";
 import {
   AMBIENT_SURFACE_FNS,
   ARRAY_METHODS,

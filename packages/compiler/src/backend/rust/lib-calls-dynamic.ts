@@ -1,5 +1,5 @@
 import type { RustLibCallContext, RustLibCallExpr } from "./lib-calls.js";
-import { RUNTIME_ERROR_CLASSES } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES } from "../../ir/ir.js";
 
 export function emitRustDynamicLibCall(
   expr: RustLibCallExpr,

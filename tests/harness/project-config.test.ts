@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
-import { analyze, compile, renderAll } from "@scriptc/compiler";
+import { analyze, compile, renderDiagnostics } from "@scriptc/compiler";
 
 /* Plain adoption checks exercise Rust, the primary backend. The separate
  * sanitized lane selects C explicitly, because Rust has no ASan mode yet. */
@@ -156,7 +156,7 @@ test("node-types: declared-but-not-lowered surface fences, naming @types/node", 
   });
   expect(result.ok).toBe(false);
   if (result.ok) return;
-  const rendered = renderAll(result.diagnostics, result.sourceTexts, { color: false })
+  const rendered = renderDiagnostics(result.diagnostics, result.sourceTexts, { color: false })
     .replaceAll(nodeTypesDir + "/", "");
   await expect(rendered).toMatchFileSnapshot("__snapshots__/node-types-fenced.txt");
 });
