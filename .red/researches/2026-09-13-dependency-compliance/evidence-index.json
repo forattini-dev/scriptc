@@ -1,0 +1,287 @@
+{
+  "createdAt": "2026-09-13T17:06:48.695509+00:00",
+  "compilerCommit": "30cde1be34c0eddc7d6a4a808796f5c56c851d58",
+  "compilerSourceCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
+  "consumerAndScannedFileHashesReverifiedBeforeWritingReport": true,
+  "sourceHashCount": 4187,
+  "files": {
+    "README.md": {
+      "sha256": "9bf540529bfac299d78f1148f5ea4e4914b464cb915a86fa1f17d7a685929712",
+      "bytes": 13733,
+      "retainedLocally": true
+    },
+    "type-discovery-requirement.md": {
+      "sha256": "6939337dfd799249e324d6e8069ee92aaa50f90eed3d24ba91b03cb1195bc08a",
+      "bytes": 3039,
+      "retainedLocally": true
+    },
+    "all-dependencies.csv": {
+      "sha256": "f3ec2c48dcc9b3790421aeb1617ad32b4927e86fc05d59d649d28449634ac5f5",
+      "bytes": 327851,
+      "retainedLocally": true
+    },
+    "observed-dependencies.csv": {
+      "sha256": "e5d59ae966dab5261210321840344f1f7894fb1faaf276d8ef5af815dae06f7f",
+      "bytes": 66439,
+      "retainedLocally": true
+    },
+    "imports.csv": {
+      "sha256": "10216d8075cb1059c2971d29405eb17b248340cd0502eae01f99ccb1bc99c051",
+      "bytes": 1771110,
+      "retainedLocally": true
+    },
+    "observed-js-without-declarations.csv": {
+      "sha256": "aa0db59123c2dca65336a295b109b43c5672ef0f6524f54c16ef6933cdf5747b",
+      "bytes": 5357,
+      "retainedLocally": true
+    },
+    "available-external-types.csv": {
+      "sha256": "660e14dbff726fc56274478eb5eca3d4fe6283bdea47a471b17dbf23b3d0887a",
+      "bytes": 18718,
+      "retainedLocally": true
+    },
+    "transitive-unresolved-type-surfaces.csv": {
+      "sha256": "c8366284dfb1e155c77c013175d249724ec028c6dbbd63a977c74b5d3a0839b7",
+      "bytes": 82880,
+      "retainedLocally": true
+    },
+    "unresolved-declared-dependencies.csv": {
+      "sha256": "7ca7a57bfca3c5d0ef9e581a0a340c3a86c530cdb0978036466fce7d0220d746",
+      "bytes": 29045,
+      "retainedLocally": true
+    },
+    "summary.json": {
+      "sha256": "f27d440672046422a996dba18c1c3b40c7bde8c1038ba415a41345175e33e18c",
+      "bytes": 4130,
+      "retainedLocally": true
+    },
+    "diagnostics-summary.json": {
+      "sha256": "652ae69bebadea375dd8e70ae0665efbeb789648a73edd5b25314e5fe3df2b9c",
+      "bytes": 10180,
+      "retainedLocally": true
+    },
+    "inventory-summary.json": {
+      "sha256": "f6f7a1611f977f3d3975a2a1f50cea27711bdee0653d72c7e9179a57397f2625",
+      "bytes": 520,
+      "retainedLocally": true
+    },
+    "surface-summary.json": {
+      "sha256": "5d74e89cf24351667b7282df21a028137575427329dd2fa65fa480cf6056c8e6",
+      "bytes": 687,
+      "retainedLocally": true
+    },
+    "provenance.json": {
+      "sha256": "b6b962505fc8e470bfe553a0fc860dfa8bd41dd93cdff0d3af672bb31f4121b3",
+      "bytes": 1816,
+      "retainedLocally": true
+    },
+    "programs.json": {
+      "sha256": "7d3061aab36e3dc98a5f1c798f97fb641299b588150e5a4a8345b88066611a03",
+      "bytes": 5849,
+      "retainedLocally": true
+    },
+    "ambient-declarations.json": {
+      "sha256": "6cd9133800b164b3c00d204ec096075aa28b8f4d483320b7bb108281869247ba",
+      "bytes": 5990,
+      "retainedLocally": true
+    },
+    "nonliteral-imports.json": {
+      "sha256": "eaf25fd1017881bff8d2af02c7ecd3601a345b2653e95ef98a9943ac5523afb4",
+      "bytes": 7657,
+      "retainedLocally": true
+    },
+    "source-hashes.json": {
+      "sha256": "bd110b3854cf1ba0de43c441b647b12d97f4ea6d3d9b7c371067b366cc1e1670",
+      "bytes": 704459,
+      "retainedLocally": true
+    },
+    "inventory.mts": {
+      "sha256": "155d8e2d8a834570a625f6ddf0e3a78b7f3408cc1daccb969595a5617231d8bf",
+      "bytes": 16166,
+      "retainedLocally": true
+    },
+    "assess-surfaces.mts": {
+      "sha256": "655473ec0c77b2692242b8c522b832c944530fbac2cf684bc8f43c12a70dd286",
+      "bytes": 4042,
+      "retainedLocally": true
+    },
+    "consolidate.py": {
+      "sha256": "9740c5fe109e7d4a3e58e1e22ee0b1d80a07c6366fe236bc1dee8a500fd9a4f3",
+      "bytes": 6698,
+      "retainedLocally": true
+    },
+    "redcode-causes.json": {
+      "sha256": "ae78e8447d56227cdaf0293fd36a36a99e176fbed58b02e9c2e63c44f3d6020a",
+      "bytes": 455269,
+      "retainedLocally": true
+    },
+    "redcode-causes.md": {
+      "sha256": "20b80f605a03847347abdc17245ba06ac3590f3908587fe079af61aa2b6ed9c7",
+      "bytes": 10567,
+      "retainedLocally": true
+    },
+    "redcode-causes.py": {
+      "sha256": "9b681441c7a4e8ea844aca9257edb4116b1dbd069270da10b4fb9411b1f1d277",
+      "bytes": 11079,
+      "retainedLocally": true
+    },
+    "redskills-causes.json": {
+      "sha256": "f1eb0fb4ee8f1e186c1fc6e32a3f8634f32a89edd9342a7caabcfbba82e0d305",
+      "bytes": 43129,
+      "retainedLocally": true
+    },
+    "redskills-causes.md": {
+      "sha256": "aa8cd632a1e8956742c01989366ab87030763ee3c7ebd4639876d261b49d4226",
+      "bytes": 6612,
+      "retainedLocally": true
+    },
+    "redskills-typing-probe.json": {
+      "sha256": "81432d15aa15c1115fe1e47ae7e7b7f4ae2c3ed7ae25a93d7dbb28fd18eb3074",
+      "bytes": 4913,
+      "retainedLocally": true
+    },
+    "redskills-typing-probe.mjs": {
+      "sha256": "937e5618c75a44052416268b1f4059664d02fe7c50a392ab47bca880c38b39f4",
+      "bytes": 2547,
+      "retainedLocally": true
+    },
+    "redskills-package-probe.json": {
+      "sha256": "855244596d3fe9d53e1430ba836d9e448d9b1811ca77782cb0689900bb15b589",
+      "bytes": 28523,
+      "retainedLocally": true
+    },
+    "redskills-package-probe.mjs": {
+      "sha256": "2bacc93444e7951bf820351edcddbde1354e88dc40831215d76eae98f7cb9b6b",
+      "bytes": 2925,
+      "retainedLocally": true
+    },
+    "redskills-flow-probe.json": {
+      "sha256": "6a60db5e6306ed95a126abf1db166dbc8a57f83ec8a996d56aa1812ee33d2989",
+      "bytes": 879,
+      "retainedLocally": true
+    },
+    "redskills-flow-probe.mjs": {
+      "sha256": "bd770a8aa4e90a86bae58b04851341b3d99c9baf8e0d5b1b207f0a20f27b848e",
+      "bytes": 1108,
+      "retainedLocally": true
+    },
+    "redskills-baseline-revalidation.json": {
+      "sha256": "bf1ba05e29b041296d9254527fb4dd210853b185667d8ca7ae00ae9aa611b23b",
+      "bytes": 5478,
+      "retainedLocally": true
+    },
+    "redskills-herdr-resolution.json": {
+      "sha256": "afd4215cc7fe1f446c6320b2bb7928acc12c4891c51d6c73359bad36daa04cbd",
+      "bytes": 833,
+      "retainedLocally": true
+    },
+    "reddev-causes.json": {
+      "sha256": "483c6e11c88b5f2cb466fcb9fa9f9f00e0041d0a8193d38f326e31bd9058f1da",
+      "bytes": 80148,
+      "retainedLocally": true
+    },
+    "reddev-causes.md": {
+      "sha256": "f3af8b8f497559f9916e17e7b17fe231286ca4f533496aa0e203e2efe71abe59",
+      "bytes": 10521,
+      "retainedLocally": true
+    },
+    "reddev-probe.json": {
+      "sha256": "fbee8397fc466c1c50a04de7ca9347f2cb108d822c959c27960aa9797f45879d",
+      "bytes": 92528,
+      "retainedLocally": true
+    },
+    "reddev-probe.mjs": {
+      "sha256": "ca631f138ef5f66f0922bdc7e02e4271a250edaffe3abb8e57e41edb1234039f",
+      "bytes": 8534,
+      "retainedLocally": true
+    },
+    "npm-eligibility.json": {
+      "sha256": "45e4f2b664f3b9e10a49587c3659341bf18c23673e9996cb78102dc028952f54",
+      "bytes": 1986,
+      "retainedLocally": true
+    },
+    "npm-eligibility.mjs": {
+      "sha256": "58287e3d2e20b83dc20f32bfbab33295a65a6761735005d183e17b0a3b16f2cd",
+      "bytes": 1052,
+      "retainedLocally": true
+    },
+    "transitive-typing-probe.json": {
+      "sha256": "ee791e1c03de0baf256db593f3bf682af8b06ef7d5de61e70163bdb30ea308ce",
+      "bytes": 19247,
+      "retainedLocally": true
+    },
+    "transitive-typing-probe.md": {
+      "sha256": "de539bbfa0edd8c3563fdc566bac560b8a2f78e75a9ba0580f4ab4c445a23f6a",
+      "bytes": 3474,
+      "retainedLocally": true
+    },
+    "transitive-typing-probe.mjs": {
+      "sha256": "4a967b22d966b86080816c991a4e6c71295f11b8ef8554a68c622a34bc3490c0",
+      "bytes": 4408,
+      "retainedLocally": true
+    },
+    "registry-types-candidates.json": {
+      "sha256": "45266ebc9d0220b84831a3e43e6edd8f61535fb15061ac015c9352e559eda4d5",
+      "bytes": 13574,
+      "retainedLocally": true
+    },
+    "registry-types-candidates.md": {
+      "sha256": "622744baea3cf120f5d61edbc15354002faa0e69598877ebf4c6363e53b4cec4",
+      "bytes": 4104,
+      "retainedLocally": true
+    },
+    "registry-subpath-probe.json": {
+      "sha256": "b5529c7c348de9d6ae1be0c83f29e8c5e64028de510cf6e35d8c015cee5964df",
+      "bytes": 15150,
+      "retainedLocally": true
+    },
+    "registry-subpath-probe.md": {
+      "sha256": "a64251f00ada62bc09beffad9a78bcb722c59dcb16a5cf7a23134c00591ea198",
+      "bytes": 872,
+      "retainedLocally": true
+    }
+  },
+  "extendedEvidence": {
+    "declared-dependency-edges.json": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/declared-dependency-edges.json",
+      "sha256": "2614902e2c1268acd9f03655a4ee9929ab50f4121090798946d6f698b0ba909b",
+      "bytes": 1101247
+    },
+    "package-surfaces.json": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/package-surfaces.json",
+      "sha256": "e4b2891b2550c3894db1af2c8b58847aeed7bd88d0bdde0dd4340cbaea433f4a",
+      "bytes": 2697212
+    },
+    "packages.json": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/packages.json",
+      "sha256": "0a455ec0b168b052baf809f7605c95102730c44373b31aa2919d28bc560f1d72",
+      "bytes": 810359
+    },
+    "npm-eligibility.log": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/npm-eligibility.log",
+      "sha256": "a3eb0855fea10aace1642002bd3ad4e9fc7a9c8a61d467edee8ed50d9201223b",
+      "bytes": 1935
+    },
+    "inventory.log": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/inventory.log",
+      "sha256": "5e2a837362053856473bd332f2103e162e37459aa8cd7a19d1656b2ea0f8f561",
+      "bytes": 1659
+    },
+    "assess-surfaces.log": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/assess-surfaces.log",
+      "sha256": "03575242eb7e6c04812419a394cf4ef86604175c2034aecf9d15d51716103362",
+      "bytes": 881
+    },
+    "reddev-probe.log": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.log",
+      "sha256": "5191c487ea09fc1aeed8eb865bca11e627cf777daf37f888865ad676f9c921df",
+      "bytes": 3845
+    },
+    "imports.json": {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/imports.json",
+      "sha256": "db990d36e64b2814e8266e8072b4be4c6edb600e3ccb9991ddb6e79d7614b00e",
+      "bytes": 11541982
+    }
+  },
+  "scope": "Read-only dependency audit; only research documentation/artifacts added to compiler repository. No consumer or compiler implementation changes."
+}

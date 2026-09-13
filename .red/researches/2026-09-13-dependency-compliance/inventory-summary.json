@@ -1,0 +1,19 @@
+{
+  "programs": 18,
+  "scannedFiles": 2298,
+  "imports": 22941,
+  "externalObservedPackages": 122,
+  "packageInstancesInManifestClosure": 1147,
+  "distinctPackageNamesInManifestClosure": 874,
+  "observedImportTyping": {
+    "TypeScript-source": 1976,
+    "external-types": 39,
+    "local-ambient-candidate": 1,
+    "no-declaration-resolved": 32,
+    "own-declarations": 3266
+  },
+  "manifestClosureNoOwnDeclarationsOrTs": 363,
+  "unresolvedManifestEdges": 169,
+  "nonliteralImports": 28,
+  "provenanceUnchanged": true
+}

@@ -1,0 +1,1058 @@
+{
+  "schemaVersion": 1,
+  "scope": "Causal audit of 13 original red-skills executable entry attempts; root audit owns complete dependency inventory. Read-only consumer/compiler audit, no source modifications.",
+  "consumer": {
+    "root": "/home/cyber/Work/reddb.io/red-skills",
+    "commit": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+    "status": ""
+  },
+  "baselineCompilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+  "freshFocusedProbeCompilerCommit": "30cde1be34c0eddc7d6a4a808796f5c56c851d58",
+  "baselineSourceOccurrencesRevalidated": 1638,
+  "baselineSourceDiskMismatches": 0,
+  "counts": {
+    "programs": 13,
+    "historicalDiagnosticOccurrences": 1759,
+    "diagnosticCodes": {
+      "SC2013": 681,
+      "SC2009": 236,
+      "SC2011": 15,
+      "SC1090": 447,
+      "SC2002": 21,
+      "SC2020": 77,
+      "SC2004": 187,
+      "SC2003": 2,
+      "SC1101": 5,
+      "SC1100": 6,
+      "SC1014": 1,
+      "SC1016": 55,
+      "SC0001": 1,
+      "SC1031": 4,
+      "SC1120": 2,
+      "SC0004": 4,
+      "SC2012": 1,
+      "SC2008": 1,
+      "SC1063": 13
+    },
+    "missingDeclarationOccurrences": 1,
+    "missingDeclarationOccurrencesWithExistingConsumerTypesOmittedByScriptc": 1,
+    "distinctPackagesNamedBySc2013": 12,
+    "thesePackagesWithOwnResolvedTypesOrTs": 12
+  },
+  "countLimitations": [
+    "Historical default npmStatic OFF results, not fresh builds of all 13 entries.",
+    "Occurrences include repeated/cascading errors and are not independent bug counts or completion percentages.",
+    "Counts do not classify every body lowering failure or certify every transitive dependency; root inventory provides coverage.",
+    "Fresh package/declaration checks do not prove a native build succeeds.",
+    "No compiler/consumer source changes, no full builds, no installations performed."
+  ],
+  "findings": [
+    {
+      "id": "local-ambient-omitted",
+      "package": "js-yaml",
+      "version": "4.3.0",
+      "category": "compiler-project-type-root-adoption",
+      "owner": "scriptc",
+      "confirmed": true,
+      "details": "Package ships JS without declarations and @types/js-yaml is not resolvable, but consumer already supplies load(input:string):unknown in apps/dev/src/types/js-yaml.d.ts, included by its tsconfig. Scriptc omits this root and reports SC0001. Exact importer with existing declaration under TypeScript has no semantic errors and a concrete yaml binding.",
+      "consumerAction": "No new dependency/types required for this immediate error. Keep the existing declaration; do not replace it by an any-only declare module.",
+      "compilerAction": "Adopt included/referenced ambient declaration roots from consumer configuration without admitting unrelated executable project files. Then evaluate JS runtime body compatibility separately.",
+      "diagnosticOccurrences": 1,
+      "programs": [
+        "red-skills/dev"
+      ],
+      "evidence": "/tmp/scriptc-dependency-compliance-20260913/redskills-typing-probe.json"
+    },
+    {
+      "id": "npm-off-is-not-untyped",
+      "category": "build-native-package-admission",
+      "owner": "scriptc-build-configuration-and-compiler",
+      "confirmed": true,
+      "details": "681 SC2013 occurrences name 12 packages; all 12 representative original importers resolve own declaration files or executable TypeScript. Default matrix omitted npmStatic, whose API default is OFF. These messages do not prove absent TS/typings.",
+      "consumerAction": "Provide reproducible native dependency selection/build config; consumer source changes are not justified by SC2013 alone.",
+      "compilerAction": "Recheck explicit/auto package admission and follow reachable runtime implementation diagnostics. Types availability does not prove native body support.",
+      "diagnosticOccurrences": 681,
+      "distinctPackages": 12,
+      "evidence": "/tmp/scriptc-dependency-compliance-20260913/redskills-package-probe.json"
+    },
+    {
+      "id": "stdlib-typed-lowering-gap",
+      "category": "compiler-runtime-lowering",
+      "owner": "scriptc",
+      "confirmed": true,
+      "details": "77 SC2020 occurrences explicitly report standard/Node APIs that have declarations but no lowering; e.g. process.hrtime.bigint has 18 occurrences in rsp.",
+      "diagnosticOccurrences": 77
+    },
+    {
+      "id": "memory-module-init",
+      "category": "compiler-module-semantics",
+      "owner": "scriptc; optional consumer refactor",
+      "confirmed": true,
+      "details": "Memory CLI stops on 55 circular-module initialization restrictions plus one package re-export restriction. These are local TS module semantics, independent of absent npm declarations. Consumer can refactor eager cycle work, but the compiler limitation should remain explicit.",
+      "diagnosticOccurrences": 56,
+      "programs": [
+        "red-skills/memory"
+      ]
+    },
+    {
+      "id": "herdr-js-is-not-cause",
+      "category": "compiler-language-feature",
+      "owner": "scriptc",
+      "confirmed": true,
+      "details": "Original Herdr source is JavaScript .mjs with mostly inferred/unannotated parameters. Its two observed preflight refusals are Error constructor cause options in client.mjs and wire.mjs, not a .mjs or missing-type rejection. Further stages remain untested; two diagnostics does not mean only two remaining bugs.",
+      "diagnosticOccurrences": 2,
+      "programs": [
+        "red-skills/herdr"
+      ]
+    },
+    {
+      "id": "registry-erased-generics",
+      "category": "consumer-typing-candidate-not-missing-package-types",
+      "owner": "consumer typing choice plus compiler supported representation",
+      "confirmed": true,
+      "details": "apps/memory/src/operations/registry.ts:21 explicitly accepts readonly MemoryOperationDefinition<any, any>[] and baseline emits SC2011. This erases correlations across heterogeneous operation input/output types. Preserve operation identity/schema correlation or use a validated unknown transport adapter as a possible static-friendly contract. No counterfactual build has proved this alone resolves registry lowering; typed Zod objects independently remain blocked.",
+      "diagnosticOccurrences": 1,
+      "programs": [
+        "red-skills/memory-mcp"
+      ]
+    },
+    {
+      "id": "rsp-evolving-local",
+      "category": "compiler-flow-inference-with-consumer-annotation-candidate",
+      "owner": "scriptc; optional consumer explicit local type",
+      "confirmed": true,
+      "details": "apps/rsp/src/cli/passthrough.ts:25 has let child assigned typed spawn results. Baseline reports conversion to unknown and then unsupported unknown -> ChildProcess. An explicit suitable ChildProcess annotation can clarify the local contract, but this is not absent @types/node. Current TypeScript flow types are recorded in redskills-flow-probe.json; no annotated counterfactual compilation was performed. TypeScript 5.9.3 infers ChildProcessByStdio<null, Readable, Readable> at all four actual uses (lines 36/40/45/51), while declaration/assignment lhs retains evolving any.",
+      "programs": [
+        "red-skills/rsp"
+      ]
+    },
+    {
+      "id": "unknown-is-safe-boundary",
+      "category": "interpretation-caveat",
+      "owner": "audit",
+      "confirmed": true,
+      "details": "222 baseline diagnostics mention unknown; 172 are SC2009 including typed Zod schema boundaries. unknown is intentionally validated input, not missing typing. 11 mention any; 9 are generic explanatory messages, one is the known ambient omission, and one is the explicit operation registry erasure. Do not classify occurrences by keyword alone."
+    },
+    {
+      "id": "herdr-workspace-not-installed",
+      "category": "consumer-build-environment-installation",
+      "owner": "consumer build setup",
+      "confirmed": true,
+      "details": "The original Herdr package has no node_modules directory. ESM import.meta.resolve using the exact original entry parent URL fails ERR_MODULE_NOT_FOUND for @reddb-io/build-info and @reddb-io/toon. Both dependencies are declared and have types from other installed workspace consumers. This is missing installed links in this package context, not absence of typings. The baseline two Error-cause preflight diagnostics are not proof its entire dependency graph is ready.",
+      "consumerAction": "Restore declared workspace dependencies using the repository install procedure before comparing source builds. Preserve original source; do not run materialize-entrypoint.mjs to substitute the distributed bundle for native source compilation.",
+      "packages": [
+        "@reddb-io/build-info",
+        "@reddb-io/toon"
+      ],
+      "programs": [
+        "red-skills/herdr"
+      ],
+      "evidence": "/tmp/scriptc-dependency-compliance-20260913/redskills-herdr-resolution.json",
+      "documentation": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/scripts/materialize-entrypoint.mjs:1"
+    }
+  ],
+  "packages": [
+    {
+      "name": "@reddb-io/toon",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/report.ts",
+      "specifier": "@reddb-io/toon",
+      "diagnosticOccurrences": 63,
+      "programs": [
+        "red-skills/benchmark-code-understanding",
+        "red-skills/benchmark-memory",
+        "red-skills/brain",
+        "red-skills/castle-mcp",
+        "red-skills/memory-mcp",
+        "red-skills/redskilled",
+        "red-skills/rsp"
+      ],
+      "requireRuntimeError": {
+        "code": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+        "message": "No \"exports\" main defined in /home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/node_modules/@reddb-io/toon/package.json"
+      },
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+toon@0.3.0/node_modules/@reddb-io/toon/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/node_modules/@reddb-io/toon/index.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/toon",
+          "subModuleName": "index.d.ts",
+          "version": "0.3.0"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+toon@0.3.0/node_modules/@reddb-io/toon/package.json",
+      "version": "0.3.0",
+      "types": "./index.d.ts",
+      "exports": {
+        ".": {
+          "import": "./src/index.js",
+          "types": "./index.d.ts"
+        },
+        "./node": {
+          "import": "./src/node.js",
+          "types": "./node.d.ts"
+        }
+      },
+      "main": "src/index.js",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+toon@0.3.0/node_modules/@reddb-io/toon",
+      "workspace": false,
+      "rootTypeScriptFiles": [
+        "index.d.ts",
+        "node.d.ts"
+      ]
+    },
+    {
+      "name": "@reddb-io/build-info",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/cli.ts",
+      "specifier": "@reddb-io/build-info",
+      "diagnosticOccurrences": 33,
+      "programs": [
+        "red-skills/benchmark-code-understanding",
+        "red-skills/benchmark-memory",
+        "red-skills/brain-mcp",
+        "red-skills/brain",
+        "red-skills/castle-mcp",
+        "red-skills/code-nav",
+        "red-skills/memory-mcp",
+        "red-skills/opencode-host",
+        "red-skills/redskilled",
+        "red-skills/rsp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/packages/build-info/index.mjs",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/packages/build-info/index.d.mts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/node_modules/@reddb-io/build-info/index.d.mts",
+        "extension": ".d.mts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/build-info",
+          "subModuleName": "index.d.mts",
+          "version": "3.3.6"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/packages/build-info/package.json",
+      "version": "3.3.6",
+      "types": null,
+      "exports": {
+        ".": {
+          "types": "./index.d.mts",
+          "default": "./index.mjs"
+        }
+      },
+      "main": null,
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/packages/build-info",
+      "workspace": true,
+      "rootTypeScriptFiles": []
+    },
+    {
+      "name": "@reddb-io/shared",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/cli.ts",
+      "specifier": "@reddb-io/shared/args.js",
+      "diagnosticOccurrences": 108,
+      "programs": [
+        "red-skills/benchmark-code-understanding",
+        "red-skills/benchmark-memory",
+        "red-skills/brain-mcp",
+        "red-skills/brain",
+        "red-skills/castle-mcp",
+        "red-skills/code-nav",
+        "red-skills/memory-mcp",
+        "red-skills/opencode-host",
+        "red-skills/redskilled",
+        "red-skills/rsp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/packages/shared/args.ts",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/packages/shared/args.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/node_modules/@reddb-io/shared/args.ts",
+        "extension": ".ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/shared",
+          "subModuleName": "args.ts",
+          "version": "3.3.6"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/packages/shared/package.json",
+      "version": "3.3.6",
+      "types": null,
+      "exports": {
+        ".": "./index.ts",
+        "./args.js": "./args.ts",
+        "./bundle-fetch.js": "./bundle-fetch.ts",
+        "./channel.js": "./channel.ts",
+        "./death-attribution.js": "./death-attribution.ts",
+        "./death-presence.js": "./death-presence.ts",
+        "./death-record.js": "./death-record.ts",
+        "./entrypoint-cli.js": "./entrypoint-cli.ts",
+        "./github-batch.js": "./github-batch.ts",
+        "./github-quota.js": "./github-quota.ts",
+        "./github-webhook.js": "./github-webhook.ts",
+        "./red-runtime.js": "./red-runtime.ts",
+        "./self-update.js": "./self-update.ts",
+        "./toon-migration.js": "./toon-migration.ts",
+        "./log.js": "./log.ts",
+        "./plugin-gate.js": "./plugin-gate.ts",
+        "./project-identity.js": "./project-identity.ts",
+        "./project-identity-resolve.js": "./project-identity-resolve.ts",
+        "./red-paths.js": "./red-paths.ts",
+        "./redskilled-home.js": "./redskilled-home.ts",
+        "./repo-root.js": "./repo-root.ts",
+        "./worker-scope.js": "./worker-scope.ts",
+        "./worker-workspace.js": "./worker-workspace.ts",
+        "./outcome-event.js": "./outcome-event.ts",
+        "./resident-client.js": "./resident-client.ts",
+        "./resident-core.js": "./resident-core.ts",
+        "./resident-protocol.js": "./resident-protocol.ts",
+        "./resident-wire.js": "./resident-wire.ts",
+        "./rsp-entry.js": "./rsp-entry.ts"
+      },
+      "main": null,
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/packages/shared",
+      "workspace": true,
+      "rootTypeScriptFiles": [
+        "args.test.ts",
+        "args.ts",
+        "bundle-fetch.test.ts",
+        "bundle-fetch.ts",
+        "channel.test.ts",
+        "channel.ts",
+        "death-attribution.test.ts",
+        "death-attribution.ts",
+        "death-presence.ts",
+        "death-record.test.ts",
+        "death-record.ts",
+        "entrypoint-cli.test.ts",
+        "entrypoint-cli.ts",
+        "github-batch.test.ts",
+        "github-batch.ts",
+        "github-quota.test.ts",
+        "github-quota.ts",
+        "github-webhook.ts",
+        "index.ts",
+        "log.test.ts",
+        "log.ts",
+        "outcome-event.ts",
+        "plugin-gate.test.ts",
+        "plugin-gate.ts",
+        "project-identity-resolve.ts",
+        "project-identity.test.ts",
+        "project-identity.ts",
+        "red-paths.test.ts",
+        "red-paths.ts",
+        "red-runtime.test.ts",
+        "red-runtime.ts",
+        "redskilled-home.ts",
+        "repo-root.ts",
+        "resident-client.test.ts",
+        "resident-client.ts",
+        "resident-core.ts",
+        "resident-protocol.ts",
+        "resident-wire.test.ts",
+        "resident-wire.ts",
+        "rsp-entry.ts",
+        "self-update.test.ts",
+        "self-update.ts",
+        "toon-migration.test.ts",
+        "toon-migration.ts",
+        "worker-scope.test.ts",
+        "worker-scope.ts",
+        "worker-workspace.test.ts",
+        "worker-workspace.ts"
+      ]
+    },
+    {
+      "name": "zod",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/graph-contract.ts",
+      "specifier": "zod",
+      "diagnosticOccurrences": 366,
+      "programs": [
+        "red-skills/benchmark-memory",
+        "red-skills/brain-mcp",
+        "red-skills/castle-mcp",
+        "red-skills/code-nav",
+        "red-skills/memory-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/zod@3.25.76/node_modules/zod/index.cjs",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/zod@3.25.76/node_modules/zod/index.d.cts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/zod/index.d.cts",
+        "extension": ".d.cts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "zod",
+          "subModuleName": "index.d.cts",
+          "version": "3.25.76"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/zod@3.25.76/node_modules/zod/package.json",
+      "version": "3.25.76",
+      "types": "./index.d.cts",
+      "exports": {
+        "./package.json": "./package.json",
+        ".": {
+          "@zod/source": "./src/index.ts",
+          "types": "./index.d.cts",
+          "import": "./index.js",
+          "require": "./index.cjs"
+        },
+        "./v3": {
+          "@zod/source": "./src/v3/index.ts",
+          "types": "./v3/index.d.cts",
+          "import": "./v3/index.js",
+          "require": "./v3/index.cjs"
+        },
+        "./v4": {
+          "@zod/source": "./src/v4/index.ts",
+          "types": "./v4/index.d.cts",
+          "import": "./v4/index.js",
+          "require": "./v4/index.cjs"
+        },
+        "./v4-mini": {
+          "@zod/source": "./src/v4-mini/index.ts",
+          "types": "./v4-mini/index.d.cts",
+          "import": "./v4-mini/index.js",
+          "require": "./v4-mini/index.cjs"
+        },
+        "./v4/mini": {
+          "@zod/source": "./src/v4/mini/index.ts",
+          "types": "./v4/mini/index.d.cts",
+          "import": "./v4/mini/index.js",
+          "require": "./v4/mini/index.cjs"
+        },
+        "./v4/core": {
+          "@zod/source": "./src/v4/core/index.ts",
+          "types": "./v4/core/index.d.cts",
+          "import": "./v4/core/index.js",
+          "require": "./v4/core/index.cjs"
+        },
+        "./v4/locales": {
+          "@zod/source": "./src/v4/locales/index.ts",
+          "types": "./v4/locales/index.d.cts",
+          "import": "./v4/locales/index.js",
+          "require": "./v4/locales/index.cjs"
+        },
+        "./v4/locales/*": {
+          "@zod/source": "./src/v4/locales/*",
+          "types": "./v4/locales/*",
+          "import": "./v4/locales/*",
+          "require": "./v4/locales/*"
+        }
+      },
+      "main": "./index.cjs",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/zod@3.25.76/node_modules/zod",
+      "workspace": false,
+      "rootTypeScriptFiles": [
+        "index.d.ts"
+      ]
+    },
+    {
+      "name": "js-tiktoken",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/bench-eval/scoring.ts",
+      "specifier": "js-tiktoken",
+      "diagnosticOccurrences": 6,
+      "programs": [
+        "red-skills/benchmark-memory",
+        "red-skills/memory-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.cjs",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/js-tiktoken/dist/index.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "js-tiktoken",
+          "subModuleName": "dist/index.d.ts",
+          "version": "1.0.21"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/package.json",
+      "version": "1.0.21",
+      "types": "./dist/index.d.ts",
+      "exports": {
+        ".": {
+          "types": "./dist/index.d.ts",
+          "require": "./dist/index.cjs",
+          "default": "./dist/index.js"
+        },
+        "./lite": {
+          "types": "./dist/lite.d.ts",
+          "require": "./dist/lite.cjs",
+          "default": "./dist/lite.js"
+        },
+        "./ranks/cl100k_base": {
+          "types": "./dist/ranks/cl100k_base.d.ts",
+          "require": "./dist/ranks/cl100k_base.cjs",
+          "default": "./dist/ranks/cl100k_base.js"
+        },
+        "./ranks/gpt2": {
+          "types": "./dist/ranks/gpt2.d.ts",
+          "require": "./dist/ranks/gpt2.cjs",
+          "default": "./dist/ranks/gpt2.js"
+        },
+        "./ranks/p50k_base": {
+          "types": "./dist/ranks/p50k_base.d.ts",
+          "require": "./dist/ranks/p50k_base.cjs",
+          "default": "./dist/ranks/p50k_base.js"
+        },
+        "./ranks/p50k_edit": {
+          "types": "./dist/ranks/p50k_edit.d.ts",
+          "require": "./dist/ranks/p50k_edit.cjs",
+          "default": "./dist/ranks/p50k_edit.js"
+        },
+        "./ranks/r50k_base": {
+          "types": "./dist/ranks/r50k_base.d.ts",
+          "require": "./dist/ranks/r50k_base.cjs",
+          "default": "./dist/ranks/r50k_base.js"
+        },
+        "./ranks/o200k_base": {
+          "types": "./dist/ranks/o200k_base.d.ts",
+          "require": "./dist/ranks/o200k_base.cjs",
+          "default": "./dist/ranks/o200k_base.js"
+        }
+      },
+      "main": "./dist/index.cjs",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken",
+      "workspace": false,
+      "rootTypeScriptFiles": [
+        "index.d.ts",
+        "lite.d.ts"
+      ]
+    },
+    {
+      "name": "@reddb-io/sdk",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/graph-store/store.ts",
+      "specifier": "@reddb-io/sdk",
+      "diagnosticOccurrences": 26,
+      "programs": [
+        "red-skills/benchmark-memory",
+        "red-skills/brain-mcp",
+        "red-skills/brain",
+        "red-skills/memory-mcp",
+        "red-skills/rsp"
+      ],
+      "requireRuntimeError": {
+        "code": "ERR_PACKAGE_PATH_NOT_EXPORTED",
+        "message": "No \"exports\" main defined in /home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/@reddb-io/sdk/package.json"
+      },
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+sdk@1.23.1/node_modules/@reddb-io/sdk/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/@reddb-io/sdk/index.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/sdk",
+          "subModuleName": "index.d.ts",
+          "version": "1.23.1"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+sdk@1.23.1/node_modules/@reddb-io/sdk/package.json",
+      "version": "1.23.1",
+      "types": "./index.d.ts",
+      "exports": {
+        ".": {
+          "import": "./src/index.js",
+          "types": "./index.d.ts"
+        }
+      },
+      "main": "src/index.js",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@reddb-io+sdk@1.23.1/node_modules/@reddb-io/sdk",
+      "workspace": false,
+      "rootTypeScriptFiles": [
+        "index.d.ts"
+      ]
+    },
+    {
+      "name": "gray-matter",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/lint.ts",
+      "specifier": "gray-matter",
+      "diagnosticOccurrences": 4,
+      "programs": [
+        "red-skills/benchmark-memory",
+        "red-skills/memory-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/gray-matter.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/gray-matter/gray-matter.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "gray-matter",
+          "subModuleName": "gray-matter.d.ts",
+          "version": "4.0.3"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/package.json",
+      "version": "4.0.3",
+      "types": "gray-matter.d.ts",
+      "exports": null,
+      "main": "index.js",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter",
+      "workspace": false,
+      "rootTypeScriptFiles": [
+        "gray-matter.d.ts"
+      ]
+    },
+    {
+      "name": "@modelcontextprotocol/sdk",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/channel-bridge.ts",
+      "specifier": "@modelcontextprotocol/sdk/client/index.js",
+      "diagnosticOccurrences": 32,
+      "programs": [
+        "red-skills/brain-mcp",
+        "red-skills/brain",
+        "red-skills/castle-mcp",
+        "red-skills/code-nav",
+        "red-skills/memory-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk/dist/cjs/client/index.js",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/brain/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@modelcontextprotocol/sdk",
+          "subModuleName": "dist/esm/client/index.d.ts",
+          "version": "1.29.0",
+          "peerDependencies": "+zod@3.25.76"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk/package.json",
+      "version": "1.29.0",
+      "types": null,
+      "exports": {
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./client": {
+          "types": "./dist/esm/client/index.d.ts",
+          "import": "./dist/esm/client/index.js",
+          "require": "./dist/cjs/client/index.js"
+        },
+        "./server": {
+          "types": "./dist/esm/server/index.d.ts",
+          "import": "./dist/esm/server/index.js",
+          "require": "./dist/cjs/server/index.js"
+        },
+        "./validation": {
+          "types": "./dist/esm/validation/index.d.ts",
+          "import": "./dist/esm/validation/index.js",
+          "require": "./dist/cjs/validation/index.js"
+        },
+        "./validation/ajv": {
+          "types": "./dist/esm/validation/ajv-provider.d.ts",
+          "import": "./dist/esm/validation/ajv-provider.js",
+          "require": "./dist/cjs/validation/ajv-provider.js"
+        },
+        "./validation/cfworker": {
+          "types": "./dist/esm/validation/cfworker-provider.d.ts",
+          "import": "./dist/esm/validation/cfworker-provider.js",
+          "require": "./dist/cjs/validation/cfworker-provider.js"
+        },
+        "./experimental": {
+          "types": "./dist/esm/experimental/index.d.ts",
+          "import": "./dist/esm/experimental/index.js",
+          "require": "./dist/cjs/experimental/index.js"
+        },
+        "./experimental/tasks": {
+          "types": "./dist/esm/experimental/tasks/index.d.ts",
+          "import": "./dist/esm/experimental/tasks/index.js",
+          "require": "./dist/cjs/experimental/tasks/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*",
+          "require": "./dist/cjs/*"
+        }
+      },
+      "main": null,
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk",
+      "workspace": false,
+      "rootTypeScriptFiles": []
+    },
+    {
+      "name": "@reddb-io/red-castle",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/core/state-transition.ts",
+      "specifier": "@reddb-io/red-castle/engine",
+      "diagnosticOccurrences": 36,
+      "programs": [
+        "red-skills/castle-mcp",
+        "red-skills/rsp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/src/engine/index.ts",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/src/engine/index.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/dev/node_modules/@reddb-io/red-castle/src/engine/index.ts",
+        "extension": ".ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/red-castle",
+          "subModuleName": "src/engine/index.ts",
+          "version": "0.11.0"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle/package.json",
+      "version": "0.11.0",
+      "types": "./src/index.ts",
+      "exports": {
+        ".": "./src/index.ts",
+        "./mcp-server": "./src/mcp-server.ts",
+        "./engine": "./src/engine/index.ts",
+        "./engine/contracts": "./src/engine/contracts/index.ts",
+        "./engine/terminal-events": "./src/engine/terminal-events.ts",
+        "./engine/lifecycle-hooks": "./src/engine/lifecycle-hooks.ts",
+        "./sandboxes/docker": "./src/sandboxes/docker.ts",
+        "./sandboxes/podman": "./src/sandboxes/podman.ts",
+        "./sandboxes/no-sandbox": "./src/sandboxes/no-sandbox.ts"
+      },
+      "main": "./src/index.ts",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/packages/red-castle",
+      "workspace": true,
+      "rootTypeScriptFiles": [
+        "tsup.config.ts",
+        "vitest.config.ts"
+      ]
+    },
+    {
+      "name": "@reddb-io/redskilled",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/runtime/redskilled-birth.ts",
+      "specifier": "@reddb-io/redskilled/client",
+      "diagnosticOccurrences": 4,
+      "programs": [
+        "red-skills/castle-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/src/client.ts",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/src/client.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/dev/node_modules/@reddb-io/redskilled/src/client.ts",
+        "extension": ".ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "@reddb-io/redskilled",
+          "subModuleName": "src/client.ts",
+          "version": "0.1.0"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/package.json",
+      "version": "0.1.0",
+      "types": null,
+      "exports": {
+        "./cli": "./src/cli.ts",
+        "./client": "./src/client.ts",
+        "./daemon": "./src/daemon.ts",
+        "./dashboard-render": "./src/dashboard-render.ts",
+        "./daemon-stop": "./src/daemon-stop.ts",
+        "./demand-loop": "./src/demand-loop.ts",
+        "./demand-producer": "./src/demand-producer.ts",
+        "./event-lane": "./src/event-lane.ts",
+        "./host-state": "./src/host-state.ts",
+        "./launch-template": "./src/launch-template.ts",
+        "./paths": "./src/paths.ts",
+        "./project-breaker": "./src/project-breaker.ts",
+        "./project-registration": "./src/project-registration.ts",
+        "./protocol": "./src/protocol.ts",
+        "./queue-discovery": "./src/queue-discovery.ts",
+        "./reclaim": "./src/reclaim.ts",
+        "./provision": "./src/provision.ts",
+        "./statusline-payload": "./src/statusline-payload.ts",
+        "./statusline-render": "./src/statusline-render.ts",
+        "./worker-display": "./src/worker-display.ts",
+        "./worker-launch": "./src/worker-launch.ts"
+      },
+      "main": null,
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled",
+      "workspace": true,
+      "rootTypeScriptFiles": [
+        "vitest.config.ts"
+      ]
+    },
+    {
+      "name": "vscode-languageserver-protocol",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/src/lsp.ts",
+      "specifier": "vscode-languageserver-protocol/node",
+      "diagnosticOccurrences": 2,
+      "programs": [
+        "red-skills/code-nav"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/vscode-languageserver-protocol@3.18.2/node_modules/vscode-languageserver-protocol/lib/node/main.js",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/vscode-languageserver-protocol@3.18.2/node_modules/vscode-languageserver-protocol/lib/node/main.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/node_modules/vscode-languageserver-protocol/lib/node/main.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "vscode-languageserver-protocol",
+          "subModuleName": "lib/node/main.d.ts",
+          "version": "3.18.2"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/vscode-languageserver-protocol@3.18.2/node_modules/vscode-languageserver-protocol/package.json",
+      "version": "3.18.2",
+      "types": null,
+      "exports": {
+        ".": {
+          "types": "./lib/common/api.d.ts",
+          "default": "./lib/common/api.js"
+        },
+        "./node": {
+          "types": "./lib/node/main.d.ts",
+          "node": "./lib/node/main.js"
+        },
+        "./browser": {
+          "types": "./lib/browser/main.d.ts",
+          "browser": "./lib/browser/main.js"
+        }
+      },
+      "main": null,
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/vscode-languageserver-protocol@3.18.2/node_modules/vscode-languageserver-protocol",
+      "workspace": false,
+      "rootTypeScriptFiles": []
+    },
+    {
+      "name": "fast-glob",
+      "importer": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/ingest.ts",
+      "specifier": "fast-glob",
+      "diagnosticOccurrences": 1,
+      "programs": [
+        "red-skills/memory-mcp"
+      ],
+      "requireRuntime": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob/out/index.js",
+      "typesResolution": {
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob/out/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-skills/apps/memory/node_modules/fast-glob/out/index.d.ts",
+        "extension": ".d.ts",
+        "isExternalLibraryImport": true,
+        "packageId": {
+          "name": "fast-glob",
+          "subModuleName": "out/index.d.ts",
+          "version": "3.3.3"
+        },
+        "resolvedUsingTsExtension": false
+      },
+      "packagePath": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob/package.json",
+      "version": "3.3.3",
+      "types": "out/index.d.ts",
+      "exports": null,
+      "main": "out/index.js",
+      "packageRoot": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob",
+      "workspace": false,
+      "rootTypeScriptFiles": []
+    }
+  ],
+  "programs": [
+    {
+      "id": "red-skills/benchmark-code-understanding",
+      "diagnosticOccurrences": 17,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC1090": 7,
+        "SC2004": 2,
+        "SC2020": 2
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-code-understanding__default",
+      "recordedSourceCount": 6,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/benchmark-memory",
+      "diagnosticOccurrences": 245,
+      "diagnosticCounts": {
+        "SC2013": 61,
+        "SC2009": 17,
+        "SC1090": 75,
+        "SC2020": 22,
+        "SC2004": 51,
+        "SC2002": 14,
+        "SC1120": 1,
+        "SC0004": 4
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-memory__default",
+      "recordedSourceCount": 97,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/brain-mcp",
+      "diagnosticOccurrences": 37,
+      "diagnosticCounts": {
+        "SC2013": 26,
+        "SC1090": 9,
+        "SC2002": 1,
+        "SC2004": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain-mcp__default",
+      "recordedSourceCount": 20,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/brain",
+      "diagnosticOccurrences": 89,
+      "diagnosticCounts": {
+        "SC2013": 17,
+        "SC1090": 33,
+        "SC2009": 19,
+        "SC1063": 13,
+        "SC2004": 4,
+        "SC2020": 3
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain__default",
+      "recordedSourceCount": 27,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/castle-mcp",
+      "diagnosticOccurrences": 234,
+      "diagnosticCounts": {
+        "SC2013": 124,
+        "SC2009": 9,
+        "SC2020": 10,
+        "SC1090": 65,
+        "SC2012": 1,
+        "SC2004": 14,
+        "SC1101": 3,
+        "SC1100": 2,
+        "SC2003": 1,
+        "SC2002": 2,
+        "SC1031": 1,
+        "SC1120": 1,
+        "SC2008": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__castle-mcp__default",
+      "recordedSourceCount": 417,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/code-nav",
+      "diagnosticOccurrences": 22,
+      "diagnosticCounts": {
+        "SC2009": 3,
+        "SC2013": 10,
+        "SC2004": 4,
+        "SC1090": 3,
+        "SC1031": 1,
+        "SC2020": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__code-nav__default",
+      "recordedSourceCount": 5,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/dev",
+      "diagnosticOccurrences": 1,
+      "diagnosticCounts": {
+        "SC0001": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__default",
+      "recordedSourceCount": 456,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/herdr",
+      "diagnosticOccurrences": 2,
+      "diagnosticCounts": {
+        "SC1090": 2
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__herdr__default",
+      "recordedSourceCount": 23,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/memory-mcp",
+      "diagnosticOccurrences": 649,
+      "diagnosticCounts": {
+        "SC2013": 339,
+        "SC2009": 176,
+        "SC2011": 11,
+        "SC1090": 106,
+        "SC2002": 3,
+        "SC2020": 7,
+        "SC2004": 6,
+        "SC2003": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory-mcp__default",
+      "recordedSourceCount": 162,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/memory",
+      "diagnosticOccurrences": 56,
+      "diagnosticCounts": {
+        "SC1014": 1,
+        "SC1016": 55
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory__default",
+      "recordedSourceCount": 211,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/opencode-host",
+      "diagnosticOccurrences": 23,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC2002": 1,
+        "SC2004": 6,
+        "SC1090": 6,
+        "SC1031": 1,
+        "SC2009": 2,
+        "SC2020": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__opencode-host__default",
+      "recordedSourceCount": 11,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/redskilled",
+      "diagnosticOccurrences": 53,
+      "diagnosticCounts": {
+        "SC2013": 29,
+        "SC1090": 13,
+        "SC2004": 9,
+        "SC2011": 1,
+        "SC1031": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__redskilled__default",
+      "recordedSourceCount": 53,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/rsp",
+      "diagnosticOccurrences": 331,
+      "diagnosticCounts": {
+        "SC2013": 63,
+        "SC1090": 128,
+        "SC2004": 90,
+        "SC2009": 10,
+        "SC2020": 31,
+        "SC2011": 3,
+        "SC1101": 2,
+        "SC1100": 4
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__rsp__default",
+      "recordedSourceCount": 150,
+      "currentDiskMismatches": []
+    }
+  ],
+  "evidence": [
+    "/tmp/scriptc-dependency-compliance-20260913/redskills-typing-probe.json",
+    "/tmp/scriptc-dependency-compliance-20260913/redskills-package-probe.json",
+    "/tmp/scriptc-dependency-compliance-20260913/redskills-baseline-revalidation.json",
+    "/tmp/scriptc-dependency-compliance-20260913/redskills-flow-probe.json",
+    "/tmp/scriptc-dependency-compliance-20260913/redskills-herdr-resolution.json"
+  ]
+}

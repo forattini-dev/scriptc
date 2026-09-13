@@ -1,0 +1,42 @@
+{
+  "typescriptVersion": "5.9.3",
+  "file": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli/passthrough.ts",
+  "optionsFrom": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/tsconfig.json",
+  "observations": [
+    {
+      "line": 25,
+      "column": 7,
+      "type": "any"
+    },
+    {
+      "line": 30,
+      "column": 5,
+      "type": "any"
+    },
+    {
+      "line": 32,
+      "column": 5,
+      "type": "any"
+    },
+    {
+      "line": 36,
+      "column": 3,
+      "type": "ChildProcessByStdio<null, Readable, Readable>"
+    },
+    {
+      "line": 40,
+      "column": 3,
+      "type": "ChildProcessByStdio<null, Readable, Readable>"
+    },
+    {
+      "line": 45,
+      "column": 5,
+      "type": "ChildProcessByStdio<null, Readable, Readable>"
+    },
+    {
+      "line": 51,
+      "column": 5,
+      "type": "ChildProcessByStdio<null, Readable, Readable>"
+    }
+  ]
+}

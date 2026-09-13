@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-09-13T16:58:43.779Z",
+  "scriptSha256": "655473ec0c77b2692242b8c522b832c944530fbac2cf684bc8f43c12a70dd286",
+  "count": 1147,
+  "byEvidence": {
+    "declaration-package": 11,
+    "js-no-declarations-jsdoc-candidate": 73,
+    "js-or-native-no-declaration-found": 237,
+    "type-surface-resolved-in-at-least-one-context": 781,
+    "types-or-ts-files-present-but-root-unresolved": 13,
+    "workspace": 32
+  },
+  "scope": "Conservative runtime/optional/peer manifest closure; exact imported subpaths separately retained. Syntax and resolution metadata do not prove public any absence, compiler support or runtime reachability. No npm registry queries or installs."
+}

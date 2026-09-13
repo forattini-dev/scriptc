@@ -1,0 +1,46 @@
+{
+  "compiler": "/tmp/scriptc-redcode-identity-20260913",
+  "inventoryScriptSha256": "155d8e2d8a834570a625f6ddf0e3a78b7f3408cc1daccb969595a5617231d8bf",
+  "before": {
+    "/tmp/scriptc-redcode-identity-20260913": {
+      "head": "30cde1be34c0eddc7d6a4a808796f5c56c851d58",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/redcode": {
+      "head": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/red-skills": {
+      "head": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/red-dev": {
+      "head": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+      "status": ""
+    }
+  },
+  "after": {
+    "/tmp/scriptc-redcode-identity-20260913": {
+      "head": "30cde1be34c0eddc7d6a4a808796f5c56c851d58",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/redcode": {
+      "head": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/red-skills": {
+      "head": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+      "status": ""
+    },
+    "/home/cyber/Work/reddb.io/red-dev": {
+      "head": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+      "status": ""
+    }
+  },
+  "gitStateUnchanged": true,
+  "scannedFilesUnchanged": true,
+  "changedFiles": [],
+  "scannedHashCount": 4187,
+  "generatedAt": "2026-09-13T16:57:06.470Z",
+  "scope": "18 original entries; static literal workspace import graph plus captured compiler runtime sources; npm manifest closure overapproximates dependency use; nonliteral imports are listed but not resolved; no installs, no native builds, no proof of full typing quality from declarations alone; standalone npm AUTO eligibility checked only for external package roots, because workspace eligibility requires program registry setup"
+}

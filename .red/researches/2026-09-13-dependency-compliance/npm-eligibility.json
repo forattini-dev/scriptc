@@ -1,0 +1,50 @@
+{
+  "scope": "Current compiler resolver plus auto eligibility heuristic only; not a compile or proof that lowering/admission will pass",
+  "results": [
+    {
+      "specifier": "cli-args-parser",
+      "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "declarations": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+        "packageName": "cli-args-parser",
+        "version": "1.0.6"
+      },
+      "runtime": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+        "packageName": "cli-args-parser",
+        "version": "1.0.6"
+      },
+      "ineligibleReason": null
+    },
+    {
+      "specifier": "tuiuiu.js",
+      "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "declarations": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "packageName": "tuiuiu.js",
+        "version": "1.0.75"
+      },
+      "runtime": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+        "packageName": "tuiuiu.js",
+        "version": "1.0.75"
+      },
+      "ineligibleReason": null
+    },
+    {
+      "specifier": "tuiuiu.js/hooks",
+      "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "declarations": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+        "packageName": "tuiuiu.js",
+        "version": "1.0.75"
+      },
+      "runtime": {
+        "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js",
+        "packageName": "tuiuiu.js",
+        "version": "1.0.75"
+      },
+      "ineligibleReason": null
+    }
+  ]
+}

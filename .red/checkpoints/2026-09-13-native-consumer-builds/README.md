@@ -88,6 +88,8 @@ The sidecar release at `24d0179f` is 640 bytes larger than its preceding release
 
 ## Next compiler work
 
+The subsequent [dependency compliance audit](../../researches/2026-09-13-dependency-compliance/README.md) separates missing declarations from compiler discovery, admission and runtime gaps. The maintainer explicitly requested [proactive type discovery](../../researches/2026-09-13-dependency-compliance/type-discovery-requirement.md). The first reproduced case is the existing js-yaml ambient declaration included by the consumer tsconfig but omitted by scriptc; adopting applicable project declaration roots is the next targeted compiler correction. JS package bodies, third-party declarations and native API implementation remain separate verification steps.
+
 The former `serviceUse` Proxy and mapped-record conversion blockers are resolved in the real CLI graph. Newly reached diagnostics identify unsupported `locations.get` lowering, object spread after explicit properties, and `unknown` passed where a typed array of service records is expected. These need minimization and compiler-versus-consumer ownership diagnosis before choosing the next acceptance slice.
 
 A separate reproduced compiler bug remains in callback covariance from `() => Promise<T>` to `() => Promise<unknown>`: the adapter can discard the original Promise and throw during conversion. Proxy thenable assimilation is explicitly refused across seven resolution routes; that refusal is not an implementation of assimilation. Proxy reflection, mutation, copying and general Symbol-keyed storage, plus `this` across suspension, remain outside this implemented subset. Nested records/arrays through Effect erasure and further dependency/runtime gaps also remain.

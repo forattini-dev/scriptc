@@ -1,0 +1,198 @@
+[
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 82,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 85,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 88,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 91,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 94,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/castle-mcp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/commands/mcp-lane-canary.ts",
+    "line": 97,
+    "expression": "require()",
+    "kind": "require"
+  },
+  {
+    "program": "red-skills/rsp",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/resident-server.ts",
+    "line": 695,
+    "expression": "import(pathToFileURL(resolveJsTiktoken()).href)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/lildax",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/design/runtime.ts",
+    "line": 62,
+    "expression": "import(pathToFileURL(await resolve(name, signal)).href)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/lildax",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/plugin/provider/sap-ai-core.ts",
+    "line": 25,
+    "expression": "import(\n            installedPath.startsWith(\"file://\") ? installedPath : pathToFileURL(installedPath).href\n          )",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/lildax",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/plugin/provider/dynamic.ts",
+    "line": 20,
+    "expression": "import(\n            installedPath.startsWith(\"file://\") ? installedPath : pathToFileURL(installedPath).href\n          )",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/lildax",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/config/plugin/external.ts",
+    "line": 80,
+    "expression": "import(entrypoint)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/lildax",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/filesystem/watcher.ts",
+    "line": 29,
+    "expression": "require(\n      `@parcel/watcher-${process.platform}-${process.arch}${process.platform === \"linux\" ? `-${libc || \"glibc\"}` : \"\"}`,\n    )",
+    "kind": "require"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/config/config.ts",
+    "line": 273,
+    "expression": "import(pathToFileURL(legacyToml).href, { with: { type: \"toml\" } })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/design/runtime.ts",
+    "line": 62,
+    "expression": "import(pathToFileURL(await resolve(name, signal)).href)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/plugin/provider/sap-ai-core.ts",
+    "line": 25,
+    "expression": "import(\n            installedPath.startsWith(\"file://\") ? installedPath : pathToFileURL(installedPath).href\n          )",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/plugin/provider/dynamic.ts",
+    "line": 20,
+    "expression": "import(\n            installedPath.startsWith(\"file://\") ? installedPath : pathToFileURL(installedPath).href\n          )",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/config/plugin/external.ts",
+    "line": 80,
+    "expression": "import(entrypoint)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/filesystem/watcher.ts",
+    "line": 29,
+    "expression": "require(\n      `@parcel/watcher-${process.platform}-${process.arch}${process.platform === \"linux\" ? `-${libc || \"glibc\"}` : \"\"}`,\n    )",
+    "kind": "require"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/provider/provider.ts",
+    "line": 1899,
+    "expression": "import(importSpec)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/registry.ts",
+    "line": 200,
+    "expression": "import(pathToFileURL(match).href)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell.ts",
+    "line": 316,
+    "expression": "import(\"web-tree-sitter/tree-sitter.wasm\" as string, {\n    with: { type: \"wasm\" },\n  })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell.ts",
+    "line": 325,
+    "expression": "import(\"tree-sitter-bash/tree-sitter-bash.wasm\" as string, {\n    with: { type: \"wasm\" },\n  })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/tool/shell.ts",
+    "line": 328,
+    "expression": "import(\"tree-sitter-powershell/tree-sitter-powershell.wasm\" as string, {\n    with: { type: \"wasm\" },\n  })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/plugin/loader.ts",
+    "line": 139,
+    "expression": "import(row.entry)",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@ff-labs+fff-bun@0.9.4/node_modules/@ff-labs/fff-bun/src/embedded.ts",
+    "line": 26,
+    "expression": "import(`@ff-labs/fff-bin-darwin-${process.arch}/libfff_c.dylib`, {\n        with: { type: \"file\" },\n      })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@ff-labs+fff-bun@0.9.4/node_modules/@ff-labs/fff-bun/src/embedded.ts",
+    "line": 34,
+    "expression": "import(`@ff-labs/fff-bin-win32-${process.arch}/fff_c.dll`, {\n        with: { type: \"file\" },\n      })",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@ff-labs+fff-bun@0.9.4/node_modules/@ff-labs/fff-bun/src/embedded.ts",
+    "line": 42,
+    "expression": "import(\n        `@ff-labs/fff-bin-linux-${process.arch}-${typeof FFF_LIBC === \"string\" ? FFF_LIBC : \"gnu\"}/libfff_c.so`,\n        { with: { type: \"file\" } }\n      )",
+    "kind": "dynamic-import"
+  },
+  {
+    "program": "redcode/redcode",
+    "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+config@10.8.1/node_modules/@npmcli/config/lib/index.js",
+    "line": 286,
+    "expression": "require(join(this.npmPath, 'package.json'))",
+    "kind": "require"
+  }
+]

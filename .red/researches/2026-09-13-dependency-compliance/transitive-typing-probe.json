@@ -1,0 +1,332 @@
+{
+  "scope": "Six exact runtime requires observed in captured Redcode npm source graph; not all dependencies, no compilation or package installation performed",
+  "consumerCommit": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+  "consumerStatus": "",
+  "typescriptVersion": "5.9.3",
+  "inferenceProbe": {
+    "rootNames": "six actual installed runtime entry files",
+    "allowJs": true,
+    "checkJs": false,
+    "maxNodeModuleJsDepth": 4,
+    "claim": "Inferred public export shapes only. Does not validate native support or constitute a strict typecheck."
+  },
+  "rows": [
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@parcel+watcher@2.5.1/node_modules/@parcel/watcher/wrapper.js",
+      "specifier": "is-glob",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 3,
+      "category": "package",
+      "package": "is-glob",
+      "version": "4.0.3",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob/index.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob/index.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob/index.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/is-glob",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob/index.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "3d6b458efdfc6c26e196b907ca56f14ee015e7272d46e179e5b6fccfb7b99a39",
+      "inferredExportAssignments": [
+        {
+          "line": 133,
+          "type": "(str: any, options: any) => boolean",
+          "callSignatures": [
+            "(str: any, options: any): boolean"
+          ],
+          "properties": []
+        }
+      ],
+      "recommendedNextStep": "Small predicate candidate for stronger compiler inference and differential native coverage. Model unknown input (runtime returns false for non-string) or a string-only checked caller boundary; accurately preserve optional strict option. No evidence a full TS rewrite is required."
+    },
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-glob@4.0.3/node_modules/is-glob/index.js",
+      "specifier": "is-extglob",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 8,
+      "category": "package",
+      "package": "is-extglob",
+      "version": "2.1.1",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-extglob@2.1.1/node_modules/is-extglob",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-extglob@2.1.1/node_modules/is-extglob/index.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-extglob@2.1.1/node_modules/is-extglob/index.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-extglob@2.1.1/node_modules/is-extglob/index.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/is-extglob",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/is-extglob@2.1.1/node_modules/is-extglob/index.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "68be041dd0379d295d89550d1f6f2e8c29645bdd92d14b427fe2e140b3c8f2f8",
+      "inferredExportAssignments": [
+        {
+          "line": 8,
+          "type": "(str: any) => boolean",
+          "callSignatures": [
+            "(str: any): boolean"
+          ],
+          "properties": []
+        }
+      ],
+      "recommendedNextStep": "Small predicate with explicit typeof string guard and boolean results. Good inference/call-specialization candidate. If adding declaration, preserve runtime acceptance of non-string returning false rather than promising an unchecked string contract everywhere."
+    },
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+config@10.8.1/node_modules/@npmcli/config/lib/index.js",
+      "specifier": "ini",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 3,
+      "category": "package",
+      "package": "ini",
+      "version": "6.0.0",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/ini@6.0.0/node_modules/ini",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/ini@6.0.0/node_modules/ini/lib/ini.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/ini@6.0.0/node_modules/ini/lib/ini.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/ini@6.0.0/node_modules/ini/lib/ini.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/ini",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/ini@6.0.0/node_modules/ini/lib/ini.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "007123836ffec243f41c8b35584fb3db0498aa12a440a9e0efc675d0000f4c32",
+      "inferredExportAssignments": [
+        {
+          "line": 273,
+          "type": "{ parse: (str: any, opt?: {}) => any; decode: (str: any, opt?: {}) => any; stringify: (obj: any, opt?: {}) => string; encode: (obj: any, opt?: {}) => string; safe: (val: any) => string; unsafe: (val: any) => any; }",
+          "callSignatures": [],
+          "properties": [
+            {
+              "name": "parse",
+              "type": "(str: any, opt?: {}) => any"
+            },
+            {
+              "name": "decode",
+              "type": "(str: any, opt?: {}) => any"
+            },
+            {
+              "name": "stringify",
+              "type": "(obj: any, opt?: {}) => string"
+            },
+            {
+              "name": "encode",
+              "type": "(obj: any, opt?: {}) => string"
+            },
+            {
+              "name": "safe",
+              "type": "(val: any) => string"
+            },
+            {
+              "name": "unsafe",
+              "type": "(val: any) => any"
+            }
+          ]
+        }
+      ],
+      "recommendedNextStep": "Provide precise parse/decode and encode option contracts; decode should expose validated unknown/object domain rather than unbounded any. Runtime body still requires dynamic object/recursive parser support. A declaration is useful but not a complete native implementation fix."
+    },
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+config@10.8.1/node_modules/@npmcli/config/lib/index.js",
+      "specifier": "nopt",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 4,
+      "category": "package",
+      "package": "nopt",
+      "version": "9.0.0",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/nopt@9.0.0/node_modules/nopt",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/nopt@9.0.0/node_modules/nopt/lib/nopt.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/nopt@9.0.0/node_modules/nopt/lib/nopt.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/nopt@9.0.0/node_modules/nopt/lib/nopt.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/nopt",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/nopt@9.0.0/node_modules/nopt/lib/nopt.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "0cd507599b0b67afaaf6aa1019dfb2ea9dc958efd1d79f5e74cd997205d65469",
+      "inferredExportAssignments": [
+        {
+          "line": 10,
+          "type": "(types: any, shorthands: any, args?: string[], slice?: number) => { argv: { remain: never[]; cooked: any; original: any; }; }",
+          "callSignatures": [
+            "(types: any, shorthands: any, args?: string[], slice?: number): { argv: { remain: never[]; cooked: any; original: any; }; }"
+          ],
+          "properties": []
+        }
+      ],
+      "recommendedNextStep": "Versioned typed command-option definitions and parsed-result contract would help; singleton expando callbacks/typeDefs and dynamic output keys independently require compiler support. Audit emitted argv keys against actual option definition input rather than inferring only the static argv member."
+    },
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+config@10.8.1/node_modules/@npmcli/config/lib/index.js",
+      "specifier": "proc-log",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 5,
+      "category": "package",
+      "package": "proc-log",
+      "version": "6.1.0",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/proc-log@6.1.0/node_modules/proc-log",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/proc-log@6.1.0/node_modules/proc-log/lib/index.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/proc-log@6.1.0/node_modules/proc-log/lib/index.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/proc-log@6.1.0/node_modules/proc-log/lib/index.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/proc-log",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/proc-log@6.1.0/node_modules/proc-log/lib/index.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "2251aa02ae472e0174b94f37bcbf433f7f2decc77edb5c7b6c56a4a3d90f7c72",
+      "inferredExportAssignments": [
+        {
+          "line": 2,
+          "type": "{ META: symbol; output: { LEVELS: string[]; KEYS: { standard: string; error: string; buffer: string; flush: string; }; standard: (...args: any[]) => boolean & Process; error: (...args: any[]) => boolean & Process; buffer: (...args: any[]) => boolean & Process; flush: (...args: any[]) => boolean & Process; }; log: { LEVELS: string[]; KEYS: { notice: string; error: string; warn: string; info: string; verbose: string; http: string; silly: string; timing: string; pause: string; resume: string; }; error: (...args: any[]) => boolean & Process; notice: (...args: any[]) => boolean & Process; warn: (...args: any[]) => boolean & Process; info: (...args: any[]) => boolean & Process; verbose: (...args: any[]) => boolean & Process; http: (...args: any[]) => boolean & Process; silly: (...args: any[]) => boolean & Process; timing: (...args: any[]) => boolean & Process; pause: () => boolean & Process; resume: () => boolean & Process; }; time: { LEVELS: string[]; KEYS: { start: string; end: string; }; start: (name: any, fn: any) => any; end: (name: any) => boolean & Process; }; input: { LEVELS: string[]; KEYS: { start: string; end: string; read: string; }; start: (...args: any[]) => any; end: (...args: any[]) => boolean & Process; read: (...args: any[]) => Promise<any>; }; }",
+          "callSignatures": [],
+          "properties": [
+            {
+              "name": "META",
+              "type": "symbol"
+            },
+            {
+              "name": "output",
+              "type": "{ LEVELS: string[]; KEYS: { standard: string; error: string; buffer: string; flush: string; }; standard: (...args: any[]) => boolean & Process; error: (...args: any[]) => boolean & Process; buffer: (...args: any[]) => boolean & Process; flush: (...args: any[]) => boolean & Process; }"
+            },
+            {
+              "name": "log",
+              "type": "{ LEVELS: string[]; KEYS: { notice: string; error: string; warn: string; info: string; verbose: string; http: string; silly: string; timing: string; pause: string; resume: string; }; error: (...args: any[]) => boolean & Process; notice: (...args: any[]) => boolean & Process; warn: (...args: any[]) => boolean & Process; info: (...args: any[]) => boolean & Process; verbose: (...args: any[]) => boolean & Process; http: (...args: any[]) => boolean & Process; silly: (...args: any[]) => boolean & Process; timing: (...args: any[]) => boolean & Process; pause: () => boolean & Process; resume: () => boolean & Process; }"
+            },
+            {
+              "name": "time",
+              "type": "{ LEVELS: string[]; KEYS: { start: string; end: string; }; start: (name: any, fn: any) => any; end: (name: any) => boolean & Process; }"
+            },
+            {
+              "name": "input",
+              "type": "{ LEVELS: string[]; KEYS: { start: string; end: string; read: string; }; start: (...args: any[]) => any; end: (...args: any[]) => boolean & Process; read: (...args: any[]) => Promise<any>; }"
+            }
+          ]
+        }
+      ],
+      "recommendedNextStep": "Type event channel, variadic payloads and callback/Promise return branches. Compiler must implement process.emit event semantics and callable/Promise behavior. Broad unknown[] typing is safer than fictitious concrete payloads; no blanket success claim from adding types."
+    },
+    {
+      "program": "redcode/redcode",
+      "file": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+config@10.8.1/node_modules/@npmcli/config/lib/index.js",
+      "specifier": "@npmcli/map-workspaces",
+      "kind": "require",
+      "typeOnly": false,
+      "line": 738,
+      "category": "package",
+      "package": "@npmcli/map-workspaces",
+      "version": "5.0.3",
+      "packageRoot": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+map-workspaces@5.0.3/node_modules/@npmcli/map-workspaces",
+      "typesPath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+map-workspaces@5.0.3/node_modules/@npmcli/map-workspaces/lib/index.js",
+      "typescriptResolved": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+map-workspaces@5.0.3/node_modules/@npmcli/map-workspaces/lib/index.js",
+      "runtimePath": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+map-workspaces@5.0.3/node_modules/@npmcli/map-workspaces/lib/index.js",
+      "runtimeLanguage": "JavaScript",
+      "typing": "no-declaration-resolved",
+      "localAmbientDeclarations": [],
+      "autoEligibilityApplies": true,
+      "automaticRefusal": "it ships no own .d.ts declaration surface",
+      "autoEligibilityIsNotNativeBuildProof": true,
+      "atTypesPackage": "@types/npmcli__map-workspaces",
+      "requireRuntime": "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/@npmcli+map-workspaces@5.0.3/node_modules/@npmcli/map-workspaces/lib/index.js",
+      "atTypesPackageResolution": {
+        "code": "MODULE_NOT_FOUND"
+      },
+      "atTypesDirectiveResolution": null,
+      "installedAtTypesStoreCandidates": [],
+      "declarationFiles": [],
+      "jsdocTypingTags": [],
+      "entrySourceSha256": "1deb734fa3b190cfe235f2c3bbffbd269f85496feadbd2d3e495cd07850bb4dd",
+      "inferredExportAssignments": [
+        {
+          "line": 226,
+          "type": "typeof mapWorkspaces",
+          "callSignatures": [
+            "(opts?: {}): Promise<Map<any, any>>"
+          ],
+          "properties": [
+            {
+              "name": "virtual",
+              "type": "(opts?: {}) => Map<any, any>"
+            }
+          ]
+        }
+      ],
+      "recommendedNextStep": "Type opts.cwd, opts.pkg/workspaces and returned mapping (the implementation constructs workspace-name/path associations). Validate concrete package metadata and return contract. Async filesystem/glob calls, Maps and function.virtual expando remain separate compiler requirements."
+    }
+  ],
+  "currentBuildAttribution": {
+    "evidence": "/tmp/scriptc-redcode-native-proxy-20260913a/build.json",
+    "compilerCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
+    "diagnosticOccurrences": 3090,
+    "auditedPackagesExplicitlySelectedByNpmStatic": [],
+    "diagnosticsLocatedInAuditedPackageRoots": 0,
+    "diagnosticsNamingAuditedPackageAsQuotedSpecifier": 0,
+    "conclusion": "No direct causal attribution of the current 3090 diagnostics to missing declarations of these six packages. This is a reachable runtime-source frontier audit, not a native compilation of these packages."
+  },
+  "classification": {
+    "confirmed": "No declared TypeScript signature surface or meaningful JSDoc typing tags is available for any of the six at these exact installed import contexts. JS inference retains partial return/object shapes, with any-valued inputs/output members.",
+    "notProven": [
+      "These six packages cannot compile natively.",
+      "Adding @types or a local declaration would make their JS implementations compile.",
+      "These six packages explain the current 3090 diagnostics."
+    ],
+    "ownership": "Dependency publishers or consumer build integration can provide correct versioned declaration/validated boundary contracts; scriptc owns admitting/inferencing/lowering actual JS bodies. Its current auto-admission rejects missing own declarations and third-party @types, and static lowering hides declaration twins, so a declaration alone does not satisfy runtime-body support."
+  }
+}

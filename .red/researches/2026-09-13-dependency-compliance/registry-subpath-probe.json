@@ -1,0 +1,76 @@
+{
+  "scope": "Two exact runtime subpath declaration audits; tarballs read and parsed in memory only, no filesystem extraction/install/execution; API compatibility not validated",
+  "rows": [
+    {
+      "package": "@types/npmcli__config",
+      "version": "6.0.4",
+      "tarballUrl": "https://registry.npmjs.org/@types/npmcli__config/-/npmcli__config-6.0.4.tgz",
+      "exactRuntimeSpecifier": "@npmcli/config/lib/definitions/index.js",
+      "checkedAt": "2026-09-13T17:03:38.821794+00:00",
+      "httpStatus": 200,
+      "compressedBytes": 4725,
+      "sha512Integrity": "sha512-RaVi5RqYusYdKHsTBPonmkfAEe80tAziJX3CpbTK8J/jlsMYk8B5T5fJc6YsJ14NZJLBLuvl43bsX/Mnx8LDKw==",
+      "integrityMatchesRegistry": true,
+      "files": [
+        "npmcli__config",
+        "npmcli__config/LICENSE",
+        "npmcli__config/README.md",
+        "npmcli__config/index.d.ts",
+        "npmcli__config/lib",
+        "npmcli__config/package.json",
+        "npmcli__config/lib/definitions",
+        "npmcli__config/lib/definitions/index.d.ts"
+      ],
+      "declarations": [
+        {
+          "path": "npmcli__config/index.d.ts",
+          "bytes": 9583,
+          "declaredModules": [],
+          "source": "/// <reference types=\"node\" />\n\nimport { Stream } from \"stream\";\n\nexport = Config;\n\ndeclare class Config<Definitions extends Config.DefinitionsObject = Config.DefinitionsObject> {\n    /**\n     * The type definitions passed to `nopt` for CLI option parsing and known\n     * configuration validation.\n     */\n    static readonly typeDefs: Config.TypeDefs;\n    /**\n     * The prefix for `global` operations.  Set by the `prefix` config value,\n     * or defaults based on the location of the `execPath` option.\n     */\n    globalPrefix: string;\n    /**\n     * The prefix for `local` operations.  Set by the `prefix` config value on\n     * the CLI only, or defaults to either the `cwd` or its nearest ancestor\n     * containing a `node_modules` folder or `package.json` file.\n     */\n    localPrefix: string;\n    /**\n     * A read-only `Map` of the file (or a comment, if no file found, or\n     * relevant) to the config level loaded from that source.\n     */\n    sources: Map<string, Config.ConfType>;\n    /**\n     * A `Map` of config level to `ConfigData` objects.  These objects should\n     * not be modified directly under any circumstances.\n     */\n    data: Map<Config.ConfType, Config.ConfigData>;\n\n    /**\n     * A list sorted in priority of all the config data objects in the\n     * prototype chain.  `config.list[0]` is the `cli` level, `config.list[1]`\n     * is the `env` level, and so on.\n     */\n    list: Config.ConfigData[];\n    /** The `cwd` param */\n    cwd: string;\n    /** The `env` param */\n    env: NodeJS.ProcessEnv;\n    /** The `argv` param */\n    argv: string[];\n    /** The `execPath` param */\n    execPath: string;\n    /** The `platform` param */\n    platform: NodeJS.Platform;\n\n    /** The `definitions` param */\n    definitions: Definitions;\n    deprecated: { [K in keyof Definitions]?: boolean };\n\n    /** The `defaults` param */\n    defaults: { [K in keyof Definitions]: Definitions[K][\"type\"] };\n    /** The `shorthands` param */\n    shorthands: Config.ShortFlags;\n    /** The `types` param */\n    types: { [K in keyof Definitions]: Definitions[K][\"type\"] };\n    /** The `npmPath` param */\n    npmPath: string;\n    /** If `config.get('global')` is true, then `globalPrefix`, otherwise `localPrefix` */\n    readonly prefix: string;\n    /** The user's home directory, found by looking at `env.HOME` or calling `os.homedir()`. */\n    home: string | null;\n    /** A boolean indicating whether or not configs are loaded */\n    readonly loaded: boolean;\n    /**\n     * A getter that returns `true` if all the config objects are valid. Any\n     * data objects that have been modified with `config.set(...)` will be\n     * re-evaluated when `config.valid` is read.\n     */\n    readonly valid: boolean;\n    /**\n     * `flat` A getter that returns a flattened object of the entire loaded config,\n     * using the provided `flatten` option\n     */\n    readonly flat: Record<string, any>;\n\n    /**\n     * Returns a `config` object, which is not yet loaded.\n     */\n    constructor(options: Config.Options<Definitions>);\n\n    /**\n     * Load configuration from the various sources of information.\n     *\n     * Returns a `Promise` that resolves when configuration is loaded, and fails\n     * if a fatal error is encountered.\n     */\n    load(): Promise<void>;\n\n    /**\n     * Find the effective place in the configuration levels a given key is set.\n     * Returns one of: `cli`, `env`, `project`, `user`, `global`, `builtin`, or\n     * `default`.\n     *\n     * Returns `null` if the key is not set.\n     */\n    find(key: keyof Definitions): Config.ConfType;\n    /**\n     * Load the given key from the config stack.\n     * @param [where='cli']\n     */\n    get<K extends keyof Definitions>(key: K, where?: Config.ConfType): Config.ConfigValueType<Definitions[K][\"type\"]>;\n    /**\n     * Set the key to the specified value, at the specified level in the config stack.\n     * @param [where='cli']\n     */\n    set<K extends keyof Definitions>(\n        key: K,\n        value: Config.ConfigValueType<Definitions[K][\"type\"]>,\n        where?: Config.ConfType,\n    ): void;\n    /**\n     * Delete the configuration key from the specified level in the config stack.\n     * @param [where='cli']\n     */\n    delete(key: keyof Definitions, where?: Config.ConfType): void;\n    /**\n     * Verify that all known configuration options are set to valid values, and\n     * log a warning if they are invalid.\n     *\n     * Invalid auth options will cause this method to throw an error with a `code`\n     * property of `ERR_INVALID_AUTH`, and a `problems` property listing the specific\n     * concerns with the current configuration.\n     *\n     * If `where` is not set, then all config objects are validated.\n     *\n     * Returns `true` if all configs are valid.\n     *\n     * Note that it's usually enough (and more efficient) to just check\n     * `config.valid`, since each data object is marked for re-evaluation on every\n     * `config.set()` operation.\n     */\n    validate(where?: Config.ConfType): boolean;\n    /**\n     * Accept an optional array of problems (as thrown by `config.validate()`) and\n     * perform the necessary steps to resolve them. If no problems are provided,\n     * this method will call `config.validate()` internally to retrieve them.\n     *\n     * Note that you must `await config.save('user')` in order to persist the changes.\n     */\n    repair(problems?: Config.Problem[]): void;\n    /**\n     * Returns `true` if the value is coming directly from the\n     * default definitions, if the current value for the key config is\n     * coming from any other source, returns `false`.\n     *\n     * This method can be used for avoiding or tweaking default values, e.g:\n     *\n     * >  Given a global default definition of foo='foo' it's possible to read that\n     * >  value such as:\n     * >\n     * >  ```js\n     * >     const save = config.get('foo')\n     * >  ```\n     * >\n     * >  Now in a different place of your app it's possible to avoid using the `foo`\n     * >  default value, by checking to see if the current config value is currently\n     * >  one that was defined by the default definitions:\n     * >\n     * >  ```js\n     * >     const save = config.isDefault('foo') ? 'bar' : config.get('foo')\n     * >  ```\n     */\n    isDefault(key: keyof Definitions): boolean;\n    /**\n     * Save the config file specified by the `where` param.  Must be one of\n     * `project`, `user`, `global`, `builtin`.\n     */\n    save(where: Config.ConfFileType): Promise<void>;\n}\n\ndeclare class Umask {\n    __isUmask__: true;\n}\n\ndeclare namespace Config {\n    interface DefinitionsObject {\n        [key: string]: Definition;\n    }\n\n    interface TypeInfo<Type> {\n        type: Type;\n        validate: (data: Record<string, any>, k: string, val: string) => boolean;\n        description: string;\n    }\n    interface TypeDefs {\n        String: TypeInfo<StringConstructor>;\n        Boolean: TypeInfo<BooleanConstructor>;\n        url: TypeInfo<typeof import(\"url\")>;\n        Number: TypeInfo<NumberConstructor>;\n        path: TypeInfo<typeof import(\"path\")>;\n        Stream: TypeInfo<typeof Stream>;\n        Date: TypeInfo<DateConstructor>;\n        semver: TypeInfo<typeof import(\"semver\")>;\n        Umask: TypeInfo<typeof Umask>;\n    }\n    interface Definition {\n        type: object | Array<object | string | null>;\n        default?: any;\n        deprecated?: boolean;\n    }\n    type ConfigValueType<Def extends Definition[\"type\"]> = Def extends string ? Def\n        : Def extends ReadonlyArray<infer T>\n            ? ArrayConstructor extends T ? _ConfigValueType<Exclude<T, ArrayConstructor>>\n            : _ConfigValueType<T>\n        : _ConfigValueType<Def>;\n    type _ConfigValueType<Def> = Def extends string | number | null ? Def\n        : Def extends StringConstructor | typeof import(\"url\") | typeof import(\"path\") | typeof import(\"semver\")\n            ? string\n        : Def extends BooleanConstructor ? boolean\n        : Def extends NumberConstructor | typeof Umask ? number\n        : Def extends typeof Stream ? Stream\n        : Def extends DateConstructor ? Date\n        : Def extends ArrayConstructor ? unknown[]\n        : unknown;\n    interface ShortFlags {\n        [k: string]: string[] | string;\n    }\n\n    interface Options<Definitions extends DefinitionsObject = DefinitionsObject> {\n        definitions: Definitions & DefinitionsObject;\n        shorthands: ShortFlags;\n        /** Must be provided for `.flat` to work */\n        flatten?: (data: ConfigData[\"data\"], flattened: Record<string, any>) => void;\n        npmPath: string;\n\n        cwd?: string;\n        env?: NodeJS.ProcessEnv;\n        argv?: string[];\n        execPath?: string;\n        platform?: NodeJS.Platform;\n    }\n\n    type ConfFileType = \"project\" | \"user\" | \"global\";\n    type ConfType = \"default\" | \"env\" | \"cli\" | \"builtin\" | ConfFileType;\n    interface ConfigData {\n        /** The source where this data was loaded from. */\n        source: string;\n        /** The raw data used to generate this config data, as it was parsed initially from the environment, config file, or CLI options. */\n        raw: Record<string, any>;\n        /** The data object reflecting the inheritance of configs up to this point in the chain. */\n        readonly data: Record<string, any>;\n        readonly valid: boolean;\n        /** Any errors encountered that prevented the loading of this config data. */\n        loadError: Error | null;\n    }\n\n    type Problem =\n        | { action: \"delete\"; key: string; where: ConfType }\n        | { action: \"rename\"; from: string; to: string; where: ConfType };\n}\n"
+        },
+        {
+          "path": "npmcli__config/lib/definitions/index.d.ts",
+          "bytes": 365,
+          "declaredModules": [],
+          "source": "import Config = require(\"@npmcli/config\");\n\ndeclare const definitionsModule: {\n    defaults: Record<string, any>;\n    definitions: Config.DefinitionsObject;\n    flatten: (obj: Record<string, any>, flat?: Record<string, any>) => Record<string, any>;\n    nerfDarts: string[];\n    proxyEnv: string[];\n    shorthands: Config.ShortFlags;\n};\n\nexport = definitionsModule;\n"
+        }
+      ],
+      "status": "inspected-in-memory",
+      "consumerImporter": "/home/cyber/Work/reddb.io/redcode/packages/core/src/npm-config.ts:7",
+      "subpathDeclarationPresent": true,
+      "candidateDeclarationPath": "npmcli__config/lib/definitions/index.d.ts",
+      "finding": "Package physically includes matching lib/definitions/index.d.ts with export=definitionsModule. It exports defaults, definitions, flatten, nerfDarts, proxyEnv, shorthands and references root Config types. This is a real subpath declaration candidate under usual TypeScript .js-to-.d.ts extension substitution; not installed or tested against runtime @npmcli/config10.8.1. Several fields still use any."
+    },
+    {
+      "package": "@types/parcel__watcher",
+      "version": "2.0.5",
+      "tarballUrl": "https://registry.npmjs.org/@types/parcel__watcher/-/parcel__watcher-2.0.5.tgz",
+      "exactRuntimeSpecifier": "@parcel/watcher/wrapper",
+      "checkedAt": "2026-09-13T17:03:38.823627+00:00",
+      "httpStatus": 200,
+      "compressedBytes": 1899,
+      "sha512Integrity": "sha512-oqv9+mKxb8ujQe0Lq0KT54B9j9xiW4h20lrir5UfdTx2Oc0VGFlMavw25sca+sGxVk2AE/lt9tDw4ExnqUM8nQ==",
+      "integrityMatchesRegistry": true,
+      "files": [
+        "parcel__watcher",
+        "parcel__watcher/LICENSE",
+        "parcel__watcher/README.md",
+        "parcel__watcher/index.d.ts",
+        "parcel__watcher/package.json"
+      ],
+      "declarations": [
+        {
+          "path": "parcel__watcher/index.d.ts",
+          "bytes": 1162,
+          "declaredModules": [],
+          "source": "/// <reference types=\"node\"/>\n\nexport class ParcelWatcherSubscription {\n    unsubscribe(): Promise<void>;\n}\n\nexport type ParcelWatcherEventType = \"create\" | \"update\" | \"delete\";\n\nexport interface ParcelWatcherEvent {\n    type: ParcelWatcherEventType;\n    path: string;\n}\n\nexport type ParcelWatcherBackend = \"fs-events\" | \"watchman\" | \"inotify\" | \"windows\" | \"brute-force\";\n\nexport interface ParcelWatcherOptions {\n    ignore?: string[] | undefined;\n    backend?: ParcelWatcherBackend | undefined;\n}\n\nexport type ParcelWatcherCallback = (error?: Error, events?: ParcelWatcherEvent[]) => any;\n\nexport function getEventsSince(\n    dirPath: string,\n    snapshotPath: string,\n    options?: ParcelWatcherOptions,\n): Promise<ParcelWatcherEvent[]>;\n\nexport function subscribe(\n    dirPath: string,\n    callback: ParcelWatcherCallback,\n    options?: ParcelWatcherOptions,\n): Promise<ParcelWatcherSubscription>;\n\nexport function unsubscribe(\n    dirPath: string,\n    callback: ParcelWatcherCallback,\n    options?: ParcelWatcherOptions,\n): Promise<void>;\n\nexport function writeSnapshot(dirPath: string, snapshotPath: string, options?: ParcelWatcherOptions): Promise<void>;\n"
+        }
+      ],
+      "status": "inspected-in-memory",
+      "consumerImporter": "/home/cyber/Work/reddb.io/redcode/packages/core/src/filesystem/watcher.ts:4",
+      "subpathDeclarationPresent": false,
+      "rootDeclarationExportsCreateWrapper": false,
+      "finding": "Only index.d.ts for public watcher API. No wrapper.d.ts, wrapper/index.d.ts, exact declare-module block, or createWrapper symbol. Runtime private wrapper.js exports createWrapper(binding), so root watcher declarations cannot simply be reused. A declaration-based fix needs a correct version-specific private-subpath declaration/typed integration; compiler inference is another route, and native addon/runtime support independently remains."
+    }
+  ]
+}

@@ -1,0 +1,353 @@
+{
+  "scope": "Historical17 default entry attempts at f1087c plus latest full CLI at5e0830c; not a new all18 build, percentages and counts are not causal completion metrics.",
+  "programs": [
+    {
+      "program": "red-skills/dev",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC0001": 1
+      },
+      "diagnosticOccurrences": 1,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__default/build.json"
+    },
+    {
+      "program": "red-skills/castle-mcp",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 124,
+        "SC2009": 9,
+        "SC2020": 10,
+        "SC1090": 65,
+        "SC2012": 1,
+        "SC2004": 14,
+        "SC1101": 3,
+        "SC1100": 2,
+        "SC2003": 1,
+        "SC2002": 2,
+        "SC1031": 1,
+        "SC1120": 1,
+        "SC2008": 1
+      },
+      "diagnosticOccurrences": 234,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__castle-mcp__default/build.json"
+    },
+    {
+      "program": "red-skills/code-nav",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2009": 3,
+        "SC2013": 10,
+        "SC2004": 4,
+        "SC1090": 3,
+        "SC1031": 1,
+        "SC2020": 1
+      },
+      "diagnosticOccurrences": 22,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__code-nav__default/build.json"
+    },
+    {
+      "program": "red-skills/memory",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC1014": 1,
+        "SC1016": 55
+      },
+      "diagnosticOccurrences": 56,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory__default/build.json"
+    },
+    {
+      "program": "red-skills/memory-mcp",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 339,
+        "SC2009": 176,
+        "SC2011": 11,
+        "SC1090": 106,
+        "SC2002": 3,
+        "SC2020": 7,
+        "SC2004": 6,
+        "SC2003": 1
+      },
+      "diagnosticOccurrences": 649,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory-mcp__default/build.json"
+    },
+    {
+      "program": "red-skills/brain",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 17,
+        "SC1090": 33,
+        "SC2009": 19,
+        "SC1063": 13,
+        "SC2004": 4,
+        "SC2020": 3
+      },
+      "diagnosticOccurrences": 89,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain__default/build.json"
+    },
+    {
+      "program": "red-skills/brain-mcp",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 26,
+        "SC1090": 9,
+        "SC2002": 1,
+        "SC2004": 1
+      },
+      "diagnosticOccurrences": 37,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain-mcp__default/build.json"
+    },
+    {
+      "program": "red-skills/rsp",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 63,
+        "SC1090": 128,
+        "SC2004": 90,
+        "SC2009": 10,
+        "SC2020": 31,
+        "SC2011": 3,
+        "SC1101": 2,
+        "SC1100": 4
+      },
+      "diagnosticOccurrences": 331,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__rsp__default/build.json"
+    },
+    {
+      "program": "red-skills/redskilled",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 29,
+        "SC1090": 13,
+        "SC2004": 9,
+        "SC2011": 1,
+        "SC1031": 1
+      },
+      "diagnosticOccurrences": 53,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__redskilled__default/build.json"
+    },
+    {
+      "program": "red-skills/herdr",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC1090": 2
+      },
+      "diagnosticOccurrences": 2,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__herdr__default/build.json"
+    },
+    {
+      "program": "red-skills/benchmark-memory",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 61,
+        "SC2009": 17,
+        "SC1090": 75,
+        "SC2020": 22,
+        "SC2004": 51,
+        "SC2002": 14,
+        "SC1120": 1,
+        "SC0004": 4
+      },
+      "diagnosticOccurrences": 245,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-memory__default/build.json"
+    },
+    {
+      "program": "red-skills/benchmark-code-understanding",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 6,
+        "SC1090": 7,
+        "SC2004": 2,
+        "SC2020": 2
+      },
+      "diagnosticOccurrences": 17,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-code-understanding__default/build.json"
+    },
+    {
+      "program": "red-skills/opencode-host",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2013": 6,
+        "SC2002": 1,
+        "SC2004": 6,
+        "SC1090": 6,
+        "SC1031": 1,
+        "SC2009": 2,
+        "SC2020": 1
+      },
+      "diagnosticOccurrences": 23,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-skills__opencode-host__default/build.json"
+    },
+    {
+      "program": "redcode/lildax",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "timeout-inconclusive",
+      "counts": {},
+      "diagnosticOccurrences": 0,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/redcode__lildax__default/build.json"
+    },
+    {
+      "program": "redcode/rpc-sidecar",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "built-native",
+      "counts": {},
+      "diagnosticOccurrences": 0,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/redcode__rpc-sidecar__default/build.json"
+    },
+    {
+      "program": "red-dev/red-dev",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC2009": 6,
+        "SC2020": 177,
+        "SC2013": 19,
+        "SC2011": 26,
+        "SC1090": 235,
+        "SC2004": 294,
+        "SC2002": 3,
+        "SC2003": 1,
+        "SC2012": 8,
+        "SC1120": 2,
+        "SC1043": 1,
+        "SC1070": 1
+      },
+      "diagnosticOccurrences": 773,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default/build.json"
+    },
+    {
+      "program": "red-dev/redwall",
+      "compilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+      "status": "diagnostic-refusal",
+      "counts": {
+        "SC0001": 3
+      },
+      "diagnosticOccurrences": 3,
+      "npmStatic": "OFF",
+      "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default/build.json"
+    },
+    {
+      "program": "redcode/redcode",
+      "compilerCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
+      "status": "refused",
+      "counts": {
+        "SC2011": 158,
+        "SC1090": 1303,
+        "SC2008": 29,
+        "SC2009": 449,
+        "SC2013": 643,
+        "SC2006": 1,
+        "SC2005": 2,
+        "SC2001": 20,
+        "SC2020": 119,
+        "SC1100": 6,
+        "SC2004": 288,
+        "SC1101": 23,
+        "SC1031": 16,
+        "SC2003": 9,
+        "SC1071": 8,
+        "SC0004": 2,
+        "SC2002": 6,
+        "SC2012": 1,
+        "SC1120": 5,
+        "SC1052": 2
+      },
+      "diagnosticOccurrences": 3090,
+      "npmStatic": [
+        "@reddb-io/redcode-core",
+        "@reddb-io/redcode-sdk",
+        "@reddb-io/redcode-llm",
+        "@reddb-io/redcode-plugin",
+        "@reddb-io/redcode-schema",
+        "@reddb-io/redcode-protocol",
+        "ulid",
+        "strip-ansi",
+        "@reddb-io/toon",
+        "undici",
+        "xdg-basedir",
+        "@reddb-io/redcode-effect-drizzle-sqlite",
+        "picocolors",
+        "sisteransi",
+        "define-lazy-prop",
+        "is-inside-container",
+        "@opentelemetry/api",
+        "immer",
+        "@deepseek-ai/cordis",
+        "poe-oauth",
+        "ansi-regex",
+        "zod-to-json-schema",
+        "eventsource-parser",
+        "eventsource",
+        "is-docker",
+        "@deepseek-ai/cosmokit",
+        "entities",
+        "domhandler",
+        "avvio",
+        "fastify-plugin",
+        "@lukeed/ms",
+        "balanced-match",
+        "domelementtype",
+        "@reddb-io/redcode-tui"
+      ],
+      "evidence": "/tmp/scriptc-redcode-native-proxy-20260913a/build.json"
+    }
+  ],
+  "totalOccurrences": 5625,
+  "countsByCode": {
+    "SC0001": 4,
+    "SC2013": 1343,
+    "SC2009": 691,
+    "SC2020": 373,
+    "SC1090": 1985,
+    "SC2012": 10,
+    "SC2004": 769,
+    "SC1101": 28,
+    "SC1100": 12,
+    "SC2003": 12,
+    "SC2002": 30,
+    "SC1031": 20,
+    "SC1120": 9,
+    "SC2008": 30,
+    "SC1014": 1,
+    "SC1016": 55,
+    "SC2011": 199,
+    "SC1063": 13,
+    "SC0004": 6,
+    "SC1043": 1,
+    "SC1070": 1,
+    "SC2006": 1,
+    "SC2005": 2,
+    "SC2001": 20,
+    "SC1071": 8,
+    "SC1052": 2
+  }
+}

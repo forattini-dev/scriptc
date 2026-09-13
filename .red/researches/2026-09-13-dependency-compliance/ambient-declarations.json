@@ -1,0 +1,233 @@
+[
+  {
+    "repo": "redcode",
+    "specifier": "*.txt",
+    "file": "/home/cyber/Work/reddb.io/redcode/.opencode/env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "solid-js",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/app/src/custom-elements.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.png",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/app/src/env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.mp4",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/app/src/env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "solid-js",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/app/src/env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "@solidjs/start/server",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/console/app/src/global.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "ssh2",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/capability/shell/ssh2.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "gifenc",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/design/gifenc.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.md",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/core/src/markdown.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "virtual:opencode-server",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/desktop/src/main/env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "solid-js",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/enterprise/src/custom-elements.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "@solidjs/start/server",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/enterprise/src/global.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.wav",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/audio.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.mp3",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/audio.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.wasm",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/audio.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.md",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/markdown.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.sql",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/sql.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "sst/resource",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/stats/app/src/resource.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "sst/resource",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/stats/core/src/resource.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "sst/resource",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/stats/server/src/resource.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "*.mp3",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/audio.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "@reddb-io/redcode-ui/audio/*.mp3",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/tui/src/audio.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "solid-js",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/ui/src/custom-elements.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "lang-map",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/web/src/types/lang-map.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "virtual:starlight/user-images",
+    "file": "/home/cyber/Work/reddb.io/redcode/packages/web/src/types/starlight-virtual.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "redcode",
+    "specifier": "sst",
+    "file": "/home/cyber/Work/reddb.io/redcode/sst-env.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-skills",
+    "specifier": "js-yaml",
+    "file": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/types/js-yaml.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.sh",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.conf",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.kdl",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.png",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.ttf",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  },
+  {
+    "repo": "red-dev",
+    "specifier": "*.embedded",
+    "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+    "anyTokens": 0,
+    "hasBody": true
+  }
+]

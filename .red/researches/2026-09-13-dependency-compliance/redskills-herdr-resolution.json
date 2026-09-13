@@ -1,0 +1,17 @@
+{
+  "importer": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+  "parentURL": "file:///home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+  "mode": "ESM import.meta.resolve with explicit parentURL; no module execution",
+  "rows": [
+    {
+      "package": "@reddb-io/build-info",
+      "error": "ERR_MODULE_NOT_FOUND",
+      "message": "Cannot find package '@reddb-io/build-info' imported from /home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs"
+    },
+    {
+      "package": "@reddb-io/toon",
+      "error": "ERR_MODULE_NOT_FOUND",
+      "message": "Cannot find package '@reddb-io/toon' imported from /home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs"
+    }
+  ]
+}

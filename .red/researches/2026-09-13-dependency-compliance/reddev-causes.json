@@ -1,0 +1,1690 @@
+{
+  "schemaVersion": 1,
+  "scope": "Read-only dependency compliance and original red-dev/redwall prerequisites; no full builds or dependency installs",
+  "preparedAt": "2026-09-13T17:02:08.861436+00:00",
+  "compiler": {
+    "root": "/tmp/scriptc-redcode-identity-20260913",
+    "head": "30cde1be34c0eddc7d6a4a808796f5c56c851d58",
+    "sourceCommitProvidedByRoot": "5e0830c2",
+    "historicalAdmissionCompiler": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+    "baselineRebuilt": false,
+    "sourceCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215"
+  },
+  "consumer": {
+    "root": "/home/cyber/Work/reddb.io/red-dev",
+    "head": "d451c0e71a499ba8b50114c529bd22ca99210b5a",
+    "status": "",
+    "packageVersion": "1.0.133",
+    "all152BaselineRuntimeSourcesStillMatch": true
+  },
+  "packages": [
+    {
+      "name": "cli-args-parser",
+      "version": "1.0.6",
+      "requested": "^1.0.6",
+      "installedRealpath": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser",
+      "manifest": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/package.json",
+      "authoredLanguageEvidence": {
+        "language": "TypeScript",
+        "buildScript": "tsup src/index.ts --format esm --dts --clean",
+        "evidence": "package build script uses src/index.ts / tsc; tuiuiu source maps name src/*.ts without embedding sources"
+      },
+      "publishedRuntimeLanguage": "JavaScript ESM",
+      "executableTypeScriptFiles": 0,
+      "runtimeJavaScriptFiles": 1,
+      "ownDeclarationFiles": 1,
+      "importedSubpaths": [
+        "cli-args-parser"
+      ],
+      "runtimeEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js"
+      ],
+      "declarationEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts"
+      ],
+      "runtimeDependencies": {},
+      "optionalDependencies": {},
+      "peerDependencies": {},
+      "actualConsumerImportSites": [
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+          "specifier": "cli-args-parser",
+          "kind": "import",
+          "line": 12,
+          "typeOnly": false
+        }
+      ],
+      "runtimeGraph": {
+        "scope": "Conservative syntax-level module reachability from actual imported package entrypoints; includes barrel exports and conditional imports, not function reachability or bundler tree shaking.",
+        "modules": 1,
+        "bareBuiltins": [
+          "fs",
+          "os",
+          "path"
+        ],
+        "externalNpmEdges": [],
+        "nonliteralEdges": [],
+        "unresolvedRelative": [],
+        "fullEvidence": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json"
+      },
+      "currentCompilerEligibility": [
+        {
+          "specifier": "cli-args-parser",
+          "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+          "declarations": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+            "packageName": "cli-args-parser",
+            "version": "1.0.6"
+          },
+          "runtime": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+            "packageName": "cli-args-parser",
+            "version": "1.0.6"
+          },
+          "ineligibleReason": null
+        }
+      ]
+    },
+    {
+      "name": "tuiuiu.js",
+      "version": "1.0.75",
+      "requested": "1.0.75",
+      "installedRealpath": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js",
+      "manifest": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/package.json",
+      "authoredLanguageEvidence": {
+        "language": "TypeScript",
+        "buildScript": "pnpm run clean && tsc",
+        "evidence": "package build script uses src/index.ts / tsc; tuiuiu source maps name src/*.ts without embedding sources"
+      },
+      "publishedRuntimeLanguage": "JavaScript ESM",
+      "executableTypeScriptFiles": 0,
+      "runtimeJavaScriptFiles": 287,
+      "ownDeclarationFiles": 287,
+      "importedSubpaths": [
+        "tuiuiu.js",
+        "tuiuiu.js/hooks"
+      ],
+      "runtimeEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js"
+      ],
+      "declarationEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts"
+      ],
+      "runtimeDependencies": {},
+      "optionalDependencies": {},
+      "peerDependencies": {},
+      "actualConsumerImportSites": [
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/ui.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 16,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-chrome.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 17,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-install.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 16,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-install.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 31,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/keys-view.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 16,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/emoji-view.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 17,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 15,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+          "specifier": "tuiuiu.js/hooks",
+          "kind": "import",
+          "line": 26,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 20,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 31,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+          "specifier": "tuiuiu.js",
+          "kind": "import",
+          "line": 15,
+          "typeOnly": false
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+          "specifier": "tuiuiu.js/hooks",
+          "kind": "import",
+          "line": 30,
+          "typeOnly": false
+        }
+      ],
+      "runtimeGraph": {
+        "scope": "Conservative syntax-level module reachability from actual imported package entrypoints; includes barrel exports and conditional imports, not function reachability or bundler tree shaking.",
+        "modules": 224,
+        "bareBuiltins": [
+          "fs",
+          "node:async_hooks",
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:fs/promises",
+          "node:os",
+          "node:path",
+          "node:process",
+          "node:readline",
+          "node:string_decoder",
+          "node:url",
+          "node:worker_threads",
+          "node:zlib",
+          "path"
+        ],
+        "externalNpmEdges": [],
+        "nonliteralEdges": [],
+        "unresolvedRelative": [],
+        "fullEvidence": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json"
+      },
+      "currentCompilerEligibility": [
+        {
+          "specifier": "tuiuiu.js",
+          "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+          "declarations": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+            "packageName": "tuiuiu.js",
+            "version": "1.0.75"
+          },
+          "runtime": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+            "packageName": "tuiuiu.js",
+            "version": "1.0.75"
+          },
+          "ineligibleReason": null
+        },
+        {
+          "specifier": "tuiuiu.js/hooks",
+          "from": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+          "declarations": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+            "packageName": "tuiuiu.js",
+            "version": "1.0.75"
+          },
+          "runtime": {
+            "typesFile": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js",
+            "packageName": "tuiuiu.js",
+            "version": "1.0.75"
+          },
+          "ineligibleReason": null
+        }
+      ]
+    }
+  ],
+  "baseline": {
+    "attempts": {
+      "red-dev__red-dev__default": {
+        "status": "diagnostic-refusal",
+        "ok": false,
+        "startedAt": "2026-09-13T12:24:23.215Z",
+        "counts": {
+          "SC2009": 6,
+          "SC2020": 177,
+          "SC2013": 19,
+          "SC2011": 26,
+          "SC1090": 235,
+          "SC2004": 294,
+          "SC2002": 3,
+          "SC2003": 1,
+          "SC2012": 8,
+          "SC1120": 2,
+          "SC1043": 1,
+          "SC1070": 1
+        },
+        "diagnostics": 773,
+        "loadedSources": 152,
+        "loadedNpmRuntimeSources": 0,
+        "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default/build.json"
+      },
+      "red-dev__red-dev__auto": {
+        "status": "diagnostic-refusal",
+        "ok": false,
+        "startedAt": "2026-09-13T12:25:38.055Z",
+        "counts": {
+          "SC2009": 6,
+          "SC2020": 177,
+          "SC2013": 19,
+          "SC2011": 26,
+          "SC1090": 235,
+          "SC2004": 294,
+          "SC2002": 3,
+          "SC2003": 1,
+          "SC2012": 8,
+          "SC1120": 2,
+          "SC1043": 1,
+          "SC1070": 1
+        },
+        "diagnostics": 773,
+        "loadedSources": 152,
+        "loadedNpmRuntimeSources": 0,
+        "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/build.json"
+      },
+      "red-dev__redwall__default": {
+        "status": "diagnostic-refusal",
+        "ok": false,
+        "startedAt": "2026-09-13T12:24:35.111Z",
+        "counts": {
+          "SC0001": 3
+        },
+        "diagnostics": 3,
+        "loadedSources": 1,
+        "loadedNpmRuntimeSources": 0,
+        "evidence": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default/build.json"
+      }
+    },
+    "defaultAndAutoDiagnosticsIdentical": true,
+    "literalAnyAssetDiagnostics": [
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+          "start": 5431,
+          "end": 5446
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 110,
+        "sourceLine": "import trustedRootFile from \"../vendor/sigstore/trusted_root.embedded\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 912,
+          "end": 916
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 27,
+        "sourceLine": "import rcSh from \"../config/bash/rc.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 975,
+          "end": 981
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 28,
+        "sourceLine": "import pathSh from \"../config/bash/path.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1042,
+          "end": 1048
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 29,
+        "sourceLine": "import initSh from \"../config/bash/init.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1109,
+          "end": 1118
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 30,
+        "sourceLine": "import aliasesSh from \"../config/bash/aliases.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1182,
+          "end": 1193
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 31,
+        "sourceLine": "import functionsSh from \"../config/bash/functions.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1259,
+          "end": 1267
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 32,
+        "sourceLine": "import promptSh from \"../config/bash/prompt.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1330,
+          "end": 1338
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 33,
+        "sourceLine": "import sharedSh from \"../config/bash/shared.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1401,
+          "end": 1409
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 34,
+        "sourceLine": "import zellijSh from \"../config/bash/zellij.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1472,
+          "end": 1488
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 35,
+        "sourceLine": "import redSkillsWatchSh from \"../config/bash/red-skills-watch.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1561,
+          "end": 1579
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 36,
+        "sourceLine": "import windowsClipboardSh from \"../config/bash/windows-clipboard.sh\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1653,
+          "end": 1660
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 37,
+        "sourceLine": "import inputrc from \"../config/bash/inputrc.conf\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1726,
+          "end": 1738
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 38,
+        "sourceLine": "import starshipToml from \"../config/bash/starship.toml\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+          "start": 1805,
+          "end": 1815
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 39,
+        "sourceLine": "import zellijBase from \"../config/zellij/config.kdl\" with { type: \"text\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 1968,
+          "end": 1975
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 52,
+        "sourceLine": "import darkPng from \"../assets/wallpapers/dark.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 2043,
+          "end": 2051
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 53,
+        "sourceLine": "import lightPng from \"../assets/wallpapers/light.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 2120,
+          "end": 2131
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 54,
+        "sourceLine": "import obsidianPng from \"../assets/wallpapers/obsidian.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 2203,
+          "end": 2212
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 55,
+        "sourceLine": "import marblePng from \"../assets/wallpapers/marble.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 2282,
+          "end": 2291
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 56,
+        "sourceLine": "import cobaltPng from \"../assets/wallpapers/cobalt.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+          "start": 2361,
+          "end": 2369
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 57,
+        "sourceLine": "import flarePng from \"../assets/wallpapers/flare.png\" with { type: \"file\" };"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-font.ts",
+          "start": 1173,
+          "end": 1179
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')",
+        "line": 27,
+        "sourceLine": "import subset from \"../assets/fonts/redwall-firacode-subset.ttf\" with { type: \"file\" };"
+      }
+    ],
+    "otherSC2011": [
+      {
+        "code": "SC2011",
+        "message": "values of type 'Provider' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+          "start": 16920,
+          "end": 16946
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",
+        "line": 431,
+        "sourceLine": "const sudoProvider = (pr: ProviderSpec): Provider => ({ ...pr, needsSudo: true });"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'Provider' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+          "start": 17289,
+          "end": 17316
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",
+        "line": 439,
+        "sourceLine": "const admin = (pr: ProviderSpec): Provider => ({ ...pr, needsAdmin: true });"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'AptDowngrade[] | []' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/providers.ts",
+          "start": 65124,
+          "end": 65139
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",
+        "line": 1662,
+        "sourceLine": "      for (const downgrade of plan.downgrades) log.plain(`       ${downgradeLine(downgrade)}`);"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'string | ArrayBuffer | Uint8Array<ArrayBufferLike>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/checksum.ts",
+          "start": 1174,
+          "end": 1179
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",
+        "line": 26,
+        "sourceLine": "export function sha256Hex(bytes: ArrayBuffer | Uint8Array | string): string {"
+      },
+      {
+        "code": "SC2011",
+        "message": "values of type 'FullUpgradePlan' have no static representation but run in the embedded dynamic engine, which this build does not include",
+        "loc": {
+          "file": "/home/cyber/Work/reddb.io/red-dev/src/apt-upgrade.ts",
+          "start": 6536,
+          "end": 6599
+        },
+        "milestone": "M4",
+        "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",
+        "line": 165,
+        "sourceLine": "  if (downgrades.length === 0) return { kind: \"clean\", argv: [...FULL_UPGRADE_ARGV], downgrades: [] };"
+      }
+    ],
+    "typedApiDiagnosticGroups": [
+      {
+        "message": "'Bun.spawn' is typed by @types/node but has no scriptc lowering yet",
+        "count": 33,
+        "example": {
+          "code": "SC2020",
+          "message": "'Bun.spawn' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/sudo-preflight.ts",
+            "start": 2019,
+            "end": 2028
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 57,
+          "sourceLine": "    const child = Bun.spawn(argv, { stdin: \"inherit\", stdout: \"inherit\", stderr: \"inherit\" });"
+        }
+      },
+      {
+        "message": "'Bun.write' is typed by @types/node but has no scriptc lowering yet",
+        "count": 29,
+        "example": {
+          "code": "SC2020",
+          "message": "'Bun.write' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+            "start": 489,
+            "end": 498
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 16,
+          "sourceLine": "const write = Bun.write;"
+        }
+      },
+      {
+        "message": "'BunFile.text' is typed by @types/node but has no scriptc lowering yet",
+        "count": 18,
+        "example": {
+          "code": "SC2020",
+          "message": "'BunFile.text' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 10619,
+            "end": 10638
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 250,
+          "sourceLine": "      const current = await Bun.file(path).text();"
+        }
+      },
+      {
+        "message": "'Bun.which' is typed by @types/node but has no scriptc lowering yet",
+        "count": 15,
+        "example": {
+          "code": "SC2020",
+          "message": "'Bun.which' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 2394,
+            "end": 2403
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 60,
+          "sourceLine": "          : (Bun.which(\"powershell.exe\") ??"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+        "count": 12,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 2985,
+            "end": 2996
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 74,
+          "sourceLine": "      const out = (await new Response(proc.stdout).text()).trim();"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 12,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"pipe\", \"ignore\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 3026,
+            "end": 3037
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 75,
+          "sourceLine": "      await proc.exited;"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 9,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/theme-editors.ts",
+            "start": 9019,
+            "end": 9030
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 273,
+          "sourceLine": "    return (await proc.exited) === 0;"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"pipe\", \"pipe\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+        "count": 7,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"pipe\", \"pipe\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-theme.ts",
+            "start": 4589,
+            "end": 4600
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 113,
+          "sourceLine": "  const out = (await new Response(proc.stdout).text()).trim();"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"pipe\", \"pipe\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 6,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"pipe\", \"pipe\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-theme.ts",
+            "start": 4631,
+            "end": 4642
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 114,
+          "sourceLine": "  if ((await proc.exited) !== 0 || !out.includes(\"ok\")) {"
+        }
+      },
+      {
+        "message": "'Bun.spawnSync' is typed by @types/node but has no scriptc lowering yet",
+        "count": 4,
+        "example": {
+          "code": "SC2020",
+          "message": "'Bun.spawnSync' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 14764,
+            "end": 14777
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 338,
+          "sourceLine": "        const which = Bun.spawnSync([mise, \"which\", name], { stdout: \"pipe\", stderr: \"ignore\" });"
+        }
+      },
+      {
+        "message": "'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet",
+        "count": 3,
+        "example": {
+          "code": "SC2020",
+          "message": "'process.stdout.columns as a plain number' is part of the standard library types but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+            "start": 34776,
+            "end": 34798
+          },
+          "milestone": "later",
+          "hint": "on a non-TTY stream Node's .columns is undefined — type the read to admit it: (process.stdout as typeof process.stdout & { columns?: number }).columns",
+          "line": 824,
+          "sourceLine": "  if (!inv.dryRun && interactive() && (process.stdout.columns ?? 0) >= 60) {"
+        }
+      },
+      {
+        "message": "'.splice with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+        "count": 3,
+        "example": {
+          "code": "SC2020",
+          "message": "'.splice with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/codex-statusline.ts",
+            "start": 2120,
+            "end": 2153
+          },
+          "milestone": "later",
+          "hint": "the removal forms lower — splice(start, deleteCount?); to insert, build a new array with slice and push",
+          "line": 58,
+          "sourceLine": "    else lines.splice(end, 0, STATUS_LINE);"
+        }
+      },
+      {
+        "message": "'Subprocess<\"inherit\", \"inherit\", \"inherit\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 2,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"inherit\", \"inherit\", \"inherit\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/sudo-preflight.ts",
+            "start": 2113,
+            "end": 2125
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 58,
+          "sourceLine": "    return await child.exited;"
+        }
+      },
+      {
+        "message": "'SyncSubprocess<\"pipe\", \"pipe\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+        "count": 2,
+        "example": {
+          "code": "SC2020",
+          "message": "'SyncSubprocess<\"pipe\", \"pipe\">.stdout' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/blesh.ts",
+            "start": 4441,
+            "end": 4455
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 114,
+          "sourceLine": "  const dir = new TextDecoder().decode(listing.stdout).trim().split(\"\\n\")[0];"
+        }
+      },
+      {
+        "message": "'{ (path: string | URL, options?: BlobPropertyBag | undefined): BunFile; (path: Uint8Array<ArrayBuffer> | ArrayBufferLike, options?: BlobPropertyBag | undefined): BunFile; (fileDescriptor: number, options?: BlobPropertyBag | undefined): BunFile; }' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'{ (path: string | URL, options?: BlobPropertyBag | undefined): BunFile; (path: Uint8Array<ArrayBuffer> | ArrayBufferLike, options?: BlobPropertyBag | undefined): BunFile; (fileDescriptor: number, options?: BlobPropertyBag | undefined): BunFile; }' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+            "start": 433,
+            "end": 437
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 14,
+          "sourceLine": "const file = Bun.file;"
+        }
+      },
+      {
+        "message": "'{ <const In extends SpawnOptions.Writable = \"ignore\", const Out extends SpawnOptions.Readable = \"pipe\", const Err extends SpawnOptions.Readable = \"inherit\">(options: SpawnOptions<In, Out, Err> & { cmd: string[]; }): Subprocess<...>; <const In extends SpawnOptions.Writable = \"ignore\", const Out extends SpawnOptions.R...' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'{ <const In extends SpawnOptions.Writable = \"ignore\", const Out extends SpawnOptions.Readable = \"pipe\", const Err extends SpawnOptions.Readable = \"inherit\">(options: SpawnOptions<In, Out, Err> & { cmd: string[]; }): Subprocess<...>; <const In extends SpawnOptions.Writable = \"ignore\", const Out extends SpawnOptions.R...' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+            "start": 456,
+            "end": 461
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 15,
+          "sourceLine": "const spawn = Bun.spawn;"
+        }
+      },
+      {
+        "message": "'{ (destination: BunFile | S3File | PathLike, input: string | Archive | BlobPart[] | Blob | ArrayBufferLike | TypedArray<...>, options?: { ...; } | undefined): Promise<...>; (destination: BunFile, input: Response, options?: { ...; } | undefined): Promise<...>; (destinationPath: PathLike, input: Response, options?: { ...' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'{ (destination: BunFile | S3File | PathLike, input: string | Archive | BlobPart[] | Blob | ArrayBufferLike | TypedArray<...>, options?: { ...; } | undefined): Promise<...>; (destination: BunFile, input: Response, options?: { ...; } | undefined): Promise<...>; (destinationPath: PathLike, input: Response, options?: { ...' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+            "start": 481,
+            "end": 486
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 16,
+          "sourceLine": "const write = Bun.write;"
+        }
+      },
+      {
+        "message": "'console.log' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'console.log' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/log.ts",
+            "start": 3411,
+            "end": 3422
+          },
+          "milestone": "later",
+          "hint": "console.log/info/debug (stdout) and console.error/warn (stderr) are the supported console surface (arguments render with Node's console semantics: strings verbatim, everything else through the static util.inspect)",
+          "line": 100,
+          "sourceLine": "  step: (msg: string) => emit(`${paint(\"1;34\", \"::\")} ${msg}`, console.log),"
+        }
+      },
+      {
+        "message": "'spawnSync option 'cwd'' is part of the standard library types but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'spawnSync option 'cwd'' is part of the standard library types but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+            "start": 14388,
+            "end": 14401
+          },
+          "milestone": "later",
+          "hint": "encoding, timeout, killSignal, stdio, env, and windowsHide are the supported options",
+          "line": 355,
+          "sourceLine": "    cwd: opts.cwd,"
+        }
+      },
+      {
+        "message": "'Bun.file' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Bun.file' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+            "start": 440,
+            "end": 448
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 14,
+          "sourceLine": "const file = Bun.file;"
+        }
+      },
+      {
+        "message": "'SyncSubprocess<\"pipe\", \"ignore\">.exitCode' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'SyncSubprocess<\"pipe\", \"ignore\">.exitCode' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+            "start": 14852,
+            "end": 14866
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 339,
+          "sourceLine": "        if (which.exitCode !== 0) {"
+        }
+      },
+      {
+        "message": "'Stats.uid' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Stats.uid' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl.ts",
+            "start": 9115,
+            "end": 9132
+          },
+          "milestone": "later",
+          "hint": "isFile(), isDirectory(), isSymbolicLink(), size, blocks, nlink, atimeMs, and mtimeMs are the supported Stats members",
+          "line": 253,
+          "sourceLine": "    return statSync(dir).uid;"
+        }
+      },
+      {
+        "message": "'Error.stack' is part of the standard library types but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Error.stack' is part of the standard library types but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/crash.ts",
+            "start": 2717,
+            "end": 2726
+          },
+          "milestone": "later",
+          "hint": "stack traces are not captured (frames would need runtime bookkeeping); name, message, and toString() are available",
+          "line": 70,
+          "sourceLine": "  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);"
+        }
+      },
+      {
+        "message": "'BunFile.bytes' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'BunFile.bytes' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+            "start": 12461,
+            "end": 12483
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 309,
+          "sourceLine": "  return await Bun.file(source).bytes();"
+        }
+      },
+      {
+        "message": "'CryptoHasher.digest' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'CryptoHasher.digest' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+            "start": 11840,
+            "end": 11891
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 295,
+          "sourceLine": "  return new Bun.CryptoHasher(\"sha256\").update(bytes).digest(\"hex\").slice(0, 8);"
+        }
+      },
+      {
+        "message": "'require' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'require' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+            "start": 58848,
+            "end": 58855
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 1421,
+          "sourceLine": "    dockerModule = require(\"./docker.ts\") as typeof import(\"./docker.ts\");"
+        }
+      },
+      {
+        "message": "'BunFile.size' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'BunFile.size' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+            "start": 111514,
+            "end": 111530
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 2828,
+          "sourceLine": "      const size = Bun.file(f).size;"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"ignore\", \"pipe\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"ignore\", \"pipe\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/alacritty.ts",
+            "start": 2441,
+            "end": 2452
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 58,
+          "sourceLine": "  if ((await proc.exited) !== 0) {"
+        }
+      },
+      {
+        "message": "'SyncSubprocess<\"ignore\", \"ignore\">.exitCode' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'SyncSubprocess<\"ignore\", \"ignore\">.exitCode' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/platform.ts",
+            "start": 3942,
+            "end": 3952
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 130,
+          "sourceLine": "      return p.exitCode === 0;"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.unref' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"ignore\", \"ignore\">.unref' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
+            "start": 22547,
+            "end": 22557
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 551,
+          "sourceLine": "    proc.unref();"
+        }
+      },
+      {
+        "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/report.ts",
+            "start": 8941,
+            "end": 8995
+          },
+          "milestone": "later",
+          "hint": "native arrays, homogeneous tuples, Sets, strings and immediate Map/Set iterator calls can seed a Set of matching supported elements; other iterable forms have no lowering",
+          "line": 231,
+          "sourceLine": "    const remedies = [...new Set(deferred.map((e) => e.remedy).filter(Boolean))];"
+        }
+      },
+      {
+        "message": "'Subprocess<\"ignore\", \"inherit\", \"inherit\">.exited' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Subprocess<\"ignore\", \"inherit\", \"inherit\">.exited' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/providers.ts",
+            "start": 8266,
+            "end": 8277
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 227,
+          "sourceLine": "      const code = await proc.exited;"
+        }
+      },
+      {
+        "message": "'{ (command: string): SpawnSyncReturns<NonSharedBuffer>; (command: string, options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<...>; (command: string, options: SpawnSyncOptionsWithBufferEncoding): SpawnSyncReturns<...>; (command: string, options?: SpawnSyncOptions | undefined): SpawnSyncReturns<...>; (comm...' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'{ (command: string): SpawnSyncReturns<NonSharedBuffer>; (command: string, options: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<...>; (command: string, options: SpawnSyncOptionsWithBufferEncoding): SpawnSyncReturns<...>; (command: string, options?: SpawnSyncOptions | undefined): SpawnSyncReturns<...>; (comm...' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/github-token.ts",
+            "start": 3470,
+            "end": 3473
+          },
+          "milestone": "later",
+          "hint": "the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)",
+          "line": 87,
+          "sourceLine": "  run: typeof spawnSync = spawnSync,"
+        }
+      },
+      {
+        "message": "'Response.arrayBuffer() in a static build' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'Response.arrayBuffer() in a static build' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-output.ts",
+            "start": 1246,
+            "end": 1280
+          },
+          "milestone": "later",
+          "hint": "use Response.bytes() for the native Uint8Array body; free-standing ArrayBuffer values have no static representation",
+          "line": 30,
+          "sourceLine": "  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());"
+        }
+      },
+      {
+        "message": "'new TextDecoder' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'new TextDecoder' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-output.ts",
+            "start": 1032,
+            "end": 1057
+          },
+          "milestone": "later",
+          "hint": "TextDecoder values have no representation — a same-scope const store-then-call or the composed form compiles: new TextDecoder().decode(bytes)",
+          "line": 25,
+          "sourceLine": "  const decoder = hasUtf16LeBom || looksUtf16Le ? new TextDecoder(\"utf-16\") : new TextDecoder();"
+        }
+      },
+      {
+        "message": "'TextDecoder.decode' is typed by @types/node but has no scriptc lowering yet",
+        "count": 1,
+        "example": {
+          "code": "SC2020",
+          "message": "'TextDecoder.decode' is typed by @types/node but has no scriptc lowering yet",
+          "loc": {
+            "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-output.ts",
+            "start": 1088,
+            "end": 1102
+          },
+          "milestone": "later",
+          "hint": "the inline new TextDecoder(<literal label>).decode(bytes) form and same-scope const store-then-call (const decoder = new TextDecoder(<literal label>); decoder.decode(bytes)) compile; captured/imported instances, streaming state, and other members need a runtime object representation",
+          "line": 26,
+          "sourceLine": "  return decoder.decode(bytes);"
+        }
+      }
+    ],
+    "diagnosticCountsAreIndependentBugs": false
+  },
+  "typescriptProbe": {
+    "version": "5.9.3",
+    "evidence": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json",
+    "virtualEntryOnly": true,
+    "consumerFileWritten": false,
+    "fullConsumerTypecheckRun": false,
+    "configuredShimsIncluded": true,
+    "typeDirectives": [
+      {
+        "name": "bun-types",
+        "resolution": null
+      },
+      {
+        "name": "bun",
+        "resolution": {
+          "primary": false,
+          "resolvedFileName": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/@types+bun@1.3.14/node_modules/@types/bun/index.d.ts",
+          "originalPath": "/home/cyber/Work/reddb.io/red-dev/node_modules/@types/bun/index.d.ts",
+          "packageId": {
+            "name": "@types/bun",
+            "subModuleName": "index.d.ts",
+            "version": "1.3.14"
+          },
+          "isExternalLibraryImport": true
+        }
+      }
+    ],
+    "originalConfigOptionDiagnostics": [
+      {
+        "code": 2688,
+        "message": "Cannot find type definition file for 'bun-types'.\n  The file is in the program because:\n    Entry point of type library 'bun-types' specified in compilerOptions"
+      }
+    ],
+    "controlledBunDirectiveOptionDiagnostics": [],
+    "controlledBunDirectiveSemanticDiagnostics": [],
+    "controlledBunDirectiveChangesOnlyProbe": true
+  },
+  "redwall": {
+    "entry": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+    "missingInputs": [
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-render.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-font.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/scripts/themes.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/.red/tmp/redwall-build/src/main.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/.red/tmp/redwall-build/src/redwall-render.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/.red/tmp/redwall-build/src/redwall-font.ts",
+        "exists": false
+      },
+      {
+        "path": "/home/cyber/Work/reddb.io/red-dev/.red/tmp/redwall-build/src/themes.ts",
+        "exists": false
+      }
+    ],
+    "preparationScriptRun": false,
+    "npmDependenciesOfTemplate": [],
+    "builtinsOfTemplate": [
+      "node:fs"
+    ],
+    "generatedExport": "REDWALL_SUBSET_BYTES",
+    "originalExport": "REDWALL_SUBSET",
+    "existingVendorBinaryTested": false
+  },
+  "findings": [
+    {
+      "id": "typed-packages-not-untyped",
+      "owner": "compiler npm admission/lowering",
+      "severity": "blocking",
+      "finding": "cli-args-parser and tuiuiu.js publish their own declaration surfaces; current resolver finds both JS and declarations at all actual imported subpaths; current auto-eligibility heuristic accepts all three specifiers. Missing npm typing is not the explanation for their baseline SC2013 refusals.",
+      "evidence": [
+        "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json",
+        "/tmp/scriptc-dependency-compliance-20260913/npm-eligibility.json",
+        "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/build.json"
+      ],
+      "caveat": "Heuristic eligibility is not full lowering or successful native compilation. Baseline does not retain per-package fallback reason and uses an older compiler."
+    },
+    {
+      "id": "no-untyped-npm-transitives",
+      "owner": "dependency assessment",
+      "severity": "informational",
+      "finding": "Both installed manifests have no runtime/optional/peer dependencies. AST traversal of actual imported entrypoints finds no external npm import, require, or nonliteral dependency edge; only Node builtins. No untyped transitive npm package is evidenced in this red-dev dependency graph.",
+      "evidence": [
+        "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json"
+      ],
+      "caveat": "Conservative module syntax reachability includes barrel exports/conditional imports; it is not function reachability, execution tracing, or a native support guarantee for Node builtins."
+    },
+    {
+      "id": "consumer-bun-type-directive",
+      "owner": "consumer build/typecheck configuration",
+      "severity": "configuration-prerequisite",
+      "finding": "Original tsconfig requests types:[bun-types], but this pnpm installation directly exposes @types/bun 1.3.14 and not bun-types. A bounded TypeScript probe reports TS2688 for bun-types. types:[bun] resolves the installed public dependency and removes that options diagnostic in the controlled probe.",
+      "evidence": [
+        "/home/cyber/Work/reddb.io/red-dev/tsconfig.json",
+        "/home/cyber/Work/reddb.io/red-dev/package.json",
+        "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json"
+      ],
+      "suggestedConsumerAction": "Align the type directive with the direct dependency (types:[bun]) or declare/install bun-types directly if that directive is intentional; preserve lockfile/install reproducibility. No edit performed.",
+      "caveat": "Scriptc already separately resolves the installed bun surface; the 773 baseline has no SC0001 type-directive error. This is not an explanation for all native refusals and no full consumer tsc run was performed."
+    },
+    {
+      "id": "typed-assets-lost",
+      "owner": "compiler project declaration adoption and Bun asset lowering",
+      "severity": "blocking",
+      "finding": "All 21 literal any SC2011 diagnostics in the baseline are Bun asset imports, not imports of untyped npm packages. Consumer shims already declare string for .sh/.conf/.kdl/.png/.ttf/.embedded, covering 20 sites. The current compiler constructs entry/ambient/runtime type roots without adopting tsconfig-included project declaration roots. A bounded TS probe types font/shell as string when original shims are present and any when absent.",
+      "evidence": [
+        "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+        "/tmp/scriptc-redcode-identity-20260913/packages/compiler/src/frontend/program.ts",
+        "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json",
+        "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/build.json"
+      ],
+      "suggestedCompilerAction": "Adopt applicable project ambient declarations and implement the explicit Bun text/file loader contract. Correct types alone cannot embed assets or supply runtime file paths."
+    },
+    {
+      "id": "toml-text-boundary",
+      "owner": "consumer type contract plus compiler asset semantics",
+      "severity": "typing-boundary",
+      "finding": "The remaining starship.toml import requests type:text. bun-types declares *.toml as any for generic TOML modules, while the consumer local shims omit .toml. With installed Bun types and local shims loaded, the probe has no diagnostics but configToml remains any.",
+      "evidence": [
+        "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+        "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+        "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json"
+      ],
+      "suggestedAction": "Specify the text-content string contract at this asset boundary and teach the compiler to honor the explicit text loader; do not treat generic TOML any as an untyped runtime npm dependency.",
+      "caveat": "A wildcard declaration must accurately distinguish text content from parsed TOML imports; blindly making every TOML value a string would be unsound."
+    },
+    {
+      "id": "typed-native-apis",
+      "owner": "compiler frontend/runtime lowering",
+      "severity": "blocking",
+      "finding": "The baseline contains 177 SC2020 diagnostics for already-typed APIs, including Bun.spawn/write/which/file-related calls and subprocess streams/exits, plus typed standard operations. It also has 5 SC2011 representation failures on named/structural types and 294 propagated SC2004 diagnostics. Adding types to consumer code cannot itself implement these APIs.",
+      "evidence": [
+        "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/build.json"
+      ],
+      "caveat": "Historical diagnostic locations, not 773 independent bugs or confirmed-current counts. Variadic/other compiler changes since baseline may already remove some."
+    },
+    {
+      "id": "redwall-staging-prerequisite",
+      "owner": "consumer build entry/staging contract",
+      "severity": "blocking-prerequisite",
+      "finding": "scripts/redwall-bin-main.ts is a staging template, not a standalone entry at its current location. Its three relative source imports are absent in scripts/, and the documented .red/tmp/redwall-build/src staging tree is also absent. The entry also imports REDWALL_SUBSET_BYTES, an export generated by the preparation script and absent from original src/redwall-font.ts. The baseline three SC0001 diagnostics therefore identify missing generated source prerequisites, not npm types.",
+      "evidence": [
+        "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+        "/home/cyber/Work/reddb.io/red-dev/scripts/build-redwall-bin.sh",
+        "/home/cyber/Work/reddb.io/red-dev/src/redwall-font.ts",
+        "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default/build.json",
+        "/tmp/scriptc-all-binary-admission-20260913/redwall-existing-inputs.json"
+      ],
+      "suggestedConsumerAction": "Provide the intended prepared entry and generated assets, or maintain a canonical source entry whose imports resolve in its actual source location. No preparation/build script executed."
+    },
+    {
+      "id": "redwall-rewrites-not-native-proof",
+      "owner": "consumer build reproducibility and compiler compatibility roadmap",
+      "severity": "comparison-boundary",
+      "finding": "The existing script does more than staging: it replaces brand code, stubs type modules, substitutes Float64Array/arithmetic, and changes PNG compression from level 9 to default before invoking scriptc --dynamic without an explicit Rust pin. This is not proof of native Rust compilation of the unchanged original graph, nor an equivalent-source benchmark.",
+      "evidence": [
+        "/home/cyber/Work/reddb.io/red-dev/scripts/build-redwall-bin.sh",
+        "/home/cyber/Work/reddb.io/red-dev/src/png.ts"
+      ],
+      "suggestedCompilerAction": "Remove compatibility rewrite requirements through compiler support, then compare fixed original source/options/assets against the Bun build. Preserve necessary resource packaging as a consumer prerequisite.",
+      "caveat": "Comments asserting old sizes/timings and the existing vendor binary were not re-benchmarked and are not accepted as current performance evidence."
+    }
+  ],
+  "recommendedOrder": [
+    "consumer: align Bun type directive and establish authoritative Redwall staged/canonical source entry and assets",
+    "compiler: preserve applicable project ambient declarations and implement explicit text/file resource semantics",
+    "compiler: inspect native npm admission/fallback using the existing typed JS declaration pairs; no untyped transitive package replacement justified here",
+    "compiler: implement typed Bun/Node APIs and remaining reference/union/import lowering cases behind native differential tests",
+    "validation: fresh original entry build on current compiler; baseline counts are historical and no complete red-dev/Redwall native build is claimed"
+  ],
+  "limits": [
+    "No installs, consumer edits, compiler edits, native builds, or benchmark runs performed.",
+    "The module graph audit is conservative syntax reachability, not proof that every module/builtin executes in every CLI path.",
+    "Current npm eligibility does not prove full npm admission or lowering success; old default/auto fallback decisions cannot be reconstructed exactly from retained build.json alone.",
+    "Zero any keywords in inspected entry declarations does not prove every transitive declaration field is free of any; sampled public bindings resolve to concrete signatures.",
+    "Full original source semantic parity, complete Redcode success, and comparative performance are outside this audit."
+  ],
+  "evidence": [
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+      "sha256": "7ba819791adf8dc0551151f6e0d7f22a1ead73a091c2419265f0e9ae47d9c4fc",
+      "bytes": 24411
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+      "sha256": "e7227afbd5f8a474f33b2c3f74f71cc20787d4f86dbb8e8b846e64c88c09a80f",
+      "bytes": 74110
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/package.json",
+      "sha256": "ade719aee38765a336a71bf1db421e163b4fca5e26db64fb5331103f0ba8742d",
+      "bytes": 1147
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+      "sha256": "48f20a323aa65073742439f5280abdac0460850345694ae48ef0c33696508bfc",
+      "bytes": 4847
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js",
+      "sha256": "aa1a89f5f8bbaffda61b9d1823f8ea1ce4bae21bb8d4ff45c3c066bc330341da",
+      "bytes": 3910
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+      "sha256": "00b904d6c22fba7016b503ccaa9af568a9fa69e6a802cc9ad47c2bb311f38f7f",
+      "bytes": 21334
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+      "sha256": "af01c44edcbc19970b1078958cd91f6c12cf85f22094f545509d0dfc96c874eb",
+      "bytes": 21228
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/package.json",
+      "sha256": "71bef416812045a6b64a2267d373683326d139489e4ddeca267d727ce69cfd31",
+      "bytes": 7186
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/package.json",
+      "sha256": "4e34ac1c108e4fa5b13148abbf362770a6535a96beff15ea06ecc753bbc3317a",
+      "bytes": 1229
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/scripts/build-redwall-bin.sh",
+      "sha256": "93642f7250af513661364fd3879aeb9581a09f9bb2be03006a07194c3ce4962c",
+      "bytes": 18469
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+      "sha256": "3561ff439f1ac2ccf619469d8143650be1a575ab0921dd925777cfa74128334a",
+      "bytes": 2853
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "sha256": "6f7102135dbd18af1e40fafdc058d47273ea95dbbf33c8821cfe054a75a54b86",
+      "bytes": 23197
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+      "sha256": "e613910ce3d570a305f87c2e729e8848e4103fa052eb496fadf1cc821cbe69ac",
+      "bytes": 26505
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/png.ts",
+      "sha256": "5874aae08db1a0dfe1327d3a8c5bde9512209a1cbfb7d4b3c203f03c3427a7a7",
+      "bytes": 11869
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/redwall-font.ts",
+      "sha256": "e7ee8816f8780fac13d0bcfe310fd7184a48ed5183bb494d5d4b7d7dc794428b",
+      "bytes": 1359
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+      "sha256": "e0119c075861004ea74dd502a3ac5bc5231d12344e58bdc188e669fe07126f34",
+      "bytes": 1759
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/src/ui.ts",
+      "sha256": "0077e4e346dc15a880ebe20955e18d6c47ee2ab61010b674f75b42e438b57c01",
+      "bytes": 2769
+    },
+    {
+      "path": "/home/cyber/Work/reddb.io/red-dev/tsconfig.json",
+      "sha256": "4e9a3025d496ec632b60a6e9f87129f27522c2e66eb312c116deeb44b59b0a67",
+      "bytes": 479
+    },
+    {
+      "path": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/build.json",
+      "sha256": "7e7ad2ea6a1257fa13b7dd4b5b0bef4f3986478bc15b9d5b054458d4cd1b939e",
+      "bytes": 402988
+    },
+    {
+      "path": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default/build.json",
+      "sha256": "b7464188615503f125e8705ae70cdcec7a29e460030222d0e66ecec6973ce4de",
+      "bytes": 402971
+    },
+    {
+      "path": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default/build.json",
+      "sha256": "40ea9a44d3a62255c9bfd3fcf636ac6fc3473f4b69b0829e97f8807e6972e943",
+      "bytes": 1927
+    },
+    {
+      "path": "/tmp/scriptc-all-binary-admission-20260913/redwall-existing-inputs.json",
+      "sha256": "8d9f858f6d5bc1fa327e08a0f59224c98a0f975e284970c0d10e68f5b3eb08a3",
+      "bytes": 1104
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/npm-eligibility.json",
+      "sha256": "45e4f2b664f3b9e10a49587c3659341bf18c23673e9996cb78102dc028952f54",
+      "bytes": 1986
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/npm-eligibility.log",
+      "sha256": "a3eb0855fea10aace1642002bd3ad4e9fc7a9c8a61d467edee8ed50d9201223b",
+      "bytes": 1935
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/npm-eligibility.mjs",
+      "sha256": "58287e3d2e20b83dc20f32bfbab33295a65a6761735005d183e17b0a3b16f2cd",
+      "bytes": 1052
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.json",
+      "sha256": "fbee8397fc466c1c50a04de7ca9347f2cb108d822c959c27960aa9797f45879d",
+      "bytes": 92528
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.log",
+      "sha256": "5191c487ea09fc1aeed8eb865bca11e627cf777daf37f888865ad676f9c921df",
+      "bytes": 3845
+    },
+    {
+      "path": "/tmp/scriptc-dependency-compliance-20260913/reddev-probe.mjs",
+      "sha256": "ca631f138ef5f66f0922bdc7e02e4271a250edaffe3abb8e57e41edb1234039f",
+      "bytes": 8534
+    },
+    {
+      "path": "/tmp/scriptc-redcode-identity-20260913/.red/checkpoints/2026-09-13-native-consumer-builds/admission.json",
+      "sha256": "9ab4cdce2ade011e2d3dbf5bd69b2e7fd96c9a792bbeb6f248ba6f4f927ee095",
+      "bytes": 13577
+    },
+    {
+      "path": "/tmp/scriptc-redcode-identity-20260913/packages/compiler/src/frontend/npm-static-auto.ts",
+      "sha256": "56da41ed9b5bc3f1138db0e16cc3496f9b69a4967aa45fb5fc1228d81eca1b32",
+      "bytes": 8542
+    },
+    {
+      "path": "/tmp/scriptc-redcode-identity-20260913/packages/compiler/src/frontend/npm-static.ts",
+      "sha256": "6cf79248a2ddb87cd475b85e2d9e4585ec3d6114e63a891204e2b599408bf5b4",
+      "bytes": 23314
+    },
+    {
+      "path": "/tmp/scriptc-redcode-identity-20260913/packages/compiler/src/frontend/program.ts",
+      "sha256": "edc96d4c40495c9e2ebf84840246a97e0406037b918e37ff2b3da2361526cffe",
+      "bytes": 161143
+    }
+  ],
+  "sourceTargetSnapshots": [
+    {
+      "attempt": "red-dev__red-dev__default",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "entrySha256": "f926f60816cf5cb6a63520658883602548f84e3ff7bdfcdb42246ababdd797f3",
+      "baselineEntrySha256": "f926f60816cf5cb6a63520658883602548f84e3ff7bdfcdb42246ababdd797f3",
+      "entryStillMatchesBaseline": true,
+      "recordedBuildOptions": {
+        "backend": "rust",
+        "allowEngine": false,
+        "optimization": "dev",
+        "target": "bun",
+        "outDir": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default",
+        "outPath": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default/program"
+      },
+      "freshBuildPerformed": false,
+      "probeCompilerHead": "30cde1be34c0eddc7d6a4a808796f5c56c851d58"
+    },
+    {
+      "attempt": "red-dev__red-dev__auto",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "entrySha256": "f926f60816cf5cb6a63520658883602548f84e3ff7bdfcdb42246ababdd797f3",
+      "baselineEntrySha256": "f926f60816cf5cb6a63520658883602548f84e3ff7bdfcdb42246ababdd797f3",
+      "entryStillMatchesBaseline": true,
+      "recordedBuildOptions": {
+        "backend": "rust",
+        "allowEngine": false,
+        "optimization": "dev",
+        "target": "bun",
+        "outDir": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto",
+        "outPath": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto/program",
+        "npmStatic": "auto"
+      },
+      "freshBuildPerformed": false,
+      "probeCompilerHead": "30cde1be34c0eddc7d6a4a808796f5c56c851d58"
+    },
+    {
+      "attempt": "red-dev__redwall__default",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+      "entrySha256": "3561ff439f1ac2ccf619469d8143650be1a575ab0921dd925777cfa74128334a",
+      "baselineEntrySha256": "3561ff439f1ac2ccf619469d8143650be1a575ab0921dd925777cfa74128334a",
+      "entryStillMatchesBaseline": true,
+      "recordedBuildOptions": {
+        "backend": "rust",
+        "allowEngine": false,
+        "optimization": "dev",
+        "target": "node24",
+        "outDir": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default",
+        "outPath": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default/program"
+      },
+      "freshBuildPerformed": false,
+      "probeCompilerHead": "30cde1be34c0eddc7d6a4a808796f5c56c851d58"
+    }
+  ]
+}

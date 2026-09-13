@@ -1,0 +1,164 @@
+[
+  {
+    "id": "red-skills/dev",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__default",
+    "filesScanned": 457,
+    "literalImports": 2338,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/castle-mcp",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/mcp-server.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__castle-mcp__default",
+    "filesScanned": 418,
+    "literalImports": 2100,
+    "nonliteralImports": 6
+  },
+  {
+    "id": "red-skills/code-nav",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/src/index.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__code-nav__default",
+    "filesScanned": 6,
+    "literalImports": 17,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/memory",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory__default",
+    "filesScanned": 212,
+    "literalImports": 1675,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/memory-mcp",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/mcp-server.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory-mcp__default",
+    "filesScanned": 163,
+    "literalImports": 1138,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/brain",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain__default",
+    "filesScanned": 28,
+    "literalImports": 105,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/brain-mcp",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/mcp-server.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain-mcp__default",
+    "filesScanned": 21,
+    "literalImports": 72,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/rsp",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__rsp__default",
+    "filesScanned": 151,
+    "literalImports": 721,
+    "nonliteralImports": 1
+  },
+  {
+    "id": "red-skills/redskilled",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__redskilled__default",
+    "filesScanned": 54,
+    "literalImports": 259,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/herdr",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__herdr__default",
+    "filesScanned": 23,
+    "literalImports": 83,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/benchmark-memory",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-memory/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-memory__default",
+    "filesScanned": 98,
+    "literalImports": 391,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/benchmark-code-understanding",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/cli.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-code-understanding__default",
+    "filesScanned": 7,
+    "literalImports": 22,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-skills/opencode-host",
+    "entry": "/home/cyber/Work/reddb.io/red-skills/apps/opencode-host/src/generate.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__opencode-host__default",
+    "filesScanned": 12,
+    "literalImports": 31,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "redcode/lildax",
+    "entry": "/home/cyber/Work/reddb.io/redcode/packages/cli/src/index.ts",
+    "target": "bun",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/redcode__lildax__default",
+    "filesScanned": 709,
+    "literalImports": 4402,
+    "nonliteralImports": 5
+  },
+  {
+    "id": "redcode/rpc-sidecar",
+    "entry": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/src/cli.ts",
+    "target": "bun",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/redcode__rpc-sidecar__default",
+    "filesScanned": 2,
+    "literalImports": 1,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-dev/red-dev",
+    "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+    "target": "bun",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default",
+    "filesScanned": 150,
+    "literalImports": 1091,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "red-dev/redwall",
+    "entry": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+    "target": "node24",
+    "evidenceDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default",
+    "filesScanned": 1,
+    "literalImports": 4,
+    "nonliteralImports": 0
+  },
+  {
+    "id": "redcode/redcode",
+    "entry": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/index.ts",
+    "target": "bun",
+    "evidenceDirectory": "/tmp/scriptc-redcode-native-proxy-20260913a",
+    "filesScanned": 1289,
+    "literalImports": 8491,
+    "nonliteralImports": 16
+  }
+]

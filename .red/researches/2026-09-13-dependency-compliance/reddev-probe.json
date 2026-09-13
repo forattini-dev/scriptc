@@ -1,0 +1,2189 @@
+{
+  "typescript": "5.9.3",
+  "config": "/home/cyber/Work/reddb.io/red-dev/tsconfig.json",
+  "configuredShimsIncluded": true,
+  "virtualEntry": "/home/cyber/Work/reddb.io/red-dev/src/__scriptc_compliance_virtual_probe.ts",
+  "virtualSource": "import { createCLI } from 'cli-args-parser';\nimport { Box, Text, renderToString, prompt } from 'tuiuiu.js';\nimport { createWizard } from 'tuiuiu.js/hooks';\nimport font from '../assets/fonts/redwall-firacode-subset.ttf' with { type: 'file' };\nimport shell from '../config/bash/rc.sh' with { type: 'text' };\nimport configToml from '../config/bash/starship.toml' with { type: 'text' };\nexport { createCLI, Box, Text, renderToString, prompt, createWizard, font, shell, configToml };\n",
+  "virtualEntryWritten": false,
+  "withShims": {
+    "includeShims": true,
+    "explicitBun": false,
+    "optionDiagnostics": [
+      {
+        "code": 2688,
+        "message": "Cannot find type definition file for 'bun-types'.\n  The file is in the program because:\n    Entry point of type library 'bun-types' specified in compilerOptions"
+      }
+    ],
+    "roots": [
+      "/home/cyber/Work/reddb.io/red-dev/src/__scriptc_compliance_virtual_probe.ts",
+      "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts"
+    ],
+    "shimsInProgram": true,
+    "imports": [
+      {
+        "specifier": "cli-args-parser",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "createCLI",
+            "type": "(schema: CLISchema) => CLI",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+                "line": 554
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "Box",
+            "type": "(props: BoxProps, ...children: TuiChild[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 21
+              }
+            ]
+          },
+          {
+            "name": "Text",
+            "type": "(props: TextProps, ...children: (string | number)[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 28
+              }
+            ]
+          },
+          {
+            "name": "renderToString",
+            "type": "(node: VNode, widthOrOptions?: number | RenderOptions | undefined, height?: number | undefined) => string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/renderer.d.ts",
+                "line": 48
+              }
+            ]
+          },
+          {
+            "name": "prompt",
+            "type": "{ input: (message: string, options?: InputOptions | undefined) => Promise<string>; confirm: (message: string, options?: ConfirmOptions | undefined) => Promise<boolean>; select: <T extends string>(message: string, choices: readonly T[], options?: SelectOptions<T> | undefined) => Promise<T>; password: (message: string, options?: PasswordOptions | undefined) => Promise<string>; checkbox: <T extends string>(message: string, choices: readonly T[], options?: CheckboxOptions<T> | undefined) => Promise<T[]>; autocomplete: <T extends string>(message: string, choices: readonly T[], options?: AutocompleteOptions<T> | undefined) => Promise<T>; number: (message: string, options?: NumberOptions | undefined) => Promise<number>; setTheme: (theme: PromptThemeOptions) => PromptTheme; getTheme: () => PromptTheme; resetTheme: () => PromptTheme; }",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.d.ts",
+                "line": 176
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js/hooks",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+        "bindings": [
+          {
+            "name": "createWizard",
+            "type": "<T = unknown>(steps: WizardStep<T>[], options?: NavigationOptions<WizardStep<T>> | undefined) => WizardState<T>",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-navigation.d.ts",
+                "line": 166
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../assets/fonts/redwall-firacode-subset.ttf",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "font",
+            "type": "string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+                "line": 44
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/rc.sh",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "shell",
+            "type": "string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+                "line": 7
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/starship.toml",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "configToml",
+            "type": "any",
+            "isAny": true,
+            "declarations": []
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": 2307,
+        "message": "Cannot find module '../config/bash/starship.toml' or its corresponding type declarations.",
+        "line": 6
+      }
+    ]
+  },
+  "withoutShims": {
+    "includeShims": false,
+    "explicitBun": false,
+    "optionDiagnostics": [
+      {
+        "code": 2688,
+        "message": "Cannot find type definition file for 'bun-types'.\n  The file is in the program because:\n    Entry point of type library 'bun-types' specified in compilerOptions"
+      }
+    ],
+    "roots": [
+      "/home/cyber/Work/reddb.io/red-dev/src/__scriptc_compliance_virtual_probe.ts"
+    ],
+    "shimsInProgram": false,
+    "imports": [
+      {
+        "specifier": "cli-args-parser",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "createCLI",
+            "type": "(schema: CLISchema) => CLI",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+                "line": 554
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "Box",
+            "type": "(props: BoxProps, ...children: TuiChild[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 21
+              }
+            ]
+          },
+          {
+            "name": "Text",
+            "type": "(props: TextProps, ...children: (string | number)[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 28
+              }
+            ]
+          },
+          {
+            "name": "renderToString",
+            "type": "(node: VNode, widthOrOptions?: number | RenderOptions | undefined, height?: number | undefined) => string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/renderer.d.ts",
+                "line": 48
+              }
+            ]
+          },
+          {
+            "name": "prompt",
+            "type": "{ input: (message: string, options?: InputOptions | undefined) => Promise<string>; confirm: (message: string, options?: ConfirmOptions | undefined) => Promise<boolean>; select: <T extends string>(message: string, choices: readonly T[], options?: SelectOptions<T> | undefined) => Promise<T>; password: (message: string, options?: PasswordOptions | undefined) => Promise<string>; checkbox: <T extends string>(message: string, choices: readonly T[], options?: CheckboxOptions<T> | undefined) => Promise<T[]>; autocomplete: <T extends string>(message: string, choices: readonly T[], options?: AutocompleteOptions<T> | undefined) => Promise<T>; number: (message: string, options?: NumberOptions | undefined) => Promise<number>; setTheme: (theme: PromptThemeOptions) => PromptTheme; getTheme: () => PromptTheme; resetTheme: () => PromptTheme; }",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.d.ts",
+                "line": 176
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js/hooks",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+        "bindings": [
+          {
+            "name": "createWizard",
+            "type": "<T = unknown>(steps: WizardStep<T>[], options?: NavigationOptions<WizardStep<T>> | undefined) => WizardState<T>",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-navigation.d.ts",
+                "line": 166
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../assets/fonts/redwall-firacode-subset.ttf",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "font",
+            "type": "any",
+            "isAny": true,
+            "declarations": []
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/rc.sh",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "shell",
+            "type": "any",
+            "isAny": true,
+            "declarations": []
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/starship.toml",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "configToml",
+            "type": "any",
+            "isAny": true,
+            "declarations": []
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": 2307,
+        "message": "Cannot find module '../assets/fonts/redwall-firacode-subset.ttf' or its corresponding type declarations.",
+        "line": 4
+      },
+      {
+        "code": 2307,
+        "message": "Cannot find module '../config/bash/rc.sh' or its corresponding type declarations.",
+        "line": 5
+      },
+      {
+        "code": 2307,
+        "message": "Cannot find module '../config/bash/starship.toml' or its corresponding type declarations.",
+        "line": 6
+      }
+    ]
+  },
+  "withShimsAndInstalledBunSurface": {
+    "includeShims": true,
+    "explicitBun": true,
+    "optionDiagnostics": [],
+    "roots": [
+      "/home/cyber/Work/reddb.io/red-dev/src/__scriptc_compliance_virtual_probe.ts",
+      "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts"
+    ],
+    "shimsInProgram": true,
+    "imports": [
+      {
+        "specifier": "cli-args-parser",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "createCLI",
+            "type": "(schema: CLISchema) => CLI",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+                "line": 554
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "bindings": [
+          {
+            "name": "Box",
+            "type": "(props: BoxProps, ...children: TuiChild[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 21
+              }
+            ]
+          },
+          {
+            "name": "Text",
+            "type": "(props: TextProps, ...children: (string | number)[]) => VNode",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.d.ts",
+                "line": 28
+              }
+            ]
+          },
+          {
+            "name": "renderToString",
+            "type": "(node: VNode, widthOrOptions?: number | RenderOptions | undefined, height?: number | undefined) => string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/renderer.d.ts",
+                "line": 48
+              }
+            ]
+          },
+          {
+            "name": "prompt",
+            "type": "{ input: (message: string, options?: InputOptions | undefined) => Promise<string>; confirm: (message: string, options?: ConfirmOptions | undefined) => Promise<boolean>; select: <T extends string>(message: string, choices: readonly T[], options?: SelectOptions<T> | undefined) => Promise<T>; password: (message: string, options?: PasswordOptions | undefined) => Promise<string>; checkbox: <T extends string>(message: string, choices: readonly T[], options?: CheckboxOptions<T> | undefined) => Promise<T[]>; autocomplete: <T extends string>(message: string, choices: readonly T[], options?: AutocompleteOptions<T> | undefined) => Promise<T>; number: (message: string, options?: NumberOptions | undefined) => Promise<number>; setTheme: (theme: PromptThemeOptions) => PromptTheme; getTheme: () => PromptTheme; resetTheme: () => PromptTheme; }",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.d.ts",
+                "line": 176
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "tuiuiu.js/hooks",
+        "resolved": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+        "bindings": [
+          {
+            "name": "createWizard",
+            "type": "<T = unknown>(steps: WizardStep<T>[], options?: NavigationOptions<WizardStep<T>> | undefined) => WizardState<T>",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-navigation.d.ts",
+                "line": 166
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../assets/fonts/redwall-firacode-subset.ttf",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "font",
+            "type": "string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+                "line": 44
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/rc.sh",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "shell",
+            "type": "string",
+            "isAny": false,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/src/shims.d.ts",
+                "line": 7
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "specifier": "../config/bash/starship.toml",
+        "resolved": null,
+        "bindings": [
+          {
+            "name": "configToml",
+            "type": "any",
+            "isAny": true,
+            "declarations": [
+              {
+                "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/bun-types@1.3.14/node_modules/bun-types/extensions.d.ts",
+                "line": 7
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "diagnostics": []
+  },
+  "typeDirectives": [
+    {
+      "name": "bun-types",
+      "resolution": null
+    },
+    {
+      "name": "bun",
+      "resolution": {
+        "primary": false,
+        "resolvedFileName": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/@types+bun@1.3.14/node_modules/@types/bun/index.d.ts",
+        "originalPath": "/home/cyber/Work/reddb.io/red-dev/node_modules/@types/bun/index.d.ts",
+        "packageId": {
+          "name": "@types/bun",
+          "subModuleName": "index.d.ts",
+          "version": "1.3.14"
+        },
+        "isExternalLibraryImport": true
+      }
+    }
+  ],
+  "consumerImports": [
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/cli.ts",
+      "specifier": "cli-args-parser",
+      "kind": "import",
+      "line": 12,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/transcript.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 46,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/transcript.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 47,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/crash.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 21,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/platform.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 17,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/manifest.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 10,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/temp.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 30,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/temp.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 31,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/checksum.ts",
+      "specifier": "node:crypto",
+      "kind": "import",
+      "line": 22,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/unattended.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 10,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-root.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 27,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-root.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 28,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/agents.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/mise-config.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 47,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/mise-config.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 48,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/mise-config.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 49,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/github-token.ts",
+      "specifier": "node:child_process",
+      "kind": "import",
+      "line": 32,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/providers.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 12,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/preferences.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 18,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/ui.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 16,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+      "specifier": "node:child_process",
+      "kind": "import",
+      "line": 89,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 90,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 107,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-set.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 108,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+      "specifier": "node:child_process",
+      "kind": "import",
+      "line": 67,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 68,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 79,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-acquire.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 80,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/product-skill.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 33,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/owned-state.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 24,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/owned-state.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 25,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/zellij-layer.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 26,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-companions.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 53,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-companions.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 54,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-ext.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 23,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shared-root.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 17,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shared-root.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 356,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shared-root.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 378,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/terminal-surfaces.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 40,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/terminal-surfaces.ts",
+      "specifier": "node:fs/promises",
+      "kind": "import",
+      "line": 41,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-registration.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 56,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-hosts.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 86,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-hosts.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 87,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-adopt.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 70,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-adopt.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 71,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-adopt.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 72,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/workload-policy.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/workload-policy.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 2,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/dotfiles.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/blesh.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 21,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 17,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 18,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/build-resources.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 2,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/alacritty.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 19,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/alacritty.ts",
+      "specifier": "node:fs/promises",
+      "kind": "import",
+      "line": 20,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/blender.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 20,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-checkout.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 78,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-checkout.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 88,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-checkout.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 89,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-mise-plugin.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 40,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-mise-plugin.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 41,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-mise-plugin.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 42,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/claude-keybindings.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 30,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/codex-statusline.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 3,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/codex-statusline.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 4,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "specifier": "node:crypto",
+      "kind": "import",
+      "line": 39,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 40,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "specifier": "node:net",
+      "kind": "import",
+      "line": 41,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 42,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/host-state.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 43,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-hook.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 92,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-hook.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 93,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/watch-schedule.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 39,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/puppeteer.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 3,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/ssh-server.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 33,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/nine-router.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 44,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/nine-router.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 45,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/linux-host.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/statusline-health.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/statusline-health.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 2,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/reclaim.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shadowed.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 28,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shadowed.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 29,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/shadow-repair.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 44,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/drift.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/drift.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 893,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/staged-update.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 55,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/staged-update.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 56,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/workstation-lock.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 75,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/offline-depot.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 69,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/offline-depot.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 79,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/workstation-rollback.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 73,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/workstation-rollback.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 74,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-usage.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 26,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-usage.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 37,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-usage.ts",
+      "specifier": "node:crypto",
+      "kind": "import",
+      "line": 38,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/agent-posture.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 33,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/rescue.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/rescue.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 2,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/rescue.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 3,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/cache-policy.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/cache-policy.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 2,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/firstrun.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 748,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/ssh-access.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 52,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 25,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 26,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 178,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 441,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:os",
+      "expression": "\"node:os\"",
+      "kind": "dynamicImport",
+      "line": 442,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/migrations.ts",
+      "specifier": "node:os",
+      "expression": "\"node:os\"",
+      "kind": "dynamicImport",
+      "line": 453,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/legacy-install.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 38,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/legacy-install.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 39,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/privileged.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 44,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/verify-install.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 23,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-chrome.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 17,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-console-mode.ts",
+      "specifier": "bun:ffi",
+      "expression": "\"bun:ffi\"",
+      "kind": "dynamicImport",
+      "line": 65,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-install.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 16,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-install.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 31,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 41,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 51,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/red-skills-watch.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 402,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/png.ts",
+      "specifier": "node:zlib",
+      "kind": "import",
+      "line": 45,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-hidden.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 33,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-hidden.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 204,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 30,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 31,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 381,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 419,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 897,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wallpaper.ts",
+      "specifier": "node:fs",
+      "expression": "\"node:fs\"",
+      "kind": "dynamicImport",
+      "line": 911,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/github-rate.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 11,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/github-rate.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 22,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/github-rate.ts",
+      "specifier": "node:crypto",
+      "kind": "import",
+      "line": 23,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-bin.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 21,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-bin.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 22,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall-bin.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 23,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/redwall.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 63,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/webapps.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 32,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/uninstall.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 20,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/keys-view.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 16,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/emoji-view.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 17,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup-model.ts",
+      "specifier": "tuiuiu.js/hooks",
+      "kind": "import",
+      "line": 26,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 20,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 31,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/statusline-command.ts",
+      "specifier": "node:stream",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": true
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/herdr.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-env.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 29,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-env.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 30,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/windows-env.ts",
+      "specifier": "node:path",
+      "kind": "import",
+      "line": 31,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/pointer-theme.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 24,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/theme-editors.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 13,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/docker.ts",
+      "specifier": "node:fs",
+      "kind": "import",
+      "line": 20,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/wsl-tuning.ts",
+      "specifier": "node:os",
+      "kind": "import",
+      "line": 1,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+      "specifier": "tuiuiu.js",
+      "kind": "import",
+      "line": 15,
+      "typeOnly": false
+    },
+    {
+      "file": "/home/cyber/Work/reddb.io/red-dev/src/tui-setup.ts",
+      "specifier": "tuiuiu.js/hooks",
+      "kind": "import",
+      "line": 30,
+      "typeOnly": false
+    }
+  ],
+  "packages": [
+    {
+      "name": "cli-args-parser",
+      "version": "1.0.6",
+      "dir": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser",
+      "manifestPath": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/package.json",
+      "declaredRuntimeDependencies": {},
+      "optionalDependencies": {},
+      "peerDependencies": {},
+      "importedSubpaths": [
+        "cli-args-parser"
+      ],
+      "runtimeEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js"
+      ],
+      "ownDeclarations": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts"
+      ],
+      "entryDeclarationAnyKeywords": [
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.d.ts",
+          "anyKeywordCount": 0,
+          "lines": []
+        }
+      ],
+      "moduleGraph": {
+        "scope": "Conservative syntax-level module reachability from actual imported package entrypoints; includes barrel exports and conditional imports, not function reachability or bundler tree shaking.",
+        "files": [
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js"
+        ],
+        "moduleCount": 1,
+        "bareEdges": [
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+            "specifier": "fs",
+            "kind": "import",
+            "line": 1257,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+            "specifier": "os",
+            "kind": "import",
+            "line": 1258,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/cli-args-parser@1.0.6/node_modules/cli-args-parser/dist/index.js",
+            "specifier": "path",
+            "kind": "import",
+            "line": 1259,
+            "typeOnly": false,
+            "builtin": true
+          }
+        ],
+        "externalPackageEdges": [],
+        "nonliteralEdges": [],
+        "unresolvedRelative": []
+      }
+    },
+    {
+      "name": "tuiuiu.js",
+      "version": "1.0.75",
+      "dir": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js",
+      "manifestPath": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/package.json",
+      "declaredRuntimeDependencies": {},
+      "optionalDependencies": {},
+      "peerDependencies": {},
+      "importedSubpaths": [
+        "tuiuiu.js",
+        "tuiuiu.js/hooks"
+      ],
+      "runtimeEntries": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js"
+      ],
+      "ownDeclarations": [
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+        "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts"
+      ],
+      "entryDeclarationAnyKeywords": [
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.d.ts",
+          "anyKeywordCount": 0,
+          "lines": []
+        },
+        {
+          "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.d.ts",
+          "anyKeywordCount": 0,
+          "lines": []
+        }
+      ],
+      "moduleGraph": {
+        "scope": "Conservative syntax-level module reachability from actual imported package entrypoints; includes barrel exports and conditional imports, not function reachability or bundler tree shaking.",
+        "files": [
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/app/render-loop.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/badge.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/big-text.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/button.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/completion-dropdown.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/data-row.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/digits.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/http-status.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/keyboard-shortcut-hint.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/list-item.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/metric-display.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/paste-collapse.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/picture.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/progress-bar.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/prompt-submit-controller.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/scrollbar.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/shimmer-text.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/slider.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/spinner.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/status-indicator.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/switch.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/terminal-image.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/text-input-model.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/text-input-persistence.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/text-input.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/timer.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/tooltip.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/trigger-completion.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/colors/ansi.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/colors/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/adaptive.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/animation.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/buffer.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/capabilities.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/clipboard-image.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/colors.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/command-palette.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/common-mistakes.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/compositor.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/constraint.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/delta-render.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/dev-warnings.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/dirty.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/error-boundary.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/events.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/focus.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/fps.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/frame-lifecycle.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/frame.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/graphics.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/highlighter.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/hit-test.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/hotkeys.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-animation.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-file.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/input-stream.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/input.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/keybindings.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/layout.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/motion-runtime.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/mouse-protocol.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/overlay.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/perf-inspector.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/pool.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/progressive-state.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/progressive.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/prompt-command-routing.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/prompt-mode-routing.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/query.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/renderer.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/router.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/runtime-scope.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/screen.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/structural-fingerprint.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/terminal-focus.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/terminal-panic.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/terminal-profile.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/terminal-session.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/theme-loader.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/theme-types.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/tick.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/transitions.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/virtual-scroll.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/visualization.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/dev-tools/debugger.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/dev-tools/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/dev-tools/mouse-simulator.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/dev-tools/perf-overlay.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/dev-tools/testing.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/context.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/factory-state.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/focus-adapter.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/focus-context.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/types.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-app.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-async-data.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-clipboard-image-hint.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-clipboard.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-compositor.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-computed.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-const.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-effect.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-focus.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-form.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-format.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-fps.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-hotkeys.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-image-paste.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-inline-trigger.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-input.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-interval.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-layout-ref.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-local-mouse.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-memo.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-mouse.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-navigation.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-notification.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-paste.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-state-cleanup.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-state.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-subscription.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-terminal-focus.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-terminal-size.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-threshold-color.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-timeout.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/activity-trail.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/autocomplete.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/calendar.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/code-block.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/collapsible.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/confirm-button.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/annotations.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/bar-chart.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/gantt-chart.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/gauge.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/heatmap.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/hooks.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/legend.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/line-chart.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/radar-chart.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/scatter-plot.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/sparkline.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/time-heatmap.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/data-viz/waveform.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/devx-inputs.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/form-field.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/markdown.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/menu.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/multi-select.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/radio-group.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/select.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/splash-screen.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/split-view.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/table.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/tabs.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/terminal-message.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/molecules/tree.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/command-palette.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/data-table.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/file-browser.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/grid.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/modal.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/overlay-stack.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/scroll-area.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/scroll-list.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/scroll-panel.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/organisms/split-panel.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/presets/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/append-list.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/canvas.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/computed-node.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/context.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/divider.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/nodes.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/scroll.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/signal.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/split-box.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/store.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/primitives/typography.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/styling/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/styling/parser.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/styling/resolver.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/styling/tokenizer.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/templates/app.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/templates/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/templates/layout.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/templates/stack.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/catppuccin.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/dark.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/dracula.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/gruvbox.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/high-contrast-dark.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/light.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/monochrome.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/monokai.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/nord.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/solarized-dark.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/themes/tokyo-night.theme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/background-executor.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/batcher.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/cursor.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/formatters.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/fs-storage.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/grapheme.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/index.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/log-update.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/resolve.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/sparkline.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/system-data.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/terminal-sanitize.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/text-utils.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/types.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/version.js",
+          "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/package.json"
+        ],
+        "moduleCount": 224,
+        "bareEdges": [
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/runtime-scope.js",
+            "specifier": "node:async_hooks",
+            "kind": "import",
+            "line": 13,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/dev-warnings.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 1,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/dev-warnings.js",
+            "specifier": "node:url",
+            "kind": "import",
+            "line": 2,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/trigger-completion.js",
+            "specifier": "node:fs",
+            "kind": "import",
+            "line": 44,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/trigger-completion.js",
+            "specifier": "node:os",
+            "kind": "import",
+            "line": 45,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/atoms/trigger-completion.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 46,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/clipboard-image.js",
+            "specifier": "node:child_process",
+            "kind": "import",
+            "line": 10,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/clipboard-image.js",
+            "specifier": "node:fs",
+            "kind": "import",
+            "line": 11,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/clipboard-image.js",
+            "specifier": "node:os",
+            "kind": "import",
+            "line": 12,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/clipboard-image.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 13,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-image-paste.js",
+            "specifier": "node:fs",
+            "expression": "'node:fs'",
+            "kind": "dynamicImport",
+            "line": 42,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-image-paste.js",
+            "specifier": "node:os",
+            "expression": "'node:os'",
+            "kind": "dynamicImport",
+            "line": 43,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/hooks/use-image-paste.js",
+            "specifier": "node:path",
+            "expression": "'node:path'",
+            "kind": "dynamicImport",
+            "line": 44,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/graphics.js",
+            "specifier": "node:zlib",
+            "kind": "import",
+            "line": 13,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-file.js",
+            "specifier": "node:child_process",
+            "kind": "import",
+            "line": 1,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-file.js",
+            "specifier": "node:fs",
+            "kind": "import",
+            "line": 2,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-file.js",
+            "specifier": "node:fs/promises",
+            "kind": "import",
+            "line": 3,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/image-file.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 4,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/input-stream.js",
+            "specifier": "node:string_decoder",
+            "kind": "import",
+            "line": 9,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.js",
+            "specifier": "node:readline",
+            "kind": "import",
+            "line": 17,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.js",
+            "specifier": "node:process",
+            "kind": "import",
+            "line": 18,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/prompts/index.js",
+            "specifier": "node:string_decoder",
+            "kind": "import",
+            "line": 19,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/error-boundary.js",
+            "specifier": "node:fs",
+            "kind": "import",
+            "line": 13,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/core/error-boundary.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 14,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/system-data.js",
+            "specifier": "node:fs",
+            "kind": "import",
+            "line": 7,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/system-data.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 8,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/fs-storage.js",
+            "specifier": "fs",
+            "kind": "import",
+            "line": 7,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/fs-storage.js",
+            "specifier": "path",
+            "kind": "import",
+            "line": 8,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/fs-storage.js",
+            "specifier": "node:crypto",
+            "kind": "import",
+            "line": 9,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/background-executor.js",
+            "specifier": "node:worker_threads",
+            "kind": "import",
+            "line": 1,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/background-executor.js",
+            "specifier": "node:url",
+            "kind": "import",
+            "line": 2,
+            "typeOnly": false,
+            "builtin": true
+          },
+          {
+            "file": "/home/cyber/Work/reddb.io/red-dev/node_modules/.pnpm/tuiuiu.js@1.0.75/node_modules/tuiuiu.js/dist/utils/background-executor.js",
+            "specifier": "node:path",
+            "kind": "import",
+            "line": 3,
+            "typeOnly": false,
+            "builtin": true
+          }
+        ],
+        "externalPackageEdges": [],
+        "nonliteralEdges": [],
+        "unresolvedRelative": []
+      }
+    }
+  ]
+}

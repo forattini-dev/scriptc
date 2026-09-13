@@ -1,0 +1,196 @@
+{
+  "consumerCommit": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+  "consumerStatus": "",
+  "rows": [
+    {
+      "id": "red-skills/benchmark-code-understanding",
+      "diagnosticOccurrences": 17,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC1090": 7,
+        "SC2004": 2,
+        "SC2020": 2
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-code-understanding__default",
+      "recordedSourceCount": 6,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/benchmark-memory",
+      "diagnosticOccurrences": 245,
+      "diagnosticCounts": {
+        "SC2013": 61,
+        "SC2009": 17,
+        "SC1090": 75,
+        "SC2020": 22,
+        "SC2004": 51,
+        "SC2002": 14,
+        "SC1120": 1,
+        "SC0004": 4
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-memory__default",
+      "recordedSourceCount": 97,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/brain-mcp",
+      "diagnosticOccurrences": 37,
+      "diagnosticCounts": {
+        "SC2013": 26,
+        "SC1090": 9,
+        "SC2002": 1,
+        "SC2004": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain-mcp__default",
+      "recordedSourceCount": 20,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/brain",
+      "diagnosticOccurrences": 89,
+      "diagnosticCounts": {
+        "SC2013": 17,
+        "SC1090": 33,
+        "SC2009": 19,
+        "SC1063": 13,
+        "SC2004": 4,
+        "SC2020": 3
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain__default",
+      "recordedSourceCount": 27,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/castle-mcp",
+      "diagnosticOccurrences": 234,
+      "diagnosticCounts": {
+        "SC2013": 124,
+        "SC2009": 9,
+        "SC2020": 10,
+        "SC1090": 65,
+        "SC2012": 1,
+        "SC2004": 14,
+        "SC1101": 3,
+        "SC1100": 2,
+        "SC2003": 1,
+        "SC2002": 2,
+        "SC1031": 1,
+        "SC1120": 1,
+        "SC2008": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__castle-mcp__default",
+      "recordedSourceCount": 417,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/code-nav",
+      "diagnosticOccurrences": 22,
+      "diagnosticCounts": {
+        "SC2009": 3,
+        "SC2013": 10,
+        "SC2004": 4,
+        "SC1090": 3,
+        "SC1031": 1,
+        "SC2020": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__code-nav__default",
+      "recordedSourceCount": 5,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/dev",
+      "diagnosticOccurrences": 1,
+      "diagnosticCounts": {
+        "SC0001": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__default",
+      "recordedSourceCount": 456,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/herdr",
+      "diagnosticOccurrences": 2,
+      "diagnosticCounts": {
+        "SC1090": 2
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__herdr__default",
+      "recordedSourceCount": 23,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/memory-mcp",
+      "diagnosticOccurrences": 649,
+      "diagnosticCounts": {
+        "SC2013": 339,
+        "SC2009": 176,
+        "SC2011": 11,
+        "SC1090": 106,
+        "SC2002": 3,
+        "SC2020": 7,
+        "SC2004": 6,
+        "SC2003": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory-mcp__default",
+      "recordedSourceCount": 162,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/memory",
+      "diagnosticOccurrences": 56,
+      "diagnosticCounts": {
+        "SC1014": 1,
+        "SC1016": 55
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory__default",
+      "recordedSourceCount": 211,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/opencode-host",
+      "diagnosticOccurrences": 23,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC2002": 1,
+        "SC2004": 6,
+        "SC1090": 6,
+        "SC1031": 1,
+        "SC2009": 2,
+        "SC2020": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__opencode-host__default",
+      "recordedSourceCount": 11,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/redskilled",
+      "diagnosticOccurrences": 53,
+      "diagnosticCounts": {
+        "SC2013": 29,
+        "SC1090": 13,
+        "SC2004": 9,
+        "SC2011": 1,
+        "SC1031": 1
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__redskilled__default",
+      "recordedSourceCount": 53,
+      "currentDiskMismatches": []
+    },
+    {
+      "id": "red-skills/rsp",
+      "diagnosticOccurrences": 331,
+      "diagnosticCounts": {
+        "SC2013": 63,
+        "SC1090": 128,
+        "SC2004": 90,
+        "SC2009": 10,
+        "SC2020": 31,
+        "SC2011": 3,
+        "SC1101": 2,
+        "SC1100": 4
+      },
+      "baselineDirectory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__rsp__default",
+      "recordedSourceCount": 150,
+      "currentDiskMismatches": []
+    }
+  ]
+}
