@@ -1,6 +1,6 @@
 // Uint8Array/Buffer values crossing into `unknown`: the checked-dynamic tree's bytes kind —
-// conversion on the way in (a copy, the boundary stance), checked-cast
-// extraction on the way out (another copy), Node-exact String() (elements
+// Rust retains the native view across boxing and checked extraction; C/LLVM
+// retain their payload-copy boundary. Node-exact String() (elements
 // joined) and JSON.stringify (the index-keyed object form). The stdin
 // toBytes(chunk: unknown) pattern.
 
@@ -26,9 +26,8 @@ scratch.buf = new Uint8Array([1, 2, 3]);
 console.log(String(scratch.buf), (scratch.buf as Uint8Array).length);
 console.log(JSON.stringify(scratch));
 
-// Extraction is a fresh value each time (both directions copy — the
-// documented aliasing divergence is asserted in the dyncheck harness, not
-// against Node); the BYTES are value-exact.
+// The bytes are value-exact in every backend. Native Rust view identity and
+// mutation sharing are pinned separately in 3236; C/LLVM still copy payloads.
 const again = scratch.buf as Uint8Array;
 console.log(again[0] + again[1] + again[2]);
 delete scratch.buf;

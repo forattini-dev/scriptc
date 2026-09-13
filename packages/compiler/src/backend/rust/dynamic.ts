@@ -1040,7 +1040,7 @@ export class RustDynamicEmitter {
       case "bytes": {
         if (type.elem !== "u8") this.context.unsupported(`dynamic checked cast to bytes<${type.elem}>`, loc);
         const name = this.context.dynTypeName();
-        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) | ${name}::Buffer(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or_else(|| runtime::bytes_copy(&bytes)), value => sc_dyn_check_fail_at("bytes", &value, ${path}), } }`;
+        return `{ let value = ${value}; match value { ${name}::Bytes(bytes) | ${name}::Buffer(bytes) => runtime::live_dyn_ref_get(bytes.identity()).unwrap_or(bytes), value => sc_dyn_check_fail_at("bytes", &value, ${path}), } }`;
       }
       case "netSocket": {
         const name = this.context.dynTypeName();

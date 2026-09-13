@@ -4798,7 +4798,7 @@ function validateFunction(
           (id) => records.get(id),
           (id) => unions.get(id),
         );
-        // bytes<u8> targets extract the checked-dynamic tree's bytes kind (a copy).
+        // bytes<u8> extracts a checked native view (Rust) or payload copy (C/LLVM).
         const bytesOk = e.type.kind === "bytes" && e.type.elem === "u8";
         // The %Error root extracts the checked-dynamic tree's error encoding (the "%error"
         // marker object caughtToDyn builds) as a fresh runtime error.

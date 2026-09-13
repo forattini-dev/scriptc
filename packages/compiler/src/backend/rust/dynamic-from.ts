@@ -16,8 +16,8 @@ interface DynFromHelper {
   readonly liveRef: boolean;
 }
 
-/** Emits typed-to-dynamic conversions. Canonical maps, scalar map/array views
- * and selected shared records retain identity; other composites copy.
+/** Emits typed-to-dynamic conversions. Bytes, canonical maps, scalar map/array
+ * views and selected shared records retain identity; other composites copy.
  *
  * Acyclic shapes stay inline. Recursive composites are interned as named
  * helpers so records, arrays, and unions can call one another without the
@@ -72,10 +72,11 @@ export class RustDynamicFromEmitter {
       case "url": return `${name}::Url(${value})`;
       case "bytes": {
         if (type.elem === "u8") {
-          return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(runtime::bytes_copy(&(${value})))`;
+          return liveRef ? `{ let source = ${value}; let mirror = runtime::bytes_copy(&source); runtime::live_dyn_ref_store(mirror.identity(), source); ${name}::Bytes(mirror) }` : `${name}::Bytes(${value})`;
         }
         const copy = `runtime::typed_bytes_${type.elem}_copy`;
-        return liveRef ? `{ let source = ${value}; let mirror = ${copy}(&source); runtime::live_dyn_ref_store(runtime::typed_bytes_identity(&mirror), source); ${name}::TypedBytes(mirror) }` : `${name}::TypedBytes(${copy}(&(${value})))`;
+        const variant = { u32: "U32", i32: "I32", f32: "F32", f64: "F64" }[type.elem];
+        return liveRef ? `{ let source = ${value}; let mirror = ${copy}(&source); runtime::live_dyn_ref_store(runtime::typed_bytes_identity(&mirror), source); ${name}::TypedBytes(mirror) }` : `${name}::TypedBytes(runtime::JsTypedBytes::${variant}(${value}))`;
       }
       case "promise": {
         const promise = this.context.nextTemporary();

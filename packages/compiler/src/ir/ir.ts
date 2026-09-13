@@ -5707,7 +5707,7 @@ export const DYN_HANDLE_KINDS: ReadonlyMap<string, { tag: string; cls: string }>
 ]);
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
- * JSON-safe data, bytes<u8> (payload copied), undefined-armed unions of
+ * JSON-safe data, bytes<u8> (Rust shares views; C/LLVM copy), undefined-armed unions of
  * JSON-safe arms, boxable function types, and the runtime HANDLE kinds
  * (boxed by reference — DYN_HANDLE_KINDS). */
 export function canConvertToDyn(
@@ -5718,7 +5718,7 @@ export function canConvertToDyn(
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion)) return true;
   // bytes<u8> and boxable functions are dyn kinds the walker boxes
-  // ANYWHERE (bytes copied, functions held by identity), including nested
+  // ANYWHERE (Rust shares bytes; functions retain identity), including nested
   // in records/arrays/unions. isJsonSafeType rejects them, but dynFrom
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
@@ -5803,7 +5803,7 @@ function canBoxDynComposite(
 }
 
 /** A type a dyn value can be VALIDATED into — the dynCheck domain:
- * JSON-safe data, bytes<u8> (a fresh copy out), the %Error extraction,
+ * JSON-safe data, bytes<u8> (Rust retains the view; C/LLVM copy), the %Error extraction,
  * undefined-armed unions of JSON-safe and %Error arms, adaptable function types,
  * and the runtime HANDLE kinds (a tag-checked reference unwrap —
  * DYN_HANDLE_KINDS). */

@@ -6893,7 +6893,7 @@ export class Lowerer {
 
   /** True when a static type converts to a dyn value (the dynFrom
    * walker's domain): JSON-safe, bytes<u8> (Uint8Array/Buffer — the checked-dynamic tree's
-   * bytes kind, payload copied; stdin chunks into unknown-typed helpers),
+   * bytes kind, shared in Rust and copied in C/LLVM; unknown-typed helpers),
    * an undefined-armed union whose other arms are JSON-safe — the
    * undefined arm becomes the undefined dyn singleton — or a BOXABLE
    * function type (the checked-dynamic function boundary: the closure
