@@ -12,6 +12,7 @@ export function emitRustDynamicInspect(
   context.pushIndent();
   context.line("match value {");
   context.pushIndent();
+  context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("inspection"),`);
   context.line(`${name}::Undefined => runtime::string("undefined"),`);
   context.line(`${name}::Null => runtime::string("null"),`);
   context.line(`${name}::Number(value) => runtime::inspect_number(*value),`);

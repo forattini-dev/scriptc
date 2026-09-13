@@ -7,6 +7,7 @@ import type { RustDynamicContext } from "./dynamic-context.js";
  */
 function variants(type: IrType): readonly string[] | null {
   switch (type.kind) {
+    case "effect": return ["Effect"];
     case "date": return ["Date"];
     case "bigint": return ["BigInt"];
     case "f64": return ["Number"];

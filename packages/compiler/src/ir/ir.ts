@@ -4,7 +4,7 @@ import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
 import type { IrUrlLibFn } from "./url-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
-import { nativeRecordCheckSupported } from "./native-record.js";
+import { nativeArrayViewSupported, nativeRecordCheckSupported } from "./native-record.js";
 import type { IrFunction } from "./functions.js";
 export type { IrFunction } from "./functions.js";
 import { InternalCompilerError } from "../errors.js";
@@ -1834,7 +1834,7 @@ export type IrLibFn =
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
   | "module.namespace"
-  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runSyncExit" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" | "effect.forEach" | "effect.all" | "effect.log" | "effect.tap" | "effect.tapError" | "effect.suspend" | "effect.sleep" | "effect.scoped" | "effect.addFinalizer" | "effect.ensuring" | "effect.acquireRelease" | "effect.acquireUseRelease" | "effect.exit" | "effect.exitSucceed" | "effect.exitFail" | "effect.exitIsSuccess" | "effect.exitIsFailure" | "effect.dataTag" | "effect.exitValue" | "effect.try" | "effect.orElseSucceed" | "effect.catchIf" | "effect.catchTag" | "layer.effectDiscard" | "effect.dataMessage" | "effect.fnPipe" | "effect.durationMillis" | "effect.durationToMillis" | "effect.refMake" | "effect.refMakeUnsafe" | "effect.syncRefMake" | "effect.syncRefMakeUnsafe" | "effect.refGet" | "effect.refSet" | "effect.refUpdate" | "effect.refUpdateEffect" | "effect.deferredMake" | "effect.deferredAwait" | "effect.deferredSettle" | "effect.deferredIsDone" | "effect.semaphoreMake" | "effect.semaphoreMakeUnsafe" | "effect.semaphoreWithPermits" | "effect.queueMake" | "effect.queueTake" | "effect.queueOffer" | "effect.queueSize" | "effect.queueShutdown" | "effect.pubsubMake" | "effect.pubsubPublish" | "effect.pubsubSubscribe" | "effect.pubsubShutdown" | "effect.tryPromiseUnknown" | "effect.catchCause" | "effect.tapErrorCause" | "effect.causeFail" | "effect.causeSquash" | "effect.causeHas" | "schema.prim" | "schema.literal" | "schema.struct" | "schema.array" | "schema.record" | "schema.union" | "schema.tuple" | "schema.decodeTo" | "schema.filterPattern" | "schema.filterBetween" | "schema.wrap" | "schema.filter" | "schema.check" | "schema.decodeSync" | "schema.decodeOption" | "schema.decodeEffect" | "schema.decodeExit" | "schema.is" | "schema.test" | "schema.encodeSync" | "schema.make" | "option.some" | "option.none" | "option.isSome" | "option.getOrUndefined" | "option.getOrElse" | "option.map" | "option.match" // the effect kernel (static builds; lower-effect.ts)
+  | "effect.succeed" | "effect.sync" | "effect.map" | "effect.flatMap" | "effect.runSync" | "effect.runSyncExit" | "effect.runPromise" | "effect.gen" | "effect.fail" | "effect.die" | "effect.orDie" | "effect.catchAll" | "effect.mapError" | "effect.promise" | "effect.tryPromise" | "effect.fn" | "effect.void" | "effect.as" | "effect.asVoid" | "effect.ignore" | "effect.andThenEffect" | "effect.serviceKey" | "effect.serviceKeyIdentity" | "effect.provide" | "effect.provideService" | "layer.empty" | "layer.succeed" | "layer.effect" | "layer.provide" | "layer.provideMerge" | "layer.merge" | "effect.forEach" | "effect.all" | "effect.log" | "effect.tap" | "effect.tapError" | "effect.suspend" | "effect.sleep" | "effect.scoped" | "effect.addFinalizer" | "effect.ensuring" | "effect.acquireRelease" | "effect.acquireUseRelease" | "effect.exit" | "effect.exitSucceed" | "effect.exitFail" | "effect.exitIsSuccess" | "effect.exitIsFailure" | "effect.dataTag" | "effect.exitValue" | "effect.try" | "effect.orElseSucceed" | "effect.catchIf" | "effect.catchTag" | "layer.effectDiscard" | "effect.dataMessage" | "effect.fnPipe" | "effect.durationMillis" | "effect.durationZero" | "effect.durationToMillis" | "effect.refMake" | "effect.refMakeUnsafe" | "effect.syncRefMake" | "effect.syncRefMakeUnsafe" | "effect.refGet" | "effect.refSet" | "effect.refUpdate" | "effect.refUpdateEffect" | "effect.deferredMake" | "effect.deferredAwait" | "effect.deferredSettle" | "effect.deferredIsDone" | "effect.semaphoreMake" | "effect.semaphoreMakeUnsafe" | "effect.semaphoreWithPermits" | "effect.queueMake" | "effect.queueTake" | "effect.queueOffer" | "effect.queueSize" | "effect.queueShutdown" | "effect.pubsubMake" | "effect.pubsubPublish" | "effect.pubsubSubscribe" | "effect.pubsubShutdown" | "effect.tryPromiseUnknown" | "effect.catchCause" | "effect.tapErrorCause" | "effect.causeFail" | "effect.causeSquash" | "effect.causeHas" | "schema.unknownFromJsonString" | "schema.prim" | "schema.literal" | "schema.struct" | "schema.array" | "schema.record" | "schema.union" | "schema.tuple" | "schema.decodeTo" | "schema.filterPattern" | "schema.filterBetween" | "schema.wrap" | "schema.filter" | "schema.check" | "schema.decodeSync" | "schema.decodeOption" | "schema.decodeEffect" | "schema.decodeExit" | "schema.is" | "schema.test" | "schema.encodeSync" | "schema.make" | "option.some" | "option.none" | "option.isSome" | "option.getOrUndefined" | "option.getOrElse" | "option.map" | "option.match" // the effect kernel (static builds; lower-effect.ts)
   /** Native static fetch and its Web-platform companions. fetch.start
    * answers once the response head arrives; the response body readers
    * consume the native body stream. AbortSignal and ReadableStream values
@@ -5723,7 +5723,7 @@ export function canConvertToDyn(
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -5768,7 +5768,7 @@ function canBoxDynComposite(
   visiting: Set<string> = new Set(),
 ): boolean {
   switch (t.kind) {
-    case "date": case "bigint": case "f64":
+    case "effect": case "date": case "bigint": case "f64":
     case "string":
     case "bool":
     case "dyn":
@@ -5812,17 +5812,17 @@ export function canDynCheckTo(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
-  if (isJsonSafeType(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
-  if (t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayViewSupported(t) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
     return !!def &&
-      def.arms.some((a) => a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT") &&
+      def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT") &&
       def.arms.every((a) =>
-        a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" ||
+        a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" ||
         isJsonSafeType(a, getRecord, getUnion) ||
         (a.kind === "object" && a.className === "%Error")
       );

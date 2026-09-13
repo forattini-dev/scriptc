@@ -117,6 +117,8 @@ include!("child_stream.rs");
 include!("child_process_async.rs");
 include!("schema.rs");
 include!("effect.rs");
+include!("effect_payload.rs");
+include!("effect_reference.rs");
 include!("effect_iteration.rs");
 include!("effect_failure.rs");
 include!("effect_context.rs");
@@ -175,6 +177,8 @@ mod tests {
     include!("effect_failure.test.rs");
     include!("effect_context.test.rs");
     include!("effect_runners.test.rs");
+    include!("effect_reference.test.rs");
+    include!("effect_payload.test.rs");
     include!("filesystem_open_numeric.test.rs");
     include!("filesystem_append.test.rs");
     include!("tests/text_decoder.rs");

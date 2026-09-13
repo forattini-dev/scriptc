@@ -7819,20 +7819,10 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
     return pieces.reduce((acc, p) => ({ kind: "strConcat", left: acc, right: p, type: STRING, loc }));
   }
 
-/** `x as T`. Non-dyn inner values ordinarily erase; a record assertion
-   * changing monomorphic shape rebuilds through the established width-copy
-   * path so its represented value agrees with its asserted type.
-   * A dyn ('unknown') inner value makes this THE dynamic boundary:
-   * - `as unknown` (dyn → dyn) stays erasure;
-   * - dyn → a JSON-representable target type T compiles to `dynCheck`, a
-   *   runtime validation that builds the typed value or THROWS a catchable
-   *   TypeError-flavored error (JS `as` never checks — the headline
-   *   documented divergence: a lying cast throws instead of corrupting
-   *   memory);
-   * - dyn → anything else (closures, class instances, void) is rejected:
-   *   those types cannot be found inside a JSON dyn. */
-  /** `e as T` and the old-style assertion `<T>e` — one node shape (both
-   * carry `.type` and `.expression`), one lowering. */
+/** `e as T` / `<T>e`: erase static assertions except record layout changes.
+ * Native unknown assertions use checked extraction, preserving supported
+ * reference identity; lying casts throw rather than corrupting memory.
+ * Types without a native dynamic representation retain their refusal. */
   export function lowerAsExpression(lowerer: Lowerer, expr: ts.AsExpression | ts.TypeAssertion): IrExpr { const castFn = familyFnNodeOf(expr.expression); if (castFn !== null && (castFn.typeParameters?.length ?? 0) === 0) { const slot = lowerer.checker.getTypeFromTypeNode(expr.type); const target = lowerer.mapTypeOf(slot); if (target?.kind === "genericFunc") return lowerFamilyImpl(lowerer, castFn, target.familyId, slot); } // a function expression cast INTO a generic signature (effect's `((input) => …) as Tags<C>["make"]`) implements that signature's closure family
     // `[] as const` — tsgo panics computing the expression's `readonly []`
     // type (the facade's fence answers `any`), but the syntax pins the
@@ -7847,11 +7837,8 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
     ) {
       return { kind: "arrayLit", elems: [], type: arrayOf(unitOnlyUnion(lowerer.unions)), loc: locOf(expr) };
     }
-    // `e as C` on a CATCH BINDING (`(err as Error).message`): the checked
-    // extraction — an instanceof match extracts the payload, anything else
-    // throws the catchable TypeError (dynCheck's trust-but-verify stance,
-    // extended to exception payloads). Intercepts BEFORE lowerExpr — the
-    // raw read would hit caughtRead's narrowness fence.
+    // Checked extraction of exception payloads preserves class and native
+    // reference identity before the raw catch-binding read's narrowing fence.
     const caughtLocal = lowerer.caughtLocalOf(expr.expression);
     if (caughtLocal) {
       const loc = locOf(expr);
@@ -7868,6 +7855,17 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
             loc,
           };
         }
+      }
+      if (target?.kind === "effect") {
+        return {
+          kind: "dynCheck",
+          value: {
+            kind: "caughtToDyn",
+            value: { kind: "varRef", localId: caughtLocal.id, type: CAUGHT, loc },
+            type: DYN, loc,
+          },
+          type: target, loc,
+        };
       }
       // Narrowed reads (`err instanceof Error` proven) still pass below;
       // other targets keep the narrowness fence with the checked-cast fix.
@@ -7958,7 +7956,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       // contains undefined, so casts over parse results keep failing on
       // non-string values with the usual path-annotated TypeError.
       if (
-        target.kind === "union" &&
+        (target.kind === "union" || target.kind === "effect" || target.kind === "array") &&
         canDynCheckTo(target, (id) => lowerer.shapes.get(id), (id) => lowerer.unions.get(id))
       ) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
@@ -8615,7 +8613,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const scalarSide = dynSide === left ? right : left;
         if (
           dynSide.type.kind === "dyn" &&
-          (scalarSide.type.kind === "date" || scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
+          (scalarSide.type.kind === "effect" || scalarSide.type.kind === "date" || scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
             // dyn vs dyn (`context.actual !== context.exact` —
             // test/common's exit accounting): the runtime's whole-dyn
             // strict equality — scalars by value, units by kind,
@@ -8811,7 +8809,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
             idLeft.type.kind === "symbol" ||
             // Typed arrays / Buffers ARE objects to ===: pointer identity
             // (buf === buf.swap16() — the in-place mutators return this).
-            idLeft.type.kind === "date" || idLeft.type.kind === "bytes" ||
+            idLeft.type.kind === "effect" || idLeft.type.kind === "date" || idLeft.type.kind === "bytes" ||
             idLeft.type.kind === "promise") &&
           typeEquals(idLeft.type, idRight.type)
         ) {

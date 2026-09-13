@@ -7,11 +7,13 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`fn sc_dyn_equal(left: &${name}, right: &${name}, deep: bool) -> bool {`);
   context.pushIndent();
   context.line("if let (Some(left), Some(right)) = (sc_dyn_function_identity(left), sc_dyn_function_identity(right)) { return left == right; }");
+  context.line(`if deep && matches!(left, ${name}::Effect(..)) || deep && matches!(right, ${name}::Effect(..)) { return sc_dyn_effect_reflection("deep equality"); }`);
   context.line("match (left, right) {");
   context.pushIndent();
   context.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
   context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
   context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
+  context.line(`(${name}::Effect(left), ${name}::Effect(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::Date(left), ${name}::Date(right)) => left == right || (deep && { let a = runtime::date_value_time(left); let b = runtime::date_value_time(right); a == b || (runtime::target_runtime_id() != "bun" && a.is_nan() && b.is_nan()) }),`);
   context.line(`(${name}::BigInt(left), ${name}::BigInt(right)) => left == right,`);
   context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);

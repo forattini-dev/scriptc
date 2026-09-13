@@ -178,7 +178,7 @@ const SCHEMA_FILTERS_NUMBER = new Set(["isGreaterThanOrEqualTo", "isLessThanOrEq
 export function lowerSchemaProperty(L: Lowerer, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
   // `Schema.UnknownFromJsonString`: JSON text in, the parsed value out.
   if (expr.name.text === "UnknownFromJsonString") {
-    return lib("schema.wrap", [strLit("fromJsonString", loc), lib("schema.prim", [strLit("unknown", loc)], EFFECT_T, loc)], EFFECT_T, loc);
+    return lib("schema.unknownFromJsonString", [], EFFECT_T, loc);
   }
   const prim = SCHEMA_PRIMS[expr.name.text];
   return prim === undefined ? null : lib("schema.prim", [strLit(prim, loc)], EFFECT_T, loc);

@@ -25,6 +25,7 @@ export function emitRustDynamicAssertions(
   context.pushIndent();
   context.line("match value {");
   context.pushIndent();
+  context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("inspection"),`);
   context.line(`${name}::Undefined => "undefined".to_owned(),`);
   context.line(`${name}::Null => "null".to_owned(),`);
   context.line(`${name}::Number(value) => runtime::display_number(*value),`);

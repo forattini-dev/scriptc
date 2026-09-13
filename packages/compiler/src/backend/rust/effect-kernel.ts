@@ -29,7 +29,7 @@ function box(context: RustLibCallContext, type: IrType, value: string, loc: SrcL
 /** A boxed value read at a site's type (`value` is a `&EffectValue` expression): a union site accepts the union itself
  * or any arm's box (rebuilt into the arm's variant); `()` answers an undefined arm (the kernel's own unit). */
 function unbox(context: RustLibCallContext, type: IrType, value: string, loc: SrcLoc): string {
-  const rust = context.rustType(type, loc);
+  const rust = context.isUnit(type) ? "()" : context.rustType(type, loc);
   if (type.kind === "dyn") return unboxEffectDynamic(context, value);
   if (type.kind === "nullT") return `{ let sc_unit = ${value}; if sc_unit.downcast_ref::<runtime::EffectUnit>() != Some(&runtime::EffectUnit::Null) { runtime::effect_unbox_mismatch("null"); } () }`;
   if (type.kind !== "union") return `runtime::effect_unbox::<${rust}>(${value})`;
@@ -86,13 +86,12 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
   switch (expr.fn) {
     case "effect.succeed":
       if (first === undefined) break;
-      return `runtime::effect_succeed(${box(context, first.type, context.emitExpr(first), expr.loc)})`;
+      return `runtime::effect_succeed_owned(${context.emitExpr(first)}, |sc_value: &${context.isUnit(first.type) ? "()" : context.rustType(first.type, expr.loc)}| ${box(context, first.type, "sc_value.clone()", expr.loc)})`;
     case "effect.sync": {
       if (first === undefined || first.type.kind !== "func") break;
-      const callback = context.nextTemporary();
-      const keep = context.nextTemporary();
+      const callback = "sc_callback";
       const dispatch = context.emitClosureDispatch(callback, first.type, [], expr.loc);
-      return `{ let ${callback} = ${context.emitExpr(first)}; let ${keep} = ${callback}.clone(); runtime::effect_sync(std::rc::Rc::new(move || ${box(context, first.type.ret, dispatch, expr.loc)}), ${traced(context, keep)}) }`;
+      return `runtime::effect_sync_owned(${context.emitExpr(first)}, |${callback}: &${context.rustType(first.type, expr.loc)}| ${box(context, first.type.ret, dispatch, expr.loc)})`;
     }
     case "effect.map":
     case "effect.flatMap":
@@ -169,7 +168,7 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       return `{ let ${body} = ${context.emitExpr(first)}; let ${keep} = ${body}.clone(); let ${post} = ${context.emitExpr(second)}; let ${keepPost} = ${post}.clone(); runtime::Gc::new(${shape}::RuntimeCallback { callback: Some(std::rc::Rc::new(move |${params}| { let sc_body = ${body}.clone(); let sc_keep = sc_body.clone(); let sc_post = ${post}.clone(); let sc_eff = ${generated}; ${applied} })), trace: Some(std::rc::Rc::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keep}); sc_tracer.edge(&${keepPost}); })) }) }`;
     }
     case "effect.void":
-      return "runtime::effect_succeed(runtime::effect_box(()))";
+      return "runtime::effect_void()";
     case "effect.as":
       if (first === undefined || second === undefined) break;
       return `runtime::effect_as(&${context.emitExpr(first)}, ${box(context, second.type, context.emitExpr(second), expr.loc)})`;
@@ -182,6 +181,9 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.andThenEffect":
       if (first === undefined || second === undefined) break;
       return `runtime::effect_zip_right(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
+    case "effect.serviceKeyIdentity":
+      if (first === undefined || second === undefined) break;
+      return `runtime::effect_service_key_identity(&${context.emitExpr(first)}, &${context.emitExpr(second)})`;
     case "effect.serviceKey":
       if (first === undefined) break;
       return `runtime::effect_service_key(&${context.emitExpr(first)})`;
@@ -319,6 +321,7 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     case "effect.dataMessage":
       if (first === undefined) break;
       return `runtime::schema_error_message(&${context.emitExpr(first)})`;
+    case "effect.durationZero": return "runtime::effect_duration_zero()";
     case "effect.durationMillis":
       if (first === undefined) break;
       return `runtime::effect_duration_millis(${context.emitExpr(first)})`;
@@ -546,6 +549,7 @@ function emitRustSchemaCall(expr: RustLibCallExpr, context: RustLibCallContext):
   const handles = (arg: RustLibCallExpr["args"][number] | undefined): string[] | null =>
     arg !== undefined && arg.kind === "arrayLit" && arg.spreads === undefined && arg.elems.every((e) => e.type.kind === "effect") ? arg.elems.map((e) => context.emitExpr(e)) : null;
   switch (expr.fn) {
+    case "schema.unknownFromJsonString": return "runtime::schema_unknown_from_json_string()";
     case "schema.prim":
       if (first === undefined) break;
       return `runtime::schema_prim(&${context.emitExpr(first)})`;

@@ -81,6 +81,8 @@ type RecoverFn = Rc<dyn Fn(Caught) -> EffectValue>;
 
 enum EffectNode {
     Succeed(EffectValue),
+    SucceedOwned(Box<dyn EffectOwnedValue>),
+    SyncOwned(Box<dyn EffectOwnedValue>),
     Fail(EffectValue),
     Die(EffectValue),
     Interrupt,
@@ -190,6 +192,7 @@ pub struct EffectData {
 impl Trace for EffectData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         match &self.node {
+            EffectNode::SucceedOwned(value) | EffectNode::SyncOwned(value) => value.trace(tracer),
             EffectNode::Succeed(_) | EffectNode::Fail(_) | EffectNode::Die(_) | EffectNode::Interrupt | EffectNode::FailCause(_) | EffectNode::ServiceKey(_) => {}
             EffectNode::ProvideBundle(inner, _) | EffectNode::WithContext(inner, _) => tracer.edge(inner),
             EffectNode::ForEach(_, _, _, trace) => trace(tracer),
@@ -328,7 +331,7 @@ pub fn effect_provide(source: &JsEffect, layer: &JsEffect) -> JsEffect {
 }
 
 pub fn layer_empty() -> JsEffect {
-    effect_new(EffectNode::Layer(LayerNode::Empty))
+    effect_reference_cached(EffectReferenceKey::EmptyLayer, || effect_new(EffectNode::Layer(LayerNode::Empty)))
 }
 
 pub fn layer_succeed(key: &JsEffect, value: EffectValue) -> JsEffect {
@@ -456,7 +459,7 @@ pub fn option_some(value: EffectValue) -> JsEffect {
 }
 
 pub fn option_none() -> JsEffect {
-    effect_new(EffectNode::Data(KernelData::Option(None)))
+    effect_reference_cached(EffectReferenceKey::None, || effect_new(EffectNode::Data(KernelData::Option(None))))
 }
 
 pub fn option_get(handle: &JsEffect) -> Option<EffectValue> {
@@ -732,6 +735,7 @@ fn fiber_new(effect: &JsEffect, on_exit: Box<dyn FnOnce(Outcome)>) -> FiberRef {
 fn effect_step(effect: &JsEffect) -> Step {
     effect.with(|data| match &data.node {
         EffectNode::Succeed(value) => Step::Done(Ok(value.clone())),
+        EffectNode::SucceedOwned(value) | EffectNode::SyncOwned(value) => Step::Done(Ok(value.evaluate())),
         EffectNode::Fail(error) => Step::Done(Err(EffectFailure::Fail(error.clone()))),
         EffectNode::Die(defect) => Step::Done(Err(EffectFailure::Die(defect.clone()))),
         EffectNode::Interrupt => Step::Done(Err(EffectFailure::Interrupt)),
@@ -767,7 +771,8 @@ fn effect_step(effect: &JsEffect) -> Step {
         EffectNode::AcquireRelease(acquire, release, _) => Step::Push(Frame::Acquired(release.clone()), acquire.clone()),
         EffectNode::AcquireUseRelease(acquire, use_fn, release, _) => Step::Push(Frame::AcquiredUse(use_fn.clone(), release.clone()), acquire.clone()),
         EffectNode::Exit(inner) => Step::Push(Frame::CaptureExit, inner.clone()),
-        EffectNode::Data(_) => throw_error("scriptc: a kernel data handle (an Exit or Option) is not an effect".to_owned()),
+        EffectNode::Data(KernelData::Exit(outcome)) => Step::Done(outcome.clone()),
+        EffectNode::Data(_) => throw_error("scriptc: this kernel data handle is not an effect".to_owned()),
         EffectNode::Try(attempt, recover, _) => {
             let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| attempt()));
             Step::Done(match attempted {

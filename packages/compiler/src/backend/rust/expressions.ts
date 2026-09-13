@@ -296,8 +296,8 @@ export class RustExpressionEmitter {
           case "undefined": test = `matches!(&${value}, ${name}::Undefined)`; break;
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
-          case "function": test = `matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`})`; break;
-          case "object": test = `matches!(&${value}, ${name}::Null | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..))`; break;
+          case "function": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "function") || matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`}))`; break;
+          case "object": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "object") || matches!(&${value}, ${name}::Null | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
           case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;
@@ -325,7 +325,7 @@ export class RustExpressionEmitter {
         const arrayTest = expr.key === "length"
           ? "true"
           : index === null ? "false" : `runtime::array_len(array) > ${index}.0`;
-        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
+        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) | ${this.context.dynTypeName()}::Effect(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
         if (this.context.hasEmbeddedModules()) test = `match &${value} { ${this.context.dynTypeName()}::Island(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), _ => ${test}, }`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${expr.negated === true ? `!(${test})` : test} }`;
       }
@@ -344,6 +344,8 @@ export class RustExpressionEmitter {
             test = `match &${dynamic} { ${name}::String(value) => value.as_ref() == ${scalar}.as_ref(), _ => false, }`;
           } else if (scalarType.kind === "f64") {
             test = `match &${dynamic} { ${name}::Number(value) => *value == ${scalar}, _ => false, }`;
+          } else if (scalarType.kind === "effect") {
+            test = `match &${dynamic} { ${name}::Effect(value) => value.ptr_eq(&${scalar}), _ => false, }`;
           } else if (scalarType.kind === "date") {
             test = `match &${dynamic} { ${name}::Date(value) => *value == ${scalar}, _ => false, }`;
           } else if (scalarType.kind === "bigint") {
@@ -654,15 +656,8 @@ export class RustExpressionEmitter {
         }
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with(|record| runtime::map_string_keys_js_order(record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"))) }`;
       }
-      case "caughtToDyn": {
-        if (this.context.hasEmbeddedModules()) return `sc_dyn_from_caught(${this.emitExpr(expr.value)})`;
-        const caught = this.context.nextName("sc_rt");
-        const error = this.context.nextName("sc_rt");
-        const dyn = this.context.dynTypeName();
-        const errorTest = this.context.errorClassRoots().length === 0 ? `runtime::caught_is_error(&${caught})` : `sc_caught_is_error_class(&${caught}, "Error")`;
-        const errorValue = this.context.errorClassRoots().length === 0 ? `runtime::caught_error_value(&${caught})` : `sc_caught_error_value(&${caught})`;
-        return `{ let ${caught} = ${this.emitExpr(expr.value)}; if runtime::caught_is::<${dyn}>(&${caught}) { runtime::caught_narrow::<${dyn}>(&${caught}) } else if runtime::caught_is::<f64>(&${caught}) { ${dyn}::Number(runtime::caught_narrow::<f64>(&${caught})) } else if runtime::caught_is::<bool>(&${caught}) { ${dyn}::Boolean(runtime::caught_narrow::<bool>(&${caught})) } else if runtime::caught_is::<runtime::JsString>(&${caught}) { ${dyn}::String(runtime::caught_narrow::<runtime::JsString>(&${caught})) } else if ${errorTest} { let ${error} = ${errorValue}; sc_dyn_error_box(&${error}) } else { ${dyn}::Object(runtime::map_new()) } }`;
-      }
+      case "caughtToDyn":
+        return `sc_dyn_from_caught(${this.emitExpr(expr.value)})`;
       case "caughtTest":
         if (expr.test !== "instanceof") {
           const type = { string: "runtime::JsString", number: "f64", boolean: "bool" }[expr.test];

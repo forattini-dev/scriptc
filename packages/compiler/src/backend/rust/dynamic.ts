@@ -53,6 +53,7 @@ export class RustDynamicEmitter {
     this.context.line("Number(f64),");
     this.context.line("BigInt(runtime::JsBigInt),");
     this.context.line("Date(runtime::JsDate),");
+    this.context.line("Effect(runtime::JsEffect),");
     this.context.line("Boolean(bool),");
     this.context.line("String(runtime::JsString),");
     this.context.line("Regex(runtime::JsRegex),");
@@ -96,6 +97,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::ArrayIterator(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
+    this.context.line("Self::Effect(value) => tracer.edge(value),");
     this.context.line("Self::Getter(value) => runtime::Trace::trace(value.as_ref(), tracer),");
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
     this.context.line("Self::TypedBytes(value) => runtime::typed_bytes_trace(value, tracer),");
@@ -127,6 +129,7 @@ export class RustDynamicEmitter {
     this.context.line("fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
     this.context.popIndent();
     this.context.line("}");
+    this.context.line(`fn sc_dyn_effect_reflection<T>(operation: &str) -> T { runtime::throw_error(format!("scriptc: {} on native kernel references is not supported yet", operation)) }`);
     emitRustQuerystringDynImpl(name, this.context);
     emitRustDynamicIslandSupport(this.context);
     this.context.line(`impl runtime::JsonValue for ${name} {`);
@@ -139,6 +142,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::BigInt(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Date(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("JSON.stringify"),`);
     this.context.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Regex(..) => { writer.begin_object(); writer.end_object(); },`);
@@ -303,6 +307,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
     this.context.line(`${name}::Date(value) => ${name}::Date(value.clone()),`);
+    this.context.line(`${name}::Effect(value) => ${name}::Effect(value.clone()),`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(value.clone()),`);
@@ -363,6 +368,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
     this.context.line(`${name}::BigInt(..) => Err(format!("bigint at {path} is not JSON data")),`);
     this.context.line(`${name}::Date(..) => Err(format!("Date at {path} is not JSON data")),`);
+    this.context.line(`${name}::Effect(..) => Err(format!("native kernel reference at {path} is not JSON data")),`);
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
     this.context.line(`${name}::Regex(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
@@ -425,6 +431,7 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_from_caught(caught: runtime::Caught) -> ${name} {`);
     this.context.pushIndent();
     this.context.line(`if runtime::caught_is::<${name}>(&caught) { runtime::caught_narrow::<${name}>(&caught) }`);
+    this.context.line(`else if runtime::caught_is::<runtime::JsEffect>(&caught) { ${name}::Effect(runtime::caught_narrow::<runtime::JsEffect>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
@@ -452,6 +459,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, false),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || runtime::map_prototype(object).is_some_and(|prototype| sc_dyn_has_key(&prototype, key)),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
@@ -464,6 +472,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("own property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
@@ -493,6 +502,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("},");
     this.context.line(`${name}::Object(object) => sc_dyn_object_key_get(object, key, value),`);
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property access"),`);
     this.context.line(`${name}::Number(..) => match key.to_utf8_lossy() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Regex(regex) => match key.to_utf8_lossy() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Url(url) => match key.to_utf8_lossy() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), "port" => ${name}::String(runtime::url_port(url)), "origin" => ${name}::String(runtime::url_origin(url)), "hash" => ${name}::String(runtime::url_hash(url)), "username" => ${name}::String(runtime::url_username(url)), "password" => ${name}::String(runtime::url_password(url)), _ => ${name}::Undefined, },`);
@@ -587,6 +597,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property assignment"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => runtime::island_set_index(value, &runtime::island_value_string(&key), &sc_dyn_to_island(&field)),`);
     this.context.line(`${name}::Object(object) => { if runtime::map_is_module_namespace(object) { if runtime::map_has_by(object, &key, |left, right| left.as_ref() == right.as_ref()) { runtime::throw_type_error(format!("Cannot assign to read only property '{}' of object '[object Module]'", key)); } runtime::throw_type_error(format!("Cannot add property {}, object is not extensible", key)); } runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()); },`);
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
@@ -636,6 +647,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Number(value) => runtime::number_to_string(*value),`);
     this.context.line(`${name}::BigInt(value) => runtime::bigint_to_string(value),`);
     this.context.line(`${name}::Date(value) => runtime::date_value_to_string(value),`);
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("string coercion"),`);
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
@@ -710,6 +722,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Object(..) => "an instance of Object".to_owned(),`);
     this.context.line(`${name}::Getter(..) => "function getter".to_owned(),`);
     this.context.line(`${name}::Promise(..) => "an instance of Promise".to_owned(),`);
+    this.context.line(`${name}::Effect(..) => "a native kernel reference".to_owned(),`);
     this.context.line(`${name}::NetServer(..) => "an instance of Server".to_owned(),`);
     this.context.line(`${name}::NetSocket(..) => "an instance of Socket".to_owned(),`);
     this.context.line(`${name}::AbortController(..) => "an instance of AbortController".to_owned(), ${name}::AbortSignal(..) => "an instance of AbortSignal".to_owned(), ${name}::HttpRequest(..) => "an instance of IncomingMessage".to_owned(),`);
@@ -749,6 +762,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
+    this.context.line(`${name}::Effect(value) if runtime::effect_reference_typeof(value) == "function" => Some(value.identity()),`);
     for (const shape of boxedShapes) {
       this.context.line(`${name}::${this.context.dynFunctionVariant(shape)}(closure, _, _) => Some(sc_closure_identity_${shape.index}(closure)),`);
     }
@@ -795,6 +809,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line("match callee {");
     this.context.pushIndent();
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("calling a kernel reference as a function"),`);
     for (const shape of boxedShapes) {
       const fixedParams = shape.type.restAbi === "jsval" ? shape.type.params.slice(0, -1) : shape.type.params;
       const typedArgs = fixedParams.map((param, index) => {
@@ -942,6 +957,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
     this.context.line(`${name}::NativeMethod(method) => runtime::throw_dom_exception("DataCloneError", &format!("{} could not be cloned.", method.name())),`);
     this.context.line(`${name}::Getter(..) => runtime::throw_dom_exception("DataCloneError", "getter could not be cloned."),`);
+    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("structuredClone"),`);
     this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
     this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
     this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
@@ -1016,6 +1032,7 @@ export class RustDynamicEmitter {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
       case "date": return `sc_dyn_check_date_at(${value}, ${path})`;
+      case "effect": return `sc_dyn_check_effect_at(${value}, ${path})`;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
       case "bigint": return `sc_dyn_check_bigint_at(${value}, ${path})`;
       case "bool": return `sc_dyn_check_boolean_at(${value}, ${path})`;

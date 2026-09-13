@@ -183,6 +183,7 @@ class RustDynamicInvokeEmitter {
     this.open("let value = match result {");
     this.context.line(`${this.dyn}::Number(value) => value,`);
     this.context.line(`${this.dyn}::Boolean(value) => if value { 1.0 } else { 0.0 },`);
+    this.context.line(`${this.dyn}::Effect(..) => sc_dyn_effect_reflection("numeric coercion of sort result"),`);
     this.context.line("_ => 0.0,");
     this.close("};");
     this.context.line("return if value < 0.0 { std::cmp::Ordering::Less } else if value > 0.0 { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal };");
@@ -303,6 +304,7 @@ class RustDynamicInvokeEmitter {
   private emitDefinePropertiesHelper(): void {
     const callableTarget = `${this.dyn}::Object(..) | ${this.functionPatterns}`;
     this.open(`fn sc_dyn_define_properties(target: &${this.dyn}, descriptors: &${this.dyn}) -> ${this.dyn} {`);
+    this.context.line(`if matches!(target, ${this.dyn}::Effect(..)) || matches!(descriptors, ${this.dyn}::Effect(..)) { return sc_dyn_effect_reflection("property definition"); }`);
     this.context.line(`if !matches!(target, ${callableTarget}) { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); }`);
     this.context.line(`let ${this.dyn}::Object(descriptors) = descriptors else { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); };`);
     this.context.line("let mut index = 0.0;");
@@ -310,6 +312,7 @@ class RustDynamicInvokeEmitter {
     this.open("if runtime::map_iter_live(descriptors, index) {");
     this.context.line("let key = runtime::map_iter_key(descriptors, index);");
     this.context.line("let descriptor = runtime::map_iter_value(descriptors, index);");
+    this.context.line(`if matches!(&descriptor, ${this.dyn}::Effect(..)) { return sc_dyn_effect_reflection("property descriptor access"); }`);
     this.context.line(`let ${this.dyn}::Object(fields) = &descriptor else { runtime::throw_type_error(format!("Property description must be an object: {}", sc_dyn_to_string(&descriptor))); };`);
     this.context.line("if runtime::map_has_by(fields, &runtime::string(\"get\"), |left, right| left.as_ref() == right.as_ref()) || runtime::map_has_by(fields, &runtime::string(\"set\"), |left, right| left.as_ref() == right.as_ref()) { runtime::throw_error(\"accessor (get/set) property descriptors on a dynamic value are not supported yet\".to_owned()); }");
     this.context.line(`let value = runtime::map_get_by(fields, &runtime::string("value"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dyn}::Undefined);`);
@@ -365,6 +368,7 @@ class RustDynamicInvokeEmitter {
     this.open(`fn sc_dyn_invoke(recv: &${this.dyn}, method: &str, args: &[${this.dyn}], callee_name: &str) -> ${this.dyn} {`);
     this.open("match recv {");
     this.context.line(`${this.dyn}::Undefined | ${this.dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading '{method}')", sc_dyn_kind(recv))),`);
+    this.context.line(`${this.dyn}::Effect(..) => sc_dyn_effect_reflection("method invocation"),`);
     if (this.context.hasEmbeddedModules()) this.context.line(`${this.dyn}::Island(value) => { let args = args.iter().map(sc_dyn_to_island).collect::<Vec<_>>(); sc_dyn_from_island(runtime::island_call_method(value, method, &args)) },`);
     this.emitObjectArm();
     this.emitFunctionArm();

@@ -127,7 +127,7 @@ pub fn schema_prim(kind: &JsString) -> JsEffect {
         "numberFromString" => SchemaPrim::NumberFromString,
         other => throw_error(format!("scriptc: unknown schema primitive '{other}'")),
     };
-    schema_handle(SchemaNode::Prim(prim))
+    effect_reference_cached(EffectReferenceKey::SchemaPrimitive(kind.to_string()), || schema_handle(SchemaNode::Prim(prim)))
 }
 
 pub fn schema_literal(values: Vec<SchemaLiteral>) -> JsEffect {

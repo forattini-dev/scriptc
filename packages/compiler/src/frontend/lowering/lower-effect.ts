@@ -54,7 +54,13 @@ export function lowerServiceKeyRef(L: Lowerer, node: ts.Identifier | ts.Property
   const id = kernelServiceIdOfSymbol(L.checker, L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name));
   if (id === null) return null;
   const loc = locOf(node);
-  return lib("effect.serviceKey", [{ kind: "strLit", value: id, type: STRING, loc }], EFFECT_T, loc);
+  let symbol = L.checker.getSymbolAtLocation(ts.isIdentifier(node) ? node : node.name);
+  if (symbol === undefined) return null;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = L.checker.getAliasedSymbol(symbol);
+  const declaration = L.checker.valueDeclarationOf(symbol) ?? L.checker.declarationsOf(symbol)[0];
+  if (declaration === undefined) return null;
+  const identity = `${declaration.getSourceFile().fileName}:${declaration.pos}`;
+  return lib("effect.serviceKeyIdentity", [id, identity].map(value => ({ kind: "strLit", value, type: STRING, loc })), EFFECT_T, loc);
 }
 
 /** `Effect.void`, `Layer.empty` and the other VALUE members of the namespaces (property reads), plus service key
@@ -68,7 +74,7 @@ export function lowerEffectProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
   if (ns === "Effect" && expr.name.text === "void") return lib("effect.void", [], EFFECT_T, loc);
   if (ns === "Layer" && expr.name.text === "empty") return lib("layer.empty", [], EFFECT_T, loc);
   if (ns === "Schema") return lowerSchemaProperty(L, expr, loc);
-  if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationMillis", [numLit(0, loc)], EFFECT_T, loc);
+  if (ns === "Duration" && expr.name.text === "zero") return lib("effect.durationZero", [], EFFECT_T, loc);
   // Kernel DATA handles (an Exit): `_tag` and the success `value` read through the kernel, typed by the checker.
   if (ns === null && !expr.questionDotToken && L.mapTypeOf(L.typeOf(expr.expression))?.kind === "effect") {
     if (expr.name.text === "_tag") return lib("effect.dataTag", [L.lowerExpr(expr.expression)], STRING, loc);

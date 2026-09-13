@@ -15,7 +15,7 @@ export function checkNativeCallResult(lowerer: Lowerer, expr: ts.CallExpression,
   const source = lowerer.checker.getReturnTypeOfSignature(signature);
   if (source.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return value;
   const type = lowerer.mapTypeOf(source);
-  if (type && ["string", "f64", "bool", "bigint", "date"].includes(type.kind)) {
+  if (type && ["string", "f64", "bool", "bigint", "date", "effect"].includes(type.kind)) {
     return { kind: "dynCheck", value, type, loc: value.loc };
   }
   return value;

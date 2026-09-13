@@ -10,7 +10,7 @@ type DynamicContext = Pick<RustLibCallContext, "dynTypeName" | "hasErrorClassRoo
  */
 export function unboxEffectDynamic(context: DynamicContext, value: string, typedFallback = ""): string {
   const dyn = context.dynTypeName();
-  const scalar = [["f64", "Number"], ["bool", "Boolean"], ["runtime::JsString", "String"]]
+  const scalar = [["f64", "Number"], ["bool", "Boolean"], ["runtime::JsString", "String"], ["runtime::JsBigInt", "BigInt"], ["runtime::JsDate", "Date"], ["runtime::JsEffect", "Effect"]]
     .map(([type, variant]) => `if let Some(sc_value) = sc_boxed.downcast_ref::<${type}>() { return ${dyn}::${variant}(sc_value.clone()); }`)
     .join(" ");
   const error = context.hasErrorClassRoots()
