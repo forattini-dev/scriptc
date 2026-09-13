@@ -50,11 +50,35 @@ The size difference is dev versus release configuration, not a new optimizer per
 
 ## Compiler continuation
 
-The implementation following this baseline targets heterogeneous service method lookup, byte and BigInt fields in shared records, and flat-array/byte results widened to Effect<unknown>. Corpus 3238–3243 covers the actual filesystem parameter shapes, function identity/replacement, width-preserved properties, evaluation order, and reference mutations under Node/Bun. This does not claim native Proxy support, arbitrary Effect composite erasure, direct Record<string, Uint8Array> or Record<string, bigint> admission, or default Object.prototype reflection.
+Compiler checkpoint `24d0179f66aa154c10eb61cd73bcee6862349b9b` implements heterogeneous service method lookup, byte and BigInt fields in shared records, and flat-array/byte results widened to Effect<unknown>. Corpus 3238–3243 covers the actual filesystem parameter shapes, function identity/replacement, width-preserved properties, evaluation order, and reference mutations under Node/Bun. This does not claim native Proxy support, arbitrary Effect composite erasure, direct Record<string, Uint8Array> or Record<string, bigint> admission, or default Object.prototype reflection.
 
 Focused validation passed: 35 distinct native differential programs and all 121 diagnostic programs; native record, backend admission, projection refusal and native prototype-refusal contracts also passed. The adjacent validation.json retains the program names and log locations.
 
 The full branch plain and sanitized shipping gate remains pending. This checkpoint is local work and does not assert release or main integration.
+
+## Latest original Redcode rebuilds
+
+Both the complete CLI and the original RPC sidecar were retried against `24d0179f`. The adjacent `latest-builds.json` records these terminal outcomes and evidence digests; `admission.json` remains the earlier all-entry baseline. The other original entries were not rerun at this latest checkpoint.
+
+| Original entry | Result at `24d0179f` | Release bytes | Acceptance |
+| --- | --- | ---: | --- |
+| Redcode complete CLI | Refused; no executable | — | 3,100 diagnostic occurrences |
+| Redcode RPC sidecar | Native Rust; no engine or external FFI | 4,359,544 | 8 original tests, 22 assertions passed |
+
+The full CLI used the same explicit 34-package selection and release options except output paths. Its 3,100 code/location diagnostic occurrences did not change; nine same-code/location message groups did. All 1,323 common captured source-text hashes match, while 51 Undici files were no longer captured; all 51 were separately verified unchanged on disk. The tracked consumer snapshot matches the previous attempt and stayed unchanged during both builds. The source capture sets are not identical. Attempt duration is not executable performance.
+
+The latest sidecar release is 640 bytes larger than the previous release (+0.0147%). Its original integration suite executed the exact ELF through `REDCODE_RPC_SIDECAR_COMMAND`; compiler and consumer sources remained unchanged through acceptance. No runtime CPU, RAM, or speed comparison was performed. The large historical development binary and this release binary use different optimization settings.
+
+## Next compiler acceptance slice
+
+The complete CLI's `ServiceUse` still has two direct blockers: `new Proxy` and the final `as ServiceUse` conversion. The cast diagnostic already contains the expected mapped method signatures, so this is not a missing implementation of mapped types from scratch. The native representation and its conversion need to preserve the object's behavior:
+
+1. Add a native Proxy reference with its own identity and traced target/handler ownership.
+2. Implement property reads with the correct key and receiver, including symbols, live handler changes, and fallback when the get trap is absent. Handle incompatible descriptor invariants and other operations explicitly.
+3. Expose the typed view lazily; do not enumerate or validate all fields during the cast, populate the accessor cache prematurely, or execute Effects during property access.
+4. Validate by importing the original `serviceUse`, covering cached accessor identity, deferred/repeated execution, missing methods, service replacement and the real filesystem signatures, then retry the complete CLI and the original-entry matrix.
+
+Nested records/arrays through Effect erasure and other dependency/runtime gaps remain separate work. Passing this slice alone will not establish that the full CLI compiles.
 
 ## Evidence
 
@@ -66,3 +90,5 @@ The adjacent admission.json preserves the compact result matrix, options, source
 - /tmp/scriptc-redcode-rpc-release-acceptance-20260913
 - /tmp/scriptc-keyed-reference-semantics-20260913
 - /tmp/scriptc-keyed-related-final-20260913.log
+- /tmp/scriptc-redcode-keyed-methods-20260913a
+- /tmp/scriptc-redcode-sidecar-keyed-release-20260913
