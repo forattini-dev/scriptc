@@ -3,8 +3,8 @@
 // hashing is honest for exactly those); everything else is fenced.
 
 // Array seeds lower (`new Set(["a", "b"])` is a corpus program now); a
-// non-array seed — another Set, any iterable — typechecks against the lib
-// but keeps the fence: never silently an empty set.
+// native collection seed now lowers as an independent container; keep this
+// accepted case beside the remaining boundaries below.
 const seeded = new Set(new Set(["a", "b"]));
 
 // Elements must be string or number — the new-site diagnostic names the

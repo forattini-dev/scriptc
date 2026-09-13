@@ -1,12 +1,3 @@
-sets.ts:8:16 - error SC2020: 'new Set(values)' is part of the standard library types but has no scriptc lowering yet
-
-  7 | // but keeps the fence: never silently an empty set.
-  8 | const seeded = new Set(new Set(["a", "b"]));
-    |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  9 | 
-
-  hint: construct the Set empty and add() each value — only an array of already-legal elements (including records by identity) seeds a Set
-
 sets.ts:12:7 - error SC2009: values of type 'Set<boolean>' cannot be compiled: the Set shape is supported, but elements are limited to numbers, strings, records, callbacks, symbols, and supported handles — 'boolean' is outside that domain
 
   11 | // element type.
