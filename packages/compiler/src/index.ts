@@ -464,6 +464,7 @@ function runFrontend(
   entryPath: string,
   npmStatic?: readonly string[] | "auto" | "lib",
   externalTypes?: Readonly<Record<string, string>>,
+  dynamic = false,
 ): Frontend {
   // Resolver package/workspace metadata is intentionally shared across the
   // several load attempts of ONE auto-detection fixpoint, but never across
@@ -481,7 +482,7 @@ function runFrontend(
     let retained = false;
     try {
       const scoutPreflight = checkPreflight(scout);
-      requested = detectAutoPackages(scout, statuses, npmStatic, judged, npmSites);
+      requested = detectAutoPackages(scout, statuses, npmStatic, judged, npmSites, !dynamic);
       // With no package to opt in, the scout already IS the final frontend:
       // same roots, resolution posture, preflight, and module order. Retain it
       // instead of spawning a second tsgo server and checking the whole graph
@@ -536,7 +537,7 @@ function runFrontend(
   if (npmStatic === "auto" || npmStatic === "lib") {
     for (;;) {
       const grown = filterExternalNpmPackages(
-        detectAutoPackages(load, statuses, npmStatic, judged, npmSites), statuses, externalTypes,
+        detectAutoPackages(load, statuses, npmStatic, judged, npmSites, !dynamic), statuses, externalTypes,
       );
       if (grown.length === 0) break;
       requested = [...requested, ...grown];
@@ -762,7 +763,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     }
     ffi = loaded.profile;
   }
-  const fe = runFrontend(entryPath, opts.npmStatic, opts.externalTypes);
+  const fe = runFrontend(entryPath, opts.npmStatic, opts.externalTypes, opts.dynamic);
   try {
     const emptyStats = { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 };
 
@@ -1225,7 +1226,7 @@ async function compileTracked(
         : { llvmRefusal: earlyHit.native.llvmRefusal }),
     };
   }
-  const fe = runFrontend(entryPath, opts.npmStatic);
+  const fe = runFrontend(entryPath, opts.npmStatic, undefined, opts.dynamic);
   let lowered: LowerResult;
   let entryText: string;
   let sourceTexts: Map<string, string>;

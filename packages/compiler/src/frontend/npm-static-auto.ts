@@ -10,6 +10,7 @@ import { npmStaticIneligibleReason, npmStaticPackageOfPath } from "./npm-static.
 import { resolveBareModule } from "./resolve.js";
 import { isRelativeSpecifier } from "./workspace-registry.js";
 import { isRuntimeSourceFileName } from "./tsc-codes.js";
+import { isKernelModule } from "./builtin-modules.js";
 
 export function detectAutoPackages(
   load: LoadResult,
@@ -17,6 +18,7 @@ export function detectAutoPackages(
   mode: "auto" | "lib",
   judged: Set<string>,
   sites: Map<string, SrcLoc>,
+  nativeKernels = false,
 ): string[] {
   // package → the resolved types file AND the file whose import found it:
   // the runtime-JS probe below must resolve the SAME specifier from that file,
@@ -43,6 +45,11 @@ export function detectAutoPackages(
       // business (and the SC4005 async_free gate's, in library mode) —
       // never npm candidates in either mode.
       if (canonicalBuiltinModule(spec) !== null) continue;
+      // Static builds recognize kernel values by their declared provenance.
+      // Replacing those declarations with inferred JS destroys that identity
+      // and needlessly discovers the kernel package's implementation graph.
+      // Dynamic builds still admit that graph under the ordinary npm policy.
+      if (nativeKernels && isKernelModule(packageNameOfBareSpecifier(spec))) continue;
       const npm = resolveNpmImport(sf.fileName, spec);
       if (npm !== null && isNodeTypesPath(npm.typesFile)) continue;
       if (npm === null) {
