@@ -28,6 +28,7 @@ export function emitRustDynamicAssertions(
   context.line(`${name}::Undefined => "undefined".to_owned(),`);
   context.line(`${name}::Null => "null".to_owned(),`);
   context.line(`${name}::Number(value) => runtime::display_number(*value),`);
+  context.line(`${name}::BigInt(value) => runtime::display_bigint(value),`);
   context.line(`${name}::Boolean(value) => value.to_string(),`);
   context.line(`${name}::String(value) => runtime::assert_inspect_string(value),`);
   context.line(`${name}::Regex(value) => format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value)),`);

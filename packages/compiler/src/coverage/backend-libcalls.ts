@@ -629,6 +629,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "island.importDyn": ["c", "llvm", "rust"],
   "island.importDynPath": ["c", "llvm", "rust"],
   "json.parse": ["c", "llvm", "rust"],
+  "json.stringifyReplacer": ["rust"],
   "layer.effect": ["c", "rust"],
   "layer.effectDiscard": ["c", "rust"],
   "layer.empty": ["c", "rust"],

@@ -288,6 +288,7 @@ export class RustExpressionEmitter {
         let test: string;
         switch (expr.test) {
           case "number": test = `matches!(&${value}, ${name}::Number(..))`; break;
+          case "bigint": test = `matches!(&${value}, ${name}::BigInt(..))`; break;
           case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
           case "boolean": test = `matches!(&${value}, ${name}::Boolean(..))`; break;
           case "string": test = `matches!(&${value}, ${name}::String(..))`; break;
@@ -300,7 +301,7 @@ export class RustExpressionEmitter {
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
           case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;
           case "truthy":
-            test = `match &${value} { ${name}::Undefined | ${name}::Null => false, ${name}::Number(value) => *value != 0.0 && !value.is_nan(), ${name}::Boolean(value) => *value, ${name}::String(value) => !value.is_empty(), _ => true }`;
+            test = `sc_dyn_is_truthy(&${value})`;
             break;
         }
         if (this.context.hasEmbeddedModules()) {
@@ -342,6 +343,8 @@ export class RustExpressionEmitter {
             test = `match &${dynamic} { ${name}::String(value) => value.as_ref() == ${scalar}.as_ref(), _ => false, }`;
           } else if (scalarType.kind === "f64") {
             test = `match &${dynamic} { ${name}::Number(value) => *value == ${scalar}, _ => false, }`;
+          } else if (scalarType.kind === "bigint") {
+            test = `match &${dynamic} { ${name}::BigInt(value) => *value == ${scalar}, _ => false, }`;
           } else if (scalarType.kind === "bool") {
             test = `match &${dynamic} { ${name}::Boolean(value) => *value == ${scalar}, _ => false, }`;
           } else {

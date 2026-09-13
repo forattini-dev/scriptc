@@ -10,9 +10,9 @@ export function nativeBigIntBackendDiagnostics(mod: IrModule, backend: "c" | "ll
       for (const child of value) visit(child, parentLoc);
       return;
     }
-    const node = value as { kind?: unknown; fn?: unknown; loc?: SrcLoc };
+    const node = value as { kind?: unknown; fn?: unknown; test?: unknown; loc?: SrcLoc };
     const here = node.loc ?? parentLoc;
-    if (node.kind === "bigint" || (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("bigint."))) {
+    if ((node.kind === "dynTest" && node.test === "bigint") || node.kind === "bigint" || (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("bigint."))) {
       loc = here;
       return;
     }

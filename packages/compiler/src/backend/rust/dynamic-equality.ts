@@ -12,6 +12,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
   context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
   context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
+  context.line(`(${name}::BigInt(left), ${name}::BigInt(right)) => left == right,`);
   context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
   if (usesEmbeddedModules) context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);
   context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);

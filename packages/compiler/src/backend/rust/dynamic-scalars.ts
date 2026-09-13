@@ -10,6 +10,7 @@ export function emitRustDynamicScalarChecks(context: RustDynamicScalarContext): 
   const name = context.dynTypeName();
   for (const [expected, rustType, variant] of [
     ["number", "f64", "Number"],
+    ["bigint", "runtime::JsBigInt", "BigInt"],
     ["boolean", "bool", "Boolean"],
     ["string", "runtime::JsString", "String"],
   ] as const) {
@@ -18,7 +19,7 @@ export function emitRustDynamicScalarChecks(context: RustDynamicScalarContext): 
     context.pushIndent();
     // An island HANDLE holding the scalar exits strictly (a typed
     // callback's parameter arriving through the dyn bridge).
-    const island = context.hasEmbeddedModules()
+    const island = context.hasEmbeddedModules() && expected !== "bigint"
       ? `${name}::Island(handle) => runtime::island_exit_${expected}(&handle), `
       : "";
     context.line(`match value { ${name}::${variant}(value) => value, ${island}value => sc_dyn_check_fail_at("${expected}", &value, path) }`);

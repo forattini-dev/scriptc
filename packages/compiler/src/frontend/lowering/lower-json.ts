@@ -6,23 +6,10 @@ import { DYN, JSVAL, STRING, type IrExpr } from "../../ir/ir.js";
 import type { Lowerer } from "./lowerer.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
 
-/** `JSON.parse(text)` / `JSON.stringify(value)`.
-   * - parse → a may-throw `libCall` producing a dyn value (the runtime JSON
-   *   dyn); malformed input throws a catchable SyntaxError-shaped string.
-   *   The divergence override types the one-argument form `unknown`; the
-   *   lib's reviver form typechecks (returning `any`) and is fenced here.
-   * - stringify → the type-DIRECTED `jsonStringify` node: the lib
-   *   signature honestly says `any`, but lowering requires the argument's
-   *   STATIC IR type to be JSON-safe — the backend emits a per-type
-   *   serializer, never a dynamic walk, so dyn (and closures/class
-   *   instances) are rejected here with a specific message. The
-   *   `stringify(v, null, space)` pretty-print form compiles when the
-   *   replacer is the literal null (or undefined) and the space is a
-   *   LITERAL — Node's rules apply at compile time (numbers clamp to 0–10
-   *   spaces, strings truncate to 10 code units) and the resolved indent
-   *   rides the node to the backend's re-indenter. Function replacers and
-   *   non-literal spaces stay fenced.
-   * Null when this isn't a JSON member call. */
+/** JSON.parse uses a checked-dynamic value. JSON.stringify keeps its typed
+ * fast path without a callback; function replacers use native dynamic holders
+ * so key order, mutation and toJSON precede each callback exactly once.
+ * Array replacers, revivers and non-literal spacing retain explicit fences. */
   export function lowerJsonMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken) return null;
@@ -41,10 +28,19 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
       return { kind: "libCall", fn: "json.parse", args: [text], type: DYN, loc };
     }
     if (member === "stringify") {
-      const indent = stringifySpaceIndent(L, call);
+      const replacerNode = call.arguments[1];
+      const replacer = replacerNode && L.checker.getCallSignatures(L.checker.getTypeAtLocation(replacerNode)).length > 0
+        ? L.lowerExpr(replacerNode) : null;
+      const indent = stringifySpaceIndent(L, call, replacer !== null);
       const argNode = call.arguments[0]!;
       const value = nativeImportHandleType(L, argNode)?.kind === "jsval"
         ? L.coerceToExpected(L.lowerExpr(argNode), DYN) : L.lowerExpr(argNode);
+      if (replacer !== null) {
+        const callback = L.coerceToExpected(replacer, DYN);
+        return { kind: "libCall", fn: "json.stringifyReplacer", args: [
+          L.coerceToExpected(value, DYN), callback, { kind: "strLit", value: indent, type: STRING, loc },
+        ], type: STRING, loc };
+      }
       // An ISLAND value (`JSON.stringify(err)` on a package handle — the
       // island error-inspection idiom): the ENGINE's own JSON.stringify
       // runs, so key order, nesting, toJSON, and getters match Node by
@@ -70,8 +66,8 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
       // A dyn ROOT (`JSON.stringify(u)` over unknown / `{}` / `Object` /
       // `object` slots, the JSON.parse round-trip) serializes with the
       // runtime's dyn walker instead of a type-directed serializer — the
-      // dyn is JSON-representable by construction (non-JSON values fenced
-      // at their conversion INTO the slot). Two edges, both documented:
+      // dyn walker visits the actual tags; unsupported JSON values such as
+      // BigInt throw unless a function replacer converts them. Two edges:
       // a root the stringify drops (runtime undefined) produces the TEXT
       // "undefined" where Node produces the undefined VALUE (tsc's own lib
       // types the return `string`, so no static consumer can tell), and a
@@ -119,8 +115,8 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
    * and null/undefined/0/"" mean compact ("" here). Only literal
    * replacer/space spellings compile — the replacer must be `null` (or
    * `undefined`), the space a numeric/string literal or `null`/`undefined`;
-   * everything else keeps the existing fence. */
-  function stringifySpaceIndent(L: Lowerer, call: ts.CallExpression): string {
+   * the callable-replacer path validates its callback separately. */
+  function stringifySpaceIndent(L: Lowerer, call: ts.CallExpression, functionReplacer = false): string {
     const fence = (): never =>
       L.noLowering(
         "JSON.stringify with replacer/space parameters",
@@ -133,7 +129,7 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
     const isUndefined = (e: ts.Expression): boolean =>
       ts.isIdentifier(e) && e.text === "undefined";
     const replacer = unwrap(call.arguments[1]!);
-    if (replacer.kind !== ts.SyntaxKind.NullKeyword && !isUndefined(replacer)) fence();
+    if (!functionReplacer && replacer.kind !== ts.SyntaxKind.NullKeyword && !isUndefined(replacer)) fence();
     if (call.arguments.length === 2) return "";
     const space = unwrap(call.arguments[2]!);
     if (space.kind === ts.SyntaxKind.NullKeyword || isUndefined(space)) return "";

@@ -7,6 +7,10 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "json.stringifyReplacer" && expr.args.length === 3 && arg && secondArg && expr.args[2]) {
+    const value = context.nextTemporary(), callback = context.nextTemporary(), indent = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; let ${callback} = ${context.emitExpr(secondArg)}; let ${indent} = ${context.emitExpr(expr.args[2])}; sc_dyn_json_stringify_replacer(${value}, ${callback}, &${indent}) }`;
+  }
   if (expr.fn === "error.newCause" && expr.args.length === 2 &&
     arg?.type.kind === "string" && secondArg?.type.kind === "dyn" && expr.type.kind === "object") {
     const error = RUNTIME_ERROR_CLASSES.get(expr.type.className);

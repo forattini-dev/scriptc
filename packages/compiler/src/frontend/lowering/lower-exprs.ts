@@ -1,3 +1,4 @@
+import { lowerExplicitThis } from "./lower-explicit-this.js";
 import { lowerBigIntExpression } from "./lower-bigint.js";
 import { lowerNumericLiteral } from "./lower-numeric-literal.js";
 import { moduleFileName, importMetaProperty } from "./import-meta.js";
@@ -941,7 +942,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       if (operand.type.kind === "dyn") {
         // Bare typeof on a dyn value: the runtime's kind→string table
         // (null answers "object", boxed closures "function" — JS-exact
-        // for every dyn kind; "bigint"/"symbol" have no producers).
+        // for every dyn kind; "symbol" has no native producer).
         return { kind: "libCall", fn: "dyn.typeof", args: [operand], type: STRING, loc };
       }
       lowerer.unsupported("SC1090", expr, "typeof expressions on statically-typed values");
@@ -1444,11 +1445,12 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       // thisArg — so the wrapper idiom `fn.apply(this, arguments)`
       // (test/common's mustCall) forwards the receiver. With no binding
       // the read answers the strict-mode plain-call undefined, the old
-      // constant. TypeScript keeps the fence (noImplicitThis makes it a
-      // compile-time story there).
+      // constant. TypeScript functions must declare their receiver type.
       if (isJsSourceFile(expr.getSourceFile())) {
         return { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
       }
+      const receiver = lowerExplicitThis(lowerer, expr);
+      if (receiver) return receiver;
       lowerer.unsupported("SC1080", expr);
     }
     if (expr.kind === ts.SyntaxKind.SuperKeyword) {
@@ -2320,12 +2322,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       for (const n of falseArmNarrows) lowerer.chainNarrowedType.set(n, falseArmNarrowType!);
       try {
       const cond = lowerer.lowerCondition(expr.condition);
-      // A condition the LOWERING proved constant (typeof-dyn against a
-      // kind no dyn box can hold — the bigint/symbol/function fold): only
-      // the taken arm exists at runtime, so only it lowers — which is
-      // exactly what lets a dual-mode arm with no static lowering (bigint
-      // literals) sit untaken in compiled JS. A boolLit carries no
-      // effects, so dropping the condition read loses nothing.
+      // A condition proven constant (such as typeof-dyn for an unrepresented
+      // symbol) lowers only its reachable arm. boolLit has no side effects.
       if (cond.kind === "boolLit") {
         return lowerer.lowerExpr(cond.value ? expr.whenTrue : expr.whenFalse);
       }
@@ -2615,7 +2613,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const narrowed = narrowedTs.flags & ts.TypeFlags.Never ? null : lowerer.mapTypeOf(narrowedTs);
       if (
         narrowed &&
-        (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
@@ -7966,7 +7964,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       }
       // Uint8Array targets: the checked-dynamic tree carries a bytes kind now (converted
       // stdin chunks) — the extraction validates the kind and copies out.
-      if (target.kind === "bytes" && target.elem === "u8") {
+      if (target.kind === "bigint" || (target.kind === "bytes" && target.elem === "u8")) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // ADAPTABLE function targets (`u as (x: number) => number` — the
@@ -8017,8 +8015,8 @@ export function lowerPrefixUnary(lowerer: Lowerer, expr: ts.PrefixUnaryExpressio
     switch (expr.operator) {
       case ts.SyntaxKind.MinusToken: {
         const operand = lowerer.lowerExpr(expr.operand);
-        if (operand.type.kind === "jsval") {
-          return { kind: "jsOp", op: "neg", args: [operand], type: JSVAL, loc };
+        if (operand.type.kind === "jsval" || (operand.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile()))) {
+          return { kind: "jsOp", op: "neg", args: [lowerer.jsvalIn(operand, expr.operand)], type: JSVAL, loc };
         }
         if (operand.type.kind !== "f64") lowerer.unsupported("SC1043", expr);
         if (operand.kind === "numLit") return { ...operand, value: -operand.value, loc };
@@ -8029,8 +8027,8 @@ export function lowerPrefixUnary(lowerer: Lowerer, expr: ts.PrefixUnaryExpressio
         // Unary + is ToNumber; on an already-number operand it's identity,
         // and a STRING operand runs the runtime's ECMA-exact StringToNumber
         // (num.fromString — Number(aString)'s lowering, scr_string.c).
-        if (operand.type.kind === "jsval") {
-          return { kind: "jsOp", op: "plus", args: [operand], type: JSVAL, loc };
+        if (operand.type.kind === "jsval" || (operand.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile()))) {
+          return { kind: "jsOp", op: "plus", args: [lowerer.jsvalIn(operand, expr.operand)], type: JSVAL, loc };
         }
         if (operand.type.kind === "string") {
           return { kind: "libCall", fn: "num.fromString", args: [operand], type: F64, loc };
@@ -8616,7 +8614,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const scalarSide = dynSide === left ? right : left;
         if (
           dynSide.type.kind === "dyn" &&
-          (scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
+          (scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
             // dyn vs dyn (`context.actual !== context.exact` —
             // test/common's exit accounting): the runtime's whole-dyn
             // strict equality — scalars by value, units by kind,
@@ -8633,46 +8631,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           };
         }
       }
-      // JS `any`-origin operands (the checked-dynamic declaration story):
-      // arithmetic operations CHECK the dyn side to the static side's
-      // scalar kind (dynCheck — a catchable TypeError on mismatch) and
-      // compute natively. Node would ToNumber-coerce instead — the honest
-      // divergence is loud (a throw), never a silent wrong answer
-      // (SEMANTICS.md). tsc rejects these forms on real `unknown`, so only
-      // any-typed JS reaches this; when BOTH sides are dyn a number
-      // context is the only honest guess for arithmetic — both check.
-      if (isJsSourceFile(expr.getSourceFile())) {
-        const checkNum = (e: IrExpr): IrExpr =>
-          e.type.kind === "dyn" ? { kind: "dynCheck", value: e, type: F64, loc: e.loc } : e;
-        const other = left.type.kind === "dyn" ? right : left;
-        const NUM_BIN: Partial<Record<ts.SyntaxKind, "-" | "*" | "/" | "%" | "**">> = {
-          [ts.SyntaxKind.MinusToken]: "-",
-          [ts.SyntaxKind.AsteriskToken]: "*",
-          [ts.SyntaxKind.SlashToken]: "/",
-          [ts.SyntaxKind.PercentToken]: "%",
-          [ts.SyntaxKind.AsteriskAsteriskToken]: "**",
-        };
-        const arith = NUM_BIN[op];
-        if (arith && (other.type.kind === "f64" || other.type.kind === "dyn")) {
-          return { kind: "bin", op: arith, left: checkNum(left), right: checkNum(right), type: F64, loc };
-        }
-        // `+`: number when the OTHER side is a number, string concat when
-        // it is a string — the two static homes; dyn+dyn stays a number.
-        if (op === ts.SyntaxKind.PlusToken) {
-          if (other.type.kind === "f64" || other.type.kind === "dyn") {
-            return { kind: "bin", op: "+", left: checkNum(left), right: checkNum(right), type: F64, loc };
-          }
-          if (other.type.kind === "string") {
-            // String-context `+`: JS's answer is String(unknown) — the
-            // JS-exact dyn walker (numbers format, arrays join, objects
-            // print [object Object], handles the same) — never a checked
-            // cast: `'status ' + res.statusCode` concatenates like Node.
-            const strOf = (e: IrExpr): IrExpr =>
-              e.type.kind === "dyn" ? { kind: "toString", operand: e, type: STRING, loc: e.loc } : e;
-            return { kind: "strConcat", left: strOf(left), right: strOf(right), type: STRING, loc };
-          }
-        }
-      }
+      // Native JS arithmetic uses ToPrimitive/ToNumeric and retains BigInt.
+      if (isJsSourceFile(expr.getSourceFile()) && [ts.SyntaxKind.PlusToken,
+        ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken,
+        ts.SyntaxKind.PercentToken, ts.SyntaxKind.AsteriskAsteriskToken].includes(op)) return lowerIslandBinary();
       // `any`-origin operands (tsc rejects these operator forms on real
       // `unknown`, so in a checker-clean TS program only `any` reaches
       // here): JS's full coercion semantics (ToPrimitive, NaN, string +)
@@ -9322,7 +9284,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           "'typeof' tests on 'unknown' values against non-literal strings",
         );
       }
-      if (b.text === "string" || b.text === "number" || b.text === "boolean" || b.text === "undefined") {
+      if (b.text === "bigint" || b.text === "string" || b.text === "number" || b.text === "boolean" || b.text === "undefined") {
         return {
           kind: "dynTest",
           test: b.text,
@@ -9359,14 +9321,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           loc,
         };
       }
-      // Kinds a dyn box can NEVER hold — no conversion into 'unknown'
-      // exists for bigints or symbols (dynFrom's domain is JSON-safe data
-      // + bytes + Error + functions), so the test's answer is a
-      // compile-time constant: false for ===, true for !==. The capability
-      // probes this settles (`typeof ms === 'bigint'` in dual-mode number
-      // helpers) then FOLD their impossible arm (lowerTernary), which is
-      // what lets the reachable arm compile statically.
-      if (b.text === "bigint" || b.text === "symbol") {
+      // Symbol remains outside the native checked-dynamic value domain.
+      if (b.text === "symbol") {
         return { kind: "boolLit", value: negated, type: BOOL, loc };
       }
       lowerer.unsupported(
@@ -9488,7 +9444,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     const narrowed = lowerer.mapTypeOf(checkerType);
     if (
       narrowed &&
-      (narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+      (narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
     ) {
       return { kind: "caughtNarrow", value: ref, type: narrowed, loc };
     }

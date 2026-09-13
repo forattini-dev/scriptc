@@ -1,3 +1,4 @@
+import { emitRustDynamicKindQueries } from "./dynamic-kind.js";
 import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminated-records.js";
 import { emitNativeUnionCheck } from "./native-union-check.js";
 import { emitNativeMapCheck } from "./native-map-values.js";
@@ -13,8 +14,8 @@ import { emitRustDynamicHttp } from "./dynamic-http.js";
 import { emitRustDynamicAgent } from "./dynamic-agent.js";
 import { emitRustDynamicAssertions } from "./dynamic-assertions.js";
 import { emitRustDynamicInspect } from "./dynamic-inspect.js";
-import { emitRustDynamicIteration } from "./dynamic-iteration.js";
 import { emitRustDynamicScalarChecks } from "./dynamic-scalars.js";
+import { emitRustDynamicJsonReplacer } from "./dynamic-json-replacer.js";
 import { emitRustDynamicStringCoercion } from "./dynamic-string-coercion.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
@@ -50,6 +51,7 @@ export class RustDynamicEmitter {
     this.context.line("Undefined,");
     this.context.line("Null,");
     this.context.line("Number(f64),");
+    this.context.line("BigInt(runtime::JsBigInt),");
     this.context.line("Boolean(bool),");
     this.context.line("String(runtime::JsString),");
     this.context.line("Regex(runtime::JsRegex),");
@@ -134,6 +136,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line(`${name}::Undefined | ${name}::Null => writer.write_null(),`);
     this.context.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::BigInt(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Regex(..) => { writer.begin_object(); writer.end_object(); },`);
@@ -255,6 +258,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined => "undefined".to_owned(),`);
     this.context.line(`${name}::Null => "null".to_owned(),`);
     this.context.line(`${name}::Number(value) => runtime::display_number(*value),`);
+    this.context.line(`${name}::BigInt(value) => runtime::display_bigint(value),`);
     this.context.line(`${name}::Boolean(value) => runtime::display_bool(*value),`);
     this.context.line(`${name}::String(value) => format!("'{}'", value),`);
     this.context.line(`${name}::Array(..) => "[ ... ]".to_owned(),`);
@@ -294,6 +298,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined => ${name}::Undefined,`);
     this.context.line(`${name}::Null => ${name}::Null,`);
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
+    this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(value.clone()),`);
@@ -352,6 +357,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     this.context.line(`${name}::Null => Ok(runtime::JsonNode::Null),`);
     this.context.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
+    this.context.line(`${name}::BigInt(..) => Err(format!("bigint at {path} is not JSON data")),`);
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
     this.context.line(`${name}::Regex(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
@@ -410,77 +416,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
 
-    this.context.line(`fn sc_dyn_kind(value: &${name}) -> &'static str {`);
-    this.context.pushIndent();
-    this.context.line("match value {");
-    this.context.pushIndent();
-    this.context.line(`${name}::Undefined => "undefined",`);
-    this.context.line(`${name}::Null => "null",`);
-    this.context.line(`${name}::Number(..) => "number",`);
-    this.context.line(`${name}::Boolean(..) => "boolean",`);
-    this.context.line(`${name}::String(..) => "string",`);
-    this.context.line(`${name}::Regex(..) => "object",`);
-    this.context.line(`${name}::Url(..) => "object",`);
-    this.context.line(`${name}::Bytes(..) => "bytes",`);
-    this.context.line(`${name}::TypedBytes(..) => "bytes",`);
-    this.context.line(`${name}::Buffer(..) => "bytes",`);
-    this.context.line(`${name}::Array(..) => "array",`);
-    this.context.line(`${name}::ArrayIterator(..) => "object",`);
-    this.context.line(`${name}::Object(..) => "object",`);
-    this.context.line(`${name}::Getter(..) => "function",`);
-    this.context.line(`${name}::Promise(..) => "promise",`);
-    this.context.line(`${name}::NetServer(..) => "object",`);
-    this.context.line(`${name}::NetSocket(..) => "object",`);
-    this.context.line(`${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::FetchBody(..) | ${name}::FetchReader(..) | ${name}::WebStream(..) | ${name}::WebController(..) | ${name}::WebReader(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..) => "object",`);
-    if (boxedShapes.length > 0) {
-      this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
-    }
-    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
-    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => "object",`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_is_truthy(value: &${name}) -> bool {`);
-    this.context.pushIndent();
-    this.context.line("match value {");
-    this.context.pushIndent();
-    this.context.line(`${name}::Undefined | ${name}::Null => false,`);
-    this.context.line(`${name}::Number(value) => *value != 0.0 && !value.is_nan(),`);
-    this.context.line(`${name}::Boolean(value) => *value,`);
-    this.context.line(`${name}::String(value) => !value.is_empty(),`);
-    this.context.line("_ => true,");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    emitRustDynamicIteration(this.context, boxedShapes);
-    this.context.line(`fn sc_dyn_typeof(value: &${name}) -> runtime::JsString {`);
-    this.context.pushIndent();
-    this.context.line("let kind = match value {");
-    this.context.pushIndent();
-    this.context.line(`${name}::Undefined => "undefined",`);
-    this.context.line(`${name}::Number(..) => "number",`);
-    this.context.line(`${name}::Boolean(..) => "boolean",`);
-    this.context.line(`${name}::String(..) => "string",`);
-    this.context.line(`${name}::Bytes(..) => "object",`);
-    this.context.line(`${name}::TypedBytes(..) => "object",`);
-    this.context.line(`${name}::Buffer(..) => "object",`);
-    this.context.line(`${name}::NetServer(..) => "object",`);
-    this.context.line(`${name}::NetSocket(..) => "object",`);
-    if (boxedShapes.length > 0) {
-      this.context.line(`${boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ")} => "function",`);
-    }
-    this.context.line(`${name}::NativeConstructor(..) | ${name}::NativeMethod(..) => "function",`);
-    // A handle answers what the engine says: solid's accessors and
-    // setters are functions there, and static code branches on that.
-    if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => return runtime::island_value_typeof(value),`);
-    this.context.line("_ => \"object\",");
-    this.context.popIndent();
-    this.context.line("};");
-    this.context.line("runtime::string(kind)");
-    this.context.popIndent();
-    this.context.line("}");
+    emitRustDynamicKindQueries(this.context, boxedShapes);
     this.context.line(`fn sc_dyn_from_caught(caught: runtime::Caught) -> ${name} {`);
     this.context.pushIndent();
     this.context.line(`if runtime::caught_is::<${name}>(&caught) { runtime::caught_narrow::<${name}>(&caught) }`);
@@ -681,6 +617,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_to_number(value: &${name}) -> f64 {`);
+    this.context.line(`if matches!(value, ${name}::BigInt(..)) { runtime::throw_type_error(if runtime::target_runtime_id() == "bun" { "Conversion from 'BigInt' to 'number' is not allowed." } else { "Cannot convert a BigInt value to a number" }.to_owned()); }`);
     this.context.pushIndent();
     this.context.line(`match value { ${name}::Undefined => f64::NAN, ${name}::Null => 0.0, ${name}::Number(value) => *value, ${name}::Boolean(value) => if *value { 1.0 } else { 0.0 }, ${name}::String(value) => runtime::number_from_string(value), _ => runtime::number_from_string(&sc_dyn_to_string(value)), }`);
     this.context.popIndent();
@@ -692,6 +629,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined => runtime::string("undefined"),`);
     this.context.line(`${name}::Null => runtime::string("null"),`);
     this.context.line(`${name}::Number(value) => runtime::number_to_string(*value),`);
+    this.context.line(`${name}::BigInt(value) => runtime::bigint_to_string(value),`);
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
@@ -750,6 +688,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined => "undefined".to_owned(),`);
     this.context.line(`${name}::Null => "null".to_owned(),`);
     this.context.line(`${name}::Number(value) => format!("type number ({})", runtime::format_number(*value)),`);
+    this.context.line(`${name}::BigInt(value) => format!("type bigint ({})", runtime::display_bigint(value)),`);
     this.context.line(`${name}::Boolean(value) => format!("type boolean ({value})"),`);
     this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
     this.context.line(`${name}::Regex(..) => "an instance of RegExp".to_owned(),`);
@@ -882,6 +821,7 @@ export class RustDynamicEmitter {
     emitRustDynamicWebStream(this.context);
     emitRustDynamicAgent(this.context);
     emitRustDynamicStringCoercion(this.context, boxedShapes);
+    emitRustDynamicJsonReplacer(this.context);
     this.emitDynamicErrorAndCloneHelpers(boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
@@ -982,6 +922,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined => ${name}::Undefined,`);
     this.context.line(`${name}::Null => ${name}::Null,`);
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
+    this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(runtime::regex_new(&runtime::regex_source(value), &runtime::regex_flags(value))),`);
@@ -1066,6 +1007,7 @@ export class RustDynamicEmitter {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
+      case "bigint": return `sc_dyn_check_bigint_at(${value}, ${path})`;
       case "bool": return `sc_dyn_check_boolean_at(${value}, ${path})`;
       case "string": return `sc_dyn_check_string_at(${value}, ${path})`;
       case "bytes": {

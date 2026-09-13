@@ -1,6 +1,6 @@
 import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js";
-import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js";
+import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
 import { isJsonStringifyType } from "./json-stringify.js";
 import { regexCaptureLayout } from "./regex-captures.js";
 import { FS_WRITE_LIB_SIGS } from "./fs-write-signatures.js";
@@ -88,7 +88,7 @@ export const REGEX_INTRINSIC_SIGS: Record<
  * surface has no optionals. readFileSync's second argument is the (always-"utf8") encoding: evaluated for JS-exact side-effect
  * order and ignored by the runtime. A `null` slot is program-dependent (a builtin-error receiver) — the libCall case checks it specially, like process.envGet's result. Exported for lib-boundary.ts. */
 export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result: IrType }> = {
-  ...NUMERIC_COERCION_SIGS,
+  ...NUMERIC_COERCION_SIGS, ...JSON_REPLACER_SIGS,
   ...FS_WRITE_LIB_SIGS,
   "fetch.start": { argTypes: [STRING, DYN], result: { kind: "promise", inner: DYN } },
   "fetch.responseNew": { argTypes: [DYN, DYN], result: DYN },
@@ -3364,7 +3364,7 @@ function validateFunction(
         const dynSide = e.left.type.kind === "dyn" ? e.left : e.right;
         const scalarSide = dynSide === e.left ? e.right : e.left;
         if (dynSide.type.kind !== "dyn") err("dynScalarEq needs a dyn side", e.loc);
-        if (!["f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
+        if (!["bigint", "f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
           err(`dynScalarEq scalar side is ${scalarSide.type.kind}`, e.loc);
         }
         if (e.type.kind !== "bool") err("dynScalarEq must be bool", e.loc);

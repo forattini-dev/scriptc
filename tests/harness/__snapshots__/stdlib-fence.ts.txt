@@ -227,18 +227,9 @@ stdlib-fence.ts:54:13 - error SC2020: 'JSON.parse with a reviver' is part of the
   53 | const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
   54 | const rev = JSON.parse("1", (_k, v) => v);
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  55 | // (stringify with a null replacer + LITERAL space now lowers — the pretty
+  55 | // Stringify with null or function replacers and literal space lowers.
 
   hint: parse to `unknown` and validate with a checked cast ('as T') instead
-
-stdlib-fence.ts:59:18 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
-
-  58 | const toStringify = { a: 1 };
-  59 | const replaced = JSON.stringify(toStringify, (_k, v) => v);
-     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  60 | const width = 2;
-
-  hint: the serializer is type-directed — shape the value before stringifying
 
 stdlib-fence.ts:61:16 - error SC2020: 'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
 

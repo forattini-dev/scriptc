@@ -68,6 +68,7 @@ class RustDynamicInvokeEmitter {
     this.open("match value {");
     this.context.line(`${this.dyn}::Undefined | ${this.dyn}::Null => false,`);
     this.context.line(`${this.dyn}::Number(value) => *value != 0.0 && !value.is_nan(),`);
+    this.context.line(`${this.dyn}::BigInt(value) => runtime::bigint_truthy(value),`);
     this.context.line(`${this.dyn}::Boolean(value) => *value,`);
     this.context.line(`${this.dyn}::String(value) => !value.is_empty(),`);
     this.context.line("_ => true,");

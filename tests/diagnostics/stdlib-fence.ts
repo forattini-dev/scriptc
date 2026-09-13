@@ -52,9 +52,9 @@ const joined = nums.join();
 nums.forEach((x) => console.log(x), { unused: true }); // thisArg stays fenced
 const pos = "abc".includes("b", 1); // the position form lowers now (indexOf's clamp)
 const rev = JSON.parse("1", (_k, v) => v);
-// (stringify with a null replacer + LITERAL space now lowers — the pretty
-// battery lives in the corpus; function replacers and non-literal spaces
-// stay fenced.)
+// Stringify with null or function replacers and literal space lowers.
+// Callback behavior lives in the Rust differential corpus; revivers and
+// non-literal spacing remain fenced.
 const toStringify = { a: 1 };
 const replaced = JSON.stringify(toStringify, (_k, v) => v);
 const width = 2;

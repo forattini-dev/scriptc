@@ -1,4 +1,4 @@
-import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js";
+import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js"; import type { IrJsonReplacerFn } from "./json-replacer.js";
 export * from "./type-constants.js";
 import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
 import type { IrUrlLibFn } from "./url-signatures.js";
@@ -1832,7 +1832,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
-  | IrBigIntLibFn
+  | IrBigIntLibFn | IrJsonReplacerFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
   | "module.namespace"
@@ -4932,7 +4932,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "bigint" | "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -5725,7 +5725,7 @@ export function canConvertToDyn(
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "bytes" && t.elem === "u8") return true;
+  if (t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -5770,7 +5770,7 @@ function canBoxDynComposite(
   visiting: Set<string> = new Set(),
 ): boolean {
   switch (t.kind) {
-    case "f64":
+    case "bigint": case "f64":
     case "string":
     case "bool":
     case "dyn":
@@ -5815,7 +5815,7 @@ export function canDynCheckTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
-  if (t.kind === "bytes" && t.elem === "u8") return true;
+  if (t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
@@ -7095,7 +7095,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
-  ...BIGINT_MAY_THROW,
+  ...BIGINT_MAY_THROW, "json.stringifyReplacer",
   "fetch.responseNew",
   "fetch.abortTimeout",
   "fetch.abortAny",

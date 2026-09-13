@@ -305,6 +305,45 @@ where
     assert_eq!(entry.identity, identity);
 }
 
+/// Keep source identities and snapshot keys/length, but read each property only
+/// when visited. Replacers may mutate later properties without borrow conflicts.
+pub fn json_write_replaced_object<V: HeapValue, T: JsonValue>(
+    map: &JsMap<JsString, V>, writer: &mut JsonWriter, read: impl Fn(&JsString) -> T,
+) {
+    let identity = map_identity(map);
+    if let Some(start) = writer.stack.iter().position(|entry| entry.identity == identity) {
+        throw_type_error(writer.circular_message(start));
+    }
+    writer.stack.push(JsonSeen { identity, is_array: false, edge: None });
+    let keys = map_string_keys_js_order(map);
+    writer.begin_object();
+    let mut first = true;
+    for index in 0..array_len(&keys) as usize {
+        let key = array_get(&keys, index as f64);
+        writer.property(&mut first, &key, &read(&key));
+    }
+    writer.end_object();
+    writer.stack.pop().expect("scriptc: JSON object stack underflow");
+}
+
+pub fn json_write_replaced_array<V: ArrayElement, T: JsonValue>(
+    array: &JsArray<V>, writer: &mut JsonWriter, read: impl Fn(usize) -> T,
+) {
+    let identity = array_identity(array);
+    if let Some(start) = writer.stack.iter().position(|entry| entry.identity == identity) {
+        throw_type_error(writer.circular_message(start));
+    }
+    writer.stack.push(JsonSeen { identity, is_array: true, edge: None });
+    let length = array_len(array) as usize;
+    writer.begin_array();
+    let mut first = true;
+    for index in 0..length {
+        writer.element(&mut first, index, &read(index));
+    }
+    writer.end_array();
+    writer.stack.pop().expect("scriptc: JSON array stack underflow");
+}
+
 pub fn json_stringify<T: JsonValue>(value: &T) -> JsString {
     if value.is_json_undefined() {
         return string("undefined");

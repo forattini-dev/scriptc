@@ -52,6 +52,10 @@ export function lowerBigIntExpression(L: Lowerer, expr: ts.Expression): IrExpr |
   if (comparison && [expr.left, expr.right].some(node => ["union", "dyn", "jsval", "caught"].includes(L.mapTypeOf(L.typeOf(node))?.kind ?? ""))) return null;
   const left = L.lowerExpr(expr.left), right = L.lowerExpr(expr.right);
   if (operation && leftBig && rightBig) return lib(operation, [left, right], loc);
+  if (operation === "bigint.add" && (left.type.kind === "string" || right.type.kind === "string")) {
+    return { kind: "strConcat", left: leftBig ? lib("bigint.toString", [left], loc) : left,
+      right: rightBig ? lib("bigint.toString", [right], loc) : right, type: STRING, loc };
+  }
   if (!comparison) return L.unsupported("SC1090", expr, "mixed BigInt arithmetic");
   const stmts: IrStmt[] = [];
   const bind = (value: IrExpr): IrExpr => {

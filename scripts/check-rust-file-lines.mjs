@@ -24,7 +24,7 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/frontend/lowering/lower-classes.ts", 5_397],
   ["packages/compiler/src/frontend/lowering/lower-containers.ts", 7_621],
   ["packages/compiler/src/frontend/lowering/lower-event-emitter.ts", 1_325],
-  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_070],
+  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_026],
   ["packages/compiler/src/frontend/lowering/lower-inspect.ts", 1_729],
   ["packages/compiler/src/frontend/lowering/lower-island.ts", 3_376],
   ["packages/compiler/src/frontend/lowering/lower-modules.ts", 2_089],
