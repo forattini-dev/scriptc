@@ -1,13 +1,14 @@
 import * as ts from "./ts7/adapter.js";
 import type { TypeMapperCtx } from "./type-mapper.js";
 import { isNpmStaticTypeFile } from "./npm-static-types.js";
+import { isProjectTypeFile } from "./project-declarations.js";
 import { isKernelTypeFile } from "./kernel.js";
 
 /** Effect's native types are structural at every depth, including options
  * and mapped-type members. This admits types, not package implementations:
  * runtime imports and opaque kernel handles keep their separate checks. */
 export function isUnmappedRecordDeclaration(sf: ts.SourceFile, ctx: TypeMapperCtx): boolean {
-  return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName) &&
+  return sf.isDeclarationFile && !isProjectTypeFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName) &&
     (ctx.dynamic || !isKernelTypeFile(sf.fileName));
 }
 

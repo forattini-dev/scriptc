@@ -13,6 +13,7 @@ import * as ts from "./ts7/adapter.js"; import { isKernelTypeFile, isKernelHandl
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType } from "../ir/ir.js";
 import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
+import { isProjectTypeFile } from "./project-declarations.js";
 import { isNpmStaticTypeFile } from "./npm-static-types.js";
 import { isJsSourceFile, isNodeTypesPath } from "./program.js";
 import { mapJsArrayField } from "./js-array-field-types.js";
@@ -459,7 +460,6 @@ export interface TypeMapperCtx {
   isIslandModuleFile: (sf: ts.SourceFile) => boolean;
 }
 
-
 /** lower-calls.ts's bodyReadsArguments, duplicated here (type-mapper.ts must not
  * import from lowering/ — that edge is a module cycle): does the function's
  * OWN body read `arguments`? Nested plain functions/methods own theirs
@@ -785,8 +785,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // validated exits at typed boundaries. Primitives/arrays/etc. REACHED THROUGH such types keep their structural mapping;
   // this rule fires only when the type's own identity is declaration-file-declared (interfaces, classes, type literals,
   // aliases). Carved out: the standard library's declaration files (static lowerings) and --external-types declarations
-  // (project-owned structural data; the Lowerer fences their imported runtime bindings). The program's own compiled modules
-  // are never declaration files. Without --dynamic this stays unmapped; badType reports the per-package requires-dynamic
+  // and configured project declarations (structural data; runtime bindings remain fenced separately).
+  // Without --dynamic this stays unmapped; badType reports the per-package requires-dynamic
   // diagnostic for node_modules types and the generic story otherwise. A KERNEL package's types (effect) map STRUCTURALLY.
   const npmSym = widened.getAliasSymbol() ?? widened.getSymbol();
   const npmDecls = npmSym ? checker.declarationsOf(npmSym) : undefined;
@@ -796,7 +796,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     npmDecls.length > 0 &&
     npmDecls.every((d) => {
       const sf = d.getSourceFile();
-      return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
+      return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isProjectTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
     }) &&
     (ctx.dynamic || !npmDecls.every((d) => isKernelTypeFile(d.getSourceFile().fileName)))
   ) {
@@ -822,7 +822,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           if (!ctx.dynamic && decls.every((d) => isKernelTypeFile(d.getSourceFile().fileName))) return false; // kernel: structural
           return decls.every((d) => {
             const sf = d.getSourceFile();
-            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isProjectTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
           });
         }
       }
@@ -833,7 +833,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return decls.length > 0 &&
           decls.every((d) => {
             const sf = d.getSourceFile();
-            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
+            return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isProjectTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
           });
       });
     };

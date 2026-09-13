@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "strict": true },
+  "files": ["main.ts", "types.d.ts"]
+}

@@ -62,6 +62,8 @@ import { clearWorkspacePackages, isRelativeSpecifier, isWorkspacePackageName, re
 import { trackedFileExists } from "./input-tracker.js";
 import { activeRuntimeConditions } from "../compat/runtime-target.js";
 import { setEmbedJsxOptions } from "./npm-typescript.js";
+import { ProjectDeclarations } from "./project-declarations.js";
+import { jsoncSyntaxError } from "./config-json.js";
 import { isPreinitializedDataPropertyRead } from "./cycle-static-data.js"; import { calleeChainInert, isDtsMemberCall, isHoistedFunctionBinding, isInertHoistedFunctionCallee, isNamespaceMemberRead, isOutsideClusterProgramCallee, kernelCallHoldsCallbacks, makeReachesCluster } from "./cycle-inert.js";
 
 const BASE_OPTIONS: ts.Ts7CompilerOptions = {
@@ -88,49 +90,6 @@ const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   resolveJsonModule: true,
   noEmit: true,
 };
-
-/** JSONC syntax validation for a tsconfig text: tsgo's parseConfigFile
- * RECOVERS silently over syntax errors (probed: a hard-broken file answers
- * empty options, no diagnostic), where 5.9.3's readConfigFile reported the
- * first parse error — a preflight-visible difference (broken config: fail
- * loudly, never adopt silently). tsconfig's grammar is JSON plus comments
- * and trailing commas, so stripping exactly those and handing the rest to
- * JSON.parse decides validity without either TypeScript's parser. The
- * MESSAGE is JSON.parse's, not 5.9.3's ("'}' expected.") — the one
- * remaining wording delta on this path, unpinned by any snapshot. */
-function jsoncSyntaxError(text: string): string | null {
-  let out = "";
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    if (ch === '"') {
-      const from = i;
-      i++;
-      while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
-      out += text.slice(from, i + 1);
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "*") {
-      const close = text.indexOf("*/", i + 2);
-      i = close < 0 ? text.length : close + 1;
-      continue;
-    }
-    out += ch;
-  }
-  // Trailing commas: `,` followed only by whitespace before } or ].
-  out = out.replace(/,(\s*[}\]])/g, "$1");
-  if (out.trim() === "") return null; // an empty config file is legal
-  try {
-    JSON.parse(out);
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-}
 
 /** The project's tsconfig adoption in the 7 world: tsgo's own config parser
  * (extends chains resolved server-side), the ADOPTED_OPTIONS subset taken,
@@ -449,9 +408,11 @@ function loadProgram7(
   // surfaces join when the project carries both. skipLibCheck applies
   // whenever a REAL surface is present (see the nodeTypes note).
   const nodeSurface = nodeTypes ?? bunTypes ?? fallbackDtsPath();
-  const coreRoots = [entryPath, ambientDtsPath(), nodeSurface];
+  const projectDeclarations = new ProjectDeclarations(host);
+  const coreRoots = [entryPath, ambientDtsPath(), nodeSurface, ...projectDeclarations.collect([entryPath])];
   if (bunTypes !== null && nodeTypes !== null) coreRoots.push(bunTypes);
-  let program = ts.createProgram([...coreRoots, overridesDtsPath()], options, host);
+  coreRoots.push(overridesDtsPath());
+  let program = projectDeclarations.createProgram(coreRoots, options);
   // tsgo's own module resolution may pull @types/node files our own
   // resolver's type-directive lookup missed (bun's isolated layout: the
   // store lives under node_modules/.bun with per-package symlinks, so a
@@ -472,7 +433,7 @@ function loadProgram7(
     }
     if (hasTypesNode) {
       program.dispose();
-      program = ts.createProgram([entryPath, ambientDtsPath(), overridesDtsPath()], options, host);
+      program = projectDeclarations.createProgram(coreRoots.filter((root) => root !== nodeSurface), options);
     }
   }
   const entry = program.getSourceFile(entryPath);
@@ -487,7 +448,7 @@ function loadProgram7(
     configDiags: config.diags,
     externalTypes,
     externalTypeSpecifiersByFile,
-    projectWorld: () => (projectWorld ??= ts.createProgram(coreRoots, options, host)),
+    projectWorld: () => (projectWorld ??= projectDeclarations.createProgram(coreRoots.filter((root) => root !== overridesDtsPath()), options)),
     disposeAll: () => {
       projectWorld?.dispose();
       program.dispose();
