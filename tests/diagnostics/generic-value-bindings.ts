@@ -19,8 +19,8 @@ console.log(typeof stored);
 const flipAlias = flip;
 console.log(flipAlias(5));
 
-// Declared inside a function: instances are module functions and cannot
-// capture the enclosing frame.
+// Function-local generic bindings now use closure families with captures.
+// Keep this accepted case alongside the remaining boundaries.
 function outer(): number {
   const inner = <T>(x: T): T => x;
   return inner(3);

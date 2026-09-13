@@ -22,5 +22,14 @@ export function familyIdOf(checker: ts.TypeChecker, type: ts.Type): string | nul
     const rest = param !== undefined && param.dotDotDotToken !== undefined;
     return `${rest ? "..." : ""}${norm(checker.getTypeOfSymbol(p))}${optional ? "?" : ""}`;
   });
-  return `<${tps.length}>(${params.join(",")})=>${norm(checker.getReturnTypeOfSignature(sig))}`;
+  // Constraints are part of the callable contract. Erasing them merges
+  // <T extends number> and <T extends { name: string }> implementations,
+  // causing each body to compile against the other family's argument types.
+  const constraints = tps.map((tp) => {
+    const symbol = tp.getSymbol();
+    const declaration = symbol && checker.declarationsOf(symbol).find(ts.isTypeParameterDeclaration);
+    return declaration?.constraint ? norm(checker.getTypeFromTypeNode(declaration.constraint)) : "*";
+  });
+  const constraintKey = constraints.some((constraint) => constraint !== "*") ? `:${constraints.join(",")}` : "";
+  return `<${tps.length}${constraintKey}>(${params.join(",")})=>${norm(checker.getReturnTypeOfSignature(sig))}`;
 }

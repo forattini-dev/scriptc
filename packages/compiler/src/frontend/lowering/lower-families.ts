@@ -12,13 +12,33 @@ import { locOf } from "../program.js";
 import { familyIdOf } from "../families.js";
 import { inferTypeParamBindings, internGenericInstance, type GenericFnInfo, type GenericInstance, type ParamShape } from "./lower-calls.js";
 
-export interface FamilyDemand { key: string; params: ParamShape[]; ret: IrType; call: ts.CallExpression; rsig: ts.Signature }
+export interface FamilyDemand { key: string; extraKey: string; params: ParamShape[]; ret: IrType; call: ts.CallExpression; rsig: ts.Signature }
 export interface FamilyBuild { id: string; impls: GenericFnInfo[]; demands: Map<string, FamilyDemand> }
 interface FamilyRegistry { builds: Map<string, FamilyBuild>; implsByNode: Map<ts.Node, Map<FnCtx | undefined, GenericFnInfo>>; counter: number }
 
 /** The instantiation key of a demand — the same signature identity internGenericInstance keys its table on. */
-function genericInstanceKey(params: ParamShape[], ret: IrType): string {
-  return `${params.map((s) => typeKey(s.type)).join(",")}=>${typeKey(ret)}`;
+function genericInstanceKey(params: ParamShape[], ret: IrType, extraKey: string): string {
+  return `${params.map((s) => typeKey(s.type)).join(",")}=>${typeKey(ret)}${extraKey}`;
+}
+
+/** A keyof or finite-literal constraint can select a concrete record field.
+ * Preserve the resolved checker signature as well as explicit type arguments;
+ * <K extends keyof Row>() can select a field without any value parameter. */
+function familyLiteralKey(L: Lowerer, call: ts.CallExpression, signature: ts.Signature): string {
+  const declaration = L.checker.signatureDeclaration(signature);
+  if (!declaration || !ts.isFunctionLike(declaration) || !declaration.typeParameters?.some((parameter) => {
+    const constraint = parameter.constraint;
+    if (!constraint) return false;
+    if (ts.isTypeOperatorNode(constraint) && constraint.operator === ts.SyntaxKind.KeyOfKeyword) return true;
+    const declared = L.checker.getTypeFromTypeNode(constraint);
+    const type = L.typeParamTsResolver(declared) ?? declared;
+    const parts = type.isUnionType() ? ts.constituentTypes(type) : [type];
+    return parts.every((part) => part.isStringLiteralType() || part.isNumberLiteralType());
+  })) return "";
+  const render = (type: ts.Type): string => L.checker.typeToString(L.typeParamTsResolver(type) ?? type);
+  const parameters = signature.getParameters().map((parameter) => render(L.checker.getTypeOfSymbol(parameter)));
+  const explicit = (call.typeArguments ?? []).map((argument) => render(L.checker.getTypeFromTypeNode(argument)));
+  return `@${JSON.stringify([parameters, explicit])}`;
 }
 
 const registries = new WeakMap<Lowerer, FamilyRegistry>();
@@ -163,10 +183,11 @@ export function lowerFamilyCall(L: Lowerer, call: ts.CallExpression, callee: IrE
   const retTs = L.checker.getReturnTypeOfSignature(rsig);
   const ret = L.mapTypeOf(retTs);
   if (ret === null) L.badType(call, retTs);
-  const key = genericInstanceKey(params, ret);
+  const extraKey = familyLiteralKey(L, call, rsig);
+  const key = genericInstanceKey(params, ret, extraKey);
   const build = buildOf(L, familyId);
   if (!build.demands.has(key)) {
-    const demand: FamilyDemand = { key, params, ret, call, rsig };
+    const demand: FamilyDemand = { key, extraKey, params, ret, call, rsig };
     build.demands.set(key, demand);
     for (const impl of build.impls) familyInstance(L, impl, demand);
   }
@@ -179,7 +200,7 @@ export function lowerFamilyCall(L: Lowerer, call: ts.CallExpression, callee: IrE
 function familyInstance(L: Lowerer, impl: GenericFnInfo, demand: FamilyDemand): GenericInstance {
   const tsBindings = new Map<ts.Symbol, ts.Type>();
   return internGenericInstance(L, demand.call, impl, demand.params, demand.ret,
-    () => inferTypeParamBindings(L, demand.call, impl, demand.rsig, tsBindings), { tsBindings });
+    () => inferTypeParamBindings(L, demand.call, impl, demand.rsig, tsBindings), { tsBindings, extraKey: demand.extraKey });
 }
 
 /** The instance context of a family body: its captures are the implementation's, pre-bound by symbol so the body's

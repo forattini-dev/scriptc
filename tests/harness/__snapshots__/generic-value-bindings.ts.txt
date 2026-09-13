@@ -39,22 +39,6 @@ generic-value-bindings.ts:19:19 - error SC2004: uses of 'flip' inherit the block
 
   hint: the declaration of 'flip' did not compile — fix the diagnostic reported there and these sites clear with it
 
-generic-value-bindings.ts:25:17 - error SC1090: generic arrow/function-expression bindings declared inside functions (the compiled instantiations of 'inner' are module functions and cannot capture the enclosing frame — declare the binding at module scope) are not supported yet
-
-  24 | function outer(): number {
-  25 |   const inner = <T>(x: T): T => x;
-     |                 ^~~~~~~~~~~~~~~~~
-  26 |   return inner(3);
-
-generic-value-bindings.ts:26:10 - error SC2004: uses of 'inner' inherit the blocker on its declaration
-
-  25 |   const inner = <T>(x: T): T => x;
-  26 |   return inner(3);
-     |          ^~~~~
-  27 | }
-
-  hint: the declaration of 'inner' did not compile — fix the diagnostic reported there and these sites clear with it
-
 generic-value-bindings.ts:51:15 - error SC1090: calls of the generic method 'm' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet
 
   50 | function throughParam(a: Amb): void {

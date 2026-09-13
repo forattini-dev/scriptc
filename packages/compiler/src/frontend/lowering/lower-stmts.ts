@@ -1,3 +1,4 @@
+import { lowerLocalGenericInitializer, registerModuleGenericBinding } from "./lower-local-generics.js";
 import { lowerDynamicSwitch } from "./lower-dynamic-switch.js";
 import { inferredRegexBindingType } from "./lower-regex-captures.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
@@ -25,7 +26,7 @@ import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsAliasVarDeclOf, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
+import { bindingGenericFnAliasInfoOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { genericIfaceBindingKeepsClass } from "./lower-classes.js";
@@ -3199,21 +3200,9 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     // is compile-time alias plumbing with no storage or code.
     if (!isLet && textCodecBindingDecl(lowerer, decl.name, decl.initializer)) return null;
 
-    // `const f = <T>(x: T) => x` — a generic function value binding: the
-    // initializer monomorphizes per call-site-resolved signature exactly
-    // like a generic function declaration (bindingGenericFnInfoOf —
-    // file-scope declarations registered at collection, block-scoped ones
-    // here, before any use in source order can lower), the binding has no
-    // runtime value, and the statement emits nothing. Non-qualifying
-    // shapes (reassigned bindings, declarations inside functions) fence
-    // by name inside; a collection-time report dedupes.
-    {
-      const gfnNode = bindingGenericFnNodeOf(decl) ?? bindingContextualGenericFnNodeOf(lowerer, decl);
-      if (gfnNode) {
-        bindingGenericFnInfoOf(lowerer, decl, gfnNode);
-        return null;
-      }
-    }
+    // Module generic bindings monomorphize statically; function-local bindings
+    // continue into ordinary storage, initialized as closure families below.
+    if (registerModuleGenericBinding(lowerer, decl)) return null;
 
     // `const h = id` — an ALIAS of a generic function: the alias's symbol
     // registers the target's info (calls and pinned values resolve like
@@ -3344,7 +3333,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
     try {
       init = immediatelyGuardedAbsenceProbe(lowerer, decl)
         ? (lowerAbsenceProbe(lowerer, decl.initializer) ?? lowerer.lowerExpr(decl.initializer))
-        : lowerer.lowerExpr(decl.initializer);
+        : (lowerLocalGenericInitializer(lowerer, decl) ?? lowerer.lowerExpr(decl.initializer));
     } catch (e) {
       if (e instanceof PoisonError) {
         const salvaged = lowerer.mapTypeOf(lowerer.typeOf(decl.name));

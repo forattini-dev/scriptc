@@ -129,12 +129,15 @@ function emitGeneratorValue(
     });
     return;
   }
-  if (expr.kind === "libCall" && expr.args.some(containsYield)) {
-    // A lib call over yields (the effect kernel's `yield* e` reads the resumed effect's value through effect.runSync):
-    // the arguments suspend in order, then the call runs over their resumed values.
+  const operands = expr.kind === "libCall" || expr.kind === "call" || expr.kind === "intrinsic" ? expr.args
+    : expr.kind === "callValue" || expr.kind === "callFamily" ? [expr.callee, ...expr.args] : null;
+  if (operands?.some(containsYield)) {
+    // Preserve the callee and each argument before moving to the next one.
+    // A suspension can mutate bindings or run arbitrary code; replaying their
+    // reads after resume would change which function or arguments are used.
     const resolved: (readonly [IrExpr, string])[] = [];
     const step = (index: number): void => {
-      const arg = expr.args[index];
+      const arg = operands[index];
       if (arg === undefined) {
         consume(context.emitExprWithValues(expr, resolved));
         return;
