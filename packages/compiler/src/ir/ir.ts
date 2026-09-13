@@ -1,3 +1,4 @@
+import type { IrUrlLibFn } from "./url-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
 import { nativeRecordCheckSupported } from "./native-record.js";
@@ -2176,45 +2177,7 @@ export type IrLibFn =
    * spawned children, exactly Node. Statement position only (JS's boolean
    * result is constant true there). Borrows the name; never throws. */
   | "process.envUnset"
-  /** node:url + the URL class (scr_url.c). url.new parses one absolute
-   * URL string into an immutable URL value (+1) — invalid input THROWS a
-   * catchable TypeError ("Invalid URL"), like Node's constructor. The
-   * getters (borrowed receiver, +1 string) never throw; url.href doubles
-   * as toString(). fileURLToPath has one libFn per receiver form (URL
-   * value / string) — both THROW Node's TypeErrors on non-file schemes,
-   * encoded slashes, and non-empty hosts. url.pathToFileURL resolves the
-   * path (getcwd) and never throws. */
-  | "url.new"
-  | "url.protocol"
-  | "url.host"
-  | "url.hostname"
-  | "url.pathname"
-  | "url.setPathname"
-  | "url.href"
-  /** The remaining WHATWG component getters, all pure reads of fields the
-   * parser already normalized: url.port answers "" when the port is absent
-   * or the scheme default; url.origin answers "scheme://host[:port]" for
-   * the tuple-origin special schemes and the literal "null" for file: and
-   * every opaque-path scheme; url.hash answers "" for BOTH no fragment and
-   * a bare '#'; url.username / url.password split the stored userinfo at
-   * its first ':' and answer "" when absent. */
-  | "url.port"
-  | "url.origin"
-  | "url.hash"
-  | "url.username"
-  | "url.password"
-  /** URL.canParse(input): url.new's accept/reject as a boolean. The one
-   * URL entry point that NEVER throws — deliberately absent from the
-   * may-throw seed set below. */
-  | "url.canParse"
-  | "url.fileURLToPathUrl"
-  | "url.fileURLToPathStr"
-  | "url.pathToFileURL"
-  /** pathToFileURL under a win32 TARGET: the same scr_url_from_path call
-   * (the runtime selects the win32 arm by _WIN32), but a distinct IR name
-   * because that arm THROWS for malformed UNC inputs — may-throw seeds on
-   * it while posix pathToFileURL emission stays byte-identical. */
-  | "url.pathToFileURLWin32"
+  | IrUrlLibFn
   /** URLSearchParams (scr_url.c — always linked with the url unit).
    * Construction: sp.new (empty), sp.parse (one borrowed init string —
    * a single leading '?' strips, Node's constructor), sp.copy (snapshot
@@ -7423,6 +7386,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readdirSync",
   "fs.readdirTypesSync",
   "url.new",
+  "url.newBase",
   "url.fileURLToPathUrl",
   "url.fileURLToPathStr",
   // The win32-target flavor of pathToFileURL (same runtime entry point —

@@ -1,3 +1,4 @@
+import { lowerUrlStaticCall } from "./lower-url.js";
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";
 import { hasHiddenOptionalIndex } from "./lower-contextual-index.js";
@@ -4232,6 +4233,9 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
     if (ts.isPropertyAccessExpression(expr.expression)) {
       const intrinsic =
         lowerEffectCall(lowerer, expr, loc) ?? // the effect kernel (`Effect.succeed(...)` on the package's namespace binding, static builds) — lower-effect.ts
+        // URL statics can resolve through node:url declarations; claim
+        // them before generic namespace export dispatch.
+        lowerUrlStaticCall(lowerer, expr, expr.expression) ??
         // Builtin namespace imports first (`fs.readFileSync(...)` where fs is `import * as fs from "node:fs"`): the same
         // tables and fences as named builtin imports — before anything below tries to lower the namespace object itself as a receiver.
         lowerer.lowerNamespaceBuiltinCall(expr, expr.expression) ??
@@ -4305,9 +4309,6 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         // island path (bytes never cross the boundary).
         lowerer.lowerBytesMethodCall(expr, expr.expression) ??
         lowerer.lowerBufferStaticCall(expr, expr.expression) ??
-        // URL.revokeObjectURL's zero-argument contract (the one-argument
-        // form keeps the fence — createObjectURL does too).
-        lowerUrlStaticCall(lowerer, expr, expr.expression) ??
         // Readable.from — the stream classes' one static (before the
         // stdlib chokepoint claims the member).
         lowerStreamStaticCall(lowerer, expr, expr.expression) ??
@@ -8980,41 +8981,6 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
    * direct `call` of the instance with the receiver unevaluated. Claims
    * every call whose member is generic-callable — lowering it or fencing
    * with a named message. */
-  /** URL.revokeObjectURL() with NO argument: Node's ERR_MISSING_ARGS
-   * throws before the registry lookup, so the zero-argument contract is
-   * exact without any blob machinery. The one-argument form (Node's
-   * silent no-op for unregistered ids) and createObjectURL keep their
-   * fences — a compiled program has no blob registry to consult.
-   *
-   * URL.canParse(input) is `new URL(input)`'s accept/reject as a boolean,
-   * answered by the same parser and never throwing. The BASE form
-   * (canParse(input, base)) fences for exactly the reason `new URL(input,
-   * base)` does — neither runtime parser resolves a relative reference
-   * against a base — so admitting it would answer the wrong boolean rather
-   * than fail loudly. */
-  function lowerUrlStaticCall(lowerer: Lowerer, call: ts.CallExpression, callee: ts.Expression): IrExpr | null {
-    if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
-    if (!ts.isIdentifier(callee.expression) || callee.expression.text !== "URL") return null;
-    const member = callee.name.text;
-    if (member === "canParse") {
-      const sym = lowerer.resolveValueSymbol(callee.expression);
-      if (!sym || !lowerer.isStdlibSymbol(sym)) return null;
-      if (call.arguments.length !== 1) {
-        lowerer.noLowering(
-          `URL.canParse with ${call.arguments.length} argument${call.arguments.length === 1 ? "" : "s"}`,
-          call,
-          "one absolute-URL string is the supported form (the base argument would need relative-reference resolution, which the parser does not implement — resolve the input against its base yourself)",
-          sym,
-        );
-      }
-      const input = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
-      return { kind: "libCall", fn: "url.canParse", args: [input], type: BOOL, loc: locOf(call) };
-    }
-    if (member !== "revokeObjectURL" || call.arguments.length !== 0) return null;
-    const sym = lowerer.resolveValueSymbol(callee.expression);
-    if (!sym || !lowerer.isStdlibSymbol(sym)) return null;
-    return nodeThrowExpr(1, "ERR_MISSING_ARGS", 'The "url" argument must be specified', VOID, locOf(call));
-  }
 
   const SP_BRAND_METHODS = new Set([
     "append", "delete", "get", "getAll", "has", "set", "sort",

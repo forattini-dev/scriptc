@@ -1396,8 +1396,8 @@ declare module "node:os" {
 }
 
 /* The WHATWG URL class (a Node global; the es2023 lib doesn't declare it),
- * typed as exactly the supported surface: construction from ONE absolute-
- * URL string (invalid input throws a catchable TypeError, like Node), the
+ * construction from an absolute URL or a relative input and a base
+ * (invalid input/base throws a catchable TypeError, like Node), the
  * static canParse (the same parse, answered as a boolean — never throws),
  * the protocol/pathname/href/host/hostname/port/origin/hash/username/
  * password/search getters, searchParams (the
@@ -1427,10 +1427,9 @@ interface URL {
   toString(): string;
 }
 declare var URL: {
-  new (input: string): URL;
+  new (input: string, base?: string): URL;
   /* Whether `new URL(input)` would succeed — the same parser, answered as
-   * a boolean instead of thrown. The base argument is declared optional to
-   * match Node's signature but has no lowering (see `new URL`). */
+   * a boolean instead of thrown, including relative inputs with a base. */
   canParse(input: string, base?: string): boolean;
 };
 

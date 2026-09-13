@@ -5410,7 +5410,7 @@
       "name": "URL constructor",
       "status": "static",
       "backends": "unknown",
-      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape, missing-arguments; supported scope: one absolute-URL string argument; the (input, base) relative-resolution overload and the zero-argument form are refused per site, and an unparseable input throws Node's TypeError('Invalid URL'); differential evidence: corpus:1355-url-parse, corpus:2573-fs-url-arg-ladders"
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape, missing-arguments; supported scope: one absolute-URL string argument on all native backends; Rust additionally resolves a string input against a string base, including file paths, with both arguments evaluated before parsing; invalid input or base throws TypeError('Invalid URL'); zero arguments and non-string coercions remain refused; differential evidence: corpus:1355-url-parse, corpus:2573-fs-url-arg-ladders, corpus:3172-url-base-resolution"
     },
     {
       "id": "stdlib.url.hash",
@@ -5595,7 +5595,7 @@
       "name": "URL.canParse",
       "status": "static",
       "backends": "unknown",
-      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape; supported scope: the one-argument form; the input's accept/reject decision as a boolean, never throwing — the (input, base) relative-resolution overload is refused; differential evidence: corpus:2834-url-can-parse"
+      "note": "Node 24.15.0; facets: parsing, webidl-conversion, error-shape; supported scope: the string input's accept/reject decision as a boolean, never throwing; Rust additionally supports two string arguments (input, base), sharing the constructor's relative-resolution parser and base validation; differential evidence: corpus:2834-url-can-parse, corpus:3172-url-base-resolution"
     },
     {
       "id": "stdlib.url.static.createObjectURL",

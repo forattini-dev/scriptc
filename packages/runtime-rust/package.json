@@ -16,6 +16,7 @@
     "island-v8/Cargo.toml",
     "island-v8/src",
     "src",
+    "vendor/url",
     "vendor/boa_ast",
     "vendor/boa_engine",
     "vendor/boa_gc",

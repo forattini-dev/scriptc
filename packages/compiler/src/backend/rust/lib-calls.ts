@@ -690,6 +690,11 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "url.new" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::url_new(&(${context.emitExpr(arg)}))`;
   }
+  if ((expr.fn === "url.newBase" || expr.fn === "url.canParseBase") &&
+      expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
+    const fn = expr.fn === "url.newBase" ? "url_new_base" : "url_can_parse_base";
+    return `runtime::${fn}(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
+  }
   if (expr.fn === "url.setPathname" && expr.args.length === 2 && arg !== undefined && secondArg !== undefined) {
     return `runtime::url_set_pathname(&(${context.emitExpr(arg)}), &(${context.emitExpr(secondArg)}))`;
   }

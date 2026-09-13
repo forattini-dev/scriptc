@@ -78,6 +78,8 @@ boa_parser = "=0.22.0"
 boa_interner = "=0.22.0"
 
 [patch.crates-io]
+# Preserve file-path empty segments for Node-compatible relative URL resolution.
+url = { path = "vendor/url" }
 boa_engine = { path = "vendor/boa_engine" }
 # boa_ast 0.22.0 with one fix (vendor/boa_ast/PATCHES.md): the scope
 # analyzer skipped a class method's COMPUTED name, so function expressions

@@ -1,3 +1,4 @@
+import { lowerUrlNew } from "./lower-url.js";
 import { lowerDateNew } from "./lower-date-constructor.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Class lowering: shape collection over the single-inheritance graph
@@ -7,7 +8,7 @@ import { InternalCompilerError } from "../../errors.js";
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
+import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
 import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../type-mapper.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
@@ -4695,11 +4696,6 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
       // object parses structurally in the stream spoke.
       const streamInfo = builtinStreamInfoOf(lowerer, symbol);
       if (streamInfo) return lowerStreamNew(lowerer, expr, streamInfo);
-      // `new URL(input)`: the WHATWG URL class (stdlib/@types provenance —
-      // a user's own `class URL` resolves through classBySymbol below).
-      // One string argument; invalid input throws a catchable TypeError
-      // ("Invalid URL"), like Node. The lib's base-argument form
-      // typechecks and is fenced here.
       // `new RegExp(pattern, flags?)`: runtime construction over the same
       // libregexp engine the literals ride. The pattern compiles EAGERLY,
       // so bad input throws Node's catchable SyntaxError at construction.
@@ -4726,19 +4722,8 @@ export function lowerNew(lowerer: Lowerer, expr: ts.NewExpression): IrExpr {
         const flags = strArg(args[1], "flags argument");
         return { kind: "libCall", fn: "regex.new", args: [pattern, flags], type: { kind: "regex" }, loc };
       }
-      if (symbol && symbol.name === "URL" && lowerer.isStdlibSymbol(symbol)) {
-        const args = expr.arguments ?? [];
-        if (args.length !== 1) {
-          lowerer.noLowering(
-            `new URL with ${args.length} argument${args.length === 1 ? "" : "s"}`,
-            expr,
-            "one absolute-URL string is the supported form (resolve relative inputs against a base yourself)",
-            symbol,
-          );
-        }
-        const input = lowerer.lowerExprExpecting(args[0]!, STRING);
-        return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };
-      }
+      const url = lowerUrlNew(lowerer, expr, symbol);
+      if (url) return url;
       // `new URLSearchParams(init?)`: the WHATWG list (stdlib provenance —
       // see lowerSearchParamsNew for the lowered init shapes).
       if (symbol && symbol.name === "URLSearchParams" && lowerer.isStdlibSymbol(symbol)) {

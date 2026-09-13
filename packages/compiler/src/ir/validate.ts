@@ -1,3 +1,4 @@
+import { URL_LIB_FN_SIGS } from "./url-signatures.js";
 import { DATE_LIB_FN_SIGS } from "./date-signatures.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js";
 import { isJsonStringifyType } from "./json-stringify.js";
@@ -264,23 +265,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },
   "sym.desc": { argTypes: [SYMBOL_T], result: VOID },
   "sym.toString": { argTypes: [SYMBOL_T], result: STRING },
-  "url.new": { argTypes: [STRING], result: URL_T },
-  "url.protocol": { argTypes: [URL_T], result: STRING },
-  "url.host": { argTypes: [URL_T], result: STRING },
-  "url.hostname": { argTypes: [URL_T], result: STRING },
-  "url.pathname": { argTypes: [URL_T], result: STRING },
-  "url.setPathname": { argTypes: [URL_T, STRING], result: VOID },
-  "url.href": { argTypes: [URL_T], result: STRING },
-  "url.port": { argTypes: [URL_T], result: STRING },
-  "url.origin": { argTypes: [URL_T], result: STRING },
-  "url.hash": { argTypes: [URL_T], result: STRING },
-  "url.username": { argTypes: [URL_T], result: STRING },
-  "url.password": { argTypes: [URL_T], result: STRING },
-  "url.canParse": { argTypes: [STRING], result: BOOL },
-  "url.fileURLToPathUrl": { argTypes: [URL_T], result: STRING },
-  "url.fileURLToPathStr": { argTypes: [STRING], result: STRING },
-  "url.pathToFileURL": { argTypes: [STRING], result: URL_T },
-  "url.pathToFileURLWin32": { argTypes: [STRING], result: URL_T },
+  ...URL_LIB_FN_SIGS,
   "sp.new": { argTypes: [], result: SEARCH_PARAMS_T },
   "sp.parse": { argTypes: [STRING], result: SEARCH_PARAMS_T },
   "sp.copy": { argTypes: [SEARCH_PARAMS_T], result: SEARCH_PARAMS_T },

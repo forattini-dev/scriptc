@@ -170,8 +170,8 @@ export const NODE24_URL_COMPAT_PROFILE = {
       "constructor",
       "constructor",
       ["parsing", "webidl-conversion", "error-shape", "missing-arguments"],
-      [corpus("1355-url-parse"), corpus("2573-fs-url-arg-ladders")],
-      "one absolute-URL string argument; the (input, base) relative-resolution overload and the zero-argument form are refused per site, and an unparseable input throws Node's TypeError('Invalid URL')",
+      [corpus("1355-url-parse"), corpus("2573-fs-url-arg-ladders"), corpus("3172-url-base-resolution")],
+      "one absolute-URL string argument on all native backends; Rust additionally resolves a string input against a string base, including file paths, with both arguments evaluated before parsing; invalid input or base throws TypeError('Invalid URL'); zero arguments and non-string coercions remain refused",
     ),
     urlOperation(
       "href",
@@ -277,8 +277,8 @@ export const NODE24_URL_COMPAT_PROFILE = {
       name: "URL.canParse",
       kind: "static-method",
       facets: ["parsing", "webidl-conversion", "error-shape"],
-      scope: "the one-argument form; the input's accept/reject decision as a boolean, never throwing — the (input, base) relative-resolution overload is refused",
-      evidence: [corpus("2834-url-can-parse")],
+      scope: "the string input's accept/reject decision as a boolean, never throwing; Rust additionally supports two string arguments (input, base), sharing the constructor's relative-resolution parser and base validation",
+      evidence: [corpus("2834-url-can-parse"), corpus("3172-url-base-resolution")],
     },
 
     paramsOperation(

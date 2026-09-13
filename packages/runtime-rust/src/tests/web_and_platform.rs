@@ -161,6 +161,40 @@
     }
 
     #[test]
+    fn url_base_resolution_preserves_file_path_segments() {
+        for (input, base, expected) in [
+            ("../c", "https://example.test/a/b", "https://example.test/c"),
+            ("?q=2", "https://example.test/a?q=1#old", "https://example.test/a?q=2"),
+            ("..", "file:///tmp/package/src/index.ts", "file:///tmp/package/"),
+            ("../x", "file:////server/a/b", "file:////server/x"),
+            ("../../../x", "file:////server/a/b", "file:///x"),
+            ("#f", "file:////server/a/b", "file:////server/a/b#f"),
+            ("file:////double/a", "https://example.test/", "file:////double/a"),
+            ("////double/a", "file:///tmp/x", "file:////double/a"),
+            ("#f", "data:text/plain,hi", "data:text/plain,hi#f"),
+        ] {
+            assert!(url_can_parse_base(&string(input), &string(base)));
+            assert_eq!(url_href(&url_new_base(&string(input), &string(base))).as_ref(), expected);
+        }
+        for (input, base) in [
+            ("https://absolute.test/", "invalid base"),
+            ("child", "data:text/plain,hi"),
+            ("http://[invalid", "https://example.test/"),
+        ] {
+            assert!(!url_can_parse_base(&string(input), &string(base)));
+            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                url_new_base(&string(input), &string(base))
+            })).err().expect("invalid input or base must throw");
+            let caught = caught_from_panic(payload);
+            assert_eq!(caught_error_name(&caught).as_ref(), "TypeError");
+            assert_eq!(caught_error_message(&caught).as_ref(), "Invalid URL");
+        }
+        let file = url_new(&string("file:////server/a"));
+        url_set_pathname(&file, &string("//other/b"));
+        assert_eq!(url_href(&file).as_ref(), "file:////other/b");
+    }
+
+    #[test]
     fn url_component_getters_match_node_empty_and_default_rules() {
         // port: "" for absent AND for the scheme default; a real port 0 stays.
         assert_eq!(url_port(&url_new(&string("http://e.com/a"))).as_ref(), "");
