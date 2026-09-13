@@ -251,13 +251,6 @@ stdlib-fence.ts:75:10 - error SC2020: 'Object.is over these union operands' is p
 
   hint: union-typed comparisons need one comparable shape (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)
 
-stdlib-fence.ts:89:13 - error SC1090: console.log of 'bigint' values ('bigint' values have no inspect lowering) are not supported yet
-
-  88 | const big = 10n;
-  89 | console.log(big);
-     |             ^~~
-  90 | function throwDate(): void {
-
 stdlib-fence.ts:91:9 - error SC1090: throwing Date values (catch bindings cannot preserve Date's object kind; throw an Error or primitive instead) are not supported yet
 
   90 | function throwDate(): void {

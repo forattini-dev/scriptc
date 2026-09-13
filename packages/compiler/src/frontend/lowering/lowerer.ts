@@ -1,3 +1,4 @@
+import { checkNativeCallResult } from "./native-call-result.js";
 import { discriminatedViewSupported, lowerDiscriminatedView } from "./lower-discriminated-view.js";
 import { jsArrayInferenceBinding, jsArrayInferenceExpression } from "../js-array-field-types.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
@@ -8482,12 +8483,11 @@ export class Lowerer {
   }
 
   lowerCall(expr: ts.CallExpression): IrExpr {
-    // Ambient fetch (native in static builds, island-backed under
-    // --dynamic) and dynamic import() claim their calls before the general
-    // dispatch. The general identifier-call paths have no lowering for a
-    // promise-returning ambient global, and `import` is a keyword callee no
-    // identifier path matches.
-    return (
+    // Fetch and dynamic import claim calls before general dispatch:
+    // identifier-call paths do not lower promise-returning ambient globals
+    // or the `import` keyword. Static fetch stays native; --dynamic fetch
+    // uses the island.
+    return checkNativeCallResult(this, expr,
       lowerFfiCall(this, expr) ??
       lowerFetchCall(this, expr) ??
       lowerStaticFetchCompanionCall(this, expr) ??

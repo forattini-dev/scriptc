@@ -86,6 +86,10 @@ function lowerBigIntCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null {
       if (!L.isStdlibGlobal(callee, name)) continue;
       if (name !== "BigInt" && !isBigInt(L, argument)) return null;
       const value = L.lowerExpr(argument);
+      // DataView's composed Number(getBig*64(...)) intrinsic already
+      // performs the integer-to-double conversion, including rounding.
+      if (name === "Number" && value.kind === "bytesIntrinsic" &&
+          (value.method === "dvGetBigUint64Number" || value.method === "dvGetBigInt64Number")) return value;
       if (name === "BigInt") {
         if (value.type.kind === "bigint") return value;
         const fn = value.type.kind === "string" ? "bigint.fromString" : value.type.kind === "f64" ? "bigint.fromNumber" : value.type.kind === "bool" ? "bigint.fromBool" : null;

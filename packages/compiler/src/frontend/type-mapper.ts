@@ -566,7 +566,7 @@ function isNeverArrayRestParameter(
 }
 
 /** An open-ended `any[]`/`unknown[]` call surface has no finite typed ABI,
- * but under --dynamic it has an exact checked-dynamic representation: the
+ * but it has an exact native checked-dynamic representation: the
  * function value is a dyn callable and its thunk receives the real JS
  * argument vector. Typed rests keep their completed-array convention. */
 function isDynamicArrayRestParameter(
@@ -2344,10 +2344,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // is therefore exactly the fixed zero-slot signature, unlike every
         // inhabited rest array, which keeps the variadic fence.
         if (isNeverArrayRestParameter(checker, p, decl)) continue;
-        // Under --dynamic, preserve JS arity by representing the whole
+        // Preserve JS arity by representing the whole
         // callable at the checked-dynamic boundary. Its typed producer is
         // boxed with a per-signature thunk and its result is checked at use.
-        if (ctx.dynamic && isDynamicArrayRestParameter(checker, p, decl)) {
+        if (isDynamicArrayRestParameter(checker, p, decl)) {
           dynamicRest = true;
           continue;
         }

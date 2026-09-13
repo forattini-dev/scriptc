@@ -44,6 +44,7 @@ import { expandoMemberRead } from "./lower-expando.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { countedFor, varRef } from "../../ir/build.js";
 import { rejectStaticThis } from "./static-this.js";
+import { packDynamicRest } from "./dynamic-rest.js";
 
 /** How a parameter participates in CALL-SITE COMPLETION (the frontend
  * completes every call to the one full signature, so the IR and backends
@@ -67,11 +68,11 @@ export interface ParamShape {
 }
 
 /** Whether a rest array deliberately carries open-ended dynamic values.
- * In TypeScript under --dynamic this uses the same dynRest ABI as inferred
+ * In TypeScript this uses the same native dynRest ABI as inferred
  * JavaScript rests: one checked-dynamic array containing the real surplus
  * argument vector. */
 function isDynamicRestArray(lowerer: Lowerer, type: ts.Type): boolean {
-  if (!lowerer.dynamic || !lowerer.checker.isArrayType(type)) return false;
+  if (!lowerer.checker.isArrayType(type)) return false;
   const element = lowerer.checker.getTypeArguments(type as ts.TypeReference)[0];
   return element !== undefined && (element.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
 }
@@ -468,18 +469,7 @@ export interface GenericInstance {
       });
       out.push({ kind: "jsOp", op: "arrLit", args: elems, type: JSVAL, loc });
     } else if (restAt >= 0 && shapes[restAt]!.mode === "dynRest") {
-      // The VARIADIC dyn pack (a JS `...args` with no static element
-      // type, or the synthetic `arguments` slot): surplus arguments
-      // convert through the dyn boundary into one fresh dyn array —
-      // exactly what the boxed call thunk builds for indirect calls.
-      const elems = sources.slice(restAt).map((a): IrExpr => {
-        if (isIr(a)) return lowerer.coerceInto(blame, a.ir, DYN);
-        if (ts.isSpreadElement(a)) {
-          lowerer.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
-        }
-        return lowerer.lowerExprExpecting(a, DYN);
-      });
-      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+      out.push(packDynamicRest(lowerer, sources.slice(restAt), blame, loc));
     } else if (restAt >= 0) {
       const restType = shapes[restAt]!.type;
       // A TUPLE-typed rest (`(...[x, y]: [number, number])` — the pattern
@@ -3319,11 +3309,11 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
         // kinds byte-exactly, boxed functions as [Function: name] /
         // [Function (anonymous)], composites through the dyn walk
         // (insp.dyn). Never throws — Node's console.log never does.
-        if (lowered.type.kind === "dyn") {
+        if (lowered.type.kind === "dyn" || lowered.type.kind === "bigint") {
           return {
             kind: "libCall",
             fn: "insp.dynS",
-            args: [lowered, { kind: "numLit", value: 2, type: F64, loc }],
+            args: [lowered.type.kind === "bigint" ? { kind: "dynFrom", value: lowered, type: DYN, loc } : lowered, { kind: "numLit", value: 2, type: F64, loc }],
             type: STRING,
             loc,
           } satisfies IrExpr;

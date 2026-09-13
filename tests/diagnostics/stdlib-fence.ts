@@ -83,8 +83,8 @@ function optionalDate(value: Date | undefined): number {
   return value === undefined ? -1 : value.getTime();
 }
 optionalDate(undefined);
-// BigInt arithmetic has native Rust support; direct console inspection
-// remains fenced until its n-suffixed rendering is lowered.
+// BigInt arithmetic and scalar console inspection have native Rust support.
+// Keep this accepted case beside the remaining unsupported stdlib shapes.
 const big = 10n;
 console.log(big);
 function throwDate(): void {
