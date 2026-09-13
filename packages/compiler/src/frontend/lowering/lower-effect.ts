@@ -643,7 +643,7 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (total !== 2) break;
         const source = at(0);
         const fn = at(1);
-        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length !== 1) break;
+        if (source.type.kind !== "effect" || fn.type.kind !== "func" || fn.type.params.length > 1) break;
         if (member !== "mapError" && fn.type.ret.kind !== "effect") break;
         return lib(member === "mapError" ? "effect.mapError" : "effect.catchAll", [source, fn], EFFECT_T, loc);
       }
@@ -688,9 +688,21 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         // `Effect.catchTag("Tag", (e) => …)` — the failure whose `_tag` is the literal; the handler's parameter is the checker's narrowing (the class the tag names).
         if (total !== 3 || at(0).type.kind !== "effect") break;
         const tag = at(1);
-        const handler = at(2);
+        let handler = at(2);
         if (tag.kind !== "strLit") L.unsupported("SC1090", expr, "Effect.catchTag with a non-literal tag");
-        if (handler.type.kind !== "func" || handler.type.params.length !== 1 || handler.type.ret.kind !== "effect") break;
+        if (handler.type.kind !== "func" || handler.type.params.length > 1 || handler.type.ret.kind !== "effect") break;
+        if (handler.type.params.length === 0) {
+          // The contextual callback contract retains the tag-narrowed error
+          // even when the implementation ignores it. Reuse the ordinary
+          // function adapter so capture and evaluation semantics stay intact.
+          const node = args[2 - pre.length];
+          const contextual = node === undefined ? undefined : L.checker.getContextualType(node);
+          const signature = contextual === undefined ? undefined : L.checker.getCallSignatures(contextual)[0];
+          const parameter = signature?.getParameters()[0];
+          const type = parameter === undefined ? null : L.mapTypeOf(L.checker.getTypeOfSymbol(parameter));
+          if (type === null) L.unsupported("SC1090", expr, "Effect.catchTag without a representable contextual error type");
+          handler = L.coerceInto(expr, handler, { kind: "func", params: [type], ret: EFFECT_T });
+        }
         return lib("effect.catchTag", [at(0), tag, handler], EFFECT_T, loc);
       }
       case "isEffect": {

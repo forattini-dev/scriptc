@@ -1,3 +1,4 @@
+import { effectTagPredicate } from "./effect-tag.js";
 import { rustJsString } from "./string-literals.js";
 import { recordNewName } from "./shared-records.js";
 /* The effect kernel's Rust emission: `effect.*` lib calls over
@@ -470,16 +471,18 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
       return `{ let ${predicate} = ${context.emitExpr(second)}; let ${recover} = ${context.emitExpr(handler)}; let ${keepPredicate} = ${predicate}.clone(); let ${keepRecover} = ${recover}.clone(); runtime::effect_catch_if(&${context.emitExpr(first)}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${errorRust} = ${unbox(context, errorType, "&sc_value", expr.loc)}; ${predicateDispatch} }), std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${context.rustType(handlerType, expr.loc)} = ${unbox(context, handlerType, "&sc_value", expr.loc)}; let _ = &sc_arg; ${recoverDispatch} }), Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keepPredicate}); sc_tracer.edge(&${keepRecover}); })) }`;
     }
     case "effect.catchTag": {
-      // The failure matches when its box holds the handler's (tag-narrowed) parameter type: the class the tag names.
+      // The runtime tag is observable even when multiple errors share a native shape.
       const handler = expr.args[2];
       if (first === undefined || second === undefined || handler === undefined || handler.type.kind !== "func") break;
       const narrowed = handler.type.params[0];
-      if (narrowed === undefined || narrowed.kind === "union") return context.unsupported("Effect.catchTag over a handler whose error parameter is not one class", expr.loc);
+      if (narrowed === undefined || second.kind !== "strLit") return context.unsupported("Effect.catchTag without a typed handler and literal tag", expr.loc);
+      const source = context.nextTemporary();
+      const predicate = effectTagPredicate(context, narrowed, "sc_value", second.value, expr.loc);
       const recover = context.nextTemporary();
       const keepRecover = context.nextTemporary();
       const recoverDispatch = context.emitClosureDispatch(recover, handler.type, ["sc_arg"], expr.loc);
       const narrowedRust = context.rustType(narrowed, expr.loc);
-      return `{ let ${recover} = ${context.emitExpr(handler)}; let ${keepRecover} = ${recover}.clone(); runtime::effect_catch_if(&${context.emitExpr(first)}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| sc_value.downcast_ref::<${narrowedRust}>().is_some()), std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${narrowedRust} = runtime::effect_unbox(&sc_value); ${recoverDispatch} }), ${traced(context, keepRecover)}) }`;
+      return `{ let ${source} = ${context.emitExpr(first)}; let ${recover} = ${context.emitExpr(handler)}; let ${keepRecover} = ${recover}.clone(); runtime::effect_catch_if(&${source}, std::rc::Rc::new(move |sc_value: runtime::EffectValue| ${predicate}), std::rc::Rc::new(move |sc_value: runtime::EffectValue| { let sc_arg: ${narrowedRust} = ${unbox(context, narrowed, "&sc_value", expr.loc)}; ${recoverDispatch} }), ${traced(context, keepRecover)}) }`;
     }
     case "option.some":
       if (first === undefined) break;
