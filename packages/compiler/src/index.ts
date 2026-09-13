@@ -613,6 +613,10 @@ function runFrontend(
     // First preserve the interacting graph if removing one package clears
     // the errors. Otherwise retain the conservative SOLO fallback, followed
     // by a full consumer recheck before admitting any survivors.
+    // Attribution uses the entry, package set and copied diagnostics; the
+    // current checker is never consulted again. Release its Go server before
+    // opening the probe worlds so large graphs do not coexist in memory.
+    load.dispose();
     const single = findSingleNpmSurfaceOffender(entryPath, effective, externalTypes);
     if (single !== null) dropWithNote(single);
     else for (const p of [...effective]) {
@@ -621,7 +625,6 @@ function runFrontend(
       probe.dispose();
       if (probeDiags.some((d) => d.code === "SC0001")) dropWithNote(p);
     }
-    load.dispose();
     load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
     preflight = checkPreflight(load);
     if (preflight.some((d) => d.code === "SC0001") && effective.size > 0) {
