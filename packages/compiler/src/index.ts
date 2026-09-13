@@ -799,7 +799,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     const lowered = lowerWithFrontier(fe, {
       dynamic: opts.dynamic ?? false,
       coverage: true,
-      statefulRegex: (opts.backend ?? "rust") === "rust",
+      statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust",
       targetPlatform: buildTargetPlatform(),
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
@@ -1227,7 +1227,7 @@ async function compileTracked(
     try {
       lowered = lowerWithFrontier(fe, {
         dynamic: opts.dynamic ?? false,
-        statefulRegex: (opts.backend ?? "rust") === "rust",
+        statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust",
         targetPlatform: buildPlatform,
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
       });

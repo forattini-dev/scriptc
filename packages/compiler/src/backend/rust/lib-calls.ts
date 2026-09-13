@@ -25,6 +25,7 @@ import { emitRustDiagnosticsChannelCall } from "./diagnostics-channel.js";
 import { emitRustAsyncLocalStorageCall } from "./async-local-storage.js";
 import { emitRustAssertCall } from "./assert-calls.js";
 import { emitRustNativeModuleCall } from "./native-module.js";
+import { emitRustPromiseView } from "./promise-view.js";
 
 export type RustLibCallExpr = Extract<IrExpr, { kind: "libCall" }>;
 type IrFuncType = Extract<IrType, { kind: "func" }>;
@@ -85,6 +86,8 @@ export interface RustLibCallContext {
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const promiseView = emitRustPromiseView(expr, context);
+  if (promiseView !== null) return promiseView;
   const bigint = emitRustBigIntCall(expr, context);
   if (bigint !== null) return bigint;
   const nativeModuleCall = emitRustNativeModuleCall(expr, context);

@@ -1,5 +1,5 @@
 import { BIGINT_LIB_FN_SIGS } from "./bigint-signatures.js"; import { URL_LIB_FN_SIGS } from "./url-signatures.js";
-import { DATE_LIB_FN_SIGS } from "./date-signatures.js";
+import { DATE_LIB_FN_SIGS } from "./date-signatures.js"; import { validatePromiseView } from "./promise-view.js";
 import { NUMERIC_COERCION_SIGS } from "./numeric-coercion.js"; import { JSON_REPLACER_SIGS } from "./json-replacer.js";
 import { isJsonStringifyType } from "./json-stringify.js";
 import { regexCaptureLayout } from "./regex-captures.js";
@@ -131,7 +131,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "timers.refresh": { argTypes: [F64], result: F64 },
   "timers.setImmediate": { argTypes: [{ kind: "func", params: [], ret: VOID }], result: F64 },
   "module.import": { argTypes: [{ kind: "func", params: [], ret: { kind: "promise", inner: JSVAL } }], result: { kind: "promise", inner: JSVAL } },
-  "module.namespace": { argTypes: [JSVAL], result: JSVAL },
+  "module.namespace": { argTypes: [JSVAL], result: JSVAL }, "promise.view": { argTypes: [null, null], result: VOID },
   "timers.queueMicrotask": { argTypes: [{ kind: "func", params: [], ret: VOID }], result: VOID },
   "timers.queueMicrotaskDyn": { argTypes: [DYN], result: VOID },
   "timers.clearImmediate": { argTypes: [F64], result: VOID },
@@ -3638,8 +3638,7 @@ function validateFunction(
           err(`libCall of unknown library function "${e.fn as string}"`, e.loc);
           break;
         }
-        // emitter.emit is variadic: (recv, name) plus the event's tuple.
-        // The stream constructors (trailing option callbacks), write/end
+        // Variadic emitter.emit takes the event tuple; stream constructors, write/end
         // (the optional chunk/cb tail), and unpipe (the optional
         // destination) admit a longer list the same way.
         const variadic =
@@ -3669,6 +3668,7 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "promise.view") { validatePromiseView(e, err); break; }
         if (e.fn === "fileHandle.read" || e.fn === "fileHandle.writeBytes" || e.fn === "fileHandle.writeStr") {
           const inner = e.type.kind === "promise" ? e.type.inner : undefined;
           const shape = inner?.kind === "record" ? records.get(inner.shapeId) : undefined;

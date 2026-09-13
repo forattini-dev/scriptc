@@ -1,3 +1,5 @@
+import { coercibleValue } from "./value-coercion.js";
+import { lowerPromiseView } from "./lower-promise-view.js";
 import { directExternalTypeSpecifiersByFile } from "./external-type-specifiers.js";
 import { checkNativeCallResult } from "./native-call-result.js";
 import { discriminatedViewSupported, lowerDiscriminatedView } from "./lower-discriminated-view.js";
@@ -346,6 +348,7 @@ export interface LowerResult {
 export interface LowerOptions {
   /** Runtime capability: stateful regex execution and match metadata. */
   statefulRegex?: boolean;
+  nativePromiseViews?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -435,6 +438,7 @@ type RuntimeFenceTarget =
 /** The Lowerer's pass configuration (see lowerToIr). */
 export interface LowererMode {
   statefulRegex?: boolean;
+  nativePromiseViews?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -529,6 +533,7 @@ export function lowerToIr(
     directExternalTypeSpecifiersByFile(externalTypes);
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
     statefulRegex: options.statefulRegex ?? false,
+    nativePromiseViews: options.nativePromiseViews ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -547,6 +552,7 @@ export function lowerToIr(
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
         statefulRegex: options.statefulRegex ?? false,
+        nativePromiseViews: options.nativePromiseViews ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -573,6 +579,7 @@ export function lowerToIr(
     const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
       reachable,
       statefulRegex: options.statefulRegex ?? false,
+      nativePromiseViews: options.nativePromiseViews ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -593,6 +600,7 @@ export function lowerToIr(
     remainder: true,
     alreadyFlushed: resultLowerer.flushedSymbols,
     statefulRegex: options.statefulRegex ?? false,
+    nativePromiseViews: options.nativePromiseViews ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -937,6 +945,7 @@ export function jsFuncNameOf(node: ts.Node): string | null {
 
 export class Lowerer {
   readonly statefulRegex: boolean;
+  readonly nativePromiseViews: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1584,6 +1593,7 @@ export class Lowerer {
     mode: LowererMode = {},
   ) {
     this.statefulRegex = mode.statefulRegex ?? false;
+    this.nativePromiseViews = mode.nativePromiseViews ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -3838,6 +3848,8 @@ export class Lowerer {
    * and structural adapters; incompatible pairs keep their shape fences. */
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
     rejectNativeImportCopy(this, expr, expected);
+    const promiseView = lowerPromiseView(this, expr, expected);
+    if (promiseView) return promiseView;
     const sharedUnion = lowerDiscriminatedView(this, expr, expected);
     if (sharedUnion) return sharedUnion;
     // Island boundary, both directions. IN: any static value flowing into
@@ -5331,57 +5343,7 @@ export class Lowerer {
    * boundary in both directions (dynFrom / dynCheck's JSON-safe domain).
    * Deliberately EXCLUDES the trap-only stranded conversions — an adapter
    * that could only ever throw is a fence, not a bridge. */
-  coercibleValue(src: IrType, dst: IrType): boolean {
-    if (typeEquals(src, dst)) return true;
-    // The island boundary joins the mechanical set: values that MARSHAL
-    // in (units, the checked-dynamic deep copy, JSON-safe data, liftable
-    // composites, marshalable closures — coerceToExpected's jsval-IN
-    // block) and island handles whose exits VALIDATE (boundaryExitSafe) —
-    // the `defaultFallback(cfg) { return { login, id, scopes } }` shape,
-    // whose slot returns a package ('any') type.
-    if (dst.kind === "jsval") {
-      return (
-        src.kind !== "jsval" &&
-        (isUnitType(src) ||
-          src.kind === "dyn" ||
-          this.boundarySafe(src) ||
-          this.jsvalLiftable(src) ||
-          (src.kind === "func" &&
-            canMarshalTypedFuncIntoIsland(src, (id) => this.shapes.get(id), (id) => this.unions.get(id))))
-      );
-    }
-    if (src.kind === "jsval") return this.boundaryExitSafe(dst);
-    if (dst.kind === "dyn") return src.kind !== "dyn" && this.dynConvertible(src);
-    if (src.kind === "dyn") {
-      // The checked-dynamic function boundary's OUT direction joins the
-      // mechanical set: a dyn result landing in an adaptable func slot
-      // takes dynCheck's per-target shim (coerceToExpected's funcOk rule
-      // — the production/development function-choice ternary shape).
-      return (
-        this.jsonSafe(dst) ||
-        (dst.kind === "func" && canAdaptDynFuncTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)))
-      );
-    }
-    // Function parameters are contravariant at the adapter boundary. A
-    // slot record may therefore enter the wrapped callback through the
-    // same exact copy/optional-completion plan as any ordinary record
-    // assignment (`P` into `P & { key?: string }` completes key with the
-    // undefined arm). recordWidthPlan is a pure probe here; the adapter's
-    // coerceToExpected call interns the helper only after every piece has
-    // been admitted.
-    if (src.kind === "record" && dst.kind === "record") {
-      return this.recordWidthPlan(src.shapeId, dst.shapeId) !== null;
-    }
-    if (dst.kind === "union") {
-      if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
-      if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;
-      return !isUnitType(src) && this.armTag(dst.unionId, src) >= 0;
-    }
-    if (src.kind === "union") {
-      return !isUnitType(dst) && dst.kind !== "void" && this.armTag(src.unionId, dst) >= 0;
-    }
-    return false;
-  }
+  coercibleValue(src: IrType, dst: IrType): boolean { return coercibleValue(this, src, dst); }
 
   /** True when a `src` function value enters a `dst` slot through
    * funcCoerceAdapter with NO stranded (trap-only) piece: no rest packs,

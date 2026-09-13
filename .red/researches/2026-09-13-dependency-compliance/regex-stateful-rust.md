@@ -35,4 +35,6 @@ As recusas de regex com estado em C/LLVM foram preservadas. IR serializada que c
 
 ## Próximo bloqueio da missão
 
+Atualização posterior: a conversão de callbacks `() => Promise<T>` para `() => Promise<unknown>` foi corrigida no [checkpoint de covariância de Promise](promise-covariance-rust.md), com testes de identidade, reações e rejeições.
+
 A aquisição de tipos e este avanço de regex fecham uma dependência real; não representam a build integral do Redcode. A contagem completa do CLI não foi refeita neste ciclo. O próximo passo é retomar o adaptador de covariância de Promise já isolado e os demais bloqueios nativos, mantendo separadas as falhas do compilador e as exigências legítimas de tipagem dos consumidores. Os gates completos precisam passar antes de publicar.

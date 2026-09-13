@@ -9,7 +9,7 @@ import { compile } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
-test("native Proxy Promise resolution refuses each top-level bridge without inspecting container children", async () => {
+test.each(["unknown", "Promise<unknown>"])("native Proxy Promise resolution through %s callbacks refuses each top-level bridge without inspecting container children", async (callbackResult) => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-rust-proxy-promise-"));
   const entry = join(dir, "main.ts");
   await writeFile(entry, `
@@ -19,7 +19,7 @@ type View = { value?: number };
 const view = proxy as unknown as View;
 function choose(flag: boolean): View | number { return flag ? view : 3; }
 function isProxy(value: unknown): boolean { return value === proxy; }
-async function report(label: string, action: () => unknown): Promise<void> {
+async function report(label: string, action: () => ${callbackResult}): Promise<void> {
   try { const result = await action(); console.log(label, 'ok', result === proxy); }
   catch (error) {
     console.log(label, 'refused', error instanceof Error && error.message.includes('Promise thenable assimilation on native Proxy'));

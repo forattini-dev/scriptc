@@ -28,6 +28,7 @@ export function nativeModuleBackendDiagnostics(
   const callableRecords = nativeCallableRecordBackendDiagnostics(mod, backend);
   if (callableRecords.length > 0) return callableRecords;
   let loc = mod.functions.find((fn) => fn.syncModuleCacheGlobal !== undefined)?.loc;
+  let feature = "native local module imports";
   const visit = (value: unknown): void => {
     if (loc !== undefined || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
@@ -35,7 +36,8 @@ export function nativeModuleBackendDiagnostics(
       return;
     }
     const node = value as { kind?: unknown; fn?: unknown; loc?: SrcLoc };
-    if (node.kind === "libCall" && (node.fn === "module.import" || node.fn === "module.namespace")) {
+    if (node.kind === "libCall" && (node.fn === "module.import" || node.fn === "module.namespace" || node.fn === "promise.view")) {
+      if (node.fn === "promise.view") feature = "Promise payload views";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
@@ -44,7 +46,7 @@ export function nativeModuleBackendDiagnostics(
   visit(mod);
   return loc === undefined ? [] : [{
     code: "SC3001",
-    message: `the ${backend} backend does not support native local module imports yet; use --backend rust`,
+    message: `the ${backend} backend does not support ${feature} yet; use --backend rust`,
     loc,
   }];
 }

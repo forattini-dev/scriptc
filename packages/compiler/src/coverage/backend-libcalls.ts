@@ -844,6 +844,7 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "process.uptime": ["c", "llvm", "rust"],
   "process.versionsNode": ["c", "llvm", "rust"],
   "process.versionsOpenssl": ["c", "llvm", "rust"],
+  "promise.view": ["c", "rust"],
   "qs.escape": ["c", "llvm", "rust"],
   "qs.parse": ["c", "llvm", "rust"],
   "qs.stringify": ["c", "llvm", "rust"],
