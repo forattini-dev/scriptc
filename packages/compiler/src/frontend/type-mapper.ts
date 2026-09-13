@@ -1,3 +1,4 @@
+import { fixedTupleParameters } from "./fixed-tuple-parameters.js";
 export { formatIrType } from "./format-ir-type.js";
 export { ISLAND_AMBIENT_TYPES, isParseArgsDynTypeName } from "./ambient-type-names.js";
 import { ISLAND_AMBIENT_TYPES, PARSE_ARGS_DYN_TYPES } from "./ambient-type-names.js";
@@ -2328,16 +2329,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       const pType = checker.getTypeOfSymbol(p);
-      // A rest parameter instantiated at a REQUIRED-ONLY tuple (`(...args: Args) => …` from effect's `fn`, Args = [n: number]) is
-      // a fixed-arity signature: each element is one slot (the empty tuple — a zero-argument body — carries no flags on the facade's
-      // shape: zero slots). Optional/rest elements keep the variadic fence below.
+      // Effect.fn and mapped callable types retain finite rest tuples in
+      // their signatures. Complete optional slots just like spelled params.
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken && checker.isTupleType(pType)) {
-        const ref = pType as ts.TupleTypeReference;
-        const flags = ((ref.elementFlags as ts.ElementFlags[] | undefined) !== undefined ? ref : (ref.getTarget() as ts.TupleType | undefined))?.elementFlags;
-        if (checker.getTypeArguments(ref).length === 0 || (flags !== undefined && flags.every((flag) => (flag & ts.ElementFlags.Required) !== 0))) {
-          for (const element of checker.getTypeArguments(ref)) { const et = mapType(element, ctx); if (!et) return null; if (et.kind !== "void") params.push(et); }
-          continue;
-        }
+        const tupleParams = fixedTupleParameters(pType as ts.TupleTypeReference, checker,
+          element => mapType(element, ctx), type => withUndefinedArm(type, ctx.unions));
+        if (tupleParams === null) return null;
+        params.push(...tupleParams);
+        continue;
       }
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
         // `(...args: never[])` is an uninhabited rest surface: every
