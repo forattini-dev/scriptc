@@ -26,6 +26,8 @@ A build Rust com `allowEngine: false` ainda foi recusada por `SC3003`, contendo 
 
 ## Próximos passos
 
+Atualização posterior: o item 1 foi implementado e a dependência real passou em 17 casos diferenciais Node/Rust. Ver [regex com estado no Rust](regex-stateful-rust.md); o bloqueio registrado acima descreve o estado deste checkpoint anterior.
+
 1. Implementar e testar o comportamento de regex global/sticky e `lastIndex`, incluindo chamadas repetidas, ausência de match, índices Unicode e `.exec()`/`.test()`, antes de liberar a dependência real sem engine. Corrigir também a identificação do método no diagnóstico.
 2. Ampliar a preservação de tipos dependentes e genéricos com proveniência explícita, sem substituir assinaturas executáveis por declarações.
 3. Retomar o adaptador de covariância de Promise e os bloqueios nativos identificados no Redcode. Este ciclo não refez a contagem completa de diagnósticos nem produziu o CLI completo do Redcode.

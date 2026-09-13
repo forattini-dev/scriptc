@@ -61,18 +61,16 @@ export const STR_INTRINSIC_SIGS: Record<
   cpAt: { argTypes: [F64], minArgs: 1, result: STRING },
 };
 
-/** Per-method signature for regexIntrinsic. test/source/flags take the
- * regex as receiver; replace/replaceAll/split take the STRING as receiver
- * with the regex as args[0] (mirroring the source syntax). All positions
- * are required — the surface has no optionals. */
+/** Per-method signatures follow source evaluation order; all arguments are required. */
 export const REGEX_INTRINSIC_SIGS: Record<
   IrRegexIntrinsicMethod,
   { receiver: IrType; argTypes: IrType[]; result: IrType }
 > = {
   test: { receiver: REGEX, argTypes: [STRING], result: BOOL },
-  // match's result is the program-dependent optional-string row union —
-  // VOID here is the process.envGet sentinel; the regexIntrinsic case
-  // checks the union's arms.
+  exec: { receiver: REGEX, argTypes: [STRING], result: VOID },
+  lastIndex: { receiver: REGEX, argTypes: [], result: F64 },
+  setLastIndex: { receiver: REGEX, argTypes: [F64], result: F64 },
+  // VOID marks a program-dependent optional capture-row result.
   match: { receiver: STRING, argTypes: [REGEX], result: VOID },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: VOID },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: VOID },
@@ -2283,10 +2281,10 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `regexIntrinsic ${e.method} arg ${i}`);
         });
-        if (e.method === "match" || e.method === "matchAll" || e.method === "matchAllInto") {
+        if (e.method === "match" || e.method === "exec" || e.method === "matchAll" || e.method === "matchAllInto") {
           const layout = regexCaptureLayout(e.type, (id) => unions.get(id));
           const def = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
-          const valid = e.method === "match"
+          const valid = e.method === "match" || e.method === "exec"
             ? def?.arms.length === 2 && def.arms.some((arm) => arm.kind === "nullT")
             : e.type.kind === "array";
           if (!layout || !valid) err("regexIntrinsic captures must contain string | undefined slots", e.loc);

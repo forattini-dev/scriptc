@@ -4769,12 +4769,11 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     const lowerReceiver = (): IrExpr => (dynReceiver ? dynReceiver() : lowerer.lowerExpr(access.expression));
     const loc = locOf(call);
     if (receiverKind === "regex" && name === "test") {
-      // The statefulness fence, at compile time where the flags are
-      // visible: a literal receiver (possibly parenthesized). Values that
-      // flow through variables hit the same fence at runtime.
+      // Legacy backends reject literal stateful receivers here and
+      // variable receivers at runtime. Rust preserves lastIndex.
       let recv: ts.Expression = access.expression;
       while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-      if (ts.isRegularExpressionLiteral(recv)) {
+      if (!lowerer.statefulRegex && ts.isRegularExpressionLiteral(recv)) {
         const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
         if (flags.includes("g") || flags.includes("y")) {
           lowerer.unsupported("SC1121", call);
@@ -4784,22 +4783,22 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const args = call.arguments.map((a) => lowerer.lowerExpr(a));
       return { kind: "regexIntrinsic", method: "test", receiver, args, type: BOOL, loc };
     }
-    // Non-stateful exec and match share optional-string capture rows.
-    // Literal g/y receivers retain the existing statefulness fence.
+    // Stateful exec has its own IR operation; C/LLVM retain their legacy fence.
     if (receiverKind === "regex" && name === "exec") {
       if (call.arguments.length !== 1) return null; // exec takes exactly the subject
       let recv: ts.Expression = access.expression;
       while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
-      if (ts.isRegularExpressionLiteral(recv)) {
+      if (!lowerer.statefulRegex && ts.isRegularExpressionLiteral(recv)) {
         const flags = recv.text.slice(recv.text.lastIndexOf("/") + 1);
         if (flags.includes("g") || flags.includes("y")) {
-          lowerer.unsupported("SC1121", call);
+          lowerer.unsupported("SC1121", call, "'.exec()' on a regex with the 'g' or 'y' flag");
         }
       }
       const re = lowerer.lowerExpr(access.expression);
       const subject = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
       const resultT: IrType = { kind: "union", unionId: lowerer.unions.intern([regexCaptureArray(lowerer.unions), { kind: "nullT" }]) };
-      return { kind: "regexIntrinsic", method: "match", receiver: subject, args: [re], type: resultT, loc };
+      return lowerer.statefulRegex ? { kind: "regexIntrinsic", method: "exec", receiver: re, args: [subject], type: resultT, loc }
+        : { kind: "regexIntrinsic", method: "match", receiver: subject, args: [re], type: resultT, loc };
     }
     // `s.match(re)` for non-g/y regexes: Node's exec-shaped result reduced
     // to the honest slice — the `(string | undefined)[] | null` union holding

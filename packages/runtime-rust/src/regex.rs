@@ -5,7 +5,7 @@ pub struct RegexData {
     unicode: bool,
     global: bool,
     sticky: bool,
-    last_index: Cell<usize>,
+    last_index: Cell<f64>,
 }
 
 pub type JsRegex = Rc<RegexData>;
@@ -65,7 +65,7 @@ pub fn regex_new<S: JsStringSource + ?Sized>(pattern: &S, flags: &str) -> JsRege
         unicode,
         global: flags.contains('g'),
         sticky: flags.contains('y'),
-        last_index: Cell::new(0),
+        last_index: Cell::new(0.0),
     })
 }
 
@@ -75,6 +75,12 @@ fn regex_find(
     start: usize,
     sticky: bool,
 ) -> Option<regress::Match> {
+    if start > units.len() { return None; }
+    // ECMAScript's Unicode matcher starts at the code point containing
+    // lastIndex, including when lastIndex names its trailing surrogate.
+    let start = if regex.unicode && start > 0 && start < units.len()
+        && (0xdc00..=0xdfff).contains(&units[start])
+        && (0xd800..=0xdbff).contains(&units[start - 1]) { start - 1 } else { start };
     if regex.unicode {
         regex.compiled.find_from_utf16(units, start).next()
     } else {
@@ -115,12 +121,12 @@ pub fn string_from_char_code_bytes<T: ByteElement>(codes: &JsBytes<T>) -> JsStri
 pub fn regex_test(regex: &JsRegex, text: &JsString) -> bool {
     let units: Vec<u16> = text.encode_utf16().collect();
     let stateful = regex.global || regex.sticky;
-    let start = if stateful { regex.last_index.get() } else { 0 };
+    let start = if stateful { regex_start_index(regex) } else { 0 };
     let found = regex_find(regex, &units, start, regex.sticky);
     if stateful {
         regex
             .last_index
-            .set(found.as_ref().map_or(0, regress::Match::end));
+            .set(found.as_ref().map_or(0.0, |matched| matched.end() as f64));
     }
     found.is_some()
 }
@@ -154,7 +160,7 @@ pub fn regex_match<T: ArrayElement>(
 ) -> Option<JsArray<T>> {
     let units: Vec<u16> = subject.encode_utf16().collect();
     if regex.global {
-        regex.last_index.set(0);
+        regex.last_index.set(0.0);
         let mut values = Vec::new();
         let mut position = 0usize;
         while position <= units.len() {
@@ -170,11 +176,11 @@ pub fn regex_match<T: ArrayElement>(
                 end
             };
         }
-        regex.last_index.set(0);
+        regex.last_index.set(0.0);
         return (!values.is_empty()).then(|| array_new(values));
     }
     let start = if regex.sticky {
-        regex.last_index.get()
+        regex_start_index(regex)
     } else {
         0
     };
@@ -182,9 +188,13 @@ pub fn regex_match<T: ArrayElement>(
     if regex.sticky {
         regex
             .last_index
-            .set(matched.as_ref().map_or(0, regress::Match::end));
+            .set(matched.as_ref().map_or(0.0, |matched| matched.end() as f64));
     }
-    matched.map(|matched| regex_match_row(&units, &matched, &capture))
+    matched.map(|matched| {
+        let row = regex_match_row(&units, &matched, &capture);
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        row
+    })
 }
 
 pub fn regex_search(subject: &JsString, regex: &JsRegex) -> f64 {
@@ -205,7 +215,7 @@ fn regex_match_all_impl<T: ArrayElement>(
     }
     let units: Vec<u16> = subject.encode_utf16().collect();
     let mut rows = Vec::new();
-    let mut position = regex.last_index.get();
+    let mut position = regex_start_index(regex);
     while position <= units.len() {
         let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
             break;
@@ -215,7 +225,9 @@ fn regex_match_all_impl<T: ArrayElement>(
         if let Some(indices) = indices {
             array_push(indices, start as f64);
         }
-        rows.push(regex_match_row(&units, &matched, &capture));
+        let row = regex_match_row(&units, &matched, &capture);
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        rows.push(row);
         position = if start == end {
             advance_string_index(&units, end, regex.unicode)
         } else {
@@ -333,23 +345,23 @@ fn regex_replace_impl(
     let mut output = Vec::new();
     let mut next = 0usize;
     let mut position = if regex.sticky && !regex.global {
-        regex.last_index.get()
+        regex_start_index(regex)
     } else {
         0
     };
     if regex.global {
-        regex.last_index.set(0);
+        regex.last_index.set(0.0);
     }
     while position <= units.len() {
         let Some(matched) = regex_find(regex, &units, position, regex.sticky) else {
             if regex.global || regex.sticky {
-                regex.last_index.set(0);
+                regex.last_index.set(0.0);
             }
             break;
         };
         let range = matched.range();
         if regex.global || regex.sticky {
-            regex.last_index.set(range.end);
+            regex.last_index.set(range.end as f64);
         }
         output.extend_from_slice(&units[next..range.start]);
         regex_put_substitution(&mut output, &units, &matched, &replacement_units);
@@ -364,7 +376,7 @@ fn regex_replace_impl(
         };
     }
     if regex.global {
-        regex.last_index.set(0);
+        regex.last_index.set(0.0);
     }
     output.extend_from_slice(&units[next..]);
     string_from_utf16(&output)
@@ -431,17 +443,31 @@ pub fn regex_flags(regex: &JsRegex) -> JsString {
     regex.flags.clone()
 }
 
-pub fn regex_last_index(regex: &JsRegex) -> f64 {
-    regex.last_index.get() as f64
+// lastIndex stores the assigned number verbatim. ToLength happens only
+// when a stateful operation executes, never when the property is written.
+fn regex_start_index(regex: &JsRegex) -> usize {
+    let value = regex.last_index.get();
+    if value.is_nan() || value <= 0.0 { 0 } else { value.floor().min(9_007_199_254_740_991.0) as usize }
 }
 
+pub fn regex_last_index(regex: &JsRegex) -> f64 { regex.last_index.get() }
+
 pub fn regex_set_last_index(regex: &JsRegex, value: f64) {
-    let index = if value.is_finite() && value > 0.0 {
-        value.trunc().min(usize::MAX as f64) as usize
-    } else {
-        0
-    };
-    regex.last_index.set(index);
+    regex.last_index.set(value);
+}
+
+pub fn regex_exec<T: ArrayElement>(regex: &JsRegex, subject: &JsString,
+    capture: impl Fn(Option<JsString>) -> T) -> Option<JsArray<T>> {
+    let units: Vec<u16> = subject.encode_utf16().collect();
+    let stateful = regex.global || regex.sticky;
+    let start = if stateful { regex_start_index(regex) } else { 0 };
+    let matched = regex_find(regex, &units, start, regex.sticky);
+    if stateful { regex.last_index.set(matched.as_ref().map_or(0.0, |m| m.end() as f64)); }
+    matched.map(|matched| {
+        let row = regex_match_row(&units, &matched, &capture);
+        array_set_regex_metadata(&row, matched.start() as f64, subject.clone());
+        row
+    })
 }
 
 pub fn regexp_escape(value: &JsString) -> JsString {

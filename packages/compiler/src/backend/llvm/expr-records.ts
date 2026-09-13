@@ -23,6 +23,7 @@ export function emitRegexIntrinsic(host: LlvmEmitterContext, e: IrExpr & { kind:
       return out;
     };
     switch (method) {
+      case "exec": case "lastIndex": case "setLastIndex": throw new LlvmUnsupportedError("stateful regex requires Rust", e.loc);
       case "matchAll":
         // Eager optional-string rows; non-global regexes throw.
         return fallible("scr_regex_match_all", `ptr ${r.name}, ptr ${args[0]!.name}${captureArgs}`);

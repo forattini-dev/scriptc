@@ -5,6 +5,7 @@ trait ArrayView<T: ArrayElement>: Trace {
     fn source(&self) -> &dyn std::any::Any;
     fn identity(&self) -> usize;
     fn raw(&self) -> Option<JsArray<T>>;
+    fn regex_metadata(&self) -> Option<(f64, JsString)>;
     fn len(&self) -> f64;
     fn get(&self, index: f64) -> T;
     fn set(&self, index: f64, value: T);
@@ -32,6 +33,7 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
     fn raw(&self) -> Option<JsArray<T>> {
         array_raw(&self.source).map(|source| array_mapped(source, self.read, self.write))
     }
+    fn regex_metadata(&self) -> Option<(f64, JsString)> { array_regex_metadata(&self.source) }
     fn len(&self) -> f64 { array_len(&self.source) }
     fn get(&self, index: f64) -> T { (self.read)(array_get(&self.source, index)) }
     fn set(&self, index: f64, value: T) { array_set(&self.source, index, (self.write)(value)); }
@@ -75,7 +77,7 @@ pub fn array_mapped<S: ArrayElement, T: ArrayElement>(
     source: JsArray<S>, read: fn(S) -> T, write: fn(T) -> S,
 ) -> JsArray<T> {
     Gc::new(ArrayData {
-        elements: Vec::new(), raw: None,
+        elements: Vec::new(), auxiliary: None,
         view: Some(Rc::new(MappedArray { source, read, write })),
     })
 }
@@ -85,4 +87,20 @@ pub fn array_mapped_source<S: ArrayElement, T: ArrayElement>(array: &JsArray<T>)
     let direct: &dyn std::any::Any = array;
     array.with(|data| data.view.as_ref()?.source().downcast_ref::<JsArray<S>>().cloned())
         .or_else(|| direct.downcast_ref::<JsArray<S>>().cloned())
+}
+
+// Reuse the optional auxiliary slot: ordinary arrays pay no extra field
+// for regex metadata, and typed/dynamic projections share its identity.
+fn array_set_regex_metadata<T: ArrayElement>(array: &JsArray<T>, index: f64, input: JsString) {
+    array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::RegexMatch { index, input })));
+}
+
+pub fn array_regex_metadata<T: ArrayElement>(array: &JsArray<T>) -> Option<(f64, JsString)> {
+    array.with(|data| match &data.view {
+        Some(view) => view.regex_metadata(),
+        None => match data.auxiliary.as_deref() {
+            Some(ArrayAux::RegexMatch { index, input }) => Some((*index, input.clone())),
+            _ => None,
+        },
+    })
 }

@@ -101,14 +101,14 @@ fn regex_match_search_and_match_all_preserve_utf16_semantics() {
 
     let stateful = regex_new(r"\w", "g");
     assert!(regex_test(&stateful, &string("ab")));
-    assert_eq!(stateful.last_index.get(), 1);
+    assert_eq!(stateful.last_index.get(), 1.0);
     let remaining = regex_match_all(&string("ab"), &stateful, |value| value.unwrap());
     assert_eq!(array_len(&remaining), 1.0);
     assert_eq!(array_get(&array_get(&remaining, 0.0), 0.0).as_ref(), "b");
-    assert_eq!(stateful.last_index.get(), 1);
+    assert_eq!(stateful.last_index.get(), 1.0);
     let all = regex_match(&string("ab"), &stateful, |value| value.unwrap()).unwrap();
     assert_eq!(array_len(&all), 2.0);
-    assert_eq!(stateful.last_index.get(), 0);
+    assert_eq!(stateful.last_index.get(), 0.0);
 }
 
 #[test]
@@ -127,4 +127,32 @@ fn regex_captures_distinguish_absence_from_empty_participation() {
     assert!(
         matches!(array_get(&array_get(&rows, 1.0), 1.0), RegexCapture(Some(text)) if text.as_ref() == "b")
     );
+}
+
+#[test]
+fn regex_exec_preserves_captures_metadata_and_assigned_last_index() {
+    let re = regex_new("(a)(b)?", "g");
+    let subject = string("a ab");
+    let first = regex_exec(&re, &subject, RegexCapture).unwrap();
+    assert_eq!(array_len(&first), 3.0);
+    assert!(array_get(&first, 2.0).0.is_none());
+    assert_eq!(array_regex_metadata(&first).unwrap().0, 0.0);
+    let second = regex_exec(&re, &subject, RegexCapture).unwrap();
+    assert_eq!(array_get(&second, 2.0).0.unwrap().as_ref(), "b");
+    assert_eq!(array_regex_metadata(&second).unwrap().0, 2.0);
+    assert_eq!(regex_last_index(&re), 4.0);
+    assert!(regex_exec(&re, &subject, RegexCapture).is_none());
+    assert_eq!(regex_last_index(&re), 0.0);
+    regex_set_last_index(&re, -1.5);
+    assert_eq!(regex_last_index(&re), -1.5);
+    assert!(regex_test(&re, &subject));
+    regex_set_last_index(&re, f64::INFINITY);
+    assert!(regex_exec(&re, &subject, RegexCapture).is_none());
+    assert_eq!(regex_last_index(&re), 0.0);
+    let unicode = regex_new(".", "gu");
+    regex_set_last_index(&unicode, 1.0);
+    let row = regex_exec(&unicode, &string("😀z"), RegexCapture).unwrap();
+    assert_eq!(array_get(&row, 0.0).0.unwrap().as_ref(), "😀");
+    assert_eq!(array_regex_metadata(&row).unwrap().0, 0.0);
+    assert_eq!(regex_last_index(&unicode), 2.0);
 }

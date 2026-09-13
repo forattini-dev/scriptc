@@ -1,3 +1,4 @@
+import { directExternalTypeSpecifiersByFile } from "./external-type-specifiers.js";
 import { checkNativeCallResult } from "./native-call-result.js";
 import { discriminatedViewSupported, lowerDiscriminatedView } from "./lower-discriminated-view.js";
 import { jsArrayInferenceBinding, jsArrayInferenceExpression } from "../js-array-field-types.js";
@@ -343,6 +344,8 @@ export interface LowerResult {
 }
 
 export interface LowerOptions {
+  /** Runtime capability: stateful regex execution and match metadata. */
+  statefulRegex?: boolean;
   /** --dynamic: the island engine is linked, so island constructs
    * (__island_eval) may lower. Off by default — without it they produce a
    * requires-dynamic diagnostic instead. */
@@ -431,6 +434,7 @@ type RuntimeFenceTarget =
 
 /** The Lowerer's pass configuration (see lowerToIr). */
 export interface LowererMode {
+  statefulRegex?: boolean;
   /** Names of bodies a prior reachability pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
@@ -459,19 +463,6 @@ export interface LowererMode {
   externalTypes?: ReadonlyMap<string, string>;
   /** LowerOptions.externalTypeSpecifiersByFile, shared by every pass. */
   externalTypeSpecifiersByFile?: ReadonlyMap<string, readonly string[]>;
-}
-
-function directExternalTypeSpecifiersByFile(
-  externalTypes: ReadonlyMap<string, string>,
-): ReadonlyMap<string, readonly string[]> {
-  const out = new Map<string, string[]>();
-  for (const [specifier, file] of externalTypes) {
-    const key = tsgoPath(resolve(file));
-    const owners = out.get(key);
-    if (owners === undefined) out.set(key, [specifier]);
-    else if (!owners.includes(specifier)) owners.push(specifier);
-  }
-  return out;
 }
 
 /** Build lowering runs as a reachability worklist over the ts.Program:
@@ -537,6 +528,7 @@ export function lowerToIr(
   const externalTypeSpecifiersByFile = options.externalTypeSpecifiersByFile ??
     directExternalTypeSpecifiersByFile(externalTypes);
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
+    statefulRegex: options.statefulRegex ?? false,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -554,6 +546,7 @@ export function lowerToIr(
   const reachableEmit = ffiImports.length === 0
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
+        statefulRegex: options.statefulRegex ?? false,
         targetPlatform,
         startupCrash,
         ffiImports,
@@ -579,6 +572,7 @@ export function lowerToIr(
   if (reachableEmit.requiresHistoricalOrderRelower) {
     const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
       reachable,
+      statefulRegex: options.statefulRegex ?? false,
       targetPlatform,
       startupCrash,
       ffiImports,
@@ -598,6 +592,7 @@ export function lowerToIr(
     reachable,
     remainder: true,
     alreadyFlushed: resultLowerer.flushedSymbols,
+    statefulRegex: options.statefulRegex ?? false,
     targetPlatform,
     ffiImports,
     libraryCallbacks,
@@ -941,6 +936,7 @@ export function jsFuncNameOf(node: ts.Node): string | null {
 }
 
 export class Lowerer {
+  readonly statefulRegex: boolean;
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
   readonly fnSigsBySymbol = new Map<ts.Symbol, FnSig>();
@@ -1587,6 +1583,7 @@ export class Lowerer {
     readonly dynamic: boolean,
     mode: LowererMode = {},
   ) {
+    this.statefulRegex = mode.statefulRegex ?? false;
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();

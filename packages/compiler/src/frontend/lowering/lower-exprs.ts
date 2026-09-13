@@ -1,3 +1,4 @@
+import { lowerRegexStateRead, lowerRegexStateAssign, lowerDynamicRegexCapture } from "./lower-regex-state.js";
 import { lowerRuntimeKeyIn, lowerTypedRecordIn } from "./lower-record-membership.js";
 import { lowerNativeDateRegexInstanceof } from "./lower-date-instanceof.js";
 import { lowerNativeProxyNew } from "./lower-native-proxy.js";
@@ -11,7 +12,7 @@ import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-k
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { hasOptionalIndexContext } from "./lower-contextual-index.js";
-import { isRegexCaptureRead, narrowRegexCaptureReceiver } from "./lower-regex-captures.js";
+import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
 import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
@@ -1784,10 +1785,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         }
         return read;
       }
-      // `m.groups` on a match result whose regex is statically known:
-      // the compile-time record projection over the honest slice (or
-      // Node's undefined when the pattern has no named groups) — see
-      // lowerMatchGroupsRead.
+      // Named groups project from the captured row.
       {
         const g = lowerMatchGroupsRead(lowerer, expr);
         if (g !== null) return g;
@@ -1809,6 +1807,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
           };
         }
       }
+      const regexState = lowerRegexStateRead(lowerer, expr);
+      if (regexState !== null) return regexState;
       // `arguments.length` in a TYPED function whose signature is
       // FIXED-ARITY (no optional/default/rest parameters): tsc enforces
       // exact arity at every call site and call/apply/bind indirection is
@@ -2505,7 +2505,8 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
           }
         }
       }
-      const type =
+      const regexJoin = regexCaptureConditionalType(lowerer, expr, thenRaw.type, elseRaw.type);
+      const type = regexJoin ?? (
         thenRaw.type.kind === "array" && typeEquals(thenRaw.type, elseRaw.type)
           ? thenRaw.type
           : dynJoin
@@ -2513,7 +2514,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
             : (anyJoin ??
               (useCtx && ctxMapped
                 ? ctxMapped
-                : lowerer.irTypeOf(expr)));
+                : lowerer.irTypeOf(expr))));
       // A VOID join (`flag ? a() : b()` over two void arms): the conditional
       // carries no value, so it only compiles where JS discards it — those
       // sites (lowerExprStatement, the void-returning concise arrow bodies)
@@ -6907,12 +6908,10 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
     // engine ops with the declared-element exit, never a static arrayGet
     // over a jsval (the validator ICE).
     if (arr.type.kind === "jsval") return islandElementRead(lowerer, expr, arr);
-    // The checker sees an array but the VALUE lowered checked-dynamic (a
-    // jsdoc-typed default export from a .js module — signature 14): the
-    // read rides the dynCheck boundary when the array shape is one the checked-dynamic tree
-    // can validate, and fences by name when it is not — an arrayGet over a
-    // dyn receiver is never emitted (the validator ICE).
+    // Dynamic storage needs a checked boundary or a native per-slot read.
     if (arr.type.kind === "dyn") {
+      const capture = lowerDynamicRegexCapture(lowerer, expr, arr);
+      if (capture !== null) return capture;
       // `any[]` (notably a rest parameter in a dynamic tagged-template
       // callback) is already represented by the checked-dynamic tree and
       // its element is dynamic too. Reading one slot does not require
@@ -8144,12 +8143,10 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     if (op === ts.SyntaxKind.EqualsToken || (op >= ts.SyntaxKind.FirstCompoundAssignment && op <= ts.SyntaxKind.LastCompoundAssignment)) {
       // `x = e` in EXPRESSION position (`while ((idx = s.indexOf("\n")) !== -1)`,
       // `f(x = v)`): evaluate e once, write the binding, yield the assigned
-      // value — JS evaluation order. Variable targets only (locals and module
-      // globals, captured/boxed included); the RHS coerces into the binding's
-      // type exactly like statement position, and the expression's value is
-      // the coerced binding-typed value (representation change only — never
-      // observably different from JS's raw-RHS yield). Compound operators,
-      // property/element targets, and destructuring targets stay fenced.
+      // value in JS evaluation order. Regex property writes use their intrinsic;
+      // variable writes coerce the RHS into the binding type, as in statements.
+      const regexAssignment = lowerRegexStateAssign(lowerer, expr);
+      if (regexAssignment !== null) return regexAssignment;
       if (op === ts.SyntaxKind.EqualsToken && ts.isIdentifier(expr.left)) {
         const target = lowerer.resolveWritable(expr.left);
         if (!target) {

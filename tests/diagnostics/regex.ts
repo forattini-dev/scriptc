@@ -1,5 +1,5 @@
-// The regex slice fences. test() on a g/y-flagged literal is the
-// statefulness fence (lastIndex is not modeled); the d/v flags are
+// The remaining regex slice fences. Rust supports stateful test/exec;
+// these first calls must no longer report SC1121. The d/v flags are
 // outside the slice; .groups needs a statically-known regex (named
 // capture groups themselves compile — corpus 2604); method-as-value has
 // no value form; regexes stay out of union arms (ARRAYS of regexes

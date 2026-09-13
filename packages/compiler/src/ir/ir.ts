@@ -62,15 +62,8 @@ export type IrType =
    * including callbacks; callback Sets are cycle-capable because a stored
    * closure may capture its owning Set. */
   | { kind: "set"; elem: IrType }
-  /** A regular expression — heap, refcounted, IMMUTABLE. No lastIndex
-   * statefulness exists: /g and /y are supported only inside
-   * replace/replaceAll/split (where the iteration is internal), and test()
-   * on them is rejected. Every regex value today originates from a literal,
-   * which backends intern as ONE immortal static per (pattern, flags) pair
-   * — bytecode compiles lazily at first use, is never freed, and the RC
-   * audit ignores immortals. Deliberately narrower than string: no array
-   * elements, no map keys/values, no union arms (a regex arm would have no
-   * narrowing test), not JSON-safe. */
+  /** A reference-identity regex. Rust stores mutable lastIndex per instance;
+   * the C/LLVM runtimes retain their narrower immutable regex surface. */
   | { kind: "regex" }
   /** A typed array / Node Buffer (Uint8Array, Uint32Array, Float32Array/Float64Array;
    * Buffer IS a Uint8Array subclass and shares the u8 kind) — heap,
@@ -1785,14 +1778,10 @@ export const MAY_THROW_BYTES_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new 
  * capture groups (JS would splice the captured values into the result) —
  * both catchable: backends' may-throw analyses must seed on these two
  * methods like a `throw`. */
-/** `match` takes a STRING receiver with args[0] the regex (non-g/y — the
- * frontend fences literal g/y flags; a g-flagged value reaching the
- * runtime aborts like test()) and produces the PROGRAM-DEPENDENT
- * `string[] | null` union: the matched slice [whole, ...captures] wrapped
- * into the array arm, or the interned null-arm instance for no match. A
- * NONPARTICIPATING capture holds "" where Node's slot is undefined
- * (SEMANTICS.md divergence). Never throws. */
+/** `match` and `exec` return optional-string capture rows or null.
+ * `exec` preserves regex state and returns one match even with /g. */
 export type IrRegexIntrinsicMethod =
+  | "exec" | "lastIndex" | "setLastIndex"
   | "test"
   | "match"
   /** `s.matchAll(re)` — every match as its honest string[] slice (match's

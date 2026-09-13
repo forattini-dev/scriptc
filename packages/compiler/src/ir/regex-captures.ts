@@ -1,5 +1,11 @@
 import { STRING, UNDEFINED_T, arrayOf, type IrType, type IrUnionDef } from "./ir.js";
 
+export function isRegexCaptureRow(type: IrType, union: (id: string) => IrUnionDef | undefined): boolean {
+  if (type.kind !== "array" || type.elem.kind !== "union") return false;
+  const arms = union(type.elem.unionId)?.arms;
+  return arms?.length === 2 && arms.some(arm => arm.kind === "string") && arms.some(arm => arm.kind === "undefinedT");
+}
+
 /** The standard library's string index signature omits absent captures. */
 export function regexCaptureArray(unions: { intern(arms: IrType[]): string }): IrType {
   return arrayOf({ kind: "union", unionId: unions.intern([STRING, UNDEFINED_T]) });

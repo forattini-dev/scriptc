@@ -296,7 +296,7 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
   SC1121: {
     feature: "'.test()' on a regex with the 'g' or 'y' flag",
     milestone: "later",
-    hint: "g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)",
+    hint: "this lowering configuration does not model mutable lastIndex state; use --backend rust for stateful test/exec, or use a non-stateful pattern",
   },
 };
 

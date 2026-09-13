@@ -3,6 +3,7 @@ import { nativeProxyBackendDiagnostics } from "./native-proxy-support.js";
 import { nativeDateBackendDiagnostics } from "./native-date-support.js";
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 import { nativeBigIntBackendDiagnostics } from "./native-bigint-support.js";
+import { nativeRegexBackendDiagnostics } from "./native-regex-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { IrModule, SrcLoc } from "../ir/ir.js";
 import { LlvmUnsupportedError } from "./llvm/unsupported.js";
@@ -14,6 +15,8 @@ export function nativeModuleBackendDiagnostics(
   backend: "c" | "llvm" | "rust",
 ): ScrDiagnostic[] {
   if (backend === "rust") return [];
+  const regex = nativeRegexBackendDiagnostics(mod, backend);
+  if (regex.length > 0) return regex;
   const proxies = nativeProxyBackendDiagnostics(mod, backend);
   if (proxies.length > 0) return proxies;
   const effects = nativeEffectBackendDiagnostics(mod, backend);

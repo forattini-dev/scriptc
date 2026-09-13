@@ -561,7 +561,7 @@ where
         }
         Ok(Self {
             elements: decoded,
-            raw: None,
+            auxiliary: None,
             view: None,
         })
     }

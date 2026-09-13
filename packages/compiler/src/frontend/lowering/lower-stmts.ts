@@ -1,3 +1,4 @@
+import { lowerRegexStateAssign } from "./lower-regex-state.js";
 import { lowerLocalGenericInitializer, registerModuleGenericBinding } from "./lower-local-generics.js";
 import { lowerDynamicSwitch } from "./lower-dynamic-switch.js";
 import { inferredRegexBindingType } from "./lower-regex-captures.js";
@@ -4495,10 +4496,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         };
       }
       if (opKind === ts.SyntaxKind.EqualsToken) {
-        // Expando function members (`foo.bar = 12`, `foo[SYM] = v` on a
-        // module-level function/callable const): the member's module
-        // global (lower-expando.ts) — claimed by symbol identity before
-        // any receiver-shape path.
+        const regexAssignment = lowerRegexStateAssign(lowerer, expr);
+        if (regexAssignment !== null) return { kind: "exprStmt", expr: regexAssignment, loc: locOf(expr) };
+        // Expando members are claimed by symbol before receiver shape.
         {
           const ex = lowerExpandoAssignStmt(lowerer, expr);
           if (ex) return ex;

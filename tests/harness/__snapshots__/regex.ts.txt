@@ -1,21 +1,3 @@
-regex.ts:7:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
-
-  6 | // compile — corpus 2448).
-  7 | const g = /ab/g.test("abab");
-    |           ^~~~~~~~~~~~~~~~~~
-  8 | const y = /ab/y.test("abab");
-
-  hint: g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)
-
-regex.ts:8:11 - error SC1121: '.test()' on a regex with the 'g' or 'y' flag is not supported yet
-
-  7 | const g = /ab/g.test("abab");
-  8 | const y = /ab/y.test("abab");
-    |           ^~~~~~~~~~~~~~~~~~
-  9 | const indices = /cat/d;
-
-  hint: g/y regexes carry mutable lastIndex state between calls, which is not modeled; drop the flag for a plain match test, or use replace/replaceAll/split (their iteration is internal)
-
 regex.ts:9:17 - error SC1120: the regex 'd' flag (match indices) is not supported yet
 
    8 | const y = /ab/y.test("abab");

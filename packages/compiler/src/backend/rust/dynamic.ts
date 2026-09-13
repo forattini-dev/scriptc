@@ -1,3 +1,4 @@
+import { isRegexCaptureRow } from "../../ir/regex-captures.js";
 import { emitRustDynamicKindQueries } from "./dynamic-kind.js";
 import { sharedDiscriminatedUnion, discriminatedUnionCheck } from "./discriminated-records.js";
 import { emitNativeUnionCheck } from "./native-union-check.js";
@@ -525,6 +526,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Array(array) => {`);
     this.context.pushIndent();
     this.context.line(`if key.as_ref() == "length" { ${name}::Number(runtime::array_len(array)) }`);
+    this.context.line(`else if key.as_ref() == "index" || key.as_ref() == "input" { runtime::array_regex_metadata(array).map(|(index, input)| if key.as_ref() == "index" { ${name}::Number(index) } else { ${name}::String(input) }).unwrap_or(${name}::Undefined) }`);
     this.context.line(`else if key.as_ref() == "raw" { runtime::array_raw(array).map(${name}::Array).unwrap_or(${name}::Undefined) }`);
     this.context.line(`else if let Some(index) = sc_dyn_key_index(key) { if index < runtime::array_len(array) as usize { runtime::array_get(array, index as f64) } else { ${name}::Undefined } }`);
     this.context.line(`else { ${name}::Undefined }`);
@@ -979,7 +981,7 @@ export class RustDynamicEmitter {
       }
       case "array": {
         const name = this.context.dynTypeName();
-        if (nativeArrayViewSupported(type)) return emitNativeArrayCheck(type, value, name,
+        if (nativeArrayViewSupported(type) || isRegexCaptureRow(type, id => this.context.union(id, loc))) return emitNativeArrayCheck(type, value, name,
           (element, item) => this.emitDynFromValue(element, item, loc), (element, item, itemPath) => this.emitDynCheckValue(element, item, loc, itemPath), path);
         if (type.elem.kind === "dyn" || type.elem.kind === "jsval") {
           return `match ${value} { ${name}::Array(array) => array, value => sc_dyn_check_fail_at("array", &value, ${path}) }`;

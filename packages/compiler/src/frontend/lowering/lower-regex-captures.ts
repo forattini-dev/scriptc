@@ -1,8 +1,17 @@
-import { BOOL, STRING, UNDEFINED_T, type IrExpr, type IrType } from "../../ir/ir.js";
+import { BOOL, STRING, UNDEFINED_T, typeEquals, type IrExpr, type IrType } from "../../ir/ir.js";
 import { nodeThrowExpr } from "./lowerer.js";
 import * as ts from "../ts7/adapter.js";
 import { regexGroupsType } from "../regex-types.js";
 import type { Lowerer } from "./lowerer.js";
+
+/** The stdlib's string slot signature must not erase an absent capture
+ * when a conditional joins it with another value. */
+export function regexCaptureConditionalType(L: Lowerer, node: ts.ConditionalExpression, yes: IrType, no: IrType): IrType | null {
+  if (!isRegexCaptureRead(L, node.whenTrue) && !isRegexCaptureRead(L, node.whenFalse)) return null;
+  const arms = [yes, no].flatMap(type => type.kind === "union" ? L.unions.get(type.unionId)?.arms ?? [] : [type]);
+  if (!arms.some(type => type.kind === "undefinedT")) return null;
+  return { kind: "union", unionId: L.unions.intern(arms.filter((arm, index) => !arms.slice(0, index).some(other => typeEquals(arm, other)))) };
+}
 
 /** The lib's unconditionally-string capture signature is not a proof that
  * a group participated. Keep the native optional value at these reads. */

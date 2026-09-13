@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-13",
+  "parentCommit": "0dacfa5ae695b7ca818252abe6ea5668c010cbc0",
+  "node": "v24.15.0",
+  "runtimePackage": "is-extglob@2.1.1",
+  "declarationsPackage": "@types/is-extglob@2.1.0",
+  "originalSource": "/home/cyber/Work/reddb.io/red-skills/node_modules/.pnpm/is-extglob@2.1.1/node_modules/is-extglob",
+  "vendoredSourceSha256": {
+    "index.js": "68be041dd0379d295d89550d1f6f2e8c29645bdd92d14b427fe2e140b3c8f2f8",
+    "package.json": "8031afcd87f448d75ba8a5dd2cde9c68f982a94f406ebae8e5fb7cf6dfdeede2",
+    "LICENSE": "73b5283588baa142c5baaef5f56d3e8fdea7a30b214e8c5737e87640f882453a"
+  },
+  "compileOptions": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": "auto",
+    "typeAcquisition": {
+      "mode": "offline",
+      "frozenLock": true
+    }
+  },
+  "analysis": {
+    "root": "/tmp/scriptc-auto-real-types-9K7auU",
+    "phase": "analysis",
+    "npmStatic": [
+      {
+        "package": "is-extglob",
+        "status": "static"
+      }
+    ],
+    "diagnostics": []
+  },
+  "execution": {
+    "root": "/tmp/scriptc-auto-real-types-9K7auU",
+    "phase": "native",
+    "engine": "none",
+    "binary": "/tmp/scriptc-auto-real-types-9K7auU/out/program",
+    "native": {
+      "stdout": "\"+(one|two)\" true\n\"plain\" false\n\"\\\\@(foo)\" false\n\"\\\\a+(b)\" true\n\"\\\\a\\\\b\" false\n\"\\\\a\\\\b?(c)\" true\n\"\" false\n\"!(a)\" true\n\"@(a)\" true\n\"*(a)\" true\n\"?(a)\" true\n\"(a)\" false\n\"abc+(a)def\" true\n\"\\\\+(one|two)\" false\n\"\\\\\\\\+(a)\" true\n\"😀+(a)\" true\n\"a\\nb+(c)\" true\n",
+      "stderr": "",
+      "status": 0
+    },
+    "node": {
+      "stdout": "\"+(one|two)\" true\n\"plain\" false\n\"\\\\@(foo)\" false\n\"\\\\a+(b)\" true\n\"\\\\a\\\\b\" false\n\"\\\\a\\\\b?(c)\" true\n\"\" false\n\"!(a)\" true\n\"@(a)\" true\n\"*(a)\" true\n\"?(a)\" true\n\"(a)\" false\n\"abc+(a)def\" true\n\"\\\\+(one|two)\" false\n\"\\\\\\\\+(a)\" true\n\"😀+(a)\" true\n\"a\\nb+(c)\" true\n",
+      "stderr": "",
+      "status": 0
+    }
+  },
+  "inputCount": 17,
+  "performanceMeasured": false
+}

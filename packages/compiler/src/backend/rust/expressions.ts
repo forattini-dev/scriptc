@@ -175,14 +175,14 @@ export class RustExpressionEmitter {
         ].join(" ");
         const captureLayout = regexCaptureLayout(expr.type, (id) => this.context.union(id, expr.loc));
         const capture = captureLayout === null ? "" : `|value| match value { Some(text) => ${this.context.unionName(captureLayout.id)}::${this.context.unionVariant(captureLayout.stringTag)}(text), None => ${this.context.unionName(captureLayout.id)}::${this.context.unionVariant(captureLayout.undefinedTag)}, }`;
-        if (expr.method === "match" && args.length === 1) {
+        if ((expr.method === "match" || expr.method === "exec") && args.length === 1) {
           if (expr.type.kind !== "union") this.context.unsupported("regex match result without a union", expr.loc);
           const union = this.context.union(expr.type.unionId, expr.loc);
           const arrayTag = union.arms.findIndex((arm) => arm.kind === "array");
           const nullTag = union.arms.findIndex((arm) => arm.kind === "nullT");
           if (arrayTag < 0 || nullTag < 0) this.context.unsupported("regex match result union shape", expr.loc);
           const name = this.context.unionName(union.id);
-          return `{ ${bindings} match runtime::regex_match(&${receiver}, &${args[0]}, ${capture}) { Some(value) => ${name}::${this.context.unionVariant(arrayTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, } }`;
+          return `{ ${bindings} match ${expr.method === "exec" ? `runtime::regex_exec(&${receiver}, &${args[0]}, ${capture})` : `runtime::regex_match(&${receiver}, &${args[0]}, ${capture})`} { Some(value) => ${name}::${this.context.unionVariant(arrayTag)}(value), None => ${name}::${this.context.unionVariant(nullTag)}, } }`;
         }
         if ((expr.method === "matchAll" || expr.method === "matchAllInto") && args.length === (expr.method === "matchAll" ? 1 : 2)) {
           return `{ ${bindings} runtime::regex_${expr.method === "matchAll" ? "match_all" : "match_all_into"}(&${receiver}, &${args[0]}${expr.method === "matchAllInto" ? `, &${args[1]}` : ""}, ${capture}) }`;
@@ -199,6 +199,8 @@ export class RustExpressionEmitter {
         if (expr.method === "test" && args.length === 1) {
           return `{ ${bindings} runtime::regex_test(&${receiver}, &${args[0]}) }`;
         }
+        if (expr.method === "lastIndex" && args.length === 0) return `{ ${bindings} runtime::regex_last_index(&${receiver}) }`;
+        if (expr.method === "setLastIndex" && args.length === 1) return `{ ${bindings} runtime::regex_set_last_index(&${receiver}, ${args[0]}); ${args[0]} }`;
         if (expr.method === "source" && args.length === 0) {
           return `{ ${bindings} runtime::regex_source(&${receiver}) }`;
         }

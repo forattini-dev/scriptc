@@ -795,13 +795,11 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
         sourceTexts: fe.sourceTexts(),
       };
     }
-    // Coverage is whole-program by design: builds stop at what the entry
-    // reaches, but the analysis additionally lowers the unreached remainder
-    // (throwaway) so the report covers everything the source declares — with
-    // the unreached share in its own group.
+    // Coverage also lowers unreached bodies in a separate throwaway pass.
     const lowered = lowerWithFrontier(fe, {
       dynamic: opts.dynamic ?? false,
       coverage: true,
+      statefulRegex: (opts.backend ?? "rust") === "rust",
       targetPlatform: buildTargetPlatform(),
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
@@ -1229,6 +1227,7 @@ async function compileTracked(
     try {
       lowered = lowerWithFrontier(fe, {
         dynamic: opts.dynamic ?? false,
+        statefulRegex: (opts.backend ?? "rust") === "rust",
         targetPlatform: buildPlatform,
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
       });

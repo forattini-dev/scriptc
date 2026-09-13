@@ -1440,15 +1440,14 @@ function emitStringExpr(
         return emitter.newTemp(e.type, `scr_arr_retain(&${inst.sym})`);
       }
       case "regexIntrinsic": {
-        // Receiver and args are borrowed frame temps; string/array results
-        // come back +1 and join the frame via newTemp. replaceAll and split
-        // may THROW (catchable) — fallibleTemp emits the pending check.
+        // Results join the frame; fallibleTemp checks catchable throws.
         const r = emitter.emitExpr(e.receiver);
         const args = e.args.map((a) => emitter.emitExpr(a));
         const method = e.method;
         const capture = regexCaptureLayout(e.type, (id) => emitter.unionsById.get(id));
         const captureArgs = capture ? `, ${capture.stringTag}, ${emitter.unitInstanceRef(capture.id, capture.undefinedTag)}` : "";
         switch (method) {
+          case "exec": case "lastIndex": case "setLastIndex": throw new InternalCompilerError("stateful regex requires Rust");
           case "test":
             return emitter.newTemp(e.type, `scr_regex_test(${r.name}, ${args[0]!.name})`);
           case "match": {

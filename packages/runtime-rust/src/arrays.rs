@@ -41,9 +41,14 @@ where
     }
 }
 
+enum ArrayAux<T: ArrayElement> {
+    Raw(JsArray<T>),
+    RegexMatch { index: f64, input: JsString },
+}
+
 pub struct ArrayData<T: ArrayElement> {
     elements: Vec<T>,
-    raw: Option<JsArray<T>>,
+    auxiliary: Option<Rc<ArrayAux<T>>>,
     view: Option<Rc<dyn ArrayView<T>>>,
 }
 
@@ -53,16 +58,14 @@ impl<T: ArrayElement> Trace for ArrayData<T> {
             element.trace_element(tracer);
         }
         if let Some(view) = &self.view { view.trace(tracer); }
-        if let Some(raw) = &self.raw {
-            tracer.edge(raw);
-        }
+        if let Some(ArrayAux::Raw(raw)) = self.auxiliary.as_deref() { tracer.edge(raw); }
     }
 }
 
 impl<T: ArrayElement> ClearEdges for ArrayData<T> {
     fn clear_edges(&mut self) {
         self.elements.clear();
-        self.raw = None;
+        self.auxiliary = None;
         self.view = None;
     }
 }
@@ -125,7 +128,7 @@ pub fn template_strings_clear() {
 pub fn array_new<T: ArrayElement>(elements: Vec<T>) -> JsArray<T> {
     Gc::new(ArrayData {
         elements,
-        raw: None,
+        auxiliary: None,
         view: None,
     })
 }
@@ -137,17 +140,17 @@ pub fn array_new_with_raw<T: ArrayElement>(
     let raw = array_new(raw_elements);
     Gc::new(ArrayData {
         elements,
-        raw: Some(raw),
+        auxiliary: Some(Rc::new(ArrayAux::Raw(raw))),
         view: None,
     })
 }
 
 pub fn array_raw<T: ArrayElement>(array: &JsArray<T>) -> Option<JsArray<T>> {
-    array.with(|data| match &data.view { Some(view) => view.raw(), None => data.raw.clone() })
+    array.with(|data| match &data.view { Some(view) => view.raw(), None => match data.auxiliary.as_deref() { Some(ArrayAux::Raw(raw)) => Some(raw.clone()), _ => None } })
 }
 
 pub fn array_set_raw<T: ArrayElement>(array: &JsArray<T>, raw: JsArray<T>) {
-    array.with_mut(|data| data.raw = Some(raw));
+    array.with_mut(|data| data.auxiliary = Some(Rc::new(ArrayAux::Raw(raw))));
 }
 
 pub fn array_len<T: ArrayElement>(array: &JsArray<T>) -> f64 {
