@@ -170,8 +170,8 @@ export const NODE24_URL_COMPAT_PROFILE = {
       "constructor",
       "constructor",
       ["parsing", "webidl-conversion", "error-shape", "missing-arguments"],
-      [corpus("1355-url-parse"), corpus("2573-fs-url-arg-ladders"), corpus("3172-url-base-resolution")],
-      "one absolute-URL string argument on all native backends; Rust additionally resolves a string input against a string base, including file paths, with both arguments evaluated before parsing; invalid input or base throws TypeError('Invalid URL'); zero arguments and non-string coercions remain refused",
+      [corpus("1355-url-parse"), corpus("2573-fs-url-arg-ladders"), corpus("3172-url-base-resolution"), corpus("3173-url-object-base")],
+      "one absolute-URL string argument on all native backends; Rust additionally resolves a string input against a string or URL base, including file paths, with both arguments evaluated before parsing; invalid input or base throws TypeError('Invalid URL'); zero arguments and other non-string coercions remain refused",
     ),
     urlOperation(
       "href",

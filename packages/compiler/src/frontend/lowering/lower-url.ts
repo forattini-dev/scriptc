@@ -11,13 +11,18 @@ export function lowerUrlNew(lowerer: Lowerer, expr: ts.NewExpression, symbol: ts
     lowerer.noLowering(
       `new URL with ${args.length} argument${args.length === 1 ? "" : "s"}`,
       expr,
-      "a string input and an optional string base are the supported forms",
+      "a string input and an optional string or URL base are the supported forms",
       symbol,
     );
   }
   const input = lowerer.lowerExprExpecting(args[0]!, STRING);
   if (args.length === 2) {
-    const base = lowerer.lowerExprExpecting(args[1]!, STRING);
+    const baseNode = args[1]!;
+    // A URL base uses its current serialization, after the input and base
+    // expressions have evaluated. This keeps mutations in either visible.
+    const base: IrExpr = lowerer.mapTypeOf(lowerer.typeOf(baseNode))?.kind === "url"
+      ? { kind: "libCall", fn: "url.href", args: [lowerer.lowerExpr(baseNode)], type: STRING, loc: locOf(baseNode) }
+      : lowerer.lowerExprExpecting(baseNode, STRING);
     return { kind: "libCall", fn: "url.newBase", args: [input, base], type: URL_T, loc };
   }
   return { kind: "libCall", fn: "url.new", args: [input], type: URL_T, loc };

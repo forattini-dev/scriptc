@@ -1427,7 +1427,7 @@ interface URL {
   toString(): string;
 }
 declare var URL: {
-  new (input: string, base?: string): URL;
+  new (input: string, base?: string | URL): URL;
   /* Whether `new URL(input)` would succeed — the same parser, answered as
    * a boolean instead of thrown, including relative inputs with a base. */
   canParse(input: string, base?: string): boolean;
