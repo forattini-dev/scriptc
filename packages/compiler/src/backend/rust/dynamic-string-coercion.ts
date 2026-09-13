@@ -70,6 +70,7 @@ export function emitRustDynamicStringCoercion(
   context.line("}");
   context.line(`fn sc_dyn_number_primitive(value: &${name}) -> ${name} {`);
   context.pushIndent();
+  context.line(`if let ${name}::Date(date) = value { return ${name}::Number(runtime::date_value_time(date)); }`);
   context.line(`if let ${name}::Array(array) = value { return ${name}::String(sc_dyn_array_string_coerce_js(array)); }`);
   context.line(`let ${name}::Object(object) = value else { return match value { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) => value.clone(), _ => ${name}::String(sc_dyn_to_string(value)), }; };`);
   context.line(`for method_name in ["valueOf", "toString"] {`);
@@ -109,8 +110,8 @@ function emitRustDynamicNumericOperations(context: RustDynamicStringCoercionCont
   const name = context.dynTypeName();
   context.line(`fn sc_dyn_numeric_binary(left: &${name}, right: &${name}, op: &str) -> ${name} {`);
   context.pushIndent();
-  context.line("let left = sc_dyn_number_primitive(left);");
-  context.line("let right = sc_dyn_number_primitive(right);");
+  context.line(`let left = if op == "add" && matches!(left, ${name}::Date(..)) { ${name}::String(sc_dyn_to_string(left)) } else { sc_dyn_number_primitive(left) };`);
+  context.line(`let right = if op == "add" && matches!(right, ${name}::Date(..)) { ${name}::String(sc_dyn_to_string(right)) } else { sc_dyn_number_primitive(right) };`);
   context.line(`if op == "add" && (matches!(&left, ${name}::String(..)) || matches!(&right, ${name}::String(..))) { return ${name}::String(runtime::string_concat(&sc_dyn_to_string(&left), &sc_dyn_to_string(&right))); }`);
   context.line("match (&left, &right) {");
   context.pushIndent();

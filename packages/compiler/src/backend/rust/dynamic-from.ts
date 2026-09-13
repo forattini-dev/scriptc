@@ -64,6 +64,7 @@ export class RustDynamicFromEmitter {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
       case "f64": return `${name}::Number(${value})`;
+      case "date": return `${name}::Date(${value})`;
       case "bigint": return `${name}::BigInt(${value})`;
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;

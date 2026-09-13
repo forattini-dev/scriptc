@@ -23,7 +23,7 @@ const fmt = new Intl.NumberFormat();
 const d = new Date(2024, 0); // local calendar construction now lowers
 const mutableDate = new Date(0);
 mutableDate.setUTCFullYear(2024); // mutation is outside the read-only Date slice
-const sameDate = mutableDate === mutableDate; // scalar storage must not fake object identity
+const sameDate = mutableDate === mutableDate; // native Rust preserves object identity
 const wm = new WeakMap();
 const px = new Proxy({ a: 1 }, {});
 const buf = new ArrayBuffer(8);
@@ -76,9 +76,9 @@ function pick(a: string | number, b: number | boolean): boolean {
 }
 const picked = pick(1, 2);
 
-// Date values deliberately have no tagged-union payload yet. Nullable
-// Date positions must fence in the frontend instead of reaching a backend
-// scalar/ref mismatch.
+// Nullable Date positions now have native Rust tagged-union payloads.
+// Keep this accepted neighbor beside the remaining stdlib refusals.
+// Date mutation above still needs its own implementation.
 function optionalDate(value: Date | undefined): number {
   return value === undefined ? -1 : value.getTime();
 }

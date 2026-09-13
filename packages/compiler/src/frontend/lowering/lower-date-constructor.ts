@@ -4,8 +4,8 @@ import { DATE_T, DYN, F64, isUnitType, typeKey, type IrExpr } from "../../ir/ir.
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";
 
-/** Read-only Date values retain a TimeClip'd millisecond scalar. Component
- * calls materialize ALL argument values before any observable ToNumber hook. */
+/** Date constructors create fresh objects, including the copy constructor.
+ * Component calls materialize arguments before observable ToNumber hooks. */
 export function lowerDateNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
   const nodes = expr.arguments ?? [];
   const loc = locOf(expr);
@@ -15,7 +15,9 @@ export function lowerDateNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const arg = L.lowerExpr(nodes[0]!);
     if (arg.type.kind === "f64") return { kind: "libCall", fn: "date.newMs", args: [arg], type: DATE_T, loc };
     if (arg.type.kind === "string") return { kind: "libCall", fn: "date.newString", args: [arg], type: DATE_T, loc };
-    if (arg.type.kind === "date") return arg;
+    if (arg.type.kind === "date") return { kind: "libCall", fn: "date.newMs", args: [
+      { kind: "libCall", fn: "date.getTime", args: [arg], type: F64, loc },
+    ], type: DATE_T, loc };
     L.noLowering(`new Date of '${L.fmt(arg.type)}' values`, nodes[0]!, "pass milliseconds, a date string, or another Date value");
   }
   const args = nodes.map((node): IrExpr => {

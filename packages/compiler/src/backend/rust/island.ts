@@ -86,7 +86,7 @@ function emitMarshal(
       return context.emitDynFromValue(expr.value.type, emitExpr(expr.value), expr.loc);
     // A native Date (its epoch milliseconds) as a fresh engine Date.
     case "date":
-      return `${context.dynTypeName()}::Island(runtime::island_value_date(${emitExpr(expr.value)}))`;
+      return `${context.dynTypeName()}::Island(runtime::island_value_date(runtime::date_value_time(&(${emitExpr(expr.value)}))))`;
     default:
       context.unsupported(`island marshal from '${expr.value.type.kind}'`, expr.loc);
   }

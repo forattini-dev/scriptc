@@ -514,7 +514,7 @@ export function emitDynamicExpr(host: LlvmEmitterContext, e: ExprOf<"dynFrom" | 
         B.line(`${neg} = xor i1 ${test}, true`);
         return { name: neg, type: e.type };
       }
-      case "dynTest": { if (e.test === "bigint") throw new LlvmUnsupportedError("native BigInt requires --backend rust", e.loc);
+      case "dynTest": { if (e.test === "bigint" || e.test === "date") throw new LlvmUnsupportedError("native BigInt/Date tags require --backend rust", e.loc);
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload (the runtime's ToBoolean).
         const d = host.emitExpr(e.value);

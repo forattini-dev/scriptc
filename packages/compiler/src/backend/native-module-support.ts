@@ -1,3 +1,4 @@
+import { nativeDateBackendDiagnostics } from "./native-date-support.js";
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 import { nativeBigIntBackendDiagnostics } from "./native-bigint-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
@@ -11,6 +12,8 @@ export function nativeModuleBackendDiagnostics(
   backend: "c" | "llvm" | "rust",
 ): ScrDiagnostic[] {
   if (backend === "rust") return [];
+  const dates = nativeDateBackendDiagnostics(mod, backend);
+  if (dates.length > 0) return dates;
   const bigints = nativeBigIntBackendDiagnostics(mod, backend);
   if (bigints.length > 0) return bigints;
   const callableRecords = nativeCallableRecordBackendDiagnostics(mod, backend);

@@ -9,6 +9,7 @@ export function emitRustDynamicJsonReplacer(context: RustDynamicContext): void {
   context.line(`fn sc_dyn_json_replace(holder: &${name}, key: &runtime::JsString, replacer: &${name}) -> ScJsonReplacement {`);
   context.pushIndent();
   context.line("let mut value = sc_dyn_key_get(holder, key, false);");
+  context.line(`if let ${name}::Date(date) = &value { value = if runtime::date_value_time(date).is_nan() { ${name}::Null } else { ${name}::String(runtime::date_value_inspect(date)) }; }`);
   context.line(`if matches!(&value, ${name}::Object(..)) {`);
   context.pushIndent();
   context.line('let hook = sc_dyn_key_get(&value, &runtime::string("toJSON"), false);');

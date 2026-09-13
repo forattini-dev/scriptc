@@ -3016,7 +3016,7 @@ function emitDynamicExpr(
               : `(${d.name}->kind == SCR_DYN_BOOL && ${d.name}->v.b == ${s.name})`;
         return emitter.newTemp(e.type, e.negated ? `!${test}` : test);
       }
-      case "dynTest": { if (e.test === "bigint") throw new Error("native BigInt requires --backend rust");
+      case "dynTest": { if (e.test === "bigint" || e.test === "date") throw new Error("native BigInt/Date tags require --backend rust");
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload. ISLAND-held nodes (the jsval
         // kind — engine objects/arrays/functions only, scalars normalize

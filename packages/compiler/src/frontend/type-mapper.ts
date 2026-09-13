@@ -868,8 +868,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // values with `_v` adapters — they just never JSON-serialize or cross the island boundary, which the safety predicates refuse), and
   // FUNCTION elements (closure `_v` adapters + scr_closure_trace_v): `f === f` identity through indexOf/includes is sound because a
   // function VALUE is one ScrClosure for its whole life (top-level declarations intern one immortal closure, inner closures allocate
-  // once at their definition's evaluation and flow by reference — JS's function identity). map/set/regex/url/dyn, Date (scalar-backed
-  // but identity-bearing) and the other opaque handles stay unsupported as array elements; ordinary Date locals, params, fixed record/tuple fields, and promise payloads are supported.
+  // once at their definition's evaluation and flow by reference — JS's function identity). Date objects retain their identity in arrays.
+  // Map/Set and opaque handles still require their own array storage contracts.
   if (checker.isArrayType(widened)) {
     const elemTs = checker.getTypeArguments(widened as ts.TypeReference)[0];
     if (!elemTs) return null;
@@ -899,7 +899,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // array literal) and typed sources convert per element at the slot.
     if (elem.kind === "dyn") return DYN;
     // The shared predicate is the runtime/backend storage contract. In
-    // particular, valid standalone values such as Map/Set/Date and opaque
+    // particular, valid standalone values such as Map/Set and opaque
     // handles do not automatically have an array element representation.
     if (!isSupportedArrayElem(elem)) return null;
     // ChildProcess[] (the running-apps list) and Server[] (the [...set]
@@ -1459,10 +1459,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (!elem || !isSupportedSetElem(elem)) return null;
     return setOf(elem);
   }
-  // Date: a TimeClip'd epoch-millisecond scalar in the static runtime.
+  // Date: the native timestamp slot, with backend-owned object identity.
   // This supports stored/passed values and the read-only getter slice;
-  // identity and mutation stay fenced because the scalar deliberately
-  // carries no object identity.
+  // Rust preserves identity in a shared object slot; mutation remains
+  // fenced until setters have native lowering.
   if (isStdlibInterface("Date")) return DATE_T;
   // RegExp: a reference to the lib RegExp interface — provenance, not the
   // name (a user's own `interface RegExp` maps as a record). Regex values
@@ -2554,7 +2554,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
             // arms map: `x instanceof RegExp` is their narrowing test
             // (the skip-utility `string | RegExp` shape), and the arm
             // rides the ref machinery like array regex elements.
-            a.kind === "map" || a.kind === "set" || a.kind === "date" || a.kind === "dyn" ||
+            a.kind === "map" || a.kind === "set" || a.kind === "dyn" ||
             // Generator arms follow the map/set rule: no narrowing test.
             a.kind === "generator" ||
             // Func arms map beside ANY sibling: `typeof x === "function"`
@@ -2960,7 +2960,7 @@ export function unitOnlyUnion(unions: UnionRegistry): IrType {
  * `.return()`, `.throw()`, the for-of desugar, and mapType's
  * IteratorResult alias mapping all intern through here, so reads agree.
  * Null when the combined union would be illegal (a func/set arm beside
- * data arms, a map/regex/Date arm — kinds with no narrowing test): such
+ * data arms, a map/regex arm — kinds with no narrowing test): such
  * generators stay unmapped. */
 export function genResultRecord(
   yieldT: IrType,
@@ -2980,7 +2980,7 @@ export function genResultRecord(
         return true;
       }
       if (
-        t.kind === "map" || t.kind === "regex" || t.kind === "date" ||
+        t.kind === "map" || t.kind === "regex" ||
         t.kind === "jsval" || t.kind === "generator"
       ) {
         return false; // no legal union arm exists for these kinds
@@ -3032,7 +3032,7 @@ export function isUnitOnlyTsType(t: ts.Type): boolean {
 
 /** IR-level `t | undefined`, canonicalized and fenced exactly like the
  * ts-union branch of mapType (typeKey-sorted arms, deduplicated; map/
- * regex/Date/dyn/void arms unrepresentable; a func arm IS representable — the
+ * regex/dyn/void arms unrepresentable; a func arm IS representable — the
  * result is exactly the nullable-callback shape mapType's union branch
  * admits, `(() => void) | undefined`) so the interned union is IDENTICAL
  * to what mapping the checker's own `T | undefined` produces. */
@@ -3040,14 +3040,13 @@ export function withUndefinedArm(t: IrType, unions: UnionRegistry): IrType | nul
   if (t.kind === "union") {
     const def = unions.get(t.unionId);
     if (!def) return null;
-    if (def.arms.some((a) => a.kind === "date")) return null;
     if (def.arms.some((a) => a.kind === "undefinedT")) return t;
     const arms = [...def.arms, UNDEFINED_T];
     arms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
     return { kind: "union", unionId: unions.intern(arms, def.discriminant) };
   }
   if (
-    t.kind === "void" || t.kind === "map" || t.kind === "date" || t.kind === "dyn" ||
+    t.kind === "void" || t.kind === "map" || t.kind === "dyn" ||
     // A bare unit field type cannot occur (units live only inside unions),
     // but guard against constructing a single-arm union from one.
     isUnitType(t)

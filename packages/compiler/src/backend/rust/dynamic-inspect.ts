@@ -16,6 +16,7 @@ export function emitRustDynamicInspect(
   context.line(`${name}::Null => runtime::string("null"),`);
   context.line(`${name}::Number(value) => runtime::inspect_number(*value),`);
   context.line(`${name}::BigInt(value) => runtime::string(&runtime::display_bigint(value)),`);
+  context.line(`${name}::Date(value) => runtime::date_value_inspect(value),`);
   context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
   context.line(`${name}::String(value) => runtime::inspect_string(value),`);
   context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);

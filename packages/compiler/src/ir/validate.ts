@@ -1507,9 +1507,8 @@ export function validateModule(mod: IrModule): IrValidationError[] {
     }
     u.arms.forEach((arm, i) => {
       // The unit kinds (undefinedT/nullT) are valid arms — union membership
-      // is the ONLY place they may appear; void/union/map/dyn/jsval/date
-      // stay out (maps and scalar Date values have no supported union
-      // representation/discriminant to narrow on). Func/set arm
+      // is the ONLY place they may appear; void/union/map/dyn/jsval stay out.
+      // Date has its own tag and native instanceof test. Func/set arm
       // sibling rules live in unionFuncSetArmsOk (shared with the frontend's
       // union builders): a func arm allows unit and FUNC siblings (the
       // nullable-callback shape, and the primitive-constructor tables where
@@ -1522,7 +1521,6 @@ export function validateModule(mod: IrModule): IrValidationError[] {
         arm.kind === "map" ||
         arm.kind === "dyn" ||
         arm.kind === "jsval" ||
-        arm.kind === "date" ||
         arm.kind === "generator"
       ) {
         errors.push({ message: `union ${u.id}: arm ${i} is ${arm.kind}`, loc: noLoc });
@@ -1839,7 +1837,7 @@ function validateFunction(
             e.left.type.kind === "record" ||
             // Symbol identity IS pointer identity (the frontend's rule).
             e.left.type.kind === "symbol" ||
-            e.left.type.kind === "bytes" ||
+            e.left.type.kind === "date" || e.left.type.kind === "bytes" ||
             e.left.type.kind === "promise" ||
             // Runtime handles are objects to === (one handle per socket/
             // request — pointer identity is JS's object equality).
@@ -3364,7 +3362,7 @@ function validateFunction(
         const dynSide = e.left.type.kind === "dyn" ? e.left : e.right;
         const scalarSide = dynSide === e.left ? e.right : e.left;
         if (dynSide.type.kind !== "dyn") err("dynScalarEq needs a dyn side", e.loc);
-        if (!["bigint", "f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
+        if (!["date", "bigint", "f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
           err(`dynScalarEq scalar side is ${scalarSide.type.kind}`, e.loc);
         }
         if (e.type.kind !== "bool") err("dynScalarEq must be bool", e.loc);

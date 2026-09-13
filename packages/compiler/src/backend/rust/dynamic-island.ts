@@ -81,6 +81,7 @@ export function rustIslandDynamicTest(test: Extract<IrExpr, { kind: "dynTest" }>
     case "truthy": return `runtime::island_truthy(${value})`;
     case "function": return `runtime::island_is_function(${value})`;
     case "error": return `runtime::island_is_error(${value})`;
+    case "date": return `runtime::island_instance_of(${value}, &runtime::island_global_get("Date"))`;
     case "array": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("Array"), "isArray", &[${value}.clone()]))`;
     case "bytes": return `runtime::island_exit_boolean(&runtime::island_call_method(&runtime::island_global_get("ArrayBuffer"), "isView", &[${value}.clone()]))`;
     case "integer": return `(runtime::island_value_typeof(${value}).as_ref() == "number" && runtime::number_is_integer(runtime::island_exit_number(${value})))`;

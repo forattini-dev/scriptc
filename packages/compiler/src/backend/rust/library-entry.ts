@@ -13,8 +13,8 @@ export interface RustLibraryEntryOptions {
 function resetGlobal(global: IrGlobal, unsupported: (kind: string) => never): string {
   const name = mangleGlobal(global.id);
   switch (global.type.kind) {
-    case "f64":
-    case "date": return `${name}.with(|slot| slot.set(0.0));`;
+    case "f64": return `${name}.with(|slot| slot.set(0.0));`;
+    case "date": return `${name}.with(|slot| *slot.borrow_mut() = runtime::date_value_new(f64::NAN));`;
     case "bool": return `${name}.with(|slot| slot.set(false));`;
     case "classval": return `${name}.with(|slot| slot.set(0));`;
     case "string":

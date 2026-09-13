@@ -52,6 +52,7 @@ export class RustDynamicEmitter {
     this.context.line("Null,");
     this.context.line("Number(f64),");
     this.context.line("BigInt(runtime::JsBigInt),");
+    this.context.line("Date(runtime::JsDate),");
     this.context.line("Boolean(bool),");
     this.context.line("String(runtime::JsString),");
     this.context.line("Regex(runtime::JsRegex),");
@@ -137,6 +138,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined | ${name}::Null => writer.write_null(),`);
     this.context.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::BigInt(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::Date(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::String(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Regex(..) => { writer.begin_object(); writer.end_object(); },`);
@@ -259,6 +261,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => "null".to_owned(),`);
     this.context.line(`${name}::Number(value) => runtime::display_number(*value),`);
     this.context.line(`${name}::BigInt(value) => runtime::display_bigint(value),`);
+    this.context.line(`${name}::Date(value) => runtime::date_value_inspect(value).to_string(),`);
     this.context.line(`${name}::Boolean(value) => runtime::display_bool(*value),`);
     this.context.line(`${name}::String(value) => format!("'{}'", value),`);
     this.context.line(`${name}::Array(..) => "[ ... ]".to_owned(),`);
@@ -299,6 +302,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => ${name}::Null,`);
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
+    this.context.line(`${name}::Date(value) => ${name}::Date(value.clone()),`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(value.clone()),`);
@@ -358,6 +362,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => Ok(runtime::JsonNode::Null),`);
     this.context.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
     this.context.line(`${name}::BigInt(..) => Err(format!("bigint at {path} is not JSON data")),`);
+    this.context.line(`${name}::Date(..) => Err(format!("Date at {path} is not JSON data")),`);
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
     this.context.line(`${name}::String(value) => Ok(runtime::JsonNode::String(value.clone())),`);
     this.context.line(`${name}::Regex(..) => Ok(runtime::JsonNode::Object(Vec::new())),`);
@@ -619,7 +624,7 @@ export class RustDynamicEmitter {
     this.context.line(`fn sc_dyn_to_number(value: &${name}) -> f64 {`);
     this.context.line(`if matches!(value, ${name}::BigInt(..)) { runtime::throw_type_error(if runtime::target_runtime_id() == "bun" { "Conversion from 'BigInt' to 'number' is not allowed." } else { "Cannot convert a BigInt value to a number" }.to_owned()); }`);
     this.context.pushIndent();
-    this.context.line(`match value { ${name}::Undefined => f64::NAN, ${name}::Null => 0.0, ${name}::Number(value) => *value, ${name}::Boolean(value) => if *value { 1.0 } else { 0.0 }, ${name}::String(value) => runtime::number_from_string(value), _ => runtime::number_from_string(&sc_dyn_to_string(value)), }`);
+    this.context.line(`match value { ${name}::Date(value) => runtime::date_value_time(value), ${name}::Undefined => f64::NAN, ${name}::Null => 0.0, ${name}::Number(value) => *value, ${name}::Boolean(value) => if *value { 1.0 } else { 0.0 }, ${name}::String(value) => runtime::number_from_string(value), _ => runtime::number_from_string(&sc_dyn_to_string(value)), }`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_to_string(value: &${name}) -> runtime::JsString {`);
@@ -630,6 +635,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => runtime::string("null"),`);
     this.context.line(`${name}::Number(value) => runtime::number_to_string(*value),`);
     this.context.line(`${name}::BigInt(value) => runtime::bigint_to_string(value),`);
+    this.context.line(`${name}::Date(value) => runtime::date_value_to_string(value),`);
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
     this.context.line(`${name}::String(value) => value.clone(),`);
     this.context.line(`${name}::Regex(value) => runtime::string(&format!("/{}/{}", runtime::regex_source(value), runtime::regex_flags(value))),`);
@@ -689,6 +695,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => "null".to_owned(),`);
     this.context.line(`${name}::Number(value) => format!("type number ({})", runtime::format_number(*value)),`);
     this.context.line(`${name}::BigInt(value) => format!("type bigint ({})", runtime::display_bigint(value)),`);
+    this.context.line(`${name}::Date(value) => format!("an instance of Date ({})", runtime::date_value_inspect(value)),`);
     this.context.line(`${name}::Boolean(value) => format!("type boolean ({value})"),`);
     this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
     this.context.line(`${name}::Regex(..) => "an instance of RegExp".to_owned(),`);
@@ -915,7 +922,8 @@ export class RustDynamicEmitter {
     this.context.line("if runtime::array_len(&transfer) > 0.0 { runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\"); }");
     this.context.popIndent();
     this.context.line("}");
-    this.context.line(`fn sc_dyn_clone(value: &${name}, parents: &mut Vec<usize>) -> ${name} {`);
+    this.context.line(`fn sc_dyn_clone(value: &${name}, parents: &mut Vec<usize>) -> ${name} { sc_dyn_clone_dates(value, parents, &mut Vec::new()) }`);
+    this.context.line(`fn sc_dyn_clone_dates(value: &${name}, parents: &mut Vec<usize>, dates: &mut Vec<(usize, runtime::JsDate)>) -> ${name} {`);
     this.context.pushIndent();
     this.context.line("match value {");
     this.context.pushIndent();
@@ -923,6 +931,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => ${name}::Null,`);
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
+    this.context.line(`${name}::Date(value) => { if runtime::target_runtime_id() == \"bun\" { return ${name}::Date(runtime::date_value_copy(value)); } let id = runtime::date_value_identity(value); if let Some((_, copied)) = dates.iter().find(|(key, _)| *key == id) { ${name}::Date(copied.clone()) } else { let copied = runtime::date_value_copy(value); dates.push((id, copied.clone())); ${name}::Date(copied) } },`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
     this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
     this.context.line(`${name}::Regex(value) => ${name}::Regex(runtime::regex_new(&runtime::regex_source(value), &runtime::regex_flags(value))),`);
@@ -954,7 +963,7 @@ export class RustDynamicEmitter {
     this.context.line("parents.push(identity);");
     this.context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
     this.context.line("let mut index = 0.0;");
-    this.context.line("while index < runtime::array_len(value) { let field = runtime::array_get(value, index); runtime::array_push(&output, sc_dyn_clone(&field, parents)); index += 1.0; }");
+    this.context.line("while index < runtime::array_len(value) { let field = runtime::array_get(value, index); runtime::array_push(&output, sc_dyn_clone_dates(&field, parents, dates)); index += 1.0; }");
     this.context.line("parents.pop();");
     this.context.line(`${name}::Array(output)`);
     this.context.popIndent();
@@ -969,7 +978,7 @@ export class RustDynamicEmitter {
     this.context.line("let mut index = 0.0;");
     this.context.line("while index < runtime::map_iter_count(value) {");
     this.context.pushIndent();
-    this.context.line("if runtime::map_iter_live(value, index) { let key = runtime::map_iter_key(value, index); let field = runtime::map_iter_value(value, index); runtime::map_set_by(&output, key, sc_dyn_clone(&field, parents), |left, right| left.as_ref() == right.as_ref()); }");
+    this.context.line("if runtime::map_iter_live(value, index) { let key = runtime::map_iter_key(value, index); let field = runtime::map_iter_value(value, index); runtime::map_set_by(&output, key, sc_dyn_clone_dates(&field, parents, dates), |left, right| left.as_ref() == right.as_ref()); }");
     this.context.line("index += 1.0;");
     this.context.popIndent();
     this.context.line("}");
@@ -1006,6 +1015,7 @@ export class RustDynamicEmitter {
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc, path = '"$"'): string {
     switch (type.kind) {
       case "dyn": case "jsval": return value;
+      case "date": return `sc_dyn_check_date_at(${value}, ${path})`;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
       case "bigint": return `sc_dyn_check_bigint_at(${value}, ${path})`;
       case "bool": return `sc_dyn_check_boolean_at(${value}, ${path})`;

@@ -12,7 +12,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::Undefined => "undefined",`);
   context.line(`${name}::Null => "null",`);
   context.line(`${name}::Number(..) => "number",`);
-  context.line(`${name}::BigInt(..) => "bigint",`);
+  context.line(`${name}::BigInt(..) => "bigint", ${name}::Date(..) => "object",`);
   context.line(`${name}::Boolean(..) => "boolean",`);
   context.line(`${name}::String(..) => "string",`);
   context.line(`${name}::Regex(..) => "object",`);
@@ -58,7 +58,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.pushIndent();
   context.line(`${name}::Undefined => "undefined",`);
   context.line(`${name}::Number(..) => "number",`);
-  context.line(`${name}::BigInt(..) => "bigint",`);
+  context.line(`${name}::BigInt(..) => "bigint", ${name}::Date(..) => "object",`);
   context.line(`${name}::Boolean(..) => "boolean",`);
   context.line(`${name}::String(..) => "string",`);
   context.line(`${name}::Bytes(..) => "object",`);

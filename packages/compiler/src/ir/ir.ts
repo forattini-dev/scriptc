@@ -41,11 +41,9 @@ export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64";
 export type IrType =
   | { kind: "f64" }
   | { kind: "bigint" }
-  /** The supported ES Date value slice: a scalar TimeClip'd millisecond
-   * value. Getters and toISOString observe only this slot, so copying it
-   * through locals/params/fields is exact while Date mutation and object
-   * identity remain frontend-fenced. It is therefore intentionally NOT
-   * refcounted despite being truthy like every JS object. */
+  /** A TimeClip'd millisecond slot. Rust retains native object identity across
+   * aliases and dynamic boundaries; legacy C/LLVM keep their scalar ABI and
+   * refuse identity-dependent forms before emission. */
   | { kind: "date" }
   | { kind: "string" } // heap, refcounted, UTF-8
   | { kind: "bool" }
@@ -477,7 +475,7 @@ export function isUnitType(t: IrType): boolean {
  * otherwise-valid standalone type (Map, Set, dyn, opaque handles, ...). */
 export function isSupportedArrayElem(t: IrType): boolean {
   switch (t.kind) {
-    case "effect": case "genericFunc": case "f64": // effect/genericFunc: refcounted handles traced like any Gc element
+    case "date": case "effect": case "genericFunc": case "f64": // effect/genericFunc: refcounted handles traced like any Gc element
     case "bool":
     case "string":
     case "array":
@@ -4932,7 +4930,7 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "bigint" | "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "date" | "bigint" | "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -5725,7 +5723,7 @@ export function canConvertToDyn(
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -5770,7 +5768,7 @@ function canBoxDynComposite(
   visiting: Set<string> = new Set(),
 ): boolean {
   switch (t.kind) {
-    case "bigint": case "f64":
+    case "date": case "bigint": case "f64":
     case "string":
     case "bool":
     case "dyn":
@@ -5815,16 +5813,16 @@ export function canDynCheckTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
-  if (t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
     return !!def &&
-      def.arms.some((a) => a.kind === "undefinedT") &&
+      def.arms.some((a) => a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT") &&
       def.arms.every((a) =>
-        a.kind === "undefinedT" ||
+        a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" ||
         isJsonSafeType(a, getRecord, getUnion) ||
         (a.kind === "object" && a.className === "%Error")
       );

@@ -12,6 +12,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::Undefined, ${name}::Undefined) | (${name}::Null, ${name}::Null) => true,`);
   context.line(`(${name}::Number(left), ${name}::Number(right)) => runtime::number_same_value(*left, *right),`);
   context.line(`(${name}::Boolean(left), ${name}::Boolean(right)) => left == right,`);
+  context.line(`(${name}::Date(left), ${name}::Date(right)) => left == right || (deep && { let a = runtime::date_value_time(left); let b = runtime::date_value_time(right); a == b || (runtime::target_runtime_id() != "bun" && a.is_nan() && b.is_nan()) }),`);
   context.line(`(${name}::BigInt(left), ${name}::BigInt(right)) => left == right,`);
   context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
   if (usesEmbeddedModules) context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);

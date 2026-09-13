@@ -145,7 +145,7 @@ export class RustValueEmitter {
         return `${name}.with(|slot| slot.borrow().as_ref().expect("scriptc: uninitialized global").clone())`;
       }
       if (this.needsClone(type)) return `${name}.with(|slot| slot.borrow().clone())`;
-      if (type.kind === "f64" || type.kind === "date" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
+      if (type.kind === "f64" || type.kind === "bool" || type.kind === "classval") return `${name}.with(Cell::get)`;
       this.context.unsupported(`global read type '${type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -168,7 +168,7 @@ export class RustValueEmitter {
       const name = mangleGlobal(id);
       if (this.isHeapRoot(global.type) || global.type.kind === "regex" || global.type.kind === "symbol" || global.type.kind === "url" || global.type.kind === "searchParams" || global.type.kind === "generator") return `${name}.with(|slot| *slot.borrow_mut() = Some(${value}));`;
       if (this.needsClone(global.type)) return `${name}.with(|slot| *slot.borrow_mut() = ${value});`;
-      if (global.type.kind === "f64" || global.type.kind === "date" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
+      if (global.type.kind === "f64" || global.type.kind === "bool" || global.type.kind === "classval") return `${name}.with(|slot| slot.set(${value}));`;
       this.context.unsupported(`global assignment type '${global.type.kind}'`, loc);
     }
     const local = this.local(id, loc);
@@ -199,7 +199,7 @@ export class RustValueEmitter {
       case "void": return "()";
       case "bigint": return "runtime::JsBigInt";
       case "f64": return "f64";
-      case "date": return "f64";
+      case "date": return "runtime::JsDate";
       case "procStream": return "f64";
       case "bool": return "bool";
       case "string": return "runtime::JsString";
@@ -279,7 +279,7 @@ export class RustValueEmitter {
     switch (type.kind) {
       case "bigint": return "runtime::bigint_from_bool(false)";
       case "f64": return "0.0";
-      case "date": return "0.0";
+      case "date": return "runtime::date_value_new(f64::NAN)";
       case "bool": return "false";
       case "string": return "runtime::empty_string()";
       case "symbol": return "runtime::symbol_new_anonymous()";
@@ -354,7 +354,7 @@ export class RustValueEmitter {
   }
 
   needsClone(type: IrType): boolean {
-    if (type.kind === "record" || type.kind === "bigint") return true;
+    if (type.kind === "record" || type.kind === "bigint" || type.kind === "date") return true;
     return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
@@ -367,6 +367,7 @@ export class RustValueEmitter {
           : `*${left} == *${right}`;
       case "bool":
       case "classval":
+      case "date":
       case "bigint":
         return `${left} == ${right}`;
       case "string":
@@ -479,6 +480,7 @@ export class RustValueEmitter {
 
   ensureUnionArm(type: IrType): void {
     switch (type.kind) {
+      case "date":
       case "bigint":
       case "f64":
       case "bool":

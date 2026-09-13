@@ -1,3 +1,4 @@
+import { lowerNativeDateRegexInstanceof } from "./lower-date-instanceof.js";
 import { lowerExplicitThis } from "./lower-explicit-this.js";
 import { lowerBigIntExpression } from "./lower-bigint.js";
 import { lowerNumericLiteral } from "./lower-numeric-literal.js";
@@ -2613,7 +2614,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const narrowed = narrowedTs.flags & ts.TypeFlags.Never ? null : lowerer.mapTypeOf(narrowedTs);
       if (
         narrowed &&
-        (narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "date" || narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
@@ -7964,7 +7965,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       }
       // Uint8Array targets: the checked-dynamic tree carries a bytes kind now (converted
       // stdin chunks) — the extraction validates the kind and copies out.
-      if (target.kind === "bigint" || (target.kind === "bytes" && target.elem === "u8")) {
+      if (target.kind === "date" || target.kind === "bigint" || (target.kind === "bytes" && target.elem === "u8")) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // ADAPTABLE function targets (`u as (x: number) => number` — the
@@ -8614,7 +8615,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const scalarSide = dynSide === left ? right : left;
         if (
           dynSide.type.kind === "dyn" &&
-          (scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
+          (scalarSide.type.kind === "date" || scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
             // dyn vs dyn (`context.actual !== context.exact` —
             // test/common's exit accounting): the runtime's whole-dyn
             // strict equality — scalars by value, units by kind,
@@ -8810,7 +8811,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
             idLeft.type.kind === "symbol" ||
             // Typed arrays / Buffers ARE objects to ===: pointer identity
             // (buf === buf.swap16() — the in-place mutators return this).
-            idLeft.type.kind === "bytes" ||
+            idLeft.type.kind === "date" || idLeft.type.kind === "bytes" ||
             idLeft.type.kind === "promise") &&
           typeEquals(idLeft.type, idRight.type)
         ) {
@@ -9025,6 +9026,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
    * "function" (unions never carry them — defensive), and the jsval/dyn/
    * caught/void/union kinds cannot appear as arms. */
   function typeofAnswer(arm: IrType): string | null {
+    if (arm.kind === "date") return "object";
     if (arm.kind === "bigint") return "bigint";
     switch (arm.kind) {
       case "f64": return "number";
@@ -9444,7 +9446,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
     const narrowed = lowerer.mapTypeOf(checkerType);
     if (
       narrowed &&
-      (narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+      (narrowed.kind === "date" || narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
     ) {
       return { kind: "caughtNarrow", value: ref, type: narrowed, loc };
     }
@@ -9562,6 +9564,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       lowerer.builtinStreamInfoOf(rhsMemberSymbol) ??
       undefined;
     if (!target) {
+      const date = lowerNativeDateRegexInstanceof(lowerer, expr);
+      if (date) return date;
       // `u instanceof Uint8Array` on an `unknown` value: the checked-dynamic
       // tree carries a bytes kind — one runtime tag test, and tsc's
       // narrowing types the true branch (reads bridge through maybeNarrow's
@@ -9605,29 +9609,6 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const left = lowerer.lowerExpr(expr.left);
         if (left.type.kind === "dyn") {
           return { kind: "dynTest", test: "bytes", value: left, type: BOOL, loc };
-        }
-      }
-      // `x instanceof RegExp` over a union with a regex arm (the
-      // skip-utility `string | RegExp` dispatch): a union tag test — the
-      // socket-narrowing shape; the checker types the branches and
-      // maybeNarrow bridges the reads. A plain regex-typed LHS folds
-      // true; the fold keeps the operand-purity rule of the class folds
-      // (identifier reads only).
-      if (
-        ts.isIdentifier(expr.right) &&
-        lowerer.isStdlibGlobal(expr.right, "RegExp") &&
-        !lowerer.caughtLocalOf(expr.left)
-      ) {
-        const left = lowerer.lowerExpr(expr.left);
-        if (left.type.kind === "union") {
-          const def = lowerer.unions.get(left.type.unionId);
-          const tag = def ? def.arms.findIndex((a) => a.kind === "regex") : -1;
-          if (tag >= 0) {
-            return { kind: "unionIsTag", unionId: left.type.unionId, tag, negated: false, value: left, type: BOOL, loc };
-          }
-        }
-        if (left.type.kind === "regex" && left.kind === "varRef" && ts.isIdentifier(expr.left)) {
-          return { kind: "boolLit", value: true, type: BOOL, loc };
         }
       }
       // `x instanceof X` where X is a class VALUE (a classval-typed

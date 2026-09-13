@@ -427,6 +427,7 @@ export class RustDefinitionEmitter {
           break;
         case "bool":
         case "classval":
+        case "date":
         case "bigint":
           comparison = "left == right";
           break;
@@ -920,7 +921,6 @@ export class RustDefinitionEmitter {
       const name = mangleGlobal(global.id);
       switch (global.type.kind) {
         case "f64":
-        case "date":
           slot(`static ${name}: Cell<f64> = const { Cell::new(0.0) };`);
           break;
         case "bool":
@@ -931,6 +931,9 @@ export class RustDefinitionEmitter {
           break;
         case "string":
           slot(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
+          break;
+        case "date":
+          slot(`static ${name}: RefCell<runtime::JsDate> = RefCell::new(runtime::date_value_new(f64::NAN));`);
           break;
         case "bigint":
           slot(`static ${name}: RefCell<runtime::JsBigInt> = RefCell::new(runtime::bigint_from_bool(false));`);

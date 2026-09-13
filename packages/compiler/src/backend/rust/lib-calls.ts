@@ -647,22 +647,25 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
   if (expr.fn === "process.uptime" && expr.args.length === 0) return "runtime::process_uptime()";
   if (expr.fn === "perf.now" && expr.args.length === 0) return "runtime::performance_now()";
   if (expr.fn === "date.now" && expr.args.length === 0) return "runtime::date_now()";
-  if (expr.fn === "date.newNow" && expr.args.length === 0) return "runtime::date_now()";
+  if (expr.fn === "date.newNow" && expr.args.length === 0) return "runtime::date_value_new(runtime::date_now())";
   if ((expr.fn === "date.newMs" || expr.fn === "date.getTime" || expr.fn === "date.valueOf") &&
       expr.args.length === 1 && arg !== undefined) {
-    const runtimeFn = expr.fn === "date.newMs" ? "date_new_ms" : "date_get_time";
-    return `runtime::${runtimeFn}(${context.emitExpr(arg)})`;
+    return expr.fn === "date.newMs" ? `runtime::date_value_new(${context.emitExpr(arg)})`
+      : `runtime::date_value_time(&(${context.emitExpr(arg)}))`;
   }
   if ((expr.fn === "date.newString" || expr.fn === "date.parseGetTime") &&
       expr.args.length === 1 && arg !== undefined) {
-    return `runtime::date_parse_get_time(&(${context.emitExpr(arg)}))`;
+    const time = `runtime::date_parse_get_time(&(${context.emitExpr(arg)}))`;
+    return expr.fn === "date.newString" ? `runtime::date_value_new(${time})` : time;
   }
   if ((expr.fn === "date.toISOString" || expr.fn === "date.toISOStringValue") &&
       expr.args.length === 1 && arg !== undefined) {
-    return `runtime::date_to_iso(${context.emitExpr(arg)})`;
+    const time = arg.type.kind === "date" ? `runtime::date_value_time(&(${context.emitExpr(arg)}))` : context.emitExpr(arg);
+    return `runtime::date_to_iso(${time})`;
   }
   if ((expr.fn === "date.utc" || expr.fn === "date.newComponents") && expr.args.length === 7) {
-    return `runtime::${expr.fn === "date.utc" ? "date_utc" : "date_new_components"}(${expr.args.map((value) => context.emitExpr(value)).join(", ")})`;
+    const time = `runtime::${expr.fn === "date.utc" ? "date_utc" : "date_new_components"}(${expr.args.map((value) => context.emitExpr(value)).join(", ")})`;
+    return expr.fn === "date.newComponents" ? `runtime::date_value_new(${time})` : time;
   }
   const dateGetter = new Map<string, [string, boolean]>([
     ["date.getFullYear", ["date_get_full_year", false]],
@@ -681,14 +684,14 @@ export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallConte
     ["date.getUTCSeconds", ["date_get_seconds", true]],
   ]).get(expr.fn);
   if (dateGetter !== undefined && expr.args.length === 1 && arg !== undefined) {
-    return `runtime::${dateGetter[0]}(${context.emitExpr(arg)}, ${dateGetter[1]})`;
+    return `runtime::${dateGetter[0]}(runtime::date_value_time(&(${context.emitExpr(arg)})), ${dateGetter[1]})`;
   }
   if ((expr.fn === "date.getMilliseconds" || expr.fn === "date.getUTCMilliseconds") &&
       expr.args.length === 1 && arg !== undefined) {
-    return `runtime::date_get_milliseconds(${context.emitExpr(arg)})`;
+    return `runtime::date_get_milliseconds(runtime::date_value_time(&(${context.emitExpr(arg)})))`;
   }
   if (expr.fn === "date.getTimezoneOffset" && expr.args.length === 1 && arg !== undefined) {
-    return `runtime::date_get_timezone_offset(${context.emitExpr(arg)})`;
+    return `runtime::date_get_timezone_offset(runtime::date_value_time(&(${context.emitExpr(arg)})))`;
   }
   if (expr.fn === "url.new" && expr.args.length === 1 && arg !== undefined) {
     return `runtime::url_new(&(${context.emitExpr(arg)}))`;

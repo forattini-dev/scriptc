@@ -17,7 +17,7 @@ export function nativeRecordShapeSupported(
   try {
     const scalar = (type: IrType): boolean => type.kind === "union"
       ? unions.get(type.unionId)?.arms.every(scalar) ?? false
-      : ["f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
+      : ["date", "f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
     const optionalArray = (type: IrType): boolean => {
       const arms = type.kind === "union" ? unions.get(type.unionId)?.arms : undefined;
       return arms !== undefined && arms.filter(arm => arm.kind === "array").length === 1 &&
@@ -37,7 +37,7 @@ export function nativeRecordShapeSupported(
     const methodValue = (type: IrType): boolean => type.kind === "union"
       ? scalar(type) || optionalArray(type) || optionalRecord(type)
       : record(type) || nativeArrayViewSupported(type) ||
-        ["f64", "bool", "string", "dyn"].includes(type.kind);
+        ["date", "f64", "bool", "string", "dyn"].includes(type.kind);
     const method = (type: IrType): boolean => type.kind === "func" && type.rest !== true &&
       type.params.every(methodValue) && (type.ret.kind === "void" || methodValue(type.ret));
     return !shape.tuple && (shape.indexValue === undefined || shape.indexValue.kind === "dyn" ||
@@ -67,7 +67,7 @@ export function nativeRecordCheckSupported(
 /** Native array views can check and box each element without composite copies. */
 export function nativeArrayViewSupported(type: IrType): boolean {
   return type.kind === "array" && (nativeArrayViewSupported(type.elem) ||
-    ["f64", "bool", "string", "dyn"].includes(type.elem.kind));
+    ["date", "f64", "bool", "string", "dyn"].includes(type.elem.kind));
 }
 
 /** Acyclic dictionaries project scalar or shared record values without copies. */

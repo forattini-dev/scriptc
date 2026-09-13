@@ -1,16 +1,5 @@
-// Compiler-synthesized `T | undefined` slots must observe the same Date
-// union fence as source-written unions. Each construct below used to reach
-// IR validation as an SC9001 internal compiler error.
-
-function defaultDate(value: Date = new Date(0)): number {
-  return value.getTime();
-}
-defaultDate();
-
-function* dates(): Generator<Date, void, unknown> {
-  yield new Date(0);
-}
-for (const value of dates()) console.log(value.getTime());
+// Deferred Date fields must still refuse until reads before initialization
+// can preserve undefined rather than manufacture a Date object.
 
 class DeferredDate {
   value!: Date;
@@ -20,3 +9,4 @@ class DeferredDate {
 }
 const deferred = new DeferredDate();
 deferred.initialize();
+// Initialization after construction remains outside the supported field contract.
