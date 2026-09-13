@@ -4,6 +4,7 @@
  * Copies of self-contained declarations exist only in the host overlay.
  * Declaration imports/external reexports, generic exports, export-star runtime barrels
  * and ambiguous names are deliberately left to the normal fallback path. */
+import { declarationText, npmDeclarationCandidates } from "./npm-static-declarations.js";
 import { dirname, resolve } from "node:path";
 import ts from "typescript5";
 import { trackedFileExists, trackedReadFile } from "./input-tracker.js";
@@ -102,6 +103,7 @@ function typeOnlyNames(path: string, text: string): string[] {
 
 export class NpmStaticTypeBridge {
   private readonly files = new Map<string, string>();
+  private readonly candidates = npmDeclarationCandidates();
 
   readFile(path: string): string | undefined { return this.files.get(normalizePath(path)); }
   fileExists(path: string): boolean { return this.files.has(normalizePath(path)); }
@@ -111,9 +113,10 @@ export class NpmStaticTypeBridge {
     const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     if (!ts.isExternalModule(source) || source.statements.some((s) =>
       ts.isExportDeclaration(s) && s.exportClause === undefined)) return text;
-    const declaration = declarationFor(path, packageName);
+    const candidate = this.candidates?.get(path);
+    const declaration = candidate === undefined ? declarationFor(path, packageName) : candidate;
     if (declaration === null || !declarationName.test(declaration)) return text;
-    const declaredText = trackedReadFile(declaration);
+    const declaredText = declarationText(declaration);
     if (declaredText === null) return text;
     // Refuse any name already mentioned in source, including JSDoc. This
     // intentionally conservative check avoids shadowing local bindings,
@@ -121,8 +124,8 @@ export class NpmStaticTypeBridge {
     const identifiers = new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? []);
     const names = [...new Set(typeOnlyNames(declaration, declaredText))].filter((name) => !identifiers.has(name));
     if (names.length === 0) return text;
-    const virtualPath = declaration.replace(declarationName, ".__scriptc-types.d.ts");
-    if (trackedFileExists(virtualPath)) return text;
+    const virtualPath = candidate === undefined ? declaration.replace(declarationName, ".__scriptc-types.d.ts") : `${path}.__scriptc-types.d.ts`;
+    if (trackedFileExists(virtualPath) || declarationText(virtualPath) !== null) return text;
     this.files.set(virtualPath, declaredText);
     virtualDeclarations.add(virtualPath);
     const specifier = JSON.stringify(virtualPath).replaceAll("*", "\\u002a");

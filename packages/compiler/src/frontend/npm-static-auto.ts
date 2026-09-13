@@ -3,6 +3,7 @@
  * frontend fixpoint, from its importing package's own resolution realm.
  * Library mode additionally diagnoses runtime-only packages lacking types;
  * executable auto retains its existing eligibility/fallback policy. */
+import { registerNpmDeclaration } from "./npm-static-declarations.js";
 import type { NpmStaticStatus } from "../coverage/report.js";
 import type { SrcLoc } from "../ir/ir.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./program.js";
@@ -26,7 +27,7 @@ export function detectAutoPackages(
   // monorepo's packages/*/node_modules, unreachable from the entry's own
   // walk-up) answers "no runtime JS" for perfectly ordinary installs.
   // Packages can expose only subpaths; their root need not be importable.
-  const seen = new Map<string, { typesFile: string; fromFile: string; specifier: string }>();
+  const seen = new Map<string, { typesFile: string; fromFile: string; specifier: string }[]>();
   for (const sf of [...load.moduleOrder, load.entry]) {
     if (mode === "auto" && sf.fileName.includes("/node_modules/") && npmStaticPackageOfPath(sf.fileName) === null) continue;
     const edges: { spec: string; loc: SrcLoc }[] = [];
@@ -63,29 +64,37 @@ export function detectAutoPackages(
       }
       // Types-first resolution can name @types/foo for an import of foo.
       // Admission owns executable packages, never their declaration provider.
-      // Keep the original typesFile so the own-declarations eligibility rule
-      // still rejects third-party declarations with the correct attribution.
+      // Keep the original declaration provider for identity/version checks.
       const pkg = npm.packageName.startsWith("@types/")
         ? resolveBareModule(sf.fileName, spec, "js-only")?.packageName ?? packageNameOfBareSpecifier(spec)
         : npm.packageName;
       if (judged.has(pkg)) continue;
-      if (!seen.has(pkg)) {
-        seen.set(pkg, { typesFile: npm.typesFile, fromFile: sf.fileName, specifier: spec });
-        sites.set(pkg, loc);
-      }
+      const entries = seen.get(pkg) ?? [];
+      entries.push({ typesFile: npm.typesFile, fromFile: sf.fileName, specifier: spec });
+      seen.set(pkg, entries);
+      if (!sites.has(pkg)) sites.set(pkg, loc);
     }
   }
   const chosen: string[] = [];
-  for (const [pkg, { typesFile, fromFile, specifier }] of seen) {
+  for (const [pkg, entries] of seen) {
     judged.add(pkg);
-    const jsEntry = resolveBareModule(fromFile, specifier, "js-only");
-    const reason = npmStaticIneligibleReason(
-      pkg,
-      typesFile,
-      jsEntry !== null && isRuntimeSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null,
-    );
-    if (reason === null) chosen.push(pkg);
-    else statuses.push({ package: pkg, status: "fallback", detail: mode === "lib" ? reason : `auto: ${reason}` });
+    const pairs: { runtime: string; declaration: string }[] = [];
+    const checked = new Set<string>();
+    let reason: string | null = null;
+    for (const { typesFile, fromFile, specifier } of entries) {
+      const jsEntry = resolveBareModule(fromFile, specifier, "js-only");
+      const runtime = jsEntry !== null && isRuntimeSourceFileName(jsEntry.typesFile) ? jsEntry.typesFile : null;
+      const identity = `${runtime}\0${typesFile}`;
+      if (checked.has(identity)) continue;
+      checked.add(identity);
+      reason = npmStaticIneligibleReason(pkg, typesFile, runtime);
+      if (reason !== null) break;
+      if (runtime !== null) pairs.push({ runtime, declaration: typesFile });
+    }
+    if (reason === null) {
+      chosen.push(pkg);
+      for (const { runtime, declaration } of pairs) registerNpmDeclaration(runtime, declaration);
+    } else statuses.push({ package: pkg, status: "fallback", detail: mode === "lib" ? reason : `auto: ${reason}` });
   }
   return chosen;
 }

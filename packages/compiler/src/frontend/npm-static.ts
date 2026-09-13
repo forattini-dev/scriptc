@@ -60,6 +60,7 @@
  * the state, so a flagless compile after a flagged one sees a clean
  * slate. */
 
+import { thirdPartyDeclarationReason } from "./npm-static-declarations.js";
 import { dirname } from "node:path";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
 import { NpmStaticTypeBridge, resetNpmStaticTypes } from "./npm-static-types.js";
@@ -424,9 +425,8 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
 }
 
 /* ── auto-detection (--npm-static=auto) ─────────────────────────────────
- * The criteria the design doc names: the package ships its OWN .d.ts (a
- * declaration surface its author maintains against the JS — @types twins
- * are third-party claims and do not qualify), the runtime JS is readable
+ * AUTO accepts own declarations or identity/version-matched @types.
+ * Declarations only authorize an attempt; runtime JS must be readable
  * (unminified: real lines, ordinary line lengths), and the source shows
  * no build-transform markers (a bundled/transpiled dist is not the code
  * the author checked). Best-effort: a package that slips through and
@@ -464,13 +464,14 @@ export function npmStaticIneligibleReason(
   typesFile: string,
   jsEntry: string | null,
 ): string | null {
+  if (jsEntry === null) return "no runtime JS entry resolves";
   if (npmPackageNameOf(typesFile) !== pkgName) {
-    return "its declared types come from a third-party @types package, not the package itself";
+    const reason = thirdPartyDeclarationReason(pkgName, typesFile, jsEntry);
+    if (reason !== null) return reason;
   }
   if (!/\.d\.(ts|mts|cts)$/.test(typesFile) && !isTsSourceFileName(typesFile)) {
     return "it ships no own .d.ts declaration surface";
   }
-  if (jsEntry === null) return "no runtime JS entry resolves";
   const source = trackedReadFile(jsEntry);
   if (source === null) return `its runtime entry ${jsEntry} cannot be read`;
   if (!looksUnminified(source)) return "its shipped JS looks minified";

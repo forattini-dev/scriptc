@@ -6,12 +6,12 @@ import { nodeOracleExecutable } from "../../../tests/harness/oracle-environment.
 import { fixture, registry } from "../src/type-acquisition/fixtures.js";
 
 test("acquisition preserves the inferred native executable instead of substituting declared signatures", async () => {
-  const root = fixture();
+  const root = fixture({ "main.ts": 'import { answer, type Row } from "type-example"; const row: Row = { value: answer() }; console.log(row.value);\n' });
   // Intentionally incorrect library declaration: native mode must infer
   // answer's actual number-returning body, never invent a string result.
-  registry({ "index.d.ts": "export function answer(): string;\n" });
+  registry({ "index.d.ts": "export function answer(): string; export interface Row { value: number }\n" });
   const result = await compile(join(root, "main.ts"), {
-    backend: "rust", allowEngine: false, npmStatic: ["type-example"],
+    backend: "rust", allowEngine: false, npmStatic: "auto",
     typeAcquisition: { mode: "auto", cacheDir: join(root, "cache") },
     outDir: join(root, "out"), outPath: join(root, "out/program"),
   });
@@ -24,6 +24,12 @@ test("acquisition preserves the inferred native executable instead of substituti
   expect(node.error).toBeUndefined();
   expect([native.stdout, native.stderr, native.status]).toEqual([node.stdout, node.stderr, node.status]);
   expect(native.stdout).toBe("42\n");
+  const replay = await analyzeAsync(join(root, "main.ts"), {
+    backend: "rust", allowEngine: false, npmStatic: "auto",
+    typeAcquisition: { mode: "offline", frozenLock: true, cacheDir: join(root, "cache") },
+  });
+  expect(replay.coverage.npmStatic).toEqual([{ package: "type-example", status: "static" }]);
+  expect(replay.coverage.diagnostics).toEqual([]);
 });
 
 test("async analysis reports acquisition failures as diagnostics", async () => {

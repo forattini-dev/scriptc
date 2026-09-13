@@ -27,7 +27,7 @@ test.each([
     expect(coverage.npmStatic).toEqual([{
       package: name,
       status: "fallback",
-      detail: `${mode === "auto" ? "auto: " : ""}its declared types come from a third-party @types package, not the package itself`,
+      detail: `${mode === "auto" ? "auto: " : ""}third-party declarations require valid stable runtime and @types versions`,
     }]);
   } finally {
     rmSync(directory, { recursive: true, force: true });

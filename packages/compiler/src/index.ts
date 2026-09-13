@@ -64,6 +64,7 @@ import { npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-stati
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
 import { retryNpmCallbackContext } from "./frontend/npm-static-context.js";
+import { withNpmDeclarationCandidates } from "./frontend/npm-static-declarations.js";
 import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
@@ -467,16 +468,14 @@ interface Frontend {
  * status the shared loops record becomes compileLibrary's SC4020
  * static-or-refuse teaching. Both auto modes close over the opted-in
  * packages' own bare edges; explicit lists retain their named scope. */
-function runFrontend(
+const runFrontend: typeof runFrontendWithDeclarations = (...args) => withNpmDeclarationCandidates(() => runFrontendWithDeclarations(...args));
+function runFrontendWithDeclarations(
   entryPath: string,
   npmStatic?: readonly string[] | "auto" | "lib",
   externalTypes?: Readonly<Record<string, string>>,
   dynamic = false,
 ): Frontend {
-  // Resolver package/workspace metadata is intentionally shared across the
-  // several load attempts of ONE auto-detection fixpoint, but never across
-  // separate compiles in a long-lived process.  A cache miss must observe
-  // package.json edits before it can publish a new early-library entry.
+  // Share resolver metadata across this fixpoint, never across compiles.
   clearResolveCaches();
   const statuses: NpmStaticStatus[] = [];
   const npmSites = new Map<string, SrcLoc>();
