@@ -112,6 +112,7 @@ include!("child_stream.rs");
 include!("child_process_async.rs");
 include!("schema.rs");
 include!("effect.rs");
+include!("effect_iteration.rs");
 include!("effect_failure.rs");
 include!("effect_context.rs");
 include!("effect_runners.rs");
@@ -164,6 +165,7 @@ mod tests {
     include!("readline.test.rs");
     include!("tests/heap_pressure.rs");
     include!("effect_state.test.rs");
+    include!("effect_iteration.test.rs");
     include!("effect_pubsub.test.rs");
     include!("effect_failure.test.rs");
     include!("effect_context.test.rs");

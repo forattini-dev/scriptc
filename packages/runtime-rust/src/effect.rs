@@ -70,6 +70,7 @@ impl<R: Clone + 'static> EffectGen for TypedGen<R> {
 type GenFn = Rc<dyn Fn() -> Box<dyn EffectGen>>;
 type PromiseFn = Rc<dyn Fn() -> JsPromiseHandle>;
 type ItemFn = Rc<dyn Fn(EffectValue, f64) -> JsEffect>;
+type ItemIteratorFn = Rc<dyn Fn() -> Box<dyn Iterator<Item = EffectValue>>>;
 /// A finalizer: the scope's exit (as a data handle) → the effect to run.
 type FinalizerFn = Rc<dyn Fn(JsEffect) -> JsEffect>;
 /// `acquireRelease`'s release: the resource and the exit → the effect to run.
@@ -106,7 +107,7 @@ enum EffectNode {
     /// A layer description (`Layer<…>` values share the handle).
     Layer(LayerNode),
     /// `Effect.forEach(items, f)` / `Effect.all(effects)`: sequential, collected by the carrier's closure.
-    ForEach(Vec<EffectValue>, ItemFn, CollectFn, TraceFn),
+    ForEach(ItemIteratorFn, ItemFn, CollectFn, TraceFn),
     All(JsArray<JsEffect>, CollectFn),
     /// The default logger's line: level and the message parts.
     Log(JsString, JsArray<JsString>),
@@ -354,7 +355,7 @@ pub fn layer_merge(left: &JsEffect, right: &JsEffect) -> JsEffect {
     effect_new(EffectNode::Layer(LayerNode::Merge(left.clone(), right.clone())))
 }
 
-pub fn effect_for_each(items: Vec<EffectValue>, f: ItemFn, collect: CollectFn, trace: TraceFn) -> JsEffect {
+pub fn effect_for_each(items: ItemIteratorFn, f: ItemFn, collect: CollectFn, trace: TraceFn) -> JsEffect {
     effect_new(EffectNode::ForEach(items, f, collect, trace))
 }
 
@@ -644,21 +645,16 @@ enum Frame {
 }
 
 enum CollectSource {
-    Items(Vec<EffectValue>, ItemFn),
+    Items(Box<dyn Iterator<Item = EffectValue>>, ItemFn),
     Effects(JsArray<JsEffect>),
 }
 
 impl CollectSource {
-    fn len(&self) -> usize {
+    fn next_effect(&mut self, index: usize) -> Option<JsEffect> {
         match self {
-            CollectSource::Items(items, _) => items.len(),
-            CollectSource::Effects(effects) => array_len(effects) as usize,
-        }
-    }
-    fn effect_at(&self, index: usize) -> JsEffect {
-        match self {
-            CollectSource::Items(items, f) => f(items[index].clone(), index as f64),
-            CollectSource::Effects(effects) => array_get(effects, index as f64),
+            CollectSource::Items(items, f) => items.next().map(|value| f(value, index as f64)),
+            CollectSource::Effects(effects) =>
+                (index < array_len(effects) as usize).then(|| array_get(effects, index as f64)),
         }
     }
 }
@@ -759,7 +755,7 @@ fn effect_step(effect: &JsEffect) -> Step {
             Step::Push(Frame::FlatMap(Rc::new(move |bundle| effect_new(EffectNode::ProvideBundle(inner.clone(), bundle_of(&bundle))))), layer_build(layer))
         }
         EffectNode::Layer(_) => throw_error("scriptc: a layer is not an effect (Effect.provide it)".to_owned()),
-        EffectNode::ForEach(items, f, collect, _) => Step::Collect(CollectSource::Items(items.clone(), f.clone()), collect.clone()),
+        EffectNode::ForEach(items, f, collect, _) => Step::Collect(CollectSource::Items(items(), f.clone()), collect.clone()),
         EffectNode::Log(level, parts) => Step::Log(level.clone(), parts.clone()),
         EffectNode::Tap(inner, f, _) => Step::Push(Frame::Tap(f.clone()), inner.clone()),
         EffectNode::TapError(inner, f, _) => Step::Push(Frame::TapError(f.clone()), inner.clone()),
@@ -847,15 +843,14 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                         None => throw_error("Effect.addFinalizer outside a scope (Effect.scoped is missing)".to_owned()),
                     }
                 }
-                Step::Collect(source, collect) => {
-                    if source.len() == 0 {
-                        Ok(collect(Vec::new()))
-                    } else {
-                        let first = source.effect_at(0);
+                Step::Collect(mut source, collect) => {
+                    if let Some(first) = source.next_effect(0) {
                         let mut state = fiber.borrow_mut();
                         state.frames.push(Frame::Collect(1, Vec::new(), source, collect));
                         state.current = Some(first);
                         continue;
+                    } else {
+                        Ok(collect(Vec::new()))
                     }
                 }
                 Step::Enter(bundle, inner) => {
@@ -962,10 +957,9 @@ fn fiber_drive_inner(fiber: &FiberRef) {
                     None
                 }
                 (Frame::ZipRight(next), Ok(_)) => Some(next),
-                (Frame::Collect(next, mut done, source, collect), Ok(value)) => {
+                (Frame::Collect(next, mut done, mut source, collect), Ok(value)) => {
                     done.push(value);
-                    if next < source.len() {
-                        let effect = source.effect_at(next);
+                    if let Some(effect) = source.next_effect(next) {
                         fiber.borrow_mut().frames.push(Frame::Collect(next + 1, done, source, collect));
                         Some(effect)
                     } else {

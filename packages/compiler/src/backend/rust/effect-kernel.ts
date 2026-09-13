@@ -208,14 +208,38 @@ export function emitRustEffectCall(expr: RustLibCallExpr, context: RustLibCallCo
     }
     case "effect.forEach": {
       const carrier = expr.args[2];
-      if (first === undefined || second === undefined || carrier === undefined || first.type.kind !== "array" || second.type.kind !== "func") break;
+      if (first === undefined || second === undefined || carrier === undefined || second.type.kind !== "func") break;
       const param = second.type.params[0];
-      if (param === undefined) break;
       const items = context.nextTemporary();
       const callback = context.nextTemporary();
       const keep = context.nextTemporary();
-      const dispatch = context.emitClosureDispatch(callback, second.type, second.type.params.length === 2 ? ["sc_arg", "sc_index"] : ["sc_arg"], expr.loc);
-      return `{ let ${items} = ${context.emitExpr(first)}; let sc_len = runtime::array_len(&${items}) as usize; let mut sc_boxed: Vec<runtime::EffectValue> = Vec::with_capacity(sc_len); for sc_i in 0..sc_len { sc_boxed.push(${box(context, first.type.elem, `runtime::array_get(&${items}, sc_i as f64)`, expr.loc)}); } let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); runtime::effect_for_each(sc_boxed, std::rc::Rc::new(move |sc_value: runtime::EffectValue, sc_index: f64| { let _ = sc_index; let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)}; ${dispatch} }), ${collector(carrier, context, expr.loc)}, ${traced(context, keep)}) }`;
+      const keepItems = context.nextTemporary();
+      let iterator: string;
+      if (first.type.kind === "array") {
+        iterator = `runtime::effect_array_iterator(&${items}).map(|sc_item| ${box(context, first.type.elem, "sc_item", expr.loc)})`;
+      } else if (first.type.kind === "set") {
+        iterator = `runtime::effect_map_iterator(&${items}).map(|(sc_item, _)| ${box(context, first.type.elem, "sc_item", expr.loc)})`;
+      } else if (first.type.kind === "map") {
+        let entry = "runtime::effect_box(())";
+        if (param !== undefined) {
+          if (param.kind !== "record") return context.unsupported("Effect.forEach Map entry callback type", expr.loc);
+          const shape = context.record(param.shapeId, expr.loc);
+          const map = first.type;
+          if (!shape.tuple || shape.fields.length !== 2) return context.unsupported("Effect.forEach Map entry tuple", expr.loc);
+          const fields = shape.fields.map((field) => {
+            const sourceType = field.name === "0" ? map.key : map.value;
+            const source = field.name === "0" ? "sc_key" : "sc_value";
+            const value = typeEquals(sourceType, field.type) ? source : unbox(context, field.type, `&(${box(context, sourceType, source, expr.loc)})`, expr.loc);
+            return `${mangleField(field.name)}: ${context.isEdgeValue(field.type) ? `Some(${value})` : value}`;
+          }).join(", ");
+          entry = box(context, param, `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`, expr.loc);
+        }
+        iterator = `runtime::effect_map_iterator(&${items}).map(|(sc_key, sc_value)| { let _ = (&sc_key, &sc_value); ${entry} })`;
+      } else break;
+      const dispatch = context.emitClosureDispatch(callback, second.type, ["sc_arg", "sc_index"].slice(0, second.type.params.length), expr.loc);
+      const bind = param === undefined ? "" : `let sc_arg: ${context.rustType(param, expr.loc)} = ${unbox(context, param, "&sc_value", expr.loc)};`;
+      const trace = `Box::new(move |sc_tracer: &mut runtime::Tracer<'_>| { sc_tracer.edge(&${keep}); sc_tracer.edge(&${keepItems}); })`;
+      return `{ let ${items} = ${context.emitExpr(first)}; let ${callback} = ${context.emitExpr(second)}; let ${keep} = ${callback}.clone(); let ${keepItems} = ${items}.clone(); runtime::effect_for_each(std::rc::Rc::new(move || Box::new(${iterator})), std::rc::Rc::new(move |sc_value: runtime::EffectValue, sc_index: f64| { let _ = (&sc_value, sc_index); ${bind} ${dispatch} }), ${collector(carrier, context, expr.loc)}, ${trace}) }`;
     }
     case "effect.all":
       if (first === undefined || second === undefined || second.type.kind !== "array") break;

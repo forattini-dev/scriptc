@@ -843,7 +843,7 @@ function lowerEffectMember(L: Lowerer, member: string, pre: IrExpr[], args: ts.E
         if (pre.length !== 0 || total < 2 || total > 3) break;
         const items = at(0);
         const fn = at(1);
-        if (items.type.kind !== "array" || fn.type.kind !== "func" || fn.type.params.length === 0 || fn.type.params.length > 2 || fn.type.ret.kind !== "effect") break;
+        if (!["array", "map", "set"].includes(items.type.kind) || fn.type.kind !== "func" || fn.type.params.length > 2 || fn.type.ret.kind !== "effect") break;
         const signature = L.checker.getCallSignatures(L.typeOf(args[1]!))[0];
         const success = signature === undefined ? null : effectSuccessOf(L, L.checker.getReturnTypeOfSignature(signature));
         const discard = discardOption(L, args[2], expr);
