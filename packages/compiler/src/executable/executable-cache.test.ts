@@ -165,6 +165,8 @@ test("early executable keys isolate compile modes, paths, implementation, and FF
     { ...f.options, backend: "c" },
     { ...f.options, optimization: "dev" },
     { ...f.options, npmStatic: "auto" },
+    { ...f.options, typeAcquisition: "auto" },
+    { ...f.options, typeAcquisition: "offline" },
     { ...f.options, npmStatic: ["commander"] },
     { ...f.options, outPath: join(f.options.outDir, "other") },
     { ...f.options, target: "other" },

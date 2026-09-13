@@ -1,3 +1,8 @@
+import { acquiredDeclarations } from "./type-acquisition/context.js";
+import { withAcquiredTypes } from "./type-acquisition/api.js";
+import type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
+export { analyzeAsync, type AsyncAnalyzeOptions } from "./type-acquisition/api.js";
+export type { TypeAcquisitionOptions } from "./type-acquisition/acquire.js";
 import { executableNativeFeatures, compileExecutableNative, emitNativeProgramObject, usesPrecompiledRuntimePack, runtimePackDiagnostic } from "./native-emission.js";
 import { resolveLibrarySection, libraryIntSlotConfig, mergeSidecarIntSlots } from "./library/section-resolution.js";
 import { llvmRefusalDiag, rustRefusalDiags, backendRefusalDiag, targetRefusalDiag } from "./backend/refusal-diagnostics.js";
@@ -243,6 +248,8 @@ export * as ir from "./ir/ir.js";
 export type CompileOutputKind = "ir" | "c" | "rust" | "llvm" | "asm" | "obj" | "exe";
 
 export interface CompileBaseOptions {
+  /** Declaration acquisition is opt-in for API calls; CLI defaults to auto. */
+  typeAcquisition?: TypeAcquisitionOptions;
   /** The runtime target the binary reproduces (--target): node24 (the
    * default), node26, or bun. Selects the ambient type surface, the
    * runtime export/imports conditions, the builtin-module table and
@@ -892,31 +899,10 @@ export async function compile(entryPath: string, opts: CompileRequestOptions): P
   opts = { ...opts, backend: opts.backend ?? (opts.outputKind === "c" ? "c" : opts.outputKind === "llvm" || opts.outputKind === "asm" || opts.outputKind === "obj" ? "llvm" : "rust") };
   clearCompileSessionCaches();
   const frontendInputs = new FrontendInputTracker();
-  return frontendInputs.run(() => compileTracked(entryPath, opts, frontendInputs));
+  return withAcquiredTypes(entryPath, opts,
+    () => frontendInputs.run(() => compileTracked(entryPath, opts, frontendInputs)),
+    diagnostic => ({ ok: false, diagnostics: [diagnostic], sourceTexts: new Map() }));
 }
-
-/** Build-time API compatibility fence: a caller's existing CompileOptions
- * variable must retain the executable result aliases without narrowing. */
-async function assertCompileOptionsCompatibility(
-  entryPath: string,
-  opts: CompileOptions,
-): Promise<void> {
-  const result = await compile(entryPath, opts);
-  if (result.ok) {
-    const binaryPath: string = result.binaryPath;
-    void binaryPath;
-  }
-}
-void assertCompileOptionsCompatibility;
-
-/** The historical exported CompileResult itself remains executable-shaped. */
-function assertCompileResultCompatibility(result: CompileResult): void {
-  if (result.ok) {
-    const binaryPath: string = result.binaryPath;
-    void binaryPath;
-  }
-}
-void assertCompileResultCompatibility;
 
 async function compileTracked(
   entryPath: string,
@@ -1047,7 +1033,7 @@ async function compileTracked(
     }
   }
   // Rust bypasses this incomplete cache; skip C/LLVM tool discovery for it too.
-  const cacheRoot = outputKind === "exe" && !rustBackend && opts.allowEngine !== false && provenanceSources() === null
+  const cacheRoot = outputKind === "exe" && !rustBackend && opts.allowEngine !== false && provenanceSources() === null && !acquiredDeclarations()?.files.size && !opts.typeAcquisition?.frozenLock
     ? await prepareBuildCacheRoot(buildCacheRoot())
     : null;
   let earlyCacheOptions: EarlyExecutableCacheOptions | null = null;
@@ -1065,6 +1051,7 @@ async function compileTracked(
       backend: opts.backend ?? "auto",
       ...(opts.optimization === "dev" ? { optimization: "dev" as const } : {}),
       npmStatic: opts.npmStatic ?? null,
+      typeAcquisition: opts.typeAcquisition?.mode ?? "local",
       ffiProfile:
         opts.ffiProfilePath === undefined || ffiProfileBytes === null
           ? null

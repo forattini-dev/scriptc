@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { RUNTIME_TARGET_IDS, analyze, compile, compileExternalC, compileLibrary, describeRuntimeTargetOrigin, isExactExternalTypeSpecifier, isRuntimeTargetId, renderCoverage, renderDiagnostics, resolveProvenanceSources, resolveRuntimeTarget, setProvenanceSources, sourceTargetPlatform, type NativeCacheWarmProfile, warmNativeCaches, writeProjectTiers } from "@scriptc/compiler";
+import { RUNTIME_TARGET_IDS, analyzeAsync, compile, compileExternalC, compileLibrary, describeRuntimeTargetOrigin, isExactExternalTypeSpecifier, isRuntimeTargetId, renderCoverage, renderDiagnostics, resolveProvenanceSources, resolveRuntimeTarget, setProvenanceSources, sourceTargetPlatform, type TypeAcquisitionOptions, type NativeCacheWarmProfile, warmNativeCaches, writeProjectTiers } from "@scriptc/compiler";
 import { LEGACY_C_EXECUTABLE_WARNING, shouldWarnLegacyCExecutable } from "./legacy-c-warning.js";
 import { resolveOutputOptions } from "./output-options.js";
 import { selectOutputPaths } from "./paths.js";
@@ -69,6 +69,20 @@ async function main(): Promise<number> {
   }
 
   const [command, inputArg] = positionals;
+  const explicitTypes = values["types-mode"] !== undefined || values["types-lock"] !== undefined || values["types-cache"] !== undefined || values["frozen-types-lock"];
+  if (explicitTypes && (command === "cache" || values.lib || values["from-c"])) {
+    fail("declaration acquisition options apply to TypeScript/JavaScript builds, runs and coverage");
+  }
+  const typesMode = values["types-mode"] ?? "auto";
+  if (typesMode !== "auto" && typesMode !== "local" && typesMode !== "offline") fail("--types-mode must be auto, local or offline");
+  if (typesMode === "local" && (values["types-lock"] !== undefined || values["types-cache"] !== undefined || values["frozen-types-lock"])) fail("local type mode does not use a declaration lock or download cache");
+  const typeAcquisition: TypeAcquisitionOptions = {
+    mode: typesMode,
+    ...(values["types-lock"] === undefined ? {} : { lockPath: values["types-lock"] }),
+    ...(values["types-cache"] === undefined ? {} : { cacheDir: values["types-cache"] }),
+    frozenLock: values["frozen-types-lock"],
+  };
+
   if (values.engine === false && (command === "cache" || values.lib || values["from-c"])) {
     fail("--no-engine applies to TypeScript/JavaScript executable builds, runs and coverage");
   }
@@ -286,7 +300,7 @@ async function main(): Promise<number> {
   }
 
   if (command === "coverage") {
-    const { coverage, sourceTexts } = analyze(input, {
+    const { coverage, sourceTexts } = await analyzeAsync(input, {
       ...(backend === undefined ? {} : { backend }),
       ...(values.engine === false ? { allowEngine: false } : {}),
       target,
@@ -294,6 +308,7 @@ async function main(): Promise<number> {
       ...(islandModules.length > 0 ? { islandModules } : {}),
       dynamic: values.dynamic,
       ...(npmStatic !== undefined ? { npmStatic } : {}),
+      typeAcquisition,
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
       ...(Object.keys(externalTypes).length > 0 ? { externalTypes } : {}),
     });
@@ -349,6 +364,7 @@ async function main(): Promise<number> {
       ...(output.outputKind !== "ir" && backend !== undefined ? { backend } : {}),
       ...(optimization !== undefined ? { optimization } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
+      typeAcquisition,
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
       ...(printNativeLinkInfo ? { nativeLinkInfo: true } : {}),
     });

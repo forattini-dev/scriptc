@@ -1,3 +1,4 @@
+import { acquiredDeclarations } from "../../type-acquisition/context.js";
 import { InternalCompilerError } from "../../errors.js";
 /* Program lifecycle over typescript@7.0.2's unstable sync API — the
  * ts.createProgram-shaped entry the survey's probe7b proved out.
@@ -158,6 +159,7 @@ export class Ts7Host {
   }) {
     const virtualFiles = this.virtualFiles;
     const shadow = options?.fsShadow ?? null;
+    const declarations = acquiredDeclarations();
     const cwd = options?.cwd ?? process.cwd();
     const serverPath = binaryPathOf(options?.binaryPath, cwd);
     const apiOptions = {
@@ -175,18 +177,25 @@ export class Ts7Host {
             const replacement = shadow.readFile(fileName);
             if (replacement !== undefined) return replacement;
           }
-          return trackedReadFile(fileName);
+          return declarations?.files.get(resolve(fileName)) ?? trackedReadFile(fileName);
         },
         fileExists: (fileName: string) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
           if (shadow?.fileExists?.(fileName)) return true;
           if (shadow !== null && shadow.hideFile(fileName)) return false;
-          return trackedFileExists(fileName);
+          return declarations?.files.has(resolve(fileName)) || trackedFileExists(fileName);
         },
-        directoryExists: (path: string) => trackedDirectoryExists(path),
+        directoryExists: (path: string) => declarations?.directories.has(resolve(path)) || trackedDirectoryExists(path),
         realpath: (path: string) =>
-          virtualFiles.has(tsgoPath(path)) ? path : (trackedRealpath(path) ?? path),
-        getAccessibleEntries: (path: string) => trackedAccessibleEntries(path) ?? { files: [], directories: [] },
+          (virtualFiles.has(tsgoPath(path)) || declarations?.files.has(resolve(path))) ? path : (trackedRealpath(path) ?? path),
+        getAccessibleEntries: (path: string) => {
+          const disk = trackedAccessibleEntries(path) ?? { files: [], directories: [] };
+          const extra = declarations?.entries(resolve(path));
+          return extra === undefined ? disk : {
+            files: [...new Set([...disk.files, ...extra.files])].sort(),
+            directories: [...new Set([...disk.directories, ...extra.directories])].sort(),
+          };
+        },
       },
     };
     this.api = new API(serverPath === undefined ? apiOptions : { ...apiOptions, tsserverPath: serverPath });

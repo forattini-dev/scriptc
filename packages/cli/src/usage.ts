@@ -81,6 +81,16 @@ Options:
                      markers). A package preflight refuses falls back to the
                      island (--dynamic) with a coverage-report note — opt-in,
                      experimental
+      --types-mode <auto|local|offline>
+                     missing declaration acquisition (default: auto). local
+                     uses installed types; offline requires lock and cache
+      --types-lock <file>
+                     declaration lock (default: scriptc.types.lock.json near
+                     the entry's package/tsconfig)
+      --types-cache <dir>
+                     verified declaration tarball cache directory
+      --frozen-types-lock
+                     require existing version pins; never update the lock
       --provenance-sources
                      EXPERIMENTAL: compile npm dependencies from their
                      provenance-attested SOURCE (fetched at the attested
@@ -115,6 +125,10 @@ export const CLI_OPTIONS = {
   engine: { type: "boolean", default: true },
   ffi: { type: "string" },
   "npm-static": { type: "string", multiple: true },
+  "types-mode": { type: "string" },
+  "types-lock": { type: "string" },
+  "types-cache": { type: "string" },
+  "frozen-types-lock": { type: "boolean", default: false },
   "provenance-sources": { type: "boolean", default: false },
   "external-types": { type: "string", multiple: true },
   lib: { type: "boolean", default: false },

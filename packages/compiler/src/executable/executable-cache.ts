@@ -85,6 +85,7 @@ export interface EarlyExecutableCacheOptions {
   /** Omitted is the historical release posture and preserves v1 keys. */
   optimization?: "dev";
   npmStatic: readonly string[] | "auto" | null;
+  typeAcquisition?: "local" | "auto" | "offline";
   /** Raw manifest identity: path and bytes. Native archives remain under the
    * stricter native cache's independent dependency validation. */
   ffiProfile: { path: string; bytes: Uint8Array } | null;
@@ -197,6 +198,7 @@ function cacheKey(options: EarlyExecutableCacheOptions): string {
         : JSON.stringify(options.npmStatic),
     options.target,
     options.runtimeTarget,
+    options.typeAcquisition ?? "local",
     JSON.stringify(options.islandModules),
     options.islandSourceStore,
     options.compiler.join("\x1f"),
@@ -228,6 +230,7 @@ function routeKey(options: EarlyExecutableRouteOptions): string {
         : JSON.stringify(options.npmStatic)).update("\0")
     .update(options.target).update("\0")
     .update(options.runtimeTarget).update("\0")
+    .update(options.typeAcquisition ?? "local").update("\0")
     .update(JSON.stringify(options.islandModules)).update("\0")
     .update(options.islandSourceStore).update("\0")
     .update(options.compiler.join("\x1f")).update("\0")

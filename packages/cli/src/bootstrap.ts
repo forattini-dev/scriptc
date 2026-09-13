@@ -59,7 +59,8 @@ async function tryFastPath(): Promise<number | null> {
     values.print !== undefined ||
     values["emit-ir"] ||
     values.lib || values.engine === false || values["from-c"] || values["provenance-sources"] ||
-    (values["external-types"] ?? []).length > 0
+    (values["external-types"] ?? []).length > 0 || (values["types-mode"] !== undefined && values["types-mode"] !== "local") ||
+    values["types-lock"] !== undefined || values["types-cache"] !== undefined || values["frozen-types-lock"]
   ) return null;
   const backend = values.backend ?? "rust";
   // Only explicit C/LLVM selections may restore their legacy cached artifacts.
@@ -148,6 +149,7 @@ async function tryFastPath(): Promise<number | null> {
     backend,
     ...(optimization === "dev" ? { optimization: "dev" as const } : {}),
     npmStatic,
+    typeAcquisition: values["types-mode"] === "local" ? "local" : "auto",
     ffiProfile: ffiPath === null ? null : { path: ffiPath, bytes: ffiBytes! },
     target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildPlatform}:${process.arch}:${
       helperObjectRoute ? "runtime-pack" : "driver-tu"

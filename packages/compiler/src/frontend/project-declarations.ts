@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
 import { isNodeModulesPath, projectDtsRuntimeSibling } from "./resolve.js";
@@ -66,7 +67,7 @@ export class ProjectDeclarations {
     const types = stringList(parsed.options["types"]);
     const typeRoots = stringList(parsed.options["typeRoots"]);
     if (types !== undefined || typeRoots !== undefined) {
-      const probe = resolve(dirname(config), ".scriptc-types-probe.ts");
+      const probe = resolve(dirname(config), `.scriptc-types-probe-${randomUUID()}.ts`);
       this.host.addVirtualFile(probe, "");
       const program = ts.createProgram([probe], {
         noLib: true, ...(types === undefined ? {} : { types }),
@@ -76,6 +77,7 @@ export class ProjectDeclarations {
         for (const sf of program.getSourceFiles()) {
           if (sf.isDeclarationFile && projectDtsRuntimeSibling(sf.fileName) === null) {
             this.declarations.add(sf.fileName);
+            if (!isNodeModulesPath(sf.fileName)) this.structural.add(sf.fileName);
           }
         }
       } finally { program.dispose(); }

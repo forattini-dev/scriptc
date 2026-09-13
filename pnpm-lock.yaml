@@ -55,12 +55,19 @@ importers:
       '@scriptc/runtime-rust':
         specifier: workspace:*
         version: link:../runtime-rust
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       typescript:
         specifier: 7.0.2
         version: 7.0.2(patch_hash=19477ace740a1ff8e54486a3b3730ccc72fc6f6de0eb7fb73fbe1a2a17a7a1d7)
       typescript5:
         specifier: npm:typescript@5.9.3
         version: typescript@5.9.3
+    devDependencies:
+      '@types/semver':
+        specifier: 7.7.1
+        version: 7.7.1
     optionalDependencies:
       '@scriptc/llvm-darwin-arm64':
         specifier: workspace:*
@@ -124,7 +131,6 @@ importers:
 
   packages/runtime: {}
 
-  packages/runtime-rust: {}
   packages/runtime-darwin-arm64: {}
 
   packages/runtime-darwin-x64: {}
@@ -138,6 +144,8 @@ importers:
   packages/runtime-linux-x64-musl: {}
 
   packages/runtime-pack-common: {}
+
+  packages/runtime-rust: {}
 
   packages/runtime-wasm32-wasi: {}
 
@@ -1098,6 +1106,9 @@ packages:
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@typescript-eslint/eslint-plugin@8.63.0':
     resolution: {integrity: sha512-rvwSgqT+DHpWdzfSzPatRLm02a0GlESt++9iy3hLCDY4BgkaLcl8LBi9Yh7XGFBpwcBE/K3024QuXWTpbz4FfQ==}
@@ -3311,6 +3322,8 @@ snapshots:
   '@types/node@24.13.3':
     dependencies:
       undici-types: 7.18.2
+
+  '@types/semver@7.7.1': {}
 
   '@typescript-eslint/eslint-plugin@8.63.0(@typescript-eslint/parser@8.63.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)':
     dependencies:

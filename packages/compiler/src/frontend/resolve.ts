@@ -1,3 +1,4 @@
+import { acquiredResolution } from "../type-acquisition/context.js";
 /* scriptc's OWN module resolver — the bounded reimplementation of the three
  * ts.resolve* entry points the program lifecycle leans on, for the TS7 world
  * (typescript@7.0.2 ships no client-side resolution API at all). Pure
@@ -934,7 +935,7 @@ export function resolveBareModule(
     }
   };
 
-  return npmStatic ? passOnce("js") : (passOnce("types") ?? passOnce("js"));
+  return npmStatic ? passOnce("js") : (acquiredResolution(fromFile, specifier) ?? passOnce("types") ?? passOnce("js"));
 }
 
 /** Resolves a `/// <reference types="name" />`-style TYPE DIRECTIVE the way

@@ -24,3 +24,5 @@ Tipos estruturais das declarações locais configuradas podem ser representados 
 Evidência em 2026-09-13: sete testes de configuração passaram; a seleção diferencial Rust e testes relacionados teve 43 positivos, com um fixture sem package.json corrigido e revalidado na suíte de configuração. O corpus 3251 verifica registros declarados e ReferenceError de global sem implementação contra Node. Build do compiler e lint passaram (lint mantém avisos preexistentes). O importador original `red-skills/apps/dev/src/core/toon-version.ts` agora inclui seu `js-yaml.d.ts` existente e retorna zero diagnósticos de preflight, sem alterações no consumidor.
 
 Gate completo plain + sanitized ainda pendente. Aquisição automática com cache, integridade, lock e modos offline/frozen ainda pendente neste checkpoint. Isso não prova compilação integral do Redcode.
+
+Atualização subsequente: a aquisição foi implementada; veja [entregas, evidências e limites](./type-acquisition-implementation.md). O gate completo permanece bloqueado pelos testes de cache descritos nesse relatório.

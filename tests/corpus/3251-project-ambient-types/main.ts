@@ -6,3 +6,6 @@ console.log(rows[0].name, rows[0].value * rows[1].value);
 try { console.log(missingRow.name); } catch (error) {
   if (error instanceof Error) console.log(error.name, error.message);
 }
+
+const environment: ProjectEnvironment = { label: "native", enabled: true };
+console.log(environment.label, environment.enabled);

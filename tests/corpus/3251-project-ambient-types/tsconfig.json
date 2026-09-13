@@ -1,4 +1,15 @@
 {
-  "compilerOptions": { "strict": true },
-  "files": ["main.ts", "types.d.ts"]
+  "compilerOptions": {
+    "strict": true,
+    "types": [
+      "project-env"
+    ],
+    "typeRoots": [
+      "./typings"
+    ]
+  },
+  "files": [
+    "main.ts",
+    "types.d.ts"
+  ]
 }
