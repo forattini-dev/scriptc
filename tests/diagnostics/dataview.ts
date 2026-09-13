@@ -8,7 +8,7 @@ const view = new DataView(buf.buffer);
 // '.buffer' only compiles inside new DataView(x.buffer, ...).
 const escaped = buf.buffer;
 
-// bigint values have no representation — only Number(view.getBigUint64(...)).
+// DataView getters still only lower inside Number(view.getBigUint64(...)).
 const big = view.getBigUint64(0);
 
 // The constructor wants a typed array's own '.buffer'.

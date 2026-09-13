@@ -427,6 +427,7 @@ export class RustDefinitionEmitter {
           break;
         case "bool":
         case "classval":
+        case "bigint":
           comparison = "left == right";
           break;
         case "string":
@@ -930,6 +931,9 @@ export class RustDefinitionEmitter {
           break;
         case "string":
           slot(`static ${name}: RefCell<runtime::JsString> = RefCell::new(runtime::empty_string());`);
+          break;
+        case "bigint":
+          slot(`static ${name}: RefCell<runtime::JsBigInt> = RefCell::new(runtime::bigint_from_bool(false));`);
           break;
         case "array":
         case "bytes":

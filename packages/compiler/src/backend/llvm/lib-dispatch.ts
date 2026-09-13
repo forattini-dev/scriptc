@@ -259,6 +259,7 @@ export function emitLibCall(host: LlvmEmitterContext, e: LibCallExpr): LlValue {
       case "strdec":
         return host.emitIoLibCall(e);
       case "asset":
+      case "bigint":
       case "effect":
       case "layer":
       case "schema":

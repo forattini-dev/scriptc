@@ -281,32 +281,16 @@ stdlib-fence.ts:85:1 - error SC2004: uses of 'optionalDate' inherit the blocker 
   84 | }
   85 | optionalDate(undefined);
      | ^~~~~~~~~~~~
-  86 | // The binding is READ so the fence stays observable (an unread bigint
+  86 | // BigInt arithmetic has native Rust support; direct console inspection
 
   hint: the declaration of 'optionalDate' did not compile — fix the diagnostic reported there and these sites clear with it
 
-stdlib-fence.ts:88:7 - error SC2001: values of type '10n' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, read-only Date values, functions, classes, records, unions of those, and 'unknown')
-
-  87 | // declaration is a value Node builds and drops — it compiles to nothing).
-  88 | const big = 10n;
-     |       ^~~
-  89 | console.log(big);
-
-stdlib-fence.ts:88:13 - error SC1090: syntax 'BigIntLiteral' is not supported yet
-
-  87 | // declaration is a value Node builds and drops — it compiles to nothing).
-  88 | const big = 10n;
-     |             ^~~
-  89 | console.log(big);
-
-stdlib-fence.ts:89:13 - error SC2004: uses of 'big' inherit the blocker on its declaration
+stdlib-fence.ts:89:13 - error SC1090: console.log of 'bigint' values ('bigint' values have no inspect lowering) are not supported yet
 
   88 | const big = 10n;
   89 | console.log(big);
      |             ^~~
   90 | function throwDate(): void {
-
-  hint: the declaration of 'big' did not compile — fix the diagnostic reported there and these sites clear with it
 
 stdlib-fence.ts:91:9 - error SC1090: throwing Date values (catch bindings cannot preserve Date's object kind; throw an Error or primitive instead) are not supported yet
 

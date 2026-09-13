@@ -73,6 +73,7 @@ export class RustValueEmitter {
 
   displayValue(value: string, type: IrType, loc: SrcLoc): string {
     switch (type.kind) {
+      case "bigint": return `runtime::display_bigint(&(${value}))`;
       case "f64": return `runtime::display_number(${value})`;
       case "bool": return `runtime::display_bool(${value})`;
       case "string": return `runtime::display_string(&(${value}))`;
@@ -82,6 +83,7 @@ export class RustValueEmitter {
 
   truthiness(value: string, type: IrType, loc: SrcLoc): string {
     switch (type.kind) {
+      case "bigint": return `runtime::bigint_truthy(&${value})`;
       case "bool": return value;
       case "f64": return `(${value} != 0.0 && !${value}.is_nan())`;
       case "string": return `!${value}.is_empty()`;
@@ -122,6 +124,7 @@ export class RustValueEmitter {
           const variant = `${name}::${this.context.unionVariant(tag)}`;
           if (this.isUnit(arm)) return `${variant} => false`;
           if (arm.kind === "bool") return `${variant}(inner) => *inner`;
+          if (arm.kind === "bigint") return `${variant}(inner) => runtime::bigint_truthy(inner)`;
           if (arm.kind === "f64") return `${variant}(inner) => *inner != 0.0 && !inner.is_nan()`;
           if (arm.kind === "string") return `${variant}(inner) => !inner.is_empty()`;
           if (arm.kind === "classval") return `${variant}(inner) => *inner != 0`;
@@ -194,6 +197,7 @@ export class RustValueEmitter {
   rustType(type: IrType, loc?: SrcLoc): string {
     switch (type.kind) {
       case "void": return "()";
+      case "bigint": return "runtime::JsBigInt";
       case "f64": return "f64";
       case "date": return "f64";
       case "procStream": return "f64";
@@ -273,6 +277,7 @@ export class RustValueEmitter {
 
   defaultValue(type: IrType, loc: SrcLoc): string {
     switch (type.kind) {
+      case "bigint": return "runtime::bigint_from_bool(false)";
       case "f64": return "0.0";
       case "date": return "0.0";
       case "bool": return "false";
@@ -349,7 +354,7 @@ export class RustValueEmitter {
   }
 
   needsClone(type: IrType): boolean {
-    if (type.kind === "record") return true;
+    if (type.kind === "record" || type.kind === "bigint") return true;
     return type.kind === "string" || type.kind === "regex" || type.kind === "symbol" || type.kind === "url" || type.kind === "searchParams" || type.kind === "generator" || type.kind === "union" || type.kind === "caught" || type.kind === "dyn" || type.kind === "jsval" ||
       (type.kind === "object" && (RUNTIME_ERROR_CLASSES.has(type.className) || type.className === RUNTIME_EMITTER_CLASS)) || this.isTracedHandle(type);
   }
@@ -362,6 +367,7 @@ export class RustValueEmitter {
           : `*${left} == *${right}`;
       case "bool":
       case "classval":
+      case "bigint":
         return `${left} == ${right}`;
       case "string":
         return `${left}.as_ref() == ${right}.as_ref()`;
@@ -390,6 +396,7 @@ export class RustValueEmitter {
   }
 
   mapKeyEquality(left: string, right: string, type: IrType, loc: SrcLoc): string {
+    if (type.kind === "bigint") return `${left} == ${right}`;
     if (type.kind === "f64") return `(*${left} == *${right} || (${left}.is_nan() && ${right}.is_nan()))`;
     if (type.kind === "string") return `${left}.as_ref() == ${right}.as_ref()`;
     if (type.kind === "symbol") return `runtime::symbol_ptr_eq(${left}, ${right})`;
@@ -472,6 +479,7 @@ export class RustValueEmitter {
 
   ensureUnionArm(type: IrType): void {
     switch (type.kind) {
+      case "bigint":
       case "f64":
       case "bool":
       case "string":

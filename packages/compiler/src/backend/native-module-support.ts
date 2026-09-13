@@ -1,4 +1,5 @@
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
+import { nativeBigIntBackendDiagnostics } from "./native-bigint-support.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { IrModule, SrcLoc } from "../ir/ir.js";
 import { LlvmUnsupportedError } from "./llvm/unsupported.js";
@@ -10,6 +11,8 @@ export function nativeModuleBackendDiagnostics(
   backend: "c" | "llvm" | "rust",
 ): ScrDiagnostic[] {
   if (backend === "rust") return [];
+  const bigints = nativeBigIntBackendDiagnostics(mod, backend);
+  if (bigints.length > 0) return bigints;
   const callableRecords = nativeCallableRecordBackendDiagnostics(mod, backend);
   if (callableRecords.length > 0) return callableRecords;
   let loc = mod.functions.find((fn) => fn.syncModuleCacheGlobal !== undefined)?.loc;

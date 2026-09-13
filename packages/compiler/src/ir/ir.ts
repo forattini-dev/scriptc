@@ -1,3 +1,6 @@
+import { BIGINT_MAY_THROW, type IrBigIntLibFn } from "./bigint-signatures.js";
+export * from "./type-constants.js";
+import { F64, BYTES_U8, STRING, BOOL, VOID } from "./type-constants.js";
 import type { IrUrlLibFn } from "./url-signatures.js";
 import { THROWING_COERCION_FNS } from "./coercion-names.js";
 import type { IrNumericCoercionFn } from "./numeric-coercion.js";
@@ -37,6 +40,7 @@ export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64";
 
 export type IrType =
   | { kind: "f64" }
+  | { kind: "bigint" }
   /** The supported ES Date value slice: a scalar TimeClip'd millisecond
    * value. Getters and toISOString observe only this slot, so copying it
    * through locals/params/fields is exact while Date mutation and object
@@ -383,6 +387,7 @@ export const POINTER_KINDS = irKindSet(POINTER_KIND_LIST);
  * Keeping this exhaustive makes a new runtime handle kind a compile error
  * until its one retain/release family is named here. */
 export const RUNTIME_RC_STEMS: Record<IrType["kind"], string> = {
+  bigint: "", // Rust-only immutable Rc value; no C runtime symbol family.
   f64: "",
   date: "",
   string: "scr_str",
@@ -456,39 +461,6 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // A class object is a JS object (constructors are functions): always truthy.
   "classval",
 ]);
-
-export const F64: IrType = { kind: "f64" };
-export const DATE_T: IrType = { kind: "date" };
-export const BYTES_U8: IrType = { kind: "bytes", elem: "u8" };
-export const STRING: IrType = { kind: "string" };
-export const BOOL: IrType = { kind: "bool" };
-export const REGEX: IrType = { kind: "regex" };
-export const URL_T: IrType = { kind: "url" };
-export const SEARCH_PARAMS_T: IrType = { kind: "searchParams" };
-export const SYMBOL_T: IrType = { kind: "symbol" };
-export const STATS_T: IrType = { kind: "stats" };
-export const FILEHANDLE_T: IrType = { kind: "fileHandle" };
-export const SPAWNRES_T: IrType = { kind: "spawnRes" };
-export const CHILD_T: IrType = { kind: "child" }; export const EFFECT_T: IrType = { kind: "effect" };
-export const NETSERVER_T: IrType = { kind: "netServer" };
-export const NETSOCKET_T: IrType = { kind: "netSocket" };
-export const HTTP2SESSION_T: IrType = { kind: "http2Session" };
-export const HTTP2STREAM_T: IrType = { kind: "http2Stream" };
-export const DGRAMSOCK_T: IrType = { kind: "dgramSocket" };
-export const TESTCTX_T: IrType = { kind: "testCtx" };
-export const HTTPREQ_T: IrType = { kind: "httpReq" };
-export const HTTPRES_T: IrType = { kind: "httpRes" };
-export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
-export const SECURECTX_T: IrType = { kind: "secureCtx" };
-export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
-export const CHILDSTREAM_T: IrType = { kind: "childStream" };
-export const PROCSTREAM_T: IrType = { kind: "procStream" };
-export const VOID: IrType = { kind: "void" };
-export const DYN: IrType = { kind: "dyn" };
-export const JSVAL: IrType = { kind: "jsval" };
-export const CAUGHT: IrType = { kind: "caught" };
-export const UNDEFINED_T: IrType = { kind: "undefinedT" };
-export const NULL_T: IrType = { kind: "nullT" };
 
 /** True for the payload-less unit kinds (`undefined`/`null`). Unit values
  * exist only inside unions: a unit-armed union instance is tag-only, so
@@ -674,6 +646,7 @@ export function unionFuncSetArmsOk(arms: IrType[]): boolean {
  * canonical) shapeId/unionId, so keys stay finite and comparable. Lives in
  * the IR (not the frontend) because both ends need it. */
 export function typeKey(t: IrType): string {
+  if (t.kind === "bigint") return "bigint";
   if (HANDLE_KINDS.has(t.kind)) return t.kind;
   switch (t.kind) {
     case "f64":
@@ -764,7 +737,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
  * this — adding a refcounted kind must not grow new per-kind checks outside
  * the type-directed helpers. */
 export function isRefCounted(t: IrType): boolean {
-  return RUNTIME_RC_STEMS[t.kind] !== "" || t.kind === "object" || t.kind === "record";
+  return RUNTIME_RC_STEMS[t.kind] !== "" || t.kind === "object" || t.kind === "record" || t.kind === "bigint";
 }
 
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
@@ -1859,6 +1832,7 @@ export type IrRegexIntrinsicMethod =
  * assume the island runtime is linked when they see it; island exceptions
  * bridge into the exception cell as catchable strings (may-throw). */
 export type IrLibFn =
+  | IrBigIntLibFn
   /** Native local import: queued loader, fresh promise, cached evaluation. */
   | "module.import"
   | "module.namespace"
@@ -5506,6 +5480,7 @@ function isJsonSafeAt(
     // URLSearchParams stringifies as the same "{}" husk — rejected; use
     // sp.toString() instead.
     case "searchParams":
+    case "bigint": // JSON.stringify throws for BigInt values.
     // Symbols are DROPPED by Node's stringify (undefined at the top level,
     // omitted as object values) — silent divergence banned; rejected.
     case "symbol":
@@ -7120,6 +7095,7 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  ...BIGINT_MAY_THROW,
   "fetch.responseNew",
   "fetch.abortTimeout",
   "fetch.abortAny",

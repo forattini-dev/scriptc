@@ -24,6 +24,8 @@ type RejectedArrayPointerType = Extract<IrType, {
 
 export function cType(t: IrType): string {
   switch (t.kind) {
+    case "bigint":
+      throw new Error("native BigInt values require --backend rust");
     case "f64":
     case "date":
       return "double";
@@ -175,6 +177,8 @@ export function boxKindC(t: IrType): string {
     throw new InternalCompilerError(`emitter bug: ${t.kind} boxes go through boxNewC, not boxKindC`);
   }
   switch (t.kind) {
+    case "bigint":
+      throw new Error("native BigInt values require --backend rust");
     case "f64":
     case "date":
       return "SCR_BOX_F64";
@@ -229,6 +233,8 @@ export function vAdapters(t: IrType): { retain: string; release: string } {
     return { retain: `${stem}_retain_v`, release: `${stem}_release_v` };
   }
   switch (t.kind) {
+    case "bigint":
+      throw new Error("native BigInt values require --backend rust");
     case "object":
       return { retain: `${mangleClassRetain(t.className)}_v`, release: `${mangleClassRelease(t.className)}_v` };
     case "record":
@@ -267,6 +273,8 @@ export function elemKindC(elem: IrType): string {
     throw new InternalCompilerError(`emitter bug: array of ${elem.kind} (frontend rejects these)`);
   }
   switch (elem.kind) {
+    case "bigint":
+      throw new Error("native BigInt values require --backend rust");
     case "f64":
       return "SCR_ELEM_F64";
     case "bool":

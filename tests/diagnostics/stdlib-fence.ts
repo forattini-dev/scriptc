@@ -83,8 +83,8 @@ function optionalDate(value: Date | undefined): number {
   return value === undefined ? -1 : value.getTime();
 }
 optionalDate(undefined);
-// The binding is READ so the fence stays observable (an unread bigint
-// declaration is a value Node builds and drops — it compiles to nothing).
+// BigInt arithmetic has native Rust support; direct console inspection
+// remains fenced until its n-suffixed rendering is lowered.
 const big = 10n;
 console.log(big);
 function throwDate(): void {

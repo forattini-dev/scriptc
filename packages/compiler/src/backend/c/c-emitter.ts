@@ -71,9 +71,6 @@ export function emitCModule(
   return new CEmitter(mod, sourceText, options).emit();
 }
 
-// Box construction moved onto CEmitter (boxNewC method): obj-kind boxes now
-// also carry the payload type's trace entry point, which is type-directed
-// through the emitter's cycle analysis.
 
 /** A declared C value with its IR type — the unit frames and scopes track
  * so releases can be type-directed. */
@@ -1959,6 +1956,7 @@ export class CEmitter {
       return `${t.name} != NULL`;
     }
     switch (t.type.kind) {
+      case "bigint": throw new Error("native BigInt values require --backend rust");
       case "bool":
         return t.name;
       case "f64":

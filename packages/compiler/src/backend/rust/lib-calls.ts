@@ -1,3 +1,4 @@
+import { emitRustBigIntCall } from "./bigint.js";
 import { rustJsString } from "./string-literals.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrRecordShape, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
@@ -84,6 +85,8 @@ export interface RustLibCallContext {
 }
 
 export function emitRustLibCall(expr: RustLibCallExpr, context: RustLibCallContext): string {
+  const bigint = emitRustBigIntCall(expr, context);
+  if (bigint !== null) return bigint;
   const nativeModuleCall = emitRustNativeModuleCall(expr, context);
   if (nativeModuleCall !== null) return nativeModuleCall;
   const eventEmitterCall = context.emitEventEmitterCall(expr);

@@ -7327,7 +7327,7 @@ function emitLibCallExpr(emitter: CEmitter, e: LibCallExpr): Temp {
   const state: LibCallState = { emitter, e, args, arg, finish };
   const prefix = fn.slice(0, fn.indexOf(".")) as LibCallPrefix;
   switch (prefix) {
-    case "effect": case "layer": case "schema": case "option": case "module":
+    case "bigint": case "effect": case "layer": case "schema": case "option": case "module":
       throw new Error(`${prefix} requires --backend rust`);
     case "fetch":
     case "island":

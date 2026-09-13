@@ -1,3 +1,5 @@
+import { lowerBigIntExpression } from "./lower-bigint.js";
+import { lowerNumericLiteral } from "./lower-numeric-literal.js";
 import { moduleFileName, importMetaProperty } from "./import-meta.js";
 import { lowerNativeRelational, relationalOperator } from "./lower-relational.js";
 import { dynamicBindingType } from "./dynamic-binding-type.js";
@@ -405,24 +407,9 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       lowerer.externalHostFence(externalTypeSpecifier, expr);
     }
 
-    if (ts.isNumericLiteral(expr)) {
-      const value = Number(expr.text.replace(/_/g, ""));
-      // Ask 4's representability input: a DECIMAL INTEGER source spelling
-      // that does not survive the trip through f64 (parse, format back,
-      // compare) rides the literal so the library integer-boundary check
-      // can refuse on the author's source text. `expr.text` is the
-      // scanner's COOKED value (already the nearest double), so the
-      // source spelling comes from the file text; numeric separators are
-      // spelling sugar and strip first. Round-tripping literals (every
-      // integer within ±(2^53−1)) and non-integer spellings carry
-      // nothing, so the IR is unchanged for programs that held their
-      // numbers.
-      const spelled = expr.getText().replace(/_/g, "");
-      if (/^\d+$/.test(spelled) && String(Number(spelled)) !== spelled) {
-        return { kind: "numLit", value: Number(spelled), spelling: spelled, type: F64, loc };
-      }
-      return { kind: "numLit", value, type: F64, loc };
-    }
+    const bigint = lowerBigIntExpression(lowerer, expr);
+    if (bigint) return bigint;
+    if (ts.isNumericLiteral(expr)) return lowerNumericLiteral(expr, loc);
     if (expr.kind === ts.SyntaxKind.TrueKeyword) {
       return { kind: "boolLit", value: true, type: BOOL, loc };
     }
@@ -3695,6 +3682,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
    * value; ref arms always truthy). Anything else (void) cannot be
    * tested. */
   export function ensureBool(lowerer: Lowerer, e: IrExpr, node: ts.Expression): IrExpr {
+    if (e.type.kind === "bigint") return { kind: "libCall", fn: "bigint.truthy", args: [e], type: BOOL, loc: e.loc };
     if (e.type.kind === "bool") return e;
     if (e.type.kind === "f64" || e.type.kind === "string") {
       return { kind: "toBool", operand: e, type: BOOL, loc: e.loc };
@@ -9075,6 +9063,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
    * "function" (unions never carry them — defensive), and the jsval/dyn/
    * caught/void/union kinds cannot appear as arms. */
   function typeofAnswer(arm: IrType): string | null {
+    if (arm.kind === "bigint") return "bigint";
     switch (arm.kind) {
       case "f64": return "number";
       case "string": return "string";
