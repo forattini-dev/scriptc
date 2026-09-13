@@ -6,6 +6,7 @@ pub struct MapData<K: Clone + 'static, V: HeapValue> {
     // Dynamic objects reuse JsMap; this bit preserves Object.create(null).
     null_prototype: bool,
     module_namespace: bool,
+    proxy_restricted: bool,
     prototype: Option<V>,
 }
 
@@ -39,6 +40,7 @@ pub fn map_new<K: Clone + 'static, V: HeapValue>() -> JsMap<K, V> {
         iteration_depth: 0,
         null_prototype: false,
         module_namespace: false,
+        proxy_restricted: false,
         prototype: None,
     })
 }
@@ -78,6 +80,18 @@ fn map_mark_namespace_by<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, co
 pub fn map_is_module_namespace<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
     if let Some(view) = map_view(map) { return view.is_namespace(); }
     map.with(|data| data.module_namespace)
+}
+
+/// Tracks descriptor invariants that the native Proxy slice cannot yet enforce.
+/// This mark follows aliases and projections; it is not an implementation of freeze.
+pub fn map_mark_proxy_restricted<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) {
+    if let Some(view) = map_view(map) { return view.mark_proxy_restricted(); }
+    map.with_mut(|data| data.proxy_restricted = true);
+}
+
+pub fn map_is_proxy_restricted<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>) -> bool {
+    if let Some(view) = map_view(map) { return view.is_proxy_restricted(); }
+    map.with(|data| data.proxy_restricted)
 }
 
 pub fn map_set_prototype<K: Clone + 'static, V: HeapValue>(map: &JsMap<K, V>, prototype: V) {

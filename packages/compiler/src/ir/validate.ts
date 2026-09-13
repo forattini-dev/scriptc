@@ -110,8 +110,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "island.import": { argTypes: [STRING, STRING, STRING], result: JSVAL },
   "island.importDyn": { argTypes: [STRING], result: JSVAL },
   "island.importDynPath": { argTypes: [STRING], result: JSVAL },
-  // Result is the cast's mapped PROMISE target (program-dependent) —
-  // checked in the libCall case, like error.new.
+  // Cast result is its mapped promise target, checked in libCall like error.new.
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
@@ -121,6 +120,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.hasKey": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.toString": { argTypes: [DYN, STRING, STRING], result: STRING },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
+  "dyn.proxyNew": { argTypes: [DYN, DYN], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
   "timers.setTimeout": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: VOID },
   "timers.setInterval": { argTypes: [{ kind: "func", params: [], ret: VOID }, F64], result: F64 },
@@ -3346,7 +3346,7 @@ function validateFunction(
         checkExpr(e.value);
         checkExpr(e.key);
         expectType(e.value, { kind: "dyn" }, "dynKeyGet operand");
-        if (e.key.type.kind !== "string") err(`dynKeyGet key is ${e.key.type.kind}, not string`, e.loc);
+        if (!["string", "symbol", "dyn"].includes(e.key.type.kind)) err(`dynKeyGet key is ${e.key.type.kind}, not string, symbol or dyn`, e.loc);
         if (e.type.kind !== "dyn") err("dynKeyGet must be dyn", e.loc);
         break;
       }
@@ -3362,7 +3362,7 @@ function validateFunction(
         const dynSide = e.left.type.kind === "dyn" ? e.left : e.right;
         const scalarSide = dynSide === e.left ? e.right : e.left;
         if (dynSide.type.kind !== "dyn") err("dynScalarEq needs a dyn side", e.loc);
-        if (!["effect", "date", "bigint", "f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
+        if (!["effect", "date", "bigint", "symbol", "f64", "string", "bool", "dyn"].includes(scalarSide.type.kind)) {
           err(`dynScalarEq scalar side is ${scalarSide.type.kind}`, e.loc);
         }
         if (e.type.kind !== "bool") err("dynScalarEq must be bool", e.loc);

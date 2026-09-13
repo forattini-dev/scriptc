@@ -26,6 +26,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line("match value {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("object reflection"),`);
+  context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("object reflection"),`);
   if (context.hasEmbeddedModules()) context.line(`${name}::Island(value) => return sc_dyn_island_object_walk(value, mode),`);
   context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
   context.line(`${name}::Object(object) => for (key, field) in runtime::map_string_entries_js_order(object) { let field = if mode != 0 && runtime::map_is_module_namespace(object) { sc_dyn_object_key_get(object, &key, value) } else { field }; sc_dyn_obj_walk_push(&output, mode, key, field); },`);
@@ -81,6 +82,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line(`fn sc_dyn_assign_from(target: &${name}, source: &${name}) {`);
   context.pushIndent();
   context.line(`if matches!(target, ${name}::Effect(..)) || matches!(source, ${name}::Effect(..)) { return sc_dyn_effect_reflection("Object.assign or object spread"); }`);
+  context.line(`if matches!(target, ${name}::Proxy(..)) || matches!(source, ${name}::Proxy(..)) { return sc_dyn_proxy_unsupported("Object.assign or object spread"); }`);
   context.line("let target = match target {");
   context.pushIndent();
   context.line(`${name}::Object(target) => target,`);
@@ -123,6 +125,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.line("match source {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("iteration"),`);
+  context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("iteration"),`);
   context.line(`${name}::Array(source) => { let ${name}::Array(pack) = pack else { unreachable!() }; runtime::array_extend(pack, source); return; },`);
   context.line(`${name}::Bytes(source) => { let mut index = 0.0; while index < runtime::bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::bytes_get(source, index))); index += 1.0; } return; },`);
   context.line(`${name}::TypedBytes(source) => { let mut index = 0.0; while index < runtime::typed_bytes_len(source) { sc_dyn_pack_push(pack, ${name}::Number(runtime::typed_bytes_get(source, index))); index += 1.0; } return; },`);
@@ -162,6 +165,7 @@ export function emitRustDynamicObjectWalk(context: RustDynamicContext): void {
   context.pushIndent();
   context.line(`if matches!(target, ${name}::Undefined | ${name}::Null) { runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()); }`);
   context.line(`if matches!(target, ${name}::Effect(..)) { return sc_dyn_effect_reflection("Object.assign"); }`);
+  context.line(`if matches!(target, ${name}::Proxy(..)) { return sc_dyn_proxy_unsupported("Object.assign"); }`);
   context.line(`if let ${name}::Array(sources) = sources { let mut index = 0.0; while index < runtime::array_len(sources) { let source = runtime::array_get(sources, index); sc_dyn_assign_from(target, &source); index += 1.0; } }`);
   context.line("target.clone()");
   context.popIndent();

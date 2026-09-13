@@ -30,6 +30,7 @@ export interface RustAsyncValueContext {
   ): void;
   emitAsyncStatements(statements: readonly IrStmt[], onComplete?: (() => void) | null): void;
   emitExpr(expr: IrExpr): string;
+  dynTypeName(): string;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
   emitBinaryValues(expr: Extract<IrExpr, { kind: "bin" }>, left: string, right: string): string;
@@ -287,7 +288,7 @@ export class RustAsyncValueEmitter {
         const boxed = this.context.emitDynFromValue(field.value.type, value, expr.loc);
         return shape.tuple ? `runtime::array_push(&${object}, ${boxed});` : `runtime::map_set_by(&${object}, ${rustJsString(field.name, text => this.context.rustString(text))}, ${boxed}, |a, b| a == b);`;
       }).join(" ");
-      consume(`{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`);
+      consume(`{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${shape.tuple ? object : `${this.context.dynTypeName()}::Object(${object})`} } }`);
       return;
     }
     if (shape.indexValue !== undefined && shape.fields.length === 0) {
@@ -339,7 +340,7 @@ export class RustAsyncValueEmitter {
     const shape = this.recordCloneShape(expr);
     if (isSharedRecord(shape)) {
       if (shape.tuple) return `${sharedRecordName(shape.id)} { object: runtime::array_slice(&${source}.object, 0.0, runtime::array_len(&${source}.object)) }`;
-      return `{ let object = runtime::map_new(); let mut index = 0.0; while index < runtime::map_iter_count(&${source}.object) { if runtime::map_iter_live(&${source}.object, index) { runtime::map_set_by(&object, runtime::map_iter_key(&${source}.object, index), runtime::map_iter_value(&${source}.object, index), |a, b| a == b); } index += 1.0; } ${sharedRecordName(shape.id)} { object } }`;
+      return `${source}.shallow_copy()`;
     }
     const fields = shape.fields.map((field) => {
       const access = `record.${mangleField(field.name)}`;

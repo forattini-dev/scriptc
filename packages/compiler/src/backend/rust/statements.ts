@@ -546,8 +546,9 @@ class RustStatementEmitter {
       if (isSharedRecord(shape)) return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.set_${mangleField(field.name)}(${checked}); }`;
       return `${index === 0 ? "if" : "else if"} ${key}.as_ref() == "${this.context.rustString(field.name)}" { ${object}.with_mut(|record| record.${mangleField(field.name)} = ${stored}); }`;
     });
-    const overflow = isSharedRecord(shape) ? `${object}.object.clone()` : `${object}.with(|record| record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone())`;
-    const setOverflow = `let overflow = ${overflow}; runtime::map_set_by(&overflow, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
+    const overflow = `${object}.with(|record| record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow").clone())`;
+    const setOverflow = isSharedRecord(shape) ? `${object}.set_key(${key}, ${value});`
+      : `let overflow = ${overflow}; runtime::map_set_by(&overflow, ${key}, ${value}, |left, right| left.as_ref() == right.as_ref());`;
     const dispatch = declared.length === 0
       ? setOverflow
       : `${declared.join(" ")} else { ${setOverflow} }`;

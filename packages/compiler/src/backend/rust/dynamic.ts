@@ -4,7 +4,7 @@ import { emitNativeUnionCheck } from "./native-union-check.js";
 import { emitNativeMapCheck } from "./native-map-values.js";
 import { nativeArrayViewSupported, nativeIndexedRecordValue } from "../../ir/native-record.js";
 import { emitNativeArrayCheck } from "./native-array-values.js";
-import { emitRustDynamicEquality } from "./dynamic-equality.js";
+import { emitRustDynamicErrorAndCloneHelpers } from "./dynamic-error-clone.js";
 import { emitRustDynamicIslandSupport } from "./dynamic-island.js";
 import type { IrType, SrcLoc } from "../../ir/ir.js";
 import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
@@ -20,10 +20,10 @@ import { emitRustDynamicStringCoercion } from "./dynamic-string-coercion.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
 import { emitRustDynamicObjectPrototype } from "./dynamic-object-prototype.js";
+import { emitRustDynamicProxy } from "./dynamic-proxy.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
-import type { RustClosureShape } from "./model.js";
 import { isSharedRecord, recordCheckName } from "./shared-records.js";
 
 export class RustDynamicEmitter {
@@ -53,6 +53,7 @@ export class RustDynamicEmitter {
     this.context.line("Null,");
     this.context.line("Number(f64),");
     this.context.line("BigInt(runtime::JsBigInt),");
+    this.context.line("Symbol(runtime::JsSymbol),");
     this.context.line("Date(runtime::JsDate),");
     this.context.line("Effect(runtime::JsEffect),");
     this.context.line("Boolean(bool),");
@@ -78,6 +79,7 @@ export class RustDynamicEmitter {
     this.context.line(`Array(runtime::JsArray<${name}>),`);
     this.context.line(`ArrayIterator(runtime::JsArrayIterator<${name}>),`);
     this.context.line(`Object(runtime::JsMap<runtime::JsString, ${name}>),`);
+    this.context.line("Proxy(runtime::Gc<ScDynProxy>),");
     this.context.line(`Getter(Box<${name}>),`);
     for (const shape of boxedShapes) {
       this.context.line(`${this.context.dynFunctionVariant(shape)}(runtime::Gc<${this.context.closureName(shape)}>, runtime::JsString, runtime::JsMap<runtime::JsString, ${name}>),`);
@@ -98,6 +100,7 @@ export class RustDynamicEmitter {
     this.context.line("Self::Array(value) => tracer.edge(value),");
     this.context.line("Self::ArrayIterator(value) => tracer.edge(value),");
     this.context.line("Self::Object(value) => tracer.edge(value),");
+    this.context.line("Self::Proxy(value) => tracer.edge(value),");
     this.context.line("Self::Effect(value) => tracer.edge(value),");
     this.context.line("Self::Getter(value) => runtime::Trace::trace(value.as_ref(), tracer),");
     this.context.line("Self::Bytes(value) => tracer.edge(value),");
@@ -123,6 +126,7 @@ export class RustDynamicEmitter {
     this.context.line(`impl runtime::HeapValue for ${name} {`);
     this.context.pushIndent();
     this.context.line("fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(self, tracer); }");
+    this.context.line(`fn promise_resolution_error(&self) -> Option<&'static str> { if matches!(self, Self::Proxy(..)) { Some("scriptc: Promise thenable assimilation on native Proxy objects is not supported yet") } else { None } }`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`impl runtime::ArrayElement for ${name} {`);
@@ -131,6 +135,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_effect_reflection<T>(operation: &str) -> T { runtime::throw_error(format!("scriptc: {} on native kernel references is not supported yet", operation)) }`);
+    emitRustDynamicProxy(this.context);
     emitRustQuerystringDynImpl(name, this.context);
     emitRustDynamicIslandSupport(this.context);
     this.context.line(`impl runtime::JsonValue for ${name} {`);
@@ -142,6 +147,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Undefined | ${name}::Null => writer.write_null(),`);
     this.context.line(`${name}::Number(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::BigInt(value) => runtime::JsonValue::write_json(value, writer),`);
+    this.context.line(`${name}::Symbol(..) => writer.write_null(), ${name}::Proxy(..) => sc_dyn_proxy_unsupported("JSON.stringify"),`);
     this.context.line(`${name}::Date(value) => runtime::JsonValue::write_json(value, writer),`);
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("JSON.stringify"),`);
     this.context.line(`${name}::Boolean(value) => runtime::JsonValue::write_json(value, writer),`);
@@ -183,6 +189,7 @@ export class RustDynamicEmitter {
     this.context.pushIndent();
     const undefinedPatterns = [
       `${name}::Undefined`,
+      `${name}::Symbol(..)`,
       `${name}::NativeConstructor(..)`,
       `${name}::NativeMethod(..)`,
       ...boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`),
@@ -242,6 +249,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::String(..) => runtime::ParseArgsKind::String,`);
     this.context.line(`${name}::Array(..) => runtime::ParseArgsKind::Array,`);
     this.context.line(`${name}::Object(..) => runtime::ParseArgsKind::Object,`);
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("parseArgs object reflection"),`);
     this.context.line("_ => runtime::ParseArgsKind::Other,");
     this.context.popIndent();
     this.context.line("} }");
@@ -307,6 +315,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => ${name}::Null,`);
     this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
     this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
+    this.context.line(`${name}::Symbol(value) => ${name}::Symbol(value.clone()), ${name}::Proxy(..) => sc_dyn_proxy_unsupported("value copies"),`);
     this.context.line(`${name}::Date(value) => ${name}::Date(value.clone()),`);
     this.context.line(`${name}::Effect(value) => ${name}::Effect(value.clone()),`);
     this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
@@ -368,6 +377,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => Ok(runtime::JsonNode::Null),`);
     this.context.line(`${name}::Number(value) => Ok(runtime::JsonNode::Number(*value)),`);
     this.context.line(`${name}::BigInt(..) => Err(format!("bigint at {path} is not JSON data")),`);
+    this.context.line(`${name}::Symbol(..) => Err(format!("symbol at {path} is not JSON data")), ${name}::Proxy(..) => Err(format!("native Proxy at {path} is not JSON data")),`);
     this.context.line(`${name}::Date(..) => Err(format!("Date at {path} is not JSON data")),`);
     this.context.line(`${name}::Effect(..) => Err(format!("native kernel reference at {path} is not JSON data")),`);
     this.context.line(`${name}::Boolean(value) => Ok(runtime::JsonNode::Bool(*value)),`);
@@ -436,6 +446,7 @@ export class RustDynamicEmitter {
     this.context.line(`else if runtime::caught_is::<f64>(&caught) { ${name}::Number(runtime::caught_narrow::<f64>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<bool>(&caught) { ${name}::Boolean(runtime::caught_narrow::<bool>(&caught)) }`);
     this.context.line(`else if runtime::caught_is::<runtime::JsString>(&caught) { ${name}::String(runtime::caught_narrow::<runtime::JsString>(&caught)) }`);
+    this.context.line(`else if runtime::caught_is::<runtime::JsSymbol>(&caught) { ${name}::Symbol(runtime::caught_narrow::<runtime::JsSymbol>(&caught)) }`);
     if (usesEmbeddedModules) this.context.line("else if runtime::caught_is::<runtime::IslandValue>(&caught) { sc_dyn_from_island(runtime::caught_narrow::<runtime::IslandValue>(&caught)) }");
     this.context.line(`else if ${caughtErrorTest} { sc_dyn_error_box(&${caughtErrorValue}) }`);
     this.context.line(`else { ${name}::Object(runtime::map_new()) }`);
@@ -461,6 +472,7 @@ export class RustDynamicEmitter {
     this.context.line("match value {");
     this.context.pushIndent();
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property membership"),`);
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, false),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()) || runtime::map_prototype(object).is_some_and(|prototype| sc_dyn_has_key(&prototype, key)),`);
     this.context.line(`${name}::Array(array) => key.as_ref() == "length" || sc_dyn_key_index(key).is_some_and(|index| index < runtime::array_len(array) as usize),`);
@@ -474,6 +486,7 @@ export class RustDynamicEmitter {
     this.context.line("match value {");
     this.context.pushIndent();
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("own property membership"),`);
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("own property membership"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => sc_dyn_island_has(value, key, true),`);
     this.context.line(`${name}::Undefined | ${name}::Null => runtime::throw_type_error("Cannot convert undefined or null to object".to_owned()),`);
     this.context.line(`${name}::Object(object) => runtime::map_has_by(object, key, |left, right| left.as_ref() == right.as_ref()),`);
@@ -489,7 +502,7 @@ export class RustDynamicEmitter {
     emitRustDynamicObjectPrototype(this.context);
     this.context.line(`fn sc_dyn_object_key_get(object: &runtime::JsMap<runtime::JsString, ${name}>, key: &runtime::JsString, receiver: &${name}) -> ${name} {`);
     this.context.pushIndent();
-    this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(${name}::Object(prototype)) => sc_dyn_object_key_get(&prototype, key, receiver), None => sc_dyn_object_prototype_fallback(object, key), _ => ${name}::Undefined, }, }`);
+    this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(prototype @ (${name}::Object(..) | ${name}::Proxy(..))) => sc_dyn_get(&prototype, key, receiver), None => sc_dyn_object_prototype_fallback(object, key), _ => ${name}::Undefined, }, }`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);
@@ -503,9 +516,10 @@ export class RustDynamicEmitter {
     this.context.line(`runtime::throw_type_error(format!("Cannot read properties of {} (reading '{}')", sc_dyn_kind(value), key))`);
     this.context.popIndent();
     this.context.line("},");
-    this.context.line(`${name}::Object(object) => sc_dyn_object_key_get(object, key, value),`);
+    this.context.line(`${name}::Object(..) | ${name}::Proxy(..) => sc_dyn_get(value, key, value),`);
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property access"),`);
     this.context.line(`${name}::Number(..) => match key.to_utf8_lossy() { "toString" => ${name}::NativeMethod(ScDynNativeMethod::NumberToString), "toFixed" => ${name}::NativeMethod(ScDynNativeMethod::NumberToFixed), _ => ${name}::Undefined, },`);
+    this.context.line(`${name}::Symbol(value) => match key.to_utf8_lossy() { "description" => runtime::symbol_description(value).map(${name}::String).unwrap_or(${name}::Undefined), "toString" | "valueOf" | "constructor" => runtime::throw_error("scriptc: native Symbol prototype property access is not supported yet".to_owned()), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Regex(regex) => match key.to_utf8_lossy() { "source" => ${name}::String(runtime::regex_source(regex)), "flags" => ${name}::String(runtime::regex_flags(regex)), "lastIndex" => ${name}::Number(runtime::regex_last_index(regex)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Url(url) => match key.to_utf8_lossy() { "href" => ${name}::String(runtime::url_href(url)), "protocol" => ${name}::String(runtime::url_protocol(url)), "host" => ${name}::String(runtime::url_host(url)), "hostname" => ${name}::String(runtime::url_hostname(url)), "pathname" => ${name}::String(runtime::url_pathname(url)), "port" => ${name}::String(runtime::url_port(url)), "origin" => ${name}::String(runtime::url_origin(url)), "hash" => ${name}::String(runtime::url_hash(url)), "username" => ${name}::String(runtime::url_username(url)), "password" => ${name}::String(runtime::url_password(url)), _ => ${name}::Undefined, },`);
     this.context.line(`${name}::Array(array) => {`);
@@ -600,6 +614,7 @@ export class RustDynamicEmitter {
     this.context.line("match value {");
     this.context.pushIndent();
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("property assignment"),`);
+    this.context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("property assignment"),`);
     if (usesEmbeddedModules) this.context.line(`${name}::Island(value) => runtime::island_set_index(value, &runtime::island_value_string(&key), &sc_dyn_to_island(&field)),`);
     this.context.line(`${name}::Object(object) => { if runtime::map_is_module_namespace(object) { if runtime::map_has_by(object, &key, |left, right| left.as_ref() == right.as_ref()) { runtime::throw_type_error(format!("Cannot assign to read only property '{}' of object '[object Module]'", key)); } runtime::throw_type_error(format!("Cannot add property {}, object is not extensible", key)); } runtime::map_set_by(object, key, field, |left, right| left.as_ref() == right.as_ref()); },`);
     this.context.line(`${name}::Regex(regex) if key.as_ref() == "lastIndex" => match field { ${name}::Number(value) => runtime::regex_set_last_index(regex, value), _ => runtime::regex_set_last_index(regex, 0.0), },`);
@@ -635,6 +650,7 @@ export class RustDynamicEmitter {
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_to_number(value: &${name}) -> f64 {`);
+    this.context.line(`if matches!(value, ${name}::Symbol(..)) { runtime::throw_type_error("Cannot convert a Symbol value to a number".to_owned()); }`);
     this.context.line(`if matches!(value, ${name}::BigInt(..)) { runtime::throw_type_error(if runtime::target_runtime_id() == "bun" { "Conversion from 'BigInt' to 'number' is not allowed." } else { "Cannot convert a BigInt value to a number" }.to_owned()); }`);
     this.context.pushIndent();
     this.context.line(`match value { ${name}::Date(value) => runtime::date_value_time(value), ${name}::Undefined => f64::NAN, ${name}::Null => 0.0, ${name}::Number(value) => *value, ${name}::Boolean(value) => if *value { 1.0 } else { 0.0 }, ${name}::String(value) => runtime::number_from_string(value), _ => runtime::number_from_string(&sc_dyn_to_string(value)), }`);
@@ -648,6 +664,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => runtime::string("null"),`);
     this.context.line(`${name}::Number(value) => runtime::number_to_string(*value),`);
     this.context.line(`${name}::BigInt(value) => runtime::bigint_to_string(value),`);
+    this.context.line(`${name}::Symbol(..) => runtime::throw_type_error("Cannot convert a Symbol value to a string".to_owned()), ${name}::Proxy(..) => sc_dyn_proxy_unsupported("string coercion"),`);
     this.context.line(`${name}::Date(value) => runtime::date_value_to_string(value),`);
     this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("string coercion"),`);
     this.context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
@@ -709,6 +726,7 @@ export class RustDynamicEmitter {
     this.context.line(`${name}::Null => "null".to_owned(),`);
     this.context.line(`${name}::Number(value) => format!("type number ({})", runtime::format_number(*value)),`);
     this.context.line(`${name}::BigInt(value) => format!("type bigint ({})", runtime::display_bigint(value)),`);
+    this.context.line(`${name}::Symbol(value) => format!("type symbol ({})", runtime::symbol_to_string(value)), ${name}::Proxy(..) => "a native Proxy object".to_owned(),`);
     this.context.line(`${name}::Date(value) => format!("an instance of Date ({})", runtime::date_value_inspect(value)),`);
     this.context.line(`${name}::Boolean(value) => format!("type boolean ({value})"),`);
     this.context.line(`${name}::String(value) => runtime::dynamic_specific_string(value),`);
@@ -846,181 +864,11 @@ export class RustDynamicEmitter {
     emitRustDynamicAgent(this.context);
     emitRustDynamicStringCoercion(this.context, boxedShapes);
     emitRustDynamicJsonReplacer(this.context);
-    this.emitDynamicErrorAndCloneHelpers(boxedShapes);
+    emitRustDynamicErrorAndCloneHelpers(this.context, boxedShapes);
     emitRustDynamicAssertions(this.context, boxedShapes);
     this.context.line("");
   }
 
-  emitDynamicErrorAndCloneHelpers(boxedShapes: readonly RustClosureShape[]): void {
-    const name = this.context.dynTypeName();
-    const usesEmbeddedModules = this.context.hasEmbeddedModules();
-    const mapType = `runtime::JsMap<runtime::JsString, ${name}>`;
-    const errorType = this.context.errorClassRoots().length === 0 ? "runtime::JsError" : this.context.errorValueName();
-    const errorHelper = (helper: string): string => this.context.errorClassRoots().length === 0 ? `runtime::error_${helper}` : `sc_error_${helper}`;
-    const errorTarget = this.context.errorClassRoots().length === 0 ? "target.strip_prefix('%').unwrap_or(target)" : "target";
-    const abortError = this.context.errorClassRoots().length === 0 ? `runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None)` : `${this.context.errorValueName()}::Builtin(runtime::dom_exception_new(runtime::string("This operation was aborted"), runtime::string("AbortError"), None))`;
-    const timeoutError = this.context.errorClassRoots().length === 0 ? `runtime::dom_exception_new(runtime::string("The operation was aborted due to timeout"), runtime::string("TimeoutError"), None)` : `${this.context.errorValueName()}::Builtin(runtime::dom_exception_new(runtime::string("The operation was aborted due to timeout"), runtime::string("TimeoutError"), None))`;
-
-    this.context.line("std::thread_local! {");
-    this.context.pushIndent();
-    this.context.line(`static SC_DYN_ERROR_CACHE: std::cell::RefCell<Vec<(usize, ${errorType}, ${mapType})>> = const { std::cell::RefCell::new(Vec::new()) };`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_error_box(error: &${errorType}) -> ${name} {`);
-    this.context.pushIndent();
-    this.context.line(`let identity = ${errorHelper("identity")}(error);`);
-    this.context.line("if let Some(object) = SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(cached, _, _)| *cached == identity).map(|(_, _, object)| object.clone())) {");
-    this.context.pushIndent();
-    this.context.line(`return ${name}::Object(object);`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`let object: ${mapType} = runtime::map_new();`);
-    this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().push((identity, error.clone(), object.clone())));");
-    this.context.line(`runtime::map_set_by(&object, runtime::string("%error"), ${name}::Boolean(true), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`runtime::map_set_by(&object, runtime::string("name"), ${name}::String(${errorHelper("name")}(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`runtime::map_set_by(&object, runtime::string("message"), ${name}::String(${errorHelper("message")}(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`if ${errorHelper("is_class")}(error, "DOMException") {`);
-    this.context.pushIndent();
-    this.context.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::Number(${errorHelper("dom_code")}(error)), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.line(`if let Some(cause) = ${errorHelper("dom_cause")}::<${name}>(error) { runtime::map_set_by(&object, runtime::string("cause"), cause, |left, right| left.as_ref() == right.as_ref()); }`);
-    this.context.popIndent();
-    this.context.line(`} else if let Some(code) = ${errorHelper("code")}(error) {`);
-    this.context.pushIndent();
-    this.context.line(`runtime::map_set_by(&object, runtime::string("code"), ${name}::String(code), |left, right| left.as_ref() == right.as_ref());`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`${name}::Object(object)`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_abort_default_reason() -> ${name} { let error = ${abortError}; sc_dyn_error_box(&error) }`);
-    this.context.line(`fn sc_dyn_abort_timeout_reason() -> ${name} { let error = ${timeoutError}; sc_dyn_error_box(&error) }`);
-    this.context.line(`fn sc_dyn_error_instanceof(value: &${name}, target: &str) -> bool {`);
-    this.context.pushIndent();
-    this.context.line(`let ${name}::Object(object) = value else { return false; };`);
-    this.context.line("let identity = object.identity();");
-    this.context.line(`SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).is_some_and(|(_, error, _)| ${errorHelper("is_class")}(error, ${errorTarget})))`);
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_error_unbox(value: ${name}) -> ${errorType} {`);
-    this.context.pushIndent();
-    // A realm Error handle (a typed callback's `Error` parameter, the
-    // rejection of an engine promise): name and message copy out.
-    if (this.context.hasEmbeddedModules()) {
-      const caughtErrorTest = this.context.errorClassRoots().length === 0 ? "runtime::caught_is_error(&caught)" : "sc_caught_is_error_class(&caught, \"Error\")";
-      const caughtErrorValue = this.context.errorClassRoots().length === 0 ? "runtime::caught_error_value(&caught)" : "sc_caught_error_value(&caught)";
-      this.context.line(`if let ${name}::Island(handle) = &value { let caught = runtime::island_exit_error(handle); if ${caughtErrorTest} { return ${caughtErrorValue}; } return sc_dyn_check_fail("Error", &value); }`);
-    }
-    this.context.line(`let ${name}::Object(object) = &value else { return sc_dyn_check_fail("Error", &value); };`);
-    this.context.line("let identity = object.identity();");
-    this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow().iter().find(|(_, _, cached)| cached.identity() == identity).map(|(_, error, _)| error.clone())).unwrap_or_else(|| sc_dyn_check_fail(\"Error\", &value))");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("fn sc_dyn_error_cache_clear() {");
-    this.context.pushIndent();
-    this.context.line("SC_DYN_ERROR_CACHE.with(|cache| cache.borrow_mut().clear());");
-    this.context.popIndent();
-    this.context.line("}");
-
-    this.context.line(`fn sc_dyn_validate_clone_options(options: &${name}) {`);
-    this.context.pushIndent();
-    this.context.line(`if matches!(options, ${name}::Undefined | ${name}::Null) { return; }`);
-    this.context.line(`let ${name}::Object(object) = options else {`);
-    this.context.pushIndent();
-    this.context.line("runtime::throw_type_error_code(\"Failed to execute 'structuredClone': Options cannot be converted to a dictionary\".to_owned(), \"ERR_INVALID_ARG_TYPE\");");
-    this.context.popIndent();
-    this.context.line("};");
-    this.context.line(`let transfer = runtime::map_get_by(object, &runtime::string("transfer"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${name}::Undefined);`);
-    this.context.line(`if matches!(transfer, ${name}::Undefined) { return; }`);
-    this.context.line(`let ${name}::Array(transfer) = transfer else {`);
-    this.context.pushIndent();
-    this.context.line("runtime::throw_type_error_code(\"Failed to execute 'structuredClone': transfer in Options cannot be converted to sequence.\".to_owned(), \"ERR_INVALID_ARG_TYPE\");");
-    this.context.popIndent();
-    this.context.line("};");
-    this.context.line("if runtime::array_len(&transfer) > 0.0 { runtime::throw_dom_exception(\"DataCloneError\", \"Found invalid value in transferList.\"); }");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_clone(value: &${name}, parents: &mut Vec<usize>) -> ${name} { sc_dyn_clone_dates(value, parents, &mut Vec::new()) }`);
-    this.context.line(`fn sc_dyn_clone_dates(value: &${name}, parents: &mut Vec<usize>, dates: &mut Vec<(usize, runtime::JsDate)>) -> ${name} {`);
-    this.context.pushIndent();
-    this.context.line("match value {");
-    this.context.pushIndent();
-    this.context.line(`${name}::Undefined => ${name}::Undefined,`);
-    this.context.line(`${name}::Null => ${name}::Null,`);
-    this.context.line(`${name}::Number(value) => ${name}::Number(*value),`);
-    this.context.line(`${name}::BigInt(value) => ${name}::BigInt(value.clone()),`);
-    this.context.line(`${name}::Date(value) => { if runtime::target_runtime_id() == \"bun\" { return ${name}::Date(runtime::date_value_copy(value)); } let id = runtime::date_value_identity(value); if let Some((_, copied)) = dates.iter().find(|(key, _)| *key == id) { ${name}::Date(copied.clone()) } else { let copied = runtime::date_value_copy(value); dates.push((id, copied.clone())); ${name}::Date(copied) } },`);
-    this.context.line(`${name}::Boolean(value) => ${name}::Boolean(*value),`);
-    this.context.line(`${name}::String(value) => ${name}::String(value.clone()),`);
-    this.context.line(`${name}::Regex(value) => ${name}::Regex(runtime::regex_new(&runtime::regex_source(value), &runtime::regex_flags(value))),`);
-    this.context.line(`${name}::Url(value) => ${name}::Url(value.clone()),`);
-    this.context.line(`${name}::Bytes(value) => ${name}::Bytes(runtime::bytes_copy(value)),`);
-    this.context.line(`${name}::TypedBytes(value) => ${name}::TypedBytes(runtime::typed_bytes_copy(value)),`);
-    this.context.line(`${name}::Buffer(value) => ${name}::Buffer(runtime::bytes_copy(value)),`);
-    this.context.line(`${name}::NativeConstructor(name) => ${name}::NativeConstructor(name),`);
-    this.context.line(`${name}::NativeMethod(method) => runtime::throw_dom_exception("DataCloneError", &format!("{} could not be cloned.", method.name())),`);
-    this.context.line(`${name}::Getter(..) => runtime::throw_dom_exception("DataCloneError", "getter could not be cloned."),`);
-    this.context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("structuredClone"),`);
-    this.context.line(`${name}::Promise(..) => runtime::throw_dom_exception("DataCloneError", "#<Promise> could not be cloned."),`);
-    this.context.line(`${name}::NetServer(..) => runtime::throw_dom_exception("DataCloneError", "#<Server> could not be cloned."),`);
-    this.context.line(`${name}::NetSocket(..) => runtime::throw_dom_exception("DataCloneError", "#<Socket> could not be cloned."),`);
-    this.context.line(`${name}::AbortController(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortController> could not be cloned."), ${name}::AbortSignal(..) => runtime::throw_dom_exception("DataCloneError", "#<AbortSignal> could not be cloned."), ${name}::HttpRequest(..) => runtime::throw_dom_exception("DataCloneError", "#<IncomingMessage> could not be cloned."),`);
-    this.context.line(`${name}::HttpHeaders(..) => runtime::throw_dom_exception("DataCloneError", "#<Headers> could not be cloned."),`);
-    this.context.line(`${name}::FetchBody(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStream> could not be cloned."),`);
-    this.context.line(`${name}::WebStream(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStream> could not be cloned."),`);
-    this.context.line(`${name}::WebController(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultController> could not be cloned."),`);
-    this.context.line(`${name}::WebReader(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultReader> could not be cloned."),`);
-    this.context.line(`${name}::FetchReader(..) => runtime::throw_dom_exception("DataCloneError", "#<ReadableStreamDefaultReader> could not be cloned."),`);
-    this.context.line(`${name}::HttpResponse(..) => runtime::throw_dom_exception("DataCloneError", "#<ServerResponse> could not be cloned."),`);
-    this.context.line(`${name}::HttpAgent(..) => runtime::throw_dom_exception("DataCloneError", "#<Agent> could not be cloned."),`);
-    this.context.line(`${name}::ArrayIterator(..) => runtime::throw_dom_exception("DataCloneError", "#<Array Iterator> could not be cloned."),`);
-    if (usesEmbeddedModules) this.context.line(`${name}::Island(..) => runtime::throw_dom_exception("DataCloneError", "embedded JavaScript value could not be cloned."),`);
-    this.context.line(`${name}::Array(value) => {`);
-    this.context.pushIndent();
-    this.context.line("let identity = value.identity();");
-    this.context.line("if parents.contains(&identity) { runtime::throw_value(runtime::error_new(\"Error\", runtime::string(\"structuredClone of cyclic values (the checked-dynamic tree cannot represent cycles) is not supported yet\"))); }");
-    this.context.line("parents.push(identity);");
-    this.context.line(`let output: runtime::JsArray<${name}> = runtime::array_new(Vec::new());`);
-    this.context.line("let mut index = 0.0;");
-    this.context.line("while index < runtime::array_len(value) { let field = runtime::array_get(value, index); runtime::array_push(&output, sc_dyn_clone_dates(&field, parents, dates)); index += 1.0; }");
-    this.context.line("parents.pop();");
-    this.context.line(`${name}::Array(output)`);
-    this.context.popIndent();
-    this.context.line("},");
-    this.context.line(`${name}::Object(value) => {`);
-    this.context.pushIndent();
-    this.context.line("if runtime::map_is_module_namespace(value) { runtime::throw_dom_exception(\"DataCloneError\", \"[object Module] could not be cloned.\"); }");
-    this.context.line("let identity = value.identity();");
-    this.context.line("if parents.contains(&identity) { runtime::throw_value(runtime::error_new(\"Error\", runtime::string(\"structuredClone of cyclic values (the checked-dynamic tree cannot represent cycles) is not supported yet\"))); }");
-    this.context.line("parents.push(identity);");
-    this.context.line(`let output: ${mapType} = runtime::map_new();`);
-    this.context.line("let mut index = 0.0;");
-    this.context.line("while index < runtime::map_iter_count(value) {");
-    this.context.pushIndent();
-    this.context.line("if runtime::map_iter_live(value, index) { let key = runtime::map_iter_key(value, index); let field = runtime::map_iter_value(value, index); runtime::map_set_by(&output, key, sc_dyn_clone_dates(&field, parents, dates), |left, right| left.as_ref() == right.as_ref()); }");
-    this.context.line("index += 1.0;");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line("parents.pop();");
-    this.context.line(`${name}::Object(output)`);
-    this.context.popIndent();
-    this.context.line("},");
-    if (boxedShapes.length > 0) {
-      const patterns = boxedShapes.map((shape) => `${name}::${this.context.dynFunctionVariant(shape)}(..)`).join(" | ");
-      this.context.line(`value @ (${patterns}) => runtime::throw_dom_exception("DataCloneError", &format!("{} could not be cloned.", sc_dyn_to_string(value))),`);
-    }
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.popIndent();
-    this.context.line("}");
-    this.context.line(`fn sc_dyn_structured_clone(value: &${name}, options: &${name}) -> ${name} {`);
-    this.context.pushIndent();
-    this.context.line("sc_dyn_validate_clone_options(options);");
-    this.context.line("sc_dyn_clone(value, &mut Vec::new())");
-    this.context.popIndent();
-    this.context.line("}");
-
-    emitRustDynamicEquality(this.context, boxedShapes);
-  }
 
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName = "", liveRef = false): string {
     return this.dynFrom.emit(type, value, loc, functionName, liveRef);
@@ -1037,6 +885,7 @@ export class RustDynamicEmitter {
       case "effect": return `sc_dyn_check_effect_at(${value}, ${path})`;
       case "f64": return `sc_dyn_check_number_at(${value}, ${path})`;
       case "bigint": return `sc_dyn_check_bigint_at(${value}, ${path})`;
+      case "symbol": return `{ let value = ${value}; match value { ${this.context.dynTypeName()}::Symbol(value) => value, value => sc_dyn_check_fail_at("symbol", &value, ${path}), } }`;
       case "bool": return `sc_dyn_check_boolean_at(${value}, ${path})`;
       case "string": return `sc_dyn_check_string_at(${value}, ${path})`;
       case "bytes": {

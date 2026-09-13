@@ -81,7 +81,7 @@ export function emitRustRecordKeyGetValues(
     const lookup = `runtime::map_get_by(${overflow}, &${key}, |left, right| left.as_ref() == right.as_ref())`;
     const present = surface(indexValue, "value");
     if (isSharedRecord(shape)) {
-      const lookup = `runtime::map_get_by(&${object}.object, &${key}, |left, right| left.as_ref() == right.as_ref())`;
+      const lookup = `${object}.get_key(&${key})`;
       return `{ ${bindings} (|| { ${declared} match ${lookup} { Some(value) => ${present}, None => ${miss} } })() }`;
     }
     return `{ ${bindings} ${object}.with(|${record}| { ${declared} match ${lookup} { Some(value) => ${present}, None => ${miss}, } }) }`;

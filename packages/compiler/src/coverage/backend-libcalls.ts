@@ -224,6 +224,8 @@ export const BACKEND_LIB_CALLS: Readonly<Record<string, readonly BackendId[]>> =
   "dyn.packPush": ["c", "llvm", "rust"],
   "dyn.packPushSpread": ["c", "llvm", "rust"],
   "dyn.packPushSpreadIter": ["c", "llvm", "rust"],
+  "dyn.proxyNew": ["rust"],
+  "dyn.stringConstructor": ["c", "llvm", "rust"],
   "dyn.structuredClone": ["c", "llvm", "rust"],
   "dyn.this": ["c", "llvm", "rust"],
   "dyn.toNumberCoerce": ["c", "llvm", "rust"],

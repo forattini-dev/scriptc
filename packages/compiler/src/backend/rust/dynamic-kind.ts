@@ -13,6 +13,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::Null => "null",`);
   context.line(`${name}::Number(..) => "number",`);
   context.line(`${name}::BigInt(..) => "bigint", ${name}::Date(..) => "object",`);
+  context.line(`${name}::Symbol(..) => "symbol", ${name}::Proxy(..) => "object",`);
   context.line(`${name}::Effect(value) => runtime::effect_reference_typeof(value),`);
   context.line(`${name}::Boolean(..) => "boolean",`);
   context.line(`${name}::String(..) => "string",`);
@@ -60,6 +61,7 @@ export function emitRustDynamicKindQueries(context: RustDynamicContext, boxedSha
   context.line(`${name}::Undefined => "undefined",`);
   context.line(`${name}::Number(..) => "number",`);
   context.line(`${name}::BigInt(..) => "bigint", ${name}::Date(..) => "object",`);
+  context.line(`${name}::Symbol(..) => "symbol",`);
   context.line(`${name}::Effect(value) => runtime::effect_reference_typeof(value),`);
   context.line(`${name}::Boolean(..) => "boolean",`);
   context.line(`${name}::String(..) => "string",`);

@@ -168,6 +168,7 @@ mod tests {
     include!("tests/crypto.rs");
     include!("tests/language_and_heap.rs");
     include!("promise_views.test.rs");
+    include!("promises.test.rs");
     include!("array_views.test.rs");
     include!("readline.test.rs");
     include!("tests/heap_pressure.rs");

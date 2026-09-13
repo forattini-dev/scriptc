@@ -23,6 +23,8 @@ trait MapView<K: Clone + 'static, V: HeapValue>: Trace {
     fn has_null_prototype(&self) -> bool;
     fn mark_namespace(&self, compare: MapKeyCompare<'_, K>);
     fn is_namespace(&self) -> bool;
+    fn mark_proxy_restricted(&self);
+    fn is_proxy_restricted(&self) -> bool;
     fn set_prototype(&self, value: V);
     fn prototype(&self) -> Option<V>;
 }
@@ -60,6 +62,8 @@ impl<K: Clone + 'static, S: HeapValue, T: HeapValue> MapView<K, T> for MappedMap
     fn has_null_prototype(&self) -> bool { map_has_null_prototype(&self.source) }
     fn mark_namespace(&self, compare: MapKeyCompare<'_, K>) { map_mark_namespace_by(&self.source, compare); }
     fn is_namespace(&self) -> bool { map_is_module_namespace(&self.source) }
+    fn mark_proxy_restricted(&self) { map_mark_proxy_restricted(&self.source); }
+    fn is_proxy_restricted(&self) -> bool { map_is_proxy_restricted(&self.source) }
     fn set_prototype(&self, value: T) { map_set_prototype(&self.source, (self.write)(value)); }
     fn prototype(&self) -> Option<T> { map_prototype(&self.source).map(self.read) }
 }
@@ -99,7 +103,7 @@ pub fn map_mapped<K: Clone + 'static, S: HeapValue, T: HeapValue>(
 ) -> JsMap<K, T> {
     Gc::new(MapData {
         entries: Vec::new(), live: 0, iteration_depth: 0, null_prototype: false,
-        module_namespace: false, prototype: None,
+        module_namespace: false, proxy_restricted: false, prototype: None,
         view: Some(Rc::new(MappedMap { source, read, write })),
     })
 }

@@ -593,6 +593,7 @@ where
             iteration_depth: 0,
             null_prototype: false,
             module_namespace: false,
+            proxy_restricted: false,
             prototype: None,
         })
     }

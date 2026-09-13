@@ -75,15 +75,6 @@ stdlib-fence.ts:27:12 - error SC2020: 'new WeakMap' is part of the standard libr
 
   hint: weak collections observe garbage collection, which reference counting never exposes — a strong Map behaves identically in-language: use Map
 
-stdlib-fence.ts:28:12 - error SC2020: 'new Proxy' is part of the standard library types but has no scriptc lowering yet
-
-  27 | const wm = new WeakMap();
-  28 | const px = new Proxy({ a: 1 }, {});
-     |            ^~~~~~~~~~~~~~~~~~~~~~~
-  29 | const buf = new ArrayBuffer(8);
-
-  hint: property-access metaprogramming has no static lowering (every property read must resolve at compile time)
-
 stdlib-fence.ts:29:7 - error SC2020: 'ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
 
   28 | const px = new Proxy({ a: 1 }, {});

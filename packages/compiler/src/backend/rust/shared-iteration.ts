@@ -13,7 +13,7 @@ export function emitSharedIteration(context: RustDefinitionContext, fn: IrFuncti
   const result = fn.returnType;
   if (result.kind !== "array" && result.kind !== "dyn") return false;
   const dyn = context.dynTypeName();
-  const raw = `runtime::map_get_by(&sc_input.object, &sc_key, |a, b| a == b).unwrap_or(${dyn}::Undefined)`;
+  const raw = `sc_input.get_key(&sc_key).unwrap_or(${dyn}::Undefined)`;
   let item: string;
   if (member === "keys") item = "sc_key";
   else if (member === "values") item = result.kind === "dyn" ? raw : context.emitDynCheckValue(result.elem, raw, fn.loc);
@@ -30,7 +30,7 @@ export function emitSharedIteration(context: RustDefinitionContext, fn: IrFuncti
     item = context.emitExprWithValues(entry, [[key, "sc_key.clone()"], [value, context.emitDynCheckValue(valueType, raw, fn.loc)]]);
   }
   context.line(`fn ${mangleFunction(fn.name)}(sc_input: ${context.rustType(source)}) -> ${context.rustType(result)} {`);
-  context.line("let sc_keys = runtime::map_string_keys_js_order(&sc_input.object);");
+  context.line("let sc_keys = sc_input.own_keys();");
   if (member === "keys") context.line("sc_keys }");
   else {
     context.line("let sc_output = runtime::array_new(Vec::new()); let mut sc_index = 0.0;");

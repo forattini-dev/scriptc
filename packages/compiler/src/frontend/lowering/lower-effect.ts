@@ -12,6 +12,7 @@ import { locOf } from "../program.js";
 import { kernelServiceIdOfSymbol } from "../kernel.js";
 import { applyProgramPipeStep, applySchemaPipeStep, isSchemaLike, lowerSchemaClassMake, lowerSchemaHandleMethod, lowerSchemaMember, lowerSchemaProperty, lowerSchemaTest, unwrapSchema } from "./lower-schema.js";
 import { lowerConsoleInspectArg } from "./lower-inspect.js";
+import { lowerContextServiceUse } from "./lower-context-service.js";
 
 const EFFECT_NAMESPACE_DTS = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 
@@ -262,6 +263,8 @@ function applyPipeStep(L: Lowerer, source: IrExpr, step: ts.Expression, loc: Src
 /** `Effect.member(...)` → the kernel's lib call, or null when the callee
  * is not an effect namespace member (the call chain keeps trying). */
 export function lowerEffectCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): IrExpr | null {
+  const serviceUse = lowerContextServiceUse(L, expr, loc);
+  if (serviceUse !== null) return serviceUse;
   const callee = expr.expression;
   const asFn = lowerEffectFn(L, expr, loc);
   if (asFn !== null) return asFn;

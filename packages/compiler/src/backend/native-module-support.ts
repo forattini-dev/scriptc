@@ -1,4 +1,5 @@
 import { nativeEffectBackendDiagnostics } from "./native-effect-support.js";
+import { nativeProxyBackendDiagnostics } from "./native-proxy-support.js";
 import { nativeDateBackendDiagnostics } from "./native-date-support.js";
 import { nativeCallableRecordBackendDiagnostics } from "./native-callable-record-support.js";
 import { nativeBigIntBackendDiagnostics } from "./native-bigint-support.js";
@@ -13,6 +14,8 @@ export function nativeModuleBackendDiagnostics(
   backend: "c" | "llvm" | "rust",
 ): ScrDiagnostic[] {
   if (backend === "rust") return [];
+  const proxies = nativeProxyBackendDiagnostics(mod, backend);
+  if (proxies.length > 0) return proxies;
   const effects = nativeEffectBackendDiagnostics(mod, backend);
   if (effects.length > 0) return effects;
   const dates = nativeDateBackendDiagnostics(mod, backend);

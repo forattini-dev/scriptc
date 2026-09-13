@@ -1915,17 +1915,16 @@ export type IrLibFn =
   /** `key in v` with a RUNTIME (string) key on a checked-dynamic
    * receiver (args: value dyn, key string; result bool): OBJ answers
    * own-member presence, ARR answers 'length'/a valid index — exactly
-   * the compile-time dynHasKey fold, per value. Never throws. */
+   * the compile-time dynHasKey fold, per value. Proxy traps can throw. */
   | "dyn.hasKey"
-  /** Object.defineProperties over dyn values (args: target, descriptors —
-   * both borrowed dyn; result: the target, +1 — JS's return value).
-   * Value descriptors become plain own properties on OBJ and FUNC targets
-   * (writable/enumerable/configurable accepted and IGNORED — dyn
-   * properties are plain data properties, SEMANTICS.md); get/set
-   * descriptors and non-object targets/descriptors throw catchably
-   * (Node's TypeError texts; accessors the loud unsupported Error). In
-   * the may-throw seed set. */
+  /** Object.defineProperties borrows target/descriptors and returns target +1.
+   * Value descriptors become plain own properties on OBJ/FUNC targets:
+   * writable/enumerable/configurable are accepted and ignored (SEMANTICS.md).
+   * Get/set descriptors and non-object targets/descriptors throw catchably
+   * (Node's TypeError texts; accessors use the unsupported Error).
+   * Included in the may-throw seed set. */
   | "dyn.defineProps"
+  | "dyn.proxyNew"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest
@@ -4930,10 +4929,10 @@ export type IrExpr =
    * "function"` — true exactly for the checked-dynamic tree's function kind (boxed
    * closures); function values are truthy and answer FALSE to the
    * `"object"` test, JS-exact. */
-  | { kind: "dynTest"; test: "date" | "bigint" | "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "date" | "bigint" | "symbol" | "string" | "number" | "integer" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "object" | "array" | "truthy" | "error" | "function"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
-   * string-typed (a strLit for the dot form); `type` is always dyn. An
+   * string, symbol, or dyn-typed (ToPropertyKey); `type` is always dyn. An
    * OBJ receiver answers the member (+1) or the undefined singleton (the
    * own-property answer — prototype members like `toString` answer
    * undefined, SEMANTICS.md); ARR answers `length` and canonical
@@ -5723,7 +5722,7 @@ export function canConvertToDyn(
   // needs only that the walker can build the dyn value, so this composite
   // fold extends the JSON-safe core.
   if (canBoxDynComposite(t, getRecord, getUnion)) return true;
-  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
   // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
   // listener boundary (a mustCall-wrapped handler receiving the payload).
@@ -5768,7 +5767,7 @@ function canBoxDynComposite(
   visiting: Set<string> = new Set(),
 ): boolean {
   switch (t.kind) {
-    case "effect": case "date": case "bigint": case "f64":
+    case "effect": case "date": case "bigint": case "symbol": case "f64":
     case "string":
     case "bool":
     case "dyn":
@@ -5813,16 +5812,16 @@ export function canDynCheckTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
   if (isJsonSafeType(t, getRecord, getUnion) || nativeArrayViewSupported(t) || nativeRecordCheckSupported(t, getRecord, getUnion)) return true;
-  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || (t.kind === "bytes" && t.elem === "u8")) return true;
+  if (t.kind === "effect" || t.kind === "date" || t.kind === "bigint" || t.kind === "symbol" || (t.kind === "bytes" && t.elem === "u8")) return true;
   if (t.kind === "object" && t.className === "%Error") return true;
   if (t.kind === "func") return canAdaptDynFuncTo(t, getRecord, getUnion);
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
     return !!def &&
-      def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8")) &&
+      def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "symbol" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8")) &&
       def.arms.every((a) =>
-        a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8") ||
+        a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "symbol" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8") ||
         isJsonSafeType(a, getRecord, getUnion) ||
         (a.kind === "object" && a.className === "%Error")
       );
@@ -7349,6 +7348,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.iterPack",
   "dyn.toString",
   "dyn.defineProps",
+  "dyn.proxyNew",
   "process.chdir",
   "fs.realpathSync",
   "fs.readFileSync",

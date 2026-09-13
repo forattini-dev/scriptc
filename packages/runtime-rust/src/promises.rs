@@ -6,6 +6,8 @@
 /// delegating to their generated `Trace` implementation.
 pub trait HeapValue: Clone + 'static {
     fn trace_value(&self, _tracer: &mut Tracer<'_>) {}
+    /// Reject unsupported top-level thenable semantics without traversing containers.
+    fn promise_resolution_error(&self) -> Option<&'static str> { None }
 }
 
 impl HeapValue for f64 {}
@@ -23,6 +25,9 @@ impl HeapValue for Caught {}
 impl<T: HeapValue> HeapValue for Option<T> {
     fn trace_value(&self, tracer: &mut Tracer<'_>) {
         if let Some(value) = self { value.trace_value(tracer); }
+    }
+    fn promise_resolution_error(&self) -> Option<&'static str> {
+        self.as_ref().and_then(HeapValue::promise_resolution_error)
     }
 }
 
@@ -267,6 +272,9 @@ pub fn promises_finish() {
 }
 
 pub fn promise_resolved<T: HeapValue>(value: T) -> JsPromise<T> {
+    if let Some(message) = value.promise_resolution_error() {
+        return promise_rejected(caught_value(error_new("Error", string(message))));
+    }
     Gc::new(PromiseData {
         state: PromiseState::Fulfilled(Some(value)),
         handled: false,
@@ -632,7 +640,10 @@ where
 }
 
 pub fn promise_fulfill<T: HeapValue>(promise: &JsPromise<T>, value: T) -> bool {
-    if promise.with(|data| data.view.is_some()) { return false; }
+    if promise.with(|data| data.view.is_some() || !matches!(&data.state, PromiseState::Pending(_))) { return false; }
+    if let Some(message) = value.promise_resolution_error() {
+        return promise_reject(promise, caught_value(error_new("Error", string(message))));
+    }
     let reactions = promise.with_mut(|data| match &mut data.state {
         PromiseState::Pending(reactions) => Some(std::mem::take(reactions)),
         PromiseState::Fulfilled(_) | PromiseState::Rejected(_) => None,

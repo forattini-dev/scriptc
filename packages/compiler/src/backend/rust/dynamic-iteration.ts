@@ -21,6 +21,7 @@ export function emitRustDynamicIteration(
   context.line("match value {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("iteration"),`);
+  context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("iteration"),`);
   context.line(`${name}::Array(array) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::array_len(array) { runtime::array_get(array, index) } else { ${name}::Undefined }); },`);
   context.line(`${name}::String(text) => { let mut chars = text.chars(); for _ in 0..count { runtime::array_push(&output, chars.next().map_or(${name}::Undefined, |character| ${name}::String(runtime::string(&character.to_string())))); } },`);
   context.line(`${name}::Bytes(bytes) | ${name}::Buffer(bytes) => for index in 0..count { let index = index as f64; runtime::array_push(&output, if index < runtime::bytes_len(bytes) { ${name}::Number(runtime::bytes_get(bytes, index)) } else { ${name}::Undefined }); },`);

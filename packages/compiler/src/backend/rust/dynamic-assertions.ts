@@ -26,10 +26,12 @@ export function emitRustDynamicAssertions(
   context.line("match value {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("inspection"),`);
+  context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("inspection"),`);
   context.line(`${name}::Undefined => "undefined".to_owned(),`);
   context.line(`${name}::Null => "null".to_owned(),`);
   context.line(`${name}::Number(value) => runtime::display_number(*value),`);
   context.line(`${name}::BigInt(value) => runtime::display_bigint(value),`);
+  context.line(`${name}::Symbol(value) => runtime::symbol_to_string(value).to_string(),`);
   context.line(`${name}::Date(value) => runtime::date_value_inspect(value).to_string(),`);
   context.line(`${name}::Boolean(value) => value.to_string(),`);
   context.line(`${name}::String(value) => runtime::assert_inspect_string(value),`);

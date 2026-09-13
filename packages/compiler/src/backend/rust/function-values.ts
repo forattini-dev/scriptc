@@ -1,4 +1,5 @@
-import { recordNewName, recordPointerEquality } from "./shared-records.js";
+import { isSharedRecord, recordNewName, recordPointerEquality } from "./shared-records.js";
+import { rustCallReceiver } from "./call-receiver.js";
 import type { IrFamily } from "../../ir/ir.js";
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import { typeKey } from "../../ir/ir.js";
@@ -22,6 +23,10 @@ export interface RustFunctionValueContext {
   emitDynCheckValue(type: IrType, value: string, loc?: SrcLoc): string;
   emitDynFromValue(type: IrType, value: string, loc?: SrcLoc, functionName?: string): string;
   emitExpr(expr: IrExpr): string;
+  emitExprWithValues(expr: IrExpr, values: readonly (readonly [IrExpr, string])[]): string;
+  hasExplicitThis(): boolean;
+  containsAsyncSuspension(value: unknown): boolean;
+  dynTypeName(): string;
   errorClassRoots(): RustClassMeta[];
   errorValueName(): string;
   isEdgeValue(type: IrType): boolean;
@@ -116,9 +121,25 @@ export class RustFunctionValueEmitter {
     }
     const callee = this.context.nextName("sc_rt");
     const args = expr.args.map(() => this.context.nextName("sc_rt"));
+    const receiver = this.context.hasExplicitThis() ? rustCallReceiver(expr.callee) : null;
+    if (receiver !== null && this.context.containsAsyncSuspension(expr)) {
+      this.context.unsupported("method receiver across await in the Rust state-machine subset", expr.loc);
+    }
+    const receiverName = receiver === null ? "" : this.context.nextName("sc_receiver");
+    if (receiver?.type.kind === "record") {
+      const record = this.context.records.get(receiver.type.shapeId);
+      if (!isSharedRecord(record) && !(record?.fields.length === 0 && record.indexValue !== undefined)) {
+        this.context.unsupported("method receiver without native shared record storage", expr.loc);
+      }
+    }
     const bindings = [
-      `let ${callee} = ${this.context.emitExpr(expr.callee)};`,
+      ...(receiver === null ? [] : [`let ${receiverName} = ${this.context.emitExpr(receiver)};`]),
+      `let ${callee} = ${receiver === null ? this.context.emitExpr(expr.callee)
+        : this.context.emitExprWithValues(expr.callee, [[receiver, `${receiverName}.clone()`]])};`,
       ...expr.args.map((arg, index) => `let ${args[index]} = ${this.context.emitExpr(arg)};`),
+      ...(this.context.hasExplicitThis() ? [`let _this_guard = sc_dyn_this_push(${receiver === null
+        ? `${this.context.dynTypeName()}::Undefined`
+        : this.context.emitDynFromValue(receiver.type, receiverName, receiver.loc)});`] : []),
     ].join(" ");
     return `{ ${bindings} ${this.emitClosureDispatch(callee, expr.callee.type, args, expr.loc)} }`;
   }

@@ -5,6 +5,7 @@ import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 
 interface RustArrayNewLenContext {
   readonly records: ReadonlyMap<string, IrRecordShape>;
+  dynTypeName(): string;
   defaultValue(type: IrType, loc: SrcLoc): string;
   isEdgeValue(type: IrType): boolean;
   nextName(prefix: string): string;
@@ -24,7 +25,7 @@ export function emitRustArrayNewLen(
     const shape = context.records.get(elem.shapeId);
     if (shape === undefined) context.unsupported(`unknown record shape '${elem.shapeId}'`, expr.loc);
     if (isSharedRecord(shape)) {
-      absent = `${sharedRecordName(shape.id)} { object: runtime::map_new() }`;
+      absent = `${sharedRecordName(shape.id)} { object: ${shape.tuple ? "runtime::array_new(Vec::new())" : `${context.dynTypeName()}::Object(runtime::map_new())`} }`;
     } else if (shape.indexValue !== undefined && shape.fields.length === 0) {
       absent = "runtime::map_new()";
     } else {

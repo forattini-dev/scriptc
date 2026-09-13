@@ -7,6 +7,10 @@ export function emitRustDynamicLibCall(
 ): string | null {
   const arg = expr.args[0];
   const secondArg = expr.args[1];
+  if (expr.fn === "dyn.proxyNew" && expr.args.length === 2 && arg?.type.kind === "dyn" && secondArg?.type.kind === "dyn" && expr.type.kind === "dyn") {
+    const target = context.nextTemporary(), handler = context.nextTemporary();
+    return `{ let ${target} = ${context.emitExpr(arg)}; let ${handler} = ${context.emitExpr(secondArg)}; sc_dyn_proxy_new(${target}, ${handler}) }`;
+  }
   if (expr.fn === "json.stringifyReplacer" && expr.args.length === 3 && arg && secondArg && expr.args[2]) {
     const value = context.nextTemporary(), callback = context.nextTemporary(), indent = context.nextTemporary();
     return `{ let ${value} = ${context.emitExpr(arg)}; let ${callback} = ${context.emitExpr(secondArg)}; let ${indent} = ${context.emitExpr(expr.args[2])}; sc_dyn_json_stringify_replacer(${value}, ${callback}, &${indent}) }`;
@@ -159,6 +163,10 @@ export function emitRustDynamicLibCall(
   if (expr.fn === "dyn.toStringCoerce" && expr.args.length === 1 &&
     arg?.type.kind === "dyn" && expr.type.kind === "string") {
     return `sc_dyn_string_coerce_js(&(${context.emitExpr(arg)}))`;
+  }
+  if (expr.fn === "dyn.stringConstructor" && expr.args.length === 1 && arg?.type.kind === "dyn" && expr.type.kind === "string") {
+    const value = context.nextTemporary();
+    return `{ let ${value} = ${context.emitExpr(arg)}; match &${value} { ${context.dynTypeName()}::Symbol(sc_symbol) => runtime::symbol_to_string(sc_symbol), sc_value => sc_dyn_string_coerce_js(sc_value), } }`;
   }
   if (expr.fn === "fs.toUnixTimestamp" && expr.args.length === 1 &&
     arg?.type.kind === "dyn" && expr.type.kind === "f64") {

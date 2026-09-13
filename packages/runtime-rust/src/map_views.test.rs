@@ -6,6 +6,43 @@ fn map_view_number(value: f64) -> JsString {
 fn map_view_string(value: JsString) -> f64 { value.parse().expect("numeric test value") }
 
 #[test]
+fn proxy_restrictions_follow_map_aliases_and_nested_projections() {
+    MAP_VIEW_READS.with(|reads| reads.set(0));
+    let source = map_new::<JsString, f64>();
+    let alias = source.clone();
+    let view = map_mapped(source.clone(), map_view_number, map_view_string);
+    let nested = map_mapped(view.clone(), |value| value, |value| value);
+    let other = map_new::<JsString, f64>();
+    assert!(!map_is_proxy_restricted(&source));
+    assert!(!map_is_proxy_restricted(&nested));
+    map_mark_proxy_restricted(&nested);
+    assert!(map_is_proxy_restricted(&source));
+    assert!(map_is_proxy_restricted(&alias));
+    assert!(map_is_proxy_restricted(&view));
+    assert!(map_is_proxy_restricted(&nested));
+    assert!(!map_is_proxy_restricted(&other));
+    map_clear(&alias);
+    assert!(map_is_proxy_restricted(&source));
+    MAP_VIEW_READS.with(|reads| assert_eq!(reads.get(), 0));
+    drop((source, alias, view, nested, other));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
+fn proxy_restrictions_marked_later_are_visible_to_existing_views() {
+    let source = map_new::<JsString, f64>();
+    let view = map_mapped(source.clone(), map_view_number, map_view_string);
+    assert!(!map_is_proxy_restricted(&view));
+    map_mark_proxy_restricted(&source);
+    assert!(map_is_proxy_restricted(&view));
+    assert_eq!(map_identity(&source), map_identity(&view));
+    drop((source, view));
+    finish();
+    assert_eq!(live_heap_objects(), 0);
+}
+
+#[test]
 fn mapped_maps_keep_storage_and_convert_only_accessed_values() {
     MAP_VIEW_READS.with(|reads| reads.set(0));
     let source = map_new();

@@ -7,6 +7,8 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`fn sc_dyn_equal(left: &${name}, right: &${name}, deep: bool) -> bool {`);
   context.pushIndent();
   context.line("if let (Some(left), Some(right)) = (sc_dyn_function_identity(left), sc_dyn_function_identity(right)) { return left == right; }");
+  context.line(`if let (${name}::Proxy(left), ${name}::Proxy(right)) = (left, right) { if left.ptr_eq(right) { return true; } }`);
+  context.line(`if deep && (matches!(left, ${name}::Proxy(..)) || matches!(right, ${name}::Proxy(..))) { return sc_dyn_proxy_unsupported("deep equality"); }`);
   context.line(`if deep && matches!(left, ${name}::Effect(..)) || deep && matches!(right, ${name}::Effect(..)) { return sc_dyn_effect_reflection("deep equality"); }`);
   context.line("match (left, right) {");
   context.pushIndent();
@@ -16,6 +18,7 @@ export function emitRustDynamicEquality(context: RustDynamicContext, boxedShapes
   context.line(`(${name}::Effect(left), ${name}::Effect(right)) => left.ptr_eq(right),`);
   context.line(`(${name}::Date(left), ${name}::Date(right)) => left == right || (deep && { let a = runtime::date_value_time(left); let b = runtime::date_value_time(right); a == b || (runtime::target_runtime_id() != "bun" && a.is_nan() && b.is_nan()) }),`);
   context.line(`(${name}::BigInt(left), ${name}::BigInt(right)) => left == right,`);
+  context.line(`(${name}::Symbol(left), ${name}::Symbol(right)) => runtime::symbol_ptr_eq(left, right),`);
   context.line(`(${name}::String(left), ${name}::String(right)) => left.as_ref() == right.as_ref(),`);
   if (usesEmbeddedModules) context.line(`(${name}::Island(left), ${name}::Island(right)) => runtime::island_strict_equal(left, right),`);
   context.line(`(${name}::Regex(left), ${name}::Regex(right)) => std::rc::Rc::ptr_eq(left, right),`);

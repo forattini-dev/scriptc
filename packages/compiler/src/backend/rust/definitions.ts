@@ -2,6 +2,8 @@ import { rustJsStringRef } from "./string-literals.js";
 import { discriminatedJsonGuard } from "./discriminated-records.js";
 import { emitSharedTupleOperation } from "./shared-tuples.js";
 import { emitSharedIteration } from "./shared-iteration.js";
+import { emitSharedMembership } from "./shared-membership.js";
+import { emitSharedProxyRestriction } from "./shared-proxy-restriction.js";
 import { sharedWidthPair, structuralProjection } from "./shared-width.js";
 import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import { sharedDiscriminatedUnion, discriminatedUnionBox } from "./discriminated-records.js";
@@ -388,6 +390,11 @@ export class RustDefinitionEmitter {
       this.context.line("runtime::Trace::trace(self, tracer);");
       this.context.popIndent();
       this.context.line("}");
+      this.context.line("fn promise_resolution_error(&self) -> Option<&'static str> { match self {");
+      union.arms.forEach((arm, tag) => this.context.line(this.context.isUnit(arm)
+        ? `Self::${this.context.unionVariant(tag)} => None,`
+        : `Self::${this.context.unionVariant(tag)}(value) => runtime::HeapValue::promise_resolution_error(value),`));
+      this.context.line("} }");
       this.context.popIndent();
       this.context.line("}");
       this.context.line(`impl runtime::ArrayElement for ${name} {`);
@@ -986,7 +993,7 @@ export class RustDefinitionEmitter {
   }
 
   emitFunction(fn: IrFunction): void {
-    if (emitSharedIteration(this.context, fn) || emitSharedTupleOperation(this.context, fn)) return;
+    if (emitSharedIteration(this.context, fn) || emitSharedMembership(this.context, fn) || emitSharedProxyRestriction(this.context, fn) || emitSharedTupleOperation(this.context, fn)) return;
     const view = sharedWidthPair(fn, this.context.records, this.context.unions);
     if (view) {
       const boxed = this.context.emitDynFromValue(view.source, "sc_width_input", fn.loc);

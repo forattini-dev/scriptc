@@ -3,13 +3,17 @@ import type { RustDynamicContext } from "./dynamic-context.js";
 /** JSON visits original holders in order; only each callback result is wrapped.
  * This preserves identity, mutations and the runtime writer's cycle paths. */
 export function emitRustDynamicJsonReplacer(context: RustDynamicContext): void {
-  if (!context.usesDynamicInvoke()) return;
   const name = context.dynTypeName();
+  // The current JSON expression ABI returns String, so a Symbol root cannot
+  // be represented faithfully. Nested Symbols still use null/omission.
+  context.line(`fn sc_dyn_json_check_root(value: &${name}) { if matches!(value, ${name}::Symbol(..)) { runtime::throw_error("scriptc: JSON.stringify of a native Symbol root is not supported yet (requires an undefined result)".to_owned()); } }`);
+  if (!context.usesDynamicInvoke()) return;
   context.line(`struct ScJsonReplacement { value: ${name}, replacer: ${name} }`);
   context.line(`fn sc_dyn_json_replace(holder: &${name}, key: &runtime::JsString, replacer: &${name}) -> ScJsonReplacement {`);
   context.pushIndent();
   context.line("let mut value = sc_dyn_key_get(holder, key, false);");
   context.line(`if matches!(&value, ${name}::Effect(..)) { return sc_dyn_effect_reflection("JSON.stringify toJSON preparation"); }`);
+  context.line(`if matches!(&value, ${name}::Proxy(..)) { return sc_dyn_proxy_unsupported("JSON.stringify toJSON preparation"); }`);
   context.line(`if let ${name}::Date(date) = &value { value = if runtime::date_value_time(date).is_nan() { ${name}::Null } else { ${name}::String(runtime::date_value_inspect(date)) }; }`);
   context.line(`if matches!(&value, ${name}::Object(..)) {`);
   context.pushIndent();
@@ -45,6 +49,7 @@ export function emitRustDynamicJsonReplacer(context: RustDynamicContext): void {
   context.line('let key = runtime::empty_string();');
   context.line('runtime::map_set_by(&root, key.clone(), value, |left, right| left == right);');
   context.line(`let value = sc_dyn_json_replace(&${name}::Object(root), &key, &replacer);`);
+  context.line('sc_dyn_json_check_root(&value.value);');
   context.line('runtime::json_stringify_indented(&value, indent.as_ref())');
   context.popIndent();
   context.line('}');

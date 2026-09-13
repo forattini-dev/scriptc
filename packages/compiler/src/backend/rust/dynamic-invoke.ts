@@ -184,6 +184,8 @@ class RustDynamicInvokeEmitter {
     this.context.line(`${this.dyn}::Number(value) => value,`);
     this.context.line(`${this.dyn}::Boolean(value) => if value { 1.0 } else { 0.0 },`);
     this.context.line(`${this.dyn}::Effect(..) => sc_dyn_effect_reflection("numeric coercion of sort result"),`);
+    this.context.line(`${this.dyn}::Proxy(..) => sc_dyn_proxy_unsupported("numeric coercion of sort result"),`);
+    this.context.line(`${this.dyn}::Symbol(..) => runtime::throw_type_error("Cannot convert a Symbol value to a number".to_owned()),`);
     this.context.line("_ => 0.0,");
     this.close("};");
     this.context.line("return if value < 0.0 { std::cmp::Ordering::Less } else if value > 0.0 { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Equal };");
@@ -211,6 +213,7 @@ class RustDynamicInvokeEmitter {
 
     this.open(`fn sc_dyn_promise_adopt(target: &runtime::JsPromise<${this.dyn}>, value: ${this.dyn}) {`);
     this.open("match value {");
+    this.context.line(`${this.dyn}::Proxy(..) => sc_dyn_proxy_unsupported("Promise thenable assimilation"),`);
     this.context.line(`${this.dyn}::Promise(handle) => {`);
     this.context.pushIndent();
     this.context.line("if runtime::promise_handle_identity(&handle) == target.identity() { let reason = runtime::caught_value(runtime::error_new(\"TypeError\", runtime::string(\"Chaining cycle detected for promise #<Promise>\"))); let _ = runtime::promise_reject(target, reason); return; }");
@@ -249,6 +252,7 @@ class RustDynamicInvokeEmitter {
     // the outer reaction adopts that intermediate promise. Even scalar cleanup
     // runs this chain; directly settling target would skip observable jobs.
     this.open("let cleanup = match cleanup {");
+    this.context.line(`${this.dyn}::Proxy(..) => sc_dyn_proxy_unsupported("Promise thenable assimilation"),`);
     this.context.line(`${this.dyn}::Promise(handle) => runtime::promise_view_from_handle::<${this.dyn}>(&handle),`);
     this.context.line("value => runtime::promise_resolved(value),");
     this.close("};");
@@ -305,6 +309,7 @@ class RustDynamicInvokeEmitter {
     const callableTarget = `${this.dyn}::Object(..) | ${this.functionPatterns}`;
     this.open(`fn sc_dyn_define_properties(target: &${this.dyn}, descriptors: &${this.dyn}) -> ${this.dyn} {`);
     this.context.line(`if matches!(target, ${this.dyn}::Effect(..)) || matches!(descriptors, ${this.dyn}::Effect(..)) { return sc_dyn_effect_reflection("property definition"); }`);
+    this.context.line(`if matches!(target, ${this.dyn}::Proxy(..)) || matches!(descriptors, ${this.dyn}::Proxy(..)) { return sc_dyn_proxy_unsupported("property definition"); }`);
     this.context.line(`if !matches!(target, ${callableTarget}) { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); }`);
     this.context.line(`let ${this.dyn}::Object(descriptors) = descriptors else { runtime::throw_type_error("Object.defineProperties called on non-object".to_owned()); };`);
     this.context.line("let mut index = 0.0;");
@@ -313,9 +318,11 @@ class RustDynamicInvokeEmitter {
     this.context.line("let key = runtime::map_iter_key(descriptors, index);");
     this.context.line("let descriptor = runtime::map_iter_value(descriptors, index);");
     this.context.line(`if matches!(&descriptor, ${this.dyn}::Effect(..)) { return sc_dyn_effect_reflection("property descriptor access"); }`);
+    this.context.line(`if matches!(&descriptor, ${this.dyn}::Proxy(..)) { return sc_dyn_proxy_unsupported("property descriptor access"); }`);
     this.context.line(`let ${this.dyn}::Object(fields) = &descriptor else { runtime::throw_type_error(format!("Property description must be an object: {}", sc_dyn_to_string(&descriptor))); };`);
     this.context.line("if runtime::map_has_by(fields, &runtime::string(\"get\"), |left, right| left.as_ref() == right.as_ref()) || runtime::map_has_by(fields, &runtime::string(\"set\"), |left, right| left.as_ref() == right.as_ref()) { runtime::throw_error(\"accessor (get/set) property descriptors on a dynamic value are not supported yet\".to_owned()); }");
     this.context.line(`let value = runtime::map_get_by(fields, &runtime::string("value"), |left, right| left.as_ref() == right.as_ref()).unwrap_or(${this.dyn}::Undefined);`);
+    this.context.line(`if let ${this.dyn}::Object(object) = target { runtime::map_mark_proxy_restricted(object); }`);
     this.context.line("sc_dyn_key_set(target, key, value);");
     this.close("}");
     this.context.line("index += 1.0;");
@@ -369,6 +376,7 @@ class RustDynamicInvokeEmitter {
     this.open("match recv {");
     this.context.line(`${this.dyn}::Undefined | ${this.dyn}::Null => runtime::throw_type_error(format!("Cannot read properties of {} (reading '{method}')", sc_dyn_kind(recv))),`);
     this.context.line(`${this.dyn}::Effect(..) => sc_dyn_effect_reflection("method invocation"),`);
+    this.context.line(`${this.dyn}::Symbol(..) => runtime::throw_error("scriptc: checked-dynamic Symbol method invocation is not supported yet".to_owned()),`);
     if (this.context.hasEmbeddedModules()) this.context.line(`${this.dyn}::Island(value) => { let args = args.iter().map(sc_dyn_to_island).collect::<Vec<_>>(); sc_dyn_from_island(runtime::island_call_method(value, method, &args)) },`);
     this.emitObjectArm();
     this.emitFunctionArm();
@@ -400,8 +408,7 @@ class RustDynamicInvokeEmitter {
   }
 
   private emitObjectArm(): void {
-    this.open(`${this.dyn}::Object(object) => {`);
-    this.context.line("let _ = object;");
+    this.open(`${this.dyn}::Object(..) | ${this.dyn}::Proxy(..) => {`);
     this.context.line("let member = sc_dyn_key_get(recv, &runtime::string(method), false);");
     this.context.line("let _this_guard = sc_dyn_this_push(recv.clone());");
     this.context.line("sc_dyn_call(&member, args, callee_name)");

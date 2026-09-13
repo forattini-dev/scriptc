@@ -75,6 +75,7 @@ function emitMarshal(
     case "f64":
     case "bool":
     case "string":
+    case "symbol":
     case "func":
     case "array":
     case "bytes":
@@ -259,12 +260,12 @@ function emitOperation(
         `${dyn}::Island(sc_receiver) => { ` +
         `let ${islandKey} = ${emitIslandValue(`&${key}`, context)}; ` +
         `${dyn}::Island(runtime::island_get_index(sc_receiver, &${islandKey})) }, ` +
-        `_ => sc_dyn_key_get(&${receiver}, &sc_dyn_to_string(&${key}), false), } }`;
+        `_ => sc_dyn_get_key(&${receiver}, &${key}, &${receiver}), } }`;
     }
-    if (keyExpr.kind !== "jsMarshal" || !["f64", "string", "bool"].includes(keyExpr.value.type.kind)) {
+    if (keyExpr.kind !== "jsMarshal" || !["f64", "string", "bool", "symbol"].includes(keyExpr.value.type.kind)) {
       context.unsupported("island computed key outside the native primitive subset", expr.loc);
     }
-    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(keyExpr)}; sc_dyn_key_get(&${receiver}, &sc_dyn_to_string(&${key}), false) }`;
+    return `{ let ${receiver} = ${emitExpr(argOf(expr, 0, context))}; let ${key} = ${emitExpr(keyExpr)}; sc_dyn_get_key(&${receiver}, &${key}, &${receiver}) }`;
   }
   if (expr.op === "setProp" && expr.name !== undefined && expr.args.length === 2) {
     const receiver = context.nextName("sc_island_receiver");
@@ -311,7 +312,7 @@ function emitOperation(
         `let ${input} = ${emitIslandValue(`&${source}`, context)}; ` +
         `runtime::island_copy_data_properties(sc_target, &${input}); ${target} }`;
     }
-    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { let sc_value = if runtime::map_is_module_namespace(sc_source) { sc_dyn_object_key_get(sc_source, &sc_key, &${source}) } else { sc_value }; sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
+    return `{ let ${target} = ${emitExpr(argOf(expr, 0, context))}; let ${source} = ${emitExpr(argOf(expr, 1, context))}; if matches!(&${target}, ${dyn}::Proxy(..)) || matches!(&${source}, ${dyn}::Proxy(..)) { sc_dyn_proxy_unsupported::<()>("object spread"); } if let ${dyn}::Object(sc_source) = &${source} { for (sc_key, sc_value) in runtime::map_string_entries_js_order(sc_source) { let sc_value = if runtime::map_is_module_namespace(sc_source) { sc_dyn_object_key_get(sc_source, &sc_key, &${source}) } else { sc_value }; sc_dyn_key_set(&${target}, sc_key, sc_value); } } ${target} }`;
   }
   if (expr.op === "defineGetter" && expr.args.length === 3) {
     const target = context.nextName("sc_island_target");
@@ -432,7 +433,7 @@ function emitOperation(
     const value = context.nextName("sc_island_typeof");
     const dyn = context.dynTypeName();
     const island = context.hasEmbeddedModules() ? `${dyn}::Island(value) => runtime::island_value_typeof(value), ` : "";
-    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; match &${value} { ${island}value => runtime::string(match value { ${dyn}::Undefined => "undefined", ${dyn}::Boolean(..) => "boolean", ${dyn}::Number(..) => "number", ${dyn}::BigInt(..) => "bigint", ${dyn}::String(..) => "string", value if sc_dyn_kind(value) == "function" => "function", _ => "object" }) } }`;
+    return `{ let ${value} = ${emitExpr(argOf(expr, 0, context))}; match &${value} { ${island}value => runtime::string(match value { ${dyn}::Undefined => "undefined", ${dyn}::Boolean(..) => "boolean", ${dyn}::Number(..) => "number", ${dyn}::BigInt(..) => "bigint", ${dyn}::String(..) => "string", ${dyn}::Symbol(..) => "symbol", value if sc_dyn_kind(value) == "function" => "function", _ => "object" }) } }`;
   }
   if (expr.op === "callMethod" && expr.name !== undefined && expr.args.length > 0) {
     const receiver = context.nextName("sc_island_receiver");

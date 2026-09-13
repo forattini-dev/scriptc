@@ -1,3 +1,5 @@
+import { isRustFunctionReferenced } from "./function-references.js";
+import { rejectRustDeferredReceivers } from "./call-receiver.js";
 import { RustByteRegions } from "./byte-regions.js";
 import { RustLocalCells } from "./local-cells.js";
 import { RustIntegerLoops } from "./integer-loops.js";
@@ -102,6 +104,7 @@ class RustEmitter {
   private nextLoopTargetId = 0;
   private usesDyn = false;
   private usesDynamicInvoke = false;
+  private usesExplicitThis = false;
   private usesEventEmitter = false;
   private usesProcessExitListeners = false;
   private usesProcessRejectionEvents = false;
@@ -241,7 +244,7 @@ class RustEmitter {
   });
   private readonly asyncValueEmitter = new RustAsyncValueEmitter({
     emitDynFromValue: (type, value, loc) => this.emitDynFromValue(type, value, loc),
-    records: this.records,
+    records: this.records, dynTypeName: () => this.dynTypeName(),
     asyncFrameExtras: () => this.asyncFrameExtrasStack,
     line: (value) => this.line(value),
     pushIndent: () => { this.indent += 1; },
@@ -275,6 +278,7 @@ class RustEmitter {
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly expressionEmitter = new RustExpressionEmitter({
+    hasExplicitThis: () => this.usesExplicitThis,
     chainValues: this.chainValues,
     classMeta: this.classMeta,
     closureShapes: this.closureShapes,
@@ -398,6 +402,10 @@ class RustEmitter {
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   private readonly functionValueEmitter = new RustFunctionValueEmitter({
+    containsAsyncSuspension: (value) => this.containsAsyncSuspension(value),
+    hasExplicitThis: () => this.usesExplicitThis,
+    dynTypeName: () => this.dynTypeName(),
+    emitExprWithValues: (expr, values) => this.expressionEmitter.emitExprWithValues(expr, values),
     closureTargets: this.closureTargets,
     dynAdapterShapes: this.dynAdapterShapes,
     emitterSnapshotShapes: this.emitterSnapshotShapes,
@@ -504,6 +512,7 @@ class RustEmitter {
     unsupported: (kind, loc) => this.unsupported(kind, loc),
   });
   constructor(private readonly mod: IrModule) {
+    rejectRustDeferredReceivers(mod.functions, (kind, loc) => this.unsupported(kind, loc));
     for (const fn of mod.functions) this.functions.set(fn.name, fn);
     for (const cls of mod.classes ?? []) {
       if (!cls.runtime) {
@@ -526,7 +535,7 @@ class RustEmitter {
     this.usesDyn = [...this.globals.values()].some((global) => global.type.kind === "dyn" || global.type.kind === "jsval");
     buildRustClassGraph(this.classMeta, this.functions, (kind, loc) => this.unsupported(kind, loc));
     this.discoverClosures();
-    if (planSharedRecords(mod, this.records, this.unions)) this.usesDyn = true;
+    if (planSharedRecords(mod, this.records, this.unions, this.usesExplicitThis)) this.usesDyn = true;
     registerSharedRecordMethods(this.records, type => { this.registerDynAdapter(type); this.registerDynBoxedFunction(type); });
   }
   emit(): string {
@@ -565,7 +574,7 @@ class RustEmitter {
       // The frontend may intern this helper while probing process.env as a
       // receiver, even when every actual read becomes process.envGet. Its
       // indexed-record body is irrelevant unless a whole env value escapes.
-      if (fn.name.startsWith("%env.snapshot.") && !this.isFunctionReferenced(fn.name)) continue;
+      if (fn.name.startsWith("%env.snapshot.") && !isRustFunctionReferenced(this.mod, fn.name)) continue;
       if (!collectAll) {
         this.emitFunction(fn);
         this.line("");
@@ -684,9 +693,10 @@ class RustEmitter {
         if (node.fn.endsWith("UncaughtException")) this.usesProcessUncaughtListeners = true;
       }
       if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
-        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "json.stringifyReplacer" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
+        (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "dyn.proxyNew" || node.fn === "json.stringifyReplacer" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.stringConstructor" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }
+      if (node.kind === "libCall" && node.fn === "dyn.this") this.usesExplicitThis = true;
       const boxedInput = dynamicBoxedInputType(node);
       if (boxedInput !== undefined) {
         this.usesDyn = true;
@@ -829,27 +839,6 @@ class RustEmitter {
       if (param.kind === "func") this.registerDynBoxedFunction(param);
     }
     if (type.ret.kind === "func") this.registerDynAdapter(type.ret);
-  }
-
-  private isFunctionReferenced(name: string): boolean {
-    let found = false;
-    const visit = (value: unknown): void => {
-      if (found || value === null || typeof value !== "object") return;
-      if (Array.isArray(value)) {
-        for (const item of value) visit(item);
-        return;
-      }
-      const node = value as Record<string, unknown>;
-      if ((node.kind === "call" && node.callee === name) || (node.kind === "closure" && node.fnName === name)) {
-        found = true;
-        return;
-      }
-      for (const child of Object.values(node)) visit(child);
-    };
-    for (const fn of this.mod.functions) {
-      if (fn.name !== name) visit(fn.body);
-    }
-    return found;
   }
 
   private emitClosureDefinitions(): void { this.definitionEmitter.emitClosureDefinitions(); }

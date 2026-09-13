@@ -13,10 +13,12 @@ export function emitRustDynamicInspect(
   context.line("match value {");
   context.pushIndent();
   context.line(`${name}::Effect(..) => sc_dyn_effect_reflection("inspection"),`);
+  context.line(`${name}::Proxy(..) => sc_dyn_proxy_unsupported("inspection"),`);
   context.line(`${name}::Undefined => runtime::string("undefined"),`);
   context.line(`${name}::Null => runtime::string("null"),`);
   context.line(`${name}::Number(value) => runtime::inspect_number(*value),`);
   context.line(`${name}::BigInt(value) => runtime::string(&runtime::display_bigint(value)),`);
+  context.line(`${name}::Symbol(value) => runtime::symbol_to_string(value),`);
   context.line(`${name}::Date(value) => runtime::date_value_inspect(value),`);
   context.line(`${name}::Boolean(value) => runtime::string(&runtime::display_bool(*value)),`);
   context.line(`${name}::String(value) => runtime::inspect_string(value),`);

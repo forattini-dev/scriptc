@@ -11,7 +11,7 @@ export function emitRustQuerystringDynImpl(name: string, context: RustLineContex
   context.pushIndent();
   context.line("fn querystring_object_entries(&self) -> Option<Vec<(runtime::JsString, Self)>> {");
   context.pushIndent();
-  context.line("match self { Self::Effect(..) => sc_dyn_effect_reflection(\"querystring object entries\"), Self::Object(value) => Some(runtime::map_string_entries_js_order(value)), _ => None }");
+  context.line("match self { Self::Effect(..) => sc_dyn_effect_reflection(\"querystring object entries\"), Self::Proxy(..) => sc_dyn_proxy_unsupported(\"querystring object entries\"), Self::Object(value) => Some(runtime::map_string_entries_js_order(value)), _ => None }");
   context.popIndent();
   context.line("}");
   context.line("fn querystring_array_values(&self) -> Option<Vec<Self>> {");

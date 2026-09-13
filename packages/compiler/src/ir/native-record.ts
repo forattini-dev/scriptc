@@ -19,7 +19,7 @@ export function nativeRecordShapeSupported(
     const scalar = (type: IrType): boolean => type.kind === "union"
       ? unions.get(type.unionId)?.arms.every(scalar) ?? false
       : (type.kind === "bytes" && type.elem === "u8") ||
-        ["effect", "date", "bigint", "f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
+        ["effect", "date", "bigint", "symbol", "f64", "bool", "string", "nullT", "undefinedT", "dyn"].includes(type.kind);
     const optionalArray = (type: IrType): boolean => {
       const arms = type.kind === "union" ? unions.get(type.unionId)?.arms : undefined;
       return arms !== undefined && arms.filter(arm => arm.kind === "array").length === 1 &&
@@ -39,7 +39,7 @@ export function nativeRecordShapeSupported(
     const methodValue = (type: IrType): boolean => type.kind === "union"
       ? scalar(type) || optionalArray(type) || optionalRecord(type)
       : record(type) || nativeArrayViewSupported(type) ||
-        (type.kind === "bytes" && type.elem === "u8") || ["effect", "date", "bigint", "f64", "bool", "string", "dyn"].includes(type.kind);
+        (type.kind === "bytes" && type.elem === "u8") || ["effect", "date", "bigint", "symbol", "f64", "bool", "string", "dyn"].includes(type.kind);
     const method = (type: IrType): boolean => type.kind === "func" && type.rest !== true &&
       type.params.every(methodValue) && (type.ret.kind === "void" || methodValue(type.ret));
     return !shape.tuple && (shape.indexValue === undefined || shape.indexValue.kind === "dyn" ||

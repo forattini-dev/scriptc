@@ -5,13 +5,13 @@ import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerNativeTupleArrayView, lowerNativeTupleTail } from "./lower-native-tuple.js";
 import { jsArrayInferenceBinding } from "../js-array-field-types.js";
 import { dynamicBindingType } from "./dynamic-binding-type.js";
+import { nativeProxyBindingType } from "./lower-native-proxy.js";
 import { lowerOpenRecordDelete } from "./lower-open-record.js";
 import { lowerArrayClearAssignment } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
-/* Statement lowering: the statement dispatch (lowerStmt), variable
- * declarations including destructuring patterns, scoped blocks, control
- * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
- * finally-crossing fence), and blocked-binding poisoning. */
+/* Statement lowering: dispatch, variable declarations and destructuring,
+ * scoped blocks, if/while/for/for-of/do, switch, try/catch, jumps with the
+ * finally-crossing fence, and blocked-binding poisoning. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
@@ -283,7 +283,7 @@ export function provenanceElidedConstDecl(lowerer: Lowerer, decl: ts.VariableDec
       // createServer(h).listen(0, go)` with `go` reading `server`) is a
       // TDZ read until the initializing assign completes — JS exactly.
       if (idx < entry.index || entry.ctx === lowerer.ctx) return false;
-      const type = lowerer.irTypeOf(decl.name);
+      const type = nativeProxyBindingType(lowerer, decl) ?? lowerer.irTypeOf(decl.name);
       if (!TDZ_KINDS.has(type.kind) || isUnitType(type)) return false;
       const name = decl.name.text;
       const count = entry.ctx.localCounters.get(name) ?? 0;
@@ -3362,7 +3362,7 @@ export function lowerVarDecl(lowerer: Lowerer, decl: ts.VariableDeclaration, isL
         return arms.filter((arm) => arm.kind === "classval").length === 1 &&
           arms.every((arm) => arm.kind === "classval" || isUnitType(arm));
       })();
-    let type =
+    let type = nativeProxyBindingType(lowerer, decl, init) ??
       // An unannotated JS alias of esbuild's lazy class binding inherits
       // the runtime slot's `classval | undefined` type. The checker loses
       // the callback assignment and may report only unit residue here;

@@ -9,7 +9,7 @@ import { DYN, F64, STRING, BOOL, type IrType } from "./ir.js";
  * bind the source receiver as this, and propagate hook failures. */
 export type IrNumericCoercionFn =
   | "num.parseInt" | "num.parseFloat" | "num.fromString" | "num.isNaN"
-  | "dyn.toStringCoerce" | "dyn.toNumberCoerce" | "dyn.compare";
+  | "dyn.toStringCoerce" | "dyn.stringConstructor" | "dyn.toNumberCoerce" | "dyn.compare";
 
 export const NUMERIC_COERCION_SIGS: Record<IrNumericCoercionFn, { argTypes: IrType[]; result: IrType }> = {
   "num.parseInt": { argTypes: [STRING, F64], result: F64 },
@@ -17,6 +17,7 @@ export const NUMERIC_COERCION_SIGS: Record<IrNumericCoercionFn, { argTypes: IrTy
   "num.fromString": { argTypes: [STRING], result: F64 },
   "num.isNaN": { argTypes: [F64], result: BOOL },
   "dyn.toStringCoerce": { argTypes: [DYN], result: STRING },
+  "dyn.stringConstructor": { argTypes: [DYN], result: STRING },
   "dyn.toNumberCoerce": { argTypes: [DYN], result: F64 },
   // ToPrimitive(number) left then right; UTF-16 string order or numeric order.
   // -1/0/+1, with NaN for unordered values. Arguments evaluate before hooks.

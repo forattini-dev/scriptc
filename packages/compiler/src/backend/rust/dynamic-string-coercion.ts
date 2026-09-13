@@ -35,7 +35,7 @@ export function emitRustDynamicStringCoercion(
   context.line("_ => return None,");
   context.popIndent();
   context.line("};");
-  context.line(`match &result { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) => Some(result), _ => None, }`);
+  context.line(`match &result { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) | ${name}::Symbol(..) => Some(result), _ => None, }`);
   context.popIndent();
   context.line("}");
   context.line("std::thread_local! { static SC_DYN_ARRAY_STRING_STACK: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) }; }");
@@ -72,7 +72,7 @@ export function emitRustDynamicStringCoercion(
   context.pushIndent();
   context.line(`if let ${name}::Date(date) = value { return ${name}::Number(runtime::date_value_time(date)); }`);
   context.line(`if let ${name}::Array(array) = value { return ${name}::String(sc_dyn_array_string_coerce_js(array)); }`);
-  context.line(`let ${name}::Object(object) = value else { return match value { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) => value.clone(), _ => ${name}::String(sc_dyn_to_string(value)), }; };`);
+  context.line(`let ${name}::Object(object) = value else { return match value { ${name}::Undefined | ${name}::Null | ${name}::Number(..) | ${name}::BigInt(..) | ${name}::Boolean(..) | ${name}::String(..) | ${name}::Symbol(..) => value.clone(), _ => ${name}::String(sc_dyn_to_string(value)), }; };`);
   context.line(`for method_name in ["valueOf", "toString"] {`);
   context.pushIndent();
   context.line(`if let Some(method) = runtime::map_get_by(object, &runtime::string(method_name), |left, right| left.as_ref() == right.as_ref()) {`);

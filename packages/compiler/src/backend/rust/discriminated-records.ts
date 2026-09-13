@@ -22,7 +22,7 @@ export function discriminatedUnionBox(context: Context, union: IrUnionDef, value
   const name = context.unionName(union.id);
   const arms = union.arms.map((arm, tag) => {
     const variant = `${name}::${context.unionVariant(tag)}`;
-    return arm.kind === "record" ? `${variant}(payload) => ${dyn}::Object(payload.object.clone())`
+    return arm.kind === "record" ? `${variant}(payload) => payload.object.clone()`
       : `${variant} => ${dyn}::${arm.kind === "nullT" ? "Null" : "Undefined"}`;
   });
   return `match &(${value}) { ${arms.join(", ")} }`;
@@ -41,7 +41,7 @@ export function discriminatedUnionCheck(context: Context, union: IrUnionDef, val
     const condition = entry.values.map(item => `kind.as_ref() == "${context.rustString(item)}"`).join(" || ");
     return `if ${condition} { ${name}::${context.unionVariant(tag)}(${recordCheckName(entry.shapeId)}_at(value, ${path})) }`;
   });
-  const record = `value => { let object = match &value { ${dyn}::Object(object) => object, _ => sc_dyn_check_fail_at("object", &value, ${path}) }; let discriminator = runtime::map_get_by(object, &${rustJsString(discriminator.field, text => context.rustString(text))}, |a, b| a == b).unwrap_or(${dyn}::Undefined); let kind = match discriminator { ${dyn}::String(kind) => kind, value => sc_dyn_check_fail_at("string discriminant", &value, ${path}) }; ${branches.join(" else ")} else { sc_dyn_check_fail_at("known record discriminant", &value, ${path}) } }`;
+  const record = `value => { let object = match &value { ${dyn}::Object(object) => object, ${dyn}::Proxy(..) => sc_dyn_proxy_unsupported("discriminated record cast"), _ => sc_dyn_check_fail_at("object", &value, ${path}) }; let discriminator = runtime::map_get_by(object, &${rustJsString(discriminator.field, text => context.rustString(text))}, |a, b| a == b).unwrap_or(${dyn}::Undefined); let kind = match discriminator { ${dyn}::String(kind) => kind, value => sc_dyn_check_fail_at("string discriminant", &value, ${path}) }; ${branches.join(" else ")} else { sc_dyn_check_fail_at("known record discriminant", &value, ${path}) } }`;
   return `{ let value = ${value}; match value { ${[...units, record].join(", ")} } }`;
 }
 
@@ -53,7 +53,7 @@ export function discriminatedUnionTag(context: Context, union: IrUnionDef, tag: 
   const entry = discriminator?.cases.find(entry => entry.shapeId === arm.shapeId);
   if (!discriminator || !entry) throw new Error("missing record discriminator case");
   const condition = entry.values.map(item => `kind.as_ref() == "${context.rustString(item)}"`).join(" || ");
-  return `{ let value = ${discriminatedUnionBox(context, union, value)}; match value { ${dyn}::Object(object) => match runtime::map_get_by(&object, &${rustJsString(discriminator.field, text => context.rustString(text))}, |a, b| a == b) { Some(${dyn}::String(kind)) => ${condition}, _ => false }, _ => false } }`;
+  return `{ let value = ${discriminatedUnionBox(context, union, value)}; match value { ${dyn}::Object(object) => match runtime::map_get_by(&object, &${rustJsString(discriminator.field, text => context.rustString(text))}, |a, b| a == b) { Some(${dyn}::String(kind)) => ${condition}, _ => false }, ${dyn}::Proxy(..) => sc_dyn_proxy_unsupported("discriminated record test"), _ => false } }`;
 }
 
 /** JSON decoding must use literal domains before structural field checks. */

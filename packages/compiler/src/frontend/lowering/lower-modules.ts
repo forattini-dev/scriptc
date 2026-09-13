@@ -1,8 +1,8 @@
 import { inferredRegexBindingType } from "./lower-regex-captures.js";
-/* Module-graph lowering: splitting each source file into its parts, the
- * program-collection pass (signatures, classes, globals — reachability
- * seeds), npm/JSON import collection, per-file %init functions, %main, and
- * the module artifacts (globals, embedded npm tables) the IR module carries. */
+import { nativeProxyBindingType } from "./lower-native-proxy.js";
+/* Module-graph lowering: split source files; collect signatures, classes,
+ * globals, reachability seeds and npm/JSON imports; emit per-file %init,
+ * %main and IR module artifacts (globals and embedded npm tables). */
 import * as ts from "../ts7/adapter.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
 import type { Lowerer } from "./lowerer.js";
@@ -1726,7 +1726,7 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
               ts.isIdentifier(decl.name) && nameNode === decl.name && decl.initializer !== undefined
                 ? probeExactInstanceClassOf(lowerer, decl.initializer)
                 : null;
-            let type = storedDynValue
+            let type = storedDynValue || (nameNode === decl.name && nativeProxyBindingType(lowerer, decl) !== null)
               ? DYN
               : storedOptionalClassValue ??
                 (exactNewClass ? { kind: "object", className: exactNewClass.def.name } : null) ??

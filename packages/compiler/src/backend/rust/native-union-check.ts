@@ -10,13 +10,14 @@ function variants(type: IrType): readonly string[] | null {
     case "effect": return ["Effect"];
     case "date": return ["Date"];
     case "bigint": return ["BigInt"];
+    case "symbol": return ["Symbol"];
     case "f64": return ["Number"];
     case "bool": return ["Boolean"];
     case "string": return ["String"];
     case "undefinedT": return ["Undefined"];
     case "nullT": return ["Null"];
     case "array": return ["Array"];
-    case "record": return ["Object"];
+    case "record": return ["Object", "Proxy"];
     case "func": return ["function"];
     case "bytes": return type.elem === "u8" ? ["Bytes", "Buffer"] : null;
     case "object": return RUNTIME_ERROR_CLASSES.has(type.className) ? ["Object"] : null;

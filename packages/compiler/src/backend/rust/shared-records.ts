@@ -6,6 +6,8 @@ import { mangleField, mangleRecordStruct } from "../mangle.js";
 import type { RustDefinitionContext } from "./definitions.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { nativeRecordShapeSupported } from "../../ir/native-record.js";
+import { rustCallReceiver } from "./call-receiver.js";
+import type { IrExpr } from "../../ir/ir.js";
 
 const sharedStorage = Symbol("Rust shared record storage");
 type SharedShape = IrRecordShape & { [sharedStorage]?: true };
@@ -20,8 +22,8 @@ export function recordCheckName(id: string): string { return `sc_check_${mangleR
 
 /** Storage planning is local to one Rust emission. Clone metadata rather
  * than changing the shared IR or the explicit C/LLVM backends. Static-only
- * shapes retain their typed structs; boundary shapes share one dynamic map. */
-export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordShape>, unions: ReadonlyMap<string, IrUnionDef>): boolean {
+ * shapes retain their typed structs; boundary shapes retain an Object or Proxy. */
+export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordShape>, unions: ReadonlyMap<string, IrUnionDef>, explicitThis = false): boolean {
   let selected = false;
   const visited = new Set<string>();
   const wrappersByRecord = new Map<string, Set<string>>();
@@ -50,6 +52,10 @@ export function planSharedRecords(mod: IrModule, records: Map<string, IrRecordSh
     if (Array.isArray(value)) { value.forEach(visit); return; }
     if (value === null || typeof value !== "object") return;
     const node = value as { kind?: string; fn?: string; args?: { type: IrType }[]; value?: { type: IrType }; type?: IrType };
+    if (explicitThis && node.kind === "callValue") {
+      const receiver = rustCallReceiver((value as Extract<IrExpr, { kind: "callValue" }>).callee);
+      if (receiver) mark(receiver.type);
+    }
     const iterable = node.kind === "libCall" && node.fn === "fetch.streamFrom" ? node.args?.[0]?.type : undefined;
     if (iterable?.kind === "array") mark(iterable.elem);
     if ((node.kind === "dynFrom" || node.kind === "jsMarshal") && node.value) mark(node.value.type);
@@ -94,23 +100,32 @@ export function emitSharedRecordDefinition(context: RustDefinitionContext, shape
   if (shape.tuple) { emitSharedTupleDefinition(context, shape); return; }
   const name = sharedRecordName(shape.id);
   const dyn = context.dynTypeName();
-  context.line(`#[derive(Clone)] struct ${name} { object: runtime::JsMap<runtime::JsString, ${dyn}> }`);
-  context.line(`impl PartialEq for ${name} { fn eq(&self, other: &Self) -> bool { runtime::map_ptr_eq(&self.object, &other.object) } }`);
+  context.line(`#[derive(Clone)] struct ${name} { object: ${dyn} }`);
+  context.line(`impl PartialEq for ${name} { fn eq(&self, other: &Self) -> bool { self.ptr_eq(other) } }`);
   context.line(`impl ${name} {`);
-  context.line("fn identity(&self) -> usize { runtime::map_identity(&self.object) }");
-  context.line("fn ptr_eq(&self, other: &Self) -> bool { runtime::map_ptr_eq(&self.object, &other.object) }");
+  context.line(`fn identity(&self) -> usize { match &self.object { ${dyn}::Object(object) => runtime::map_identity(object), ${dyn}::Proxy(proxy) => proxy.identity(), _ => unreachable!("scriptc: invalid shared record storage") } }`);
+  context.line(`fn ptr_eq(&self, other: &Self) -> bool { match (&self.object, &other.object) { (${dyn}::Object(left), ${dyn}::Object(right)) => runtime::map_ptr_eq(left, right), (${dyn}::Proxy(left), ${dyn}::Proxy(right)) => left.ptr_eq(right), _ => false } }`);
+  // Keep ordinary reads on the existing map path. A Proxy read invokes Get
+  // once, with the retained proxy itself as receiver, and validates afterward.
+  context.line(`fn get_key(&self, key: &runtime::JsString) -> Option<${dyn}> { match &self.object { ${dyn}::Object(object) => runtime::map_get_by(object, key, |a, b| a == b), ${dyn}::Proxy(..) => Some(sc_dyn_get(&self.object, key, &self.object)), _ => unreachable!("scriptc: invalid shared record storage") } }`);
+  // Reflection and mutation need additional Proxy internal methods. Refuse
+  // explicitly until those contracts exist instead of observing an empty map.
+  context.line(`fn own_object(&self, operation: &str) -> &runtime::JsMap<runtime::JsString, ${dyn}> { match &self.object { ${dyn}::Object(object) => object, ${dyn}::Proxy(..) => sc_dyn_proxy_unsupported(operation), _ => unreachable!("scriptc: invalid shared record storage") } }`);
+  context.line(`fn set_key(&self, key: runtime::JsString, value: ${dyn}) { runtime::map_set_by(self.own_object("Set"), key, value, |a, b| a == b); }`);
+  context.line('fn own_keys(&self) -> runtime::JsArray<runtime::JsString> { runtime::map_string_keys_js_order(self.own_object("ownKeys")) }');
+  context.line(`fn shallow_copy(&self) -> Self { let source = self.own_object("CopyDataProperties"); let object = runtime::map_new(); let mut index = 0.0; while index < runtime::map_iter_count(source) { if runtime::map_iter_live(source, index) { runtime::map_set_by(&object, runtime::map_iter_key(source, index), runtime::map_iter_value(source, index), |a, b| a == b); } index += 1.0; } Self { object: ${dyn}::Object(object) } }`);
   for (const field of shape.fields) {
     const key = `${rustJsString(field.name, text => context.rustString(text))}`;
-    const get = `runtime::map_get_by(&self.object, &${key}, |a, b| a == b).unwrap_or(${dyn}::Undefined)`;
+    const get = `self.get_key(&${key}).unwrap_or(${dyn}::Undefined)`;
     // Build diagnostic paths only during boundary validation, not ordinary reads.
     context.line(`fn get_${mangleField(field.name)}(&self) -> ${context.rustType(field.type)} { ${context.emitDynCheckValue(field.type, get)} }`);
     context.line(`fn get_${mangleField(field.name)}_at(&self, path: &str) -> ${context.rustType(field.type)} { ${context.emitDynCheckValue(field.type, get, undefined, `&runtime::json_property_path(path, "${context.rustString(field.name)}")`)} }`);
-    context.line(`fn set_${mangleField(field.name)}(&self, value: ${context.rustType(field.type)}) { runtime::map_set_by(&self.object, ${key}, ${context.emitDynFromValue(field.type, "value")}, |a, b| a == b); }`);
+    context.line(`fn set_${mangleField(field.name)}(&self, value: ${context.rustType(field.type)}) { self.set_key(${key}, ${context.emitDynFromValue(field.type, "value")}); }`);
   }
   context.line("}");
-  context.line(`impl runtime::Trace for ${name} { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
-  context.line(`impl runtime::HeapValue for ${name} { fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
-  context.line(`impl runtime::ArrayElement for ${name} { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
+  context.line(`impl runtime::Trace for ${name} { fn trace(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(&self.object, tracer); } }`);
+  context.line(`impl runtime::HeapValue for ${name} { fn trace_value(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(&self.object, tracer); } fn promise_resolution_error(&self) -> Option<&'static str> { runtime::HeapValue::promise_resolution_error(&self.object) } }`);
+  context.line(`impl runtime::ArrayElement for ${name} { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { runtime::Trace::trace(&self.object, tracer); } }`);
   context.line(`impl runtime::JsonValue for ${name} { fn write_json(&self, writer: &mut runtime::JsonWriter) { runtime::JsonValue::write_json(&self.object, writer); } }`);
   context.line(`impl runtime::JsonDecode for ${name} { fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {`);
   if (shape.fields.some(field => !context.isRustJsonCompatible(field.type))) {
@@ -128,12 +143,14 @@ export function emitSharedRecordDefinition(context: RustDefinitionContext, shape
         ? `if let Some(value) = runtime::json_object_field(fields, ${key}) { let _ = ${decode}; }`
         : `{ let value = runtime::json_required_field(fields, ${key}, path)?; let _ = ${decode}; }`);
     }
-    context.line("Ok(Self { object: runtime::JsonDecode::decode_json(node, path)? }) }");
+    context.line(`Ok(Self { object: ${dyn}::Object(runtime::JsonDecode::decode_json(node, path)?) }) }`);
   }
   context.line("}");
   context.line(`fn ${recordCheckName(shape.id)}(value: ${dyn}) -> ${name} { ${recordCheckName(shape.id)}_at(value, "$") }`);
   context.line(`fn ${recordCheckName(shape.id)}_at(value: ${dyn}, path: &str) -> ${name} {`);
-  context.line(`let object = match value { ${dyn}::Object(object) => object, value => sc_dyn_check_fail_at("object", &value, path) };`);
+  // A typed Proxy cast is a lazy view: do not read fields, enumerate keys or
+  // populate the handler's caches merely to validate the asserted shape.
+  context.line(`let object = match value { object @ ${dyn}::Proxy(..) => return ${name} { object }, object @ ${dyn}::Object(..) => object, value => sc_dyn_check_fail_at("object", &value, path) };`);
   context.line(`let record = ${name} { object };`);
   for (const field of shape.fields) context.line(`let _ = record.get_${mangleField(field.name)}_at(path);`);
   context.line("record }");
@@ -151,7 +168,7 @@ export function emitSharedRecordDefinition(context: RustDefinitionContext, shape
   if (shape.indexValue) {
     context.line(`if let Some(overflow) = value.${RUST_RECORD_OVERFLOW} { let mut index = 0.0; while index < runtime::map_iter_count(&overflow) { if runtime::map_iter_live(&overflow, index) { runtime::map_set_by(&object, runtime::map_iter_key(&overflow, index), runtime::map_iter_value(&overflow, index), |a, b| a == b); } index += 1.0; } }`);
   }
-  context.line(`${name} { object } }`);
+  context.line(`${name} { object: ${dyn}::Object(object) } }`);
 }
 
 /** Pure dictionaries keep JsMap storage; declared records use their wrapper. */

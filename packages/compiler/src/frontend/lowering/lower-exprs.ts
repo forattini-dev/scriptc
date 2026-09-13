@@ -1,11 +1,14 @@
+import { lowerRuntimeKeyIn, lowerTypedRecordIn } from "./lower-record-membership.js";
 import { lowerNativeDateRegexInstanceof } from "./lower-date-instanceof.js";
+import { lowerNativeProxyNew } from "./lower-native-proxy.js";
 import { lowerExplicitThis } from "./lower-explicit-this.js";
 import { lowerBigIntExpression } from "./lower-bigint.js";
 import { lowerNumericLiteral } from "./lower-numeric-literal.js";
 import { moduleFileName, importMetaProperty } from "./import-meta.js";
 import { lowerNativeRelational, relationalOperator } from "./lower-relational.js";
 import { dynamicBindingType } from "./dynamic-binding-type.js";
-import { lowerDynamicKeyRead } from "./lower-dynamic-key-read.js";
+import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-key-read.js";
+import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { hasOptionalIndexContext } from "./lower-contextual-index.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver } from "./lower-regex-captures.js";
@@ -52,7 +55,7 @@ import { mixinFnOfCallee } from "./lower-mixins.js"; import { familyFnNodeOf, lo
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../type-mapper.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
-import { boolLit, countedFor, numLit, strLit, varRef } from "../../ir/build.js";
+import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
 import { type FieldTarget, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
@@ -944,7 +947,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       if (operand.type.kind === "dyn") {
         // Bare typeof on a dyn value: the runtime's kind→string table
         // (null answers "object", boxed closures "function" — JS-exact
-        // for every dyn kind; "symbol" has no native producer).
+        // for every native dyn kind, including symbols).
         return { kind: "libCall", fn: "dyn.typeof", args: [operand], type: STRING, loc };
       }
       lowerer.unsupported("SC1090", expr, "typeof expressions on statically-typed values");
@@ -1469,7 +1472,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
           return trapUseThrowExpr(lowerer, tm, expr, lowerer.mapTypeOf(lowerer.typeOf(expr)), loc);
         }
       }
-      return lowerer.lowerNew(expr);
+      return lowerNativeProxyNew(lowerer, expr) ?? lowerer.lowerNew(expr);
     }
     if (ts.isAwaitExpression(expr)) {
       if (!lowerer.ctx.isAsync) {
@@ -2615,7 +2618,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
       const narrowed = narrowedTs.flags & ts.TypeFlags.Never ? null : lowerer.mapTypeOf(narrowedTs);
       if (
         narrowed &&
-        (narrowed.kind === "date" || narrowed.kind === "bigint" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
+        (narrowed.kind === "date" || narrowed.kind === "bigint" || narrowed.kind === "symbol" || narrowed.kind === "f64" || narrowed.kind === "bool" || narrowed.kind === "string")
       ) {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
@@ -3336,18 +3339,8 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
         return lowerer.maybeNarrow({ kind: "dynKeyGet", key, optional: true, value: receiver, type: DYN, loc }, expr);
       }
       if (dotNode === expr && ts.isElementAccessExpression(expr)) {
-        const key = lowerer.lowerExpr(expr.argumentExpression);
-        if (key.type.kind === "string") {
-          return lowerer.maybeNarrow({ kind: "dynKeyGet", key, optional: true, value: receiver, type: DYN, loc }, expr);
-        }
-        // NUMBER-typed indices (`entries?.[0]`): the property key is
-        // ToString(i), exactly JS — the canonical number text answers
-        // array indices in the dyn helper, anything else (fractions,
-        // negatives, NaN) reads as an absent key.
-        if (key.type.kind === "f64") {
-          const skey: IrExpr = { kind: "toString", operand: key, type: STRING, loc: key.loc };
-          return lowerer.maybeNarrow({ kind: "dynKeyGet", key: skey, optional: true, value: receiver, type: DYN, loc }, expr);
-        }
+        const read = lowerDynamicKeyRead(lowerer, expr, receiver, true);
+        if (read) return read;
       }
       // The METHOD-call step (`rawName?.match(re)` on a dyn value): a
       // nullish receiver short-circuits to the undefined dyn singleton
@@ -6690,6 +6683,8 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
     if (lowerer.mapTypeOf(lowerer.typeOf(expr.argumentExpression))?.kind === "symbol") {
       const target = symbolFieldTarget(lowerer, expr);
       if (target) return lowerer.maybeNarrow(lowerer.fieldGetExpr(target, locOf(expr), expr), expr);
+      const native = lowerNativeSymbolKeyRead(lowerer, expr, chainGuardedByQuestionDot(expr.expression));
+      if (native) return native;
       lowerer.unsupported(
         "SC1090",
         expr,
@@ -7944,7 +7939,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       return { kind: "jsExit", value: inner, type: target, loc: locOf(expr) };
     }
     const targetTs = lowerer.checker.getTypeFromTypeNode(expr.type);
-    const target = lowerer.mapTypeOf(targetTs);
+    const target = lowerer.mapTypeOf(targetTs) ?? resolvedReturnAssertion(lowerer, expr, targetTs);
     if (!target) lowerer.badType(expr.type, targetTs);
     if (target.kind === "dyn") return inner; // `as unknown`: erasure
     if (target.kind === "void" || !lowerer.jsonSafe(target)) {
@@ -7963,7 +7958,7 @@ export function lowerTemplate(lowerer: Lowerer, expr: ts.TemplateExpression): Ir
       }
       // Uint8Array targets: the checked-dynamic tree carries a bytes kind now (converted
       // stdin chunks) — the extraction validates the kind and copies out.
-      if (target.kind === "date" || target.kind === "bigint" || (target.kind === "bytes" && target.elem === "u8")) {
+      if (target.kind === "date" || target.kind === "bigint" || target.kind === "symbol" || (target.kind === "bytes" && target.elem === "u8")) {
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // ADAPTABLE function targets (`u as (x: number) => number` — the
@@ -8613,7 +8608,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
         const scalarSide = dynSide === left ? right : left;
         if (
           dynSide.type.kind === "dyn" &&
-          (scalarSide.type.kind === "effect" || scalarSide.type.kind === "date" || scalarSide.type.kind === "bigint" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
+          (scalarSide.type.kind === "effect" || scalarSide.type.kind === "date" || scalarSide.type.kind === "bigint" || scalarSide.type.kind === "symbol" || scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
             // dyn vs dyn (`context.actual !== context.exact` —
             // test/common's exit accounting): the runtime's whole-dyn
             // strict equality — scalars by value, units by kind,
@@ -9284,7 +9279,7 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           "'typeof' tests on 'unknown' values against non-literal strings",
         );
       }
-      if (b.text === "bigint" || b.text === "string" || b.text === "number" || b.text === "boolean" || b.text === "undefined") {
+      if (b.text === "symbol" || b.text === "bigint" || b.text === "string" || b.text === "number" || b.text === "boolean" || b.text === "undefined") {
         return {
           kind: "dynTest",
           test: b.text,
@@ -9320,10 +9315,6 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
           type: BOOL,
           loc,
         };
-      }
-      // Symbol remains outside the native checked-dynamic value domain.
-      if (b.text === "symbol") {
-        return { kind: "boolLit", value: negated, type: BOOL, loc };
       }
       lowerer.unsupported(
         "SC1090",
@@ -10066,6 +10057,8 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       return { kind: "unionIsTag", unionId: envType.unionId, tag: undefTag, negated: true, value: read, type: BOOL, loc };
     }
     const recv = lowerer.lowerExpr(expr.right);
+    const membership = lowerTypedRecordIn(lowerer, recv, { kind: "strLit", value: key, type: STRING, loc }, loc);
+    if (membership) return membership;
     // Error-rooted receivers (builtin or user subclass — the isErrnoException
     // predicate's `err instanceof Error && "code" in err` shape): `code`
     // answers from the runtime error's code slot (stamped by fs/system/
@@ -10227,90 +10220,6 @@ export function lowerBinary(lowerer: Lowerer, expr: ts.BinaryExpression): IrExpr
       return { kind: "boolLit", value: false, type: BOOL, loc };
     }
     lowerer.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
-  }
-
-/** The runtime-key `in` (see lowerInExpression): `k in r` where k is a
-   * runtime string and r an index-signature record — an interned
-   * `%rec.haskey.<n>(k, r)` walks the declared names (a string-equality
-   * chain: non-optional fields and accessor slots answer true, optional
-   * slots answer their per-value tag test) and then the overflow map's
-   * live keys. Null when the pair is outside that shape (the caller keeps
-   * its fence). */
-  function lowerRuntimeKeyIn(lowerer: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
-    if (lowerer.mapTypeOf(lowerer.typeOf(expr.left))?.kind !== "string") return null;
-    const recvT = lowerer.mapTypeOf(lowerer.typeOf(expr.right));
-    if (recvT?.kind !== "record") return null;
-    const shape = lowerer.shapes.get(recvT.shapeId);
-    if (!shape?.indexValue || shape.tuple) return null;
-    const keyIr = lowerer.lowerExprExpecting(expr.left, STRING);
-    const recv = lowerer.lowerExprExpecting(expr.right, recvT);
-    const hkey = `haskey:${recvT.shapeId}`;
-    let helper = lowerer.widthHelpers.get(hkey);
-    if (!helper) {
-      helper = `%rec.haskey.${lowerer.widthHelpers.size}`;
-      lowerer.widthHelpers.set(hkey, helper);
-      const recT: IrType = { kind: "record", shapeId: recvT.shapeId };
-
-      const k = varRef("k.0", STRING, loc);
-      const r = varRef("r.0", recT, loc);
-      const body: IrStmt[] = [];
-      const ret = (value: IrExpr): IrStmt => ({ kind: "return", value, loc });
-      for (const f of shape.fields) {
-        const accessor = f.name.startsWith("%get:") || f.name.startsWith("%set:");
-        if (f.name.startsWith("%") && !accessor) continue;
-        const name = accessor ? f.name.slice(5) : f.name;
-        const eq: IrExpr = { kind: "strEq", negated: false, left: k, right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc };
-        const utag = !accessor && f.type.kind === "union" ? lowerer.armTag(f.type.unionId, UNDEFINED_T) : -1;
-        const answer: IrExpr =
-          utag >= 0 && f.type.kind === "union"
-            ? {
-                kind: "unionIsTag",
-                unionId: f.type.unionId,
-                tag: utag,
-                negated: true,
-                value: { kind: "recordGet", obj: r, shapeId: recvT.shapeId, field: f.name, type: f.type, loc },
-                type: BOOL,
-                loc,
-              }
-            : { kind: "boolLit", value: true, type: BOOL, loc };
-        body.push({ kind: "if", cond: eq, then: [ret(answer)], else_: null, loc });
-      }
-      const ksT = arrayOf(STRING);
-      body.push(
-        { kind: "varDecl", localId: "ks.0", init: { kind: "recordOvfKeys", obj: r, shapeId: recvT.shapeId, type: ksT, loc }, loc },
-        countedFor(
-          loc,
-          { kind: "arrIntrinsic", method: "length", receiver: varRef("ks.0", ksT, loc), args: [], type: F64, loc },
-          () => [
-            {
-              kind: "if",
-              cond: { kind: "strEq", negated: false, left: k, right: { kind: "arrayGet", arr: varRef("ks.0", ksT, loc), index: varRef("i.0", F64, loc), type: STRING, loc }, type: BOOL, loc },
-              then: [ret({ kind: "boolLit", value: true, type: BOOL, loc })],
-              else_: null,
-              loc,
-            },
-          ],
-        ),
-        ret({ kind: "boolLit", value: false, type: BOOL, loc }),
-      );
-      lowerer.liftedFns.push({
-        name: helper,
-        params: [
-          { localId: "k.0", name: "k", type: STRING },
-          { localId: "r.0", name: "r", type: recT },
-        ],
-        returnType: BOOL,
-        locals: [
-          { id: "k.0", name: "k", type: STRING, mutable: true },
-          { id: "r.0", name: "r", type: recT, mutable: true },
-          { id: "ks.0", name: "ks", type: ksT, mutable: false },
-          { id: "i.0", name: "i", type: F64, mutable: true },
-        ],
-        body,
-        loc,
-      });
-    }
-    return { kind: "call", callee: helper, args: [keyIr, recv], type: BOOL, loc };
   }
 
 /** A regex literal `/ab+c/gi` → regexLit (interned per (pattern, flags)

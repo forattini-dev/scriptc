@@ -7,6 +7,7 @@ import type { IrFamily } from "../../ir/ir.js";
 import type { IrClassDef, IrExpr, IrFfiImport, IrFunction, IrLibCallback, IrRecordShape, IrStmt, IrType, IrUnionDef, SrcLoc } from "../../ir/ir.js";
 import type { IrFuncType, RustClassMeta, RustClosureShape, RustVtSlot } from "./model.js";
 export interface RustExpressionContext {
+  hasExplicitThis(): boolean;
   readonly byteRegions: RustByteRegions;
   readonly integerLoops: RustIntegerLoops;
   readonly chainValues: Map<string, string>;

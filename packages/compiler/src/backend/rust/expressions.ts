@@ -1,4 +1,5 @@
 import { borrowedRustBytesLocal } from "./bytes-borrow.js";
+import { emitRustDynamicKeyRead } from "./dynamic-key-read.js";
 import { rustJsString } from "./string-literals.js";
 import { regexCaptureLayout } from "../../ir/regex-captures.js";
 import { sharedDiscriminatedUnion, discriminatedUnionBox, discriminatedUnionCheck, discriminatedUnionTag } from "./discriminated-records.js";
@@ -25,6 +26,7 @@ import { emitRustArrayNewLen } from "./array-new-len.js";
 import { emitRustFfiCall } from "./ffi.js";
 import { emitEffectCauseDynamic } from "./effect-dynamic.js";
 import type { RustExpressionContext } from "./expression-context.js";
+import { emitRustDirectCall } from "./call-receiver.js";
 export type { RustExpressionContext } from "./expression-context.js";
 
 export class RustExpressionEmitter {
@@ -227,6 +229,13 @@ export class RustExpressionEmitter {
           this.context.unsupported(`JSON.stringify value '${expr.value.type.kind}'`, expr.loc);
         }
         const indent = (expr as typeof expr & { indent?: string }).indent;
+        if (expr.value.type.kind === "dyn") {
+          const root = this.context.nextName("sc_json_root");
+          const serialized = indent
+            ? `runtime::json_stringify_indented(&${root}, "${this.context.rustString(indent)}")`
+            : `runtime::json_stringify(&${root})`;
+          return `{ let ${root} = ${value}; sc_dyn_json_check_root(&${root}); ${serialized} }`;
+        }
         return indent
           ? `runtime::json_stringify_indented(&(${value}), "${this.context.rustString(indent)}")`
           : `runtime::json_stringify(&(${value}))`;
@@ -260,8 +269,10 @@ export class RustExpressionEmitter {
       case "dynCall":
         return emitRustDynamicCall(expr, {
           hasEmbeddedModules: () => this.context.hasEmbeddedModules(),
+          hasExplicitThis: () => this.context.hasExplicitThis(),
           dynTypeName: () => this.context.dynTypeName(),
           emitExpr: (value) => this.emitExpr(value),
+          emitExprWithValues: (value, values) => this.emitExprWithValues(value, values),
           nextName: (prefix) => this.context.nextName(prefix),
           rustString: (value) => this.context.rustString(value),
         });
@@ -290,6 +301,7 @@ export class RustExpressionEmitter {
           case "number": test = `matches!(&${value}, ${name}::Number(..))`; break;
           case "date": test = `matches!(&${value}, ${name}::Date(..))`; break;
           case "bigint": test = `matches!(&${value}, ${name}::BigInt(..))`; break;
+          case "symbol": test = `matches!(&${value}, ${name}::Symbol(..))`; break;
           case "integer": test = `matches!(&${value}, ${name}::Number(number) if runtime::number_is_integer(*number))`; break;
           case "boolean": test = `matches!(&${value}, ${name}::Boolean(..))`; break;
           case "string": test = `matches!(&${value}, ${name}::String(..))`; break;
@@ -297,7 +309,7 @@ export class RustExpressionEmitter {
           case "null": test = `matches!(&${value}, ${name}::Null)`; break;
           case "nullish": test = `matches!(&${value}, ${name}::Undefined | ${name}::Null)`; break;
           case "function": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "function") || matches!(&${value}, ${name}::NativeConstructor(..)${functions.length === 0 ? "" : ` | ${functions.join(" | ")}`}))`; break;
-          case "object": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "object") || matches!(&${value}, ${name}::Null | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)))`; break;
+          case "object": test = `(matches!(&${value}, ${name}::Effect(handle) if runtime::effect_reference_typeof(handle) == "object") || matches!(&${value}, ${name}::Null | ${name}::Date(..) | ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..) | ${name}::Array(..) | ${name}::Object(..) | ${name}::Proxy(..) | ${name}::Url(..) | ${name}::Promise(..) | ${name}::NetServer(..) | ${name}::NetSocket(..) | ${name}::AbortController(..) | ${name}::AbortSignal(..) | ${name}::HttpRequest(..) | ${name}::HttpHeaders(..) | ${name}::HttpResponse(..) | ${name}::HttpAgent(..)))`; break;
           case "array": test = `matches!(&${value}, ${name}::Array(..))`; break;
           case "error": test = `match &${value} { ${name}::Object(object) => runtime::map_has_by(object, &runtime::string("%error"), |left, right| left.as_ref() == right.as_ref()), _ => false }`; break;
           case "bytes": test = `matches!(&${value}, ${name}::Bytes(..) | ${name}::TypedBytes(..) | ${name}::Buffer(..))`; break;
@@ -311,12 +323,7 @@ export class RustExpressionEmitter {
         if (expr.negated) test = `!(${test})`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${test} }`;
       }
-      case "dynKeyGet": {
-        if (expr.key.type.kind !== "string") this.context.unsupported("dynamic keyed read with a non-string key", expr.loc);
-        const value = this.context.nextName("sc_rt");
-        const key = this.context.nextName("sc_rt");
-        return `{ let ${value} = ${this.emitExpr(expr.value)}; let ${key} = ${this.emitExpr(expr.key)}; sc_dyn_key_get(&${value}, &${key}, ${expr.optional === true ? "true" : "false"}) }`;
-      }
+      case "dynKeyGet": return emitRustDynamicKeyRead(this.context, expr, value => this.emitExpr(value));
       case "dynHasKey": {
         const value = this.context.nextName("sc_rt");
         const index = /^(?:0|[1-9][0-9]*)$/u.test(expr.key) && Number.isSafeInteger(Number(expr.key))
@@ -325,7 +332,7 @@ export class RustExpressionEmitter {
         const arrayTest = expr.key === "length"
           ? "true"
           : index === null ? "false" : `runtime::array_len(array) > ${index}.0`;
-        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) | ${this.context.dynTypeName()}::Effect(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
+        let test = `match &${value} { ${this.context.dynTypeName()}::Object(..) | ${this.context.dynTypeName()}::Proxy(..) | ${this.context.dynTypeName()}::Effect(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), ${this.context.dynTypeName()}::Array(array) => ${arrayTest}, _ => false, }`;
         if (this.context.hasEmbeddedModules()) test = `match &${value} { ${this.context.dynTypeName()}::Island(..) => sc_dyn_has_key(&${value}, &${rustJsString(expr.key, text => this.context.rustString(text))}), _ => ${test}, }`;
         return `{ let ${value} = ${this.emitExpr(expr.value)}; ${expr.negated === true ? `!(${test})` : test} }`;
       }
@@ -350,6 +357,8 @@ export class RustExpressionEmitter {
             test = `match &${dynamic} { ${name}::Date(value) => *value == ${scalar}, _ => false, }`;
           } else if (scalarType.kind === "bigint") {
             test = `match &${dynamic} { ${name}::BigInt(value) => *value == ${scalar}, _ => false, }`;
+          } else if (scalarType.kind === "symbol") {
+            test = `match &${dynamic} { ${name}::Symbol(value) => runtime::symbol_ptr_eq(value, &${scalar}), _ => false, }`;
           } else if (scalarType.kind === "bool") {
             test = `match &${dynamic} { ${name}::Boolean(value) => *value == ${scalar}, _ => false, }`;
           } else {
@@ -576,7 +585,7 @@ export class RustExpressionEmitter {
             const boxed = this.context.emitDynFromValue(entry.value.type, value, entry.value.loc);
             return shape.tuple ? `runtime::array_push(&${object}, ${boxed});` : `runtime::map_set_by(&${object}, ${rustJsString(entry.name, text => this.context.rustString(text))}, ${boxed}, |a, b| a == b);`;
           }).join(" ");
-          return `{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${object} } }`;
+          return `{ let ${object} = ${shape.tuple ? "runtime::array_new(Vec::new())" : "runtime::map_new()"}; ${entries} ${sharedRecordName(shape.id)} { object: ${shape.tuple ? object : `${this.context.dynTypeName()}::Object(${object})`} } }`;
         }
         if (shape.indexValue !== undefined && shape.fields.length === 0) {
           const map = this.context.nextName("sc_rt");
@@ -652,7 +661,7 @@ export class RustExpressionEmitter {
         const object = this.context.nextName("sc_rt");
         if (isSharedRecord(shape)) {
           const declared = shape.fields.map(field => `key.as_ref() != "${this.context.rustString(field.name)}"`).join(" && ");
-          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let keys = runtime::map_string_keys_js_order(&${object}.object); let output = runtime::array_new(Vec::new()); let mut index = 0.0; while index < runtime::array_len(&keys) { let key = runtime::array_get(&keys, index); if ${declared} { runtime::array_push(&output, key); } index += 1.0; } output }`;
+          return `{ let ${object} = ${this.emitExpr(expr.obj)}; let keys = ${object}.own_keys(); let output = runtime::array_new(Vec::new()); let mut index = 0.0; while index < runtime::array_len(&keys) { let key = runtime::array_get(&keys, index); if ${declared} { runtime::array_push(&output, key); } index += 1.0; } output }`;
         }
         return `{ let ${object} = ${this.emitExpr(expr.obj)}; ${object}.with(|record| runtime::map_string_keys_js_order(record.${RUST_RECORD_OVERFLOW}.as_ref().expect("scriptc: cleared live record overflow"))) }`;
       }
@@ -839,12 +848,7 @@ export class RustExpressionEmitter {
         }
         return "sc_self.clone()";
       }
-      case "call": {
-        const callee = this.context.functions.get(expr.callee);
-        if (callee === undefined) this.context.unsupported(`unknown call target '${expr.callee}'`, expr.loc);
-        if (callee.captures !== undefined) this.context.unsupported(`direct call to lifted closure '${callee.name}'`, expr.loc);
-        return `${mangleFunction(callee.name)}(${expr.args.map((arg) => this.emitExpr(arg)).join(", ")})`;
-      }
+      case "call": return emitRustDirectCall(this.context, expr, value => this.emitExpr(value));
       case "virtualCall": {
         const meta = this.context.classMetaOf(expr.className, expr.loc);
         const slot = meta.root.slots.find((candidate) =>

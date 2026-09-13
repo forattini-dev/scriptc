@@ -69,6 +69,7 @@ export class RustDynamicFromEmitter {
       case "bigint": return `${name}::BigInt(${value})`;
       case "bool": return `${name}::Boolean(${value})`;
       case "string": return `${name}::String(${value})`;
+      case "symbol": return `${name}::Symbol(${value})`;
       case "url": return `${name}::Url(${value})`;
       case "bytes": {
         if (type.elem === "u8") {
@@ -138,7 +139,7 @@ export class RustDynamicFromEmitter {
   private emitRecord(type: Extract<IrType, { kind: "record" }>, value: string, loc?: SrcLoc, liveRef = false): string {
     const name = this.context.dynTypeName();
     const shape = this.context.records.get(type.shapeId);
-    if (isSharedRecord(shape)) return `${name}::${shape?.tuple ? "Array" : "Object"}((${value}).object)`;
+    if (isSharedRecord(shape)) return shape?.tuple ? `${name}::Array((${value}).object)` : `(${value}).object`;
     if (shape?.tuple) {
       const record = this.context.nextTemporary();
       const output = this.context.nextTemporary();
