@@ -1,0 +1,429 @@
+{
+  "mission": "Native Rust builds of every original distributed entry in red-skills, redcode and red-dev; complete Redcode CLI is the priority",
+  "missionComplete": false,
+  "baselineCompilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
+  "consumers": {
+    "redcode": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+    "red-skills": "c5255e006318fa3ec9aea51ccac11778da3888a1",
+    "red-dev": "d451c0e71a499ba8b50114c529bd22ca99210b5a"
+  },
+  "distributedSourceEntries": 18,
+  "boundedAdmissionAttempts": 20,
+  "countsByLane": {
+    "default": {
+      "diagnostic-refusal": 15,
+      "timeout-inconclusive": 1,
+      "built-native": 1
+    },
+    "auto": {
+      "timeout-inconclusive": 2,
+      "diagnostic-refusal": 1
+    }
+  },
+  "limits": {
+    "defaultAuto": {
+      "optimization": "dev",
+      "cpuQuota": "100%",
+      "memoryHigh": "2G",
+      "memoryMax": "3G",
+      "timeoutSeconds": 58
+    },
+    "npmStaticDefault": "OFF",
+    "timeouts": "inconclusive",
+    "diagnosticCounts": "Occurrences, including repetitions and cascades; not independent bugs or completion percentages"
+  },
+  "rows": [
+    {
+      "id": "red-skills/dev",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 1,
+      "diagnosticCounts": {
+        "SC0001": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__default"
+    },
+    {
+      "id": "red-skills/castle-mcp",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/mcp-server.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 234,
+      "diagnosticCounts": {
+        "SC2013": 124,
+        "SC2009": 9,
+        "SC2020": 10,
+        "SC1090": 65,
+        "SC2012": 1,
+        "SC2004": 14,
+        "SC1101": 3,
+        "SC1100": 2,
+        "SC2003": 1,
+        "SC2002": 2,
+        "SC1031": 1,
+        "SC1120": 1,
+        "SC2008": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__castle-mcp__default"
+    },
+    {
+      "id": "red-skills/code-nav",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/code-nav/src/index.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 22,
+      "diagnosticCounts": {
+        "SC2009": 3,
+        "SC2013": 10,
+        "SC2004": 4,
+        "SC1090": 3,
+        "SC1031": 1,
+        "SC2020": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__code-nav__default"
+    },
+    {
+      "id": "red-skills/memory",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 56,
+      "diagnosticCounts": {
+        "SC1014": 1,
+        "SC1016": 55
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory__default"
+    },
+    {
+      "id": "red-skills/memory-mcp",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/memory/src/mcp-server.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 649,
+      "diagnosticCounts": {
+        "SC2013": 339,
+        "SC2009": 176,
+        "SC2011": 11,
+        "SC1090": 106,
+        "SC2002": 3,
+        "SC2020": 7,
+        "SC2004": 6,
+        "SC2003": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__memory-mcp__default"
+    },
+    {
+      "id": "red-skills/brain",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 89,
+      "diagnosticCounts": {
+        "SC2013": 17,
+        "SC1090": 33,
+        "SC2009": 19,
+        "SC1063": 13,
+        "SC2004": 4,
+        "SC2020": 3
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain__default"
+    },
+    {
+      "id": "red-skills/brain-mcp",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/brain/src/mcp-server.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 37,
+      "diagnosticCounts": {
+        "SC2013": 26,
+        "SC1090": 9,
+        "SC2002": 1,
+        "SC2004": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__brain-mcp__default"
+    },
+    {
+      "id": "red-skills/rsp",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/rsp/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 331,
+      "diagnosticCounts": {
+        "SC2013": 63,
+        "SC1090": 128,
+        "SC2004": 90,
+        "SC2009": 10,
+        "SC2020": 31,
+        "SC2011": 3,
+        "SC1101": 2,
+        "SC1100": 4
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__rsp__default"
+    },
+    {
+      "id": "red-skills/redskilled",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/redskilled/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 53,
+      "diagnosticCounts": {
+        "SC2013": 29,
+        "SC1090": 13,
+        "SC2004": 9,
+        "SC2011": 1,
+        "SC1031": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__redskilled__default"
+    },
+    {
+      "id": "red-skills/herdr",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/herdr-plugin-red-skills/bin/red-skills-herdr.mjs",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 2,
+      "diagnosticCounts": {
+        "SC1090": 2
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__herdr__default"
+    },
+    {
+      "id": "red-skills/benchmark-memory",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-memory/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 245,
+      "diagnosticCounts": {
+        "SC2013": 61,
+        "SC2009": 17,
+        "SC1090": 75,
+        "SC2020": 22,
+        "SC2004": 51,
+        "SC2002": 14,
+        "SC1120": 1,
+        "SC0004": 4
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-memory__default"
+    },
+    {
+      "id": "red-skills/benchmark-code-understanding",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/benchmark-code-understanding/src/cli.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 17,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC1090": 7,
+        "SC2004": 2,
+        "SC2020": 2
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__benchmark-code-understanding__default"
+    },
+    {
+      "id": "red-skills/opencode-host",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/opencode-host/src/generate.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 23,
+      "diagnosticCounts": {
+        "SC2013": 6,
+        "SC2002": 1,
+        "SC2004": 6,
+        "SC1090": 6,
+        "SC1031": 1,
+        "SC2009": 2,
+        "SC2020": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__opencode-host__default"
+    },
+    {
+      "id": "redcode/lildax",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/cli/src/index.ts",
+      "target": "bun",
+      "status": "timeout-inconclusive",
+      "diagnostics": 0,
+      "diagnosticCounts": {},
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": false,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/redcode__lildax__default"
+    },
+    {
+      "id": "redcode/rpc-sidecar",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/src/cli.ts",
+      "target": "bun",
+      "status": "built-native",
+      "diagnostics": 0,
+      "diagnosticCounts": {},
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/redcode__rpc-sidecar__default"
+    },
+    {
+      "id": "red-dev/red-dev",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "target": "bun",
+      "status": "diagnostic-refusal",
+      "diagnostics": 773,
+      "diagnosticCounts": {
+        "SC2009": 6,
+        "SC2020": 177,
+        "SC2013": 19,
+        "SC2011": 26,
+        "SC1090": 235,
+        "SC2004": 294,
+        "SC2002": 3,
+        "SC2003": 1,
+        "SC2012": 8,
+        "SC1120": 2,
+        "SC1043": 1,
+        "SC1070": 1
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__default"
+    },
+    {
+      "id": "red-dev/redwall",
+      "lane": "default",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/scripts/redwall-bin-main.ts",
+      "target": "node24",
+      "status": "diagnostic-refusal",
+      "diagnostics": 3,
+      "diagnosticCounts": {
+        "SC0001": 3
+      },
+      "npmStaticPosture": "omitted; API default OFF",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-dev__redwall__default"
+    },
+    {
+      "id": "red-skills/dev",
+      "lane": "auto",
+      "entry": "/home/cyber/Work/reddb.io/red-skills/apps/dev/src/cli.ts",
+      "target": "node24",
+      "status": "timeout-inconclusive",
+      "diagnostics": 0,
+      "diagnosticCounts": {},
+      "npmStaticPosture": "auto",
+      "diagnosticCountComplete": false,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-skills__dev__auto"
+    },
+    {
+      "id": "red-dev/red-dev",
+      "lane": "auto",
+      "entry": "/home/cyber/Work/reddb.io/red-dev/src/main.ts",
+      "target": "bun",
+      "status": "diagnostic-refusal",
+      "diagnostics": 773,
+      "diagnosticCounts": {
+        "SC2009": 6,
+        "SC2020": 177,
+        "SC2013": 19,
+        "SC2011": 26,
+        "SC1090": 235,
+        "SC2004": 294,
+        "SC2002": 3,
+        "SC2003": 1,
+        "SC2012": 8,
+        "SC1120": 2,
+        "SC1043": 1,
+        "SC1070": 1
+      },
+      "npmStaticPosture": "auto",
+      "diagnosticCountComplete": true,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/red-dev__red-dev__auto"
+    },
+    {
+      "id": "redcode/lildax",
+      "lane": "auto",
+      "entry": "/home/cyber/Work/reddb.io/redcode/packages/cli/src/index.ts",
+      "target": "bun",
+      "status": "timeout-inconclusive",
+      "diagnostics": 0,
+      "diagnosticCounts": {},
+      "npmStaticPosture": "auto",
+      "diagnosticCountComplete": false,
+      "directory": "/tmp/scriptc-all-binary-admission-20260913/redcode__lildax__auto"
+    }
+  ],
+  "fullRedcodeBaseline": {
+    "entry": "../redcode/packages/redcode/src/index.ts",
+    "status": "refused",
+    "diagnosticOccurrences": 3100,
+    "npmStatic": "explicit 34-package selection",
+    "backend": "rust",
+    "allowEngine": false,
+    "target": "bun",
+    "optimization": "release",
+    "evidence": "/tmp/scriptc-redcode-byte-references-20260913a"
+  },
+  "rpcSidecarRelease": {
+    "entry": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/src/cli.ts",
+    "binaryBytes": 4358904,
+    "binarySha256": "c70c6ba9b0f8482f5b13c80aa61820f6f38d9d39ad992738432a2b4a27a7d50b",
+    "execution": {
+      "engine": "none",
+      "externalFfi": false
+    },
+    "safetyProfile": "rust-only",
+    "runtimeFences": []
+  },
+  "sidecarAcceptance": {
+    "dev": {
+      "tests": 8,
+      "assertions": 22,
+      "failures": 0,
+      "evidence": "/tmp/scriptc-redcode-rpc-native-acceptance-20260913"
+    },
+    "release": {
+      "tests": 8,
+      "assertions": 22,
+      "failures": 0,
+      "evidence": "/tmp/scriptc-redcode-rpc-release-acceptance-20260913"
+    }
+  },
+  "consumerSourceChanges": false,
+  "runtimePerformanceComparison": false
+}

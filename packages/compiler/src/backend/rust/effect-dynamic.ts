@@ -1,17 +1,20 @@
 import type { RustLibCallContext } from "./lib-calls.js";
 import type { RustExpressionContext } from "./expression-context.js";
-import type { IrExpr } from "../../ir/ir.js";
+import { arrayOf, BOOL, BYTES_U8, DATE_T, DYN, EFFECT_T, F64, STRING, type IrExpr } from "../../ir/ir.js";
 
-type DynamicContext = Pick<RustLibCallContext, "dynTypeName" | "hasErrorClassRoots" | "errorValueName">;
+type DynamicContext = Pick<RustLibCallContext, "dynTypeName" | "hasErrorClassRoots" | "errorValueName" | "rustType" | "emitDynFromValue">;
 
-/** Effect channels are covariant: a scalar producer may be consumed as
- * unknown without having boxed a dynamic enum. Keep already-dynamic values
- * and Error identities intact; never substitute an empty object on mismatch.
+/** Effect channels are covariant: scalars, bytes and flat native arrays may
+ * be consumed as unknown without having boxed a dynamic enum. Array views
+ * retain identity and mutations. Other composites require a typed fallback.
  */
 export function unboxEffectDynamic(context: DynamicContext, value: string, typedFallback = ""): string {
   const dyn = context.dynTypeName();
   const scalar = [["f64", "Number"], ["bool", "Boolean"], ["runtime::JsString", "String"], ["runtime::JsBigInt", "BigInt"], ["runtime::JsDate", "Date"], ["runtime::JsEffect", "Effect"]]
     .map(([type, variant]) => `if let Some(sc_value) = sc_boxed.downcast_ref::<${type}>() { return ${dyn}::${variant}(sc_value.clone()); }`)
+    .join(" ");
+  const references = [BYTES_U8, ...[F64, BOOL, STRING, DATE_T, EFFECT_T, DYN].map(arrayOf)]
+    .map(type => `if let Some(sc_value) = sc_boxed.downcast_ref::<${context.rustType(type)}>() { return ${context.emitDynFromValue(type, "sc_value.clone()")}; }`)
     .join(" ");
   const error = context.hasErrorClassRoots()
     ? `if let Some(sc_value) = sc_boxed.downcast_ref::<${context.errorValueName()}>() { return sc_dyn_error_box(sc_value); }
@@ -20,6 +23,7 @@ export function unboxEffectDynamic(context: DynamicContext, value: string, typed
   return `(|sc_boxed: &runtime::EffectValue| -> ${dyn} {
     if let Some(sc_value) = sc_boxed.downcast_ref::<${dyn}>() { return sc_value.clone(); }
     ${scalar}
+    ${references}
     if sc_boxed.downcast_ref::<runtime::EffectUnit>() == Some(&runtime::EffectUnit::Null) { return ${dyn}::Null; }
     if sc_boxed.downcast_ref::<runtime::EffectUnit>() == Some(&runtime::EffectUnit::Undefined) || sc_boxed.downcast_ref::<()>().is_some() { return ${dyn}::Undefined; }
     ${error}
@@ -46,5 +50,7 @@ export function emitEffectCauseDynamic(expr: Extract<IrExpr, { kind: "dynFrom" }
     dynTypeName: () => context.dynTypeName(),
     hasErrorClassRoots: () => context.errorClassRoots().length > 0,
     errorValueName: () => context.errorValueName(),
+    rustType: (type, loc) => context.rustType(type, loc),
+    emitDynFromValue: (type, value, loc) => context.emitDynFromValue(type, value, loc),
   }, `&runtime::effect_cause_squash(&${handle})`, fallback);
 }

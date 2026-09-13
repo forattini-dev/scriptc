@@ -113,8 +113,9 @@ export function emitSharedRecordDefinition(context: RustDefinitionContext, shape
   context.line(`impl runtime::ArrayElement for ${name} { fn trace_element(&self, tracer: &mut runtime::Tracer<'_>) { tracer.edge(&self.object); } }`);
   context.line(`impl runtime::JsonValue for ${name} { fn write_json(&self, writer: &mut runtime::JsonWriter) { runtime::JsonValue::write_json(&self.object, writer); } }`);
   context.line(`impl runtime::JsonDecode for ${name} { fn decode_json(node: &runtime::JsonNode, path: &str) -> Result<Self, String> {`);
-  if (shape.fields.some(field => field.type.kind === "func")) {
-    context.line('let _ = node; Err(format!("expected callable record at {path}, got JSON")) }');
+  if (shape.fields.some(field => !context.isRustJsonCompatible(field.type))) {
+    const expected = shape.fields.some(field => field.type.kind === "func") ? "callable" : "native";
+    context.line(`let _ = node; Err(format!("expected ${expected} record at {path}, got JSON")) }`);
   } else {
     context.line("let fields = runtime::json_expect_object(node, path)?;");
     for (const field of shape.fields) {

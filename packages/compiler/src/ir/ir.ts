@@ -5820,9 +5820,9 @@ export function canDynCheckTo(
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
     return !!def &&
-      def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT") &&
+      def.arms.some((a) => a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8")) &&
       def.arms.every((a) =>
-        a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" ||
+        a.kind === "effect" || a.kind === "date" || a.kind === "bigint" || a.kind === "undefinedT" || (a.kind === "bytes" && a.elem === "u8") ||
         isJsonSafeType(a, getRecord, getUnion) ||
         (a.kind === "object" && a.className === "%Error")
       );

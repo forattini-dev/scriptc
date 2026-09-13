@@ -19,6 +19,7 @@ import { emitRustDynamicJsonReplacer } from "./dynamic-json-replacer.js";
 import { emitRustDynamicStringCoercion } from "./dynamic-string-coercion.js";
 import { RustDynamicFromEmitter } from "./dynamic-from.js";
 import { emitRustDynamicObjectWalk } from "./dynamic-object-walk.js";
+import { emitRustDynamicObjectPrototype } from "./dynamic-object-prototype.js";
 import { emitRustNativeMethodDefinition } from "./dynamic-native-method.js";
 import { emitRustQuerystringDynImpl } from "./querystring.js";
 import type { RustDynamicContext } from "./dynamic-context.js";
@@ -485,9 +486,10 @@ export class RustDynamicEmitter {
     const getterRead = this.context.usesDynamicInvoke()
       ? `{ let _this_guard = sc_dyn_this_push(receiver.clone()); sc_dyn_call(getter.as_ref(), &[], key.as_ref()) }`
       : "sc_dyn_call(getter.as_ref(), &[], key.as_ref())";
+    emitRustDynamicObjectPrototype(this.context);
     this.context.line(`fn sc_dyn_object_key_get(object: &runtime::JsMap<runtime::JsString, ${name}>, key: &runtime::JsString, receiver: &${name}) -> ${name} {`);
     this.context.pushIndent();
-    this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(${name}::Object(prototype)) => sc_dyn_object_key_get(&prototype, key, receiver), _ => ${name}::Undefined, }, }`);
+    this.context.line(`match runtime::map_get_by(object, key, |left, right| left.as_ref() == right.as_ref()) { Some(${name}::Getter(getter)) => ${getterRead}, Some(field) => field, None => match runtime::map_prototype(object) { Some(${name}::Object(prototype)) => sc_dyn_object_key_get(&prototype, key, receiver), None => sc_dyn_object_prototype_fallback(object, key), _ => ${name}::Undefined, }, }`);
     this.context.popIndent();
     this.context.line("}");
     this.context.line(`fn sc_dyn_key_get(value: &${name}, key: &runtime::JsString, optional: bool) -> ${name} {`);

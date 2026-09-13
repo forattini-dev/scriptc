@@ -1,12 +1,27 @@
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
-import type { IrExpr, IrModule, IrType, SrcLoc } from "../ir/ir.js";
+import { typeEquals, type IrExpr, type IrModule, type IrType, type SrcLoc } from "../ir/ir.js";
 import { nativeIndexedRecordValue, nativeRecordCheckSupported } from "../ir/native-record.js";
 
-/** C/LLVM's record builders copy fields. Newly admitted callable record
+/** C/LLVM's record builders copy fields. Newly admitted reference record
  * exits require Rust's shared map instead of accepting a different identity. */
 export function nativeCallableRecordBackendDiagnostics(mod: IrModule, backend: "c" | "llvm"): ScrDiagnostic[] {
   const records = new Map(mod.records?.map(record => [record.id, record]));
   const unions = new Map(mod.unions?.map(union => [union.id, union]));
+  let byteRecordExit = false;
+  const hasBytes = (type: IrType): boolean => type.kind === "union"
+    ? unions.get(type.unionId)?.arms.some(hasBytes) ?? false
+    : type.kind === "bytes" && type.elem === "u8";
+  const sharedBytes = (type: IrType, fromDynamic: boolean): boolean => {
+    if (!fromDynamic || !hasBytes(type)) return false;
+    byteRecordExit = true;
+    return true;
+  };
+  const sharedKeyedRead = (type: IrType): boolean => {
+    if (type.kind !== "record" || !nativeRecordCheckSupported(type, id => records.get(id), id => unions.get(id))) return false;
+    const shape = records.get(type.shapeId);
+    return !!shape && !shape.tuple && shape.indexValue === undefined && shape.fields.length > 1 &&
+      !shape.fields.every(field => typeEquals(field.type, shape.fields[0]!.type));
+  };
   const requiresSharedExit = (type: IrType | undefined, visiting = new Set<string>(), fromDynamic = true): boolean => {
     // Checking a callable boxes its typed arguments and checks its result.
     // A callback argument reverses direction again; do not mistake a supported
@@ -20,7 +35,10 @@ export function nativeCallableRecordBackendDiagnostics(mod: IrModule, backend: "
     const shape = records.get(type.shapeId);
     const shared = (!fromDynamic || nativeRecordCheckSupported(type, id => records.get(id), id => unions.get(id))) &&
       ((shape?.indexValue !== undefined && requiresSharedExit(shape.indexValue, visiting, fromDynamic)) ||
-        (shape?.fields.some(field => (fromDynamic && (field.type.kind === "func" || field.type.kind === "dyn")) || requiresSharedExit(field.type, visiting, fromDynamic)) ?? false));
+        (shape?.fields.some(field => {
+          if (sharedBytes(field.type, fromDynamic)) return true;
+          return (fromDynamic && (field.type.kind === "func" || field.type.kind === "dyn")) || requiresSharedExit(field.type, visiting, fromDynamic);
+        }) ?? false));
     visiting.delete(key);
     return shared;
   };
@@ -38,8 +56,9 @@ export function nativeCallableRecordBackendDiagnostics(mod: IrModule, backend: "
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
     }
-    if (node.kind === "dynCheck" && node.value?.kind === "dynKeyGet" && node.value.value.kind === "dynFrom" &&
-      node.value.value.value.type.kind === "record" && node.type && nativeRecordCheckSupported(node.type, id => records.get(id), id => unions.get(id))) {
+    if ((node.kind === "dynKeyGet" && node.value?.kind === "dynFrom" && sharedKeyedRead(node.value.value.type)) ||
+      (node.kind === "dynCheck" && node.value?.kind === "dynKeyGet" && node.value.value.kind === "dynFrom" &&
+        node.value.value.value.type.kind === "record" && node.type && nativeRecordCheckSupported(node.type, id => records.get(id), id => unions.get(id)))) {
       sharedOperation = "heterogeneous record keyed reads";
       loc = node.loc ?? { file: mod.sourceFile, start: 0, end: 0 };
       return;
@@ -61,6 +80,6 @@ export function nativeCallableRecordBackendDiagnostics(mod: IrModule, backend: "
   };
   visit(mod);
   return loc ? [{ code: "SC3001", loc,
-    message: `the ${backend} backend does not support shared ${sharedOperation ?? (indexedCast ? "indexed record casts" : "callable record exits")} yet; use --backend rust`,
+    message: `the ${backend} backend does not support shared ${sharedOperation ?? (indexedCast ? "indexed record casts" : byteRecordExit ? "record exits with byte fields" : "callable record exits")} yet; use --backend rust`,
   }] : [];
 }

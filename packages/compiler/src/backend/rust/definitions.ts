@@ -2,7 +2,8 @@ import { rustJsStringRef } from "./string-literals.js";
 import { discriminatedJsonGuard } from "./discriminated-records.js";
 import { emitSharedTupleOperation } from "./shared-tuples.js";
 import { emitSharedIteration } from "./shared-iteration.js";
-import { sharedWidthPair } from "./shared-width.js";
+import { sharedWidthPair, structuralProjection } from "./shared-width.js";
+import { nativeRecordCheckSupported } from "../../ir/native-record.js";
 import { sharedDiscriminatedUnion, discriminatedUnionBox } from "./discriminated-records.js";
 import { recordPointerEquality } from "./shared-records.js";
 import type { IrFamily } from "../../ir/ir.js";
@@ -991,6 +992,11 @@ export class RustDefinitionEmitter {
       const boxed = this.context.emitDynFromValue(view.source, "sc_width_input", fn.loc);
       this.context.line(`fn ${mangleFunction(fn.name)}(sc_width_input: ${this.context.rustType(view.source)}) -> ${this.context.rustType(view.target)} { ${this.context.emitDynCheckValue(view.target, boxed, fn.loc)} }`);
       return;
+    }
+    const projection = structuralProjection(fn);
+    if (projection?.target.kind === "record" && isSharedRecord(this.context.records.get(projection.target.shapeId)) &&
+      !nativeRecordCheckSupported(projection.source, id => this.context.records.get(id), id => this.context.unions.get(id))) {
+      this.context.unsupported("shared record projection from an unsupported source layout would copy fields and lose reference identity", fn.loc);
     }
     for (const local of fn.locals) {
       this.context.rustType(local.type, fn.loc);

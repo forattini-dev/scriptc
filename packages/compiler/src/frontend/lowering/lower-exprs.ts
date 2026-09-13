@@ -11,6 +11,7 @@ import { hasOptionalIndexContext } from "./lower-contextual-index.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver } from "./lower-regex-captures.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
+import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
 import { lowerNativeRecordCast } from "./lower-native-record-cast.js";
 import { lowerHomogeneousTupleRead, tupleSpreadArray } from "./lower-native-containers.js";
 import { InternalCompilerError } from "../../errors.js";
@@ -7098,8 +7099,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
     // a generic instance) is the same static read — identifier evaluation
     // is pure, so skipping it matches JS exactly.
     const litKey = recordKeyLiteralText(keyNode) ?? recordKeyTypeLiteralText(lowerer, keyNode);
-    // The receiver lowers FIRST (both branches below read it, and JS
-    // evaluates the receiver before the key).
+    // Lower the receiver before the key, preserving JS evaluation order.
     const obj = lowerer.lowerExpr(expr.expression);
     if (obj.type.kind === "jsval") {
       return islandElementRead(lowerer, expr, obj, includeUndefined);
@@ -7170,7 +7170,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       declared = shape.fields[0]!.type;
     }
     if (!declared) {
-      const shared = lowerSharedRecordKeyRead(lowerer, expr, obj, key);
+      const shared = lowerSharedRecordKeyRead(lowerer, expr, obj, key) ?? lowerHeterogeneousRecordKeyRead(lowerer, expr, obj, key, shape);
       if (shared) return shared;
       lowerer.unsupported(
         "SC1090",

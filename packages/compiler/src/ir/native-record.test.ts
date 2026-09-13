@@ -15,7 +15,7 @@ test.each([F64, STRING, BOOL, DYN, VOID])("shared methods retain supported scala
 test.each<IrType>([
   { kind: "array", elem: { kind: "record", shapeId: "nested" } },
   { kind: "record", shapeId: "nested" },
-  { kind: "bytes", elem: "u8" },
+  { kind: "bytes", elem: "u32" },
   { kind: "promise", inner: F64 },
 ])("shared method admission cannot silently copy a composite: %j", composite => {
   expect(admitted(composite)).toBe(false);
@@ -25,6 +25,11 @@ test.each<IrType>([
 
 test("rest methods require a separate adapter contract", () => {
   expect(admitted({ kind: "func", params: [DYN], ret: DYN, rest: true })).toBe(false);
+});
+
+test.each<IrType>([{ kind: "bigint" }, { kind: "bytes", elem: "u8" }])("shared fields and methods retain native references: %j", value => {
+  expect(admitted(value)).toBe(true);
+  expect(admitted({ kind: "func", params: [value], ret: value })).toBe(true);
 });
 
 
@@ -75,10 +80,11 @@ test("shared methods box scalar union returns without copying composites", () =>
   );
   expect(check([F64, { kind: "undefinedT" }])).toBe(true);
   expect(check([STRING, BOOL, { kind: "nullT" }])).toBe(true);
-  expect(check([F64, { kind: "bytes", elem: "u8" }])).toBe(false);
+  expect(check([F64, { kind: "bytes", elem: "u8" }])).toBe(true);
+  expect(check([F64, { kind: "bytes", elem: "u32" }])).toBe(false);
 });
 
-test("nested shared records admit acyclic and optional views but reject recursive or byte layouts", () => {
+test("nested shared records admit acyclic and byte views but reject recursive layouts", () => {
   const records = new Map<string, IrRecordShape>([
     ["leaf", { id: "leaf", fields: [{ name: "count", type: F64 }] }],
     ["outer", { id: "outer", fields: [{ name: "leaf", type: { kind: "record", shapeId: "leaf" } }] }],
@@ -89,7 +95,7 @@ test("nested shared records admit acyclic and optional views but reject recursiv
   const check = (shapeId: string) => nativeRecordCheckSupported({ kind: "record", shapeId }, getRecord, () => undefined);
   expect(check("outer")).toBe(true);
   expect(check("cycle")).toBe(false);
-  expect(check("bytes")).toBe(false);
+  expect(check("bytes")).toBe(true);
   const optional: IrType = { kind: "union", unionId: "optional" };
   const checkUnion = (arms: IrType[]) => nativeRecordCheckSupported(optional, getRecord, id => ({ id, arms }));
   expect(checkUnion([{ kind: "record", shapeId: "leaf" }, { kind: "undefinedT" }, { kind: "nullT" }])).toBe(true);
