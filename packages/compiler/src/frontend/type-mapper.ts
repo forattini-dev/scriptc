@@ -1,12 +1,13 @@
 export { ISLAND_AMBIENT_TYPES, isParseArgsDynTypeName } from "./ambient-type-names.js";
 import { ISLAND_AMBIENT_TYPES, PARSE_ARGS_DYN_TYPES } from "./ambient-type-names.js";
+import { isMappedShape, isUnmappedRecordDeclaration, recordProvenanceOk } from "./record-provenance.js";
 import { regexGroupsType } from "./regex-types.js";
 import { regexCaptureArray } from "../ir/regex-captures.js";
 import { UnionRegistry } from "./union-registry.js";
 export { UnionRegistry } from "./union-registry.js";
 import { recordUnionDiscriminant } from "./union-discriminants.js";
 import { mapObjectIterationValueAlias } from "./object-iteration-types.js"; import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf } from "./families.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelTypeFile, isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType } from "../ir/ir.js";
 import { arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
@@ -940,7 +941,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const sf = d.getSourceFile();
       return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
     }) &&
-    (ctx.dynamic || !npmDecls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName)))
+    (ctx.dynamic || !npmDecls.every((d) => isKernelTypeFile(d.getSourceFile().fileName)))
   ) {
     return ctx.dynamic ? JSVAL : null;
   }
@@ -961,7 +962,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (partSym) {
         const decls = checker.declarationsOf(partSym);
         if (decls.length > 0) {
-          if (!ctx.dynamic && decls.every((d) => /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(d.getSourceFile().fileName))) return false; // kernel: structural
+          if (!ctx.dynamic && decls.every((d) => isKernelTypeFile(d.getSourceFile().fileName))) return false; // kernel: structural
           return decls.every((d) => {
             const sf = d.getSourceFile();
             return (sf.isDeclarationFile && !ctx.isStdlibFile(sf) && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName)) || ctx.isIslandModuleFile(sf);
@@ -3251,51 +3252,6 @@ function mapHybridCallableIntersection(widened: ts.Type, ctx: TypeMapperCtx): Ir
   return { kind: "record", shapeId: shapes.intern(fields, false, undefined, declaredOrder) };
 }
 
-/** True for MAPPED-type results — `Partial<Config>`, `Record<"a", n>`,
- * whatever `Pick`/`Omit` reduce to. Their shape is computed by the checker,
- * not declared anywhere: the only declaration behind them is the utility
- * type's `{ [P in keyof T]: ... }` machinery in lib.es5.d.ts. */
-function isMappedShape(t: ts.Type): boolean {
-  return (
-    (t.flags & ts.TypeFlags.Object) !== 0 &&
-    ((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Mapped) !== 0
-  );
-}
-
-/** The record path's provenance fence. Declared shapes (object literals,
- * interfaces, type literals) must come from user code or an explicitly
- * mapped external type surface, never an arbitrary .d.ts — the empty
- * ambient interfaces (Object, Function, Boolean, ...) exist only to
- * satisfy tsc and must not become zero-field records. Checker-COMPUTED
- * shapes (mapped-type results, intersections) have no user declaration to
- * point at: mapped types pass here and get per-MEMBER provenance in the
- * field walk instead; an intersection passes when every part is itself an
- * ordinary provenance-passing object type (class parts keep their nominal
- * identity and never flatten into a struct). */
-function recordProvenanceOk(t: ts.Type, ctx: TypeMapperCtx): boolean {
-  const { checker } = ctx;
-  if (t.isIntersectionType()) {
-    return ts.constituentTypes(t).every(
-      (part) => {
-        const partSym = part.getSymbol();
-        return (part.flags & ts.TypeFlags.Object) !== 0 &&
-          !(partSym && partSym.flags & ts.SymbolFlags.Class) &&
-          checker.getCallSignatures(part).length === 0 &&
-          checker.getConstructSignatures(part).length === 0 &&
-          recordProvenanceOk(part, ctx);
-      },
-    );
-  }
-  if (isMappedShape(t)) return true;
-  const tSym = t.getSymbol();
-  const decls = tSym ? checker.declarationsOf(tSym) : undefined;
-  if (!decls || decls.length === 0) return false;
-  return !decls.some((d) => {
-    const sf = d.getSourceFile();
-    return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
-  });
-}
-
 /** A GENERIC-callable member type (`m<T>(x: T): T` / `f: <T>(x: T) => T` in
  * an object type): pure function-shaped — call signatures only, every one
  * carrying its own type parameters — with no data properties, no construct
@@ -3600,7 +3556,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
         computed &&
         checker.declarationsOf(p).some((d) => {
           const sf = d.getSourceFile();
-          return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
+          return isUnmappedRecordDeclaration(sf, ctx);
         })
       ) {
         return null;
@@ -3919,7 +3875,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       computed &&
       checker.declarationsOf(p).some((d) => {
         const sf = d.getSourceFile();
-        return sf.isDeclarationFile && !ctx.isExternalTypeFile(sf) && !isNpmStaticTypeFile(sf.fileName);
+        return isUnmappedRecordDeclaration(sf, ctx);
       })
     ) {
       return null;

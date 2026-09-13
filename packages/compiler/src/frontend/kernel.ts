@@ -4,6 +4,11 @@ import * as ts from "./ts7/adapter.js";
 
 const EFFECT_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/]([A-Za-z]+)\.d\.ts$/;
 
+/** Native Effect declarations also contain structural records and callables. */
+export function isKernelTypeFile(file: string): boolean {
+  return /[\\/]node_modules[\\/]effect[\\/]dist[\\/]/.test(file);
+}
+
 /** The effect namespace (`Context`, `Effect`, …) an expression names, by the provenance of its alias target. */
 export function effectNamespaceOfNode(checker: ts.TypeChecker, node: ts.Expression): string | null {
   if (!ts.isIdentifier(node)) return null;
