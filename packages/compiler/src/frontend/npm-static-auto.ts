@@ -54,10 +54,17 @@ export function detectAutoPackages(
         statuses.push({ package: js.packageName, status: "fallback", detail: "it ships no own .d.ts declaration surface" });
         continue;
       }
-      if (judged.has(npm.packageName)) continue;
-      if (!seen.has(npm.packageName)) {
-        seen.set(npm.packageName, { typesFile: npm.typesFile, fromFile: sf.fileName, specifier: spec });
-        sites.set(npm.packageName, loc);
+      // Types-first resolution can name @types/foo for an import of foo.
+      // Admission owns executable packages, never their declaration provider.
+      // Keep the original typesFile so the own-declarations eligibility rule
+      // still rejects third-party declarations with the correct attribution.
+      const pkg = npm.packageName.startsWith("@types/")
+        ? resolveBareModule(sf.fileName, spec, "js-only")?.packageName ?? packageNameOfBareSpecifier(spec)
+        : npm.packageName;
+      if (judged.has(pkg)) continue;
+      if (!seen.has(pkg)) {
+        seen.set(pkg, { typesFile: npm.typesFile, fromFile: sf.fileName, specifier: spec });
+        sites.set(pkg, loc);
       }
     }
   }
