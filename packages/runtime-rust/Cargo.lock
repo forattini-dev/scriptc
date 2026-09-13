@@ -1872,6 +1872,8 @@ dependencies = [
  "flate2",
  "getifaddrs",
  "getrandom 0.4.3",
+ "num-bigint",
+ "num-traits",
  "regress",
  "ring",
  "rusqlite",
