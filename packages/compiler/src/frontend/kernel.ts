@@ -114,5 +114,15 @@ const HANDLE_DIST = /[\\/]node_modules[\\/]effect[\\/]dist[\\/](?:unstable[\\/][
  * Deferred, Queue, Stream, Duration, Config, …): the kernel's handle in a static build. Type utilities (Types, Brand,
  * Pipeable, Data, Struct, Array, …) stay structural; aliases resolve structurally too. */
 export function isKernelHandleSymbol(decls: readonly ts.Node[]): boolean {
+  // File.Info is metadata returned by stat, not an executable kernel handle.
+  // Preserve its full structural record, including native Option/Date/Size
+  // fields. The declaration path and namespace distinguish it from an Info
+  // interface owned by a different runtime contract.
+  if (decls.length > 0 && decls.every(d => {
+    if (!/[\\/]node_modules[\\/]effect[\\/]dist[\\/]FileSystem\.d\.ts$/.test(d.getSourceFile().fileName) ||
+        !ts.isInterfaceDeclaration(d) || d.name.text !== "Info") return false;
+    const block = d.parent;
+    return ts.isModuleBlock(block) && ts.isModuleDeclaration(block.parent) && block.parent.name.text === "File";
+  })) return false;
   return decls.length > 0 && decls.every((d) => HANDLE_DIST.test(d.getSourceFile().fileName)) && decls.some((d) => ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d));
 }
