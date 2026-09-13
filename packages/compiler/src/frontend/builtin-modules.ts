@@ -114,7 +114,12 @@ export function unsupportedModuleFeatureOf(spec: string): string {
 export const KERNEL_MODULES: ReadonlySet<string> = new Set(["effect"]);
 
 export function isKernelModule(spec: string): boolean {
-  return KERNEL_MODULES.has(spec);
+  // Package subpaths share the root kernel. Admission does not promise
+  // every export: unsupported uses still receive lowering diagnostics.
+  for (const pkg of KERNEL_MODULES) {
+    if (spec === pkg || spec.startsWith(`${pkg}/`)) return true;
+  }
+  return false;
 }
 
 
