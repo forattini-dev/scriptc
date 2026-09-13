@@ -1,4 +1,4 @@
-import { lowerUrlStaticCall } from "./lower-url.js";
+import { lowerNativeGlobalCall } from "./lower-native-global-calls.js";
 import { lowerNumericParser } from "./lower-numeric-parser.js";
 import { lowerNumberConversion } from "./lower-number-conversion.js";
 import { hasHiddenOptionalIndex } from "./lower-contextual-index.js";
@@ -4233,9 +4233,9 @@ export function lowerCall(lowerer: Lowerer, expr: ts.CallExpression): IrExpr {
     if (ts.isPropertyAccessExpression(expr.expression)) {
       const intrinsic =
         lowerEffectCall(lowerer, expr, loc) ?? // the effect kernel (`Effect.succeed(...)` on the package's namespace binding, static builds) — lower-effect.ts
-        // URL statics can resolve through node:url declarations; claim
+        // Native globals can resolve through module declarations; claim
         // them before generic namespace export dispatch.
-        lowerUrlStaticCall(lowerer, expr, expr.expression) ??
+        lowerNativeGlobalCall(lowerer, expr, expr.expression) ??
         // Builtin namespace imports first (`fs.readFileSync(...)` where fs is `import * as fs from "node:fs"`): the same
         // tables and fences as named builtin imports — before anything below tries to lower the namespace object itself as a receiver.
         lowerer.lowerNamespaceBuiltinCall(expr, expr.expression) ??

@@ -3034,6 +3034,18 @@
       "backends": "unknown"
     },
     {
+      "id": "stdlib.crypto.randomUUID",
+      "kind": "stdlib",
+      "name": "crypto.randomUUID",
+      "status": "static",
+      "backends": [
+        "c",
+        "llvm",
+        "rust"
+      ],
+      "note": "zero-argument WebCrypto calls through crypto and globalThis.crypto use OS entropy for UUID v4; corpus:3174-global-crypto-uuid and corpus:3175-bun-global-crypto-uuid verify format and user-binding shadowing"
+    },
+    {
       "id": "stdlib.date.UTC",
       "kind": "stdlib",
       "name": "Date.UTC",

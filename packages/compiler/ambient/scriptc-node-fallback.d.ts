@@ -417,10 +417,9 @@ declare var DOMException: {
 };
 
 /* Capability-gated globals harness code probes behind feature guards
- * (globalThis.crypto under a hasCrypto check, the SQLite-backed storage
- * pair): typed `unknown` — no lowering exists, the guard is expected to
+ * (WebCrypto constructors and the SQLite-backed storage pair):
+ * typed `unknown` — no lowering exists, the guard is expected to
  * be false in a compiled binary, and any reached use fences per site. */
-declare var crypto: unknown;
 declare var Crypto: unknown;
 declare var CryptoKey: unknown;
 declare var SubtleCrypto: unknown;
@@ -1469,6 +1468,9 @@ declare module "url" {
 declare module "node:url" {
   export * from "url";
 }
+
+/** WebCrypto's UUID generator shares the native OS entropy primitive. */
+declare var crypto: { randomUUID(): string };
 
 /* node:crypto: randomUUID(), and randomBytes returning a REAL Buffer —
  * the composed randomBytes(n).toString("hex" | "base64") still lowers as

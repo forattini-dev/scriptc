@@ -310,6 +310,10 @@ const PROBES: Probe[] = [
     source: 'const u = new URL("https://example.com/a");\nconsole.log(u.host);\n',
   },
   {
+    id: "stdlib.crypto.randomUUID",
+    source: 'console.log(crypto.randomUUID().length, globalThis.crypto.randomUUID().length);\n',
+  },
+  {
     id: "stdlib.url.origin",
     source:
       '/// <reference types="node" />\nconst u = new URL("https://example.com/a");\nconsole.log(u.origin);\n',
