@@ -266,6 +266,9 @@ export class Ts7Host {
 export class Ts7Program {
   private sourceFilesCache: readonly SourceFile[] | null = null;
   private checkerFacade: CheckerFacade | null = null;
+  // Snapshots are immutable. Repeated diagnostic consumers must not ask TS7
+  // to check the entire graph again; file-scoped requests stay independent.
+  private readonly semanticDiagnostics = new Map<string | undefined, readonly Diagnostic[]>();
   private disposed = false;
 
   constructor(
@@ -312,7 +315,13 @@ export class Ts7Program {
   }
 
   getSemanticDiagnostics(sourceFile?: SourceFile): readonly Diagnostic[] {
-    return this.project.program.getSemanticDiagnostics(sourceFile?.fileName);
+    const file = sourceFile?.fileName;
+    let diagnostics = this.semanticDiagnostics.get(file);
+    if (diagnostics === undefined) {
+      diagnostics = this.project.program.getSemanticDiagnostics(file);
+      this.semanticDiagnostics.set(file, diagnostics);
+    }
+    return diagnostics;
   }
 
   getGlobalDiagnostics(): readonly Diagnostic[] {
@@ -338,6 +347,7 @@ export class Ts7Program {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.semanticDiagnostics.clear();
     this.snapshot.dispose();
     if (this.sharedHost) this.host.releaseProgram(this.project.configFileName);
     else this.host.close();

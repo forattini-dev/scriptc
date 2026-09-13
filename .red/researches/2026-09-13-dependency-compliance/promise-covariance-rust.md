@@ -43,3 +43,5 @@ Uma execução independente do checkpoint anterior `29101fb7`, com os mesmos arg
 Os fontes do compilador permaneceram idênticos ao snapshot durante as tentativas, e todos os arquivos rastreados do Redcode foram verificados sem alterações. O [registro das tentativas](promise-covariance-redcode.json) preserva opções, proveniência, estados terminais e journals. O worktree baseline contém apenas links não rastreados para as dependências instaladas, sem alterações nos arquivos rastreados.
 
 O próximo passo para retomar a build integral é reproduzir e perfilar o consumo de memória da análise TypeScript do grafo real. A correção de Promise está validada nos casos descritos; resolver a pressão de memória e os gates completos continua pendente.
+
+Continuação da investigação de memória: [cache de diagnósticos por snapshot e vida útil da visão temporária de tipos](./semantic-diagnostics-cache.md). Esse checkpoint trata o custo da análise; não é evidência de build integral do Redcode nem de desempenho do seu binário.

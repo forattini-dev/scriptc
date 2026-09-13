@@ -242,7 +242,7 @@ export interface LoadResult {
    * specifier. Multiple exact module names may deliberately share one
    * declaration surface. */
   externalTypeSpecifiersByFile: ReadonlyMap<string, readonly string[]>;
-  projectWorld: () => ts.Program;
+  withProjectWorld: <T>(action: (program: ts.Program) => T) => T;
 }
 
 /** See LoadResult.startupCrash: Node's exact error message, the IR error
@@ -439,7 +439,6 @@ function loadProgram7(
   const entry = program.getSourceFile(entryPath);
   if (!entry) throw new Error(`could not load ${entryPath}`);
   const externalTypeSpecifiersByFile = externalTypeFileClosure7(program, externalTypes);
-  let projectWorld: ts.Program | null = null;
   return {
     program,
     entry,
@@ -448,11 +447,11 @@ function loadProgram7(
     configDiags: config.diags,
     externalTypes,
     externalTypeSpecifiersByFile,
-    projectWorld: () => (projectWorld ??= projectDeclarations.createProgram(coreRoots.filter((root) => root !== overridesDtsPath()), options)),
-    disposeAll: () => {
-      projectWorld?.dispose();
-      program.dispose();
+    withProjectWorld: (action) => {
+      const view = projectDeclarations.createProgram(coreRoots.filter((root) => root !== overridesDtsPath()), options);
+      try { return action(view); } finally { view.dispose(); }
     },
+    disposeAll: () => program.dispose(),
   };
 }
 
@@ -1916,21 +1915,17 @@ function preflight7(load: LoadResult): {
     );
   };
 
-  // The tsc gate, with a second chance: the LOWERING world's checker
-  // includes the divergence overrides (JSON.parse(): unknown, the Promise
-  // executor shape, ...), which are TIGHTER than the standard lib — a
-  // project that typechecks clean under its own tsc can still error here
-  // (any-typed JSON.parse results, most commonly). Those errors are OURS,
-  // not the project's, so they must not fail preflight: when the lowering
-  // world has errors, the PROJECT world (same program without the override
-  // declarations) is built and consulted. Clean there → preflight passes
-  // and the override-affected sites meet the lowerer's honest fences
-  // instead (the SC1100 checked-cast family). Dirty there → the project-
-  // world errors are the ones reported: they are reproducible with the
-  // project's own tsc, which is what "fix type errors first" asks for.
+  // Lowering overrides (JSON.parse(): unknown, the Promise executor shape)
+  // are tighter than the project's standard lib. If they introduce errors,
+  // consult the same program without those overrides: a clean project passes
+  // preflight and meets any checked-cast fences during lowering; a broken
+  // project reports its own reproducible tsc errors. Release this temporary
+  // checker before prefetch/lowering; only copied diagnostics survive.
   const tscErrors = errorsOf(program);
   if (tscErrors.length > 0) {
-    for (const d of errorsOf(load.projectWorld())) diags.push(toPassthrough(d));
+    load.withProjectWorld((view) => {
+      for (const d of errorsOf(view)) diags.push(toPassthrough(d));
+    });
   }
 
   // Preflight and lowering share this CheckerFacade. Claim executable

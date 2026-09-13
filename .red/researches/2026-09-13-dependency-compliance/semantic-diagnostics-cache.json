@@ -1,0 +1,417 @@
+{
+  "compilerBase": "e50752ff",
+  "consumerHead": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+  "entry": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/index.ts",
+  "options": {
+    "backend": "rust",
+    "allowEngine": false,
+    "npmStatic": [
+      "@reddb-io/redcode-core",
+      "@reddb-io/redcode-sdk",
+      "@reddb-io/redcode-llm",
+      "@reddb-io/redcode-plugin",
+      "@reddb-io/redcode-schema",
+      "@reddb-io/redcode-protocol",
+      "ulid",
+      "strip-ansi",
+      "@reddb-io/toon",
+      "undici",
+      "xdg-basedir",
+      "@reddb-io/redcode-effect-drizzle-sqlite",
+      "picocolors",
+      "sisteransi",
+      "define-lazy-prop",
+      "is-inside-container",
+      "@opentelemetry/api",
+      "immer",
+      "@deepseek-ai/cordis",
+      "poe-oauth",
+      "ansi-regex",
+      "zod-to-json-schema",
+      "eventsource-parser",
+      "eventsource",
+      "is-docker",
+      "@deepseek-ai/cosmokit",
+      "entities",
+      "domhandler",
+      "avvio",
+      "fastify-plugin",
+      "@lukeed/ms",
+      "balanced-match",
+      "domelementtype",
+      "@reddb-io/redcode-tui"
+    ],
+    "target": "bun",
+    "optimization": "release",
+    "outDir": "/tmp/scriptc-redcode-memory-20260913e/out",
+    "outPath": "/tmp/scriptc-redcode-memory-20260913e/out/redcode"
+  },
+  "limits": {
+    "cpuQuota": "100%",
+    "memoryHighBytes": 7516192768,
+    "memoryMaxBytes": 8589934592,
+    "swapMaxBytes": 0
+  },
+  "attempts": [
+    {
+      "id": "a",
+      "directory": "/tmp/scriptc-redcode-memory-20260913a",
+      "terminalStatus": "manual-stop-after-repeated-semantic-query-pressure",
+      "driverStatus": "compiling",
+      "peakCgroupBytes": 7848923136,
+      "sampledCpuMicroseconds": 90001757,
+      "memoryEvents": {
+        "low": 0,
+        "high": 18276,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "programCreations": null,
+      "semanticQueries": [],
+      "resultDiagnostics": null,
+      "binaryExists": false,
+      "sourceCapture": {
+        "available": false,
+        "reason": "compile did not return a result"
+      }
+    },
+    {
+      "id": "b",
+      "directory": "/tmp/scriptc-redcode-memory-20260913b",
+      "terminalStatus": "manual-stop-after-cache-counterprobe",
+      "driverStatus": "compiling",
+      "peakCgroupBytes": 7616352256,
+      "sampledCpuMicroseconds": 297377761,
+      "memoryEvents": {
+        "low": 0,
+        "high": 1450,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "programCreations": null,
+      "semanticQueries": [],
+      "resultDiagnostics": null,
+      "binaryExists": false,
+      "sourceCapture": {
+        "available": false,
+        "reason": "compile did not return a result"
+      }
+    },
+    {
+      "id": "c",
+      "directory": "/tmp/scriptc-redcode-memory-20260913c",
+      "terminalStatus": "timeout-124-inconclusive-after-debugger-attempt",
+      "driverStatus": "compiling",
+      "peakCgroupBytes": 7410139136,
+      "sampledCpuMicroseconds": 482921816,
+      "memoryEvents": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "programCreations": 16,
+      "semanticQueries": [
+        {
+          "id": 0,
+          "diagnostics": 4410
+        },
+        {
+          "id": 1,
+          "diagnostics": 4276
+        },
+        {
+          "id": 2,
+          "diagnostics": 4410
+        },
+        {
+          "id": 3,
+          "diagnostics": 2661
+        },
+        {
+          "id": 4,
+          "diagnostics": 2535
+        },
+        {
+          "id": 5,
+          "diagnostics": 4410
+        },
+        {
+          "id": 6,
+          "diagnostics": 4275
+        },
+        {
+          "id": 7,
+          "diagnostics": 2663
+        },
+        {
+          "id": 8,
+          "diagnostics": 4276
+        }
+      ],
+      "resultDiagnostics": null,
+      "binaryExists": false,
+      "sourceCapture": {
+        "available": false,
+        "reason": "compile did not return a result"
+      }
+    },
+    {
+      "id": "d",
+      "directory": "/tmp/scriptc-redcode-memory-20260913d",
+      "terminalStatus": "manual-stop-after-later-memory-pressure",
+      "driverStatus": "compiling",
+      "peakCgroupBytes": 7757516800,
+      "sampledCpuMicroseconds": 323535977,
+      "memoryEvents": {
+        "low": 0,
+        "high": 33962,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "programCreations": 16,
+      "semanticQueries": [
+        {
+          "id": 0,
+          "diagnostics": 2663
+        },
+        {
+          "id": 1,
+          "diagnostics": 4276
+        },
+        {
+          "id": 2,
+          "diagnostics": 2663
+        },
+        {
+          "id": 3,
+          "diagnostics": 4408
+        },
+        {
+          "id": 4,
+          "diagnostics": 2535
+        },
+        {
+          "id": 5,
+          "diagnostics": 2663
+        },
+        {
+          "id": 6,
+          "diagnostics": 4276
+        },
+        {
+          "id": 7,
+          "diagnostics": 4410
+        },
+        {
+          "id": 8,
+          "diagnostics": 2537
+        }
+      ],
+      "resultDiagnostics": null,
+      "binaryExists": false,
+      "sourceCapture": {
+        "available": false,
+        "reason": "compile did not return a result"
+      }
+    },
+    {
+      "id": "e",
+      "directory": "/tmp/scriptc-redcode-memory-20260913e",
+      "terminalStatus": "timeout-124-after-600-seconds",
+      "driverStatus": "compiling",
+      "peakCgroupBytes": 7877447680,
+      "sampledCpuMicroseconds": 478341773,
+      "memoryEvents": {
+        "low": 0,
+        "high": 38084,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0,
+        "sock_throttled": 0
+      },
+      "programCreations": 20,
+      "semanticQueries": [
+        {
+          "id": 0,
+          "diagnostics": 4410
+        },
+        {
+          "id": 1,
+          "diagnostics": 2537
+        },
+        {
+          "id": 2,
+          "diagnostics": 4410
+        },
+        {
+          "id": 3,
+          "diagnostics": 4408
+        },
+        {
+          "id": 4,
+          "diagnostics": 4274
+        },
+        {
+          "id": 5,
+          "diagnostics": 2663
+        },
+        {
+          "id": 6,
+          "diagnostics": 3524
+        },
+        {
+          "id": 7,
+          "diagnostics": 4410
+        },
+        {
+          "id": 8,
+          "diagnostics": 4276
+        },
+        {
+          "id": 9,
+          "diagnostics": 4410
+        },
+        {
+          "id": 10,
+          "diagnostics": 2537
+        }
+      ],
+      "resultDiagnostics": null,
+      "binaryExists": false,
+      "sourceCapture": {
+        "available": false,
+        "reason": "compile did not return a result"
+      }
+    }
+  ],
+  "hashVerification": [
+    {
+      "scope": "compiler",
+      "checked": 483,
+      "changed": []
+    },
+    {
+      "scope": "consumer",
+      "checked": 6848,
+      "changed": []
+    }
+  ],
+  "graphVariation": {
+    "cSourceCount": 4223,
+    "dSourceCount": 4172,
+    "onlyC": [
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/api/index.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/cache/memory-cache-store.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/cache/sqlite-cache-store.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/core/connect.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/core/errors.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/core/symbols.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/core/util.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/balanced-pool.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/client.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/dispatcher.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/dispatcher1-wrapper.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/env-http-proxy-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/h2c-client.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/pool.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/proxy-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/retry-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/round-robin-pool.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/dispatcher/socks5-proxy-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/global.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/handler/decorator-handler.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/handler/redirect-handler.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/handler/retry-handler.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/cache.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/decompress.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/deduplicate.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/dns.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/dump.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/redirect.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/response-error.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/interceptor/retry.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/mock-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/mock-call-history.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/mock-client.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/mock-errors.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/mock-pool.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/mock/snapshot-agent.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/cache/cachestorage.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/cookies/index.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/eventsource/eventsource.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/data-url.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/formdata.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/global.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/headers.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/index.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/request.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/fetch/response.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/websocket/events.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/websocket/stream/websocketerror.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/websocket/stream/websocketstream.js",
+      "/home/cyber/Work/reddb.io/redcode/node_modules/.bun/undici@8.3.0/node_modules/undici/lib/web/websocket/websocket.js"
+    ],
+    "onlyD": [],
+    "cause": "not isolated",
+    "smallDepthProbe": {
+      "rounds": 30,
+      "distinctGraphs": 1,
+      "reproduced": false
+    }
+  },
+  "validation": {
+    "finalFocused": {
+      "passed": 5,
+      "log": "/tmp/scriptc-redcode-memory-final-focused.log"
+    },
+    "finalIntegration": {
+      "passed": 26,
+      "log": "/tmp/scriptc-redcode-memory-final-integration.log"
+    },
+    "build": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 3140
+    },
+    "plain": {
+      "passed": 6,
+      "failed": 1,
+      "failure": "native-toolchain.test.ts missing ccache.log",
+      "log": "/tmp/scriptc-redcode-memory-final-plain.log"
+    },
+    "sanitized": {
+      "passed": 6,
+      "failed": 1,
+      "failure": "native-toolchain.test.ts missing ccache.log",
+      "log": "/tmp/scriptc-redcode-memory-final-san.log"
+    },
+    "broaderSelectionBeforeScopedWorld": {
+      "passed": 32,
+      "failed": 2,
+      "failuresReproducedAtBase": true,
+      "baselineLog": "/tmp/scriptc-redcode-memory-baseline-tests.log"
+    }
+  },
+  "approvedForPublication": false,
+  "limitsOfEvidence": [
+    "Memory is for compilation, not the generated executable.",
+    "Interrupted attempts have no terminal diagnostic count.",
+    "Concurrent validation and graph variation rule out whole-build percentage comparisons.",
+    "Final systemd journal underreports peak memory as 3.5M; the direct cgroup memory.peak series is the memory measurement used here."
+  ]
+}

@@ -34,7 +34,7 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/frontend/lowering/lowerer.ts", 9_290],
   ["packages/compiler/src/frontend/lowering/surfaces.ts", 1_565],
   ["packages/compiler/src/frontend/npm.ts", 2_002],
-  ["packages/compiler/src/frontend/program.ts", 3_258],
+  ["packages/compiler/src/frontend/program.ts", 3_253],
   ["packages/compiler/src/frontend/type-mapper.ts", 3_746],
   ["packages/compiler/src/index.ts", 2_416],
   ["packages/compiler/src/ir/ir.ts", 7_472],
