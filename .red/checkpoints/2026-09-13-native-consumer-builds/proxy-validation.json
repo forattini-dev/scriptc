@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "compilerCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
+  "precommitSourceDiffSha256": "f07ba2f59309d6f46f1985d943d3760e1877dfc5d5205bc2ee8e2ac35f70b13d",
+  "scope": "Native Proxy get and service accessor compiler slice; not complete CLI or all-entry acceptance. Recorded focused runs do not replace the full shipping gate.",
+  "differential": {
+    "distinctProgramsPassedAcrossFocusedRuns": 45,
+    "singleFinalIntegrationRunPassed": 16,
+    "newPrograms": [
+      "3244-native-symbol-dynamic.ts",
+      "3245-native-proxy-get.ts",
+      "3246-native-service-use.ts",
+      "3247-native-proxy-bun.ts",
+      "3248-native-symbol-string.ts",
+      "3249-native-symbol-json.ts",
+      "3250-native-proxy-method-receiver.ts"
+    ],
+    "newProgramsEnginePolicy": "no engine",
+    "existingDynamicProgramsInFocusedTotal": 3,
+    "all45RetestedTogetherOnFinalSource": false,
+    "runs": [
+      {
+        "log": "/tmp/scriptc-native-proxy-20260913/related-native.log",
+        "passed": 32,
+        "failed": 2,
+        "status": "partial_then_repaired_by_focused_rerun"
+      },
+      {
+        "log": "/tmp/scriptc-native-proxy-20260913/final-native-optional.log",
+        "passed": 4,
+        "failed": 0,
+        "status": "passed"
+      },
+      {
+        "log": "/tmp/scriptc-native-proxy-20260913/optional-existing.log",
+        "passed": 4,
+        "failed": 0,
+        "status": "passed"
+      },
+      {
+        "log": "/tmp/scriptc-native-proxy-20260913/symbol-related-native.log",
+        "passed": 6,
+        "failed": 0,
+        "status": "passed"
+      },
+      {
+        "log": "/tmp/scriptc-proxy-method-receiver-final.log",
+        "passed": 3,
+        "failed": 0,
+        "status": "passed"
+      }
+    ]
+  },
+  "contracts": {
+    "packageTests": 60,
+    "packageFiles": 9,
+    "sharedTests": 22,
+    "sharedFiles": 5,
+    "methodReceiverTests": 6,
+    "promiseIntegrationTests": 1,
+    "promiseRefusalRoutes": 7,
+    "symbolRootRefusalTests": 4,
+    "ordinaryStringSourceEmissionTests": 3
+  },
+  "diagnostics": {
+    "passed": 121,
+    "exitCode": 0,
+    "earlierRunWith121PassedButRpcTimeoutWasNotGreen": true
+  },
+  "runtime": {
+    "toolchain": "1.98.0",
+    "testsPassed": 254,
+    "clippyExitCode": 0,
+    "clippyWarningsDenied": true
+  },
+  "staticChecks": {
+    "compilerBuildExitCode": 0,
+    "lintExitCode": 0,
+    "lintErrors": 0,
+    "lintWarnings": 3140,
+    "manifestEntries": 637,
+    "compatibilityModules": 53,
+    "compatibilitySourceRows": 4690,
+    "compatibilityPublicRows": 3662
+  },
+  "originalServiceUse": {
+    "entry": {
+      "path": "/home/cyber/Work/reddb.io/redcode/packages/core/src/effect/service-use.ts",
+      "sha256": "c822dfd22e911d6997fe8544f7f4bc90c25510a9d3fc9b5053e0688ea665657d"
+    },
+    "fsUtilTypes": {
+      "path": "/home/cyber/Work/reddb.io/redcode/packages/core/src/fs-util.ts",
+      "sha256": "40084b297ac1f0d1d01ea58eed97c94180201a3921c1d7b42f890935faa065ef"
+    },
+    "scope": "Original helper and original FSUtil method/error types; Effect.sync fixture implementations, not full FSUtil or CLI.",
+    "modes": [
+      "Node 24.15.0",
+      "Bun 1.4.1",
+      "native Rust 1.97.1",
+      "native Rust with heap audit"
+    ],
+    "allExitsZero": true,
+    "stdoutEqual": true,
+    "stderrEqual": true,
+    "consumerUnchanged": true,
+    "compilerSourceManifestUnchanged": true,
+    "developmentArtifactIsNotReleaseSizeOrPerformanceEvidence": true,
+    "evidenceDirectory": "/tmp/scriptc-native-proxy-original-20260913/full-types-final",
+    "evidenceSha256": {
+      "result.json": "71685c0b1b067169b0a60ad6a67fc102c7222fd47b78f0b51c45c0234e0269ce",
+      "source-freeze-comparison.json": "961b94bfd1d08046e8eafe7ea04c7f9e046e412756d0f25d169b3e9d3fbda38f"
+    }
+  },
+  "remainingBoundaries": [
+    "Proxy mutation, reflection, copying, general Symbol-key storage and unsupported descriptor invariants remain refused.",
+    "Promise assimilation of a top-level Proxy is explicitly rejected; thenable semantics are not implemented.",
+    "Explicit this across await or in async/generator bodies remains refused.",
+    "Symbol left at JSON root is explicitly refused because IR cannot represent the undefined result.",
+    "Callback conversion from () => Promise<T> to () => Promise<unknown> can discard the original Promise and cause an orphan rejection; separate unfixed compiler bug."
+  ],
+  "promiseCovarianceEvidence": "/tmp/scriptc-proxy-promise-debug-20260913/covariant-adapter-result.json",
+  "originalBuildsRecord": "latest-builds.json",
+  "previousValidationRecord": "validation.json",
+  "fullPlainAndSanitizedShippingGate": "pending",
+  "mainIntegrated": false,
+  "pushed": false,
+  "evidence": {
+    "finalDifferential": {
+      "path": "/tmp/scriptc-native-proxy-20260913/closure-final-native.log",
+      "sha256": "aa40dfabc1450a403597ac2fbb8fb55e1ddfdbfb95cc53b216a5169cc5ba86ff"
+    },
+    "diagnostics": {
+      "path": "/tmp/scriptc-native-proxy-20260913/diagnostics-frozen-verified.log",
+      "sha256": "7bbc4d61504275dfece8b79460a75c6882f0de50bf92df5b62ea9085dd1e664c"
+    },
+    "compilerBuild": {
+      "path": "/tmp/scriptc-native-proxy-20260913/compiler-frozen-build.log",
+      "sha256": "2e227ee91f0649ffe8a9d67b7ca0c9d1553e91632d00ecd38680b77776585199"
+    },
+    "lint": {
+      "path": "/tmp/scriptc-native-proxy-20260913/lint-frozen.log",
+      "sha256": "94cf69be9cd72e9fc23895ee68deace1f96e0798c2b778e81371c820eb855de6"
+    },
+    "packageContracts": {
+      "path": "/tmp/scriptc-native-proxy-20260913/package-contracts.log",
+      "sha256": "c6a7a11550245f25292b0a4d6b738616bb374464206c3788b67847a77143a226"
+    },
+    "sharedContracts": {
+      "path": "/tmp/scriptc-native-proxy-20260913/shared-contracts.log",
+      "sha256": "4ce2067020022f5101ff5baf5b8ace0f6270dfe75d7caba80e1d8a0f0dbf3c02"
+    },
+    "methodContracts": {
+      "path": "/tmp/scriptc-proxy-method-receiver-deferred.log",
+      "sha256": "8af0f1680d12346e5c3c41d4874b718342c59f10c08aef6d18ef6c057b322cdb"
+    },
+    "promiseIntegration": {
+      "path": "/tmp/scriptc-native-proxy-original-20260913/promise-bridge-test.log",
+      "sha256": "eea24e8bfef2ac6849f51e94e7362bd4130475a77adb133a540f01c0dd63425c"
+    },
+    "runtimeTests": {
+      "path": "/tmp/scriptc-native-proxy-original-20260913/runtime-test-final.log",
+      "sha256": "153a583a2fc23d828957b8a440ee5873e593964582b2ccf741c8cf378c2dbcd0"
+    },
+    "runtimeClippy": {
+      "path": "/tmp/scriptc-native-proxy-original-20260913/runtime-clippy-final.log",
+      "sha256": "d30b1dcd85b88e15eabf1284a1f75abb884ede3fab00fcbfd2e5f008eb773edc"
+    },
+    "manifest": {
+      "path": "/tmp/scriptc-native-proxy-20260913/manifest-check.log",
+      "sha256": "d86712c4df06526660a5dd71724ec41115cc551955fd3672cfdcc416c0532258"
+    },
+    "compatibility": {
+      "path": "/tmp/scriptc-native-proxy-20260913/compatibility-check.log",
+      "sha256": "4ae30dacfb10fc9d90a161b3919fdf003a4be058f4549061f6df0fd839bbaef6"
+    }
+  }
+}

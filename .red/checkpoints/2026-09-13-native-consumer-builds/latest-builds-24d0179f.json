@@ -1,6 +1,6 @@
 {
-  "compilerCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
-  "baselineCompilerCommit": "24d0179f66aa154c10eb61cd73bcee6862349b9b",
+  "compilerCommit": "24d0179f66aa154c10eb61cd73bcee6862349b9b",
+  "baselineCompilerCommit": "f1087c892c9fb38ad41c712417284be98dadfe7d",
   "scope": "Original Redcode full CLI attempt and original RPC sidecar release build; consumer sources unchanged.",
   "fullRedcode": {
     "entry": "/home/cyber/Work/reddb.io/redcode/packages/redcode/src/index.ts",
@@ -47,50 +47,46 @@
       "optimization": "release"
     },
     "validation": {
-      "verifiedAt": "2026-09-13T15:06:33.932365+00:00",
-      "compilerCommit": "5e0830c24a73a2122b6ecec430c4d31b810de215",
+      "verifiedAt": "2026-09-13T13:11:19.376205+00:00",
+      "compilerCommit": "24d0179f66aa154c10eb61cd73bcee6862349b9b",
       "consumerCommit": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
       "status": "refused",
       "compilerChildExitCode": 1,
       "nativeExecutableExists": false,
-      "diagnosticOccurrences": 3090,
+      "diagnosticOccurrences": 3100,
       "baselineDiagnosticOccurrences": 3100,
-      "removedCodeLocationOccurrences": 13,
-      "addedCodeLocationOccurrences": 3,
-      "changedSameCodeLocationMessageGroups": 6,
-      "serviceUseDiagnosticOccurrences": 0,
+      "identicalCodeLocationOccurrenceMultisets": true,
+      "changedSameCodeLocationMessageGroups": 9,
       "sameOptionsExceptOutputPaths": true,
       "staticSelectedPackageCount": 34,
       "compilerUnchangedDuringAttempt": true,
       "consumerUnchangedDuringAttempt": true,
       "trackedConsumerSnapshotIdenticalToBaseline": true,
       "sourceCapture": {
-        "origin": "compile.result.sourceTexts",
-        "baselineTextAvailable": false,
-        "candidateTextAvailable": true,
-        "baselineCount": 1323,
-        "candidateCount": 1323,
+        "basis": "Compiler result.sourceTexts hashes; these need not be raw file hashes.",
+        "currentCount": 1323,
+        "baselineCount": 1374,
         "commonCount": 1323,
-        "captureSetsEqual": true,
-        "allCapturedHashesEqual": true,
-        "addedSources": [],
-        "removedSources": [],
-        "changedSources": [],
-        "uncapturedSourcePolicy": "No substitution or inference from disk bytes. Missing compiler captures remain missing."
+        "commonHashesMatch": true,
+        "newlyCapturedCount": 0,
+        "noLongerCapturedCount": 51,
+        "changedCommonCount": 0,
+        "all51NoLongerCapturedUndiciFilesStillMatchBaselineHashesOnDisk": true,
+        "identicalCaptureSets": false
       },
-      "compileAttemptMilliseconds": 149411.58065000002,
+      "compileAttemptMilliseconds": 139225.909825,
       "applicationPerformanceMeasured": false,
       "remainingByCode": {
         "SC0004": 2,
         "SC1031": 16,
         "SC1052": 2,
         "SC1071": 8,
-        "SC1090": 1303,
+        "SC1090": 1306,
         "SC1100": 6,
-        "SC1101": 23,
+        "SC1101": 28,
         "SC1120": 5,
         "SC2001": 20,
-        "SC2002": 6,
+        "SC2002": 7,
         "SC2003": 9,
         "SC2004": 288,
         "SC2005": 2,
@@ -100,18 +96,18 @@
         "SC2011": 158,
         "SC2012": 1,
         "SC2013": 643,
-        "SC2020": 119
+        "SC2020": 120
       },
       "evidenceSha256": {
-        "build.json": "d2d30402160a570d38d2c6e16276b5f106d22d31097e1456aa9fd99fb948c497",
-        "runner.json": "b1132ae76af3239d2761e5134acf6dd4ae865cead80be762b5b80d10e98ccca9",
-        "comparison.json": "6aeaf1efc3153dd905097b3484590dbf1e451c32622e066b9a336b804c0090c9",
-        "comparison-summary.json": "b7a3fcc5baa4a32cfe1501172855951cc56b7128b063acb9f350b37b18eaca2c",
-        "source-comparison.json": "58fe7b8c142f7c43695539423b450c29a2e29e538bc1ad8d6206d983ac0da1c1",
-        "changed-diagnostic-messages.json": "a5729b14e15921436299dedc30b39dbf33190aa0250d9038b2927a6b300d9591"
+        "build.json": "2245c8afc061ab3eaa301a52fe6b5645f450939bce7f6d731864f4e45ad84386",
+        "runner.json": "fe70b271f05c087c8e5a2b2024575873433678919ba7f2d69d7e330d0f50be99",
+        "comparison.json": "c7c319d8ee9b8ad07d62fdbadcd4ad8400d94ea9d80bb3f37cc84b76b990e5ef",
+        "source-comparison.json": "c8cf764293842b955fab409bf4fd507cdf3002ee096bd12e8b5059eb635467d3",
+        "changed-diagnostic-messages.json": "8d97f6e39d13c720f0509ee43e4a0582de6fe097a522415e8dbb79c6af12c24c",
+        "uncaptured-source-verification.json": "4f03edeabd51bd8c1f67bb095a0da87da5051219f3fa323cfd201935541cdb5f"
       }
     },
-    "evidenceDirectory": "/tmp/scriptc-redcode-native-proxy-20260913a"
+    "evidenceDirectory": "/tmp/scriptc-redcode-keyed-methods-20260913a"
   },
   "rpcSidecar": {
     "entry": "/home/cyber/Work/reddb.io/redcode/packages/rpc-sidecar/src/cli.ts",
@@ -128,12 +124,12 @@
     },
     "safetyProfile": "rust-only",
     "runtimeFences": [],
-    "binaryBytes": 4370568,
-    "binaryMiB": 4.168098449707031,
-    "binarySha256": "a41067738a1bfa834921936285646e7b78ca7bf95536590e78bdc07a6359a59d",
-    "artifactPath": "/tmp/scriptc-redcode-sidecar-proxy-release-20260913/program",
-    "releaseBaselineBytes": 4359544,
-    "releaseBytesDelta": 11024,
+    "binaryBytes": 4359544,
+    "binaryMiB": 4.157585144042969,
+    "binarySha256": "f9f9305472c9ed7466424cd896ef24a4bc492d7b0a23d947335932ca6d2f5712",
+    "artifactPath": "/tmp/scriptc-redcode-sidecar-keyed-release-20260913/program",
+    "releaseBaselineBytes": 4358904,
+    "releaseBytesDelta": 640,
     "originalIntegrationTests": {
       "tests": 8,
       "assertions": 22,
@@ -152,15 +148,14 @@
     },
     "testHost": "Bun 1.3.14",
     "applicationPerformanceMeasured": false,
-    "evidenceDirectory": "/tmp/scriptc-redcode-sidecar-proxy-release-20260913",
+    "evidenceDirectory": "/tmp/scriptc-redcode-sidecar-keyed-release-20260913",
     "evidenceSha256": {
-      "build.json": "779a359b7c8e180f92ce0fe11d02462c5f16d4eec3fc7c4716a5bd44047c237f",
-      "runner.json": "eef52da1c83dd1165c0577c31b7ed8c1f2e932469676b0c719edcb84488983e2",
-      "metrics.json": "16f1983d3be7f0cb555f6ad5107cc27d58aacfc71d6dce193ccdd4f4f89b5c5f",
-      "acceptance/result.json": "e98f1fdc08b00567f4379e7973e92a11cc11793f94330be3e5656aac32bdbd76",
-      "acceptance/junit.xml": "ba8bba181cda1d1043ae5c1d35a4b430b5ab6a4feefd0646a9a4b3edec1b0158"
-    },
-    "releaseSizeChangePercent": 0.2528704837019724
+      "build.json": "1bd6abaa9a343c9e6720b4bc560a9cc043ab011c1ffe4174fe4d6004b753ac53",
+      "runner.json": "8c01c2b9a684fcc243bdc086ecea2267d51a5c46af4be3ff7927ab18f4d6cca5",
+      "metrics.json": "f48dda53242fb398cf23ee589d0226ee5195b87f62ac8c6b5f21954ebd7ac6d6",
+      "acceptance/result.json": "072f870172c96fddc27b1874639145a243612369e620a5615c2102451a62f179",
+      "acceptance/junit.xml": "02cfff3b55400e6601c56543c4fb08c72bd752a62470d6af4c77b827ef5bd23b"
+    }
   },
   "otherOriginalEntries": {
     "retestedAtThisCompilerCheckpoint": false,
@@ -169,6 +164,5 @@
   },
   "fullPlainAndSanitizedShippingGate": "pending",
   "mainIntegrated": false,
-  "pushed": false,
-  "previousCheckpointRecord": "latest-builds-24d0179f.json"
+  "pushed": false
 }
