@@ -1,3 +1,4 @@
+import { lowerComputedStringKey } from "./lower-computed-string-key.js";
 import { lowerRegexStateRead, lowerRegexStateAssign, lowerDynamicRegexCapture } from "./lower-regex-state.js";
 import { lowerRuntimeKeyIn, lowerTypedRecordIn } from "./lower-record-membership.js";
 import { lowerNativeDateRegexInstanceof } from "./lower-date-instanceof.js";
@@ -4635,18 +4636,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
         if (folded !== null) {
           key = { kind: "strLit", value: folded, type: STRING, loc: locOf(name) };
         } else {
-          let k = lowerer.lowerExpr(name.expression);
-          if (k.type.kind === "f64" || k.type.kind === "bool" || k.type.kind === "dyn") {
-            k = { kind: "toString", operand: k, type: STRING, loc: locOf(name) };
-          }
-          if (k.type.kind !== "string") {
-            lowerer.unsupported(
-              "SC1090",
-              name,
-              `'${lowerer.fmt(k.type)}'-typed computed property keys (string, number, boolean, and unknown keys stringify)`,
-            );
-          }
-          key = k;
+          key = lowerComputedStringKey(lowerer, name);
         }
       } else if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
         key = { kind: "strLit", value: name.text, type: STRING, loc: locOf(name) };
@@ -5519,17 +5509,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         // writes through the signature exactly like a spread's keys.
         // Number/boolean/unknown keys stringify (ToPropertyKey).
         if (ts.isPropertyAssignment(prop) && ts.isComputedPropertyName(prop.name)) {
-          let k = lowerer.lowerExpr(prop.name.expression);
-          if (k.type.kind === "f64" || k.type.kind === "bool" || k.type.kind === "dyn") {
-            k = { kind: "toString", operand: k, type: STRING, loc: locOf(prop.name) };
-          }
-          if (k.type.kind !== "string") {
-            lowerer.unsupported(
-              "SC1090",
-              prop.name,
-              `'${lowerer.fmt(k.type)}'-typed computed property keys (string, number, boolean, and unknown keys stringify)`,
-            );
-          }
+          const k = lowerComputedStringKey(lowerer, prop.name);
           const value = lowerer.intoIndexValueSlot(lowerer.lowerExpr(prop.initializer), shape.indexValue, prop.initializer);
           contributors.push({ kind: "keyedField", key: k, value });
           continue;
