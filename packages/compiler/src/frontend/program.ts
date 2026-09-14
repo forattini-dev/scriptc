@@ -378,11 +378,11 @@ function loadProgram7(
     const conditions = [...activeRuntimeConditions().filter((c) => c !== "import" && c !== "default"), ...projectConditions];
     if (conditions.length > 0) options = { ...options, customConditions: [...new Set(conditions)] };
   }
-  // --npm-static: opted-in packages' shipped JS must be TYPE-INCLUDED (not
-  // just resolved) — without maxNodeModuleJsDepth, node_modules JS types as
-  // an implicit-any module (TS7016) and nothing infers. Only flagged
-  // compiles pay this; flagless builds keep the exact historical options.
-  if (npmStaticActive()) options.maxNodeModuleJsDepth = 4;
+  // Admitted JS needs its complete type graph: a finite depth cutoff can
+  // omit shared descendants depending on which declaration path TS7 visits
+  // first. Use the largest exact JS integer; cycles terminate by file identity.
+  // Package admission still belongs to npmStaticFsShadow, not graph depth.
+  if (npmStaticActive()) options.maxNodeModuleJsDepth = Number.MAX_SAFE_INTEGER;
   // --provenance-sources: the registered entries become tsconfig "paths"
   // so tsgo's OWN resolution of the bare specifiers lands on the same
   // source files the preflight resolver answers — the checker types the

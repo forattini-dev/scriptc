@@ -24,11 +24,7 @@ equivale a aceitar todo programa aprovado pelo checker TypeScript.
 1. **Validação integral:** corrigir ambiente/cache, helper LLVM ausente e
    expectativas de bigint; obter os gates plain e sanitized verdes sem ocultar
    recusas. Separar resultados Rust nativo, Rust com engine e C/LLVM.
-2. **Escala do frontend:** congelar inputs, medir Node + TS7 por fase, explicar a
-   variação do grafo e eliminar consultas equivalentes/retenções. Aceite: três
-   análises completas do Redcode original, cada uma em até 600 s e pico de até
-   6 GiB sob uma CPU; teto de segurança 8 GiB e sem swap. São metas ainda não
-   atingidas, não garantias de implementação.
+2. **Escala do frontend:** congelar inputs, medir Node + TS7 por fase, explicar a variação do grafo e eliminar consultas equivalentes/retenções. Aceite: três análises completas do Redcode original, cada uma em até 600 s e pico de até 6 GiB sob uma CPU; teto de segurança 8 GiB e sem swap. O sétimo checkpoint atinge esse aceite no perfil com GOMEMLIMIT=4GiB; não é uma garantia para a configuração padrão.
 3. **Contratos da IR:** centralizar conversões, identidade, aliasing, ordem e
    avaliação única; validar operações, capturas e serialização. Migrar por
    famílias, sem reescrita integral.
@@ -150,3 +146,11 @@ O corpus 1703 agora compila e executa com paridade Node em Rust sem engine, sem 
 A nova análise completa do Redcode terminou em 118,56 s e pico de 6,21 GiB, ainda com 3.087 diagnósticos e sem binário. Não houve redução de bloqueios nessa execução nem comprovação de ganho percentual de performance. Os gates gerais plain e sanitized terminaram no bloqueio C de library-contract já reproduzido antes desta mudança; continuam vermelhos. A seleção Rust ampliada terminou separadamente com 117 testes aprovados em quatro arquivos, sem falhas, incluindo os novos diferenciais e todo o grupo anteriormente bloqueado pelo corpus 1703. Isso não é a totalidade dos testes Rust do repositório.
 
 Três análises experimentais com GOMEMLIMIT=4GiB terminaram em 178,83–198,51 s, com picos de 4,68–4,70 GiB e os mesmos códigos/localizações dos 3.087 diagnósticos. Porém, duas capturas têm 51 fontes internas de undici a menos, apesar dos hashes de entrada verificados permanecerem iguais. O orçamento não virou configuração padrão e a meta de escala continua aberta até explicar a variação do grafo. São medidas da análise, sem binário Redcode produzido.
+
+### Sétimo checkpoint: grafo completo e isolamento das dependências
+
+O corte de quatro níveis de JS fazia o checker TS7 omitir descendentes conforme a ordem de visita. O problema foi reproduzido no Redcode, em replay de filesystem congelado e num projeto de sete arquivos. O frontend agora admite o grafo completo dos pacotes selecionados. Uma cadeia de sete pacotes JS que antes exigia engine em depth4 agora compila para Rust nativo com paridade Node. O ajuste complementar preserva a tipagem de dependências não admitidas, inclusive quando exports torna seu metadata de tipos inalcançável; declarações alcançáveis continuam sendo usadas.
+
+Três análises completas do Redcode atingiram o aceite de escala no perfil medido: 224,18–291,61 s e picos de 4,77–4,96 GiB, sob uma CPU e GOMEMLIMIT=4GiB. Todas as fases relevantes conservaram os mesmos grafos; os 1.335 textos-fonte finais conservaram ordem e hashes. Os diagnósticos finais continuam com os mesmos códigos/localizações: 3.087, sem binário. O orçamento Go não virou padrão e os gates gerais continuam vermelhos em falhas C preexistentes.
+
+Cinco regressões focadas passaram em plain e na configuração sanitized. A seleção npm/lifecycle/TS7 terminou com 112 aprovados e três falhas C reproduzidas no baseline; seu caso Rust também passou. Build e lint passaram, com avisos anteriores preservados. Ver [causa, contraprovas, limites e resultados](static-js-graph-depth.md). O próximo trabalho pode usar o grafo reproduzível para reduzir as rodadas de análise e tratar os bloqueios do núcleo de linguagem, antes de ampliar bibliotecas.

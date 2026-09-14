@@ -61,12 +61,11 @@
  * slate. */
 
 import { thirdPartyDeclarationReason } from "./npm-static-declarations.js";
-import { dirname } from "node:path";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
 import { NpmStaticTypeBridge, resetNpmStaticTypes } from "./npm-static-types.js";
 import { isTsSourceFileName } from "./tsc-codes.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./workspace-registry.js";
-import { trackedExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+import { trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 let activePackages: ReadonlySet<string> = new Set();
 
@@ -84,7 +83,6 @@ export function setNpmStaticPackages(packages: Iterable<string>): void {
   offenders.clear();
   rewriteCache.clear();
   resetNpmStaticTypes();
-  untypedPkgCache.clear();
   realpathProbed.clear();
 }
 
@@ -280,57 +278,6 @@ function isNodeModulesPathNorm(path: string): boolean {
   return path.split("\\").join("/").includes("/node_modules/");
 }
 
-/** Whether the package owning `path` is UNTYPED for the checker: no
- * "types"/"typings" claim, no root .d.ts entry, and no installed @types
- * twin along the walk-up — the packages whose flagless import surface is
- * `any` (see the any-surface stub in the fs shadow). Cached per package
- * directory for the load's lifetime. */
-const untypedPkgCache = new Map<string, boolean>();
-
-function packageIsUntyped(path: string): boolean {
-  const norm = path.split("\\").join("/");
-  const idx = norm.lastIndexOf("/node_modules/");
-  if (idx === -1) return false;
-  const rest = norm.slice(idx + "/node_modules/".length);
-  const parts = rest.split("/");
-  const first = parts[0] ?? "";
-  if (first.startsWith("@types")) return false; // a twin IS the types
-  const dirName = first.startsWith("@") ? `${first}/${parts[1] ?? ""}` : first;
-  const pkgDir = `${norm.slice(0, idx)}/node_modules/${dirName}`;
-  const hit = untypedPkgCache.get(pkgDir);
-  if (hit !== undefined) return hit;
-  let untyped = true;
-  try {
-    const pkgText = trackedReadFile(`${pkgDir}/package.json`);
-    if (pkgText !== null) {
-      const pkg = JSON.parse(pkgText) as Record<string, unknown>;
-      if (pkg["types"] !== undefined || pkg["typings"] !== undefined) untyped = false;
-      if (untyped && typeof pkg["exports"] === "object" && pkg["exports"] !== null) {
-        // a "types" condition anywhere inside exports is a claim too
-        untyped = !JSON.stringify(pkg["exports"]).includes('"types"');
-      }
-    }
-  } catch {
-    /* no package.json — keep probing */
-  }
-  if (untyped && trackedExists(`${pkgDir}/index.d.ts`)) untyped = false;
-  if (untyped) {
-    // the @types twin, hoisted anywhere up the realm chain
-    const mangled = mangledTypesName(dirName);
-    for (let dir = dirname(pkgDir); ; ) {
-      const parent = dirname(dir);
-      if (trackedExists(`${dir}/node_modules/@types/${mangled}/package.json`) || trackedExists(`${dir}/@types/${mangled}/package.json`)) {
-        untyped = false;
-        break;
-      }
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-  untypedPkgCache.set(pkgDir, untyped);
-  return untyped;
-}
-
 export interface NpmStaticFsShadow {
   /** Shadowed CONTENT for a real path (the types-stripped package.json),
    * or undefined (no shadow — fall through). */
@@ -353,22 +300,14 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
       const virtual = types.readFile(path);
       if (virtual !== undefined) return virtual;
       const target = shadowTargetOf(path);
-      /* NON-OPTED node_modules JS: maxNodeModuleJsDepth (set only on
-       * --npm-static loads) admits third-party JS the flagless build never
-       * types, and an UNTYPED package's inferred surface would then
-       * replace the `any` its imports contribute flagless — changing the
-       * PROGRAM's own types under a flag that promised to touch only the
-       * opted-in packages (the jaro-winkler shape: an @ts-ignore'd import
-       * whose result feeds program arithmetic). Serve those files as the
-       * any-surface stub instead: the import types exactly what the
-       * flagless build typed. Typed packages (own .d.ts or an installed
-       * @types twin) resolve types-first and never reach here. */
+      /* Expanding admitted JS must not infer non-admitted implementations.
+       * A package's types metadata does not prove that this runtime path
+       * has a reachable declaration (exports can hide it). Resolution still
+       * reads reachable declarations normally; runtime JS uses the existing
+       * any surface that flagless imports have at depth zero. */
       if (!target) {
         if (
-          (path.endsWith(".js") || path.endsWith(".cjs")) &&
-          isNodeModulesPathNorm(path) &&
-          !trackedExists(path.replace(/\.(js|cjs)$/, ".d.ts")) && // a sibling .d.ts types this very file
-          packageIsUntyped(path)
+          /\.(?:js|cjs|mjs)$/.test(path) && isNodeModulesPathNorm(path)
         ) {
           return "module.exports = (() => { let u; return u; })();\n";
         }

@@ -40,6 +40,40 @@ test("auto discovers nested transitive imports to a fixed point", async () => {
   });
 });
 
+test("Rust infers and compiles an explicitly admitted JS chain beyond four packages", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-transitive-depth-"));
+  try {
+    const packages = Array.from({ length: 7 }, (_, i) => `depth${i}`);
+    let parent = dir;
+    for (const [i, name] of packages.entries()) {
+      const source = i === packages.length - 1 ? "export function run() { return 7; }"
+        : `import { run as child } from "${packages[i + 1]}"; export function run() { return child() + 1; }`;
+      parent = packageAt(parent, name, source, "export declare function run(): number;");
+    }
+    const entry = join(dir, "main.ts");
+    writeFileSync(entry, 'import { run } from "depth0"; const answer: number = run(); console.log(answer);');
+    const result = await compile(entry, { npmStatic: packages, backend: "rust", allowEngine: false,
+      outDir: join(dir, "out"), outPath: join(dir, "out/program"), optimization: "dev",
+    });
+    expect(result.ok, result.ok ? "" : result.diagnostics.map((d) => d.message).join("\n")).toBe(true);
+    if (!result.ok) return;
+    expect(result.execution.engine).toBe("none");
+    expect(result.runtimeFences).toEqual([]);
+    const node = spawnSync(nodeOracleExecutable(), [entry], { timeout: 30_000 });
+    const native = spawnSync(result.binaryPath, [], {
+      timeout: 30_000, env: { ...process.env, SCRIPTC_RUST_HEAP_AUDIT: "1" },
+    });
+    expect(node.error).toBeUndefined();
+    expect(native.error).toBeUndefined();
+    expect(node.status).toBe(0);
+    expect(node.stdout.toString()).toBe("13\n");
+    expect(native.status).toBe(node.status);
+    expect(native.signal).toBeNull();
+    expect(native.stdout).toEqual(node.stdout);
+    expect(native.stderr).toEqual(node.stderr);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test.for(["rust", "c", "llvm"] as const)("transitive auto native parity with backend %s", async (backend) => {
   await fixture(async (dir, entry) => {
     const result = await compile(entry, { npmStatic: "auto", backend, allowEngine: false,

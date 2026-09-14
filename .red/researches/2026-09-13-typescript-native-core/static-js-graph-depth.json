@@ -1,0 +1,106 @@
+{
+  "profile": {
+    "cpuQuota": "100%",
+    "memoryHigh": "7G",
+    "memoryMax": "8G",
+    "swapMax": 0,
+    "GOMEMLIMIT": "4GiB",
+    "timeoutSeconds": 600
+  },
+  "runs": [
+    {
+      "path": "/tmp/scriptc-redcode-depth-isolated-20260914b",
+      "status": "refused",
+      "seconds": 283.195186249,
+      "memoryPeakBytes": 5125693440,
+      "diagnostics": 3087,
+      "sources": 1335,
+      "sameSourceHashes": true,
+      "sameSourceOrder": true,
+      "sameDiagnosticCodeLocations": true,
+      "samePhaseGraphs": true,
+      "phaseSizes": [
+        4290,
+        4301,
+        4300,
+        4225,
+        4236,
+        4235
+      ],
+      "unchangedDuringRun": true,
+      "sameRecordedInputs": true,
+      "timeout": false,
+      "inputCounts": {
+        "compilerSources": 488,
+        "consumerFiles": 6848,
+        "previousGraphFiles": 4348
+      }
+    },
+    {
+      "path": "/tmp/scriptc-redcode-depth-isolated-20260914c",
+      "status": "refused",
+      "seconds": 291.611595156,
+      "memoryPeakBytes": 5149835264,
+      "diagnostics": 3087,
+      "sources": 1335,
+      "sameSourceHashes": true,
+      "sameSourceOrder": true,
+      "sameDiagnosticCodeLocations": true,
+      "samePhaseGraphs": true,
+      "phaseSizes": [
+        4290,
+        4301,
+        4300,
+        4225,
+        4236,
+        4235
+      ],
+      "unchangedDuringRun": true,
+      "sameRecordedInputs": true,
+      "timeout": false,
+      "inputCounts": {
+        "compilerSources": 488,
+        "consumerFiles": 6848,
+        "previousGraphFiles": 4348
+      }
+    },
+    {
+      "path": "/tmp/scriptc-redcode-depth-isolated-20260914d",
+      "status": "refused",
+      "seconds": 224.18496334300002,
+      "memoryPeakBytes": 5328470016,
+      "diagnostics": 3087,
+      "sources": 1335,
+      "sameSourceHashes": true,
+      "sameSourceOrder": true,
+      "sameDiagnosticCodeLocations": true,
+      "samePhaseGraphs": true,
+      "phaseSizes": [
+        4290,
+        4301,
+        4300,
+        4225,
+        4236,
+        4235
+      ],
+      "unchangedDuringRun": true,
+      "sameRecordedInputs": true,
+      "timeout": false,
+      "inputCounts": {
+        "compilerSources": 488,
+        "consumerFiles": 6848,
+        "previousGraphFiles": 4348
+      }
+    }
+  ],
+  "inputs": {
+    "compilerHead": "9015f9e05217f84fd8c8f7613f3ceac7beb59a56",
+    "compilerDirty": true,
+    "consumerHead": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+    "digests": {
+      "compilerSources": "fa2301842aecba5aaa510c76f73359c4e27a6e5a1cc84e67faf048b1f0b30b4e",
+      "consumerFiles": "123f79a76fcc748e3f53c5df2a54269eb41e386a87c6c51e7dea291ccbf0b1b3",
+      "previousGraphFiles": "827c04c91dbe69495db5c190dc282d3cdd3d2bbec37e15c1da7f82a34353bbd5"
+    }
+  }
+}
