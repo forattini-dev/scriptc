@@ -2099,12 +2099,12 @@ function validateFunction(
           break;
         }
         const rest = def.arms.filter((a) => !isUnitType(a));
-        if (rest.length !== 1 || rest.length === def.arms.length) {
-          err("optChain receiver must have unit arms and exactly one non-unit arm", e.loc);
+        if (rest.length === 0 || rest.length === def.arms.length) {
+          err("optChain receiver must have unit and non-unit arms", e.loc);
           break;
         }
         if (activeChains.has(e.id)) err(`optChain id "${e.id}" shadows an active chain`, e.loc);
-        activeChains.set(e.id, rest[0]!);
+        activeChains.set(e.id, rest.length === 1 ? rest[0]! : e.receiver.type); // sub-union: the whole receiver
         checkExpr(e.body);
         activeChains.delete(e.id);
         if (e.type.kind === "void") {
@@ -3468,11 +3468,11 @@ function validateFunction(
         expectType(e.value, { kind: "union", unionId: e.unionId }, "unionDisc receiver");
         // Any representable field type reads through the tag switch (the
         // emitter retains ref results uniformly); units/void can never be
-        // record/class field types and have no C value form.
+        // field types. Unit ARMS are the checker-narrowed, unreachable ones.
         if (e.type.kind === "void" || e.type.kind === "undefinedT" || e.type.kind === "nullT") {
           err(`unionDisc of valueless type ${e.type.kind}`, e.loc);
         }
-        def.arms.forEach((arm, i) => {
+        def.arms.forEach((arm, i) => { if (isUnitType(arm)) return;
           const fieldType =
             arm.kind === "record"
               ? records.get(arm.shapeId)?.fields.find((f) => f.name === e.field)?.type
@@ -3525,16 +3525,14 @@ function validateFunction(
             }
             return;
           }
-          if (arm.kind !== "record") {
-            err(`unionKeyGet: arm ${i} of ${e.unionId} is ${arm.kind}, not a record`, e.loc);
-            return;
-          }
+          const literal = e.key.kind === "strLit" ? e.key.value : null; // class arms: a declared field under a literal key
+          if (arm.kind === "object") { const f = literal === null ? undefined : classes.get(arm.className)?.fields.find((x) => x.name === literal); if (!f || !surfaces(f.type)) err(`unionKeyGet: class arm ${i} of ${e.unionId} has no field surfacing for the key`, e.loc); return; }
+          if (arm.kind !== "record") { err(`unionKeyGet: arm ${i} of ${e.unionId} is ${arm.kind}, not a record`, e.loc); return; }
           const shape = records.get(arm.shapeId);
           if (!shape) {
             err(`unionKeyGet: arm ${i} of unknown shape ${arm.shapeId}`, e.loc);
             return;
           }
-          const literal = e.key.kind === "strLit" ? e.key.value : null;
           const declared = literal !== null ? shape.fields.find((f) => f.name === literal)?.type : undefined;
           if (declared) {
             if (!surfaces(declared)) {

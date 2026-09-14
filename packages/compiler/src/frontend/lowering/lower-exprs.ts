@@ -62,7 +62,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
-import { type FieldTarget, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
+import { type FieldTarget, lowerClassLiteralKeyRead, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
@@ -3601,20 +3601,19 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
       }
     }
     const rest = def.arms.filter((a) => !isUnitType(a));
-    if (rest.length !== 1) {
-      lowerer.unsupported(
-        "SC1090",
-        expr,
-        `'?.' on '${lowerer.fmt(receiver.type)}' (the guarded receiver is a sub-union; check a discriminant field first)`,
-      );
-    }
-    const narrowed = rest[0]!;
+    // A SUB-union receiver (`a?.name` on `A | B | undefined`) binds the whole
+    // union value: the chain's tag test proves a non-unit arm, and the body's
+    // union reads skip the unit arms its narrowed checker type excludes.
+    const narrowed = rest.length === 1 ? rest[0]! : receiver.type;
     const id = `chain.${lowerer.chainCounter++}`;
     const recvRef: IrExpr = { kind: "chainRecv", id, type: narrowed, loc: locOf(recvNode) };
 
     // `f?.()`: the callee IS the guarded value — build the indirect call
     // directly (no member dispatch exists to re-enter).
     if (dotNode === expr && ts.isCallExpression(expr)) {
+      if (rest.length !== 1) {
+        lowerer.unsupported("SC1090", expr, `'?.()' on '${lowerer.fmt(receiver.type)}' (the guarded callee is a sub-union)`);
+      }
       if (narrowed.kind !== "func") lowerer.badType(recvNode, lowerer.typeOf(recvNode));
       const params = narrowed.params;
       const args = expr.arguments.map((a, i) => lowerer.lowerExprExpecting(a, params[i]));
@@ -4753,7 +4752,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
     // WIDENS to string un-late-binds the property, its type is no literal,
     // and the fence stays.
     if (!pureKeyExpr(lowerer, expr)) return null;
-    return literalKeySpellingOf(lowerer.typeOf(expr));
+    return literalKeySpellingOf(lowerer.typeParamTsResolver(lowerer.typeOf(expr)) ?? lowerer.typeOf(expr)); // `key: K` bound to a literal
   }
 
   /** The property-name spelling of a single-literal checker type: string
@@ -7189,10 +7188,9 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       if (value.type.kind === "union") {
         const key = lowerer.lowerExpr(expr.argumentExpression);
         if (key.type.kind === "string") {
-          const lit = ts.isStringLiteral(expr.argumentExpression)
-            ? expr.argumentExpression.text
-            : null;
-          const keyed = lowerUnionKeyedRead(lowerer, expr, value.type.unionId, value, key, lit);
+          const lit = foldedStringKeyOf(lowerer, expr.argumentExpression); // a pure ONE-literal key reads that declared field
+          const litKey: IrExpr = lit === null ? key : { kind: "strLit", value: lit, type: STRING, loc: key.loc };
+          const keyed = lowerUnionKeyedRead(lowerer, expr, value.type.unionId, value, litKey, lit);
           if (keyed) return lowerer.maybeNarrow(keyed, expr);
         }
         // `u?.split(":")[0]` — a NUMBER index over an undefined-armed
@@ -7226,6 +7224,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         }
       }
     }
+    if (receiverIr?.kind === "object") { const field = lowerClassLiteralKeyRead(lowerer, expr, receiverIr.className, foldedStringKeyOf(lowerer, expr.argumentExpression)); if (field) return field; }
     if (receiverIr?.kind !== "array") {
       if (receiverIr?.kind === "string") {
         // `s[i]` with a number index reads a UTF-16 code unit — charAt's

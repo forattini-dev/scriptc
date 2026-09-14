@@ -24,7 +24,7 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/frontend/lowering/lower-classes.ts", 5_384],
   ["packages/compiler/src/frontend/lowering/lower-containers.ts", 7_743],
   ["packages/compiler/src/frontend/lowering/lower-event-emitter.ts", 1_325],
-  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_483],
+  ["packages/compiler/src/frontend/lowering/lower-exprs.ts", 11_482],
   ["packages/compiler/src/frontend/lowering/lower-inspect.ts", 1_741],
   ["packages/compiler/src/frontend/lowering/lower-island.ts", 3_394],
   ["packages/compiler/src/frontend/lowering/lower-modules.ts", 2_088],
@@ -38,7 +38,7 @@ const legacyOversizedFiles = new Map([
   ["packages/compiler/src/frontend/type-mapper.ts", 3_749],
   ["packages/compiler/src/index.ts", 2_413],
   ["packages/compiler/src/ir/ir.ts", 7_495],
-  ["packages/compiler/src/ir/validate.ts", 5_659],
+  ["packages/compiler/src/ir/validate.ts", 5_657],
   ["packages/compiler/src/library/int-infer.ts", 1_759],
   ["packages/compiler/src/library/sidecar.ts", 1_649],
 ]);

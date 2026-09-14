@@ -21,7 +21,7 @@ unions.ts:96:1 - error SC1090: '??=' on non-variable targets (write it out: if (
      | ^~~~~~~~~~~
   97 | 
 
-unions.ts:100:10 - error SC1090: '?.' on 'number | string | undefined' (the guarded receiver is a sub-union; check a discriminant field first) is not supported yet
+unions.ts:100:10 - error SC1090: reading 'valueOf' on a union-typed value (every arm must be an object/record with a same-typed field 'valueOf'; narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet
 
    99 | function chainSubUnion(x: number | string | undefined): number {
   100 |   return x?.valueOf === undefined ? 0 : 1;

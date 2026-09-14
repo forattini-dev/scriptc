@@ -1,12 +1,12 @@
 import type { IrExpr, IrType } from "../../ir/ir.js";
-import { typeKey } from "../../ir/ir.js";
+import { RUNTIME_ERROR_CLASSES, typeKey } from "../../ir/ir.js";
 import { mangleField } from "../mangle.js";
 import type { RustExpressionContext } from "./expressions.js";
 import { emitRustRecordKeyGetValues } from "./indexed-records.js";
 import { isSharedRecord } from "./shared-records.js";
 
 type UnionKeyGetContext = Pick<RustExpressionContext,
-  "dynTypeName" | "emitDynFromValue" | "isEdgeValue" | "isUnit" |
+  "classDef" | "classFieldName" | "dynTypeName" | "emitDynFromValue" | "isEdgeValue" | "isUnit" |
   "needsClone" | "nextName" | "records" | "rustString" | "union" |
   "unionName" | "unionVariant" | "unsupported"
 >;
@@ -42,6 +42,16 @@ export function emitRustUnionKeyGet(
     if (arm.kind === "array") {
       if (expr.key.type.kind !== "f64") context.unsupported("string-keyed union array read", expr.loc);
       return `${variant}(payload) => ${surface(`runtime::array_get(&payload, ${key})`, arm.elem)}`;
+    }
+    if (arm.kind === "object") {
+      // A class arm answers a declared field under a literal key (the frontend's contract).
+      const field = literal === null ? undefined : context.classDef(arm.className, expr.loc).fields.find((candidate) => candidate.name === literal);
+      if (field === undefined || RUNTIME_ERROR_CLASSES.has(arm.className)) context.unsupported(`union keyed read on class '${arm.className}'`, expr.loc);
+      const access = `object.${context.classFieldName(arm.className, field.name, expr.loc)}`;
+      const answer = context.isEdgeValue(field.type)
+        ? `${access}.as_ref().expect("scriptc: cleared live class field").clone()`
+        : context.needsClone(field.type) ? `${access}.clone()` : access;
+      return `${variant}(payload) => payload.with(|object| ${surface(answer, field.type)})`;
     }
     if (arm.kind !== "record") context.unsupported(`union keyed read arm '${arm.kind}'`, expr.loc);
     if (expr.key.type.kind !== "string") context.unsupported("number-keyed union record read", expr.loc);

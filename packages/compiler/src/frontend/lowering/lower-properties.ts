@@ -128,7 +128,7 @@ export type FieldTarget =
    * and `switch (r.kind)` work without dedicated test nodes. Anything else
    * on a union receiver is rejected specifically (narrow first). */
   export function lowerUnionProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (expr.questionDotToken && !L.chainHandled.has(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
     if (receiverIr?.kind !== "union") return null;
     // Lower the receiver FIRST and read its actual IR union: a partially
@@ -189,8 +189,14 @@ export type FieldTarget =
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new InternalCompilerError(`lowerer bug: unknown union ${value.type.unionId}`);
     const field = expr.name.text;
+    // Unit arms the checker narrowed away (`x !== undefined`, an optional
+    // chain's guard) stay in the runtime union but are unreachable here.
+    const receiverTs = L.typeOf(expr.expression);
+    const nullishFlags = ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.AnyOrUnknown;
+    const unitsUnreachable = !(receiverTs.isUnionType() ? ts.constituentTypes(receiverTs) : [receiverTs]).some((t) => (t.flags & nullishFlags) !== 0);
     let common: IrType | null = null;
     for (const arm of def.arms) {
+      if (unitsUnreachable && isUnitType(arm)) continue;
       let ft: IrType | undefined;
       if (arm.kind === "record") {
         ft = L.shapes.get(arm.shapeId)?.fields.find((f) => f.name === field)?.type;
@@ -273,6 +279,12 @@ export type FieldTarget =
         push(UNDEFINED_T);
         continue;
       }
+      if (arm.kind === "object") {
+        // A class arm answers only a declared field under a literal key.
+        const declared = literalField !== null ? L.classes.get(arm.className)?.fields.get(literalField) : undefined;
+        if (!declared || !pushAnswer(declared)) return null;
+        continue;
+      }
       if (arm.kind !== "record") return null;
       const shape = L.shapes.get(arm.shapeId);
       if (!shape || shape.tuple) return null;
@@ -319,6 +331,11 @@ export type FieldTarget =
         if (!(type.kind === "union" && L.armTag(type.unionId, UNDEFINED_T) >= 0)) return null;
         continue;
       }
+      if (arm.kind === "object") {
+        const declared = literalField !== null ? L.classes.get(arm.className)?.fields.get(literalField) : undefined;
+        if (!declared || !surfaces(declared)) return null;
+        continue;
+      }
       if (arm.kind !== "record") return null;
       const shape = L.shapes.get(arm.shapeId);
       if (!shape) return null;
@@ -332,6 +349,16 @@ export type FieldTarget =
       if (!recordKeyResultOk(L, ovfShape, type)) return null;
     }
     return { kind: "unionKeyGet", unionId, key, value, type, loc: locOf(expr) };
+  }
+
+/** `obj["field"]` on a class instance whose pure key folds to ONE literal
+   * naming a declared data field: the dotted read's twin. Anything else
+   * (accessors, methods, runtime keys) stays with the caller's fences. */
+  export function lowerClassLiteralKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, className: string, lit: string | null): IrExpr | null {
+    const type = lit === null ? undefined : L.classes.get(className)?.fields.get(lit);
+    if (lit === null || type === undefined) return null;
+    const read: IrExpr = { kind: "fieldGet", obj: L.lowerExpr(expr.expression), className, field: lit, type, loc: locOf(expr) };
+    return L.maybeNarrow(read, expr);
   }
 
 /** Recognizes `obj.field` as an assignable field target: receiver is a
