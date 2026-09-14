@@ -20,6 +20,7 @@ import { emitRustOptionalChain } from "./optional-chains.js";
 import { emitRustNullish } from "./nullish.js";
 import { RUST_RECORD_OVERFLOW } from "./record-layout.js";
 import { emitRustUnionKeyGet } from "./union-key-get.js";
+import { emitRustUnionDisc } from "./union-disc.js";
 import { emitRustIslandExpr } from "./island.js";
 import { rustIslandDynamicTest } from "./dynamic-island.js";
 import { emitRustArrayNewLen } from "./array-new-len.js";
@@ -780,25 +781,8 @@ export class RustExpressionEmitter {
         const input = sharedDiscriminatedUnion(this.context, union) ? discriminatedUnionCheck(this.context, union, discriminatedUnionBox(this.context, union, raw)) : raw;
         return `{ let ${value} = ${input}; match ${value} { ${variant}(payload) => payload, _ => unreachable!("scriptc invariant: invalid union narrowing") } }`;
       }
-      case "unionDisc": {
-        const union = this.context.union(expr.unionId, expr.loc);
-        const value = this.context.nextName("sc_rt");
-        const arms = union.arms.map((arm, tag) => {
-          if (arm.kind !== "record") this.context.unsupported(`union discriminant arm '${arm.kind}'`, expr.loc);
-          const shape = this.context.records.get(arm.shapeId);
-          const field = shape?.fields.find((candidate) => candidate.name === expr.field);
-          if (shape === undefined || field === undefined) {
-            this.context.unsupported(`unknown union discriminant field '${arm.shapeId}.${expr.field}'`, expr.loc);
-          }
-          if (isSharedRecord(shape)) return `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}(payload) => payload.get_${mangleField(field.name)}()`;
-          const access = `record.${mangleField(field.name)}`;
-          const result = this.context.isEdgeValue(field.type)
-            ? `${access}.as_ref().expect("scriptc: cleared live union field").clone()`
-            : this.context.needsClone(field.type) ? `${access}.clone()` : access;
-          return `${this.context.unionName(union.id)}::${this.context.unionVariant(tag)}(payload) => payload.with(|record| ${result})`;
-        }).join(", ");
-        return `{ let ${value} = ${this.emitExpr(expr.value)}; match &${value} { ${arms} } }`;
-      }
+      case "unionDisc":
+        return emitRustUnionDisc(expr, this.context, (value) => this.emitExpr(value));
       case "unionKeyGet":
         return emitRustUnionKeyGet(expr, this.context, (value) => this.emitExpr(value));
       case "unionIsTag": {

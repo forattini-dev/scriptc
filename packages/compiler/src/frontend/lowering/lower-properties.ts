@@ -128,7 +128,7 @@ export type FieldTarget =
    * and `switch (r.kind)` work without dedicated test nodes. Anything else
    * on a union receiver is rejected specifically (narrow first). */
   export function lowerUnionProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (expr.questionDotToken) return null;
+    if (expr.questionDotToken && !L.chainHandled.has(expr)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(expr.expression));
     if (receiverIr?.kind !== "union") return null;
     // Lower the receiver FIRST and read its actual IR union: a partially
@@ -189,8 +189,14 @@ export type FieldTarget =
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new InternalCompilerError(`lowerer bug: unknown union ${value.type.unionId}`);
     const field = expr.name.text;
+    // Unit arms the checker narrowed away (`x !== undefined`, an optional
+    // chain's guard) stay in the runtime union but are unreachable here.
+    const receiverTs = L.typeOf(expr.expression);
+    const nullishFlags = ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.AnyOrUnknown;
+    const unitsUnreachable = !(receiverTs.isUnionType() ? ts.constituentTypes(receiverTs) : [receiverTs]).some((t) => (t.flags & nullishFlags) !== 0);
     let common: IrType | null = null;
     for (const arm of def.arms) {
+      if (unitsUnreachable && isUnitType(arm)) continue;
       let ft: IrType | undefined;
       if (arm.kind === "record") {
         ft = L.shapes.get(arm.shapeId)?.fields.find((f) => f.name === field)?.type;

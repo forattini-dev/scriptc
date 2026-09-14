@@ -251,6 +251,7 @@ export function emitControlExpr(host: LlvmEmitterContext, e: ExprOf<"dynDestrChe
         const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
         const narrowIdx = def.arms.findIndex((a) => !isUnitType(a));
         if (unitTags.length === 0 || narrowIdx < 0) throw new InternalCompilerError("llvm emitter bug: optChain union arms");
+        if (unitTags.length + 1 !== def.arms.length) throw new LlvmUnsupportedError("optChain:sub-union", e.loc);
         const narrowed = def.arms[narrowIdx]!;
         const r = host.emitExpr(e.receiver);
         const bind = B.slot();

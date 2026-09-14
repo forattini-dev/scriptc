@@ -95,7 +95,7 @@ console.log(mixedDefault("s"));
 const holder: { slot?: string } = {};
 holder.slot ??= "v";
 
-// `?.` on a multi-arm union: the guarded receiver is a sub-union.
+// `?.` on a primitive sub-union: no arm carries a shared field to read.
 function chainSubUnion(x: number | string | undefined): number {
   return x?.valueOf === undefined ? 0 : 1;
 }

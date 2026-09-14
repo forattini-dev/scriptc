@@ -3461,20 +3461,19 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
       }
     }
     const rest = def.arms.filter((a) => !isUnitType(a));
-    if (rest.length !== 1) {
-      lowerer.unsupported(
-        "SC1090",
-        expr,
-        `'?.' on '${lowerer.fmt(receiver.type)}' (the guarded receiver is a sub-union; check a discriminant field first)`,
-      );
-    }
-    const narrowed = rest[0]!;
+    // A SUB-union receiver (`a?.name` on `A | B | undefined`) binds the whole
+    // union value: the chain's tag test proves a non-unit arm, and the body's
+    // union reads skip the unit arms its narrowed checker type excludes.
+    const narrowed = rest.length === 1 ? rest[0]! : receiver.type;
     const id = `chain.${lowerer.chainCounter++}`;
     const recvRef: IrExpr = { kind: "chainRecv", id, type: narrowed, loc: locOf(recvNode) };
 
     // `f?.()`: the callee IS the guarded value — build the indirect call
     // directly (no member dispatch exists to re-enter).
     if (dotNode === expr && ts.isCallExpression(expr)) {
+      if (rest.length !== 1) {
+        lowerer.unsupported("SC1090", expr, `'?.()' on '${lowerer.fmt(receiver.type)}' (the guarded callee is a sub-union)`);
+      }
       if (narrowed.kind !== "func") lowerer.badType(recvNode, lowerer.typeOf(recvNode));
       const params = narrowed.params;
       const args = expr.arguments.map((a, i) => lowerer.lowerExprExpecting(a, params[i]));

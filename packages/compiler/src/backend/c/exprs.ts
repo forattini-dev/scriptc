@@ -1019,7 +1019,7 @@ function emitControlExpr(
         if (!def) throw new InternalCompilerError(`emitter bug: optChain of unknown union ${e.receiver.type.unionId}`);
         const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
         const narrowIdx = def.arms.findIndex((a) => !isUnitType(a));
-        if (unitTags.length === 0 || narrowIdx < 0) throw new InternalCompilerError("emitter bug: optChain union arms");
+        if (unitTags.length === 0 || narrowIdx < 0 || unitTags.length + 1 !== def.arms.length) throw new InternalCompilerError("emitter bug: optChain union arms (sub-union chains are Rust-only)");
         const narrowed = def.arms[narrowIdx]!;
         const r = emitter.emitExpr(e.receiver);
         const bind = `sc_t${emitter.tempCounter++}`;
@@ -2847,7 +2847,7 @@ function emitDynamicExpr(
         emitter.line(`${cDecl(e.type, name)};`);
         emitter.line(`switch (${u.name}->tag) {`);
         emitter.indent++;
-        def.arms.forEach((arm, i) => {
+        def.arms.forEach((arm, i) => { if (isUnitType(arm)) return; // checker-narrowed away: the default trap
           if (arm.kind !== "record" && arm.kind !== "object") {
             throw new InternalCompilerError(`emitter bug: unionDisc arm of kind ${arm.kind}`);
           }

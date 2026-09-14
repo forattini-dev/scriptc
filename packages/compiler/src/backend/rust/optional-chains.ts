@@ -49,7 +49,7 @@ export function emitRustOptionalChain(
   const source = context.union(expr.receiver.type.unionId, expr.loc);
   const narrowedTags = source.arms.flatMap((arm, tag) => context.isUnit(arm) ? [] : [tag]);
   const unitTags = source.arms.flatMap((arm, tag) => context.isUnit(arm) ? [tag] : []);
-  if (narrowedTags.length !== 1 || unitTags.length === 0) context.unsupported("optional chain union shape", expr.loc);
+  if (narrowedTags.length === 0 || unitTags.length === 0) context.unsupported("optional chain union shape", expr.loc);
   let absent: string;
   if (expr.type.kind === "void") {
     absent = "()";
@@ -63,6 +63,11 @@ export function emitRustOptionalChain(
     absent = `${context.unionName(result.id)}::${context.unionVariant(undefinedTag)}`;
   }
   const sourceName = context.unionName(source.id);
+  if (narrowedTags.length > 1) {
+    // A sub-union chain binds the whole receiver union (see the validator).
+    const units = unitTags.map((tag) => `${sourceName}::${context.unionVariant(tag)}`).join(" | ");
+    return `match ${emitExpr(expr.receiver)} { ${units} => ${absent}, ${receiver} => ${body} }`;
+  }
   const arms = source.arms.map((arm, tag) => {
     const variant = `${sourceName}::${context.unionVariant(tag)}`;
     return context.isUnit(arm) ? `${variant} => ${absent}` : `${variant}(${receiver}) => ${body}`;
