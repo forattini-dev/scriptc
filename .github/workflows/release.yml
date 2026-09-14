@@ -108,12 +108,16 @@ jobs:
           cache: pnpm
       - name: Install toolchain (macOS)
         if: startsWith(matrix.platform, 'darwin')
-        run: brew install llvm@22
+        run: |
+          brew install llvm@22
+          llvm_prefix=$(brew --prefix llvm@22)
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "LLVM_DIR=$llvm_prefix/lib/cmake/llvm" >> "$GITHUB_ENV"
       - name: Install pinned LLVM development distribution (Linux)
         if: startsWith(matrix.platform, 'linux') || matrix.platform == 'wasm32-wasi'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libzstd-dev
+          sudo apt-get install --yes g++ zlib1g-dev libzstd-dev
           curl -fL --retry 3 -o "$RUNNER_TEMP/llvm.tar.xz" "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/${{ matrix.llvm_asset }}.tar.xz"
           tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
           mv "$RUNNER_TEMP/${{ matrix.llvm_asset }}" "$RUNNER_TEMP/llvm-22.1.8"
@@ -216,6 +220,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           cp -R native-artifacts/. packages/
+          # upload-artifact does not preserve executable bits. Restore the
+          # helper mode before pnpm runs its prepack checks.
+          find packages -type f -path '*/bin/scriptc-llvm-codegen' -exec chmod 755 {} +
           pnpm -r build
 
       - name: Check version sync
@@ -263,6 +270,22 @@ jobs:
           # moment it lands. pnpm pack rewrites workspace:* to the real
           # version; npm publish on the tarball handles OIDC.
           # Re-runs skip anything already on the registry at this version.
+          # npm may finish a trusted publication asynchronously. In that
+          # window a retry can report "previously staged" even though the
+          # same package/version is about to become publicly visible.
+          wait_for_published_version() {
+            name="$1"
+            for attempt in $(seq 1 12); do
+              if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+                return 0
+              fi
+              if [ "$attempt" -lt 12 ]; then
+                sleep 10
+              fi
+            done
+            return 1
+          }
+
           publish_dir() {
             dir="$1"
             packed="${2:-}"
@@ -275,7 +298,17 @@ jobs:
               tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
               packed="$dir/$tarball"
             fi
-            npm publish "$packed" $PROVENANCE --access public --tag "$DIST_TAG"
+            if npm publish "$packed" $PROVENANCE --access public --tag "$DIST_TAG"; then
+              return 0
+            else
+              publish_status=$?
+            fi
+            echo "$name@$VERSION publish failed; waiting for registry visibility before retrying"
+            if wait_for_published_version "$name"; then
+              echo "$name@$VERSION is now published; treating the publish as successful"
+              return 0
+            fi
+            return "$publish_status"
           }
 
           publish_dir packages/runtime

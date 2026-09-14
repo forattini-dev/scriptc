@@ -140,7 +140,7 @@ export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegi
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
-      return `Generator<${formatIrType(t.yieldT, shapes, unions, seen)}, ${formatIrType(t.retT, shapes, unions, seen)}, ${formatIrType(t.nextT, shapes, unions, seen)}>`;
+      return `${t.async ? "AsyncGenerator" : "Generator"}<${formatIrType(t.yieldT, shapes, unions, seen)}, ${formatIrType(t.retT, shapes, unions, seen)}, ${formatIrType(t.nextT, shapes, unions, seen)}>`;
     default: {
       const _exhaustive: never = t;
       void _exhaustive;

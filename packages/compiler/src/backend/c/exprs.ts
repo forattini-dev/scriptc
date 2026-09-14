@@ -54,12 +54,33 @@ function streamTypedRefCommitAdapter(
       `  size_t sc_target_len = sc_target->len;`,
       `  size_t sc_target_cap = sc_target->cap;`,
       `  uint64_t *sc_target_data = sc_target->data;`,
+      `  uint8_t *sc_target_present = sc_target->present;`,
+      `  ScrArrSparseSlot *sc_target_sparse = sc_target->sparse;`,
+      `  size_t sc_target_sparse_len = sc_target->sparse_len;`,
+      `  size_t sc_target_sparse_cap = sc_target->sparse_cap;`,
+      `  ScrArrProp *sc_target_props = sc_target->props;`,
+      `  size_t sc_target_prop_len = sc_target->prop_len;`,
+      `  size_t sc_target_prop_cap = sc_target->prop_cap;`,
       `  sc_target->len = sc_next->len;`,
       `  sc_target->cap = sc_next->cap;`,
       `  sc_target->data = sc_next->data;`,
+      `  sc_target->present = sc_next->present;`,
+      `  sc_target->sparse = sc_next->sparse;`,
+      `  sc_target->sparse_len = sc_next->sparse_len;`,
+      `  sc_target->sparse_cap = sc_next->sparse_cap;`,
+      `  sc_target->props = sc_next->props;`,
+      `  sc_target->prop_len = sc_next->prop_len;`,
+      `  sc_target->prop_cap = sc_next->prop_cap;`,
       `  sc_next->len = sc_target_len;`,
       `  sc_next->cap = sc_target_cap;`,
       `  sc_next->data = sc_target_data;`,
+      `  sc_next->present = sc_target_present;`,
+      `  sc_next->sparse = sc_target_sparse;`,
+      `  sc_next->sparse_len = sc_target_sparse_len;`,
+      `  sc_next->sparse_cap = sc_target_sparse_cap;`,
+      `  sc_next->props = sc_target_props;`,
+      `  sc_next->prop_len = sc_target_prop_len;`,
+      `  sc_next->prop_cap = sc_target_prop_cap;`,
       `  scr_arr_release(sc_next);`,
       `}`,
       ``,
@@ -1514,7 +1535,7 @@ function emitStringExpr(
 
 function emitContainerExpr(
   emitter: CEmitter,
-  e: ExprOf<"arrayLit" | "arrayNewLen" | "arrayGet" | "arrIntrinsic" | "bytesNew" | "bytesIntrinsic" | "mapNew" | "mapIntrinsic" | "setIntrinsic" | "setNew">,
+  e: ExprOf<"arrayLit" | "arrayNewLen" | "arrayGet" | "arrayHas" | "arrayState" | "arrIntrinsic" | "bytesNew" | "bytesIntrinsic" | "mapNew" | "mapIntrinsic" | "setIntrinsic" | "setNew">,
 ): Temp {
   switch (e.kind) {
       case "arrayLit": {
@@ -1533,12 +1554,7 @@ function emitContainerExpr(
         e.elems.forEach((el, i) => {
           const v = emitter.emitExpr(el);
           if (spreadSet.has(i)) {
-            const n = `sc_i${emitter.tempCounter++}`;
-            emitter.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${v.name}); ${n} < ${n}_len; ${n}++) {`);
-            emitter.indent++;
-            emitter.line(`scr_arr_push_${acc}(${arr.name}, scr_arr_get_${acc}(${v.name}, (double)${n}));`);
-            emitter.indent--;
-            emitter.line(`}`);
+            emitter.line(`scr_arr_push_spread(${arr.name}, ${v.name});`);
             return;
           }
           if (acc === "ref") emitter.moveTemp(v);
@@ -1580,6 +1596,18 @@ function emitContainerExpr(
         const acc = elemAccess(e.arr.type.elem);
         return emitter.newTemp(e.type, `scr_arr_get_${acc}(${arr.name}, ${idx.name})`);
       }
+      case "arrayHas": {
+        const arr = emitter.emitExpr(e.arr);
+        const idx = emitter.emitExpr(e.index);
+        if (e.arr.type.kind !== "array") throw new InternalCompilerError("emitter bug: arrayHas on non-array");
+        return emitter.newTemp(e.type, `scr_arr_has(${arr.name}, ${idx.name})`);
+      }
+      case "arrayState": {
+        const arr = emitter.emitExpr(e.arr);
+        const idx = emitter.emitExpr(e.index);
+        if (e.arr.type.kind !== "array") throw new InternalCompilerError("emitter bug: arrayState on non-array");
+        return emitter.newTemp(e.type, `scr_arr_state(${arr.name}, ${idx.name})`);
+      }
       case "arrIntrinsic": {
         const r = emitter.emitExpr(e.receiver);
         if (e.receiver.type.kind !== "array") throw new InternalCompilerError("emitter bug: arrIntrinsic on non-array");
@@ -1588,6 +1616,10 @@ function emitContainerExpr(
         switch (method) {
           case "length":
             return emitter.newTemp(e.type, `scr_arr_len(${r.name})`);
+          case "nextPresent": {
+            const start = emitter.emitExpr(e.args[0]!);
+            return emitter.newTemp(e.type, `scr_arr_next_present(${r.name}, ${start.name})`);
+          }
           case "push": {
             // Variadic like JS: every argument evaluates first (left to
             // right — an argument reading the array sees the pre-push
@@ -1606,18 +1638,15 @@ function emitContainerExpr(
               : emitter.newTemp(e.type, `scr_arr_len(${r.name})`);
           }
           case "pushSpread": {
-            // `a.push(...src)`: append src's elements in order. The source
-            // is BORROWED; the count snapshots before the loop so
-            // `a.push(...a)` duplicates exactly like JS. _get_ref's +1
-            // moves into _push_ref — RC-balanced. Result: the new length.
+            // `a.push(...src)`: append src's indexed state in order while
+            // preserving holes; the runtime snapshots self-spread and
+            // retains copied refs. Result: the new length.
             const src = emitter.emitExpr(e.args[0]!);
-            const n = `sc_i${emitter.tempCounter++}`;
-            emitter.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${src.name}); ${n} < ${n}_len; ${n}++) {`);
-            emitter.indent++;
-            emitter.line(`scr_arr_push_${acc}(${r.name}, scr_arr_get_${acc}(${src.name}, (double)${n}));`);
-            emitter.indent--;
-            emitter.line(`}`);
-            return emitter.newTemp(e.type, `scr_arr_len(${r.name})`);
+            return emitter.newTemp(e.type, `scr_arr_push_spread(${r.name}, ${src.name})`);
+          }
+          case "concatSpread": {
+            const src = emitter.emitExpr(e.args[0]!);
+            return emitter.newTemp(e.type, `scr_arr_concat_copy(${r.name}, ${src.name})`);
           }
           case "unshift": {
             // Like push, every argument evaluates before mutation. Apply
@@ -1638,9 +1667,35 @@ function emitContainerExpr(
             return emitter.newTemp(e.type, `scr_arr_unshift_spread(${r.name}, ${src.name})`);
           }
           case "pop":
-            // Ownership of a refcounted element moves OUT of the array to
-            // this temp (+1 to us, the runtime does not release it).
-            return emitter.newTemp(e.type, `scr_arr_pop_${acc}(${r.name})`);
+          case "shift": {
+            // Move the slot once, preserving undefined and holes as values
+            // while still applying the method's length/index mutation.
+            if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: array removal result is not a union");
+            const elemT = e.receiver.type.elem;
+            const def = emitter.unionsById.get(e.type.unionId);
+            const tag = def ? def.arms.findIndex((arm) => typeEquals(arm, elemT)) : -1;
+            const undefTag = undefinedArmTag(e.type, emitter.unionsById);
+            const sameUnion = elemT.kind === "union" && typeEquals(elemT, e.type);
+            if ((!sameUnion && tag < 0) || undefTag < 0) throw new InternalCompilerError("emitter bug: array removal union lacks its arms");
+            const state = `sc_remove_state${emitter.tempCounter++}`;
+            const slot = `sc_remove_slot${emitter.tempCounter++}`;
+            emitter.line(`uint64_t ${slot} = 0;`);
+            emitter.line(`uint8_t ${state} = scr_arr_${method}_state(${r.name}, &${slot});`);
+            let present: string;
+            if (elemT.kind === "f64") {
+              const number = `sc_remove_number${emitter.tempCounter++}`;
+              emitter.line(`double ${number}; memcpy(&${number}, &${slot}, sizeof ${number});`);
+              present = `scr_union_new_f64(${tag}, ${number})`;
+            } else if (elemT.kind === "bool") {
+              present = `scr_union_new_bool(${tag}, ${slot} != 0)`;
+            } else {
+              const ref = `sc_remove_ref${emitter.tempCounter++}`;
+              emitter.line(`void *${ref}; memcpy(&${ref}, &${slot}, sizeof ${ref});`);
+              const rc = vAdapters(elemT);
+              present = sameUnion ? `(ScrUnion *)${ref}` : `scr_union_new_ref(${tag}, ${ref}, &${rc.retain}, &${rc.release}, ${emitter.traceArgC(elemT)})`;
+            }
+            return emitter.newTemp(e.type, `${state} == SCR_ARR_VALUE ? ${present} : ${emitter.unitInstanceRef(e.type.unionId, undefTag)}`);
+          }
           case "indexOf": {
             // The needle is BORROWED (released with this statement's frame);
             // the ref variant dispatches on the array's element kind
@@ -1699,6 +1754,15 @@ function emitContainerExpr(
             emitter.emitPendingCheck();
             return out;
           }
+          case "withUndefined": {
+            const index = emitter.emitExpr(e.args[0]!);
+            const out = emitter.newTemp(
+              e.type,
+              `scr_arr_with_undefined(${r.name}, ${index.name})`,
+            );
+            emitter.emitPendingCheck();
+            return out;
+          }
           case "splice": {
             // The removal splice: the removed elements come back as a
             // fresh +1 array, their ownership MOVED out of the receiver
@@ -1707,29 +1771,6 @@ function emitContainerExpr(
             const start = emitter.emitExpr(e.args[0]!);
             const cnt = e.args[1] ? emitter.emitExpr(e.args[1]).name : "INFINITY";
             return emitter.newTemp(e.type, `scr_arr_splice(${r.name}, ${start.name}, ${cnt})`);
-          }
-          case "shift": {
-            // JS shift: undefined on an empty array, else the first
-            // element out (ref ownership moves into the union box) with
-            // the tail sliding down. Union construction is type-directed
-            // here, the envGet convention.
-            if (e.type.kind !== "union") throw new InternalCompilerError("emitter bug: shift result is not a union");
-            const elemT = e.receiver.type.elem;
-            const def = emitter.unionsById.get(e.type.unionId);
-            const tag = def ? def.arms.findIndex((a) => typeEquals(a, elemT)) : -1;
-            const undefTag = undefinedArmTag(e.type, emitter.unionsById);
-            if (tag < 0 || undefTag < 0) throw new InternalCompilerError("emitter bug: shift union lacks its arms");
-            const absent = emitter.unitInstanceRef(e.type.unionId, undefTag);
-            const present =
-              elemT.kind === "f64"
-                ? `scr_union_new_f64(${tag}, scr_arr_shift_f64(${r.name}))`
-                : elemT.kind === "bool"
-                  ? `scr_union_new_bool(${tag}, scr_arr_shift_bool(${r.name}))`
-                  : (() => {
-                      const rc = vAdapters(elemT);
-                      return `scr_union_new_ref(${tag}, scr_arr_shift_ref(${r.name}), &${rc.retain}, &${rc.release}, ${emitter.traceArgC(elemT)})`;
-                    })();
-            return emitter.newTemp(e.type, `scr_arr_len(${r.name}) ? ${present} : ${absent}`);
           }
           default: {
             const _exhaustive: never = method;
@@ -3372,6 +3413,7 @@ function emitAsyncExpr(
         if (e.value === null) throw new InternalCompilerError("emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = emitter.emitExpr(e.value);
         const yt = e.value.type;
+        if (e.awaited) emitter.line(`scr_async_gen_hop_done();`);
         if (yt.kind === "f64" || yt.kind === "date") {
           emitter.line(`scr_gen_yield_f64(${v.name});${emitter.srcComment(e.loc)}`);
         } else if (yt.kind === "bool") {
@@ -3402,13 +3444,70 @@ function emitAsyncExpr(
         // build the IteratorResult record through the interned helper.
         const genT = e.gen.type;
         if (genT.kind !== "generator") throw new InternalCompilerError("emitter bug: genResume on a non-generator");
-        if (e.type.kind !== "record") throw new InternalCompilerError("emitter bug: genResume result is not a record");
+        const resultT = genT.async ? (e.type.kind === "promise" ? e.type.inner : null) : e.type;
+        if (resultT?.kind !== "record") throw new InternalCompilerError("emitter bug: genResume result is not an IteratorResult record");
         const g = emitter.emitExpr(e.gen); // borrowed for the calls below
         const sendArg = (store: (a: Temp) => string): void => {
           const a = emitter.emitExpr(e.arg!);
           if (isRefCounted(e.arg!.type)) emitter.moveTemp(a); // the slot takes ownership
           emitter.line(store(a));
         };
+        if (genT.async) {
+          let call: string;
+          if (e.mode === "next") {
+            if (e.arg === null) {
+              if (genT.nextT.kind === "dyn") {
+                call = `scr_async_gen_next_ref(${g.name}, scr_dyn_retain(scr_dyn_undefined()), scr_dyn_release_v)`;
+              } else {
+                call = `scr_async_gen_next_none(${g.name})`;
+              }
+            } else {
+              const a = emitter.emitExpr(e.arg);
+              const t = e.arg.type;
+              if (isRefCounted(t)) emitter.moveTemp(a);
+              call = t.kind === "f64" || t.kind === "date"
+                ? `scr_async_gen_next_f64(${g.name}, ${a.name})`
+                : t.kind === "bool"
+                  ? `scr_async_gen_next_bool(${g.name}, ${a.name})`
+                  : `scr_async_gen_next_ref(${g.name}, ${a.name}, ${vAdapters(t).release})`;
+            }
+          } else if (e.mode === "return") {
+            if (e.arg === null) {
+              call = `scr_async_gen_return_none(${g.name})`;
+            } else {
+              const a = emitter.emitExpr(e.arg);
+              const t = e.arg.type;
+              if (isRefCounted(t)) emitter.moveTemp(a);
+              call = t.kind === "f64" || t.kind === "date"
+                ? `scr_async_gen_return_f64(${g.name}, ${a.name})`
+                : t.kind === "bool"
+                  ? `scr_async_gen_return_bool(${g.name}, ${a.name})`
+                  : `scr_async_gen_return_ref(${g.name}, ${a.name}, ${vAdapters(t).release})`;
+            }
+          } else {
+            if (e.arg === null) throw new InternalCompilerError("emitter bug: async genResume throw with no payload");
+            const a = emitter.emitExpr(e.arg);
+            const t = e.arg.type;
+            if (isRefCounted(t)) emitter.moveTemp(a);
+            if (t.kind === "date") {
+              throw new InternalCompilerError("emitter bug: Date async-generator throw reached backend");
+            } else if (t.kind === "f64") {
+              emitter.line(`scr_throw_f64(${a.name});${emitter.srcComment(e.loc)}`);
+            } else if (t.kind === "bool") {
+              emitter.line(`scr_throw_bool(${a.name});${emitter.srcComment(e.loc)}`);
+            } else if (t.kind === "string") {
+              emitter.line(`scr_throw_str(${a.name});${emitter.srcComment(e.loc)}`);
+            } else if (t.kind === "object" && emitter.classMeta.get(t.className)?.hierarchy) {
+              const rc = vAdapters(t);
+              emitter.line(`scr_throw_obj(${a.name}, &${rc.retain}, &${rc.release}, ${emitter.traceArgC(t)});${emitter.srcComment(e.loc)}`);
+            } else {
+              const rc = vAdapters(t);
+              emitter.line(`scr_throw_ref(${a.name}, &${rc.retain}, &${rc.release}, ${emitter.traceArgC(t)});${emitter.srcComment(e.loc)}`);
+            }
+            call = `scr_async_gen_throw(${g.name})`;
+          }
+          return emitter.newTemp(e.type, call);
+        }
         if (e.mode === "next") {
           if (e.arg === null) {
             // Valueless resume: dyn channels read JS's undefined; unit
@@ -3463,7 +3562,7 @@ function emitAsyncExpr(
           }
           emitter.line(`scr_gen_resume_throw(${g.name});`);
         }
-        const helper = genResultThunkFor(emitter, genT, e.type);
+        const helper = genResultThunkFor(emitter, genT, resultT);
         // The record builds before the check so an unwind (a propagated
         // body exception) releases it as the frame's never-read dummy.
         return emitter.fallibleTemp(e.type, `${helper}(${g.name})`);
@@ -7462,6 +7561,8 @@ export function emitExpr(emitter: CEmitter, e: IrExpr): Temp {
     case "arrayLit":
     case "arrayNewLen":
     case "arrayGet":
+    case "arrayHas":
+    case "arrayState":
     case "arrIntrinsic":
     case "bytesNew":
     case "bytesIntrinsic":

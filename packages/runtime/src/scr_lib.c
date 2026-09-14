@@ -108,7 +108,6 @@ extern char **environ; /* env snapshot (scr_env_pairs) */
 
 static SCR_TL int scr_lib_argc = 0;
 static SCR_TL char **scr_lib_argv = NULL;
-static SCR_TL bool scr_lib_self_reexec = false;
 static SCR_TL ScrArr *scr_argv_arr = NULL;    /* interned process.argv */
 static SCR_TL ScrStr *scr_platform_str = NULL; /* interned process.platform */
 static SCR_TL ScrStr *scr_exec_path_str = NULL; /* interned process.execPath */
@@ -159,12 +158,7 @@ static void scr_process_versions_openssl_cleanup(void) {
   scr_versions_openssl_str = NULL;
 }
 
-#ifndef SCR_LIB
-/* Executable lane only: a library artifact has no argv and registers no
- * atexit handlers (the emitted library init never calls this; keeping it out
- * the archive's objects free of any atexit reference — the K8 ambient
- * audit's bar). */
-static bool scr_lib_same_executable_path(const char *a, const char *b) {
+static bool scr_lib_same_executable_arg(const char *a, const char *b) {
   if (strcmp(a, b) == 0) return true;
 #ifdef __wasi__
   /* WASI has no host executable identity or process-spawning API. */
@@ -183,13 +177,29 @@ static bool scr_lib_same_executable_path(const char *a, const char *b) {
 #endif
 }
 
+/* A child_process call spelling Node's self-reexec shape:
+ * spawn(process.execPath, [process.argv[1], ...args]). The parent still
+ * knows these two path-like arguments are the executable and script marker,
+ * so its argv builder can collapse the marker without guessing from an
+ * unrelated child's raw user arguments. Library sessions have no argv and
+ * always answer false. */
+bool scr_lib_should_collapse_reexec_arg(ScrStr *cmd, ScrArr *args) {
+  if (scr_lib_argv == NULL || scr_lib_argc < 1 || scr_arr_len(args) < 1) return false;
+  ScrStr *first = (ScrStr *)scr_arr_get_ref(args, 0);
+  bool collapse = scr_lib_same_executable_arg(cmd->data, scr_lib_argv[0]) &&
+                  scr_lib_same_executable_arg(first->data, scr_lib_argv[0]);
+  scr_str_release(first);
+  return collapse;
+}
+
+#ifndef SCR_LIB
+/* Executable lane only: a library artifact has no argv and registers no
+ * atexit handlers (the emitted library init never calls this; keeping it out
+ * the archive's objects free of any atexit reference — the K8 ambient
+ * audit's bar). */
 void scr_lib_init(int argc, char **argv) {
   scr_lib_argc = argc;
   scr_lib_argv = argv;
-  /* child_process stamps argv[0] only for a native self-reexecution. Keep
-   * the repeated first argument as Node's script slot and hide the marker.
-   * In particular, never infer reexecution from ordinary user arguments. */
-  scr_lib_self_reexec = argc >= 2 && strcmp(argv[0], SCR_SELF_REEXEC_ARGV0) == 0;
   atexit(scr_lib_cleanup);
 }
 #endif /* !SCR_LIB */
@@ -213,10 +223,8 @@ void scr_lib_session_cleanup(void) {
 /* Raw argv accessors for the island's process shim (scr_island.c): the
  * island's process.argv must match the static world's ["scriptc",
  * argv[0], ...] shape exactly, so both build from the same stash. */
-int scr_lib_arg_count(void) { return scr_lib_argc - (scr_lib_self_reexec ? 1 : 0); }
-const char *scr_lib_arg(int i) {
-  return scr_lib_argv[i + (scr_lib_self_reexec ? 1 : 0)];
-}
+int scr_lib_arg_count(void) { return scr_lib_argc; }
+const char *scr_lib_arg(int i) { return scr_lib_argv[i]; }
 
 ScrArr *scr_process_argv(void) {
   if (!scr_argv_arr) {
@@ -364,21 +372,6 @@ ScrStr *scr_process_exec_path(void) {
 #endif
   }
   return scr_str_retain(scr_exec_path_str);
-}
-
-bool scr_lib_should_mark_self_reexec(const ScrStr *cmd, const ScrStr *first_arg) {
-#ifdef SCR_LIB
-  (void)cmd;
-  (void)first_arg;
-  return false;
-#else
-  ScrStr *exec_path = scr_process_exec_path();
-  bool should_mark =
-      scr_lib_same_executable_path(exec_path->data, cmd->data) &&
-      scr_lib_same_executable_path(exec_path->data, first_arg->data);
-  scr_str_release(exec_path);
-  return should_mark;
-#endif
 }
 
 ScrStr *scr_env_get(const ScrStr *name) {

@@ -28,6 +28,10 @@
     "webstreams": "unreviewed"
   },
   "evidenceByManifestPrefix": {
+    "syntax.using-declarations": ["tests/corpus/2841-using-sync.ts"],
+    "syntax.await-using-declarations": ["tests/corpus/2842-await-using.ts"],
+    "syntax.for-using-of": ["tests/corpus/2845-for-using-of.ts"],
+    "syntax.finally-abrupt-completions": ["tests/corpus/2840-finally-completions.ts"],
     "node-builtin.assert": ["tests/corpus/1600-assert-passing.ts", "tests/corpus/1609-assert-async.ts"],
     "node-builtin.async_hooks": ["tests/corpus/2213-async-local-storage.cjs"],
     "node-builtin.buffer": ["tests/corpus/1402-buffer-encodings.ts", "tests/corpus/1660-buffer-read-write-num.ts"],
@@ -70,15 +74,19 @@
   "features": [
     { "chapter": "environment_variables", "symbols": ["export"], "status": "not-applicable" },
     { "chapter": "globals", "symbols": ["fetch"], "status": "partial", "evidence": ["tests/harness/fetch-conformance.test.ts"] },
-    { "chapter": "modules", "symbols": ["__dirname", "__filename", "exports", "require", "module.require", "main", "filename"], "status": "partial", "evidence": ["tests/corpus/1612-cjs-module-globals.cjs", "tests/corpus/1596-cjs-modules/main.js", "tests/corpus/1629-require-main-filename.cjs"] },
+    { "chapter": "modules", "symbols": ["__dirname", "__filename", "exports", "require", "module.require", "main", "filename"], "status": "partial", "evidence": ["tests/corpus/1612-cjs-module-globals.cjs", "tests/corpus/1596-cjs-modules/main.js", "tests/corpus/1629-require-main-filename.cjs", "tests/corpus/2830-cjs-require-self-name/main.cjs"] },
     { "chapter": "modules", "symbols": ["require.resolve", "require.resolve.paths", "cache", "extensions", "children", "id", "isPreloading", "loaded", "parent", "paths", "Module"], "status": "not-implemented" },
     { "chapter": "modules", "symbols": ["node:", "node_modules"], "status": "partial", "evidence": ["tests/corpus/1598-cjs-builtin-require/main.js", "tests/corpus/1596-cjs-modules/main.js"] },
     { "chapter": "esm", "symbols": ["import", "file:", "node:", "await"], "status": "partial", "evidence": ["tests/corpus/950-modules-basic/main.ts", "tests/corpus/2646-top-level-await.ts"] },
     { "chapter": "esm", "symbols": ["url", "dirname", "filename", "main"], "status": "partial", "evidence": ["tests/corpus/2701-import-meta/main.mjs"] },
     { "chapter": "esm", "symbols": ["meta", "import.meta.resolve", "data:", "require", "__filename", "require.main", "require.resolve", "NODE_PATH", "require.extensions", "require.cache"], "status": "not-implemented" },
-    { "chapter": "packages", "symbols": ["package.json", "\"name\"", "\"main\"", "\"type\"", "\"exports\"", "\"imports\""], "status": "partial", "evidence": ["tests/corpus/2092-package-imports/main.ts", "tests/corpus/2120-package-self-import/main.ts", "tests/corpus/2124-imports-field-wildcard/main.ts", "tests/corpus/2390-dot-requires/main.cjs"] },
+    { "chapter": "packages", "symbols": ["package.json", "\"name\"", "\"main\"", "\"type\"", "\"exports\"", "\"imports\""], "status": "partial", "evidence": ["tests/corpus/2092-package-imports/main.ts", "tests/corpus/2120-package-self-import/main.ts", "tests/corpus/2124-imports-field-wildcard/main.ts", "tests/corpus/2390-dot-requires/main.cjs", "tests/corpus/2830-cjs-require-self-name/main.cjs"] },
     { "chapter": "packages", "symbols": ["--input-type"], "status": "not-applicable" },
-    { "chapter": "typescript", "symbols": ["type"], "status": "not-implemented" }
+    { "chapter": "child_process", "signatures": ["`subprocess[Symbol.dispose]()`"], "status": "partial", "evidence": ["tests/corpus/2844-node-disposable-resources.ts"] },
+    { "chapter": "fs", "signatures": ["`filehandle[Symbol.asyncDispose]()`"], "status": "partial", "evidence": ["tests/corpus/2844-node-disposable-resources.ts"] },
+    { "chapter": "readline", "signatures": ["`rl[Symbol.dispose]()`"], "status": "partial", "evidence": ["tests/corpus/2844-node-disposable-resources.ts"] },
+    { "chapter": "timers", "signatures": ["`immediate[Symbol.dispose]()`", "`timeout[Symbol.dispose]()`"], "status": "partial", "evidence": ["tests/corpus/2844-node-disposable-resources.ts"] },
+    { "chapter": "typescript", "symbols": ["type"], "status": "supported", "evidence": ["tests/corpus/2702-type-import-link-static/main.ts", "tests/corpus/2703-type-import-link-static-reexport/main.ts", "tests/corpus/2704-type-import-link-static-success/main.ts", "tests/corpus/2707-type-import-link-static-default-reexport/main.ts", "tests/harness/errors.test.ts"] }
   ],
   "dedicated": [
     { "symbols": ["console.log", "console.info", "console.debug", "console.error", "console.warn"], "status": "partial", "evidence": ["tests/corpus/1460-console-error-warn.ts", "tests/corpus/2440-console-inspect-args.ts"] },
@@ -86,7 +94,7 @@
     { "symbols": ["EventEmitter", "emitter.on", "emitter.addListener", "emitter.once", "emitter.prependListener", "emitter.prependOnceListener", "emitter.off", "emitter.removeListener", "emitter.removeAllListeners", "emitter.emit", "emitter.listenerCount", "emitter.listeners", "emitter.rawListeners", "emitter.eventNames", "emitter.setMaxListeners", "emitter.getMaxListeners", "events.getEventListeners", "events.listenerCount", "events.once", "events.on", "events.setMaxListeners"], "status": "partial", "evidence": ["tests/corpus/1677-emitter-listeners.ts", "tests/corpus/2620-ee-override-once-order.ts"] },
     { "symbols": ["AsyncLocalStorage", "asyncLocalStorage.run", "asyncLocalStorage.exit", "asyncLocalStorage.getStore", "asyncLocalStorage.enterWith", "asyncLocalStorage.disable"], "status": "partial", "evidence": ["tests/corpus/2213-async-local-storage.cjs"] },
     { "symbols": ["StringDecoder", "stringDecoder.write", "stringDecoder.end"], "status": "partial", "evidence": ["tests/corpus/1662-string-decoder-encodings.ts"] },
-    { "symbols": ["setImmediate", "setInterval", "setTimeout", "clearImmediate", "clearInterval", "clearTimeout", "timersPromises.setTimeout", "timersPromises.setImmediate", "immediate.hasRef", "immediate.ref", "immediate.unref", "timeout.hasRef", "timeout.ref", "timeout.unref", "timeout.refresh"], "status": "partial", "evidence": ["tests/corpus/1804-timers-module.ts", "tests/corpus/1805-timer-callback-args.ts", "tests/corpus/2093-timers-promises.ts"] },
+    { "symbols": ["setImmediate", "setInterval", "setTimeout", "clearImmediate", "clearInterval", "clearTimeout", "timersPromises.setTimeout", "timersPromises.setImmediate", "timersPromises.setInterval", "immediate.hasRef", "immediate.ref", "immediate.unref", "timeout.hasRef", "timeout.ref", "timeout.unref", "timeout.refresh"], "status": "partial", "evidence": ["tests/corpus/1804-timers-module.ts", "tests/corpus/1805-timer-callback-args.ts", "tests/corpus/2093-timers-promises.ts", "tests/corpus/2852-timers-promises-interval.ts"] },
     { "symbols": ["stream.finished", "stream.pipeline", "stream.getDefaultHighWaterMark", "readable.push", "readable.unshift", "readable.read", "readable.pause", "readable.resume", "readable.isPaused", "readable.setEncoding", "readable.pipe", "readable.unpipe", "readable.destroy", "writable.write", "writable.end", "writable.cork", "writable.uncork", "writable.setDefaultEncoding"], "status": "partial", "evidence": ["tests/corpus/1685-stream-readable-basics.ts", "tests/corpus/1688-stream-writable-basics.ts", "tests/corpus/1814-stream-pipeline.cjs"] },
     { "symbols": ["net.createServer", "net.connect", "net.createConnection", "net.getDefaultAutoSelectFamilyAttemptTimeout", "net.setDefaultAutoSelectFamilyAttemptTimeout", "server.address", "server.close", "server.listen", "socket.destroy", "socket.end", "socket.pause", "socket.resume", "socket.setEncoding", "socket.setTimeout", "socket.write"], "status": "partial", "evidence": ["tests/corpus/2500-net-autosel-timeout.ts", "tests/corpus/2596-net-arg-ladders.cjs"] },
     { "symbols": ["dgram.createSocket", "socket.address", "socket.bind", "socket.close", "socket.connect", "socket.ref", "socket.remoteAddress", "socket.send", "socket.unref"], "status": "partial", "evidence": ["tests/corpus/2597-dgram-send-ladders.cjs"] },

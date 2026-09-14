@@ -3,25 +3,25 @@
   "nodeVersion": "24.15.0",
   "nodeCommit": "848430679556aed0bd073f2bc263331ad84fa119",
   "summary": {
-    "taskCount": 3369,
-    "tierItemCount": 6673,
+    "taskCount": 3368,
+    "tierItemCount": 6671,
     "tiers": {
       "static": {
         "replace-refusal": 70,
-        "verify-gap": 2753,
-        "audit-partial": 384,
+        "verify-gap": 2748,
+        "audit-partial": 389,
         "classify": 4,
-        "implement": 93
+        "implement": 92
       },
       "dynamic": {
         "audit-partial": 745,
         "verify-gap": 2302,
         "replace-refusal": 101,
-        "implement": 221
+        "implement": 220
       }
     },
     "priorities": {
-      "high": 4510,
+      "high": 4508,
       "normal": 1411,
       "low": 752
     }
@@ -6118,12 +6118,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:child_process",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-feature:child_process.subprocess",
+          "tests": [
+            "tests/corpus/2844-node-disposable-resources.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -34622,12 +34624,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:fs",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-feature:fs.filehandle",
+          "tests": [
+            "tests/corpus/2844-node-disposable-resources.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -45354,7 +45358,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -45393,7 +45398,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -45432,7 +45438,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -45539,7 +45546,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -45578,7 +45586,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -45617,7 +45626,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -59327,7 +59337,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59367,7 +59378,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59407,7 +59419,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59447,7 +59460,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59523,7 +59537,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59698,7 +59713,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59771,7 +59787,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59841,7 +59858,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59881,7 +59899,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -59921,7 +59940,8 @@
           "tests": [
             "tests/corpus/1612-cjs-module-globals.cjs",
             "tests/corpus/1596-cjs-modules/main.js",
-            "tests/corpus/1629-require-main-filename.cjs"
+            "tests/corpus/1629-require-main-filename.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -61945,7 +61965,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -61957,7 +61978,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -61982,7 +62004,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -61994,7 +62017,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -62019,7 +62043,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -62031,7 +62056,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -62056,7 +62082,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -62068,7 +62095,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -62093,7 +62121,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -62105,7 +62134,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -62130,7 +62160,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -62142,7 +62173,8 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
         }
       }
@@ -62167,7 +62199,8 @@
             "tests/corpus/2092-package-imports/main.ts",
             "tests/corpus/2120-package-self-import/main.ts",
             "tests/corpus/2124-imports-field-wildcard/main.ts",
-            "tests/corpus/2390-dot-requires/main.cjs"
+            "tests/corpus/2390-dot-requires/main.cjs",
+            "tests/corpus/2830-cjs-require-self-name/main.cjs"
           ]
         },
         "dynamic": {
@@ -62179,41 +62212,9 @@
           "tests": [
             "tests/fixtures/npm/cases/dual-entry/main.ts",
             "tests/fixtures/npm/cases/self-name/main.ts",
-            "tests/fixtures/npm/cases/scoped-nested/main.ts"
+            "tests/fixtures/npm/cases/scoped-nested/main.ts",
+            "tests/corpus/2790-dynamic-import-self-name/main.ts"
           ]
-        }
-      }
-    },
-    {
-      "id": "typescript:e0b7094a6baa",
-      "chapter": "typescript",
-      "label": "Importing types without type keyword",
-      "signature": "Importing types without `type` keyword",
-      "apiSymbol": "type",
-      "docsUrl": "https://nodejs.org/docs/v24.15.0/api/typescript.html#importing-types-without-type-keyword",
-      "nodeStability": {
-        "index": "2",
-        "level": 2,
-        "text": "Stable",
-        "inherited": true
-      },
-      "priority": "high",
-      "tiers": {
-        "static": {
-          "status": "not-implemented",
-          "action": "implement",
-          "verification": "declared-gap",
-          "confidence": "medium",
-          "source": "compiler-feature:typescript.type",
-          "tests": []
-        },
-        "dynamic": {
-          "status": "not-implemented",
-          "action": "implement",
-          "verification": "declared-gap",
-          "confidence": "medium",
-          "source": "island-feature:typescript.type",
-          "tests": []
         }
       }
     },
@@ -74483,12 +74484,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:readline",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-feature:readline.rl",
+          "tests": [
+            "tests/corpus/2844-node-disposable-resources.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -85462,7 +85465,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85501,7 +85505,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85540,7 +85545,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85579,7 +85585,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85618,7 +85625,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85657,7 +85665,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85696,7 +85705,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85735,7 +85745,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85766,12 +85777,17 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:timers",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-dedicated:timersPromises.setInterval",
+          "tests": [
+            "tests/corpus/1804-timers-module.ts",
+            "tests/corpus/1805-timer-callback-args.ts",
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
+          ]
         },
         "dynamic": {
           "status": "partial",
@@ -85908,7 +85924,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85945,7 +85962,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -85982,7 +86000,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -86011,12 +86030,14 @@
       "priority": "high",
       "tiers": {
         "static": {
-          "status": "not-implemented",
-          "action": "verify-gap",
-          "verification": "registry-gap",
-          "confidence": "low",
-          "source": "compiler-unmatched:timers",
-          "tests": []
+          "status": "partial",
+          "action": "audit-partial",
+          "verification": "test-backed",
+          "confidence": "high",
+          "source": "compiler-feature:timers.immediate",
+          "tests": [
+            "tests/corpus/2844-node-disposable-resources.ts"
+          ]
         },
         "dynamic": {
           "status": "not-implemented",
@@ -86118,7 +86139,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -86155,7 +86177,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -86192,7 +86215,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -86229,7 +86253,8 @@
           "tests": [
             "tests/corpus/1804-timers-module.ts",
             "tests/corpus/1805-timer-callback-args.ts",
-            "tests/corpus/2093-timers-promises.ts"
+            "tests/corpus/2093-timers-promises.ts",
+            "tests/corpus/2852-timers-promises-interval.ts"
           ]
         },
         "dynamic": {
@@ -86299,11 +86324,9 @@
           "action": "audit-partial",
           "verification": "test-backed",
           "confidence": "high",
-          "source": "compiler-dedicated:timeout",
+          "source": "compiler-feature:timers.timeout",
           "tests": [
-            "tests/corpus/1780-http-res-surface.ts",
-            "tests/corpus/2672-http-request-response-callback.ts",
-            "tests/corpus/2689-http-server-timeout-properties.ts"
+            "tests/corpus/2844-node-disposable-resources.ts"
           ]
         },
         "dynamic": {

@@ -8,17 +8,29 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
+        ca-certificates curl gnupg \
+    && curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | gpg --dearmor --output /usr/share/keyrings/llvm-snapshot.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+        > /etc/apt/sources.list.d/llvm22.list \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
         build-essential \
         ca-certificates \
         ccache \
-        clang \
+        clang-22 \
         cmake \
         curl \
         git \
-        libclang-rt-dev \
-        llvm \
+        libclang-rt-22-dev \
+        libzstd-dev \
+        llvm-22-dev \
+        ninja-build \
         xz-utils \
         zlib1g-dev \
+    && ln -sf clang-22 /usr/bin/clang \
+    && ln -sf clang++-22 /usr/bin/clang++ \
+    && test "$(llvm-config-22 --version)" = 22.1.8 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --fail --silent --show-error --location \

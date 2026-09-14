@@ -71,7 +71,7 @@ function emitArgPackAndTrampolinePrologue(
    * their closure env through the pack (+1, released after the body). */
   export function emitAsyncScaffolding(emitter: CEmitter, out: string[]): void {
     for (const fn of emitter.mod.functions) {
-      if (!fn.async) continue;
+      if (!fn.async || fn.generator !== undefined) continue;
       const { definitions, ret, lines, spawnParams, argPackLines } =
         emitArgPackAndTrampolinePrologue(fn);
       out.push(...definitions);
@@ -199,6 +199,33 @@ function emitArgPackAndTrampolinePrologue(
       );
       out.push(...lines);
 
+      let settleAsync: string | null = null;
+      if (fn.async) {
+        const genT: IrType & { kind: "generator" } = {
+          kind: "generator",
+          async: true,
+          yieldT: fn.generator.yieldT,
+          retT: ret,
+          nextT: fn.generator.nextT,
+        };
+        const resultT = fn.generator.resultType;
+        const build = genResultThunkFor(emitter, genT, resultT);
+        settleAsync = `${build}_async`;
+        const settleKey = `async:${typeKey(genT)}`;
+        if (!emitter.genResThunks.has(settleKey)) {
+          emitter.genResThunks.set(settleKey, settleAsync);
+          const adapters = vAdapters(resultT);
+          out.push(`static void ${settleAsync}(ScrGen *sc_g, ScrPromise *sc_p);`);
+          emitter.walkerDefs.push(
+            `static void ${settleAsync}(ScrGen *sc_g, ScrPromise *sc_p) {`,
+            `  ${mangleRecordStruct(resultT.shapeId)} *sc_r = ${build}(sc_g);`,
+            `  scr_promise_fulfill_ref(sc_p, sc_r, ${adapters.retain}, ${adapters.release}, ${emitter.traceArgC(resultT)});`,
+            `}`,
+            ``,
+          );
+        }
+      }
+
       out.push(
         `static void ${mangleGenDrop(fn.name)}(void *sc_ap0) {`,
         `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
@@ -211,7 +238,9 @@ function emitArgPackAndTrampolinePrologue(
         `}`,
         `static ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
         ...argPackLines,
-        `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`,
+        settleAsync === null
+          ? `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`
+          : `  return scr_async_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)}, &${settleAsync});`,
         `}`,
       );
     }

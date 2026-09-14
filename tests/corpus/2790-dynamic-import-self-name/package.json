@@ -1,0 +1,7 @@
+{
+  "name": "scriptc-dynamic-self",
+  "type": "module",
+  "exports": {
+    "./dep": "./dep.ts"
+  }
+}

@@ -199,9 +199,9 @@
       "apiEntries": 39,
       "static": {
         "supported": 0,
-        "partial": 5,
+        "partial": 6,
         "refused": 1,
-        "not-implemented": 33,
+        "not-implemented": 32,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -511,9 +511,9 @@
       "apiEntries": 276,
       "static": {
         "supported": 0,
-        "partial": 39,
+        "partial": 40,
         "refused": 0,
-        "not-implemented": 237,
+        "not-implemented": 236,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -774,19 +774,19 @@
       "entries": 11,
       "apiEntries": 2,
       "static": {
-        "supported": 0,
+        "supported": 2,
         "partial": 0,
         "refused": 0,
-        "not-implemented": 2,
+        "not-implemented": 0,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
       },
       "dynamic": {
-        "supported": 0,
+        "supported": 2,
         "partial": 0,
         "refused": 0,
-        "not-implemented": 2,
+        "not-implemented": 0,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -991,9 +991,9 @@
       "apiEntries": 43,
       "static": {
         "supported": 0,
-        "partial": 3,
+        "partial": 4,
         "refused": 0,
-        "not-implemented": 40,
+        "not-implemented": 39,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -1183,9 +1183,9 @@
       "apiEntries": 25,
       "static": {
         "supported": 0,
-        "partial": 18,
+        "partial": 20,
         "refused": 0,
-        "not-implemented": 7,
+        "not-implemented": 5,
         "by-design": 0,
         "unreviewed": 0,
         "not-applicable": 0
@@ -13999,7 +13999,8 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/1361-spawn-events.ts",
-          "tests/corpus/1565-spawn-pipe-streams.ts"
+          "tests/corpus/1565-spawn-pipe-streams.ts",
+          "tests/corpus/2844-node-disposable-resources.ts"
         ]
       },
       "dynamic": {
@@ -14555,8 +14556,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:child_process"
+        "status": "partial",
+        "evidence": "compiler-feature:child_process.subprocess",
+        "tests": [
+          "tests/corpus/2844-node-disposable-resources.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -50390,7 +50394,8 @@
         "evidence": "derived:descendants",
         "tests": [
           "tests/corpus/1403-buffer-fs.ts",
-          "tests/corpus/2595-fs-arg-ladders.cjs"
+          "tests/corpus/2595-fs-arg-ladders.cjs",
+          "tests/corpus/2844-node-disposable-resources.ts"
         ]
       },
       "dynamic": {
@@ -51176,8 +51181,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:fs"
+        "status": "partial",
+        "evidence": "compiler-feature:fs.filehandle",
+        "tests": [
+          "tests/corpus/2844-node-disposable-resources.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -59098,6 +59106,7 @@
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
           "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts",
           "tests/harness/fetch-conformance.test.ts"
         ]
       },
@@ -60975,7 +60984,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -61010,7 +61020,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -61045,7 +61056,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -61137,7 +61149,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -61172,7 +61185,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -61207,7 +61221,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -73696,7 +73711,8 @@
           "tests/corpus/1596-cjs-modules/main.js",
           "tests/corpus/1598-cjs-builtin-require/main.js",
           "tests/corpus/1612-cjs-module-globals.cjs",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -73733,7 +73749,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -73796,7 +73813,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -73832,7 +73850,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -73868,7 +73887,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -73934,7 +73954,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -74082,7 +74103,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -74144,7 +74166,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -74203,7 +74226,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -74239,7 +74263,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -74275,7 +74300,8 @@
         "tests": [
           "tests/corpus/1612-cjs-module-globals.cjs",
           "tests/corpus/1596-cjs-modules/main.js",
-          "tests/corpus/1629-require-main-filename.cjs"
+          "tests/corpus/1629-require-main-filename.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -77686,13 +77712,15 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
+          "tests/corpus/2790-dynamic-import-self-name/main.ts",
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/scoped-nested/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts"
@@ -77834,7 +77862,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -77843,7 +77872,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78241,7 +78271,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78250,7 +78281,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78274,7 +78306,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78283,7 +78316,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78307,7 +78341,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78316,7 +78351,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78340,7 +78376,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78349,7 +78386,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78373,7 +78411,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78382,7 +78421,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78406,7 +78446,8 @@
           "tests/corpus/2092-package-imports/main.ts",
           "tests/corpus/2120-package-self-import/main.ts",
           "tests/corpus/2124-imports-field-wildcard/main.ts",
-          "tests/corpus/2390-dot-requires/main.cjs"
+          "tests/corpus/2390-dot-requires/main.cjs",
+          "tests/corpus/2830-cjs-require-self-name/main.cjs"
         ]
       },
       "dynamic": {
@@ -78415,7 +78456,8 @@
         "tests": [
           "tests/fixtures/npm/cases/dual-entry/main.ts",
           "tests/fixtures/npm/cases/self-name/main.ts",
-          "tests/fixtures/npm/cases/scoped-nested/main.ts"
+          "tests/fixtures/npm/cases/scoped-nested/main.ts",
+          "tests/corpus/2790-dynamic-import-self-name/main.ts"
         ]
       },
       "anchorSource": "exact"
@@ -78438,12 +78480,25 @@
         "inherited": false
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "derived:descendants"
+        "status": "supported",
+        "evidence": "derived:descendants",
+        "tests": [
+          "tests/corpus/2702-type-import-link-static/main.ts",
+          "tests/corpus/2703-type-import-link-static-reexport/main.ts",
+          "tests/corpus/2704-type-import-link-static-success/main.ts",
+          "tests/corpus/2707-type-import-link-static-default-reexport/main.ts",
+          "tests/harness/errors.test.ts"
+        ]
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "derived:descendants"
+        "status": "supported",
+        "evidence": "derived:descendants",
+        "tests": [
+          "tests/corpus/2705-type-import-link-dynamic/main.ts",
+          "tests/corpus/2706-type-import-link-dynamic-success/main.ts",
+          "tests/corpus/2708-type-import-link-dynamic/main.ts",
+          "tests/harness/errors.test.ts"
+        ]
       },
       "anchorSource": "chapter"
     },
@@ -78600,12 +78655,25 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-feature:typescript.type"
+        "status": "supported",
+        "evidence": "compiler-feature:typescript.type",
+        "tests": [
+          "tests/corpus/2702-type-import-link-static/main.ts",
+          "tests/corpus/2703-type-import-link-static-reexport/main.ts",
+          "tests/corpus/2704-type-import-link-static-success/main.ts",
+          "tests/corpus/2707-type-import-link-static-default-reexport/main.ts",
+          "tests/harness/errors.test.ts"
+        ]
       },
       "dynamic": {
-        "status": "not-implemented",
-        "evidence": "island-feature:typescript.type"
+        "status": "supported",
+        "evidence": "island-feature:typescript.type",
+        "tests": [
+          "tests/corpus/2705-type-import-link-dynamic/main.ts",
+          "tests/corpus/2706-type-import-link-dynamic-success/main.ts",
+          "tests/corpus/2708-type-import-link-dynamic/main.ts",
+          "tests/harness/errors.test.ts"
+        ]
       },
       "anchorSource": "exact"
     },
@@ -89360,7 +89428,8 @@
         "status": "partial",
         "evidence": "derived:descendants",
         "tests": [
-          "tests/corpus/1475-readline-closed-stdin.ts"
+          "tests/corpus/1475-readline-closed-stdin.ts",
+          "tests/corpus/2844-node-disposable-resources.ts"
         ]
       },
       "dynamic": {
@@ -90071,8 +90140,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:readline"
+        "status": "partial",
+        "evidence": "compiler-feature:readline.rl",
+        "tests": [
+          "tests/corpus/2844-node-disposable-resources.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -102313,7 +102385,9 @@
           "tests/corpus/1805-timer-callback-args.ts",
           "tests/corpus/2093-timers-promises.ts",
           "tests/corpus/2672-http-request-response-callback.ts",
-          "tests/corpus/2689-http-server-timeout-properties.ts"
+          "tests/corpus/2689-http-server-timeout-properties.ts",
+          "tests/corpus/2844-node-disposable-resources.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102375,7 +102449,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102410,7 +102485,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102445,7 +102521,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102507,7 +102584,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102542,7 +102620,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102577,7 +102656,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102639,7 +102719,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102674,7 +102755,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102704,8 +102786,14 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:timers"
+        "status": "partial",
+        "evidence": "compiler-dedicated:timersPromises.setInterval",
+        "tests": [
+          "tests/corpus/1804-timers-module.ts",
+          "tests/corpus/1805-timer-callback-args.ts",
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
+        ]
       },
       "dynamic": {
         "status": "partial",
@@ -102820,7 +102908,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102852,7 +102941,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102884,7 +102974,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -102911,8 +103002,11 @@
         "inherited": true
       },
       "static": {
-        "status": "not-implemented",
-        "evidence": "compiler-unmatched:timers"
+        "status": "partial",
+        "evidence": "compiler-feature:timers.immediate",
+        "tests": [
+          "tests/corpus/2844-node-disposable-resources.ts"
+        ]
       },
       "dynamic": {
         "status": "not-implemented",
@@ -102997,7 +103091,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -103029,7 +103124,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -103061,7 +103157,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -103093,7 +103190,8 @@
         "tests": [
           "tests/corpus/1804-timers-module.ts",
           "tests/corpus/1805-timer-callback-args.ts",
-          "tests/corpus/2093-timers-promises.ts"
+          "tests/corpus/2093-timers-promises.ts",
+          "tests/corpus/2852-timers-promises-interval.ts"
         ]
       },
       "dynamic": {
@@ -103153,11 +103251,9 @@
       },
       "static": {
         "status": "partial",
-        "evidence": "compiler-dedicated:timeout",
+        "evidence": "compiler-feature:timers.timeout",
         "tests": [
-          "tests/corpus/1780-http-res-surface.ts",
-          "tests/corpus/2672-http-request-response-callback.ts",
-          "tests/corpus/2689-http-server-timeout-properties.ts"
+          "tests/corpus/2844-node-disposable-resources.ts"
         ]
       },
       "dynamic": {

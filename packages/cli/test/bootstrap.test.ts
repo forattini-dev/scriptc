@@ -4,12 +4,16 @@ import { release as osRelease, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { precompiledRuntimePackTarget } from "../../compiler/src/startup-cache.js";
+import { platformLinkerSupportsPersistentCache } from "../../compiler/src/backend/linker.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../../..");
 const bootstrap = join(repoRoot, "packages/cli/dist/bootstrap.js");
 const runtimePackHost = process.platform === "darwin" && process.arch === "arm64" &&
   Number.parseInt(osRelease().split(".", 1)[0] ?? "", 10) >= 24;
+const helperTarget = precompiledRuntimePackTarget();
+const persistentExecutable = helperTarget === null || platformLinkerSupportsPersistentCache(process.env, helperTarget);
 
 test("bootstrap serves version and help without loading the compiler graph", async () => {
   const preloadDir = await mkdtemp(join(tmpdir(), "scriptc-bootstrap-preload-"));
@@ -99,7 +103,15 @@ test.each([
       rm(join(cacheRoot, "early-exe-implementation"), { recursive: true, force: true }),
     ]);
     expect((await build()).stderr).not.toContain("scriptc lowering");
-    await expect(build(true)).resolves.toMatchObject({ stderr: "" });
+    if (persistentExecutable) {
+      await expect(build(true)).resolves.toMatchObject({ stderr: "" });
+    } else {
+      // This target intentionally lacks a persistent native dependency proof.
+      // It must enter the full compiler to relink, even on a frontend hit.
+      await expect(build(true)).rejects.toMatchObject({ stderr: expect.stringContaining("compiler graph loaded") });
+      expect((await build()).stderr).not.toContain("scriptc lowering");
+      expect((await execFileAsync(outPath)).stdout).toBe("one\n");
+    }
 
     await writeFile(entry, 'console.log("two");\n');
     expect((await build()).stderr).toContain("scriptc lowering");

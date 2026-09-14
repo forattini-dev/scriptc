@@ -152,6 +152,30 @@ void scr_rethrow(const ScrCaught *c) {
   }
 }
 
+/* Explicit resource management's error merge. The full JavaScript object
+ * exposes `.error` and `.suppressed`; the static catch surface currently
+ * exposes Error name/message, so retain Node's externally visible identity
+ * and ordering while consuming both snapshots exactly once. */
+void scr_exc_suppress(ScrCaught *suppressed) {
+  if (suppressed->kind == SCR_EXC_GENRET) {
+    /* A generator .return() is a return completion, not a thrown error.
+     * A failing disposer replaces it directly. */
+    scr_caught_release(suppressed);
+    return;
+  }
+  ScrCaught *error = scr_exc_take();
+  if (!error) {
+    scr_rethrow(suppressed);
+    scr_caught_release(suppressed);
+    return;
+  }
+  scr_caught_release(error);
+  scr_caught_release(suppressed);
+  scr_throw_error_named(
+      scr_str_new("SuppressedError", sizeof("SuppressedError") - 1),
+      scr_str_new("An error was suppressed during disposal", sizeof("An error was suppressed during disposal") - 1));
+}
+
 bool scr_caught_instanceof(const ScrCaught *c, size_t pre, size_t post) {
   if (c->kind != SCR_EXC_OBJ) return false;
   /* Every hierarchy class shares the rc+vt prefix; ScrError names it. */

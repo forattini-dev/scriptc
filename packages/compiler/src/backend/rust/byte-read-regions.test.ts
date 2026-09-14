@@ -28,7 +28,7 @@ function fixture(): { mod: IrModule; loop: Extract<IrStmt, { kind: "for" }>; hel
       init: { kind: "bytesNew", source: num(4), type: bytes, loc }, loc })),
   };
   fn.body.push(loop);
-  return { mod: { irVersion: 6, sourceFile: loc.file, entry: "main", functions: [fn, helper] }, loop, helper };
+  return { mod: { irVersion: 8, sourceFile: loc.file, entry: "main", functions: [fn, helper] }, loop, helper };
 }
 
 test("read regions inspect direct callees and borrow stable inputs once", () => {

@@ -1,0 +1,7 @@
+{
+  "name": "scriptc-cjs-self",
+  "type": "commonjs",
+  "exports": {
+    "./lib": "./lib.cjs"
+  }
+}

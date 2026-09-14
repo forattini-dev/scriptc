@@ -6,7 +6,7 @@ import { nativeModuleBackendDiagnostics } from "./native-module-support.js";
 
 test("a BigInt global refuses C and LLVM before emitting source", () => {
   const mod: IrModule = {
-    irVersion: 6, sourceFile: "bigint.ts", entry: "main",
+    irVersion: 8, sourceFile: "bigint.ts", entry: "main",
     globals: [{ id: "large", name: "large", type: BIGINT, mutable: false }],
     functions: [{ name: "main", params: [], locals: [], returnType: VOID,
       body: [], loc: { file: "bigint.ts", start: 0, end: 1 } }],
@@ -25,7 +25,7 @@ test("a BigInt global refuses C and LLVM before emitting source", () => {
 test("refuses a BigInt kind test without any statically typed BigInt value", () => {
   const loc = { file: "unknown.ts", start: 1, end: 2 };
   const mod: IrModule = {
-    irVersion: 6, sourceFile: "unknown.ts", entry: "main", globals: [],
+    irVersion: 8, sourceFile: "unknown.ts", entry: "main", globals: [],
     functions: [{ name: "main", params: [], locals: [], returnType: VOID,
       body: [{ kind: "exprStmt", loc, expr: { kind: "dynTest", test: "bigint", type: { kind: "bool" }, loc,
         value: { kind: "libCall", fn: "json.parse", args: [{ kind: "strLit", value: "0", type: { kind: "string" }, loc }], type: { kind: "dyn" }, loc },

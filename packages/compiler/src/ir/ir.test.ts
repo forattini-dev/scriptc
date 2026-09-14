@@ -18,7 +18,7 @@ const loc = { file: "test.ts", start: 0, end: 1 };
 
 function moduleWithExpr(expr: IrExpr): IrModule {
   return {
-    irVersion: 6,
+    irVersion: 8,
     sourceFile: loc.file,
     functions: [{
       name: "main",

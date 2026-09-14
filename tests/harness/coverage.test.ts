@@ -76,6 +76,18 @@ test("JS numeric inference and native dynamic execution need no JavaScript engin
   );
 });
 
+test("any-typed checked-dynamic locals honor the --dynamic coverage promise", () => {
+  const file = join(repoRoot, "tests/corpus/2856-dynamic-any-local-operators.ts");
+  const staticCoverage = analyze(file).coverage;
+  expect(staticCoverage.diagnostics.length).toBeGreaterThan(0);
+  expect(new Set(staticCoverage.diagnostics.map((d) => d.code))).toEqual(new Set(["SC2011"]));
+
+  const dynamicCoverage = analyze(file, { dynamic: true }).coverage;
+  expect(dynamicCoverage.diagnostics).toEqual([]);
+  expect(dynamicCoverage.stats.statementsFailed).toBe(0);
+  expect(dynamicCoverage.stats.statementsIsland).toBeGreaterThan(0);
+});
+
 test("npm package sites attribute per package", async () => {
   // Every site of a package-declared value groups into one SC2013 line
   // naming the package ("values from the 'mathkit' package ..."), inside

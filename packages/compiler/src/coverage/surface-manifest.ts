@@ -230,6 +230,16 @@ export function generateSurfaceManifest(compilerVersion: string): SurfaceManifes
       note: `compiles over the operand types the '${op}' operator supports`,
     });
   }
+  for (const [id, name, note] of [
+    ["async-generators", "typed async generator functions and methods", "lazy bodies with queued next/return/throw requests, await, direct yield, and Node-compatible completion promises"],
+    ["for-await-async-generators", "for await over typed async generators", "awaits each IteratorResult and closes the generator on early break"],
+    ["using-declarations", "block- and function-scoped using declarations", "LIFO disposal on normal and abrupt scope exit through [Symbol.dispose]"],
+    ["await-using-declarations", "block- and function-scoped await using declarations", "LIFO asynchronous disposal through [Symbol.asyncDispose], with synchronous fallback"],
+    ["for-using-of", "for (using ... of ...) over arrays", "each array element is disposed at the end of its iteration, including break and continue paths"],
+    ["finally-abrupt-completions", "abrupt completions through finally", "return, throw, break, continue, and labeled jumps run crossed finally blocks; a finally completion replaces the pending one"],
+  ] as const) {
+    add({ id: `syntax.${id}`, kind: "syntax", name, status: "static", note });
+  }
 
   // ── stdlib: string / array / map / set method surfaces ────────────────
   for (const [name, entry] of Object.entries(STR_METHODS)) {

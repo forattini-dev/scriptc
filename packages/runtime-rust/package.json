@@ -1,6 +1,6 @@
 {
   "name": "@scriptc/runtime-rust",
-  "version": "0.0.36-rust.0",
+  "version": "0.1.1-rust.0",
   "description": "Memory-safe Rust runtime for the scriptc Rust backend",
   "license": "Apache-2.0",
   "homepage": "https://scriptc.dev",

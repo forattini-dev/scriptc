@@ -23,9 +23,11 @@ const tty = process.stdout.isTTY;
 const errTty = process.stderr.isTTY;
 
 import { accessSync, constants, mkdtempSync, readFileSync } from "node:fs";
+import { setInterval as promiseInterval } from "node:timers/promises";
 accessSync("/bin/sh", constants.X_OK);
 const tmp = mkdtempSync("/tmp/scr-");
 const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // runtime BufferEncoding selection lowers too
+const intervalWithSignal = promiseInterval(1, "tick", {}); // AbortSignal options stay fenced
 // The computed encoding is now part of the static Buffer surface.
 import { deflateSync, gzipSync } from "node:zlib";
 const packed = deflateSync("data"); // string data: the wrap-it-first hint

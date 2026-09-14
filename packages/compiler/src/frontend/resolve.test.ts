@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { clearResolveCaches, projectDtsRuntimeSibling, setProjectRealm } from "./resolve.js";
+import { clearResolveCaches, projectDtsRuntimeSibling, resolveProjectModule, setProjectPathMappings, setProjectRealm } from "./resolve.js";
 
 test("resolver reset clears the active project package realm", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-resolve-reset-"));
@@ -20,9 +20,12 @@ test("resolver reset clears the active project package realm", async () => {
     clearResolveCaches();
     setProjectRealm(join(src, "main.ts"));
     expect(projectDtsRuntimeSibling(declaration)).toBe(runtime);
+    setProjectPathMappings({ "@app/value": [join(src, "value")] });
+    expect(resolveProjectModule(join(src, "main.ts"), "@app/value")).toBe(runtime);
 
     clearResolveCaches();
     expect(projectDtsRuntimeSibling(declaration)).toBeNull();
+    expect(resolveProjectModule(join(src, "main.ts"), "@app/value")).toBeNull();
   } finally {
     clearResolveCaches();
     await rm(dir, { recursive: true, force: true });

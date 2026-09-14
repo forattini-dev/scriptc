@@ -33,7 +33,7 @@ function fixture() {
       loop, { kind: "return", value: out, loc }],
   };
   const main: IrFunction = { name: "main", params: [], locals: [], body: [], returnType: { kind: "void" }, loc };
-  const mod: IrModule = { irVersion: 6, sourceFile: loc.file, entry: main.name, functions: [main, fn, helper],
+  const mod: IrModule = { irVersion: 8, sourceFile: loc.file, entry: main.name, functions: [main, fn, helper],
     unions: [{ id: union.unionId, arms: [bytes, { kind: "nullT" }] }] };
   return { helper, receiver, fn, loop, mod };
 }

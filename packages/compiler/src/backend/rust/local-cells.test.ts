@@ -15,7 +15,7 @@ function fixture(): { fn: IrFunction; mod: IrModule } {
       { kind: "exprStmt", expr: { kind: "varRef", localId: "value", type: { kind: "f64" }, loc }, loc },
     ],
   };
-  return { fn, mod: { irVersion: 6, sourceFile: loc.file, entry: fn.name, functions: [fn] } };
+  return { fn, mod: { irVersion: 8, sourceFile: loc.file, entry: fn.name, functions: [fn] } };
 }
 
 test("uncaptured scalar cells stay on the stack with an initialization check", () => {
@@ -54,7 +54,7 @@ test("forced-cell decisions reject suspended frames and reset between functions"
   cells.set("value", true);
   expect(cells.isStack("value")).toBe(false);
   delete fn.async;
-  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" } };
+  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" }, resultType: { kind: "record", shapeId: "r0" } };
   cells.set("value", true);
   expect(cells.isStack("value")).toBe(false);
   cells.set("value", false);

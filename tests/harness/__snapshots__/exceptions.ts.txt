@@ -6,24 +6,3 @@ exceptions.ts:3:10 - error SC1062: destructuring catch clause bindings are not s
   4 |   console.log("destructuring catch bindings are fenced");
 
   hint: bind an identifier (catch (e)) and narrow it — 'e instanceof Error' exposes .name/.message, typeof tests expose primitives
-
-exceptions.ts:12:5 - error SC1090: 'return' out of a 'finally' block (it would replace the pending completion — restructure so the finally only cleans up) is not supported yet
-
-  11 |     // INSIDE the finally body (replacing the pending completion) stays out.
-  12 |     return 1;
-     |     ^~~~~~~~~
-  13 |   }
-
-exceptions.ts:18:7 - error SC1090: 'break' crossing a 'finally' block is not supported yet
-
-  17 |     if (i === 2) {
-  18 |       break;
-     |       ^~~~~~
-  19 |     }
-
-exceptions.ts:27:7 - error SC1090: 'continue' out of a 'finally' block (it would replace the pending completion — restructure so the finally only cleans up) is not supported yet
-
-  26 |     } finally {
-  27 |       continue;
-     |       ^~~~~~~~~
-  28 |     }

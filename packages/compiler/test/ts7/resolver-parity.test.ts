@@ -17,8 +17,10 @@ import {
   projectDtsRuntimeSibling,
   resolveBareModule,
   resolveProjectImport,
+  resolveProjectModule,
   resolveRelativeModule,
   resolveTypeDirective,
+  setProjectPathMappings,
 } from "../../src/frontend/resolve.js";
 import { isRelativeSpecifier } from "../../src/frontend/workspace-registry.js";
 import { options5 } from "./harness.js";
@@ -327,6 +329,46 @@ test("synthetic project imports: the imports field and self-name exports", () =>
   rmSync(dir, { recursive: true, force: true });
   clearResolveCaches();
   expect(failures, failures.join("\n")).toEqual([]);
+});
+
+test("synthetic project paths use TypeScript's exact and best-pattern resolution", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-resolve-paths-"));
+  const write = (rel: string, text = "export const x = 1;\n"): void => {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), text);
+  };
+  write("main.ts");
+  write("src/exact.ts");
+  write("src/general/value.ts");
+  write("src/special/value.ts");
+  const configured = {
+    exact: ["src/exact.ts"],
+    "@app/*": ["missing/*", "src/general/*"],
+    "@app/special/*": ["src/special/*"],
+  };
+  setProjectPathMappings(
+    Object.fromEntries(
+      Object.entries(configured).map(([key, targets]) => [
+        key,
+        targets.map((target) => join(dir, target)),
+      ]),
+    ),
+  );
+  const from = join(dir, "main.ts");
+  expect(resolveProjectModule(from, join(dir, "src/exact.ts"))).toBe(
+    join(dir, "src/exact.ts").replaceAll("\\", "/"),
+  );
+  for (const spec of ["exact", "@app/value", "@app/special/value", "@app/missing"]) {
+    const reference = ts5.resolveModuleName(
+      spec,
+      from,
+      { ...OPTS, baseUrl: dir, paths: configured },
+      ts5.sys,
+    ).resolvedModule;
+    expect(resolveProjectImport(from, spec), spec).toBe(reference?.resolvedFileName ?? null);
+  }
+  clearResolveCaches();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("the 'node' type directive resolves identically from every fixture anchor", () => {

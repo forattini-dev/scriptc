@@ -14,7 +14,7 @@ import { locOf } from "../program.js";
 import { genResultRecord } from "../type-mapper.js";
 import { forOfVarTarget } from "./lower-stmts.js";
 
-type GenType = IrType & { kind: "generator" };
+export type GenType = IrType & { kind: "generator" };
 
 /** The interned IteratorResult record of a generator type (never null for
  * a MAPPED generator — mapType required it to intern). */
@@ -56,8 +56,8 @@ export function lowerYield(lowerer: Lowerer, expr: ts.YieldExpression): IrExpr {
   const loc = locOf(expr);
   const gen = lowerer.ctx.generator;
   if (!gen) {
-    // A yield in a body this compiler did not lower as a generator (an
-    // async generator's, a comptime callback's) — the blanket fence.
+    // A yield in a body this compiler did not lower as a generator (for
+    // example a comptime callback) — the blanket fence.
     lowerer.unsupported("SC1071", expr);
   }
   if (expr.asteriskToken && gen.yieldT.kind === "effect" && expr.expression !== undefined) {
@@ -81,8 +81,19 @@ export function lowerYield(lowerer: Lowerer, expr: ts.YieldExpression): IrExpr {
     );
   }
   let value: IrExpr;
+  let awaited = false;
   if (expr.expression) {
-    value = lowerer.lowerExprExpecting(expr.expression, gen.yieldT);
+    const raw = lowerer.lowerExpr(expr.expression);
+    if (lowerer.ctx.isAsync && raw.type.kind === "promise") {
+      const awaitedValue: IrExpr = { kind: "awaitExpr", value: raw, type: raw.type.inner, loc: raw.loc };
+      value = lowerer.coerceInto(expr.expression, awaitedValue, gen.yieldT);
+      // AsyncGeneratorYield itself awaits its operand. The explicit IR
+      // await above performs that one required hop; the runtime must settle
+      // in the same continuation instead of inserting another.
+      awaited = true;
+    } else {
+      value = lowerer.coerceInto(expr.expression, raw, gen.yieldT);
+    }
   } else {
     const u = channelUndefined(lowerer, gen.yieldT, loc);
     if (!u) {
@@ -98,7 +109,7 @@ export function lowerYield(lowerer: Lowerer, expr: ts.YieldExpression): IrExpr {
   // the expression is void (statement position; the checker types reads of
   // it undefined, whose uses fence downstream).
   const type = gen.nextT.kind === "undefinedT" ? VOID : gen.nextT;
-  return { kind: "yieldExpr", value, type, loc };
+  return { kind: "yieldExpr", value, ...(awaited ? { awaited: true as const } : {}), type, loc };
 }
 
 /** `g.next(v)` / `g.return(v)` / `g.throw(e)` on a generator-typed
@@ -121,6 +132,7 @@ export function lowerGenMethodCall(
   if (gen.type.kind !== "generator") return null;
   const genT = gen.type;
   const recT = resultRecordOf(lowerer, genT);
+  const resultT: IrType = genT.async ? { kind: "promise", inner: recT } : recT;
   const argNode = call.arguments[0];
   let arg: IrExpr | null = null;
   if (name === "next") {
@@ -189,7 +201,7 @@ export function lowerGenMethodCall(
       );
     }
   }
-  return { kind: "genResume", mode: name, gen, arg, type: recT, loc };
+  return { kind: "genResume", mode: name, gen, arg, type: resultT, loc };
 }
 
 /** Extraction of a suspended resume's yield value out of the result
@@ -251,6 +263,9 @@ export function lowerForOfGenerator(
   iterable: IrExpr & { type: GenType },
   labels?: string[],
 ): IrStmt {
+  if (iterable.type.async) {
+    lowerer.unsupported("SC1070", stmt.expression, "synchronous for-of over an async generator (use 'for await')");
+  }
   if (!ts.isVariableDeclarationList(stmt.initializer)) {
     lowerer.unsupported(
       "SC1090",
@@ -379,6 +394,138 @@ export function lowerForOfGenerator(
   }
 }
 
+/** `for await (const x of asyncGen)` — the async sibling of
+ * lowerForOfGenerator. Each resume produces Promise<IteratorResult>, so
+ * the loop awaits it before testing done and extracting the typed value.
+ * Early break awaits `.return()` to run the generator's finally blocks. */
+export function lowerForAwaitGenerator(
+  lowerer: Lowerer,
+  stmt: ts.ForOfStatement,
+  iterable: IrExpr & { type: GenType },
+  labels?: string[],
+): IrStmt {
+  if (!iterable.type.async) {
+    lowerer.unsupported("SC1070", stmt.expression, "for-await over this synchronous generator");
+  }
+  if (!lowerer.ctx.isAsync) {
+    lowerer.unsupported("SC1090", stmt, "top-level 'for await' (await outside async functions)");
+  }
+  if (!ts.isVariableDeclarationList(stmt.initializer)) {
+    lowerer.unsupported(
+      "SC1090",
+      stmt.initializer,
+      "for-await over a pre-declared variable (declare the loop variable in the loop: for await (const value of ...))",
+    );
+  }
+  const list = stmt.initializer;
+  if ((list.flags & ts.NodeFlags.Using) !== 0) {
+    lowerer.unsupported("SC1090", list, "'await using' loop bindings over async generators");
+  }
+  const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+  const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+  if (!isConst && !isLet) lowerer.unsupported("SC1030", list, "'var' loop bindings in 'for await' (use const)");
+  const decl = list.declarations[0]!;
+  if (!ts.isIdentifier(decl.name)) lowerer.unsupported("SC1031", decl.name);
+  const genT = iterable.type;
+  if (genT.yieldT.kind === "void") {
+    lowerer.unsupported("SC1090", stmt.expression, "for-await over an async generator that never yields");
+  }
+  if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") {
+    lowerer.unsupported(
+      "SC1090",
+      stmt.expression,
+      `for-await over an async generator whose yields expect .next(value) ('${lowerer.fmt(genT.nextT)}' — drive it with .next() calls instead)`,
+    );
+  }
+  const loc = locOf(stmt);
+  const recT = resultRecordOf(lowerer, genT);
+  const promiseT: IrType = { kind: "promise", inner: recT };
+  const shape = lowerer.shapes.get(recT.shapeId)!;
+  const valueT = shape.fields.find((f) => f.name === "value")!.type;
+  lowerer.scopes.push(new Map());
+  try {
+    const g = lowerer.declareHiddenLocal("%fag", genT);
+    const done = lowerer.declareHiddenLocal("%fagdone", BOOL);
+    done.mutable = true;
+    const p = lowerer.declareHiddenLocal("%fagpromise", promiseT);
+    const r = lowerer.declareHiddenLocal("%fagresult", recT);
+    const gRef = (): IrExpr => ({ kind: "varRef", localId: g.id, type: genT, loc });
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: recT, loc });
+    const valueRead: IrExpr = { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
+    const extracted = extractYieldValue(lowerer, genT, valueT, valueRead, loc);
+    if (!extracted) {
+      lowerer.unsupported(
+        "SC1090",
+        stmt.expression,
+        `for-await over an async generator yielding '${lowerer.fmt(genT.yieldT)}' (no per-element extraction exists)`,
+      );
+    }
+    const x = lowerer.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+    const head: IrStmt[] = [
+      {
+        kind: "varDecl",
+        localId: p.id,
+        init: { kind: "genResume", mode: "next", gen: gRef(), arg: null, type: promiseT, loc },
+        loc,
+      },
+      {
+        kind: "varDecl",
+        localId: r.id,
+        init: {
+          kind: "awaitExpr",
+          value: { kind: "varRef", localId: p.id, type: promiseT, loc },
+          type: recT,
+          loc,
+        },
+        loc,
+      },
+      {
+        kind: "if",
+        cond: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+        then: [
+          { kind: "assign", localId: done.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+          { kind: "break", loc },
+        ],
+        else_: null,
+        loc,
+      },
+      { kind: "varDecl", localId: x.id, init: extracted, loc },
+    ];
+    const body = lowerer.inCtl("loop", () => lowerer.lowerScopedBlock(stmt.statement), labels);
+    const closePromise: IrExpr = { kind: "genResume", mode: "return", gen: gRef(), arg: null, type: promiseT, loc };
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: g.id, init: iterable, loc },
+        { kind: "varDecl", localId: done.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        {
+          kind: "while",
+          cond: { kind: "boolLit", value: true, type: BOOL, loc },
+          body: [...head, ...body],
+          ...(labels && { labels }),
+          loc,
+        },
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: { kind: "varRef", localId: done.id, type: BOOL, loc }, type: BOOL, loc },
+          then: [
+            {
+              kind: "exprStmt",
+              expr: { kind: "awaitExpr", value: closePromise, type: recT, loc },
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
+  } finally {
+    lowerer.scopes.pop();
+  }
+}
+
 /** Statement-position `yield* e;` — the forwarding loop:
  *
  *   { const %dele = <e>; let %dr = %dele.next();
@@ -396,6 +543,13 @@ export function lowerYieldStarStatement(lowerer: Lowerer, expr: ts.Expression): 
   if (!gen) lowerer.unsupported("SC1071", expr);
   // An Effect.gen body: the expression form (lowerYield) serves statement position too — the value is dropped.
   if (gen.yieldT.kind === "effect") return { kind: "exprStmt", expr: lowerYield(lowerer, expr), loc: locOf(expr) };
+  if (lowerer.ctx.isAsync) {
+    lowerer.unsupported(
+      "SC1071",
+      expr,
+      "'yield*' in async generators (use 'for await' and yield each value explicitly)",
+    );
+  }
   if (!expr.expression) lowerer.unsupported("SC1071", expr, "'yield*' with no operand");
   const loc = locOf(expr);
   const delegate = lowerer.lowerExpr(expr.expression);

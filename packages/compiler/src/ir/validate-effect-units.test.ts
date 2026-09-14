@@ -8,7 +8,7 @@ const nil: IrExpr = { kind: "unitLit", unit: "null", type: { kind: "nullT" }, lo
 
 function moduleWith(expr: IrExpr): IrModule {
   return {
-    irVersion: 6, sourceFile: loc.file, entry: "main",
+    irVersion: 8, sourceFile: loc.file, entry: "main",
     functions: [{ name: "main", params: [], locals: [], returnType: { kind: "void" },
       body: [{ kind: "exprStmt", expr, loc }], loc }],
   };

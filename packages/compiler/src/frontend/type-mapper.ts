@@ -1935,16 +1935,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (!inner) return null;
     return { kind: "promise", inner };
   }
-  // Generator<T, TReturn, TNext> (and the lib's IterableIterator<T, ...>, the older annotation spelling — Generator
-  // extends it): the sync generator kind. Channel normalization keeps the runtime honest:
-  //   yield channel  — T must be a real value type (a generator that could only yield undefined has no C value
-  //                    form); `never` (a generator that never yields) rides the VOID sentinel — the suspended branch is unreachable.
+  // Generator<T, TReturn, TNext>, AsyncGenerator<T, TReturn, TNext> (and the lib's IterableIterator<T, ...>, the older sync annotation spelling): the generator kind.
+  // Channel normalization keeps the runtime honest:
+  //   yield channel  — T must be a real value type (a generator that could only yield undefined has no C value form); `never`
+  //                    (a generator that never yields) rides the VOID sentinel — the suspended branch is unreachable.
   //   return channel — void/undefined/never carry no value (VOID: the done-value is the undefined arm); any/unknown ride dyn; else the mapped type.
   //   next channel   — void/undefined/never mean valueless resumes (the undefined UNIT: `.next()` sends nothing, yields are
   //                    statement-position); any/unknown ride dyn (`.next(v)` boxes; the yield expression reads checked-dynamic);
   //                    else the mapped type (`.next(v)` requires its argument — fenced at the call).
   // Mixed dyn/concrete channels stay unmapped: the shared result record's value slot would need a dyn union arm, which does not exist.
-  if (isStdlibInterface("Generator") || isStdlibInterface("IterableIterator")) {
+  if (isStdlibInterface("Generator") || isStdlibInterface("AsyncGenerator") || isStdlibInterface("IterableIterator")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     // An Effect.gen/fn body (static builds): `Generator<Effect<…> | …, A, never>` (or a never-yielding body keeping the contextual `never` NEXT channel — a plain generator infers `unknown`) is resumed by the kernel with each yielded effect's value: both channels are the opaque handle; the return channel is A (void-like → VOID).
     const isEffectRef = (t: ts.Type): boolean => { const sym = t.getAliasSymbol() ?? t.getSymbol(); return sym?.name === "Effect" && checker.declarationsOf(sym).some((d) => ts.isInterfaceDeclaration(d) && /[\\/]effect[\\/]dist[\\/]Effect\.d\.ts$/.test(d.getSourceFile().fileName)); };
@@ -1957,7 +1957,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // The result record must exist too (its union must be legal), or
     // `.next()` could never answer — mapped generators always resume.
     if (!genResultRecord(channels.yieldT, channels.retT, ctx.shapes, unions)) return null;
-    return { kind: "generator", ...channels };
+    return {
+      kind: "generator",
+      ...(isStdlibInterface("AsyncGenerator") ? { async: true as const } : {}),
+      ...channels,
+    };
   }
   // IteratorResult<T, TReturn> — the checker's type of `g.next()` (an
   // alias for IteratorYieldResult<T> | IteratorReturnResult<TReturn>):
@@ -3011,7 +3015,7 @@ export function genResultRecord(
     shapeId: shapes.intern([
       { name: "done", type: BOOL },
       { name: "value", type: valueT },
-    ]),
+    ], false, undefined, ["value", "done"]),
   };
 }
 

@@ -11,7 +11,7 @@ const value: IrExpr = { kind: "libCall", fn: "date.newMs", args: [
 ], type: date, loc };
 
 function moduleWith(expr?: IrExpr): IrModule {
-  return { irVersion: 6, sourceFile: loc.file, entry: "main", globals: [],
+  return { irVersion: 8, sourceFile: loc.file, entry: "main", globals: [],
     functions: [{ name: "main", params: [], locals: [], returnType: VOID,
       body: expr ? [{ kind: "exprStmt", expr, loc }] : [], loc }] };
 }

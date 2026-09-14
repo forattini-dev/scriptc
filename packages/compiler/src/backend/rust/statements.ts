@@ -243,6 +243,22 @@ class RustStatementEmitter {
         this.context.line(`{ let ${array} = ${this.context.emitExpr(stmt.arr)}; let ${index} = ${this.context.emitExpr(stmt.index)}; let ${value} = ${this.context.emitExpr(stmt.value)}; runtime::array_set(&${array}, ${index}, ${value}); }`);
         return;
       }
+      case "arraySetLength": {
+        if (stmt.arr.type.kind !== "array") this.context.unsupported("arraySetLength on a non-array", stmt.loc);
+        const array = this.context.nextTemporary();
+        const length = this.context.nextTemporary();
+        this.context.line(`{ let ${array} = ${this.context.emitExpr(stmt.arr)}; let ${length} = ${this.context.emitExpr(stmt.length)}; runtime::array_set_length(&${array}, ${length}); }`);
+        return;
+      }
+      case "arraySetUndefined":
+      case "arrayDelete": {
+        if (stmt.arr.type.kind !== "array") this.context.unsupported(`${stmt.kind} on a non-array`, stmt.loc);
+        const array = this.context.nextTemporary();
+        const index = this.context.nextTemporary();
+        const helper = stmt.kind === "arraySetUndefined" ? "array_set_undefined" : "array_delete";
+        this.context.line(`{ let ${array} = ${this.context.emitExpr(stmt.arr)}; let ${index} = ${this.context.emitExpr(stmt.index)}; runtime::${helper}(&${array}, ${index}); }`);
+        return;
+      }
       case "bytesSet": {
         if (stmt.arr.type.kind !== "bytes") this.context.unsupported("bytesSet on non-bytes", stmt.loc);
         const storedValue = rustByteStoreValue(stmt.arr.type, stmt.value);

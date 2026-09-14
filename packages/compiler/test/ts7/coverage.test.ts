@@ -33,9 +33,10 @@ const ENUMS: [name: string, keys: string[]][] = [
   ["DiagnosticCategory", ["Error", "Warning", "Suggestion", "Message"]],
 ];
 
-/* The survey's MISSING list that stays 5.9.3-hosted (islands) — the adapter
- * must NOT grow look-alikes silently; phase 2 keeps these imports on the
- * old package. */
+/* The survey's MISSING list that stays outside the adapter — the adapter
+ * must NOT grow look-alikes silently. Source parsing/transpilation remains
+ * in the allowlisted TypeScript 5 islands; resolution and config parsing use
+ * scriptc's resolver and the TypeScript 7 host instead. */
 const DEFERRED = [
   "createSourceFile", "preProcessFile", "transpileModule",
   "resolveModuleName", "resolveTypeReferenceDirective",

@@ -9,7 +9,7 @@ import { nativeModuleBackendDiagnostics } from "./native-module-support.js";
 
 const loc = { file: "native-module.ts", start: 2, end: 4 };
 const mod: IrModule = {
-  irVersion: 6, sourceFile: loc.file, entry: "%init",
+  irVersion: 8, sourceFile: loc.file, entry: "%init",
   globals: [{ id: "%g.cache", name: "cache", type: { kind: "promise", inner: VOID }, mutable: true }],
   functions: [{ name: "%init", params: [], locals: [], returnType: VOID,
     syncModuleCacheGlobal: "%g.cache", body: [], loc }],
@@ -34,7 +34,7 @@ test("C and LLVM refuse module evaluation cache metadata rather than ignoring it
 test("native namespace operations require a namespace value and refuse C/LLVM", () => {
   const object: IrExpr = { kind: "jsOp", op: "objLit", args: [], type: JSVAL, loc };
   const namespace: IrExpr = { kind: "libCall", fn: "module.namespace", args: [object], type: JSVAL, loc };
-  const module: IrModule = { irVersion: 6, sourceFile: loc.file, entry: "main", functions: [{
+  const module: IrModule = { irVersion: 8, sourceFile: loc.file, entry: "main", functions: [{
     name: "main", params: [], locals: [], returnType: VOID,
     body: [{ kind: "exprStmt", expr: namespace, loc }], loc,
   }] };
@@ -51,7 +51,7 @@ test("native imports validate a loader promise and emit without an engine global
     type: { kind: "func", params: [], ret: { kind: "promise", inner: JSVAL } }, loc,
   }], type: { kind: "promise", inner: JSVAL }, loc };
   const module: IrModule = {
-    irVersion: 6, sourceFile: loc.file, entry: "main", functions: [{
+    irVersion: 8, sourceFile: loc.file, entry: "main", functions: [{
       name: "main", params: [], locals: [], returnType: VOID,
       body: [{ kind: "exprStmt", expr: imported, loc }], loc,
     }, {

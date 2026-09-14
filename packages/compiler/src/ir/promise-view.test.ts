@@ -14,7 +14,7 @@ const view: Extract<IrExpr, { kind: "libCall" }> = { kind: "libCall", fn: "promi
 ], type: target, loc };
 
 function moduleWith(expr: IrExpr): IrModule {
-  return { irVersion: 6, sourceFile: loc.file, entry: "main", functions: [
+  return { irVersion: 8, sourceFile: loc.file, entry: "main", functions: [
     { name: "main", params: [], locals: [], returnType: VOID, body: [], loc },
     { name: "bridge", params: [{ localId: "source", name: "source", type: source }],
       locals: [{ id: "source", name: "source", type: source, mutable: false }], returnType: target,

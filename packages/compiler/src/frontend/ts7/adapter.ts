@@ -13,13 +13,13 @@
  *
  * TWO-WORLD DISCIPLINE. typescript@7.0.2 is the REAL "typescript"
  * dependency; typescript@5.9.3 stays installed under the "typescript5"
- * alias for the parser/transpile islands only (npm.ts's module edge scan
- * over node_modules JS — 7.0.2 ships no client-side parser — cjs-lexer.ts's
- * merve-port lex over CJS source text, and lower-comptime's
- * transpileModule). Nothing may hand a 5.9.3 node, type, symbol, or enum
- * value to this world or back (cjs-lexer.ts's exports take and answer
- * strings and name sets only — its 5.9.3 parse is an implementation
- * detail behind that boundary):
+ * alias for string-bounded parser/transpile islands only. TypeScript 7.0.2
+ * ships no client-side parser or transpileModule equivalent, so the npm,
+ * provenance, semantic-source, CJS-lexer, and comptime helpers retain that
+ * implementation detail. scripts/test-ts7.mjs owns the exact import
+ * allowlist. Nothing may hand a 5.9.3 node, type, symbol, or enum value to
+ * this world or back; every island accepts source strings and returns
+ * world-neutral facts or rewritten strings:
  *   - Mixing OBJECTS is a compile-time error: every node interface carries
  *     `kind: SyntaxKind` and the two packages declare DISTINCT enums, which
  *     TypeScript treats nominally — a 5.9.3 SourceFile is not assignable
@@ -27,17 +27,16 @@
  *     with @ts-expect-error assertions that pnpm build enforces).
  *   - Mixing ENUM VALUES cannot be fenced by the type system alone (both
  *     erase to number), which is why every enum here re-exports 7's own
- *     objects symbolically and no scriptc source may import "typescript5"
- *     outside the two island files.
+ *     objects symbolically and no new scriptc source may import
+ *     "typescript5" outside the enforced island allowlist.
  *
  * Census coverage not present here, by design (the survey's MISSING list):
  *   - ts.createSourceFile / ts.preProcessFile — no client-side parser in 7;
  *     the npm.ts edge scan keeps 5.9.3 (island).
  *   - ts.transpileModule — lower-comptime keeps 5.9.3 (island).
- *   - ts.resolveModuleName / ts.resolveTypeReferenceDirective — resolution
- *     helpers stay 5.9.3-hosted for now (they take ts.sys-shaped hosts and
- *     never exchange AST/checker objects with either world; tsgo resolves
- *     the embedded program itself, server-side).
+ *   - ts.resolveModuleName / ts.resolveTypeReferenceDirective — replaced by
+ *     resolve.ts, the one resolver shared by the TypeScript 7 program graph
+ *     and lowering.
  *   - ts.readConfigFile / ts.parseJsonConfigFileContent — replaced by
  *     Ts7Host.parseConfigFile (tsgo's own config parser, extends resolved
  *     server-side).

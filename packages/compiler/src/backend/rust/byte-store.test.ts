@@ -7,7 +7,7 @@ const num = (value: number): IrExpr => ({ kind: "numLit", value, type: { kind: "
 function fixture(elem: "u8" | "u32" | "f64", mask = 255): IrModule {
   const type = { kind: "bytes", elem } as const;
   const value: IrExpr = { kind: "varRef", localId: "value", type: { kind: "f64" }, loc };
-  return { irVersion: 6, sourceFile: loc.file, entry: "main", functions: [{
+  return { irVersion: 8, sourceFile: loc.file, entry: "main", functions: [{
     name: "main", params: [], returnType: { kind: "void" }, loc,
     locals: [{ id: "bytes", name: "bytes", type, mutable: false },
       { id: "value", name: "value", type: { kind: "f64" }, mutable: true }],

@@ -46,6 +46,18 @@ static void expect_pending(const char *name) {
 int main(int argc, char **argv) {
   scr_init();
   scr_lib_init(argc, argv);
+  if (argc >= 3 && strcmp(argv[argc - 1], "--argv-collision-probe") == 0) {
+    ScrArr *args = scr_process_argv();
+    double n = scr_arr_len(args);
+    printf("%.0f\n", n);
+    for (double i = 2; i < n; i++) {
+      ScrStr *arg = scr_arr_get_ref(args, i);
+      printf("%s\n", arg->data);
+      scr_str_release(arg);
+    }
+    scr_arr_release(args);
+    return 0;
+  }
   if (argc < 2) {
     fputs("usage: test_lib <scratch-dir>\n", stderr);
     return 2;

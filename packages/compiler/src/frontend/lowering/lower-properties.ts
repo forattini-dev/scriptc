@@ -370,7 +370,18 @@ export type FieldTarget =
         return null;
       }
       const lowerReceiver = (): IrExpr => {
-        const obj = L.lowerExpr(access.expression);
+        let obj = L.lowerExpr(access.expression);
+        if (obj.type.kind === "union" && L.armTag(obj.type.unionId, UNDEFINED_T) >= 0) {
+          // An unchecked outer array read (`items[i].field`) stays
+          // `T | undefined` in the IR; validate the object arm first.
+          const present = L.stripUndefinedArm(obj.type);
+          const helper = present.kind === "object"
+            ? L.narrowedArmHelper(obj.type.unionId, present, locOf(access.expression))
+            : null;
+          obj = helper
+            ? { kind: "call", callee: helper, args: [obj], type: present, loc: locOf(access.expression) }
+            : L.maybeNarrow(obj, access.expression);
+        }
         return exactInstance !== null && obj.type.kind === "object" &&
           L.isSubclassOf(receiverIr.className, obj.type.className)
           ? {
@@ -407,7 +418,18 @@ export type FieldTarget =
       const shape = L.shapes.get(receiverIr.shapeId);
       const fieldType = shape?.fields.find((f) => f.name === access.name.text)?.type;
       if (fieldType) {
-        const obj = L.lowerExpr(access.expression);
+        let obj = L.lowerExpr(access.expression);
+        if (obj.type.kind === "union" && L.armTag(obj.type.unionId, UNDEFINED_T) >= 0) {
+          // `rows[i].value`: validate the record arm of the unchecked outer
+          // read so a missing element raises a catchable TypeError.
+          const present = L.stripUndefinedArm(obj.type);
+          const helper = present.kind === "record"
+            ? L.narrowedArmHelper(obj.type.unionId, present, locOf(access.expression))
+            : null;
+          obj = helper
+            ? { kind: "call", callee: helper, args: [obj], type: present, loc: locOf(access.expression) }
+            : L.maybeNarrow(obj, access.expression);
+        }
         // A checker-record receiver whose VALUE stayed dyn (the erased
         // all-unknown-fields cast — `(err as { code?: unknown }).code`):
         // decline, and the dyn keyed-read fallback answers.
@@ -488,7 +510,14 @@ export type FieldTarget =
           return declaredArms.every((a) => ivArms.some((b) => typeEquals(a, b)));
         };
         if (!nameSym || nameSym.name === ts.InternalSymbolName.Index || canonicalized()) {
-          const obj = L.lowerExpr(access.expression);
+          let obj = L.lowerExpr(access.expression);
+          if (obj.type.kind === "union" && L.armTag(obj.type.unionId, UNDEFINED_T) >= 0) {
+            const present = L.stripUndefinedArm(obj.type);
+            const helper = present.kind === "record"
+              ? L.narrowedArmHelper(obj.type.unionId, present, locOf(access.expression))
+              : null;
+            if (helper) obj = { kind: "call", callee: helper, args: [obj], type: present, loc: locOf(access.expression) };
+          }
           // JSDoc record globals can retain dynamic storage. Keep their
           // keyed target so absence probes observe undefined before narrowing.
           if (obj.type.kind === "dyn") {

@@ -7,8 +7,7 @@ function f(): number {
   try {
     console.log("body");
   } finally {
-    // return crossing OUT of a try/catch body compiles now; a return
-    // INSIDE the finally body (replacing the pending completion) stays out.
+    // A return inside finally replaces the pending completion.
     return 1;
   }
 }

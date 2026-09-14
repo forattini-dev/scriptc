@@ -16,20 +16,29 @@ node-fallback-fence.ts:17:13 - error SC2020: 'Buffer<ArrayBufferLike>.reverse' i
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-node-fallback-fence.ts:31:28 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
+node-fallback-fence.ts:30:28 - error SC2020: 'timers/promises.setInterval with 3 arguments' is part of the standard library types but has no scriptc lowering yet
 
-  30 | import { deflateSync, gzipSync } from "node:zlib";
-  31 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
+  29 | const raw = readFileSync("/etc/hosts").toString(tty ? "hex" : "latin1"); // runtime BufferEncoding selection lowers too
+  30 | const intervalWithSignal = promiseInterval(1, "tick", {}); // AbortSignal options stay fenced
+     |                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  31 | // The computed encoding is now part of the static Buffer surface.
+
+  hint: the lowered form is setInterval(delay, value) with an explicit yielded value; AbortSignal options are not supported yet
+
+node-fallback-fence.ts:33:28 - error SC2020: 'deflateSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
+
+  32 | import { deflateSync, gzipSync } from "node:zlib";
+  33 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
      |                            ^~~~~~
-  32 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
+  34 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
 
   hint: zlib works on Buffers: deflateSync(Buffer.from(s, "utf8"))
 
-node-fallback-fence.ts:32:25 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
+node-fallback-fence.ts:34:25 - error SC2020: 'gzipSync of 'string' data' is part of the standard library types but has no scriptc lowering yet
 
-  31 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
-  32 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
+  33 | const packed = deflateSync("data"); // string data: the wrap-it-first hint
+  34 | const zipped = gzipSync("data"); // gzip lowers too, over Buffers: same hint
      |                         ^~~~~~
-  33 | // The remaining imports continue the declared-but-not-lowered surface.
+  35 | // The remaining imports continue the declared-but-not-lowered surface.
 
   hint: zlib works on Buffers: gzipSync(Buffer.from(s, "utf8"))

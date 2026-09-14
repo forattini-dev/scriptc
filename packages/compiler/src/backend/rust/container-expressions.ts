@@ -67,8 +67,36 @@ export class RustContainerExpressionEmitter {
     switch (expr.method) {
       case "length":
         return `runtime::array_len(&(${receiverExpr}))`;
-      case "pop":
-        return `runtime::array_pop(&(${receiverExpr}))`;
+      case "pop": {
+        if (expr.type.kind !== "union") return `runtime::array_pop(&(${receiverExpr}))`;
+        const union = this.context.union(expr.type.unionId, expr.loc);
+        const valueTag = union.arms.findIndex((arm) => typeKey(arm) === typeKey(elementType));
+        const undefinedTag = union.arms.findIndex((arm) => arm.kind === "undefinedT");
+        if (undefinedTag < 0) this.context.unsupported("array pop result union shape", expr.loc);
+        const name = this.context.unionName(union.id);
+        // A union-element array already stores the optional union itself.
+        const present = valueTag >= 0
+          ? `${name}::${this.context.unionVariant(valueTag)}(runtime::array_pop(&${receiver}))`
+          : typeKey(elementType) === typeKey(expr.type) ? `runtime::array_pop(&${receiver})` : null;
+        if (present === null) this.context.unsupported("array pop result union shape", expr.loc);
+        return `{ let ${receiver} = ${receiverExpr}; if runtime::array_len(&${receiver}) == 0.0 { ${name}::${this.context.unionVariant(undefinedTag)} } else { ${present} } }`;
+      }
+      case "nextPresent": {
+        const start = argExprs[0];
+        if (start === undefined) this.context.unsupported("array nextPresent without a start", expr.loc);
+        return `runtime::array_next_present(&(${receiverExpr}), ${start})`;
+      }
+      case "concatSpread": {
+        const first = argExprs[0];
+        if (first === undefined) this.context.unsupported("array concatSpread without a source", expr.loc);
+        const source = this.context.nextTemporary();
+        return `{ let ${receiver} = ${receiverExpr}; let ${source} = ${first}; runtime::array_extend(&${receiver}, &${source}) }`;
+      }
+      case "withUndefined": {
+        const indexExpr = argExprs[0];
+        if (indexExpr === undefined) this.context.unsupported("array withUndefined without an index", expr.loc);
+        return `runtime::array_with_undefined(&(${receiverExpr}), ${indexExpr})`;
+      }
       case "indexOf":
       case "includes": {
         const needleExpr = argExprs[0];

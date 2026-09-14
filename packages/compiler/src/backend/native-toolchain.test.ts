@@ -3880,7 +3880,11 @@ test.skipIf(
       probeSource,
       "long long public_value(void);\nint main(void) { return public_value() != 7; }\n",
     );
-    execFileSync(clangExecutable!, [probeSource, outPath, "-lm", "-o", probe], { env: { ...process.env, PATH: oldPath } });
+    // The failed linker belongs only to the shard-merge probe. Link the
+    // resulting archive with the real host tools to verify its fallback.
+    execFileSync(clangExecutable!, [probeSource, outPath, "-lm", "-o", probe], {
+      env: { ...process.env, PATH: oldPath },
+    });
     expect(execFileSync(probe, { encoding: "utf8" })).toBe("");
     // The canonical retry is valid for this invocation, but must not occupy a
     // key describing merged shard bytes. A repaired merge tool retries the

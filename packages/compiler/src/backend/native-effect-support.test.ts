@@ -10,7 +10,7 @@ function moduleWith(type: IrType, direction?: "box" | "check", records?: IrRecor
   const source: IrExpr = { kind: "varRef", localId: "value.0", type: sourceType, loc };
   const expr: IrExpr = direction === "box" ? { kind: "dynFrom", value: source, type: DYN, loc }
     : direction === "check" ? { kind: "dynCheck", value: source, type, loc } : source;
-  return { irVersion: 6, sourceFile: loc.file, entry: "main", ...(records ? { records } : {}), ...(unions ? { unions } : {}),
+  return { irVersion: 8, sourceFile: loc.file, entry: "main", ...(records ? { records } : {}), ...(unions ? { unions } : {}),
     functions: [
       { name: "main", params: [], locals: [], returnType: VOID, body: [], loc },
       { name: "probe", params: [{ localId: "value.0", name: "value", type: sourceType }],

@@ -290,7 +290,7 @@ export type IrType =
    * generators still suspended at exit). Fenced out of union arms (no
    * narrowing test — the map/set rule), map keys/values, set elements,
    * array elements, and JSON. */
-  | { kind: "generator"; yieldT: IrType; retT: IrType; nextT: IrType }
+  | { kind: "generator"; async?: true; yieldT: IrType; retT: IrType; nextT: IrType }
   /** The `undefined` unit type — a payload-less arm kind. Representable
    * ONLY as a union arm (`string | undefined`) or as the type of a
    * `unitLit` on its way into a `unionWrap`; it can never stand alone in
@@ -674,7 +674,7 @@ export function typeKey(t: IrType): string {
     case "promise":
       return `promise<${typeKey(t.inner)}>`;
     case "generator":
-      return `generator<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
+      return `${t.async ? "async-generator" : "generator"}<${typeKey(t.yieldT)},${typeKey(t.retT)},${typeKey(t.nextT)}>`;
     default: {
       const _exhaustive: never = t as Exclude<typeof t, HandleType>;
       void _exhaustive;
@@ -710,6 +710,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   if (a.kind === "generator") {
     return (
       b.kind === "generator" &&
+      (a.async === true) === (b.async === true) &&
       typeEquals(a.yieldT, b.yieldT) &&
       typeEquals(a.retT, b.retT) &&
       typeEquals(a.nextT, b.nextT)
@@ -730,7 +731,7 @@ export function isRefCounted(t: IrType): boolean {
 /* ── module ────────────────────────────────────────────────────────────── */ export interface IrFamily { id: string; impls: { name: string; captures: IrParam[] }[]; instances: { key: string; params: IrType[]; ret: IrType; targets: string[] }[] }
 export interface IrModule {
   /** Bumped on any breaking IR change; serialize.ts refuses mismatches. */
-  irVersion: 6;
+  irVersion: 8;
   sourceFile: string;
   /** The runtime target the program was lowered for (--target): the
    * backends configure the runtime's per-runtime semantic switches from
@@ -1332,10 +1333,18 @@ export type IrStmt =
       loc: SrcLoc;
     }
   /** Element write `a[i] = v` — statement-only, like `assign`. Valid indices
-   * are [0, length]; i == length appends (JS would create a hole past that —
-   * scriptc traps instead, see SEMANTICS.md). Ownership of a refcounted
-   * value MOVES into the array; the replaced element is released. */
+   * are canonical array indices; writes beyond length grow the array and
+   * leave the intervening positions as holes. Ownership of a refcounted value
+   * MOVES into the array; the replaced element is released. */
   | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; loc: SrcLoc }
+  /** Writable `a.length = n`: growth creates holes and truncation releases
+   * removed reference elements. Invalid array lengths raise a catchable
+   * RangeError from the runtime. */
+  | { kind: "arraySetLength"; arr: IrExpr; length: IrExpr; loc: SrcLoc }
+  /** Write an explicit present `undefined` state without shrinking length. */
+  | { kind: "arraySetUndefined"; arr: IrExpr; index: IrExpr; loc: SrcLoc }
+  /** Delete an indexed/property slot without changing Array.length. */
+  | { kind: "arrayDelete"; arr: IrExpr; index: IrExpr; loc: SrcLoc }
   /** Typed-array element write `b[i] = v` — arraySet's sibling for bytes
    * receivers: statement-only, receiver and index like bytesIntrinsic
    * `get` (any invalid index TRAPS — JS would ignore the write, a
@@ -1428,23 +1437,19 @@ export type IrStmt =
    * completion AND on the exception path (after catch, or with the
    * exception still pending when there is no catch — it keeps propagating
    * after the finally completes; a throw inside the finally replaces it).
-   * A `return` inside tryBody/catchBody additionally runs the finally on
-   * its way out (the backend's PENDING-RETURN path: the value is computed
-   * and snapshotted FIRST, every crossed finally runs inner-to-outer, then
-   * the function returns — finally mutations of returned locals are
-   * invisible, Node-exact; a throw inside such a finally replaces the
-   * pending return, releasing the snapshot). The frontend still rejects
-   * break/continue crossing a try-with-finally and ANY jump out of a
-   * finally body, so normal, exception, and pending-return are the only
-   * completions a finally sees; plain try/catch has no such restriction
-   * (jumps out release the try scopes like any other jump). Each body is
-   * its own lexical scope. */
+   * Every abrupt completion crossing the region runs the finally
+   * inner-to-outer. Return values are snapshotted first; break/continue
+   * retain their resolved targets; and a completion raised inside the
+   * finally replaces the pending one. Each body is its own lexical scope. */
   | {
       kind: "tryCatch";
       tryBody: IrStmt[];
       catchBody: IrStmt[] | null;
       catchLocalId: string | null;
       finallyBody: IrStmt[] | null;
+      /** Resource-management cleanup: if the guarded body and cleanup both
+       * throw, raise a SuppressedError instead of replacing the first error. */
+      suppressFinallyErrors?: true;
       loc: SrcLoc;
     };
 
@@ -1461,11 +1466,15 @@ export type IrArrIntrinsicMethod =
   | "length"
   | "push"
   | "pushSpread"
+  | "concatSpread"
   | "unshift"
   | "unshiftSpread"
   | "pop"
   | "indexOf"
   | "includes"
+  /** Internal sparse traversal: the first present index at/after start,
+   * or length when the remaining positions are holes. */
+  | "nextPresent"
   | "join"
   | "slice"
   | "shift"
@@ -1477,12 +1486,17 @@ export type IrArrIntrinsicMethod =
    * when the relative index is out of range. */
   | "toReversed"
   | "toSpliced"
+  /** `.with()` replacement carrying present undefined while retaining the
+   * scalar array payload ABI; it has the same catchable index validation as
+   * the typed replacement forms. */
+  | "withUndefined"
   | "with";
 
 /** Array intrinsics whose runtime implementation can raise a catchable
  * exception (rather than the static tier's deliberate index traps). */
 export const MAY_THROW_ARR_METHODS: ReadonlySet<IrArrIntrinsicMethod> = new Set([
   "with",
+  "withUndefined",
 ]);
 
 /** The Map method/property surface (mirrors ambient/scriptc.d.ts) plus the
@@ -4472,10 +4486,17 @@ export type IrExpr =
    * via the `i <= n - 1` loop form (fractions truncate; negative/NaN give
    * an empty array). Allocates; the result is owned (+1). */
   | { kind: "arrayNewLen"; length: IrExpr; type: IrType; loc: SrcLoc }
-  /** Element read `a[i]`. Index is f64; a non-integer or out-of-bounds index
-   * traps at runtime (JS returns undefined — documented divergence). For
-   * refcounted elements the result is a fresh owned (+1) reference. */
+  /** Element read `a[i]`. Index is f64; the low-level accessors require a
+   * proven present slot and trap on a hole. For refcounted elements the result
+   * is a fresh owned (+1) reference. */
   | { kind: "arrayGet"; arr: IrExpr; index: IrExpr; type: IrType; loc: SrcLoc }
+  /** Presence query for an array index. Invalid/non-index keys and holes
+   * answer false without reading the slot; present undefined answers true.
+   * The ordinary-read lowering must use arrayState before selecting its
+   * undefined arm. */
+  | { kind: "arrayHas"; arr: IrExpr; index: IrExpr; type: IrType; loc: SrcLoc }
+  /** Array slot state as f64: HOLE=0, VALUE=1, UNDEFINED=2. */
+  | { kind: "arrayState"; arr: IrExpr; index: IrExpr; type: IrType; loc: SrcLoc }
   /** Array method/property on an array receiver: `length` (f64), `push`
    * (VARIADIC like JS — zero or more elem-typed args; every argument
    * evaluates before any appends, then each appends in order; returns the
@@ -4486,8 +4507,8 @@ export type IrExpr =
    * exactly like JS; returns the new length), `unshift` (the matching
    * variadic front insertion; all arguments evaluate before mutation and
    * ref ownership moves in), `unshiftSpread` (one borrowed same-typed array,
-   * with self-spread snapshot semantics), `pop` (returns elem — traps on an
-   * empty array; ownership moves OUT to the caller), `indexOf` (one
+   * with self-spread snapshot semantics), `pop` (returns `elem | undefined`
+   * and leaves an empty array unchanged; ownership moves OUT to the caller), `indexOf` (one
    * elem-typed arg, BORROWED; strict equality — NaN never matches; → f64),
    * `includes` (one elem-typed arg, borrowed; SameValueZero — NaN DOES
    * match; → bool), `join` (one string arg, borrowed; f64/bool/string
@@ -4635,7 +4656,7 @@ export type IrExpr =
    * through finally blocks but must NOT be taken by catch handlers
    * (backends emit a sentinel re-unwind prologue at catch entry inside
    * generator bodies; scr_exc_genret_pending answers it). */
-  | { kind: "yieldExpr"; value: IrExpr | null; type: IrType; loc: SrcLoc }
+  | { kind: "yieldExpr"; value: IrExpr | null; awaited?: true; type: IrType; loc: SrcLoc }
   /** One consumer resume of a generator: `g.next(arg)`, `g.return(arg)`,
    * `g.throw(arg)`, and the for-of/yield* desugars. `gen` is a borrowed
    * generator-typed temp. `arg` is the sent value (moves in): next's
@@ -4651,8 +4672,9 @@ export type IrExpr =
    * unless suspended (then the GENRET unwind runs finallys; a finally
    * yield answers done:false and parks the return value) / throw on a
    * non-suspended generator marks it done and re-throws at the call site.
-   * MAY-THROW SEED: a body exception (or the injected throw) propagates
-   * into the caller synchronously. */
+   * Sync generators return that record directly and propagate body errors
+   * synchronously. Async generators return Promise<record>; requests queue,
+   * and body errors reject the corresponding promise. */
   | { kind: "genResume"; mode: "next" | "return" | "throw"; gen: IrExpr; arg: IrExpr | null; type: IrType; loc: SrcLoc }
   /** Await a promise: parks the current fiber until it settles; a rejected
    * promise re-throws into the awaiter (may-throw seed). Result is the
@@ -5385,22 +5407,30 @@ export function isJsonSafeType(
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
 ): boolean {
-  return isJsonSafeAt(t, getRecord, getUnion, false, new Set());
+  return isJsonSafeAt(t, getRecord, getUnion, false, false, new Set());
 }
 
-/** The recursion behind isJsonSafeType. `inRecordField` is the ONE position
- * where an undefined arm is JSON-representable: an undefined-armed union as
- * a record field (the `a?: T` spelling) serializes by DROPPING the field
- * when it holds undefined and validates a MISSING key as the undefined arm
- * — both exactly Node. Everywhere else (a bare `T | undefined` value,
- * stringified whole or cast to) exactness is unreachable: Node's stringify
- * of bare undefined is not a string at all, and JSON text can never contain
- * a value that matches the arm. */
+/** The JSON.stringify-only domain additionally admits undefined arms in
+ * array and tuple positions, where Node emits null. A bare undefined-armed
+ * root remains outside the domain because JSON.stringify returns the
+ * undefined value instead of a string. */
+export function isJsonStringifySafeType(
+  t: IrType,
+  getRecord: (shapeId: string) => IrRecordShape | undefined,
+  getUnion: (unionId: string) => IrUnionDef | undefined,
+): boolean {
+  return isJsonSafeAt(t, getRecord, getUnion, true, false, new Set());
+}
+
+/** The recursion shared by checked JSON conversion and stringification.
+ * Ordinary record fields always admit undefined by dropping the key. Array
+ * and tuple slots admit it only for stringification, which writes null. */
 function isJsonSafeAt(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,
   getUnion: (unionId: string) => IrUnionDef | undefined,
-  inRecordField: boolean,
+  stringify: boolean,
+  undefinedAllowed: boolean,
   visiting: Set<string>,
 ): boolean {
   if (HANDLE_KINDS.has(t.kind)) return false;
@@ -5410,7 +5440,7 @@ function isJsonSafeAt(
     case "bool":
       return true;
     case "array":
-      return isJsonSafeAt(t.elem, getRecord, getUnion, false, visiting);
+      return isJsonSafeAt(t.elem, getRecord, getUnion, stringify, stringify, visiting);
     case "record": {
       const shape = getRecord(t.shapeId);
       if (!shape) return false;
@@ -5419,10 +5449,7 @@ function isJsonSafeAt(
       // short-circuits every `every` up the walk).
       if (visiting.has(t.shapeId)) return true;
       visiting.add(t.shapeId);
-      // TUPLE positions are array slots, not droppable object keys: an
-      // undefined-armed position would stringify as `null` in JS (not
-      // drop), so tuples keep the array rule for their fields.
-      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting))) {
+      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, stringify, !shape.tuple || stringify, visiting))) {
         return false;
       }
       // Overflow values sit in record-key position too: dyn is JSON-safe
@@ -5430,17 +5457,17 @@ function isJsonSafeAt(
       // like any undefined-valued key), everything else follows the
       // record-field rule.
       if (shape.indexValue && shape.indexValue.kind !== "dyn") {
-        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, true, visiting);
+        return isJsonSafeAt(shape.indexValue, getRecord, getUnion, stringify, true, visiting);
       }
       return true;
     }
     case "union": {
       const def = getUnion(t.unionId);
       if (!def) return false;
-      const key = `${t.unionId}:${inRecordField}`;
+      const key = `${t.unionId}:${stringify}:${undefinedAllowed}`;
       if (visiting.has(key)) return true; // the recursive knot, union-flavored
       visiting.add(key);
-      return def.arms.every((a) => isJsonSafeAt(a, getRecord, getUnion, inRecordField, visiting));
+      return def.arms.every((a) => a.kind === "undefinedT" ? undefinedAllowed : isJsonSafeAt(a, getRecord, getUnion, stringify, undefinedAllowed, visiting));
     }
     case "func":
     case "object":
@@ -5477,12 +5504,10 @@ function isJsonSafeAt(
     case "generator":
     case "void":
       return false;
-    // Representable exactly as a union arm in record-field position (the
-    // optional-field story above); bare undefined-armed unions stay fenced
-    // out of both stringify and dynCheck (narrow with '!== undefined'
-    // first, or model absence with a null arm).
+    // Record fields drop undefined. Stringification also represents it in
+    // array and tuple slots as null; bare roots remain fenced.
     case "undefinedT":
-      return inRecordField;
+      return undefinedAllowed;
     // JSON null ↔ the nullT arm: null-armed unions stringify (`null`) and
     // validate (a JSON null matches exactly the nullT arm).
     case "nullT":
@@ -6022,7 +6047,8 @@ export function moduleUsesCopying(mod: IrModule): boolean {
       node.kind === "arrIntrinsic" &&
       (node.method === "toReversed" ||
         node.method === "toSpliced" ||
-        node.method === "with")
+        node.method === "with" ||
+        node.method === "withUndefined")
     ) {
       found = true;
       return;
@@ -7360,6 +7386,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",
+  "buffer.concat",
   "buffer.concatLen",
   // The checked-dynamic compare/equals validators: Node's argument
   // ladders throw ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE catchably.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -23,6 +23,7 @@ import {
   filterExistingWorktreePaths,
   workspaceResetCommand,
 } from "./worktree-files.mjs";
+import { sandboxCommand, shellQuote } from "./sandbox-command.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const laneCaseShardedFiles = [
@@ -377,7 +378,6 @@ const vercel = ([group, command, ...args], options) =>
   });
 // `vercel sandbox exec` does not propagate the remote process's exit code.
 // Print a per-command nonce after it finishes and enforce that status here.
-const shellQuote = (value) => `'${value.replaceAll("'", `'\"'\"'`)}'`;
 const execIn = async (
   worker,
   command,
@@ -390,12 +390,22 @@ const execIn = async (
 ) => {
   const envArgs = Object.entries(env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
   const exitMarker = `__SCRIPTC_REMOTE_EXIT_${randomBytes(12).toString("hex")}__`;
-  const statusPath = `/tmp/${exitMarker}.status`;
-  const script =
-    `${[command, ...args].map(shellQuote).join(" ")}; scriptc_status=$?; ` +
-    `printf '%s\\n' "$scriptc_status" > ${shellQuote(statusPath)}; ` +
-    `printf '\\n${exitMarker}%s\\n' "$scriptc_status"`;
+  const prepared = sandboxCommand(command, args, exitMarker);
+  const { statusPath } = prepared;
   const label = task ? `${worker.label} ${task}` : worker.label;
+  if (prepared.file) {
+    const localScript = join(temp, `${exitMarker}.sh`);
+    await writeFile(localScript, prepared.script, { mode: 0o600 });
+    try {
+      await vercel(["sandbox", "copy", localScript, `${worker.name}:${prepared.scriptPath}`], {
+        idleTimeoutMs: 60_000,
+        label: `${label} command`,
+        timeoutMs: 2 * 60_000,
+      });
+    } finally {
+      await rm(localScript, { force: true });
+    }
+  }
   const commandArgs = [
     "sandbox",
     "exec",
@@ -405,9 +415,7 @@ const execIn = async (
     workdir,
     ...envArgs,
     worker.name,
-    "sh",
-    "-c",
-    script,
+    ...prepared.argv,
   ];
   try {
     await vercel(commandArgs, {
@@ -417,7 +425,7 @@ const execIn = async (
       timeoutMs: wallTimeoutMs,
     });
   } catch (error) {
-    console.warn(`[${label}] CLI completion was not confirmed; checking the remote command status...`);
+    console.warn(`[${label}] CLI completion was not confirmed (${error.message}); checking the remote command status...`);
     const probeMarker = `__SCRIPTC_REMOTE_PROBE_${randomBytes(12).toString("hex")}__`;
     const probeScript =
       `scriptc_status=125; test ! -f ${shellQuote(statusPath)} || ` +
@@ -720,6 +728,10 @@ try {
       }
       await execIn(worker, "pnpm", ["install", "--frozen-lockfile"], {}, "", 2 * 60_000);
       await execIn(worker, "pnpm", ["build"], {}, "", 2 * 60_000);
+      // Workspace builds deliberately do not rebuild packaged native artifacts.
+      // Every remote lane needs the Linux helper and runtime from this worktree.
+      await execIn(worker, "pnpm", ["--filter", "@scriptc/llvm-linux-x64-gnu", "build:native"], {}, "LLVM helper", 5 * 60_000);
+      await execIn(worker, "pnpm", ["--filter", "@scriptc/runtime-linux-x64-gnu", "build:native"], { CC: "clang-22", AR: "llvm-ar-22" }, "runtime pack", 5 * 60_000);
     }, imageConfig.custom ? workers.length : 8);
 
     await allWorkers("Testing", async (worker) => {

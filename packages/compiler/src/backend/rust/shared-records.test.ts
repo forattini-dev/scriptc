@@ -13,7 +13,7 @@ test.each([false, true])("shared union planning is independent of boundary disco
   } };
   const boundary: IrStmt = { kind: "exprStmt", loc, expr: { kind: "dynFrom", value, type: DYN, loc } };
   const mod: IrModule = {
-    irVersion: 6, sourceFile: loc.file, entry: "main",
+    irVersion: 8, sourceFile: loc.file, entry: "main",
     records: [shape, { id: "value", fields: [{ name: "coerce", type: funcOf([], F64) }, { name: "kind", type: STRING }] },
       { id: "static", fields: [{ name: "count", type: F64 }] }],
     unions: [{ id: "flag", arms: [source, { kind: "record", shapeId: "value" }],
@@ -41,7 +41,7 @@ test("Rust storage planning keeps static records typed and leaves shared IR unto
   ];
   const loc = { file: "fixture.ts", start: 0, end: 1 };
   const mod: IrModule = {
-    irVersion: 6, sourceFile: loc.file,
+    irVersion: 8, sourceFile: loc.file,
     records: shapes,
     entry: "main",
     functions: [{
@@ -73,7 +73,7 @@ test("boundary planning marks nested record storage without mutating input metad
     { id: "outer", fields: [{ name: "leaf", type: { kind: "record", shapeId: "leaf" } }] },
   ];
   const mod: IrModule = {
-    irVersion: 6, sourceFile: loc.file, records: shapes, entry: "main",
+    irVersion: 8, sourceFile: loc.file, records: shapes, entry: "main",
     functions: [{ name: "main", params: [], locals: [], returnType: { kind: "void" }, loc,
       body: [{ kind: "exprStmt", loc, expr: { kind: "dynFrom", type: { kind: "dyn" }, loc,
         value: { kind: "recordLit", fields: [], type: { kind: "record", shapeId: "outer" }, loc } } }],
@@ -92,7 +92,7 @@ test("dictionary boundaries mark composite values while retaining map storage", 
     { id: "leaf", fields: [{ name: "count", type: { kind: "f64" } }] },
     { id: "map", fields: [], indexValue: { kind: "record", shapeId: "leaf" } },
   ];
-  const mod: IrModule = { irVersion: 6, sourceFile: loc.file, records: shapes, entry: "main",
+  const mod: IrModule = { irVersion: 8, sourceFile: loc.file, records: shapes, entry: "main",
     functions: [{ name: "main", params: [], locals: [], returnType: { kind: "void" }, loc,
       body: [{ kind: "exprStmt", loc, expr: { kind: "dynCheck", type: { kind: "record", shapeId: "map" }, loc,
         value: { kind: "dynObjLit", fields: [], type: { kind: "dyn" }, loc } } }],

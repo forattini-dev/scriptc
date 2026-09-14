@@ -2,9 +2,53 @@ import { isJsonStringifyType } from "../../ir/json-stringify.js";
 import * as ts from "../ts7/adapter.js";
 import { locOf } from "../program.js";
 import { InternalCompilerError } from "../../errors.js";
-import { DYN, JSVAL, STRING, type IrExpr } from "../../ir/ir.js";
+import { BOOL, DYN, JSVAL, STRING, type IrExpr, type SrcLoc } from "../../ir/ir.js";
+import { varRef } from "../../ir/build.js";
 import type { Lowerer } from "./lowerer.js";
+import { optionalStringTags } from "./lower-builtins.js";
 import { nativeImportHandleType } from "./lower-native-import-types.js";
+
+/** `JSON.stringify(s)` over `string | undefined`: the undefined arm answers
+ * the undefined value (Node's stringify result), the string arm serializes. */
+function lowerOptionalStringifyRoot(L: Lowerer, value: IrExpr, indent: string, loc: SrcLoc): IrExpr | null {
+  const tags = optionalStringTags(L, value.type);
+  if (!tags || value.type.kind !== "union") return null;
+  const resultT = L.withUndefinedArm(STRING);
+  const key = `json.optionalString:${value.type.unionId}:${JSON.stringify(indent)}`;
+  let helper = L.widthHelpers.get(key);
+  if (!helper) {
+    helper = `%json.optionalString.${L.widthHelpers.size}`;
+    L.widthHelpers.set(key, helper);
+    const input = varRef("value.0", value.type, loc);
+    const serialized: IrExpr = {
+      kind: "jsonStringify",
+      value: { kind: "unionNarrow", unionId: value.type.unionId, tag: tags.stringTag, value: input, type: STRING, loc },
+      type: STRING,
+      loc,
+    };
+    if (indent !== "") (serialized as { indent?: string }).indent = indent;
+    const missing = L.wrappedUndefined(resultT, loc);
+    if (!missing) throw new InternalCompilerError("optional JSON.stringify result needs an undefined arm");
+    L.liftedFns.push({
+      name: helper,
+      params: [{ localId: "value.0", name: "value", type: value.type }],
+      returnType: resultT,
+      locals: [{ id: "value.0", name: "value", type: value.type, mutable: false }],
+      body: [
+        {
+          kind: "if",
+          cond: { kind: "unionIsTag", unionId: value.type.unionId, tag: tags.undefinedTag, negated: false, value: input, type: BOOL, loc },
+          then: [{ kind: "return", value: missing, loc }],
+          else_: null,
+          loc,
+        },
+        { kind: "return", value: L.coerceToExpected(serialized, resultT), loc },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: helper, args: [value], type: resultT, loc };
+}
 
 /** JSON.parse uses a checked-dynamic value. JSON.stringify keeps its typed
  * fast path without a callback; function replacers use native dynamic holders
@@ -41,6 +85,8 @@ import { nativeImportHandleType } from "./lower-native-import-types.js";
           L.coerceToExpected(value, DYN), callback, { kind: "strLit", value: indent, type: STRING, loc },
         ], type: STRING, loc };
       }
+      const optionalString = lowerOptionalStringifyRoot(L, value, indent, loc);
+      if (optionalString) return optionalString;
       // An ISLAND value (`JSON.stringify(err)` on a package handle — the
       // island error-inspection idiom): the ENGINE's own JSON.stringify
       // runs, so key order, nesting, toJSON, and getters match Node by

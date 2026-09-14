@@ -56,7 +56,7 @@ import { cFnPtrCast, cType, releaseCallC, cStringLiteral, cDecl } from "./types.
 import { computeMayThrow } from "./may-throw.js";
 import { unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, recordKeyGetHelper, recordKeySetHelper } from "./walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./shapes.js";
-import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitSignalThunkFor, closeBindThunkFor, connectResThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsRenameThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./async.js";
+import { emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitSignalThunkFor, closeBindThunkFor, connectResThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsRenameThunkFor, genResultThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./stmts.js";
 import { emitExpr } from "./exprs.js";
@@ -311,9 +311,10 @@ export class CEmitter {
         labels?: string[];
         scopeDepth: number;
         frameDepth: number;
+        finallyDepth: number;
       }
-    | { kind: "switch"; endLabel: string; usedEnd: boolean; labels?: string[]; scopeDepth: number; frameDepth: number }
-    | { kind: "block"; endLabel: string; usedEnd: boolean; labels: string[]; scopeDepth: number; frameDepth: number }
+    | { kind: "switch"; endLabel: string; usedEnd: boolean; labels?: string[]; scopeDepth: number; frameDepth: number; finallyDepth: number }
+    | { kind: "block"; endLabel: string; usedEnd: boolean; labels: string[]; scopeDepth: number; frameDepth: number; finallyDepth: number }
   )[] = [];
   labelCounter = 0;
   readonly returnTypeByFn = new Map<string, IrType>();
@@ -329,15 +330,16 @@ export class CEmitter {
    * out of the function. Purely compile-time: entering a try emits no code. */
   tryStack: { label: string; used: boolean; frameDepth: number; scopeDepth: number }[] =
     [];
-  /** Enclosing try-with-FINALLY regions, innermost last — the pending-
-   * return analogue of tryStack: a `return` inside one snapshots its value
-   * into the function's pending-return slot (sc_pret), releases down to
-   * the region's depths, and jumps to `label` (the region's pending-return
-   * finally copy), whose tail dispatches to the next region out or emits
-   * the actual return. Spans tryBody and catchBody; the finally body
-   * itself is outside (the frontend fences jumps there). */
-  finallyStack: { label: string; used: boolean; frameDepth: number; scopeDepth: number }[] =
+  /** Enclosing try-with-finally regions, innermost last. Returns use the
+   * central pending-return copies; break/continue inline the crossed bodies
+   * with the same truncated ownership and exception context as LLVM. */
+  finallyStack: { label: string; used: boolean; frameDepth: number; scopeDepth: number; tryDepth: number; body: IrStmt[] }[] =
     [];
+  /** Scope entry protecting sc_pret while a pending-return finally copy
+   * runs. A return in that copy replaces the old completion: it evaluates
+   * first, releases the old slot, then removes this protection from its
+   * own unwind path before dispatching. */
+  pendingReturnScopeIndex: number | null = null;
   /** Return type of the function being emitted — the unwind path returns a
    * dummy of this type (never read: callers check the pending flag first). */
   currentReturnType: IrType = VOID;
@@ -588,6 +590,23 @@ export class CEmitter {
 
   emit(): string {
     const body: string[] = [];
+    // Async-generator spawn wrappers need their type-directed result
+    // builders even when user code only creates and drops the iterator.
+    // Register them before the unit-instance table flushes below.
+    for (const fn of this.mod.functions) {
+      if (!fn.async || fn.generator === undefined) continue;
+      genResultThunkFor(
+        this,
+        {
+          kind: "generator",
+          async: true,
+          yieldT: fn.generator.yieldT,
+          retT: fn.returnType,
+          nextT: fn.generator.nextT,
+        },
+        fn.generator.resultType,
+      );
+    }
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
     for (const fn of this.mod.functions) {
@@ -736,7 +755,7 @@ export class CEmitter {
       const fn = this.fnByName.get(name)!;
       const params = ["ScrClosure *sc_env", ...fn.params.map((p) => cDecl(p.type, mangleLocal(p.localId)))];
       const call = `${this.callTargetC(name)}(${fn.params.map((p) => mangleLocal(p.localId)).join(", ")})`;
-      const retType = fn.async ? "ScrPromise *" : fn.generator ? "ScrGen *" : cType(fn.returnType);
+      const retType = fn.generator ? "ScrGen *" : fn.async ? "ScrPromise *" : cType(fn.returnType);
       out.push(
         ``,
         `static ${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")}) {`,
@@ -1558,6 +1577,36 @@ export class CEmitter {
     for (let i = this.scopes.length - 1; i >= scopeDepth; i--) this.releaseFrame(this.scopes[i]!);
   }
 
+  /** Run the finally regions a break/continue exits, then release to its
+   * resolved target. Every body sees compile-time frame/scope/finally/try
+   * stacks truncated to the region boundary: a throw propagates outside
+   * the completing try, and a jump inside the finally replaces the pending
+   * jump without re-entering the same cleanup. */
+  emitFinallysForJump(finallyDepth: number, frameDepth: number, scopeDepth: number): void {
+    if (this.finallyStack.length <= finallyDepth) {
+      this.releaseForJump(frameDepth, scopeDepth);
+      return;
+    }
+    const savedFrames = this.frames;
+    const savedScopes = this.scopes;
+    const savedFinally = this.finallyStack;
+    const savedTry = this.tryStack;
+    for (let i = savedFinally.length - 1; i >= finallyDepth; i--) {
+      const fin = savedFinally[i]!;
+      this.releaseForJump(fin.frameDepth, fin.scopeDepth);
+      this.frames = this.frames.slice(0, fin.frameDepth);
+      this.scopes = this.scopes.slice(0, fin.scopeDepth);
+      this.finallyStack = savedFinally.slice(0, i);
+      this.tryStack = savedTry.slice(0, fin.tryDepth);
+      this.emitBlock(fin.body);
+    }
+    this.releaseForJump(frameDepth, scopeDepth);
+    this.frames = savedFrames;
+    this.scopes = savedScopes;
+    this.finallyStack = savedFinally;
+    this.tryStack = savedTry;
+  }
+
   /** THE unwind path at a point where an exception is pending: release
    * everything between here and the innermost try handler — or the whole
    * function — via releaseForJump, then jump to the handler / return a
@@ -1591,8 +1640,8 @@ export class CEmitter {
    * fiber and returns the generator object). */
   callTargetC(fnName: string): string {
     const fn = this.fnByName.get(fnName);
-    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     if (fn?.generator !== undefined) return mangleGenSpawn(fnName);
+    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     return mangleFunction(fnName);
   }
 
@@ -1919,6 +1968,7 @@ export class CEmitter {
       ...(labels !== undefined && { labels }),
       scopeDepth: this.scopes.length,
       frameDepth: this.frames.length,
+      finallyDepth: this.finallyStack.length,
     };
   }
 

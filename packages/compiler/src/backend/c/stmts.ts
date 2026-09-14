@@ -25,6 +25,7 @@ export function emitFunction(emitter: CEmitter, fn: IrFunction): void {
     emitter.jumpTargets = [];
     emitter.tryStack = [];
     emitter.finallyStack = [];
+    emitter.pendingReturnScopeIndex = null;
     emitter.currentReturnType = fn.returnType;
     emitter.currentGenerator = fn.generator ?? null;
     emitter.labelCounter = 0;
@@ -413,6 +414,22 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
         emitter.line(`scr_arr_set_${acc}(${arr.name}, ${idx.name}, ${v.name});${emitter.srcComment(s.loc)}`);
         break;
       }
+      case "arraySetLength": {
+        const arr = emitter.emitExpr(s.arr);
+        const length = emitter.emitExpr(s.length);
+        if (s.arr.type.kind !== "array") throw new InternalCompilerError("emitter bug: arraySetLength on non-array");
+        emitter.line(`scr_arr_set_len(${arr.name}, ${length.name});${emitter.srcComment(s.loc)}`);
+        emitter.emitPendingCheck();
+        break;
+      }
+      case "arraySetUndefined":
+      case "arrayDelete": {
+        const arr = emitter.emitExpr(s.arr);
+        const idx = emitter.emitExpr(s.index);
+        if (s.arr.type.kind !== "array") throw new InternalCompilerError(`emitter bug: ${s.kind} on non-array`);
+        emitter.line(`${s.kind === "arraySetUndefined" ? "scr_arr_set_undefined" : "scr_arr_delete"}(${arr.name}, ${idx.name});${emitter.srcComment(s.loc)}`);
+        break;
+      }
       case "bytesSet": {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the inline kind-specific accessor coerces
@@ -557,6 +574,7 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
           labels: s.labels,
           scopeDepth: emitter.scopes.length,
           frameDepth: emitter.frames.length,
+          finallyDepth: emitter.finallyStack.length,
         };
         emitter.jumpTargets.push(target);
         emitter.emitBlock(s.body);
@@ -583,7 +601,7 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
           }
         }
         if (!target) throw new InternalCompilerError("emitter bug: break target not found");
-        emitter.releaseForJump(target.frameDepth, target.scopeDepth);
+        emitter.emitFinallysForJump(target.finallyDepth, target.frameDepth, target.scopeDepth);
         if (target.kind !== "loop" || s.label !== undefined) {
           // Switches are emitted as goto chains and blocks aren't C loops
           // at all, so a C `break` cannot target either; and a LABELED
@@ -610,7 +628,7 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
           }
         }
         if (!loop) throw new InternalCompilerError("emitter bug: continue target not found");
-        emitter.releaseForJump(loop.frameDepth, loop.scopeDepth);
+        emitter.emitFinallysForJump(loop.finallyDepth, loop.frameDepth, loop.scopeDepth);
         if (loop.continueLabel) {
           // Labeled loops always allocate one (a labeled continue may
           // target an outer loop a C continue could never reach); for/
@@ -623,6 +641,21 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
         break;
       }
       case "return": {
+        // A return inside the pending-return copy of a finally REPLACES the
+        // old return. Keep the old slot protected while the new expression
+        // evaluates (a throw there still discards it), then release the old
+        // value and remove the slot from this return's own unwind path.
+        let pendingEntry: { index: number; entry: (typeof emitter.scopes)[number][number] } | null = null;
+        let value: ReturnType<typeof emitter.emitExpr> | null = null;
+        if (s.value) value = emitter.emitExpr(s.value);
+        const pendingIndex = emitter.pendingReturnScopeIndex;
+        if (pendingIndex !== null && isRefCounted(emitter.currentReturnType)) {
+          const scope = emitter.scopes[pendingIndex]!;
+          const entryIndex = scope.findIndex((entry) => entry.name === "sc_pret");
+          if (entryIndex < 0) throw new InternalCompilerError("emitter bug: pending return scope has no sc_pret");
+          pendingEntry = { index: pendingIndex, entry: scope.splice(entryIndex, 1)[0]! };
+          emitter.releaseValue("sc_pret", emitter.currentReturnType);
+        }
         const fin = emitter.finallyStack[emitter.finallyStack.length - 1];
         if (fin) {
           // Crossing ≥1 finally: the value is computed and snapshotted
@@ -630,26 +663,25 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
           // it — Node's semantics), then everything down to the innermost
           // region releases and control runs that region's pending-return
           // finally copy; its tail dispatches further out or returns.
-          if (s.value) {
-            const v = emitter.emitExpr(s.value);
-            emitter.moveTemp(v); // ownership parks in the slot until the dispatch returns it
-            emitter.line(`sc_pret = ${v.name};${emitter.srcComment(s.loc)}`);
+          if (value) {
+            emitter.moveTemp(value); // ownership parks in the slot until the dispatch returns it
+            emitter.line(`sc_pret = ${value.name};${emitter.srcComment(s.loc)}`);
           }
           fin.used = true;
           emitter.releaseForJump(fin.frameDepth, fin.scopeDepth);
           emitter.line(`goto ${fin.label};${s.value ? "" : emitter.srcComment(s.loc)}`);
-          break;
-        }
-        if (s.value) {
-          const v = emitter.emitExpr(s.value);
-          emitter.moveTemp(v);
+        } else if (value) {
+          emitter.moveTemp(value);
           // Everything down to function depth releases; the moved result is
           // exempt (already struck from its frame).
           emitter.releaseForJump(0, 0);
-          emitter.line(`return ${v.name};${emitter.srcComment(s.loc)}`);
+          emitter.line(`return ${value.name};${emitter.srcComment(s.loc)}`);
         } else {
           emitter.releaseForJump(0, 0);
           emitter.line(`return;${emitter.srcComment(s.loc)}`);
+        }
+        if (pendingEntry !== null) {
+          emitter.scopes[pendingEntry.index]!.push(pendingEntry.entry);
         }
         break;
       }
@@ -738,11 +770,9 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
    * handler or dummy return). A `return` inside the try/catch body rides a
    * THIRD finally copy (sc_finret_N — the pending-return path: value
    * snapshotted into sc_pret at the return site, dispatch outward after
-   * the copy runs); break/continue never cross a finally and no jump
-   * leaves a finally body (frontend fence + validator backstop), so
-   * normal, exception, and pending-return are the only paths a finally
-   * must model; jumps out of PLAIN try/catch need nothing here —
-   * release-on-jump already walks the try scopes. */
+   * the copy runs). Break/continue inline the crossed finally bodies via
+   * emitFinallysForJump before branching to their resolved targets; jumps
+   * out of plain try/catch need nothing beyond release-on-jump. */
   export function emitTryCatch(emitter: CEmitter, s: IrStmt & { kind: "tryCatch" }): void {
     const id = emitter.labelCounter++;
     const hasCatch = s.catchBody !== null;
@@ -769,6 +799,8 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
           used: false,
           frameDepth: emitter.frames.length,
           scopeDepth: emitter.scopes.length,
+          tryDepth: emitter.tryStack.length,
+          body: s.finallyBody!,
         }
       : null;
     emitter.line(`/* try */${emitter.srcComment(s.loc)}`);
@@ -848,11 +880,26 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
         emitter.line(`${finExcLabel}:; /* finally (exception path — stashed) */`);
         emitter.line(`ScrCaught *${stash} = scr_exc_take();`);
         emitter.scopes.push([{ name: stash, type: CAUGHT }]);
+        const suppressHandler = s.suppressFinallyErrors
+          ? {
+              label: `sc_fsup_${id}`,
+              used: false,
+              frameDepth: emitter.frames.length,
+              scopeDepth: emitter.scopes.length,
+            }
+          : null;
+        if (suppressHandler) emitter.tryStack.push(suppressHandler);
         emitter.emitBlock(s.finallyBody!);
+        if (suppressHandler) emitter.tryStack.pop();
         emitter.scopes.pop(); // normal completion keeps the stash for the re-raise
         emitter.line(`scr_rethrow(${stash});`);
         emitter.line(`scr_caught_release(${stash});`);
         emitter.emitUnwind();
+        if (suppressHandler?.used) {
+          emitter.line(`${suppressHandler.label}:; /* disposal error suppresses body error */`);
+          emitter.line(`scr_exc_suppress(${stash}); /* consumes stash */`);
+          emitter.emitUnwind();
+        }
       }
       if (retEntry!.used) {
         // Pending-return path: a return in the try/catch body parked its
@@ -866,9 +913,14 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
         emitter.line(`${retEntry!.label}:; /* finally (pending-return path) */`);
         const retT = emitter.currentReturnType;
         const own = isRefCounted(retT);
-        if (own) emitter.scopes.push([{ name: "sc_pret", type: retT }]);
+        const previousPendingScope = emitter.pendingReturnScopeIndex;
+        if (own) {
+          emitter.scopes.push([{ name: "sc_pret", type: retT }]);
+          emitter.pendingReturnScopeIndex = emitter.scopes.length - 1;
+        }
         emitter.emitBlock(s.finallyBody!);
         if (own) emitter.scopes.pop();
+        emitter.pendingReturnScopeIndex = previousPendingScope;
         const outer = emitter.finallyStack[emitter.finallyStack.length - 1];
         if (outer) {
           outer.used = true;
@@ -958,6 +1010,7 @@ export function emitStmt(emitter: CEmitter, s: IrStmt): void {
       ...(s.labels !== undefined && { labels: s.labels }),
       scopeDepth: emitter.scopes.length,
       frameDepth: emitter.frames.length,
+      finallyDepth: emitter.finallyStack.length,
     };
     emitter.jumpTargets.push(target);
     emitter.scopes.push([]);

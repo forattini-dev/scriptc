@@ -21,11 +21,10 @@ function unusedCorner(bag: Bag, pairs: Map<string, number>): void {
   }
 }
 
-// Never referenced and its declaration doesn't collect (an ASYNC
-// generator signature — sync generators compile now): deferred — only a
-// reference would make it fail a build.
+// Never referenced and its body uses the remaining async-generator
+// delegation fence: deferred — only a reference would fail a build.
 async function* counter(limit: number): AsyncGenerator<number> {
-  for (let i = 0; i < limit; i++) yield i;
+  yield* [limit];
 }
 
 console.log(used(41));

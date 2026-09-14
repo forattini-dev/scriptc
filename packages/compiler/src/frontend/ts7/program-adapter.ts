@@ -93,6 +93,13 @@ function serializeOptions(options: Ts7CompilerOptions): Record<string, unknown> 
   return out;
 }
 
+/** TypeScript's filesystem reader removes a leading UTF-8 BOM before the
+ * parser sees source text. node:fs's utf8 reader keeps it, so normalize every
+ * virtual, shadowed, and real host response to the same parser contract. */
+function stripSourceBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
 let nextConfigId = 0;
 
 
@@ -126,6 +133,43 @@ function binaryPathOf(explicit: string | undefined, cwd: string): string | undef
     if (parent === dir) return undefined;
     dir = parent;
   }
+}
+
+type Ts7TransportDecoder = {
+  readonly ignoreBOM?: boolean;
+  decode(input?: Uint8Array, options?: { stream?: boolean }): string;
+};
+
+const bomPreservingDecoderPrototypes = new WeakSet<object>();
+
+/** TypeScript 7.0.2's Wtf8Decoder inherits TextDecoder's default BOM
+ * handling, so decoding an individual AST/checker string-table cell strips
+ * one leading U+FEFF. Patch that decoder class once after the first project
+ * exposes an instance: delegate to its WTF-8-aware implementation, then
+ * restore the one BOM TextDecoder consumed. */
+function preserveTransportBoms(project: Project): void {
+  const decoder = (project.program as unknown as { decoder?: Ts7TransportDecoder }).decoder;
+  if (decoder === undefined) {
+    throw new InternalCompilerError("ts7 createProgram: program decoder is unavailable");
+  }
+  const prototype = Object.getPrototypeOf(decoder) as Ts7TransportDecoder | null;
+  if (prototype === null || typeof prototype.decode !== "function") {
+    throw new InternalCompilerError("ts7 createProgram: program decoder prototype is unavailable");
+  }
+  if (bomPreservingDecoderPrototypes.has(prototype)) return;
+  const decode = prototype.decode;
+  prototype.decode = function (input, options): string {
+    const text = decode.call(this, input, options);
+    return this.ignoreBOM !== true &&
+      input !== undefined &&
+      input.length >= 3 &&
+      input[0] === 0xef &&
+      input[1] === 0xbb &&
+      input[2] === 0xbf
+      ? "\uFEFF" + text
+      : text;
+  };
+  bomPreservingDecoderPrototypes.add(prototype);
 }
 
 /** One spawned tsgo server plus the virtual-FS overlay serving synthesized
@@ -171,13 +215,14 @@ export class Ts7Host {
         // existence; undefined => real-FS fallthrough.
         readFile: (fileName: string) => {
           const virtual = virtualFiles.get(tsgoPath(fileName));
-          if (virtual !== undefined) return virtual;
+          if (virtual !== undefined) return stripSourceBom(virtual);
           if (shadow !== null) {
             if (shadow.hideFile(fileName)) return null;
             const replacement = shadow.readFile(fileName);
-            if (replacement !== undefined) return replacement;
+            if (replacement !== undefined) return stripSourceBom(replacement);
           }
-          return declarations?.files.get(resolve(fileName)) ?? trackedReadFile(fileName);
+          const source = declarations?.files.get(resolve(fileName)) ?? trackedReadFile(fileName);
+          return source === null ? null : stripSourceBom(source);
         },
         fileExists: (fileName: string) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
@@ -236,6 +281,7 @@ export class Ts7Host {
       this.releaseProgram(configPath);
       throw new InternalCompilerError(`ts7 createProgram: project failed to open for ${first}`);
     }
+    preserveTransportBoms(project);
     return new Ts7Program(project, snapshot, this, !programOwnsHost);
   }
 

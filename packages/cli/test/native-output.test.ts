@@ -36,11 +36,13 @@ function cli(args: string[], env: NodeJS.ProcessEnv = process.env) {
   });
 }
 
-test("unsupported hosts fail with SC3002 before creating an artifact", async () => {
-  if (target !== null) return;
+test("unsupported targets fail with SC3002 before creating an artifact", async () => {
   const { dir, entry } = await fixture();
   const output = join(dir, "hello.o");
-  await expect(cli(["build", entry, "--emit=obj", "-o", output])).rejects.toMatchObject({
+  await expect(cli(["build", entry, "--emit=obj", "-o", output], {
+    ...process.env,
+    SCRIPTC_TARGET: "scriptc-unsupported-target",
+  })).rejects.toMatchObject({
     code: 1,
     stderr: expect.stringContaining("SC3002"),
   });

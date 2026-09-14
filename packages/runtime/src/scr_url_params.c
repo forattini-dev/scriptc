@@ -467,20 +467,42 @@ bool scr_sp_has_value(ScrSearchParams *sp, ScrStr *name, ScrStr *value) {
   return false;
 }
 
-/* Stable insertion sort by name (lists are small; equal names keep their
- * relative order — the spec's stability requirement). */
+/* Stable merge sort by name. The temporary arrays borrow the list's string
+ * references; each merge only moves pointers, so ownership is unchanged.
+ * Taking the left pair on equality preserves the URL Standard's stable order,
+ * while the ordered-boundary check keeps an already-sorted list linear. */
+static void sp_sort_range(ScrSearchParams *sp, ScrStr **tmp_names,
+                          ScrStr **tmp_vals, size_t lo, size_t hi) {
+  if (hi - lo < 2) return;
+  size_t mid = lo + (hi - lo) / 2;
+  sp_sort_range(sp, tmp_names, tmp_vals, lo, mid);
+  sp_sort_range(sp, tmp_names, tmp_vals, mid, hi);
+  if (scr_str_cmp_u16(sp->names[mid - 1], sp->names[mid]) <= 0) return;
+
+  size_t left = lo, right = mid;
+  for (size_t out = lo; out < hi; out++) {
+    bool take_left = right == hi ||
+                     (left < mid && scr_str_cmp_u16(sp->names[left], sp->names[right]) <= 0);
+    size_t from = take_left ? left++ : right++;
+    tmp_names[out] = sp->names[from];
+    tmp_vals[out] = sp->vals[from];
+  }
+  memcpy(sp->names + lo, tmp_names + lo, (hi - lo) * sizeof(ScrStr *));
+  memcpy(sp->vals + lo, tmp_vals + lo, (hi - lo) * sizeof(ScrStr *));
+}
+
 void scr_sp_sort(ScrSearchParams *sp) {
-  for (size_t i = 1; i < sp->len; i++) {
-    ScrStr *n = sp->names[i];
-    ScrStr *v = sp->vals[i];
-    size_t j = i;
-    while (j > 0 && scr_str_cmp_u16(sp->names[j - 1], n) > 0) {
-      sp->names[j] = sp->names[j - 1];
-      sp->vals[j] = sp->vals[j - 1];
-      j--;
+  if (sp->len > 1) {
+    ScrStr **tmp_names = malloc(sp->len * sizeof(ScrStr *));
+    ScrStr **tmp_vals = malloc(sp->len * sizeof(ScrStr *));
+    if (!tmp_names || !tmp_vals) {
+      free(tmp_names);
+      free(tmp_vals);
+      scr_trap("scriptc: out of memory\n");
     }
-    sp->names[j] = n;
-    sp->vals[j] = v;
+    sp_sort_range(sp, tmp_names, tmp_vals, 0, sp->len);
+    free(tmp_names);
+    free(tmp_vals);
   }
   sp_sync_owner(sp);
 }

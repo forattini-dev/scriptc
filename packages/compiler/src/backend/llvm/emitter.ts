@@ -80,7 +80,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/ir.js";
-import { CAUGHT, ffiCallbackType, isFfiContextParam, isRefCounted, isUnitType, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, VOID } from "../../ir/ir.js";
+import { CAUGHT, ffiCallbackType, isFfiContextParam, isRefCounted, isUnitType, moduleEmbedsBuiltin, moduleEmbedsCompressedNpm, moduleUsesDynInvoke, moduleUsesFetch, moduleUsesFsWatch, moduleUsesHttpServer, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, moduleUsesTls, moduleUsesTlsCa, NPM_COMPRESS_MIN, POINTER_KINDS, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, typeKey, VOID } from "../../ir/ir.js";
 import { matchIntegerBytesForLoop } from "../../ir/integer-loops.js";
 import { allocateFfiCallbackAdapters, hasForeignFfiCallback, hasRetainedFfiCallback, type FfiCallbackAdapter } from "../ffi-callbacks.js";
 import { RUNTIME_ABI_MARKER } from "../runtime-abi.js";
@@ -319,6 +319,7 @@ class LlEmitter {
     labels?: string[];
     frameDepth: number;
     scopeDepth: number;
+    finallyDepth: number;
   }[] = [];
   private currentLocals = new Map<string, IrLocal>();
   private captureIds = new Set<string>();
@@ -331,8 +332,8 @@ class LlEmitter {
    * `tryDepth` snapshots tryStack.length at region entry: a throw inside
    * a pending-return finally copy propagates OUT of the completing try
    * (past its own catch), so the copies emit under the truncated stack.
-   * break/continue never cross a finally (frontend fence + validator
-   * backstop), so return and the two tryCatch paths are the only copies. */
+   * break/continue use the same region snapshots through
+   * emitFinallysForJump. */
   private finallyStack: { frameDepth: number; scopeDepth: number; tryDepth: number; body: IrStmt[] }[] = [];
   /** Enclosing try contexts, innermost last — the compile-time unwind
    * targets (CEmitter.tryStack): a pending check or `throw` inside a try
@@ -1040,11 +1041,10 @@ class LlEmitter {
       `%ScrClosure = type { ${this.sizeType}, ptr, ${this.sizeType}, ptr }`,
       `%ScrFfiTable = type { ptr, ${this.sizeType}, ${this.sizeType}, ptr, i8, ptr, ptr, ${this.sizeType}, ${this.sizeType}, ${this.sizeType}, ptr, ptr }`,
       `%ScrRegex = type { ${this.sizeType}, ptr, ptr, ptr }`,
-      // ScrArr mirror { rc, len, cap, elem(i32+pad), elem_retain,
-      // elem_release, elem_trace, data } — the immortal tagged-template
-      // strings objects lay out through it (nothing GEPs into live heap
-      // arrays; those stay behind the runtime's own entry points).
-      `%ScrArr = type { ${this.sizeType}, ${this.sizeType}, ${this.sizeType}, i32, ptr, ptr, ptr, ptr }`,
+      // ScrArr mirrors scr_runtime.h field-for-field. Live dynamic stream
+      // commits swap its mutable dense, sparse, presence, and property
+      // storage while preserving the target object's identity.
+      `%ScrArr = type { ${this.sizeType}, ${this.sizeType}, ${this.sizeType}, i32, ptr, ptr, ptr, ptr, ptr, ptr, ${this.sizeType}, ${this.sizeType}, ptr, ${this.sizeType}, ${this.sizeType} }`,
       // The runtime error prefix { rc, vt, name, message, code,
       // has_cause, cause } and the
       // class-object shape { rc, pre, post, ctor, name } — field reads on
@@ -1132,11 +1132,16 @@ class LlEmitter {
       // One immortal ScrArr per tagged-template site: a [N x ptr] data
       // global of interned cooked-string literals, and the ScrArr header
       // over it (rc == SIZE_MAX, len == cap, SCR_ELEM_STR = 2, no REF
-      // entry points). Reads retain immortal strings — a no-op.
+      // entry points). Every dense slot is present; reads retain immortal
+      // strings — a no-op.
       const n = inst.slots.length;
+      const present = n === 0
+        ? "zeroinitializer"
+        : `[ ${inst.slots.map(() => "i8 1").join(", ")} ]`;
       out.push(
         `@${inst.sym}_data = internal constant [${n} x ptr] [ ${inst.slots.map((s) => `ptr ${s}`).join(", ")} ]`,
-        `@${inst.sym} = internal global %ScrArr { ${this.sizeType} -1, ${this.sizeType} ${n}, ${this.sizeType} ${n}, i32 2, ptr null, ptr null, ptr null, ptr @${inst.sym}_data }`,
+        `@${inst.sym}_present = internal constant [${n} x i8] ${present}`,
+        `@${inst.sym} = internal global %ScrArr { ${this.sizeType} -1, ${this.sizeType} ${n}, ${this.sizeType} ${n}, i32 2, ptr null, ptr null, ptr null, ptr @${inst.sym}_data, ptr @${inst.sym}_present, ptr null, ${this.sizeType} 0, ${this.sizeType} 0, ptr null, ${this.sizeType} 0, ${this.sizeType} 0 }`,
       );
     }
     if (this.templateStringsInstances.size > 0) out.push(``);
@@ -1870,7 +1875,7 @@ class LlEmitter {
       );
     }
     for (const fn of this.mod.functions) {
-      if (fn.async !== true) continue;
+      if (fn.async !== true || fn.generator !== undefined) continue;
       const { definitions, ret, tr, spawnParams, argPackLines } =
         this.emitArgPackAndTrampolinePrologue(fn);
       out.push(...definitions);
@@ -2080,6 +2085,36 @@ class LlEmitter {
       }
       out.push(...tr);
 
+      let settleAsync: string | null = null;
+      if (fn.async) {
+        this.declare(`declare ptr @scr_async_gen_new(ptr, ptr, ptr, ptr)`);
+        const genT: IrType & { kind: "generator" } = {
+          kind: "generator",
+          async: true,
+          yieldT: fn.generator.yieldT,
+          retT: ret,
+          nextT: fn.generator.nextT,
+        };
+        const resultT = fn.generator.resultType;
+        const build = this.genResultThunkFor(genT, resultT);
+        settleAsync = `${build}_async`;
+        const settleKey = `ags:${typeKey(genT)}`;
+        if (!this.resolveThunks.has(settleKey)) {
+          this.resolveThunks.set(settleKey, settleAsync);
+          const adapters = vAdapters(this, resultT);
+          this.resolveThunkDefs.push(
+            `define internal void @${settleAsync}(ptr %g, ptr %p) ${FN_ATTRS} {`,
+            `entry:`,
+            `  %r = call ptr @${build}(ptr %g)`,
+            `  call void @scr_promise_fulfill_ref(ptr %p, ptr %r, ptr ${adapters.retain}, ptr ${adapters.release}, ptr ${traceArg(this, resultT)})`,
+            `  ret void`,
+            `}`,
+            ``,
+          );
+        }
+        this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
+      }
+
       // The never-started teardown: drop the packed (+1) arguments.
       const dr: string[] = [
         `define internal void @${mangleGenDrop(fn.name)}(ptr %ap) ${FN_ATTRS} {`,
@@ -2114,7 +2149,9 @@ class LlEmitter {
         ...argPackLines,
       ];
       sp.push(
-        `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
+        settleAsync === null
+          ? `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`
+          : `  %gg = call ptr @scr_async_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)}, ptr @${settleAsync})`,
         `  ret ptr %gg`,
         `}`,
         ``,
@@ -2253,6 +2290,34 @@ class LlEmitter {
   private releaseForJump(frameDepth: number, scopeDepth: number): void {
     for (let i = this.frames.length - 1; i >= frameDepth; i--) this.releaseFrame(this.frames[i]!);
     for (let i = this.scopes.length - 1; i >= scopeDepth; i--) this.releaseScope(this.scopes[i]!);
+  }
+
+  /** Run the finally regions an abrupt loop/block jump crosses, then
+   * release to the already-resolved target. This is the return path's
+   * completion walk without a parked result value. */
+  private emitFinallysForJump(finallyDepth: number, frameDepth: number, scopeDepth: number): void {
+    if (this.finallyStack.length <= finallyDepth) {
+      this.releaseForJump(frameDepth, scopeDepth);
+      return;
+    }
+    const savedFrames = this.frames;
+    const savedScopes = this.scopes;
+    const savedFinally = this.finallyStack;
+    const savedTry = this.tryStack;
+    for (let i = savedFinally.length - 1; i >= finallyDepth && !this.B.isTerminated(); i--) {
+      const fin = savedFinally[i]!;
+      this.releaseForJump(fin.frameDepth, fin.scopeDepth);
+      this.frames = this.frames.slice(0, fin.frameDepth);
+      this.scopes = this.scopes.slice(0, fin.scopeDepth);
+      this.finallyStack = savedFinally.slice(0, i);
+      this.tryStack = savedTry.slice(0, fin.tryDepth);
+      this.emitBlock(fin.body);
+    }
+    if (!this.B.isTerminated()) this.releaseForJump(frameDepth, scopeDepth);
+    this.frames = savedFrames;
+    this.scopes = savedScopes;
+    this.finallyStack = savedFinally;
+    this.tryStack = savedTry;
   }
 
   /** THE unwind path at a point where an exception is pending: release
@@ -2747,8 +2812,8 @@ class LlEmitter {
    * fiber and returns the generator object) — CEmitter.callTargetC. */
   private callTarget(fnName: string): string {
     const fn = this.fnByName.get(fnName);
-    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     if (fn?.generator !== undefined) return mangleGenSpawn(fnName);
+    if (fn?.async === true) return mangleAsyncSpawn(fnName);
     return mangleFunction(fnName);
   }
 
@@ -2883,7 +2948,7 @@ class LlEmitter {
       B.line(`call void @scr_wasi_coro_started(ptr ${handle})`);
       B.line(`${self} = call ptr @scr_fiber_self()`);
       this.currentWasiCoro = {
-        kind: fn.async === true ? "async" : "generator",
+        kind: fn.generator !== undefined ? "generator" : "async",
         id,
         handle,
         self,
@@ -3125,6 +3190,26 @@ class LlEmitter {
         B.line(`call void @scr_arr_set_${acc}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
         break;
       }
+      case "arraySetLength": {
+        const arr = this.emitExpr(s.arr);
+        const length = this.emitExpr(s.length);
+        if (s.arr.type.kind !== "array") throw new InternalCompilerError("llvm emitter bug: arraySetLength on non-array");
+        this.declare(`declare void @scr_arr_set_len(ptr, double)`);
+        B.line(`call void @scr_arr_set_len(ptr ${arr.name}, double ${length.name})`);
+        this.emitPendingCheck();
+        break;
+      }
+      case "arraySetUndefined":
+      case "arrayDelete": {
+        const arr = this.emitExpr(s.arr);
+        const idx = this.emitExpr(s.index);
+        if (s.arr.type.kind !== "array") throw new InternalCompilerError(`llvm emitter bug: ${s.kind} on non-array`);
+        const fn = s.kind === "arraySetUndefined" ? "scr_arr_set_undefined" : "scr_arr_delete";
+        this.declare(`declare ${s.kind === "arrayDelete" ? "zeroext i1" : "void"} @${fn}(ptr, double)`);
+        if (s.kind === "arrayDelete") B.line(`call zeroext i1 @${fn}(ptr ${arr.name}, double ${idx.name})`);
+        else B.line(`call void @${fn}(ptr ${arr.name}, double ${idx.name})`);
+        break;
+      }
       case "bytesSet": {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the kind-specific inline path coerces
@@ -3315,6 +3400,7 @@ class LlEmitter {
           labels: s.labels,
           frameDepth: this.frames.length,
           scopeDepth: this.scopes.length,
+          finallyDepth: this.finallyStack.length,
         });
         this.emitBlock(s.body);
         this.jumpTargets.pop();
@@ -3354,6 +3440,7 @@ class LlEmitter {
           ...(s.labels !== undefined && { labels: s.labels }),
           frameDepth: this.frames.length,
           scopeDepth: this.scopes.length,
+          finallyDepth: this.finallyStack.length,
         });
         this.emitBlock(s.body);
         this.jumpTargets.pop();
@@ -3375,6 +3462,7 @@ class LlEmitter {
           ...(s.labels !== undefined && { labels: s.labels }),
           frameDepth: this.frames.length,
           scopeDepth: this.scopes.length,
+          finallyDepth: this.finallyStack.length,
         });
         this.emitBlock(s.body);
         this.jumpTargets.pop();
@@ -3432,6 +3520,7 @@ class LlEmitter {
           ...(s.labels !== undefined && { labels: s.labels }),
           frameDepth: this.frames.length,
           scopeDepth: this.scopes.length,
+          finallyDepth: this.finallyStack.length,
         });
         this.emitBlock(s.body);
         this.jumpTargets.pop();
@@ -3499,6 +3588,7 @@ class LlEmitter {
           ...(s.labels !== undefined && { labels: s.labels }),
           frameDepth: this.frames.length,
           scopeDepth: this.scopes.length,
+          finallyDepth: this.finallyStack.length,
         });
         // The loop variable is a fresh const per iteration: its scope opens
         // here, holds the (for ref elements: owned +1) current element, and
@@ -3557,8 +3647,8 @@ class LlEmitter {
           }
         }
         if (!target) throw new InternalCompilerError("llvm emitter bug: break target not found");
-        this.releaseForJump(target.frameDepth, target.scopeDepth);
-        B.terminate(`br label %${target.brkLabel}`);
+        this.emitFinallysForJump(target.finallyDepth, target.frameDepth, target.scopeDepth);
+        if (!B.isTerminated()) B.terminate(`br label %${target.brkLabel}`);
         break;
       }
       case "continue": {
@@ -3573,8 +3663,8 @@ class LlEmitter {
           }
         }
         if (!target || target.contLabel === null) throw new InternalCompilerError("llvm emitter bug: continue target not found");
-        this.releaseForJump(target.frameDepth, target.scopeDepth);
-        B.terminate(`br label %${target.contLabel}`);
+        this.emitFinallysForJump(target.finallyDepth, target.frameDepth, target.scopeDepth);
+        if (!B.isTerminated()) B.terminate(`br label %${target.contLabel}`);
         break;
       }
       case "return": {
@@ -3704,10 +3794,9 @@ class LlEmitter {
    *     <unwind>                   stash (it unwinds through the synthetic
    *   try.e:                       scope entry) — JS's semantics exactly
    *
-   * Returns inside tryBody/catchBody ride the finallyStack (inline copies
-   * at the return site — see `return`); break/continue never cross a
-   * finally and no jump leaves a finally body (frontend fence + validator
-   * backstop). */
+   * Abrupt completions inside tryBody/catchBody ride the finallyStack:
+   * returns inline copies at the return site, while break/continue use the
+   * shared region walk before branching to their resolved target. */
   private emitTryCatch(s: IrStmt & { kind: "tryCatch" }): void {
     const B = this.B;
     const hasCatch = s.catchBody !== null;
@@ -3806,11 +3895,27 @@ class LlEmitter {
         B.line(`${stash} = call ptr @scr_exc_take() ; stash across finally`);
         B.line(`store ptr ${stash}, ptr ${stashSlot}`);
         this.scopes.push([{ slot: stashSlot, type: CAUGHT }]);
+        const suppressHandler = s.suppressFinallyErrors
+          ? {
+              label: B.newLabel("try.fs"),
+              used: false,
+              frameDepth: this.frames.length,
+              scopeDepth: this.scopes.length,
+            }
+          : null;
+        if (suppressHandler) this.tryStack.push(suppressHandler);
         this.emitBlock(s.finallyBody!);
+        if (suppressHandler) this.tryStack.pop();
         this.scopes.pop(); // normal completion keeps the stash for the re-raise
         B.line(`call void @scr_rethrow(ptr ${stash})`);
         B.line(`call void @scr_caught_release(ptr ${stash})`);
         this.emitUnwind();
+        if (suppressHandler?.used) {
+          B.startBlock(suppressHandler.label);
+          this.declare(`declare void @scr_exc_suppress(ptr)`);
+          B.line(`call void @scr_exc_suppress(ptr ${stash}) ; consumes stash`);
+          this.emitUnwind();
+        }
       }
       B.startBlock(endLabel);
     } else {
@@ -3879,6 +3984,7 @@ class LlEmitter {
       ...(s.labels !== undefined && { labels: s.labels }),
       frameDepth: this.frames.length,
       scopeDepth: this.scopes.length,
+      finallyDepth: this.finallyStack.length,
     });
     const scope: LlScopeEntry[] = [];
     this.scopes.push(scope);
@@ -3988,7 +4094,7 @@ class LlEmitter {
     return result;
   }
 
-  private emitContainerExpr(e: ExprOf<"arrayLit" | "arrayNewLen" | "arrayGet" | "arrIntrinsic" | "bytesNew" | "bytesIntrinsic" | "mapNew" | "mapIntrinsic" | "setIntrinsic" | "setNew">): LlValue {
+  private emitContainerExpr(e: ExprOf<"arrayLit" | "arrayNewLen" | "arrayGet" | "arrayHas" | "arrayState" | "arrIntrinsic" | "bytesNew" | "bytesIntrinsic" | "mapNew" | "mapIntrinsic" | "setIntrinsic" | "setNew">): LlValue {
     return emitContainerExpr(this.expressionContext(), e);
   }
 

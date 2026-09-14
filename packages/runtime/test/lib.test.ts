@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
@@ -67,4 +67,18 @@ test("process + fs library: checks pass, error messages match Node's shape", asy
       ``,
     ].join("\n"),
   );
+});
+
+test("process.argv preserves user arguments that resolve to the executable", async () => {
+  const marker = "--argv-collision-probe";
+  for (const [argument, cwd] of [
+    [bin, undefined],
+    [`./${basename(bin)}`, dirname(bin)],
+  ] as const) {
+    const { stdout, stderr } = await execFileAsync(bin, [argument, marker], {
+      ...(cwd !== undefined ? { cwd } : {}),
+    });
+    expect(stdout).toBe(`4\n${argument}\n${marker}\n`);
+    expect(stderr).toBe("");
+  }
 });

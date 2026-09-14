@@ -66,11 +66,12 @@ test("the managed-image bootstrap pins the custom image's Node, pnpm, and LLVM",
   const bootstrap = readFileSync(new URL("../../scripts/sandbox-bootstrap.sh", import.meta.url), "utf8");
   expect(bootstrap).toContain("< .node-version");
   expect(bootstrap).toContain("ARG PNPM_VERSION=");
-  expect(bootstrap).toContain("llvm-toolchain-noble-18");
+  expect(bootstrap).toContain("llvm-toolchain-${llvm_distro}-22");
   expect(bootstrap).toContain("install -D -m 0644");
-  expect(bootstrap).toContain("clang-18");
-  expect(bootstrap).toContain("libclang-rt-18-dev");
-  expect(bootstrap).toContain("llvm-18");
+  expect(bootstrap).toContain("clang-22");
+  expect(bootstrap).toContain("libclang-rt-22-dev");
+  expect(bootstrap).toContain("llvm-22-dev");
+  expect(bootstrap).toContain("ninja-build");
 });
 
 test("a custom image does not select the Sandbox team or project", () => {

@@ -16,7 +16,7 @@ function fixture(): { mod: IrModule; fn: IrFunction; loop: Extract<IrStmt, { kin
     locals: [{ id: "out", name: "out", type: out.type, mutable: false }],
     body: [{ kind: "varDecl", localId: "out", init: { kind: "bytesNew", source: num(4), type: out.type, loc }, loc }, loop],
   };
-  return { fn, loop, mod: { irVersion: 6, sourceFile: loc.file, entry: "main", functions: [fn] } };
+  return { fn, loop, mod: { irVersion: 8, sourceFile: loc.file, entry: "main", functions: [fn] } };
 }
 
 test("fresh buffer loops borrow storage once and emit checked slice accesses", () => {

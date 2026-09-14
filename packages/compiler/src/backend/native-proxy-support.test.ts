@@ -9,7 +9,7 @@ const backends = ["c", "llvm"] as const;
 const ref = (type: IrType): IrExpr => ({ kind: "varRef", localId: "value.0", type, loc });
 
 function moduleWith(expr: IrExpr, records?: IrRecordShape[], unions?: IrUnionDef[]): IrModule {
-  return { irVersion: 6, sourceFile: loc.file, entry: "main", ...(records ? { records } : {}), ...(unions ? { unions } : {}),
+  return { irVersion: 8, sourceFile: loc.file, entry: "main", ...(records ? { records } : {}), ...(unions ? { unions } : {}),
     functions: [{ name: "main", params: [], locals: [], returnType: VOID,
       body: [{ kind: "exprStmt", expr, loc }], loc }] };
 }

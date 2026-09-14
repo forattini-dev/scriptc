@@ -60,7 +60,7 @@ test("integer storage refuses captured, forced-boxed, async and generator bindin
   fn.async = true;
   expect(model.match(loop, () => false)).toBeNull();
   delete fn.async;
-  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" } };
+  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" }, resultType: { kind: "record", shapeId: "r0" } };
   expect(model.match(loop, () => false)).toBeNull();
 });
 
@@ -83,7 +83,7 @@ test("emission uses checked integer byte operations and leaves the shared IR unc
   loop.body.push({ kind: "bytesSet", arr: bytes, index, loc, value: {
     kind: "bytesIntrinsic", receiver: bytes, method: "get", args: [index], type: { kind: "f64" }, loc,
   } });
-  const mod: IrModule = { irVersion: 6, sourceFile: loc.file, entry: fn.name, functions: [fn] };
+  const mod: IrModule = { irVersion: 8, sourceFile: loc.file, entry: fn.name, functions: [fn] };
   expect(validateModule(mod)).toEqual([]);
   const original = structuredClone(mod);
   const rust = emitRustModule(mod);

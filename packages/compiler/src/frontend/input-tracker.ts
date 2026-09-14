@@ -62,6 +62,16 @@ function pathKind(path: string): Extract<FrontendInputProbe, { op: "kind" }>["ki
   }
 }
 
+/** Mirrors TypeScript's system realpath policy: the native implementation
+ * canonicalizes Windows casing and expands 8.3 short names, while the JS
+ * implementation remains the fallback for Windows paths at the legacy
+ * MAX_PATH boundary. */
+function systemRealpath(path: string): string {
+  return process.platform === "win32" && path.length >= 260
+    ? realpathSync(path)
+    : realpathSync.native(path);
+}
+
 const activeTracker = new AsyncLocalStorage<FrontendInputTracker>();
 
 export class FrontendInputTracker {
@@ -174,7 +184,7 @@ export function trackedExists(path: string): boolean {
 export function trackedRealpath(path: string): string | null {
   path = resolve(path);
   try {
-    const target = realpathSync(path);
+    const target = systemRealpath(path);
     record({ op: "realpath", path, target });
     return target;
   } catch {
@@ -262,7 +272,7 @@ export function frontendInputsStillMatch(
       }
       if (probe.op === "realpath" && probe.target === null) {
         try {
-          realpathSync(probe.path);
+          systemRealpath(probe.path);
           return generatedOnlyDirectory(probe.path);
         } catch {
           return true;
@@ -333,7 +343,7 @@ export function frontendInputsStillMatch(
       }
       case "realpath": {
         try {
-          return realpathSync(probe.path) === probe.target;
+          return systemRealpath(probe.path) === probe.target;
         } catch {
           return probe.target === null;
         }

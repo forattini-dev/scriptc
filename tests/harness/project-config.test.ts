@@ -57,6 +57,19 @@ test("indexed-strict: the project's EXTRA strictness is honored — preflight fa
   expect(result.diagnostics.some((d) => d.message.includes("possibly 'undefined'"))).toBe(true);
 });
 
+test("project paths: TS 7 checking and native module lowering share the configured aliases", async () => {
+  const outDir = outDirFor("project-paths");
+  const result = await compile(join(fixture("project-paths"), "main.ts"), {
+    outPath: join(outDir, "main"),
+    outDir,
+    sanitize,
+  });
+  expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
+  if (!result.ok) return;
+  const { stdout } = await execFileAsync(result.binaryPath);
+  expect(stdout).toBe("paths agree 42\n");
+});
+
 test("node-types: the supported process surface lowers statically under @types/node", async () => {
   const outDir = outDirFor("node-types");
   const result = await compile(join(nodeTypesDir, "argv-env.ts"), {

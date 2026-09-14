@@ -162,6 +162,52 @@ pub fn array_get<T: ArrayElement>(array: &JsArray<T>, index: f64) -> T {
     array.with(|data| data.view.as_ref().map_or_else(|| data.elements[index].clone(), |view| view.get(index as f64)))
 }
 
+/// Native arrays are dense: an index is present exactly when it is a
+/// canonical array index below the length.
+pub fn array_has<T: ArrayElement>(array: &JsArray<T>, index: f64) -> bool {
+    index >= 0.0 && index.fract() == 0.0 && index < array_len(array)
+}
+
+/// The IR's slot state: 0 hole/missing, 1 value (dense arrays have no
+/// separately stored undefined state).
+pub fn array_state<T: ArrayElement>(array: &JsArray<T>, index: f64) -> f64 {
+    if array_has(array, index) { 1.0 } else { 0.0 }
+}
+
+pub fn array_next_present<T: ArrayElement>(array: &JsArray<T>, start: f64) -> f64 {
+    let len = array_len(array);
+    if start.is_nan() || start >= len { return len; }
+    if start > 0.0 { start.ceil() } else { 0.0 }
+}
+
+/// `array.length = n`: truncation matches JavaScript; growth would create
+/// holes, which dense native arrays do not represent.
+pub fn array_set_length<T: ArrayElement>(array: &JsArray<T>, length: f64) {
+    if length.is_nan() || length < 0.0 || length.fract() != 0.0 || length > 4_294_967_295.0 {
+        throw_range_error("Invalid array length".to_owned());
+    }
+    let len = array_len(array);
+    if length > len {
+        throw_error_code("growing an array length creates sparse holes, which native Rust arrays do not support yet".to_owned(), "SC3001");
+    }
+    if length == len { return; }
+    if let Some(view) = array_view(array) { view.splice(length, len - length, Vec::new()); return; }
+    array.with_mut(|data| data.elements.truncate(length as usize));
+}
+
+pub fn array_set_undefined<T: ArrayElement>(_array: &JsArray<T>, _index: f64) {
+    throw_error_code("storing undefined in a non-optional native array slot is not supported yet".to_owned(), "SC3001");
+}
+
+pub fn array_delete<T: ArrayElement>(array: &JsArray<T>, index: f64) {
+    if !array_has(array, index) { return; }
+    throw_error_code("deleting an array element creates a sparse hole, which native Rust arrays do not support yet".to_owned(), "SC3001");
+}
+
+pub fn array_with_undefined<T: ArrayElement>(_array: &JsArray<T>, _index: f64) -> JsArray<T> {
+    throw_error_code("array.with(index, undefined) on a non-optional native array is not supported yet".to_owned(), "SC3001");
+}
+
 pub fn array_values<T: ArrayElement>(array: &JsArray<T>) -> Vec<T> {
     array.with(|data| data.elements().into_owned())
 }

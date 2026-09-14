@@ -74,7 +74,7 @@ export interface FileParts {
     });
   }
 
-/** A source file dynamic `import("<relative>")` can host as a COMPILED
+/** A source file dynamic `import("<project specifier>")` can host as a COMPILED
    * module namespace (lowerOwnModuleImport): a non-declaration program file
    * that is not JSON and not CommonJS-flavored (a CJS namespace is built
    * from module.exports through Node's lexer — a different surface with no
@@ -86,11 +86,11 @@ export interface FileParts {
   ): ts.SourceFile | null {
     // tsconfig paths ALIASES (`import("@/effect/app-runtime")`): the
     // adopted alias table answers the bare specifier into a program file —
-    // same program-module story as the relative form.
+    // same program-module story as the relative form. Other bare project
+    // specifiers (self-name, #imports) fall through to resolveImport.
     if (!isRelativeSpecifier(spec) && !spec.startsWith("/")) {
       const aliased = pathAliasesProgramModule(program, spec);
       if (aliased !== null) return aliased;
-      return null;
     }
     const dep = resolveImport(program, sf, spec);
     if (!dep || dep.isDeclarationFile) return null;
@@ -2055,9 +2055,8 @@ export function collectGlobals(lowerer: Lowerer, sf: ts.SourceFile, topStmts: ts
           }]
         : [];
     // Node's startup refusal (a resolution the graph carries that Node
-    // rejects — preflight's Node-order resolution walk — or the module-
-    // LINK SyntaxError of a named import of a CommonJS export its lexer
-    // cannot detect — cjsNamedImportLinkCheck): the graph is refused
+    // rejects — preflight's Node-order resolution walk — or a module-LINK
+    // SyntaxError from either named-import checker): the graph is refused
     // before ANY module evaluates, so %main opens with exactly that throw
     // (message and error class both Node's) and the entry init below it
     // never runs. The init still lowers — the program must otherwise

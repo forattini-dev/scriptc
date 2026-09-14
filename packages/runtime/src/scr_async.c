@@ -325,6 +325,9 @@ struct ScrFiber {
    * an UNCAUGHT exception, like Node's queueMicrotask, never a
    * rejection). Owned; NULL on real fibers. */
   ScrClosure *micro_cb;
+  /* Async-generator settlement jobs: stackless READY-queue envelopes.
+   * The retained generator is pumped on the main stack. */
+  ScrGen *gen_job;
 #ifdef SCR_ASAN_FIBERS
   void *fake_stack;
 #endif
@@ -402,6 +405,9 @@ static void scr_ready_push(ScrFiber *f) {
   }
   scr_ready[scr_ready_head + scr_ready_len++] = f;
 }
+
+static void scr_async_gen_job(ScrGen *g);
+static void scr_async_gen_resume_ready(ScrGen *g);
 
 /* Timer min-heap, FIFO tiebreak via sequence numbers. `id` is nonzero only
  * for setInterval entries (the clearInterval handle; setTimeout has no
@@ -1047,8 +1053,10 @@ ScrPromise *scr_promise_all(ScrArr *ps, ScrArr *values,
   size_t n = ps->len;
   ScrPromise *result = scr_promise_new();
   if (values && n > 0) {
-    memset(values->data, 0, n * sizeof *values->data);
-    values->len = n;
+    /* Pre-size as holes. Promise settlement writes the present slots through
+     * the normal setters; this also remains safe when n is sparse-sized and
+     * the array intentionally has no dense allocation. */
+    scr_arr_set_len(values, (double)n);
   }
   ScrAllState *st = malloc(sizeof *st);
   if (!st) scr_oom();
@@ -2082,6 +2090,13 @@ void scr_loop_set_events(bool (*pending)(void), bool (*watching)(void),
 /* ── the event loop ───────────────────────────────────────────────────── */
 
 static void scr_resume_fiber(ScrFiber *f) {
+  if (f->gen_job != NULL) {
+    ScrGen *g = f->gen_job;
+    free(f);
+    scr_async_gen_job(g);
+    scr_gen_release(g);
+    return;
+  }
   /* A queueMicrotask envelope: run the closure on the main stack, no
    * context switch. A throw leaves the exception cell pending — every
    * drain site returns to main's uncaught report, Node's queueMicrotask
@@ -2091,6 +2106,10 @@ static void scr_resume_fiber(ScrFiber *f) {
     free(f);
     ((void (*)(ScrClosure *))cb->fn)(cb);
     scr_closure_release(cb);
+    return;
+  }
+  if (f->gen != NULL) {
+    scr_async_gen_resume_ready(f->gen);
     return;
   }
 #ifdef _WIN32
@@ -2948,7 +2967,13 @@ void scr_promise_run_executor2(ScrPromise *p, ScrClosure *exec, ScrClosure *reso
  * loop — .next() from the main stack (or any fiber) blocks until the
  * yield. */
 
-enum { SCR_GEN_UNSTARTED = 0, SCR_GEN_SUSPENDED, SCR_GEN_RUNNING, SCR_GEN_DONE };
+enum {
+  SCR_GEN_UNSTARTED = 0,
+  SCR_GEN_SUSPENDED,
+  SCR_GEN_AWAITING,
+  SCR_GEN_RUNNING,
+  SCR_GEN_DONE
+};
 
 /* One type-erased value slot: the exception cell's payload technique,
  * with only the release entry point (takes MOVE — nothing here retains). */
@@ -2960,11 +2985,36 @@ typedef struct {
   void (*release_fn)(void *);
 } ScrGenSlot;
 
+enum { SCR_AG_NEXT = 0, SCR_AG_RETURN, SCR_AG_THROW };
+
+typedef struct ScrAsyncGenRequest {
+  int mode;
+  ScrGenSlot arg;
+  ScrExcCell thrown;
+  ScrPromise *promise; /* owned until this request settles */
+  struct ScrAsyncGenRequest *next;
+} ScrAsyncGenRequest;
+
 static void scr_gen_slot_reset(ScrGenSlot *s) {
   if (s->kind == SCR_EXC_REF && s->payload != NULL) s->release_fn(s->payload);
   s->kind = SCR_EXC_NONE;
   s->payload = NULL;
   s->release_fn = NULL;
+}
+
+static void scr_gen_exc_reset(ScrExcCell *cell) {
+  if (cell->kind == SCR_EXC_STR) {
+    scr_str_release((ScrStr *)cell->payload);
+  } else if (cell->kind == SCR_EXC_REF || cell->kind == SCR_EXC_OBJ) {
+    cell->release_fn(cell->payload);
+  }
+  memset(cell, 0, sizeof *cell);
+}
+
+static void scr_gen_exc_move(ScrExcCell *dst, ScrExcCell *src) {
+  scr_gen_exc_reset(dst);
+  *dst = *src;
+  memset(src, 0, sizeof *src);
 }
 
 struct ScrGen {
@@ -2977,15 +3027,26 @@ struct ScrGen {
   /* The never-started teardown: drops the packed (already-retained)
    * arguments the spawn wrapper built. Emitted per generator function. */
   void (*drop_args)(void *);
+  bool is_async;
+  void (*settle_async)(ScrGen *, ScrPromise *);
+  ScrAsyncGenRequest *requests_head;
+  ScrAsyncGenRequest *requests_tail;
+  ScrPromise *active_request;
+  ScrExcCell async_error;
+  bool settle_queued;
+  bool success_hop_done;
 };
 
-ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *)) {
+static ScrGen *scr_gen_new_common(void (*entry)(ScrFiber *, void *), void *argpack,
+                                  void (*drop_args)(void *),
+                                  void (*settle_async)(ScrGen *, ScrPromise *)) {
   ScrGen *g = calloc(1, sizeof *g);
   if (!g) scr_oom();
   g->rc = 1;
   g->state = SCR_GEN_UNSTARTED;
   g->drop_args = drop_args;
+  g->is_async = settle_async != NULL;
+  g->settle_async = settle_async;
   scr_obj_alloc_note();
 
   ScrFiber *f = calloc(1, sizeof *f);
@@ -3016,6 +3077,17 @@ ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
   return g;
 }
 
+ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
+                    void (*drop_args)(void *)) {
+  return scr_gen_new_common(entry, argpack, drop_args, NULL);
+}
+
+ScrGen *scr_async_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
+                          void (*drop_args)(void *),
+                          void (*settle)(ScrGen *, ScrPromise *)) {
+  return scr_gen_new_common(entry, argpack, drop_args, settle);
+}
+
 ScrGen *scr_gen_retain(ScrGen *g) {
   if (g) g->rc++;
   return g;
@@ -3026,6 +3098,7 @@ void scr_gen_release(ScrGen *g) {
   scr_gen_slot_reset(&g->out);
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
+  scr_gen_exc_reset(&g->async_error);
   if (g->fiber != NULL) {
     if (g->state == SCR_GEN_UNSTARTED) {
       /* Never ran: nothing on the stack owns anything — clean teardown.
@@ -3151,6 +3224,15 @@ void scr_gen_yield_ref(void *v, void (*release)(void *)) {
   scr_gen_yield_switch();
 }
 
+void scr_async_gen_hop_done(void) {
+  ScrGen *g = scr_gen_self();
+  if (!g->is_async) {
+    fputs("scriptc: internal error: async-generator hop on sync generator\n", stderr);
+    abort();
+  }
+  g->success_hop_done = true;
+}
+
 bool scr_exc_genret_pending(void) {
   return scr_exc_current_cell()->kind == SCR_EXC_GENRET;
 }
@@ -3200,20 +3282,26 @@ static void scr_gen_switch_in(ScrGen *g) {
   if (f->done) {
     g->state = SCR_GEN_DONE;
     if (f->exc.kind != SCR_EXC_NONE) {
-      /* The body's exception escaped: move it into the resumer's cell
-       * (replace semantics match a throw at the resume site; the resumer's
-       * cell is clean here — a pending exception cannot reach a resume). */
-      ScrExcCell *mine = scr_exc_current_cell();
-      *mine = f->exc;
-      f->exc.kind = SCR_EXC_NONE;
-      f->exc.payload = NULL;
-      f->exc.trace_fn = NULL;
+      if (g->is_async) {
+        /* Async-generator failures reject the active request; they never
+         * throw synchronously from next/return/throw. */
+        scr_gen_exc_move(&g->async_error, &f->exc);
+      } else {
+        /* The sync body's exception escapes at the resume site. */
+        ScrExcCell *mine = scr_exc_current_cell();
+        *mine = f->exc;
+        memset(&f->exc, 0, sizeof f->exc);
+      }
     }
     scr_fiber_destroy(f);
     g->fiber = NULL;
     scr_fibers_live--;
   } else {
-    g->state = SCR_GEN_SUSPENDED;
+    /* An async generator can return to its resumer because it yielded OR
+     * because await parked it. OUT distinguishes the two. */
+    g->state = g->is_async && !scr_gen_out_has(g)
+        ? SCR_GEN_AWAITING
+        : SCR_GEN_SUSPENDED;
   }
   scr_gen_release(g);
 }
@@ -3304,4 +3392,222 @@ void scr_gen_resume_throw(ScrGen *g) {
     scr_gen_switch_in(g);
   }
   }
+}
+
+/* ── async generators ────────────────────────────────────────────────
+ * The body is the same suspended generator fiber, now allowed to await.
+ * Each resume request owns a promise and a retained generator. The first
+ * idle request starts synchronously; successful yield/return settlement
+ * takes AsyncGeneratorYield's Await hop (the emitter marks a yielded
+ * promise whose await already supplied it), while thrown completions reject
+ * immediately. Requests queued behind an active one begin in that
+ * settlement continuation, preserving Node's ordering. */
+
+static void scr_async_gen_start_queued(ScrGen *g);
+
+static void scr_async_gen_schedule_settle(ScrGen *g) {
+  if (g->settle_queued) return;
+  ScrFiber *job = calloc(1, sizeof *job);
+  if (!job) scr_oom();
+  job->gen_job = scr_gen_retain(g);
+  g->settle_queued = true;
+  scr_ready_push(job);
+}
+
+static void scr_async_gen_finish_active(ScrGen *g, bool rejected) {
+  ScrPromise *p = g->active_request;
+  if (p == NULL) {
+    fputs("scriptc: internal error: async generator settled without a request\n", stderr);
+    abort();
+  }
+  g->active_request = NULL;
+  if (rejected) {
+    scr_promise_reject_from_cell(p, &g->async_error);
+    scr_promise_settle_wake(p);
+  } else {
+    g->settle_async(g, p);
+  }
+  scr_promise_release(p);
+  /* Every queued request retains its generator until settlement. */
+  scr_gen_release(g);
+}
+
+static void scr_async_gen_capture_caller_error(ScrGen *g) {
+  ScrExcCell *cell = scr_exc_current_cell();
+  if (cell->kind != SCR_EXC_NONE) scr_gen_exc_move(&g->async_error, cell);
+}
+
+static void scr_async_gen_run_active(ScrGen *g, ScrAsyncGenRequest *req) {
+  const bool was_done = g->state == SCR_GEN_DONE;
+  if (req->mode == SCR_AG_NEXT) {
+    scr_gen_slot_reset(&g->in);
+    g->in = req->arg;
+    memset(&req->arg, 0, sizeof req->arg);
+    scr_gen_resume(g);
+  } else if (req->mode == SCR_AG_RETURN) {
+    scr_gen_slot_reset(&g->ret);
+    g->ret = req->arg;
+    memset(&req->arg, 0, sizeof req->arg);
+    scr_gen_resume_return(g);
+  } else {
+    scr_gen_exc_move(scr_exc_current_cell(), &req->thrown);
+    scr_gen_resume_throw(g);
+  }
+  scr_async_gen_capture_caller_error(g);
+
+  if (g->async_error.kind != SCR_EXC_NONE) {
+    scr_async_gen_finish_active(g, true);
+    return;
+  }
+  if (g->state == SCR_GEN_AWAITING) return;
+
+  /* next() on an already-completed generator produces its undefined done
+   * result immediately. Yield, body return, and return(value) all pass
+   * through AsyncGeneratorYield's successful Await step. */
+  if (was_done && req->mode == SCR_AG_NEXT) {
+    scr_async_gen_finish_active(g, false);
+  } else if (g->success_hop_done) {
+    g->success_hop_done = false;
+    scr_async_gen_finish_active(g, false);
+  } else {
+    scr_async_gen_schedule_settle(g);
+  }
+}
+
+static void scr_async_gen_start_queued(ScrGen *g) {
+  /* Keep the object alive while an immediately-settled request releases
+   * its own retain and the loop inspects the next queue node. */
+  scr_gen_retain(g);
+  while (g->active_request == NULL && g->requests_head != NULL) {
+    ScrAsyncGenRequest *req = g->requests_head;
+    g->requests_head = req->next;
+    if (g->requests_head == NULL) g->requests_tail = NULL;
+    g->active_request = req->promise; /* request ownership transfers */
+    scr_async_gen_run_active(g, req);
+    scr_gen_slot_reset(&req->arg);
+    scr_gen_exc_reset(&req->thrown);
+    free(req);
+    /* Awaiting or deferred successful settlement keeps this request
+     * active. Immediate done/error settlement cleared it and can consume
+     * the next queued request in this same turn. */
+    if (g->active_request != NULL) break;
+  }
+  scr_gen_release(g);
+}
+
+static ScrPromise *scr_async_gen_enqueue(ScrGen *g, int mode,
+                                         ScrGenSlot *arg,
+                                         ScrExcCell *thrown) {
+  if (!g->is_async || g->settle_async == NULL) {
+    fputs("scriptc: internal error: async resume of a sync generator\n", stderr);
+    abort();
+  }
+  ScrAsyncGenRequest *req = calloc(1, sizeof *req);
+  if (!req) scr_oom();
+  req->mode = mode;
+  if (arg != NULL) {
+    req->arg = *arg;
+    memset(arg, 0, sizeof *arg);
+  }
+  if (thrown != NULL) scr_gen_exc_move(&req->thrown, thrown);
+  req->promise = scr_promise_new();
+  /* The request owns the original promise reference and one generator
+   * reference; the caller receives a second promise reference. */
+  ScrPromise *result = scr_promise_retain(req->promise);
+  scr_gen_retain(g);
+  if (g->requests_tail != NULL) g->requests_tail->next = req;
+  else g->requests_head = req;
+  g->requests_tail = req;
+  if (g->active_request == NULL && !g->settle_queued) {
+    scr_async_gen_start_queued(g);
+  }
+  return result;
+}
+
+ScrPromise *scr_async_gen_next_none(ScrGen *g) {
+  ScrGenSlot arg = {0};
+  return scr_async_gen_enqueue(g, SCR_AG_NEXT, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_next_f64(ScrGen *g, double value) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_f64(&arg, value);
+  return scr_async_gen_enqueue(g, SCR_AG_NEXT, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_next_bool(ScrGen *g, bool value) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_bool(&arg, value);
+  return scr_async_gen_enqueue(g, SCR_AG_NEXT, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_next_ref(ScrGen *g, void *value,
+                                   void (*release)(void *)) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_ref(&arg, value, release);
+  return scr_async_gen_enqueue(g, SCR_AG_NEXT, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_return_none(ScrGen *g) {
+  ScrGenSlot arg = {0};
+  return scr_async_gen_enqueue(g, SCR_AG_RETURN, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_return_f64(ScrGen *g, double value) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_f64(&arg, value);
+  return scr_async_gen_enqueue(g, SCR_AG_RETURN, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_return_bool(ScrGen *g, bool value) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_bool(&arg, value);
+  return scr_async_gen_enqueue(g, SCR_AG_RETURN, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_return_ref(ScrGen *g, void *value,
+                                     void (*release)(void *)) {
+  ScrGenSlot arg = {0};
+  scr_gen_slot_ref(&arg, value, release);
+  return scr_async_gen_enqueue(g, SCR_AG_RETURN, &arg, NULL);
+}
+
+ScrPromise *scr_async_gen_throw(ScrGen *g) {
+  ScrExcCell thrown = {0};
+  scr_gen_exc_move(&thrown, scr_exc_current_cell());
+  return scr_async_gen_enqueue(g, SCR_AG_THROW, NULL, &thrown);
+}
+
+static void scr_async_gen_job(ScrGen *g) {
+  g->settle_queued = false;
+  if (g->active_request == NULL || g->async_error.kind != SCR_EXC_NONE) {
+    fputs("scriptc: internal error: invalid async generator settlement job\n", stderr);
+    abort();
+  }
+  scr_async_gen_finish_active(g, false);
+  scr_async_gen_start_queued(g);
+}
+
+static void scr_async_gen_resume_ready(ScrGen *g) {
+  if (!g->is_async || g->active_request == NULL) {
+    fputs("scriptc: internal error: async generator resumed without a request\n", stderr);
+    abort();
+  }
+  /* The active request normally owns the generator. Keep an independent
+   * reference across settlement, which releases that request ownership. */
+  scr_gen_retain(g);
+  scr_gen_switch_in(g);
+  if (g->async_error.kind != SCR_EXC_NONE) {
+    scr_async_gen_finish_active(g, true);
+    scr_async_gen_start_queued(g);
+  } else if (g->state != SCR_GEN_AWAITING) {
+    if (g->success_hop_done) {
+      g->success_hop_done = false;
+      scr_async_gen_finish_active(g, false);
+      scr_async_gen_start_queued(g);
+    } else {
+      scr_async_gen_schedule_settle(g);
+    }
+  }
+  scr_gen_release(g);
 }

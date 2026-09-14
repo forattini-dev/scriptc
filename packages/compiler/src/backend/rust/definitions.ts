@@ -1080,6 +1080,7 @@ export class RustDefinitionEmitter {
       }
       this.context.line(result);
     } else if (fn.generator !== undefined) {
+      if (fn.async) this.context.unsupported(`async generator function '${fn.name}'`, fn.loc);
       emitRustGeneratorBody(fn, this.context);
     } else {
       emitRustSyncModuleBody(fn, this.context);

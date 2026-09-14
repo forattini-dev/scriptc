@@ -877,15 +877,20 @@ ScrStr *scr_b64_missing_arg(void);
  * (doubles/bools/pointers via memcpy and casts); `elem` records what the
  * slots hold so the array can release its own reference elements — ScrStr's
  * layout is untouched (interned-literal statics depend on it), so the
- * element kind lives here instead of in a shared object header.
+ * element kind lives here instead of in a shared object header. A separate
+ * presence bitset distinguishes a hole from a present `undefined`-carrying
+ * reference value. Very large indices stay in a sorted sparse side store;
+ * the dense slot array is retained for ordinary packed arrays.
  *
- * Index arguments are doubles (JS numbers). A valid index is a non-negative
- * integer; reads must be < len, writes may also be == len (append — JS
- * would create a hole past the end; scriptc traps instead, see
- * SEMANTICS.md). Anything else prints
+ * Index arguments are doubles (JS numbers). A valid array index is a
+ * non-negative integer below 2^32-1; reads must be < len and writes may
+ * extend len through a sparse hole. Noncanonical numeric keys are ordinary
+ * properties stored by their JavaScript number-to-string spelling. Anything
+ * else prints
  *   scriptc: RangeError: array index <i> out of bounds (length <n>)
- * to stderr and abort()s. pop() on an empty array likewise traps (JS
- * returns undefined — unrepresentable here).
+ * to stderr and abort()s in the proven-presence accessors. `scr_arr_has` is
+ * the shared presence query used before those accessors when the language
+ * surface permits an undefined result.
  *
  * Ownership: _get_ref returns +1 (retains before returning); _set_ref and
  * _push_ref take ownership of the new element (and _set_ref releases the
@@ -906,10 +911,16 @@ typedef enum {
   SCR_ELEM_REF,
 } ScrElemKind;
 
+typedef enum {
+  SCR_ARR_HOLE = 0,
+  SCR_ARR_VALUE = 1,
+  SCR_ARR_UNDEFINED = 2,
+} ScrArrState;
+
 typedef struct ScrArr {
   size_t rc; /* SIZE_MAX = immortal (unused for arrays; kept per convention) */
   size_t len;
-  size_t cap;
+  size_t cap; /* dense capacity; sparse entries cover indices >= cap */
   ScrElemKind elem;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
@@ -922,7 +933,27 @@ typedef struct ScrArr {
   void (*elem_release)(void *);
   ScrTraceFn elem_trace;
   uint64_t *data;
+  uint8_t *present; /* one ScrArrState per dense slot */
+  struct ScrArrSparseSlot *sparse;
+  size_t sparse_len;
+  size_t sparse_cap;
+  struct ScrArrProp *props; /* noncanonical numeric properties */
+  size_t prop_len;
+  size_t prop_cap;
 } ScrArr;
+
+typedef struct ScrArrSparseSlot {
+  size_t index;
+  uint64_t slot;
+  uint8_t state;
+} ScrArrSparseSlot;
+
+typedef struct ScrArrProp {
+  char *key;
+  size_t key_len;
+  uint64_t slot;
+  uint8_t state; /* SCR_ARR_VALUE or SCR_ARR_UNDEFINED */
+} ScrArrProp;
 
 ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap); /* returns +1 */
 
@@ -954,6 +985,31 @@ void scr_arr_release(ScrArr *a);
 void scr_arr_trace_v(void *a, ScrTraceVisit visit, void *ctx);
 
 double scr_arr_len(ScrArr *a);
+/* Shared hole/property query. Canonical indices answer from indexed storage;
+ * noncanonical numeric keys answer from the ordinary-property vector. Missing
+ * keys and indices >= length answer false without trapping; callers that need
+ * a value must still use the proven-presence get accessors below. */
+bool scr_arr_has(const ScrArr *a, double i);
+double scr_arr_state(const ScrArr *a, double i);
+double scr_arr_next_present(const ScrArr *a, double start);
+/* Set Array.prototype.length semantics for the supported native array
+ * surface. Growth creates holes without allocating a dense prefix; shrinking
+ * releases removed reference elements. Invalid lengths set a catchable
+ * RangeError and leave the array unchanged. */
+void scr_arr_set_len(ScrArr *a, double length);
+/* Copy one slot from src into dst, retaining reference elements when the
+ * source slot is present. The destination must already have a length that
+ * includes dst_index. Holes remain holes. */
+void scr_arr_copy_index(ScrArr *dst, size_t dst_index, const ScrArr *src,
+                        size_t src_index);
+/* Copy a range while preserving holes. `dst_start` and `src_start` are the
+ * starts of equal-length ranges; with reverse=true the source range is
+ * copied in reverse order. Reference elements are retained. */
+void scr_arr_copy_range(ScrArr *dst, size_t dst_start, const ScrArr *src,
+                        size_t src_start, size_t count, bool reverse);
+void scr_arr_copy_range_ex(ScrArr *dst, size_t dst_start, const ScrArr *src,
+                           size_t src_start, size_t count, bool reverse,
+                           bool materialize_holes);
 /* Math.max(...xs) / Math.min(...xs) over an f64-element array: the JS
  * fold (NaN poisons, ±0 by the JS preferences, empty → ∓Infinity). */
 double scr_math_max_arr(ScrArr *a);
@@ -967,15 +1023,17 @@ double scr_math_round(double x);
 double scr_math_max(double a, double b);
 double scr_math_random(void);
 
-double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
-bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
-void *scr_arr_get_ref(ScrArr *a, double i);  /* trap OOB; returns +1 */
+double scr_arr_get_f64(ScrArr *a, double i); /* trap missing/hole */
+bool scr_arr_get_bool(ScrArr *a, double i);  /* trap missing/hole */
+void *scr_arr_get_ref(ScrArr *a, double i);  /* trap missing/hole; +1 */
 
 /* i == len appends; the _ref variant releases the old element (when
  * replacing) and takes ownership of the new one. */
 void scr_arr_set_f64(ScrArr *a, double i, double v);
 void scr_arr_set_bool(ScrArr *a, double i, bool v);
 void scr_arr_set_ref(ScrArr *a, double i, void *v);
+void scr_arr_set_undefined(ScrArr *a, double i);
+bool scr_arr_delete(ScrArr *a, double i);
 
 /* slice(start?, end?): a fresh +1 shallow copy of the index range —
  * ToIntegerOrInfinity indices, negatives from the end, clamping; ref
@@ -991,11 +1049,18 @@ ScrArr *scr_arr_to_spliced(const ScrArr *a, double start,
 ScrArr *scr_arr_with_f64(ScrArr *a, double index, double value);
 ScrArr *scr_arr_with_bool(ScrArr *a, double index, bool value);
 ScrArr *scr_arr_with_ref(ScrArr *a, double index, void *value);
+ScrArr *scr_arr_with_undefined(ScrArr *a, double index);
 
 /* push returns the new length (JS-exact); _ref takes ownership. */
 double scr_arr_push_f64(ScrArr *a, double v);
 double scr_arr_push_bool(ScrArr *a, bool v);
 double scr_arr_push_ref(ScrArr *a, void *v);
+/* Append a same-element-kind array through the JS iterator contract: holes
+ * become present undefined states. The source is borrowed and self-spread
+ * duplicates the original indexed state. */
+double scr_arr_push_spread(ScrArr *a, const ScrArr *src);
+/* Append a concat argument by indexed property copy, preserving holes. */
+double scr_arr_concat_copy(ScrArr *a, const ScrArr *src);
 
 /* unshift returns the new length and _ref takes ownership. The spread form
  * borrows a same-element-kind source, retains copied refs, and snapshots
@@ -1011,6 +1076,7 @@ ScrArr *scr_arr_reverse(ScrArr *a);
 double scr_arr_pop_f64(ScrArr *a);
 bool scr_arr_pop_bool(ScrArr *a);
 void *scr_arr_pop_ref(ScrArr *a);
+uint8_t scr_arr_pop_state(ScrArr *a, uint64_t *slot_out);
 
 /* shift: the first element out, tail sliding down. The emitter guards the
  * empty array (JS's undefined — the `elem | undefined` union), so empty
@@ -1018,6 +1084,7 @@ void *scr_arr_pop_ref(ScrArr *a);
 double scr_arr_shift_f64(ScrArr *a);
 bool scr_arr_shift_bool(ScrArr *a);
 void *scr_arr_shift_ref(ScrArr *a);
+uint8_t scr_arr_shift_state(ScrArr *a, uint64_t *slot_out);
 
 /* splice(start, deleteCount) — the REMOVAL forms: Node-exact
  * relative/clamped start, count clamped to [0, len - start] (+Infinity =
@@ -2082,6 +2149,9 @@ typedef struct ScrCaught {
 ScrCaught *scr_exc_take(void); /* moves the pending cell into a fresh box (+1) */
 ScrCaught *scr_caught_retain(ScrCaught *c);
 void scr_caught_release(ScrCaught *c); /* NULL-tolerant */
+/* Replace the pending disposal error with a SuppressedError and consume the
+ * original body-error snapshot. The current exception cell must be pending. */
+void scr_exc_suppress(ScrCaught *suppressed);
 /* Borrows the box; re-raises the saved exception exactly (payload RETAINED
  * — the binding stays live until its scope exits). */
 void scr_rethrow(const ScrCaught *c);
@@ -2123,13 +2193,6 @@ void scr_exc_print_uncaught(void);
  */
 void scr_lib_init(int argc, char **argv);
 
-/* Native self-reexecution protocol. child_process replaces argv[0] with
- * this private marker only for process.execPath + process.argv[1]; the
- * child then removes the marker while retaining the repeated script slot.
- * Ordinary invocations never infer reexecution from user arguments. */
-#define SCR_SELF_REEXEC_ARGV0 "\x1fscriptc-self-reexec"
-bool scr_lib_should_mark_self_reexec(const ScrStr *cmd, const ScrStr *first_arg);
-
 /* +1 on the ONE interned argv array (identity and mutation semantics match
  * Node's stable process.argv). */
 ScrArr *scr_process_argv(void);
@@ -2137,6 +2200,11 @@ ScrArr *scr_process_argv(void);
  * ["scriptc", argv[0], ...] shape from the same stash. */
 int scr_lib_arg_count(void);
 const char *scr_lib_arg(int i);
+/* True only for a child_process call whose command and first argument both
+ * resolve to this executable — Node's process.execPath/process.argv[1]
+ * self-reexec shape. Child argv builders collapse that known script marker;
+ * direct startup never filters user arguments. */
+bool scr_lib_should_collapse_reexec_arg(ScrStr *cmd, ScrArr *args);
 ScrStr *scr_process_platform(void); /* +1 interned ("darwin", "linux", ...) */
 ScrStr *scr_process_cwd(void);      /* +1 fresh (getcwd) */
 /* Submit one raw chunk to fd 1/2 and flush it before returning. Used by all
@@ -4282,7 +4350,10 @@ ScrPromise *scr_fiber_promise(ScrFiber *f);
 typedef struct ScrGen ScrGen;
 
 ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *));
+                    void (*drop_args)(void *));
+ScrGen *scr_async_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
+                          void (*drop_args)(void *),
+                          void (*settle)(ScrGen *, ScrPromise *));
 ScrGen *scr_gen_retain(ScrGen *g);
 void scr_gen_release(ScrGen *g); /* NULL-tolerant */
 void *scr_gen_retain_v(void *g);
@@ -4292,6 +4363,20 @@ void scr_gen_resume(ScrGen *g);
 void scr_gen_resume_return(ScrGen *g);
 void scr_gen_resume_throw(ScrGen *g);
 bool scr_gen_done(ScrGen *g);
+
+/* Async-generator resume methods. Reference arguments move into the
+ * queued request; every function returns a +1 Promise<IteratorResult>. */
+ScrPromise *scr_async_gen_next_none(ScrGen *g);
+ScrPromise *scr_async_gen_next_f64(ScrGen *g, double value);
+ScrPromise *scr_async_gen_next_bool(ScrGen *g, bool value);
+ScrPromise *scr_async_gen_next_ref(ScrGen *g, void *value,
+                                   void (*release)(void *));
+ScrPromise *scr_async_gen_return_none(ScrGen *g);
+ScrPromise *scr_async_gen_return_f64(ScrGen *g, double value);
+ScrPromise *scr_async_gen_return_bool(ScrGen *g, bool value);
+ScrPromise *scr_async_gen_return_ref(ScrGen *g, void *value,
+                                     void (*release)(void *));
+ScrPromise *scr_async_gen_throw(ScrGen *g);
 
 /* IN slot (consumer stores before resume; body takes after the yield). */
 void scr_gen_in_f64(ScrGen *g, double v);
@@ -4316,6 +4401,7 @@ void scr_gen_ret_none(ScrGen *g);
 void scr_gen_yield_f64(double v);
 void scr_gen_yield_bool(bool v);
 void scr_gen_yield_ref(void *v, void (*release)(void *)); /* moves */
+void scr_async_gen_hop_done(void);
 void scr_gen_out_f64(ScrGen *g, double v); /* trampoline completion stores */
 void scr_gen_out_bool(ScrGen *g, bool v);
 void scr_gen_out_ref(ScrGen *g, void *v, void (*release)(void *)); /* moves */

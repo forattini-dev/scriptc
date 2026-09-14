@@ -14,6 +14,9 @@ import { droppableStatic, isRequireMainFilename, lowerDynObjectLiteral, probeLow
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { islandPrimitiveExit, lowerDynDispatchMethodCall } from "./lower-calls.js";
+import { buildArraySortFn, buildBytesSortFn } from "./lower-array-sort.js";
+import { arrayValueRead, arrayValueStore, arrayValueType } from "./array-values.js";
+import { provesWrittenNullishFilter } from "./nullish-filter-proof.js";
 import { typeKey } from "../type-mapper.js";
 import { dynUndefinedExpr, own, WidthLift } from "./lowerer.js";
 import { boolLit, countedFor, numLit, varRef } from "../../ir/build.js";
@@ -105,9 +108,59 @@ function lowerOptionalDefaultArg(
   return lowerer.coerceInto(node, value, expected);
 }
 
+/** Build the argument array for a mutating/copying operation while keeping
+ * the receiver's scalar payload ABI. A missing read is represented as the
+ * present UNDEFINED state in this temporary, so push/unshift and toSpliced
+ * materialize it through their ordinary indexed/iterator copies. */
+function lowerArrayValueItems(
+  lowerer: Lowerer,
+  values: IrExpr[],
+  elem: IrType,
+  arrType: IrType & { kind: "array" },
+  loc: SrcLoc,
+): IrExpr {
+  const out = lowerer.declareHiddenLocal("%arrayItems", arrType);
+  const outRef = varRef(out.id, arrType, loc);
+  const length = (): IrExpr => ({
+    kind: "arrIntrinsic",
+    method: "length",
+    receiver: outRef,
+    args: [],
+    type: F64,
+    loc,
+  });
+  const body: IrStmt[] = [
+    { kind: "varDecl", localId: out.id, init: { kind: "arrayLit", elems: [], type: arrType, loc }, loc },
+  ];
+  for (const value of values) {
+    const stored = lowerer.runtimeOptionalWidening(value.type, elem) !== null
+      ? value
+      : lowerer.coerceToExpected(value, elem);
+    body.push(arrayValueStore(lowerer, outRef, length(), stored, elem, loc));
+  }
+  return { kind: "seqExpr", stmts: body, result: outRef, type: arrType, loc };
+}
+
 function lowerSplitLimitArg(lowerer: Lowerer, node: ts.Expression | undefined, loc: SrcLoc): IrExpr {
   const defaultValue: IrExpr = { kind: "numLit", value: 4294967295, type: F64, loc };
   return node ? lowerOptionalDefaultArg(lowerer, node, F64, defaultValue) : defaultValue;
+}
+
+/** Extract the checker-proven receiver arm from a runtime-optional array
+ * read. The receiver is stabilized once before its tag is tested, and a
+ * missing value throws the same property-read TypeError Node throws before
+ * evaluating method arguments. */
+function lowerMethodReceiver(
+  lowerer: Lowerer,
+  node: ts.Expression,
+  expected: IrType,
+  member: string,
+): IrExpr {
+  const lowered = lowerer.lowerExpr(node);
+  const optional = lowerer.runtimeOptionalPropertyReceiver(node, lowered, expected, member);
+  if (optional) return optional;
+  if (typeEquals(lowered.type, expected)) return lowered;
+  return lowerer.coerceInto(node, lowered, expected);
 }
 
 /** Callback-driven array producers bypass mapType's ordinary T[] mapping:
@@ -259,16 +312,62 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       }
       const receiver = lowerer.lowerExpr(access.expression);
       const index = lowerer.lowerExprExpecting(call.arguments[0]!, F64);
-      const value = lowerer.coerceInto(
-        call.arguments[1]!,
-        lowerer.lowerExpr(call.arguments[1]!),
-        elem,
-      );
+      const value = lowerer.lowerExpr(call.arguments[1]!);
+      if (value.type.kind === "union" && lowerer.runtimeOptionalWidening(value.type, elem) !== null) {
+        // `.with()` validates its index and returns a fresh copy. Stabilize
+        // all three operands, then select the scalar replacement or the
+        // present-undefined copy without evaluating a read twice.
+        const receiverLocal = lowerer.declareHiddenLocal("%withRecv", receiverIr);
+        const indexLocal = lowerer.declareHiddenLocal("%withIndex", F64);
+        const valueLocal = lowerer.declareHiddenLocal("%withValue", value.type);
+        const unionId = value.type.unionId;
+        const receiverRef = varRef(receiverLocal.id, receiverIr, loc);
+        const indexRef = varRef(indexLocal.id, F64, loc);
+        const valueRef = varRef(valueLocal.id, value.type, loc);
+        const undefTag = lowerer.armTag(unionId, UNDEFINED_T);
+        const condition: IrExpr = {
+          kind: "unionIsTag",
+          unionId,
+          tag: undefTag,
+          negated: false,
+          value: valueRef,
+          type: BOOL,
+          loc,
+        };
+        const missing: IrExpr = {
+          kind: "arrIntrinsic",
+          method: "withUndefined",
+          receiver: receiverRef,
+          args: [indexRef],
+          type: receiverIr,
+          loc,
+        };
+        const present: IrExpr = {
+          kind: "arrIntrinsic",
+          method: "with",
+          receiver: receiverRef,
+          args: [indexRef, lowerer.coerceToExpected(valueRef, elem)],
+          type: receiverIr,
+          loc,
+        };
+        return {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: receiverLocal.id, init: receiver, loc },
+            { kind: "varDecl", localId: indexLocal.id, init: index, loc },
+            { kind: "varDecl", localId: valueLocal.id, init: value, loc },
+          ],
+          result: { kind: "ternary", cond: condition, then: missing, else_: present, type: receiverIr, loc },
+          type: receiverIr,
+          loc,
+        };
+      }
+      const coercedValue = lowerer.coerceInto(call.arguments[1]!, value, elem);
       return {
         kind: "arrIntrinsic",
         method: "with",
         receiver,
-        args: [index, value],
+        args: [index, coercedValue],
         type: receiverIr,
         loc,
       };
@@ -298,13 +397,18 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
                 deleteCountDefault,
               )
             : { kind: "numLit" as const, value: Infinity, type: F64, loc };
-      const items: IrExpr = {
-        kind: "arrayLit",
-        elems: call.arguments.slice(2).map((arg) =>
-          lowerer.coerceInto(arg, lowerer.lowerExpr(arg), elem)),
-        type: receiverIr,
-        loc,
-      };
+      const itemNodes = call.arguments.slice(2);
+      const itemProbes = itemNodes.map((arg) => probeLower(lowerer, arg));
+      const statefulItems = itemProbes.some((probe) =>
+        probe !== null && lowerer.runtimeOptionalWidening(probe.type, elem) !== null);
+      const items: IrExpr = statefulItems
+        ? lowerArrayValueItems(lowerer, itemNodes.map((arg) => lowerer.lowerExpr(arg)), elem, receiverIr, loc)
+        : {
+            kind: "arrayLit",
+            elems: itemNodes.map((arg) => lowerer.coerceInto(arg, lowerer.lowerExpr(arg), elem)),
+            type: receiverIr,
+            loc,
+          };
       return {
         kind: "arrIntrinsic",
         method: "toSpliced",
@@ -352,11 +456,23 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         hint,
       );
     }
-    if (name === "push" || name === "unshift" || name === "pop") {
-      const receiver = lowerer.lowerExpr(access.expression);
-      if (name !== "pop" && call.arguments.length > 1 && call.arguments.some(ts.isSpreadElement)) {
+    if (name === "push" || name === "unshift") {
+      let receiver = lowerer.lowerExpr(access.expression);
+      if (receiver.type.kind === "union" && lowerer.armTag(receiver.type.unionId, UNDEFINED_T) >= 0) {
+        const present = lowerer.stripUndefinedArm(receiver.type);
+        const helper = present.kind === "array"
+          ? lowerer.narrowedArmHelper(receiver.type.unionId, present, loc)
+          : null;
+        receiver = helper
+          ? { kind: "call", callee: helper, args: [receiver], type: present, loc }
+          : lowerer.maybeNarrow(receiver, access.expression);
+      }
+      if (call.arguments.length > 1 && call.arguments.some(ts.isSpreadElement)) {
         return lowerArraySpreadInsert(lowerer, call, receiver, receiverIr, name);
       }
+      // `a.push(...src)` / `a.unshift(...src)`: copy src's elements in
+      // order (count snapshotted first, so the self-spread forms duplicate
+      // like JS) and return the new length.
       const spreadArg = call.arguments.length === 1 && ts.isSpreadElement(call.arguments[0]!)
         ? call.arguments[0]!
         : null;
@@ -383,6 +499,25 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
           loc,
         };
       }
+      const valueProbes = call.arguments.map((arg) => probeLower(lowerer, arg));
+      if (valueProbes.some((probe) =>
+        probe !== null && lowerer.runtimeOptionalWidening(probe.type, elem) !== null)) {
+        const items = lowerArrayValueItems(
+          lowerer,
+          call.arguments.map((arg) => lowerer.lowerExpr(arg)),
+          elem,
+          receiverIr,
+          loc,
+        );
+        return {
+          kind: "arrIntrinsic",
+          method: name === "push" ? "pushSpread" : "unshiftSpread",
+          receiver,
+          args: [items],
+          type: F64,
+          loc,
+        };
+      }
       // Inserted values flow into the element slot like an assignment would:
       // union-element arrays wrap plain arm values (coerceInto is inert
       // when the types already agree).
@@ -394,42 +529,34 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
         method: name,
         receiver,
         args,
-        type: name === "push" || name === "unshift" ? F64 : elem,
+        type: F64,
+        loc,
+      };
+    }
+    if (name === "pop") {
+      // Like shift(), pop() returns undefined for an empty array. Union
+      // element arrays remain fenced here because their existing boxed
+      // element already carries the result union and a second undefined
+      // wrapper would lose the element identity contract.
+      if (elem.kind === "union" && lowerer.armTag(elem.unionId, UNDEFINED_T) < 0) {
+        lowerer.unsupported(
+          "SC1090",
+          call,
+          "'.pop()' on union-element arrays without an undefined arm (read the last element and splice it after narrowing instead)",
+        );
+      }
+      const receiver = lowerer.lowerExpr(access.expression);
+      return {
+        kind: "arrIntrinsic",
+        method: "pop",
+        receiver,
+        args: [],
+        type: arrayValueType(lowerer, elem),
         loc,
       };
     }
     if (name === "indexOf" || name === "includes") {
-      // Union elements are fenced: the runtime compares ref elements by
-      // POINTER identity (JS-exact for records/objects/arrays), but a
-      // union BOX is a compiler artifact — two boxes of the same arm value
-      // are distinct pointers where JS would say ===. Honest answer: none.
-      if (elem.kind === "union") {
-        lowerer.unsupported(
-          "SC1090",
-          call,
-          `'.${name}()' on union-element arrays (union values have no stable identity — ` +
-            "loop and compare the narrowed values instead)",
-        );
-      }
-      const receiver = lowerer.lowerExpr(access.expression);
-      let needle = lowerer.lowerExpr(call.arguments[0]!);
-      // A derived CLASS VALUE against a base-classval element widens (the
-      // same pointer — identity search is exact); the coercion path owns
-      // the ABI gate and its pointed fences.
-      if (needle.type.kind === "classval" && elem.kind === "classval" && !typeEquals(needle.type, elem)) {
-        needle = lowerer.coerceInto(call.arguments[0]!, needle, elem);
-      }
-      if (!typeEquals(needle.type, elem)) {
-        lowerer.badType(call.arguments[0]!, lowerer.typeOf(call.arguments[0]!));
-      }
-      return {
-        kind: "arrIntrinsic",
-        method: name,
-        receiver,
-        args: [needle],
-        type: name === "indexOf" ? F64 : BOOL,
-        loc,
-      };
+      return lowerArraySearchCall(lowerer, call, access, name, elem);
     }
     if (name === "concat") {
       // `a.concat(x, ys, ...)` — a fresh array of a's elements followed by
@@ -519,15 +646,15 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       // arrays are fenced: their shift result would collapse arms
       // (`(string | undefined)[]`'s shift is `string | undefined` too, and
       // the box can't say which world the undefined came from).
-      if (elem.kind === "union") {
+      if (elem.kind === "union" && lowerer.armTag(elem.unionId, UNDEFINED_T) < 0) {
         lowerer.unsupported(
           "SC1090",
           call,
-          "'.shift()' on union-element arrays (read [0] and splice(0, 1) with the narrowed value instead)",
+          "'.shift()' on union-element arrays without an undefined arm (read [0] and splice(0, 1) with the narrowed value instead)",
         );
       }
       const receiver = lowerer.lowerExpr(access.expression);
-      return { kind: "arrIntrinsic", method: "shift", receiver, args: [], type: lowerer.withUndefinedArm(elem), loc };
+      return { kind: "arrIntrinsic", method: "shift", receiver, args: [], type: arrayValueType(lowerer, elem), loc };
     }
     if (name === "join") {
       // The ambient declares join on every Array<T> (a per-element-type
@@ -572,6 +699,234 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
     // reduce / reduceRight
     return lowerArrayReduceCall(lowerer, call, access, name as "reduce" | "reduceRight", elem);
   }
+
+/** `indexOf` and `includes` normally use the runtime's typed search helpers,
+ * but an indexed array read is a `T | undefined` value. Keep that union
+ * through a small lowered loop so the needle's missing state is observable:
+ * indexOf skips holes, while includes treats holes as undefined. The same
+ * loop also gives union-element arrays their value equality rather than
+ * comparing the compiler's union boxes by pointer. */
+function lowerArraySearchCall(
+  lowerer: Lowerer,
+  call: ts.CallExpression,
+  access: ts.PropertyAccessExpression,
+  method: "indexOf" | "includes",
+  elem: IrType,
+): IrExpr {
+  const loc = locOf(call);
+  const receiver = lowerer.lowerExpr(access.expression);
+  const argNode = call.arguments[0]!;
+  let needle = lowerer.lowerExpr(argNode);
+  // A derived CLASS VALUE against a base-classval element widens (the same
+  // pointer — identity search is exact); the coercion path owns the ABI gate.
+  if (needle.type.kind === "classval" && elem.kind === "classval" && !typeEquals(needle.type, elem)) {
+    needle = lowerer.coerceInto(argNode, needle, elem);
+  }
+
+  // Preserve the existing fast path for an ordinary, non-union needle. Its
+  // runtime implementation already has exact primitive/reference equality.
+  if (elem.kind !== "union" && typeEquals(needle.type, elem)) {
+    return {
+      kind: "arrIntrinsic",
+      method,
+      receiver,
+      args: [needle],
+      type: method === "indexOf" ? F64 : BOOL,
+      loc,
+    };
+  }
+
+  const valueT = arrayValueType(lowerer, elem);
+  // jsval/dyn arrays have a single engine value representation rather than a
+  // static undefined arm. Keep their existing runtime path and its explicit
+  // type fence; typed static arrays take the state-aware helper below.
+  if (valueT.kind !== "union") {
+    if (!typeEquals(needle.type, elem)) lowerer.badType(argNode, lowerer.typeOf(argNode));
+    return {
+      kind: "arrIntrinsic",
+      method,
+      receiver,
+      args: [needle],
+      type: method === "indexOf" ? F64 : BOOL,
+      loc,
+    };
+  }
+
+  const searchNeedle = lowerer.coerceInto(argNode, needle, valueT);
+  if (!typeEquals(searchNeedle.type, valueT)) lowerer.badType(argNode, lowerer.typeOf(argNode));
+  const helper = arraySearchHelper(lowerer, method, elem, valueT, loc);
+  return { kind: "call", callee: helper, args: [receiver, searchNeedle], type: method === "indexOf" ? F64 : BOOL, loc };
+}
+
+/** SameValueZero over a static value union. `unionEq` supplies strict
+ * equality for every arm; the extra f64-arm test is the only difference for
+ * includes, where NaN equals NaN while +0 and -0 remain equal. */
+function arraySearchEquality(
+  lowerer: Lowerer,
+  left: IrExpr,
+  right: IrExpr,
+  sameValueZero: boolean,
+  loc: SrcLoc,
+): IrExpr {
+  if (left.type.kind !== "union" || right.type.kind !== "union" || left.type.unionId !== right.type.unionId) {
+    return { kind: "bin", op: "===", left, right, type: BOOL, loc };
+  }
+  const unionId = left.type.unionId;
+  const strict: IrExpr = { kind: "unionEq", unionId, negated: false, sameValue: false, left, right, type: BOOL, loc };
+  if (!sameValueZero) return strict;
+  const numberTag = lowerer.unions.get(unionId)?.arms.findIndex((arm) => arm.kind === "f64") ?? -1;
+  if (numberTag < 0) return strict;
+  const leftIsNumber: IrExpr = { kind: "unionIsTag", unionId, tag: numberTag, negated: false, value: left, type: BOOL, loc };
+  const rightIsNumber: IrExpr = { kind: "unionIsTag", unionId, tag: numberTag, negated: false, value: right, type: BOOL, loc };
+  const leftNumber: IrExpr = { kind: "unionNarrow", unionId, tag: numberTag, value: left, type: F64, loc };
+  const rightNumber: IrExpr = { kind: "unionNarrow", unionId, tag: numberTag, value: right, type: F64, loc };
+  const bothNaN: IrExpr = {
+    kind: "logical",
+    op: "&&",
+    left: {
+      kind: "logical",
+      op: "&&",
+      left: leftIsNumber,
+      right: rightIsNumber,
+      type: BOOL,
+      loc,
+    },
+    right: {
+      kind: "logical",
+      op: "&&",
+      left: { kind: "libCall", fn: "num.isNaN", args: [leftNumber], type: BOOL, loc },
+      right: { kind: "libCall", fn: "num.isNaN", args: [rightNumber], type: BOOL, loc },
+      type: BOOL,
+      loc,
+    },
+    type: BOOL,
+    loc,
+  };
+  return { kind: "logical", op: "||", left: strict, right: bothNaN, type: BOOL, loc };
+}
+
+function arraySearchHelper(
+  lowerer: Lowerer,
+  method: "indexOf" | "includes",
+  elem: IrType,
+  valueT: IrType & { kind: "union" },
+  loc: SrcLoc,
+): string {
+  const key = `${method}:${typeKey(elem)}:${typeKey(valueT)}`;
+  const existing = lowerer.arrHofHelpers.get(key);
+  if (existing) return existing;
+  const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
+  lowerer.arrHofHelpers.set(key, name);
+  const arrT = arrayOf(elem);
+  const resultT = method === "indexOf" ? F64 : BOOL;
+  const arrRef = varRef("a.0", arrT, loc);
+  const indexRef = varRef("i.0", F64, loc);
+  const needleRef = varRef("needle.0", valueT, loc);
+  const stateRef = varRef("state.0", F64, loc);
+  const nextRef = varRef("next.0", F64, loc);
+  const rawRead: IrExpr = { kind: "arrayGet", arr: arrRef, index: indexRef, type: elem, loc };
+  const missing = lowerer.wrappedUndefined(valueT, loc);
+  if (!missing) throw new InternalCompilerError("array search helper needs an undefined arm");
+  const value: IrExpr = {
+    kind: "ternary",
+    cond: { kind: "bin", op: "===", left: stateRef, right: numLit(1, loc), type: BOOL, loc },
+    then: typeEquals(elem, valueT) ? rawRead : lowerer.coerceToExpected(rawRead, valueT),
+    else_: missing,
+    type: valueT,
+    loc,
+  };
+  const equal = arraySearchEquality(lowerer, varRef("value.0", valueT, loc), needleRef, method === "includes", loc);
+  const match = method === "indexOf"
+    ? {
+        kind: "logical" as const,
+        op: "&&" as const,
+        left: { kind: "bin" as const, op: "!==" as const, left: stateRef, right: numLit(0, loc), type: BOOL, loc },
+        right: equal,
+        type: BOOL,
+        loc,
+      }
+    : equal;
+  const undefinedTag = lowerer.armTag(valueT.unionId, UNDEFINED_T);
+  if (undefinedTag < 0) throw new InternalCompilerError("array search helper needs an undefined tag");
+  const needleIsUndefined: IrExpr = {
+    kind: "unionIsTag",
+    unionId: valueT.unionId,
+    tag: undefinedTag,
+    negated: false,
+    value: needleRef,
+    type: BOOL,
+    loc,
+  };
+  const advance: IrStmt = {
+    kind: "assign",
+    localId: "i.0",
+    value: { kind: "bin", op: "+", left: indexRef, right: numLit(1, loc), type: F64, loc },
+    loc,
+  };
+  const visitPresent: IrStmt[] = [
+    { kind: "varDecl", localId: "value.0", init: value, loc },
+    {
+      kind: "if",
+      cond: match,
+      then: [{ kind: "return", value: method === "indexOf" ? indexRef : boolLit(true, loc), loc }],
+      else_: null,
+      loc,
+    },
+    advance,
+  ];
+  const skipHole: IrStmt[] = [
+    {
+      kind: "varDecl",
+      localId: "next.0",
+      init: { kind: "arrIntrinsic", method: "nextPresent", receiver: arrRef, args: [indexRef], type: F64, loc },
+      loc,
+    },
+    ...(method === "includes"
+      ? [{ kind: "if" as const, cond: needleIsUndefined, then: [{ kind: "return" as const, value: boolLit(true, loc), loc }], else_: null, loc }]
+      : []),
+    { kind: "assign", localId: "i.0", value: nextRef, loc },
+  ];
+  const loopBody: IrStmt[] = [
+    { kind: "varDecl", localId: "state.0", init: { kind: "arrayState", arr: arrRef, index: indexRef, type: F64, loc }, loc },
+    {
+      kind: "if",
+      cond: { kind: "bin", op: "===", left: stateRef, right: numLit(0, loc), type: BOOL, loc },
+      then: skipHole,
+      else_: visitPresent,
+      loc,
+    },
+  ];
+  lowerer.liftedFns.push({
+    name,
+    params: [
+      { localId: "a.0", name: "a", type: arrT },
+      { localId: "needle.0", name: "needle", type: valueT },
+    ],
+    returnType: resultT,
+    locals: [
+      { id: "a.0", name: "a", type: arrT, mutable: true },
+      { id: "needle.0", name: "needle", type: valueT, mutable: true },
+      { id: "n.0", name: "n", type: F64, mutable: false },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+      { id: "state.0", name: "state", type: F64, mutable: false },
+      { id: "next.0", name: "next", type: F64, mutable: false },
+      { id: "value.0", name: "value", type: valueT, mutable: false },
+    ],
+    body: [
+      readLenStmt(arrT, loc),
+      { kind: "varDecl", localId: "i.0", init: numLit(0, loc), loc },
+      {
+        kind: "while",
+        cond: { kind: "bin", op: "<", left: indexRef, right: varRef("n.0", F64, loc), type: BOOL, loc },
+        body: loopBody,
+        loc,
+      },
+      { kind: "return", value: method === "indexOf" ? numLit(-1, loc) : boolLit(false, loc), loc },
+    ],
+    loc,
+  });
+  return name;
+}
 
 /** Lowers and validates a HOF callback argument. The lib declares optional
    * trailing (index, array) parameters after `lead` (the element for the
@@ -662,7 +1017,22 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
     const receiver = lowerer.lowerExpr(access.expression);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
-    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [elem], arrayOf(elem));
+    const booleanFilter =
+      method === "filter" &&
+      ts.isIdentifier(argNode) &&
+      argNode.text === "Boolean" &&
+      lowerer.isStdlibSymbol(lowerer.resolveValueSymbol(argNode) ?? undefined);
+    const valueT = arrayValueType(lowerer, elem);
+    if (booleanFilter) {
+      if (valueT.kind === "union") lowerer.requireTruthyUnion(valueT.unionId, argNode);
+      if (valueT.kind === "dyn" || valueT.kind === "jsval" || valueT.kind === "void" || isUnitType(valueT)) {
+        lowerer.badType(argNode, lowerer.typeOf(argNode));
+      }
+    }
+    const callback = booleanFilter
+      ? { fnArg: truthyFilterCallback(lowerer, valueT, loc), arity: 1 }
+      : hofCallbackArg(lowerer, argNode, [valueT], arrayOf(elem));
+    const { fnArg, arity } = callback;
     const fnRet = fnArg.type.ret;
     if (method === "map" && (fnRet.kind === "void" || fnRet.kind === "func")) {
       // The result array U[] is unrepresentable here (no void elements;
@@ -691,11 +1061,132 @@ export function fenceProducedArrayElem(lowerer: Lowerer, node: ts.Node, producer
       }
       lowerer.badType(argNode, lowerer.typeOf(argNode));
     }
-    const helper = arrayHofHelper(lowerer, method, elem, fnRet, arity, loc);
+    const outElem = method === "filter"
+      ? filterResultElem(lowerer, call, argNode, elem, valueT, booleanFilter)
+      : callbackArrayElem(lowerer, call, fnRet);
+    const helper = arrayHofHelper(lowerer, method, elem, fnRet, arity, loc, outElem);
     const resultType: IrType =
-      method === "map" ? arrayOf(fnRet) : method === "filter" ? arrayOf(elem) : VOID;
+      method === "map" || method === "filter" ? arrayOf(outElem) : VOID;
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: resultType, loc };
   }
+
+/** Preserve the checker-selected payload ABI when a callback's runtime
+ * return gained only undefined. The array state byte carries that value. */
+function callbackArrayElem(lowerer: Lowerer, call: ts.CallExpression, fnRet: IrType): IrType {
+  const result = lowerer.mapTypeOf(lowerer.typeOf(call));
+  return result?.kind === "array" && lowerer.runtimeOptionalWidening(fnRet, result.elem)
+    ? result.elem : fnRet;
+}
+
+/** The checker-selected element of a filter result, with the same trust
+ * boundary as the historical narrowing filter: an inferred inline type
+ * predicate may prove one source arm; a written predicate annotation may
+ * not. Boolean is safe when every discarded arm is a nullish unit. */
+function filterResultElem(
+  lowerer: Lowerer,
+  call: ts.CallExpression,
+  argNode: ts.Expression,
+  elem: IrType,
+  valueT: IrType,
+  booleanFilter: boolean,
+): IrType {
+  const callT = lowerer.typeOf(call);
+  const result = lowerer.mapTypeOf(callT);
+  let outElem = result?.kind === "array" ? result.elem : elem;
+  const access = ts.isPropertyAccessExpression(call.expression) ? call.expression : null;
+  const checkerReceiver = access
+    ? lowerer.mapTypeOf(lowerer.typeOf(access.expression))
+    : null;
+  // Evolving-any arrays of island handles retain their jsval element ABI,
+  // while the checker later describes both the receiver and unchanged
+  // filter result by the evolved callable type. Equal checker elements mean
+  // no predicate narrowing occurred; preserve the runtime element home.
+  if (
+    elem.kind === "jsval" && valueT.kind === "jsval" &&
+    result?.kind === "array" && checkerReceiver?.kind === "array" &&
+    typeEquals(result.elem, checkerReceiver.elem)
+  ) {
+    return elem;
+  }
+  if (!typeEquals(outElem, elem)) {
+    const contextual = lowerer.mapTypeOf(lowerer.checker.getContextualType(call) ?? callT);
+    if (contextual?.kind === "array" && typeEquals(contextual.elem, elem)) outElem = elem;
+  }
+  if (typeEquals(outElem, elem)) return elem;
+
+  const annotateEscape =
+    "keep the receiver's element type instead — annotate the callback's return ': boolean' " +
+    "(the checker then skips the predicate) or annotate the result with the receiver's own " +
+    "element type — and narrow the elements after";
+  if (!booleanFilter) {
+    if (!ts.isArrowFunction(argNode) && !ts.isFunctionExpression(argNode)) {
+      lowerer.unsupported(
+        "SC1090",
+        argNode,
+        `narrowing '.filter' through a callback VALUE (only an inline callback whose predicate ` +
+          `the checker inferred can re-tag — ${annotateEscape})`,
+      );
+    }
+    // filter skips holes, so the proof ranges over stored elements only.
+    if (argNode.type && !provesWrittenNullishFilter(lowerer, argNode, elem, outElem)) {
+      lowerer.unsupported(
+        "SC1090",
+        argNode,
+        `narrowing '.filter' with a hand-written type predicate (a written 'x is T' is an ` +
+          `unchecked assertion nothing validates at runtime — ${annotateEscape})`,
+      );
+    }
+  }
+  if (valueT.kind !== "union" || lowerer.armTag(valueT.unionId, outElem) < 0) {
+    const multiArm = outElem.kind === "union";
+    lowerer.unsupported(
+      "SC1090",
+      call,
+      `'.filter' narrowing '${lowerer.fmt(elem)}' elements to ` +
+        `${multiArm ? `the multi-arm '${lowerer.fmt(outElem)}'` : `'${lowerer.fmt(outElem)}'`} ` +
+        `(${multiArm ? "only a SINGLE arm re-tags" : "only a single runtime arm re-tags"} — ${annotateEscape})`,
+    );
+  }
+  if (booleanFilter) {
+    const arms = lowerer.unions.get(valueT.unionId)?.arms ?? [];
+    if (arms.some((arm) => !typeEquals(arm, outElem) && !isUnitType(arm))) {
+      lowerer.unsupported(
+        "SC1090",
+        call,
+        `'.filter(Boolean)' narrowing '${lowerer.fmt(elem)}' to '${lowerer.fmt(outElem)}' ` +
+          "when another truthy arm could survive",
+      );
+    }
+  }
+  return outElem;
+}
+
+/** A native closure for the ambient Boolean callback. Reifying the
+ * JavaScript constructor itself is unnecessary; Array#filter only observes
+ * its one-argument ToBoolean result. */
+function truthyFilterCallback(
+  lowerer: Lowerer,
+  valueT: IrType,
+  loc: SrcLoc,
+): IrExpr & { type: IrType & { kind: "func" } } {
+  const fnT: IrType & { kind: "func" } = { kind: "func", params: [valueT], ret: BOOL };
+  const key = `filterBoolean:${typeKey(valueT)}`;
+  let name = lowerer.arrHofHelpers.get(key);
+  if (!name) {
+    name = `%arr.filterBoolean.${lowerer.arrHofHelpers.size}`;
+    lowerer.arrHofHelpers.set(key, name);
+    const value = varRef("v.0", valueT, loc);
+    lowerer.liftedFns.push({
+      name,
+      params: [{ localId: "v.0", name: "v", type: valueT }],
+      returnType: BOOL,
+      locals: [{ id: "v.0", name: "v", type: valueT, mutable: false }],
+      body: [{ kind: "return", value: { kind: "toBool", operand: value, type: BOOL, loc }, loc }],
+      loc,
+    });
+  }
+  return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+}
 
 /** The predicate result kinds `.filter()` accepts. JS applies ToBoolean to
  * whatever the callback answers, so a bool is not required: the scalars and
@@ -740,17 +1231,18 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
    * combo. Named `%arr.<method>.<n>` ('%' keeps it out of the user
    * namespace); rides `liftedFns` into the module like a lifted lambda (it
    * is a plain function — no captures). */
-  function arrayHofHelper(lowerer: Lowerer, method: "map" | "filter" | "forEach",
+  function arrayHofHelper(lowerer: Lowerer, method: "map" | "flatMap" | "filter" | "forEach",
     elem: IrType,
     fnRet: IrType,
     arity: number,
-    loc: SrcLoc,): string {
-    const key = `${method}:${typeKey(elem)}:${typeKey(fnRet)}:${arity}`;
+    loc: SrcLoc,
+    outElem: IrType = fnRet,): string {
+    const key = `${method}:${typeKey(elem)}:${typeKey(fnRet)}:${arity}:${typeKey(outElem)}`;
     const existing = lowerer.arrHofHelpers.get(key);
     if (existing) return existing;
     const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
     lowerer.arrHofHelpers.set(key, name);
-    lowerer.liftedFns.push(buildArrayHofFn(lowerer, name, method, elem, fnRet, arity, loc));
+    lowerer.liftedFns.push(buildArrayHofFn(lowerer, name, method, elem, fnRet, arity, loc, outElem));
     return name;
   }
 
@@ -864,13 +1356,14 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       lowerer.noLowering(`.map with ${call.arguments.length} arguments`, call, "the thisArg parameter has no lowering — use an arrow function");
     }
     const argNode = call.arguments[0]!;
-    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [snapshotElem], arrayOf(snapshotElem));
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [arrayValueType(lowerer, snapshotElem)], arrayOf(snapshotElem));
     const fnRet = fnArg.type.ret;
     if (fnRet.kind === "void" || fnRet.kind === "func") lowerer.badType(call, lowerer.typeOf(call));
     if (fnRet.kind === "dyn") return lowerArrayMapDynamic(lowerer, snapshot, fnArg, snapshotElem, arity, loc);
     fenceProducedArrayElem(lowerer, call, "'.map()'", fnRet);
-    const helper = arrayHofHelper(lowerer, "map", snapshotElem, fnRet, arity, loc);
-    return { kind: "call", callee: helper, args: [snapshot, fnArg], type: arrayOf(fnRet), loc };
+    const outElem = callbackArrayElem(lowerer, call, fnRet);
+    const helper = arrayHofHelper(lowerer, "map", snapshotElem, fnRet, arity, loc, outElem);
+    return { kind: "call", callee: helper, args: [snapshot, fnArg], type: arrayOf(outElem), loc };
   }
 
 /** An OOB-SAFE indexed read: `xs[i]`
@@ -888,55 +1381,15 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     index: IrExpr,
     loc: SrcLoc,
   ): IrExpr | null {
-    const elem = (arr.type as IrType & { kind: "array" }).elem;
+    const elem = arr.type.elem;
     if (elem.kind === "void" || elem.kind === "dyn") return null;
-    const resultT = elem.kind === "union" ? lowerer.withUndefinedArmOf(elem) : lowerer.withUndefinedArm(elem);
-    if (!resultT || resultT.kind !== "union") return null;
-    const undefTag = lowerer.armTag(resultT.unionId, UNDEFINED_T);
-    const foundTag = elem.kind === "union" ? -1 : lowerer.armTag(resultT.unionId, elem);
-    if (undefTag < 0 || (elem.kind !== "union" && foundTag < 0)) return null;
-    const arrT = arr.type;
+    const resultT = arrayValueType(lowerer, elem);
     const key = `idxOr:${typeKey(elem)}`;
     let name = lowerer.arrHofHelpers.get(key);
     if (!name) {
       name = `%arr.idxOr.${lowerer.arrHofHelpers.size}`;
       lowerer.arrHofHelpers.set(key, name);
-
-      const i = varRef("i.0", F64, loc);
-      const n = varRef("n.0", F64, loc);
-      const v = varRef("v.0", elem, loc);
-      const lt = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "bin", op: "<", left: l, right: r, type: BOOL, loc });
-      const miss: IrExpr = {
-        kind: "unionWrap",
-        unionId: resultT.unionId,
-        tag: undefTag,
-        value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
-        type: resultT,
-        loc,
-      };
-      const body: IrStmt[] = [
-        readLenStmt(arrT, loc),
-        { kind: "if", cond: { kind: "bin", op: "!==", left: i, right: i, type: BOOL, loc }, then: [{ kind: "return", value: miss, loc }], else_: null, loc },
-        { kind: "if", cond: lt(i, numLit(0, loc)), then: [{ kind: "return", value: miss, loc }], else_: null, loc },
-        { kind: "if", cond: { kind: "bin", op: ">=", left: i, right: n, type: BOOL, loc }, then: [{ kind: "return", value: miss, loc }], else_: null, loc },
-        // A fractional index is a property miss too (floor(i) < i exactly
-        // when i has a fraction; negatives already returned above).
-        {
-          kind: "if",
-          cond: lt({ kind: "libCall", fn: "math.floor", args: [i], type: F64, loc }, i),
-          then: [{ kind: "return", value: miss, loc }],
-          else_: null,
-          loc,
-        },
-        { kind: "varDecl", localId: "v.0", init: { kind: "arrayGet", arr: varRef("a.0", arrT, loc), index: i, type: elem, loc }, loc },
-        {
-          kind: "return",
-          value: elem.kind === "union"
-            ? lowerer.coerceToExpected(v, resultT)
-            : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc },
-          loc,
-        },
-      ];
+      const arrT = arr.type;
       lowerer.liftedFns.push({
         name,
         params: [
@@ -945,12 +1398,10 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         ],
         returnType: resultT,
         locals: [
-          { id: "a.0", name: "a", type: arrT, mutable: true },
-          { id: "i.0", name: "i", type: F64, mutable: true },
-          { id: "n.0", name: "n", type: F64, mutable: false },
-          { id: "v.0", name: "v", type: elem, mutable: false },
+          { id: "a.0", name: "a", type: arrT, mutable: false },
+          { id: "i.0", name: "i", type: F64, mutable: false },
         ],
-        body,
+        body: [{ kind: "return", value: arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc), loc }],
         loc,
       });
     }
@@ -986,7 +1437,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       kind: "exprStmt",
       expr: {
         kind: "arrIntrinsic",
-        method: s === "a" ? "pushSpread" : "push",
+        method: s === "a" ? "concatSpread" : "push",
         receiver: varRef("out.0", arrT, loc),
         args: [src],
         type: F64,
@@ -1073,13 +1524,15 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
    * passes the index and the receiver itself after the element when the
    * callback names them, exactly the arguments JS supplies. */
   function buildArrayHofFn(lowerer: Lowerer, name: string,
-    method: "map" | "filter" | "forEach",
+    method: "map" | "flatMap" | "filter" | "forEach",
     elem: IrType,
     fnRet: IrType,
     arity: number,
-    loc: SrcLoc,): IrFunction {
+    loc: SrcLoc,
+    outElem: IrType,): IrFunction {
     const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
+    const valueT = arrayValueType(lowerer, elem);
+    const fnT = funcOf([arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
 
     const locals: IrLocal[] = [
       { id: "a.0", name: "a", type: arrT, mutable: true },
@@ -1098,25 +1551,14 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       type: fnRet,
       loc,
     });
-    const getElem: IrExpr = {
-      kind: "arrayGet",
+    const getElem = arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc);
+    const hasElem: IrExpr = {
+      kind: "arrayHas",
       arr: varRef("a.0", arrT, loc),
       index: varRef("i.0", F64, loc),
-      type: elem,
+      type: BOOL,
       loc,
     };
-    const push = (outT: IrType, value: IrExpr): IrStmt => ({
-      kind: "exprStmt",
-      expr: {
-        kind: "arrIntrinsic",
-        method: "push",
-        receiver: varRef("out.0", outT, loc),
-        args: [value],
-        type: F64,
-        loc,
-      },
-      loc,
-    });
     const readLen: IrStmt = {
       kind: "varDecl",
       localId: "n.0",
@@ -1128,42 +1570,86 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
 
     let returnType: IrType;
     let body: IrStmt[];
-    if (method === "map") {
-      const outT = arrayOf(fnRet);
-      locals.push({ id: "out.0", name: "out", type: outT, mutable: false });
+    if (method === "map" || method === "flatMap") {
+      const outT = arrayOf(outElem);
+      locals.push({ id: "out.0", name: "out", type: outT, mutable: false }, { id: "mapped.0", name: "mapped", type: fnRet, mutable: false });
       returnType = outT;
       body = [
         { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
         readLen,
-        forLoop([push(outT, callF(getElem))]),
-        { kind: "return", value: varRef("out.0", outT, loc), loc },
-      ];
-    } else if (method === "filter") {
-      locals.push(
-        { id: "out.0", name: "out", type: arrT, mutable: false },
-        { id: "v.0", name: "v", type: elem, mutable: false },
-      );
-      returnType = arrT;
-      body = [
-        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: arrT, loc }, loc },
-        readLen,
+        ...(method === "map" && !lowerer.nativeDenseArrays ? [{ kind: "arraySetLength", arr: varRef("out.0", outT, loc), length: varRef("n.0", F64, loc), loc } satisfies IrStmt] : []),
         forLoop([
-          { kind: "varDecl", localId: "v.0", init: getElem, loc },
           {
             kind: "if",
-            // ToBoolean over the predicate's answer — inert when it already
-            // returned bool, the per-union helper when it returned a union.
-            cond: filterCond(callF(varRef("v.0", elem, loc)), fnRet, loc),
-            then: [push(arrT, varRef("v.0", elem, loc))],
+            cond: hasElem,
+            then: [
+              { kind: "varDecl", localId: "mapped.0", init: callF(getElem), loc },
+              arrayValueStore(lowerer, varRef("out.0", outT, loc), method === "map" ? varRef("i.0", F64, loc) : { kind: "arrIntrinsic", method: "length", receiver: varRef("out.0", outT, loc), args: [], type: F64, loc }, varRef("mapped.0", fnRet, loc), outElem, loc),
+            ],
             else_: null,
             loc,
           },
         ]),
-        { kind: "return", value: varRef("out.0", arrT, loc), loc },
+        { kind: "return", value: varRef("out.0", outT, loc), loc },
+      ];
+    } else if (method === "filter") {
+      const outT = arrayOf(outElem);
+      locals.push(
+        { id: "out.0", name: "out", type: outT, mutable: false },
+        { id: "v.0", name: "v", type: valueT, mutable: false },
+      );
+      returnType = outT;
+      const retained = typeEquals(outElem, elem)
+        ? varRef("v.0", valueT, loc)
+        : valueT.kind === "union"
+          ? {
+              kind: "unionNarrow" as const,
+              unionId: valueT.unionId,
+              tag: lowerer.armTag(valueT.unionId, outElem),
+              value: varRef("v.0", valueT, loc),
+              type: outElem,
+              loc,
+            }
+          : varRef("v.0", valueT, loc);
+      body = [
+        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+        readLen,
+        forLoop([
+          {
+            kind: "if",
+            cond: hasElem,
+            then: [
+              { kind: "varDecl", localId: "v.0", init: getElem, loc },
+              {
+                kind: "if",
+                // ToBoolean over the predicate's answer — inert when it already
+                // returned bool, the per-union helper when it returned a union.
+                cond: filterCond(callF(varRef("v.0", valueT, loc)), fnRet, loc),
+                then: [arrayValueStore(lowerer, varRef("out.0", outT, loc), { kind: "arrIntrinsic", method: "length", receiver: varRef("out.0", outT, loc), args: [], type: F64, loc }, retained, outElem, loc)],
+                else_: null,
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+        ]),
+        { kind: "return", value: varRef("out.0", outT, loc), loc },
       ];
     } else {
       returnType = VOID;
-      body = [readLen, forLoop([{ kind: "exprStmt", expr: callF(getElem), loc }])];
+      body = [
+        readLen,
+        forLoop([
+          {
+            kind: "if",
+            cond: hasElem,
+            then: [{ kind: "exprStmt", expr: callF(getElem), loc }],
+            else_: null,
+            loc,
+          },
+        ]),
+      ];
     }
     return { name, params, returnType, locals, body, loc };
   }
@@ -1196,7 +1682,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
-    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [elem], arrT);
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [arrayValueType(lowerer, elem)], arrT);
     // JS takes the ToBoolean of the predicate's result — allowed wherever
     // that ToBoolean has a static answer (bool passes through; f64/string
     // by value; a truthy-answerable union by its arm — the
@@ -1231,19 +1717,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     if (resultT.kind !== "union") lowerer.badType(call, lowerer.typeOf(call)); // defensive: T | undefined always maps to a union
     const undefTag = lowerer.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) lowerer.badType(call, lowerer.typeOf(call));
-    let foundTag: number | null = null;
-    if (!typeEquals(resultT, elem)) {
-      foundTag = lowerer.armTag(resultT.unionId, elem);
-      if (foundTag < 0) {
-        lowerer.unsupported(
-          "SC1090",
-          call,
-          `'.${method}' on '${lowerer.fmt(elem)}'-element arrays (the found element would need a union ` +
-            "re-tag that is not supported yet — loop and test instead)",
-        );
-      }
-    }
-    const helper = findHelper(lowerer, elem, resultT, foundTag, undefTag, fnRet, arity, last, loc);
+    const helper = findHelper(lowerer, elem, resultT, undefTag, fnRet, arity, last, loc);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: resultT, loc };
   }
 
@@ -1263,7 +1737,6 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
    */
   function findHelper(lowerer: Lowerer, elem: IrType,
     resultT: IrType & { kind: "union" },
-    foundTag: number | null,
     undefTag: number,
     fnRet: IrType,
     arity: number,
@@ -1276,13 +1749,11 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
     lowerer.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
+    const fnT = funcOf([arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
 
-    const v = varRef("v.0", elem, loc);
-    const found: IrExpr =
-      foundTag === null
-        ? v
-        : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
+    const valueT = arrayValueType(lowerer, elem);
+    const v = varRef("v.0", valueT, loc);
+    const found = lowerer.coerceToExpected(v, resultT);
     const miss: IrExpr = {
       kind: "unionWrap",
       unionId: resultT.unionId,
@@ -1291,8 +1762,8 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       type: resultT,
       loc,
     };
-    const visit: IrStmt[] = [
-      { kind: "varDecl", localId: "v.0", init: getElemExpr(arrT, elem, loc), loc },
+    const visitBody: IrStmt[] = [
+      { kind: "varDecl", localId: "v.0", init: arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc), loc },
       {
         kind: "if",
         cond: predToBool({
@@ -1307,6 +1778,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         loc,
       },
     ];
+    const visit: IrStmt[] = visitBody;
     const loop = last
       ? reverseCountedForLoop(loc, visit)
       : countedFor(loc, varRef("n.0", F64, loc), () => visit);
@@ -1327,7 +1799,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         { id: "f.0", name: "f", type: fnT, mutable: true },
         { id: "n.0", name: "n", type: F64, mutable: false },
         { id: "i.0", name: "i", type: F64, mutable: true },
-        { id: "v.0", name: "v", type: elem, mutable: false },
+        { id: "v.0", name: "v", type: valueT, mutable: false },
       ],
       body,
       loc,
@@ -1348,14 +1820,14 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
     lowerer.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
+    const fnT = funcOf([arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
 
     const visit: IrStmt[] = [{
       kind: "if",
       cond: predToBool({
         kind: "callValue",
         callee: varRef("f.0", fnT, loc),
-        args: [getElemExpr(arrT, elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
+        args: [arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
         type: fnRet,
         loc,
       }),
@@ -1406,11 +1878,11 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
     lowerer.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
+    const fnT = funcOf([arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
     const callF: IrExpr = predToBool({
       kind: "callValue",
       callee: varRef("f.0", fnT, loc),
-      args: [getElemExpr(arrT, elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
+      args: [arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
       type: fnRet,
       loc,
     });
@@ -1419,8 +1891,14 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       countedFor(loc, varRef("n.0", F64, loc), () => [
         {
           kind: "if",
-          cond: method === "some" ? callF : { kind: "unary", op: "!", operand: callF, type: BOOL, loc },
-          then: [{ kind: "return", value: boolLit(method === "some", loc), loc }],
+          cond: getHasExpr(arrT, loc),
+          then: [{
+            kind: "if",
+            cond: method === "some" ? callF : { kind: "unary", op: "!", operand: callF, type: BOOL, loc },
+            then: [{ kind: "return", value: boolLit(method === "some", loc), loc }],
+            else_: null,
+            loc,
+          }],
           else_: null,
           loc,
         },
@@ -1460,7 +1938,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const arrT = arrayOf(elem);
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
-    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [elem], arrT);
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [arrayValueType(lowerer, elem)], arrT);
     const fnRet = fnArg.type.ret;
     if (fnRet.kind === "union") {
       const def = lowerer.unions.get(fnRet.unionId);
@@ -1474,11 +1952,12 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       }
     }
     if (fnRet.kind !== "array") {
-      // No flatten happens: exactly map's loop, map's helper.
+      // Scalar results append densely; source holes do not produce output slots.
       if (fnRet.kind === "void" || fnRet.kind === "func") lowerer.badType(call, lowerer.typeOf(call));
       fenceProducedArrayElem(lowerer, call, "'.flatMap()'", fnRet);
-      const helper = arrayHofHelper(lowerer, "map", elem, fnRet, arity, loc);
-      return { kind: "call", callee: helper, args: [receiver, fnArg], type: arrayOf(fnRet), loc };
+      const outElem = callbackArrayElem(lowerer, call, fnRet);
+      const helper = arrayHofHelper(lowerer, "flatMap", elem, fnRet, arity, loc, outElem);
+      return { kind: "call", callee: helper, args: [receiver, fnArg], type: arrayOf(outElem), loc };
     }
     const helper = flatMapHelper(lowerer, elem, fnRet, arity, loc);
     return { kind: "call", callee: helper, args: [receiver, fnArg], type: fnRet, loc };
@@ -1504,7 +1983,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     lowerer.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
     const inner = fnRet.elem;
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), fnRet);
+    const fnT = funcOf([arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
 
     const innerLoop: IrStmt = {
       kind: "for",
@@ -1518,15 +1997,17 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       },
       body: [
         {
-          kind: "exprStmt",
-          expr: {
-            kind: "arrIntrinsic",
-            method: "push",
-            receiver: varRef("out.0", fnRet, loc),
-            args: [{ kind: "arrayGet", arr: varRef("r.0", fnRet, loc), index: varRef("j.0", F64, loc), type: inner, loc }],
-            type: F64,
+          kind: "if",
+          cond: arrayHasExpr(
+            varRef("r.0", fnRet, loc),
+            varRef("j.0", F64, loc),
             loc,
-          },
+          ),
+          then: [
+            { kind: "varDecl", localId: "inner.0", init: arrayValueRead(lowerer, varRef("r.0", fnRet, loc), varRef("j.0", F64, loc), inner, loc), loc },
+            arrayValueStore(lowerer, varRef("out.0", fnRet, loc), { kind: "arrIntrinsic", method: "length", receiver: varRef("out.0", fnRet, loc), args: [], type: F64, loc }, varRef("inner.0", arrayValueType(lowerer, inner), loc), inner, loc),
+          ],
+          else_: null,
           loc,
         },
       ],
@@ -1537,24 +2018,32 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       readLenStmt(arrT, loc),
       countedFor(loc, varRef("n.0", F64, loc), () => [
         {
-          kind: "varDecl",
-          localId: "r.0",
-          init: {
-            kind: "callValue",
-            callee: varRef("f.0", fnT, loc),
-            args: [getElemExpr(arrT, elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
-            type: fnRet,
-            loc,
-          },
+          kind: "if",
+          cond: getHasExpr(arrT, loc),
+          then: [
+            {
+              kind: "varDecl",
+              localId: "r.0",
+              init: {
+                kind: "callValue",
+                callee: varRef("f.0", fnT, loc),
+                args: [arrayValueRead(lowerer, varRef("a.0", arrT, loc), varRef("i.0", F64, loc), elem, loc), varRef("i.0", F64, loc), varRef("a.0", arrT, loc)].slice(0, arity),
+                type: fnRet,
+                loc,
+              },
+              loc,
+            },
+            {
+              kind: "varDecl",
+              localId: "m.0",
+              init: { kind: "arrIntrinsic", method: "length", receiver: varRef("r.0", fnRet, loc), args: [], type: F64, loc },
+              loc,
+            },
+            innerLoop,
+          ],
+          else_: null,
           loc,
         },
-        {
-          kind: "varDecl",
-          localId: "m.0",
-          init: { kind: "arrIntrinsic", method: "length", receiver: varRef("r.0", fnRet, loc), args: [], type: F64, loc },
-          loc,
-        },
-        innerLoop,
       ]),
       { kind: "return", value: varRef("out.0", fnRet, loc), loc },
     ];
@@ -1574,6 +2063,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         { id: "r.0", name: "r", type: fnRet, mutable: false },
         { id: "m.0", name: "m", type: F64, mutable: false },
         { id: "j.0", name: "j", type: F64, mutable: true },
+        { id: "inner.0", name: "inner", type: arrayValueType(lowerer, inner), mutable: false },
       ],
       body,
       loc,
@@ -1596,11 +2086,11 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     const argNode = call.arguments[0];
     if (!argNode) lowerer.unsupported("SC1090", call, "this call form"); // tsc-guarded
     const hasInit = call.arguments.length === 2;
-    const accT = hasInit ? lowerer.irTypeOf(call) : elem;
+    const accT = lowerer.runtimeOptionalReduceTypes.get(call) ??
+      (hasInit ? lowerer.irTypeOf(call) : arrayValueType(lowerer, elem));
     if (accT.kind === "void" || accT.kind === "func") lowerer.badType(call, lowerer.typeOf(call));
-    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [accT, elem], arrT);
-    if (!typeEquals(fnArg.type.ret, accT)) lowerer.badType(argNode, lowerer.typeOf(argNode));
-    const helper = reduceHelper(lowerer, method, elem, accT, arity, hasInit, loc);
+    const { fnArg, arity } = hofCallbackArg(lowerer, argNode, [accT, arrayValueType(lowerer, elem)], arrT);
+    const helper = reduceHelper(lowerer, method, elem, accT, fnArg.type.ret, arity, hasInit, loc);
     const args: IrExpr[] = [receiver, fnArg];
     if (hasInit) args.push(lowerer.lowerExprExpecting(call.arguments[1]!, accT));
     return { kind: "call", callee: helper, args, type: accT, loc };
@@ -1619,21 +2109,22 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
   function reduceHelper(lowerer: Lowerer, method: "reduce" | "reduceRight",
     elem: IrType,
     accT: IrType,
+    fnRet: IrType,
     arity: number,
     hasInit: boolean,
     loc: SrcLoc,): string {
-    const key = `${method}:${typeKey(elem)}:${typeKey(accT)}:${arity}:${hasInit ? "init" : "seed"}`;
+    const key = `${method}:${typeKey(elem)}:${typeKey(accT)}:${typeKey(fnRet)}:${arity}:${hasInit ? "init" : "seed"}`;
     const existing = lowerer.arrHofHelpers.get(key);
     if (existing) return existing;
     const name = `%arr.${method}.${lowerer.arrHofHelpers.size}`;
     lowerer.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
-    const fnT = funcOf([accT, elem, F64, arrT].slice(0, arity), accT);
+    const fnT = funcOf([accT, arrayValueType(lowerer, elem), F64, arrT].slice(0, arity), fnRet);
 
     const n = varRef("n.0", F64, loc);
     const i = varRef("i.0", F64, loc);
     const right = method === "reduceRight";
-    const at = (index: IrExpr): IrExpr => ({ kind: "arrayGet", arr: varRef("a.0", arrT, loc), index, type: elem, loc });
+    const at = (index: IrExpr): IrExpr => arrayValueRead(lowerer, varRef("a.0", arrT, loc), index, elem, loc);
     const locals: IrLocal[] = [
       { id: "a.0", name: "a", type: arrT, mutable: true },
       { id: "f.0", name: "f", type: fnT, mutable: true },
@@ -1647,50 +2138,27 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       { localId: "f.0", name: "f", type: fnT },
       ...(hasInit ? [{ localId: "z.0", name: "z", type: accT }] : []),
     ];
-    const seedStmts: IrStmt[] = hasInit
-      ? [{ kind: "varDecl", localId: "acc.0", init: varRef("z.0", accT, loc), loc }]
-      : [
-          {
-            kind: "if",
-            cond: { kind: "bin", op: "===", left: n, right: numLit(0, loc), type: BOOL, loc },
-            then: [
-              {
-                kind: "throw",
-                value: {
-                  kind: "libCall",
-                  fn: "error.new",
-                  args: [
-                    {
-                      kind: "strLit",
-                      value: "Reduce of empty array with no initial value",
-                      type: STRING,
-                      loc,
-                    },
-                  ],
-                  type: { kind: "object", className: "%TypeError" },
-                  loc,
-                },
-                loc,
-              },
-            ],
-            else_: null,
-            loc,
-          },
-          {
-            kind: "varDecl",
-            localId: "acc.0",
-            init: at(right ? { kind: "bin", op: "-", left: n, right: numLit(1, loc), type: F64, loc } : numLit(0, loc)),
-            loc,
-          },
-        ];
-    // Loop bounds: with init the walk covers every index; the seeded form
-    // starts one past the seed. reduce ascends, reduceRight descends.
     const start: IrExpr = right
-      ? { kind: "bin", op: "-", left: n, right: numLit(hasInit ? 1 : 2, loc), type: F64, loc }
-      : numLit(hasInit ? 0 : 1, loc);
+      ? { kind: "bin", op: "-", left: n, right: numLit(1, loc), type: F64, loc }
+      : numLit(0, loc);
+    const inRange: IrExpr = right
+      ? { kind: "bin", op: ">=", left: i, right: numLit(0, loc), type: BOOL, loc }
+      : { kind: "bin", op: "<", left: i, right: n, type: BOOL, loc };
+    const advance: IrStmt = { kind: "assign", localId: "i.0", value: { kind: "bin", op: right ? "-" : "+", left: i, right: numLit(1, loc), type: F64, loc }, loc };
+    const seedStmts: IrStmt[] = [
+      { kind: "varDecl", localId: "i.0", init: start, loc },
+      ...(hasInit
+        ? [{ kind: "varDecl", localId: "acc.0", init: varRef("z.0", accT, loc), loc } satisfies IrStmt]
+        : [
+            { kind: "while", cond: { kind: "ternary", cond: inRange, then: { kind: "unary", op: "!", operand: getHasExpr(arrT, loc), type: BOOL, loc }, else_: boolLit(false, loc), type: BOOL, loc }, body: [advance], loc },
+            { kind: "if", cond: { kind: "unary", op: "!", operand: inRange, type: BOOL, loc }, then: [{ kind: "throw", value: { kind: "libCall", fn: "error.new", args: [{ kind: "strLit", value: "Reduce of empty array with no initial value", type: STRING, loc }], type: { kind: "object", className: "%TypeError" }, loc }, loc }], else_: null, loc },
+            { kind: "varDecl", localId: "acc.0", init: lowerer.coerceToExpected(at(i), accT), loc },
+            advance,
+          ] satisfies IrStmt[]),
+    ];
     const loop: IrStmt = {
       kind: "for",
-      init: { kind: "varDecl", localId: "i.0", init: start, loc },
+      init: null,
       cond: right
         ? { kind: "bin", op: ">=", left: i, right: numLit(0, loc), type: BOOL, loc }
         : { kind: "bin", op: "<", left: i, right: n, type: BOOL, loc },
@@ -1700,20 +2168,20 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
         value: { kind: "bin", op: right ? "-" : "+", left: i, right: numLit(1, loc), type: F64, loc },
         loc,
       },
-      body: [
+      body: [{ kind: "if", cond: getHasExpr(arrT, loc), then: [
         {
           kind: "assign",
           localId: "acc.0",
-          value: {
+          value: lowerer.coerceToExpected({
             kind: "callValue",
             callee: varRef("f.0", fnT, loc),
             args: [varRef("acc.0", accT, loc), at(i), i, varRef("a.0", arrT, loc)].slice(0, arity),
-            type: accT,
+            type: fnRet,
             loc,
-          },
+          }, accT),
           loc,
         },
-      ],
+      ], else_: null, loc }],
       loc,
     };
     const body: IrStmt[] = [
@@ -1730,19 +2198,20 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
    * function like the other array HOFs. sort mutates and returns the receiver;
    * toSorted takes its shallow snapshot INSIDE the helper, after the receiver
    * and comparator expressions have both been evaluated, then sorts and
-   * returns that copy without touching the receiver. The loop is a
-   * binary-free INSERTION sort: stable (equal-comparing elements keep their
-   * source order, which is what Node's stable TimSort produces for any
-   * consistent comparator) and JS-faithful on the comparator contract — an
-   * element moves left only while cmp(left, v) > 0, so a NaN or 0 result holds
-   * position exactly like the spec's "treat as equal". The SEQUENCE of
-   * comparator calls differs from V8's TimSort (SEMANTICS.md); results are
-   * identical for consistent comparators. The comparator-less form lowers for
-   * STRING elements only — JS's default converts every element to string and
-   * compares UTF-16 units, so the interned synthesized comparator selects the
-   * runtime's code-unit ordering rather than scriptc's documented code-point
-   * relational operators. For numbers that default is the notorious string
-   * sort ([10, 9, 1] → [1, 10, 9]), deliberately fenced toward an explicit
+   * returns that copy without touching the receiver. The helper uses a stable
+   * bottom-up merge sort with an ordered-boundary check: ordered inputs use a
+   * linear number of comparator calls, but buffer movement remains O(n log n)
+   * even when every boundary is already ordered. During a merge, an element
+   * moves right only while cmp(left, right) > 0, so a NaN or 0 result keeps
+   * the left element first. Undefined values sink without reaching the user
+   * comparator. The callback sequence differs from V8's TimSort, so exact
+   * order and count parity are not claimed; results agree for consistent
+   * comparators. The comparator-less form lowers for STRING elements only —
+   * JS's default converts every element to string and compares UTF-16 units,
+   * so the interned synthesized comparator selects the runtime's code-unit
+   * ordering rather than scriptc's documented code-point relational
+   * operators. For numbers that default is the notorious string sort
+   * ([10, 9, 1] → [1, 10, 9]), deliberately fenced toward an explicit
    * comparator. */
   function lowerArraySortCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,
@@ -1857,183 +2326,11 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     return name;
   }
 
-/** The insertion-sort loop, from existing IR nodes:
-   *
-   *   n = a.length;
-    *   for (i = 1; i < n; i++) {
-    *     v = a[i]; j = i - 1;
-    *     while (j >= 0) {
-    *       if (CompareArrayElements(a[j], v, f) > 0) {
-    *         a[j + 1] = a[j]; j = j - 1;
-    *       } else break;
-   *     }
-   *     a[j + 1] = v;
-   *   }
-   *   return a;
-   */
-  function buildArraySortFn(
-    name: string,
-    elem: IrType,
-    arity: number,
-    copyFirst: boolean,
-    undefinedTag: number | null,
-    loc: SrcLoc,
-  ): IrFunction {
-    const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, elem].slice(0, arity), F64);
-
-    const j = varRef("j.0", F64, loc);
-    const at = (index: IrExpr): IrExpr => ({ kind: "arrayGet", arr: varRef("a.0", arrT, loc), index, type: elem, loc });
-    const jPlus1: IrExpr = { kind: "bin", op: "+", left: j, right: numLit(1, loc), type: F64, loc };
-    const isUndefined = (value: IrExpr): IrExpr | null => {
-      if (elem.kind === "union" && undefinedTag !== null) {
-        return {
-          kind: "unionIsTag",
-          unionId: elem.unionId,
-          tag: undefinedTag,
-          negated: false,
-          value,
-          type: BOOL,
-          loc,
-        };
-      }
-      if (elem.kind === "jsval") {
-        return {
-          kind: "jsOp",
-          op: "eq",
-          args: [
-            value,
-            { kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc },
-          ],
-          type: BOOL,
-          loc,
-        };
-      }
-      return null;
-    };
-    const compareGreater: IrExpr = {
-      kind: "bin",
-      op: ">",
-      left: {
-        kind: "callValue",
-        callee: varRef("f.0", fnT, loc),
-        args: [at(j), varRef("v.0", elem, loc)].slice(0, arity),
-        type: F64,
-        loc,
-      },
-      right: numLit(0, loc),
-      type: BOOL,
-      loc,
-    };
-    const leftUndefined = isUndefined(at(j));
-    const valueUndefined = isUndefined(varRef("v.0", elem, loc));
-    // CompareArrayElements: undefined always sinks and never reaches the
-    // user comparator. Ternaries preserve that callback suppression.
-    const shouldShift: IrExpr =
-      leftUndefined !== null && valueUndefined !== null
-        ? {
-            kind: "ternary",
-            cond: leftUndefined,
-            then: {
-              kind: "unary",
-              op: "!",
-              operand: valueUndefined,
-              type: BOOL,
-              loc,
-            },
-            else_: {
-              kind: "ternary",
-              cond: valueUndefined,
-              then: { kind: "boolLit", value: false, type: BOOL, loc },
-              else_: compareGreater,
-              type: BOOL,
-              loc,
-            },
-            type: BOOL,
-            loc,
-          }
-        : compareGreater;
-    const shiftLoop: IrStmt = {
-      kind: "while",
-      cond: { kind: "bin", op: ">=", left: j, right: numLit(0, loc), type: BOOL, loc },
-      body: [
-        {
-          kind: "if",
-          cond: shouldShift,
-          then: [
-            { kind: "arraySet", arr: varRef("a.0", arrT, loc), index: jPlus1, value: at(j), loc },
-            { kind: "assign", localId: "j.0", value: { kind: "bin", op: "-", left: j, right: numLit(1, loc), type: F64, loc }, loc },
-          ],
-          else_: [{ kind: "break", loc }],
-          loc,
-        },
-      ],
-      loc,
-    };
-    const body: IrStmt[] = [
-      ...(copyFirst
-        ? [{
-            kind: "assign" as const,
-            localId: "a.0",
-            value: {
-              kind: "arrIntrinsic" as const,
-              method: "slice" as const,
-              receiver: varRef("a.0", arrT, loc),
-              args: [],
-              type: arrT,
-              loc,
-            },
-            loc,
-          }]
-        : []),
-      readLenStmt(arrT, loc),
-      countedFor(
-        loc,
-        { kind: "bin", op: "-", left: varRef("n.0", F64, loc), right: numLit(1, loc), type: F64, loc },
-        (index) => [
-          {
-            kind: "varDecl",
-            localId: "v.0",
-            init: {
-              kind: "arrayGet",
-              arr: varRef("a.0", arrT, loc),
-              index: { kind: "bin", op: "+", left: index, right: numLit(1, loc), type: F64, loc },
-              type: elem,
-              loc,
-            },
-            loc,
-          },
-          { kind: "varDecl", localId: "j.0", init: index, loc },
-          shiftLoop,
-          { kind: "arraySet", arr: varRef("a.0", arrT, loc), index: jPlus1, value: varRef("v.0", elem, loc), loc },
-        ],
-      ),
-      { kind: "return", value: varRef("a.0", arrT, loc), loc },
-    ];
-    return {
-      name,
-      params: [
-        { localId: "a.0", name: "a", type: arrT },
-        { localId: "f.0", name: "f", type: fnT },
-      ],
-      returnType: arrT,
-      locals: [
-        { id: "a.0", name: "a", type: arrT, mutable: true },
-        { id: "f.0", name: "f", type: fnT, mutable: true },
-        { id: "n.0", name: "n", type: F64, mutable: false },
-        { id: "i.0", name: "i", type: F64, mutable: true },
-        { id: "v.0", name: "v", type: elem, mutable: false },
-        { id: "j.0", name: "j", type: F64, mutable: true },
-      ],
-      body,
-      loc,
-    };
-  }
 
 /** Uint8Array.prototype.toSorted. The receiver/comparator expressions are
  * evaluated before entering the helper; the helper snapshots with
  * TypedArray.prototype.slice before its first comparison, then performs
- * the same stable insertion walk as Array.toSorted. Uint8Array's default
+ * the same stable merge walk as Array.toSorted. Uint8Array's default
  * comparator is numeric ascending, so its comparator-less form needs no
  * string-conversion machinery. */
   function lowerBytesToSortedCall(
@@ -2115,211 +2412,6 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     };
   }
 
-  function buildBytesSortFn(
-    name: string,
-    arity: number,
-    hasComparator: boolean,
-    loc: SrcLoc,
-  ): IrFunction {
-    const bytesT = BYTES_U8;
-    const fnT = funcOf([F64, F64].slice(0, arity), F64);
-
-    const j = varRef("j.0", F64, loc);
-    const at = (index: IrExpr): IrExpr => ({
-      kind: "bytesIntrinsic",
-      method: "get",
-      receiver: varRef("a.0", bytesT, loc),
-      args: [index],
-      type: F64,
-      loc,
-    });
-    const jPlus1: IrExpr = {
-      kind: "bin",
-      op: "+",
-      left: j,
-      right: numLit(1, loc),
-      type: F64,
-      loc,
-    };
-    const compare: IrExpr = hasComparator
-      ? {
-          kind: "callValue",
-          callee: varRef("f.0", fnT, loc),
-          args: [at(j), varRef("v.0", F64, loc)].slice(0, arity),
-          type: F64,
-          loc,
-        }
-      : {
-          kind: "bin",
-          op: "-",
-          left: at(j),
-          right: varRef("v.0", F64, loc),
-          type: F64,
-          loc,
-        };
-    const shiftLoop: IrStmt = {
-      kind: "while",
-      cond: {
-        kind: "bin",
-        op: ">=",
-        left: j,
-        right: numLit(0, loc),
-        type: BOOL,
-        loc,
-      },
-      body: [
-        {
-          kind: "if",
-          cond: {
-            kind: "bin",
-            op: ">",
-            left: compare,
-            right: numLit(0, loc),
-            type: BOOL,
-            loc,
-          },
-          then: [
-            {
-              kind: "bytesSet",
-              arr: varRef("a.0", bytesT, loc),
-              index: jPlus1,
-              value: at(j),
-              loc,
-            },
-            {
-              kind: "assign",
-              localId: "j.0",
-              value: {
-                kind: "bin",
-                op: "-",
-                left: j,
-                right: numLit(1, loc),
-                type: F64,
-                loc,
-              },
-              loc,
-            },
-          ],
-          else_: [{ kind: "break", loc }],
-          loc,
-        },
-      ],
-      loc,
-    };
-    const params: IrParam[] = [
-      { localId: "a.0", name: "a", type: bytesT },
-      ...(hasComparator
-        ? [{ localId: "f.0", name: "f", type: fnT }]
-        : []),
-    ];
-    const locals: IrLocal[] = [
-      { id: "a.0", name: "a", type: bytesT, mutable: true },
-      ...(hasComparator
-        ? [{ id: "f.0", name: "f", type: fnT, mutable: true }]
-        : []),
-      { id: "n.0", name: "n", type: F64, mutable: false },
-      { id: "i.0", name: "i", type: F64, mutable: true },
-      { id: "v.0", name: "v", type: F64, mutable: false },
-      { id: "j.0", name: "j", type: F64, mutable: true },
-    ];
-    const body: IrStmt[] = [
-      {
-        kind: "assign",
-        localId: "a.0",
-        value: {
-          kind: "bytesIntrinsic",
-          method: "slice",
-          receiver: varRef("a.0", bytesT, loc),
-          args: [],
-          type: bytesT,
-          loc,
-        },
-        loc,
-      },
-      {
-        kind: "varDecl",
-        localId: "n.0",
-        init: {
-          kind: "bytesIntrinsic",
-          method: "length",
-          receiver: varRef("a.0", bytesT, loc),
-          args: [],
-          type: F64,
-          loc,
-        },
-        loc,
-      },
-      {
-        kind: "for",
-        init: {
-          kind: "varDecl",
-          localId: "i.0",
-          init: numLit(1, loc),
-          loc,
-        },
-        cond: {
-          kind: "bin",
-          op: "<",
-          left: varRef("i.0", F64, loc),
-          right: varRef("n.0", F64, loc),
-          type: BOOL,
-          loc,
-        },
-        update: {
-          kind: "assign",
-          localId: "i.0",
-          value: {
-            kind: "bin",
-            op: "+",
-            left: varRef("i.0", F64, loc),
-            right: numLit(1, loc),
-            type: F64,
-            loc,
-          },
-          loc,
-        },
-        body: [
-          {
-            kind: "varDecl",
-            localId: "v.0",
-            init: at(varRef("i.0", F64, loc)),
-            loc,
-          },
-          {
-            kind: "varDecl",
-            localId: "j.0",
-            init: {
-              kind: "bin",
-              op: "-",
-              left: varRef("i.0", F64, loc),
-              right: numLit(1, loc),
-              type: F64,
-              loc,
-            },
-            loc,
-          },
-          shiftLoop,
-          {
-            kind: "bytesSet",
-            arr: varRef("a.0", bytesT, loc),
-            index: jPlus1,
-            value: varRef("v.0", F64, loc),
-            loc,
-          },
-        ],
-        loc,
-      },
-      { kind: "return", value: varRef("a.0", bytesT, loc), loc },
-    ];
-    return {
-      name,
-      params,
-      returnType: bytesT,
-      locals,
-      body,
-      loc,
-    };
-  }
 
 /** `n = a.length` — the once-up-front length read every array HOF loop
    * starts with (locals a.0/n.0 by convention). */
@@ -2340,7 +2432,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
   }
 
 /** `a[i]` inside a HOF loop (locals a.0/i.0 by convention). */
-  function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
+function getElemExpr(arrT: IrType, elem: IrType, loc: SrcLoc): IrExpr {
     return {
       kind: "arrayGet",
       arr: { kind: "varRef", localId: "a.0", type: arrT, loc },
@@ -2401,18 +2493,6 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
     if (resultT.kind !== "union") lowerer.badType(call, lowerer.typeOf(call)); // defensive: T | undefined always maps to a union
     const undefTag = lowerer.armTag(resultT.unionId, UNDEFINED_T);
     if (undefTag < 0) lowerer.badType(call, lowerer.typeOf(call));
-    let foundTag: number | null = null;
-    if (!typeEquals(resultT, elem)) {
-      foundTag = lowerer.armTag(resultT.unionId, elem);
-      if (foundTag < 0) {
-        lowerer.unsupported(
-          "SC1090",
-          call,
-          `'.at' on '${lowerer.fmt(elem)}'-element arrays (the element would need a union ` +
-            "re-tag that is not supported yet — index and test instead)",
-        );
-      }
-    }
     const key = `at:${typeKey(elem)}:${typeKey(resultT)}`;
     let name = lowerer.arrHofHelpers.get(key);
     if (!name) {
@@ -2423,11 +2503,7 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
       const t = varRef("t.0", F64, loc);
       const i = varRef("i.0", F64, loc);
       const n = varRef("n.0", F64, loc);
-      const v = varRef("v.0", elem, loc);
-      const found: IrExpr =
-        foundTag === null
-          ? v
-          : { kind: "unionWrap", unionId: resultT.unionId, tag: foundTag, value: v, type: resultT, loc };
+      const found = lowerer.coerceToExpected(arrayValueRead(lowerer, varRef("a.0", arrT, loc), t, elem, loc), resultT);
       const miss: IrExpr = {
         kind: "unionWrap",
         unionId: resultT.unionId,
@@ -2479,12 +2555,6 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
           else_: null,
           loc,
         },
-        {
-          kind: "varDecl",
-          localId: "v.0",
-          init: { kind: "arrayGet", arr: varRef("a.0", arrT, loc), index: t, type: elem, loc },
-          loc,
-        },
         { kind: "return", value: found, loc },
       ];
       lowerer.liftedFns.push({
@@ -2499,7 +2569,6 @@ function filterCond(call: IrExpr, fnRet: IrType, loc: SrcLoc): IrExpr {
           { id: "i.0", name: "i", type: F64, mutable: true },
           { id: "n.0", name: "n", type: F64, mutable: false },
           { id: "t.0", name: "t", type: F64, mutable: true },
-          { id: "v.0", name: "v", type: elem, mutable: false },
         ],
         body,
         loc,
@@ -4217,7 +4286,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     proj: "keys" | "entries",): IrStmt {
     const loc = locOf(stmt);
     const arrT = iterable.type;
-    const elemT = arrT.kind === "array" ? arrT.elem : F64;
+    const elemT = arrT.kind === "array" ? arrayValueType(lowerer, arrT.elem) : F64;
     const yieldsPair = proj === "entries";
     if (!ts.isVariableDeclarationList(stmt.initializer)) {
       lowerer.unsupported(
@@ -4242,13 +4311,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const keyRead = (): IrExpr => varRef(i.id, F64, loc);
       const valRead = (): IrExpr =>
         arrT.kind === "array"
-          ? {
-              kind: "arrayGet",
-              arr: varRef(arr.id, arrT, loc),
-              index: varRef(i.id, F64, loc),
-              type: elemT,
-              loc,
-            }
+          ? arrayValueRead(lowerer, varRef(arr.id, arrT, loc), varRef(i.id, F64, loc), arrT.elem, loc)
           : {
               kind: "bytesIntrinsic",
               method: "get",
@@ -4275,6 +4338,11 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         binds.push({ kind: "varDecl", localId: kLocal.id, init: keyRead(), loc });
         if (els[1]) {
           const vLocal = lowerer.declareLocal(els[1].name, els[1].name.text, elemT, isLet);
+          if (arrT.kind === "array" && !typeEquals(elemT, arrT.elem)) {
+            const root = lowerer.runtimeOptionalRootOf(vLocal);
+            lowerer.runtimeOptionalLocals.add(root);
+            lowerer.runtimeOptionalStorageLocals.add(root);
+          }
           binds.push({ kind: "varDecl", localId: vLocal.id, init: valRead(), loc });
         }
       } else {
@@ -4284,6 +4352,13 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
         const declT = lowerer.mapTypeOf(lowerer.checker.getTypeAtLocation(decl.name));
         if (yieldsPair) {
           const shape = declT?.kind === "record" ? lowerer.shapes.get(declT.shapeId) : null;
+          if (declT?.kind === "record" && shape?.tuple && arrT.kind === "array") {
+            const valueField = shape.fields.find((field) => field.name === "1");
+            if (valueField && typeEquals(valueField.type, arrT.elem) && !typeEquals(elemT, arrT.elem)) {
+              valueField.type = elemT;
+              lowerer.runtimeOptionalFields.add(lowerer.runtimeOptionalFieldKey(declT.shapeId, "1"));
+            }
+          }
           if (
             declT?.kind !== "record" || !shape?.tuple || shape.fields.length !== 2 ||
             shape.fields.find((f) => f.name === "0")?.type.kind !== "f64" ||
@@ -4766,7 +4841,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if (dynReceiver === undefined && !lowerer.isStdlibMember(access)) return null;
     const name = access.name.text;
     const receiverKind = dynReceiver ? "string" : lowerer.mapTypeOf(lowerer.typeOf(access.expression))?.kind;
-    const lowerReceiver = (): IrExpr => (dynReceiver ? dynReceiver() : lowerer.lowerExpr(access.expression));
+    const lowerReceiver = (): IrExpr => {
+      if (dynReceiver) return dynReceiver();
+      if (receiverKind === "string") return lowerMethodReceiver(lowerer, access.expression, STRING, access.name.text);
+      if (receiverKind === "regex") return lowerMethodReceiver(lowerer, access.expression, { kind: "regex" }, access.name.text);
+      return lowerer.lowerExpr(access.expression);
+    };
     const loc = locOf(call);
     if (receiverKind === "regex" && name === "test") {
       // Legacy backends reject literal stateful receivers here and
@@ -4779,7 +4859,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
           lowerer.unsupported("SC1121", call);
         }
       }
-      const receiver = lowerer.lowerExpr(access.expression);
+      const receiver = lowerReceiver();
       const args = call.arguments.map((a) => lowerer.lowerExpr(a));
       return { kind: "regexIntrinsic", method: "test", receiver, args, type: BOOL, loc };
     }
@@ -4794,7 +4874,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
           lowerer.unsupported("SC1121", call, "'.exec()' on a regex with the 'g' or 'y' flag");
         }
       }
-      const re = lowerer.lowerExpr(access.expression);
+      const re = lowerReceiver();
       const subject = lowerer.lowerExprExpecting(call.arguments[0]!, STRING);
       const resultT: IrType = { kind: "union", unionId: lowerer.unions.intern([regexCaptureArray(lowerer.unions), { kind: "nullT" }]) };
       return lowerer.statefulRegex ? { kind: "regexIntrinsic", method: "exec", receiver: re, args: [subject], type: resultT, loc }
@@ -4840,7 +4920,9 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
           );
         }
       }
-      const receiver = nullableStringRecv ? lowerer.lowerExprExpecting(access.expression, STRING) : lowerReceiver();
+      const receiver = nullableStringRecv
+        ? lowerMethodReceiver(lowerer, access.expression, STRING, access.name.text)
+        : lowerReceiver();
       const re = lowerer.lowerExpr(arg0);
       // RegExpMatchArray | null maps to the optional-string row union by
       // itself; intern it directly when the checker's spelling doesn't —
@@ -4978,7 +5060,9 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       };
       return { kind: "jsExit", value: result, type: entry.result, loc: locOf(call) };
     }
-    const receiver = dynReceiver ? dynReceiver() : lowerer.lowerExpr(access.expression);
+    const receiver = dynReceiver
+      ? dynReceiver()
+      : lowerMethodReceiver(lowerer, access.expression, STRING, access.name.text);
     // Same checker-level gate as the regex path: a function replacement
     // is CALLED per match, whatever the argument happens to lower to.
     if (entry.method === "replace" || entry.method === "replaceAll") {
@@ -5049,7 +5133,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
           "pass exactly the comparison string",
       );
     }
-    const receiver = lowerer.lowerExpr(access.expression);
+    const receiver = lowerMethodReceiver(lowerer, access.expression, STRING, access.name.text);
     const arg = lowerer.lowerExpr(call.arguments[0]!);
     if (arg.type.kind !== "string") lowerer.badType(call.arguments[0]!, lowerer.typeOf(call.arguments[0]!));
     const key = "localeCompare";
@@ -5182,6 +5266,25 @@ const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
         return { kind: "bytesNew", source: count, type, loc };
       }
       const src = lowerer.lowerExpr(argNode);
+      if (src.type.kind === "union" && lowerer.armTag(src.type.unionId, UNDEFINED_T) >= 0) {
+        const present = lowerer.stripUndefinedArm(src.type);
+        if (present.kind === "array" && present.elem.kind === "f64") {
+          const undefTag = lowerer.armTag(src.type.unionId, UNDEFINED_T);
+          const presentTag = lowerer.armTag(src.type.unionId, present);
+          if (undefTag >= 0 && presentTag >= 0) {
+            const empty: IrExpr = { kind: "arrayLit", elems: [], type: present, loc };
+            const source: IrExpr = {
+              kind: "ternary",
+              cond: { kind: "unionIsTag", unionId: src.type.unionId, tag: undefTag, negated: false, value: src, type: BOOL, loc },
+              then: empty,
+              else_: { kind: "unionNarrow", unionId: src.type.unionId, tag: presentTag, value: src, type: present, loc },
+              type: present,
+              loc,
+            };
+            return { kind: "bytesNew", source, type, loc };
+          }
+        }
+      }
       if (
         src.type.kind === "f64" ||
         typeEquals(src.type, type) ||
@@ -5598,6 +5701,26 @@ const BUF_ENCODINGS: Record<string, string | undefined> = {
  * literals into Node's runtime ERR_UNKNOWN_ENCODING throw. */
 export function knownBufEncoding(name: string): string | undefined {
   return own(BUF_ENCODINGS, name);
+}
+
+/** Presence guard for a synthetic native-array loop. HOFs skip holes, while
+ * the ordinary `arrayGet` remains a proven-presence operation. */
+function arrayHasExpr(arr: IrExpr, index: IrExpr, loc: SrcLoc): IrExpr {
+  return {
+    kind: "arrayHas",
+    arr,
+    index,
+    type: BOOL,
+    loc,
+  };
+}
+
+function getHasExpr(arrT: IrType, loc: SrcLoc): IrExpr {
+  return arrayHasExpr(
+    { kind: "varRef", localId: "a.0", type: arrT, loc },
+    { kind: "varRef", localId: "i.0", type: F64, loc },
+    loc,
+  );
 }
 
 /** The literal encoding argument of a Buffer surface, normalized — or a

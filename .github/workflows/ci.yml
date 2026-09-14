@@ -131,7 +131,7 @@ jobs:
       - name: Install pinned LLVM development distribution
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libzstd-dev
+          sudo apt-get install --yes g++ zlib1g-dev libzstd-dev
           curl -fL --retry 3 -o "$RUNNER_TEMP/llvm.tar.xz" https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz
           tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
           mv "$RUNNER_TEMP/LLVM-22.1.8-Linux-X64" "$RUNNER_TEMP/llvm-22.1.8"
@@ -143,8 +143,26 @@ jobs:
       - uses: vercel-labs/setup-zig@v1
         with:
           version: 0.16.0
+      - name: Build and verify Linux x64 musl release packages
+        run: |
+          pnpm --filter @scriptc/llvm-linux-x64-musl build:native
+          CC=zig AR=zig pnpm --filter @scriptc/runtime-linux-x64-musl build:native
+          helper=packages/llvm-linux-x64-musl/bin/scriptc-llvm-codegen
+          readelf -l "$helper" > "$RUNNER_TEMP/musl-helper-program-headers"
+          if grep -q INTERP "$RUNNER_TEMP/musl-helper-program-headers"; then
+            echo "musl helper must be a static executable" >&2
+            exit 1
+          fi
+          docker run --rm --volume "$GITHUB_WORKSPACE:/work:ro" alpine:3.22 \
+            /work/$helper version --format=json | node -e '
+              const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              if (value.default_target !== "x86_64-unknown-linux-musl" || !value.supported_targets?.includes("wasm32-unknown-wasi")) process.exit(1);
+            '
+          node packages/runtime-linux-x64-musl/scripts/verify.mjs
       - run: pnpm --filter @scriptc/runtime-wasm32-wasi build:native
       - run: pnpm build
+      - name: TypeScript 7 full parity sweep
+        run: pnpm test:ts7
       - name: Linux helper object format and no-clang output contract
         run: |
           PATH="$RUNNER_TEMP/traps:$PATH"
@@ -313,7 +331,7 @@ jobs:
           }
       - run: pnpm build
       - name: Windows path regressions
-        run: pnpm exec vitest run packages/compiler/test/ts7/program.test.ts packages/cli/test/paths.test.ts
+        run: pnpm exec vitest run packages/compiler/test/ts7/program-adapter.test.ts packages/compiler/test/ts7/resolver-parity.test.ts packages/cli/test/paths.test.ts
       - name: Windows Sandbox path regression
         run: >-
           pnpm exec vitest run tests/harness/worktree-files.test.ts

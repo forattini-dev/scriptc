@@ -11,7 +11,7 @@ function boundary(type: IrType, boxed = false): IrModule {
   const valueType = boxed ? type : DYN;
   const value = { kind: "varRef", localId: "%g.value", type: valueType, loc } as const;
   return {
-    irVersion: 6, sourceFile: loc.file, entry: "main",
+    irVersion: 8, sourceFile: loc.file, entry: "main",
     records: [
       { id: "api", fields: [{ name: "read", type: funcOf([], F64) }] },
       { id: "wrapper", fields: [{ name: "consume", type: funcOf([record], VOID) }] },
@@ -69,7 +69,7 @@ test.each([
   const valueType = boxed ? record : DYN;
   const value = { kind: "varRef", localId: "%g.value", type: valueType, loc } as const;
   const module: IrModule = {
-    irVersion: 6, sourceFile: loc.file, entry: "main",
+    irVersion: 8, sourceFile: loc.file, entry: "main",
     records: [{ id: "api", fields: [{ name: "read", type: read }, { name: "version", type: heterogeneous ? F64 : read }] }],
     globals: [{ id: "%g.value", name: "value", type: valueType, mutable: true }],
     functions: [{ name: "main", params: [], locals: [], returnType: VOID, loc,

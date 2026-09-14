@@ -13,6 +13,10 @@ set(SCRIPTC_ALLOWED_TARGETS "arm64-apple-macosx14.0.0" CACHE STRING
     "Comma-separated target triples accepted by this helper")
 set(SCRIPTC_HELPER_ARCH "arm64" CACHE STRING
     "macOS architecture of the helper executable")
+# LLVM's official Linux archives use the host libstdc++ and glibc ABIs. The
+# musl package therefore ships this process-isolated helper as a fully static
+# host executable; its configured output targets and runtime pack remain musl.
+option(SCRIPTC_MUSL_BUILD "Configure the Linux musl helper package" OFF)
 
 # These must be cache variables before project() enables the Apple toolchain.
 # A target property named OSX_DEPLOYMENT_TARGET is not recognized by CMake and
@@ -29,10 +33,28 @@ endif()
 
 project(scriptc_llvm_codegen LANGUAGES C CXX)
 
+if(CMAKE_C_COMPILER_TARGET MATCHES "linux-musl")
+  set(SCRIPTC_MUSL_BUILD ON)
+endif()
+
 # Official LLVM binary distributions retain zstd as an imported dependency in
 # LLVMSupport. Resolve it before loading LLVM's exported targets so CMake never
 # leaves an unresolved `zstd::libzstd_static` edge on Linux or Windows.
 find_package(zstd CONFIG QUIET)
+
+# LLVM's Linux archives retain ZLIB and zstd target edges in LLVMSupport. The
+# musl package flattens that imported graph below and appends portable library
+# names explicitly, so use interface placeholders instead of embedding host
+# library paths in the flattened graph.
+if(SCRIPTC_MUSL_BUILD AND NOT TARGET ZLIB::ZLIB)
+  add_library(ZLIB::ZLIB INTERFACE IMPORTED)
+endif()
+if(SCRIPTC_MUSL_BUILD AND NOT TARGET zstd::libzstd_static)
+  add_library(zstd::libzstd_static INTERFACE IMPORTED)
+endif()
+if(SCRIPTC_MUSL_BUILD AND NOT TARGET zstd::libzstd_shared)
+  add_library(zstd::libzstd_shared INTERFACE IMPORTED)
+endif()
 
 find_package(LLVM 22.1.8 EXACT REQUIRED CONFIG)
 
@@ -104,17 +126,70 @@ target_compile_definitions(scriptc-llvm-codegen PRIVATE
   SCRIPTC_ALLOWED_TARGETS="${SCRIPTC_ALLOWED_TARGETS}"
 )
 
-llvm_map_components_to_libnames(SCRIPTC_LLVM_LIBS
-  ${SCRIPTC_LLVM_TARGET_LIBS}
-  CodeGen
-  Core
-  Coroutines
-  IRReader
-  Passes
-  Support
-  Target
-)
-target_link_libraries(scriptc-llvm-codegen PRIVATE ${SCRIPTC_LLVM_LIBS})
+if(SCRIPTC_MUSL_BUILD)
+  # CMake's imported LLVM targets carry transitive archive interfaces that
+  # duplicate most of this large static graph. Flatten it to one absolute
+  # archive path per target for the resource-constrained musl release link.
+  function(scriptc_collect_llvm_target target)
+    get_property(seen GLOBAL PROPERTY SCRIPTC_LLVM_LINK_SEEN)
+    if(target IN_LIST seen)
+      return()
+    endif()
+    set_property(GLOBAL APPEND PROPERTY SCRIPTC_LLVM_LINK_SEEN "${target}")
+
+    get_target_property(dependencies "${target}" INTERFACE_LINK_LIBRARIES)
+    if(dependencies AND NOT dependencies MATCHES "-NOTFOUND$")
+      foreach(dependency IN LISTS dependencies)
+        if(dependency MATCHES "^\\$<")
+          continue()
+        elseif(TARGET "${dependency}")
+          scriptc_collect_llvm_target("${dependency}")
+        elseif(NOT dependency STREQUAL "optimized" AND NOT dependency STREQUAL "debug")
+          set_property(GLOBAL APPEND PROPERTY SCRIPTC_LLVM_LINK_SYSTEM_LIBS "${dependency}")
+        endif()
+      endforeach()
+    endif()
+
+    # Static linkers need each dependent archive before the archives that
+    # satisfy it. Appending after the recursive walk gives post-order; the
+    # final reversal below turns the diamond graph into dependent-first order.
+    get_target_property(location "${target}" IMPORTED_LOCATION_RELEASE)
+    if(NOT location OR location MATCHES "-NOTFOUND$")
+      get_target_property(location "${target}" IMPORTED_LOCATION)
+    endif()
+    if(location AND NOT location MATCHES "-NOTFOUND$")
+      set_property(GLOBAL APPEND PROPERTY SCRIPTC_LLVM_LINK_LIBS "${location}")
+    endif()
+  endfunction()
+
+  set(SCRIPTC_LLVM_LINK_ROOTS ${SCRIPTC_LLVM_TARGET_LIBS} IRReader Passes)
+  foreach(component IN LISTS SCRIPTC_LLVM_LINK_ROOTS)
+    if(TARGET "LLVM${component}")
+      scriptc_collect_llvm_target("LLVM${component}")
+    elseif(TARGET "${component}")
+      scriptc_collect_llvm_target("${component}")
+    endif()
+  endforeach()
+  get_property(SCRIPTC_LLVM_LIBS GLOBAL PROPERTY SCRIPTC_LLVM_LINK_LIBS)
+  get_property(SCRIPTC_LLVM_SYSTEM_LIBS GLOBAL PROPERTY SCRIPTC_LLVM_LINK_SYSTEM_LIBS)
+  list(REMOVE_DUPLICATES SCRIPTC_LLVM_LIBS)
+  list(REVERSE SCRIPTC_LLVM_LIBS)
+  list(REMOVE_DUPLICATES SCRIPTC_LLVM_SYSTEM_LIBS)
+  list(APPEND SCRIPTC_LLVM_SYSTEM_LIBS z zstd)
+else()
+  llvm_map_components_to_libnames(SCRIPTC_LLVM_LIBS
+    ${SCRIPTC_LLVM_TARGET_LIBS}
+    CodeGen
+    Core
+    Coroutines
+    IRReader
+    Passes
+    Support
+    Target
+  )
+  list(REMOVE_DUPLICATES SCRIPTC_LLVM_LIBS)
+endif()
+target_link_libraries(scriptc-llvm-codegen PRIVATE ${SCRIPTC_LLVM_LIBS} ${SCRIPTC_LLVM_SYSTEM_LIBS})
 
 if(APPLE)
   # Homebrew's static LLVM archives contain broad component object files.

@@ -14,13 +14,16 @@ export function lowerArrayMapDynamic(
   L: Lowerer, receiver: IrExpr, callback: IrExpr,
   elem: IrType, arity: number, loc: SrcLoc,
 ): IrExpr {
-  const key = `mapDynamic:${typeKey(elem)}:${arity}`;
+  // Callbacks observe JavaScript array reads (`T | undefined`); the stored
+  // payload keeps the element ABI.
+  const valueT = callback.type.kind === "func" && callback.type.params[0] !== undefined ? callback.type.params[0] : elem;
+  const key = `mapDynamic:${typeKey(elem)}:${typeKey(valueT)}:${arity}`;
   let name = L.arrHofHelpers.get(key);
   if (name === undefined) {
     name = `%arr.mapDynamic.${L.arrHofHelpers.size}`;
     L.arrHofHelpers.set(key, name);
     const arrT = arrayOf(elem);
-    const fnT = funcOf([elem, F64, arrT].slice(0, arity), DYN);
+    const fnT = funcOf([valueT, F64, arrT].slice(0, arity), DYN);
     const source = varRef("a.0", arrT, loc);
     const fn = varRef("f.0", fnT, loc);
     const index = varRef("i.0", F64, loc);
@@ -37,7 +40,7 @@ export function lowerArrayMapDynamic(
     const item: IrExpr = { kind: "arrayGet", arr: source, index, type: elem, loc };
     const call: IrExpr = {
       kind: "callValue", callee: fn,
-      args: [item, index, source].slice(0, arity),
+      args: [L.coerceToExpected(item, valueT), index, source].slice(0, arity),
       type: DYN, loc,
     };
     const locals: IrLocal[] = [

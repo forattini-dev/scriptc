@@ -261,6 +261,7 @@ export class RustValueEmitter {
       }
       case "promise": return `runtime::JsPromise<${this.rustType(type.inner, loc)}>`;
       case "generator": {
+        if (type.async) this.context.unsupported("async generator values", loc);
         const channel = (value: IrType): string =>
           value.kind === "undefinedT" || value.kind === "nullT" ? "()" : this.rustType(value, loc);
         return `runtime::JsGenerator<${channel(type.yieldT)}, ${channel(type.retT)}, ${channel(type.nextT)}>`;

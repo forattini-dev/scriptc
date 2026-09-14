@@ -285,6 +285,10 @@ export function emitAsyncExpr(host: LlvmEmitterContext, e: ExprOf<"yieldExpr" | 
         if (e.value === null) throw new InternalCompilerError("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = host.emitExpr(e.value);
         const yt = e.value.type;
+        if (e.awaited) {
+          host.declare(`declare void @scr_async_gen_hop_done()`);
+          B.line(`call void @scr_async_gen_hop_done()`);
+        }
         if (yt.kind === "f64" || yt.kind === "date") {
           if (host.wasi) {
             const coro = host.currentWasiCoro!;
@@ -352,7 +356,8 @@ export function emitAsyncExpr(host: LlvmEmitterContext, e: ExprOf<"yieldExpr" | 
         // build the IteratorResult record through the interned helper.
         const genT = e.gen.type;
         if (genT.kind !== "generator") throw new InternalCompilerError("llvm emitter bug: genResume on a non-generator");
-        if (e.type.kind !== "record") throw new InternalCompilerError("llvm emitter bug: genResume result is not a record");
+        const resultT = genT.async ? (e.type.kind === "promise" ? e.type.inner : null) : e.type;
+        if (resultT?.kind !== "record") throw new InternalCompilerError("llvm emitter bug: genResume result is not an IteratorResult record");
         const g = host.emitExpr(e.gen); // borrowed for the calls below
         const sendArg = (store: (aName: string, t: IrType) => void): void => {
           const a = host.emitExpr(e.arg!);
@@ -371,6 +376,70 @@ export function emitAsyncExpr(host: LlvmEmitterContext, e: ExprOf<"yieldExpr" | 
             B.line(`call void @scr_gen_in_ref(ptr ${g.name}, ptr ${name}, ptr ${vAdapters(host, t).release})`);
           }
         };
+        if (genT.async) {
+          let call: string;
+          if (e.mode === "next") {
+            if (e.arg === null) {
+              if (genT.nextT.kind === "dyn") {
+                host.declare(`declare ptr @scr_dyn_undefined()`);
+                host.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+                host.declare(`declare void @scr_dyn_release_v(ptr)`);
+                host.declare(`declare ptr @scr_async_gen_next_ref(ptr, ptr, ptr)`);
+                const u = B.tmp();
+                const owned = B.tmp();
+                B.line(`${u} = call ptr @scr_dyn_undefined()`);
+                B.line(`${owned} = call ptr @scr_dyn_retain_v(ptr ${u})`);
+                call = `call ptr @scr_async_gen_next_ref(ptr ${g.name}, ptr ${owned}, ptr @scr_dyn_release_v)`;
+              } else {
+                host.declare(`declare ptr @scr_async_gen_next_none(ptr)`);
+                call = `call ptr @scr_async_gen_next_none(ptr ${g.name})`;
+              }
+            } else {
+              const a = host.emitExpr(e.arg);
+              const t = e.arg.type;
+              if (isRefCounted(t)) host.moveTemp(a);
+              if (t.kind === "f64" || t.kind === "date") {
+                host.declare(`declare ptr @scr_async_gen_next_f64(ptr, double)`);
+                call = `call ptr @scr_async_gen_next_f64(ptr ${g.name}, double ${a.name})`;
+              } else if (t.kind === "bool") {
+                host.declare(`declare ptr @scr_async_gen_next_bool(ptr, i1 zeroext)`);
+                call = `call ptr @scr_async_gen_next_bool(ptr ${g.name}, i1 ${a.name})`;
+              } else {
+                host.declare(`declare ptr @scr_async_gen_next_ref(ptr, ptr, ptr)`);
+                call = `call ptr @scr_async_gen_next_ref(ptr ${g.name}, ptr ${a.name}, ptr ${vAdapters(host, t).release})`;
+              }
+            }
+          } else if (e.mode === "return") {
+            if (e.arg === null) {
+              host.declare(`declare ptr @scr_async_gen_return_none(ptr)`);
+              call = `call ptr @scr_async_gen_return_none(ptr ${g.name})`;
+            } else {
+              const a = host.emitExpr(e.arg);
+              const t = e.arg.type;
+              if (isRefCounted(t)) host.moveTemp(a);
+              if (t.kind === "f64" || t.kind === "date") {
+                host.declare(`declare ptr @scr_async_gen_return_f64(ptr, double)`);
+                call = `call ptr @scr_async_gen_return_f64(ptr ${g.name}, double ${a.name})`;
+              } else if (t.kind === "bool") {
+                host.declare(`declare ptr @scr_async_gen_return_bool(ptr, i1 zeroext)`);
+                call = `call ptr @scr_async_gen_return_bool(ptr ${g.name}, i1 ${a.name})`;
+              } else {
+                host.declare(`declare ptr @scr_async_gen_return_ref(ptr, ptr, ptr)`);
+                call = `call ptr @scr_async_gen_return_ref(ptr ${g.name}, ptr ${a.name}, ptr ${vAdapters(host, t).release})`;
+              }
+            }
+          } else {
+            if (e.arg === null) throw new InternalCompilerError("llvm emitter bug: async genResume throw with no payload");
+            const a = host.emitExpr(e.arg);
+            if (isRefCounted(e.arg.type)) host.moveTemp(a);
+            host.emitThrowValue({ name: a.name, type: e.arg.type });
+            host.declare(`declare ptr @scr_async_gen_throw(ptr)`);
+            call = `call ptr @scr_async_gen_throw(ptr ${g.name})`;
+          }
+          const p = B.tmp();
+          B.line(`${p} = ${call}`);
+          return host.own({ name: p, type: e.type });
+        }
         if (e.mode === "next") {
           if (e.arg === null) {
             if (genT.nextT.kind === "dyn") {
@@ -426,7 +495,7 @@ export function emitAsyncExpr(host: LlvmEmitterContext, e: ExprOf<"yieldExpr" | 
           host.declare(`declare void @scr_gen_resume_throw(ptr)`);
           B.line(`call void @scr_gen_resume_throw(ptr ${g.name})`);
         }
-        const helper = host.genResultThunkFor(genT, e.type);
+        const helper = host.genResultThunkFor(genT, resultT);
         // The record builds before the check so an unwind (a propagated
         // body exception) releases it as the frame's never-read dummy.
         const t = B.tmp();

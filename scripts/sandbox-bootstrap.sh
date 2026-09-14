@@ -9,30 +9,35 @@ if [ -z "$node_version" ] || [ -z "$pnpm_version" ]; then
 fi
 
 # The managed image intentionally floats its distro and language runtimes.
-# Install the same LLVM major and exact Node/pnpm tuple as the custom image so
+# Install the same LLVM and exact Node/pnpm tuple as the custom image so
 # differential oracles do not change when the managed image is refreshed.
+. /etc/os-release
+llvm_distro=${VERSION_CODENAME:?the Sandbox image must identify its Ubuntu release}
 curl --fail --silent --show-error --location \
   https://apt.llvm.org/llvm-snapshot.gpg.key \
   --output /tmp/llvm-snapshot.gpg.key
 gpg --dearmor --yes --output /tmp/llvm-snapshot.gpg /tmp/llvm-snapshot.gpg.key
 sudo install -D -m 0644 /tmp/llvm-snapshot.gpg /etc/apt/keyrings/llvm-snapshot.gpg
-echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-18 main" \
-  | sudo tee /etc/apt/sources.list.d/llvm18.list >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] https://apt.llvm.org/${llvm_distro}/ llvm-toolchain-${llvm_distro}-22 main" \
+  | sudo tee /etc/apt/sources.list.d/llvm22.list >/dev/null
 
 sudo apt-get update --quiet=2
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install --quiet=2 --yes --no-install-recommends \
   build-essential \
   ca-certificates \
   ccache \
-  clang-18 \
+  clang-22 \
   cmake \
-  libclang-rt-18-dev \
-  llvm-18 \
+  libclang-rt-22-dev \
+  libzstd-dev \
+  llvm-22-dev \
+  ninja-build \
   xz-utils \
   zlib1g-dev
 sudo rm -f /usr/local/bin/clang /usr/local/bin/clang++
-sudo ln -sf clang-18 /usr/bin/clang
-sudo ln -sf clang++-18 /usr/bin/clang++
+sudo ln -sf clang-22 /usr/bin/clang
+sudo ln -sf clang++-22 /usr/bin/clang++
+test "$(llvm-config-22 --version)" = 22.1.8
 
 node_archive="node-v${node_version}-linux-x64.tar.xz"
 curl --fail --silent --show-error --location \

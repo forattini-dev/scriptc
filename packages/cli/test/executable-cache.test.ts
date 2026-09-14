@@ -5,6 +5,8 @@ import { release as osRelease, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
+import { precompiledRuntimePackTarget } from "../../compiler/src/startup-cache.js";
+import { platformLinkerSupportsPersistentCache } from "../../compiler/src/backend/linker.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -13,6 +15,8 @@ const cliEntry = join(repoRoot, "packages/cli/src/main.ts");
 const tsxLoader = join(dirname(require.resolve("tsx/package.json")), "dist/loader.mjs");
 const runtimePackHost = process.platform === "darwin" && process.arch === "arm64" &&
   Number.parseInt(osRelease().split(".", 1)[0] ?? "", 10) >= 24;
+const helperTarget = precompiledRuntimePackTarget();
+const persistentExecutable = helperTarget === null || platformLinkerSupportsPersistentCache(process.env, helperTarget);
 
 test("exact executable repeats skip lowering while edits and damaged outputs stay correct", async () => {
   const dir = await mkdtemp(join(tmpdir(), "scriptc-cli-executable-cache-"));
@@ -54,10 +58,12 @@ test("exact executable repeats skip lowering while edits and damaged outputs sta
     const originalBinaryTime = (await stat(outPath)).mtimeMs;
     const originalTuTime = (await stat(tuPath)).mtimeMs;
 
-    // The exact repeat returns from the whole-program cache before tsgo and
-    // leaves already-correct caller outputs on their existing inodes.
+    // Every route reuses the frontend. Only routes with a complete native
+    // dependency proof can also retain the executable inode; other targets
+    // deliberately relink their cached translation unit.
     expect((await build()).stderr).not.toContain("scriptc lowering");
-    expect((await stat(outPath)).mtimeMs).toBe(originalBinaryTime);
+    if (persistentExecutable) expect((await stat(outPath)).mtimeMs).toBe(originalBinaryTime);
+    expect(await run()).toBe("one\n");
     expect((await stat(tuPath)).mtimeMs).toBe(originalTuTime);
 
     // Output-kind cleanup is honest even on an exact early hit: an IR file

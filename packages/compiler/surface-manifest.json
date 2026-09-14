@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "compilerVersion": "0.0.36-rust.0",
+  "compilerVersion": "0.1.1-rust.0",
   "coverage": [
     "Entries are projected mechanically from the compiler's own decision tables: the diagnostics registry, the unsupported-syntax dispatch tables, the stdlib and node-builtin lowering tables, and the supported-builtin-module list. Nothing is hand-maintained; the manifest regenerates byte-identically from the source tree at this version.",
     "Absence from this manifest means 'not projected', never 'unsupported'. Surfaces lowered through dedicated code paths rather than tables are not yet projected: console, JSON, Promise/async and the timer surface, the net/http/tls/https/dgram/dns/assert/test/stream/readline module member surfaces, template literals, the regex slice, global functions (parseInt, parseFloat, isNaN, isFinite), and the process surface outside its ambient slice.",
@@ -5662,6 +5662,22 @@
       "note": "Node 24.15.0; facets: property-read; supported scope: the percent-encoded userinfo component before the first ':', the empty string when absent; differential evidence: corpus:2833-url-userinfo"
     },
     {
+      "id": "syntax.async-generators",
+      "kind": "syntax",
+      "name": "typed async generator functions and methods",
+      "status": "static",
+      "backends": "unknown",
+      "note": "lazy bodies with queued next/return/throw requests, await, direct yield, and Node-compatible completion promises"
+    },
+    {
+      "id": "syntax.await-using-declarations",
+      "kind": "syntax",
+      "name": "block- and function-scoped await using declarations",
+      "status": "static",
+      "backends": "unknown",
+      "note": "LIFO asynchronous disposal through [Symbol.asyncDispose], with synchronous fallback"
+    },
+    {
       "id": "syntax.class-declarations-inside-functions",
       "kind": "syntax",
       "name": "class declarations inside functions",
@@ -5790,6 +5806,30 @@
       "code": "SC1090"
     },
     {
+      "id": "syntax.finally-abrupt-completions",
+      "kind": "syntax",
+      "name": "abrupt completions through finally",
+      "status": "static",
+      "backends": "unknown",
+      "note": "return, throw, break, continue, and labeled jumps run crossed finally blocks; a finally completion replaces the pending one"
+    },
+    {
+      "id": "syntax.for-await-async-generators",
+      "kind": "syntax",
+      "name": "for await over typed async generators",
+      "status": "static",
+      "backends": "unknown",
+      "note": "awaits each IteratorResult and closes the generator on early break"
+    },
+    {
+      "id": "syntax.for-using-of",
+      "kind": "syntax",
+      "name": "for (using ... of ...) over arrays",
+      "status": "static",
+      "backends": "unknown",
+      "note": "each array element is disposed at the end of its iteration, including break and continue paths"
+    },
+    {
       "id": "syntax.jsx-elements",
       "kind": "syntax",
       "name": "JSX elements (the .tsx surface resolves and types; the element tree has no lowering)",
@@ -5836,6 +5876,14 @@
       "status": "unsupported",
       "backends": "unknown",
       "code": "SC1090"
+    },
+    {
+      "id": "syntax.using-declarations",
+      "kind": "syntax",
+      "name": "block- and function-scoped using declarations",
+      "status": "static",
+      "backends": "unknown",
+      "note": "LIFO disposal on normal and abrupt scope exit through [Symbol.dispose]"
     },
     {
       "id": "syntax.with-statements",

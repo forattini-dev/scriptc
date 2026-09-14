@@ -71,7 +71,7 @@ function request(root: string, packageJson: string, output = join(root, "program
     outputKind: "obj" as const,
     sourcePath: "/source/app.ts",
     target,
-    helperHost: { platform: "darwin", arch: "arm64" } as const,
+    helperHost: { platform: "darwin" as const, arch: "arm64" },
     resolvePackageJson: () => packageJson,
     cacheRoot: join(root, "cache"),
   };

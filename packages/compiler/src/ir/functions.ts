@@ -15,7 +15,9 @@ export interface IrFunction {
    * Each is also listed in `locals` (with boxed: true); it is NOT a param. */
   captures?: IrParam[];
   /** Async: the body runs on a fiber; `returnType` is the INNER type T (a
-   * `return v` fulfills with v) while call sites receive Promise<T>. */
+   * `return v` fulfills with v) while ordinary call sites receive
+   * Promise<T>. With `generator` present, call sites receive the lazy
+   * async-generator object instead. */
   async?: true;
   /** Async module initializers only: a module-global Promise<T> slot where
    * the spawn wrapper caches its first evaluation promise. Every later
@@ -32,15 +34,16 @@ export interface IrFunction {
    * becomes the runtime cycle root. Dynamic imports wait on this shared
    * completion verdict instead of a build-time-selected member. */
   asyncCycleCacheGlobal?: string;
-  /** Generator (`function*`): the body runs on a fiber created SUSPENDED
-   * (nothing runs until the first `.next()`); `returnType` is the
-   * generator's TReturn (VOID when it carries no value — `return;`
+  /** Generator (`function*` / `async function*`): the body runs on a fiber
+   * created SUSPENDED (nothing runs until the first `.next()`); `returnType`
+   * is the generator's TReturn (VOID when it carries no value — `return;`
    * completes with the undefined arm) while call sites receive the
-   * generator type `{ yieldT, retT: returnType, nextT }` from an emitted
-   * spawn wrapper that only allocates. `yieldT` is what `yield e` sends
-   * out, `nextT` what `.next(v)` sends in (the yield expression's result
-   * type). Mutually exclusive with `async` (async generators are fenced). */
-  generator?: { yieldT: IrType; nextT: IrType };
+   * generator type `{ async?, yieldT, retT: returnType, nextT }` from an
+   * emitted spawn wrapper that only allocates. `yieldT` is what `yield e`
+   * sends out, `nextT` what `.next(v)` sends in (the yield expression's
+   * result type). `async` alongside this field marks an async generator: its
+   * resume methods queue requests and return promises. */
+  generator?: { yieldT: IrType; nextT: IrType; resultType: IrType & { kind: "record" } };
   body: IrStmt[];
   loc: SrcLoc;
 }

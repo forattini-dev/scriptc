@@ -23,7 +23,7 @@ function fixture(): IrModule {
       { kind: "exprStmt", expr: { kind: "bytesIntrinsic", method: "length", receiver: bytes, args: [], type: { kind: "f64" }, loc }, loc },
     ],
   };
-  return { irVersion: 6, sourceFile: loc.file, entry: fn.name, functions: [fn] };
+  return { irVersion: 8, sourceFile: loc.file, entry: fn.name, functions: [fn] };
 }
 
 test("byte reads and length borrow an eligible local without cloning its handle", () => {
@@ -74,7 +74,7 @@ test("borrowing rejects boxed, forced-boxed, global and suspended receivers", ()
   fn.async = true;
   expect(borrowedRustBytesLocal(bytes, [index], context)).toBeNull();
   delete fn.async;
-  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" } };
+  fn.generator = { yieldT: { kind: "f64" }, nextT: { kind: "undefinedT" }, resultType: { kind: "record", shapeId: "r0" } };
   expect(borrowedRustBytesLocal(bytes, [index], context)).toBeNull();
   delete fn.generator;
   const global: IrExpr = { ...bytes, localId: "globalBytes" };

@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@app/*": ["missing/*", "src/*"],
+      "@exact": ["src/exact.ts"]
+    }
+  }
+}

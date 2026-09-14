@@ -5,9 +5,9 @@
  * name drops out of the adapter's surface.
  *
  * Not present, per the survey's MISSING list and the two-world design:
- * ts.Types (a comment-text census artifact, not an API), and the island
- * surface that stays 5.9.3 (createSourceFile/preProcessFile/transpileModule
- * and the resolution/config-file helpers' 5.9.3 types). */
+ * ts.Types (a comment-text census artifact, not an API), the parser and
+ * transpile surface kept in TypeScript 5 islands, and the resolution/config
+ * helpers replaced by scriptc and the TypeScript 7 host. */
 
 import type * as ts from "./adapter.js";
 

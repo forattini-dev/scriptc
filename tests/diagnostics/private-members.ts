@@ -81,7 +81,8 @@ class GenBrand<T> {
 }
 console.log(new GenBrand<number>().same(new GenBrand<number>()));
 
-// Async private generators are still async generators — the blanket fence.
+// Positive control: async private generators use direct dispatch and the
+// same request queue as module-level async generators.
 class AsyncGen {
   async *#pump(): AsyncGenerator<number, void, undefined> {
     yield 1;

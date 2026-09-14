@@ -1163,6 +1163,9 @@ export interface IrValidationError {
  * TReturn channel, so call sites see the generator type. The one place
  * the body/call-site split is spelled out in the validator. */
 function callSiteReturnType(fn: IrFunction): IrType {
+  if (fn.async && fn.generator !== undefined) {
+    return { kind: "generator", async: true, yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT };
+  }
   if (fn.async) return { kind: "promise", inner: fn.returnType };
   if (fn.generator !== undefined) {
     return { kind: "generator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT };
@@ -1176,9 +1179,6 @@ export function validateModule(mod: IrModule): IrValidationError[] {
   for (const fn of mod.functions) {
     if (functionsByName.has(fn.name)) {
       errors.push({ message: `duplicate function "${fn.name}"`, loc: fn.loc });
-    }
-    if (fn.async && fn.generator !== undefined) {
-      errors.push({ message: `function "${fn.name}" is both async and a generator (async generators are fenced)`, loc: fn.loc });
     }
     functionsByName.set(fn.name, fn);
   }
@@ -1923,9 +1923,11 @@ function validateFunction(
         break;
       }
       case "seqExpr": {
-        // Statements in an expression: straight-line writes only — no
-        // control flow, no jumps (the C emission point is mid-expression).
-        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "arraySet", "bytesSet", "block"]);
+        // Statements in an expression cannot jump out of the expression,
+        // but a local state branch is valid: optional array stores must
+        // choose ARRAY_VALUE versus ARRAY_UNDEFINED before the final result
+        // is evaluated. Nested blocks/ifs are checked recursively below.
+        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "arraySet", "arraySetLength", "arraySetUndefined", "arrayDelete", "bytesSet", "block", "if"]);
         const flat = (ss: IrStmt[]): void => {
           for (const s of ss) {
             if (!allowed.has(s.kind)) {
@@ -1934,6 +1936,12 @@ function validateFunction(
             }
             if (s.kind === "block") {
               flat(s.body);
+              continue;
+            }
+            if (s.kind === "if") {
+              flat(s.then);
+              if (s.else_) flat(s.else_);
+              checkExpr(s.cond);
               continue;
             }
             checkStmt(s);
@@ -2348,6 +2356,24 @@ function validateFunction(
         }
         break;
       }
+      case "arrayHas": {
+        checkExpr(e.arr);
+        checkExpr(e.index);
+        expectType(e.index, F64, "arrayHas index");
+        if (!typeEquals(e.type, BOOL)) err(`arrayHas result ${e.type.kind} != bool`, e.loc);
+        if (e.arr.type.kind !== "array") {
+          err(`arrayHas on non-array ${e.arr.type.kind}`, e.loc);
+        }
+        break;
+      }
+      case "arrayState": {
+        checkExpr(e.arr);
+        checkExpr(e.index);
+        expectType(e.index, F64, "arrayState index");
+        if (!typeEquals(e.type, F64)) err(`arrayState result ${e.type.kind} != f64`, e.loc);
+        if (e.arr.type.kind !== "array") err(`arrayState on non-array ${e.arr.type.kind}`, e.loc);
+        break;
+      }
       case "bytesNew": {
         if (e.type.kind !== "bytes") {
           err(`bytesNew of non-bytes type ${e.type.kind}`, e.loc);
@@ -2498,10 +2524,12 @@ function validateFunction(
         const sig =
           e.method === "push" || e.method === "unshift"
             ? { argTypes: e.args.map(() => elem), result: F64 }
-            : e.method === "pushSpread" || e.method === "unshiftSpread"
+            : e.method === "pushSpread" || e.method === "concatSpread" || e.method === "unshiftSpread"
               ? { argTypes: [e.receiver.type], result: F64 }
+              : e.method === "nextPresent"
+              ? { argTypes: [F64], result: F64 }
               : e.method === "pop"
-              ? { argTypes: [], result: elem }
+              ? { argTypes: [], result: e.type } // union-checked below
               : e.method === "indexOf"
                 ? { argTypes: [elem], result: F64 }
                 : e.method === "includes"
@@ -2518,6 +2546,8 @@ function validateFunction(
                       ? { argTypes: [F64, F64, e.receiver.type], result: e.receiver.type }
                       : e.method === "with"
                         ? { argTypes: [F64, elem], result: e.receiver.type }
+                        : e.method === "withUndefined"
+                          ? { argTypes: [F64], result: e.receiver.type }
                   : e.method === "splice"
                     ? { argTypes: [F64, F64], result: e.receiver.type }
                         : e.method === "shift"
@@ -2543,19 +2573,14 @@ function validateFunction(
           // misjudge JS ===; the frontend fences these.
           err(`arrIntrinsic ${e.method} on union elements (frontend must reject)`, e.loc);
         }
-        if (e.method === "shift") {
-          // The result is the interned `elem | undefined` union (union
-          // elements are frontend-fenced, so the arms never collide).
-          if (elem.kind === "union") {
-            err("arrIntrinsic shift on union elements (frontend must reject)", e.loc);
-          }
+        if (e.method === "shift" || e.method === "pop") {
           const rdef = e.type.kind === "union" ? unions.get(e.type.unionId) : undefined;
           if (
             !rdef ||
-            !rdef.arms.some((a) => a.kind === "undefinedT") ||
-            !rdef.arms.some((a) => typeEquals(a, elem))
+            !rdef.arms.some((arm) => arm.kind === "undefinedT") ||
+            !(elem.kind === "union" ? typeEquals(elem, e.type) : rdef.arms.some((arm) => typeEquals(arm, elem)))
           ) {
-            err("arrIntrinsic shift result must be the elem|undefined union", e.loc);
+            err(`arrIntrinsic ${e.method} result must be the elem|undefined union`, e.loc);
           }
         }
         // slice's indices and splice's count are optional (omitted args
@@ -4881,17 +4906,19 @@ function validateFunction(
             err(`genResume throw of a ${e.arg.type.kind} value`, e.loc);
           }
         }
-        // The result is the IteratorResult record { done: bool, value: V }
+        // Sync resumes return IteratorResult directly; async resumes return
+        // Promise<IteratorResult>. The record is { done: bool, value: V }
         // with V dyn (the any/unknown channel) or an undefined-armed union.
-        if (e.type.kind !== "record") {
-          err(`genResume result is ${e.type.kind}, not a record`, e.loc);
+        const resultT = genT.async ? (e.type.kind === "promise" ? e.type.inner : null) : e.type;
+        if (resultT?.kind !== "record") {
+          err(`genResume result is ${typeKey(e.type)}, not ${genT.async ? "a promise of " : ""}a record`, e.loc);
           break;
         }
-        const rec = records.get(e.type.shapeId);
+        const rec = records.get(resultT.shapeId);
         const doneF = rec?.fields.find((f) => f.name === "done");
         const valueF = rec?.fields.find((f) => f.name === "value");
         if (!rec || rec.fields.length !== 2 || doneF?.type.kind !== "bool" || valueF === undefined) {
-          err(`genResume result record ${e.type.shapeId} is not { done: bool, value: V }`, e.loc);
+          err(`genResume result record ${resultT.shapeId} is not { done: bool, value: V }`, e.loc);
           break;
         }
         if (valueF.type.kind === "dyn") break;
@@ -5146,19 +5173,8 @@ function validateFunction(
   let breakableDepth = 0;
   // Labeled jump targets, innermost last: every loop/switch/labeled-block
   // enters with its labels (possibly none) so `break lbl`/`continue lbl`
-  // can resolve to an enclosing entry — and so the finally backstop can
-  // compare the TARGET's position, not just the innermost depth.
+  // can resolve to an enclosing entry.
   const labelTargets: { kind: "loop" | "switch" | "block"; labels: string[] }[] = [];
-  // Active try-with-finally regions: break/continue may not cross one, and
-  // NO jump may leave a finally BODY (the frontend fences both; this is the
-  // backstop). `return` crossing a region is modeled now (the backend's
-  // pending-return path), so returns are legal in tryBody/catchBody but
-  // still rejected inside finallyBody (they would replace a pending
-  // completion). Each entry records the loop/switch depths (and the label
-  // stack length) at region entry: a break whose target is at or below
-  // them would cross the finally.
-  const finallyRegions: { loopDepth: number; breakableDepth: number; labelLen: number }[] = [];
-  let finallyBlockDepth = 0;
 
   function checkStmts(stmts: IrStmt[]): void {
     for (const s of stmts) checkStmt(s);
@@ -5174,11 +5190,10 @@ function validateFunction(
     loopDepth--;
   }
 
-  /** The innermost enclosing target carrying `label`, or null — plus its
-   * index for the finally-region crossing check. */
-  function labelTargetOf(label: string): { entry: (typeof labelTargets)[number]; index: number } | null {
+  /** The innermost enclosing target carrying `label`, or null. */
+  function labelTargetOf(label: string): (typeof labelTargets)[number] | null {
     for (let i = labelTargets.length - 1; i >= 0; i--) {
-      if (labelTargets[i]!.labels.includes(label)) return { entry: labelTargets[i]!, index: i };
+      if (labelTargets[i]!.labels.includes(label)) return labelTargets[i]!;
     }
     return null;
   }
@@ -5285,6 +5300,23 @@ function validateFunction(
         } else {
           expectType(s.value, s.arr.type.elem, "arraySet value");
         }
+        break;
+      }
+      case "arraySetLength": {
+        checkExpr(s.arr);
+        checkExpr(s.length);
+        expectType(s.length, F64, "arraySetLength length");
+        if (s.arr.type.kind !== "array") {
+          err(`arraySetLength on non-array ${s.arr.type.kind}`, s.loc);
+        }
+        break;
+      }
+      case "arraySetUndefined":
+      case "arrayDelete": {
+        checkExpr(s.arr);
+        checkExpr(s.index);
+        expectType(s.index, F64, `${s.kind} index`);
+        if (s.arr.type.kind !== "array") err(`${s.kind} on non-array ${s.arr.type.kind}`, s.loc);
         break;
       }
       case "bytesSet": {
@@ -5442,59 +5474,33 @@ function validateFunction(
             err(`tryCatch catch binding without a catch body`, s.loc);
           }
         }
-        const guarded = s.finallyBody !== null;
-        if (guarded) finallyRegions.push({ loopDepth, breakableDepth, labelLen: labelTargets.length });
         checkStmts(s.tryBody);
         if (s.catchBody) checkStmts(s.catchBody);
-        if (s.finallyBody) {
-          finallyBlockDepth++;
-          checkStmts(s.finallyBody);
-          finallyBlockDepth--;
-        }
-        if (guarded) finallyRegions.pop();
+        if (s.finallyBody) checkStmts(s.finallyBody);
         break;
       }
       case "break": {
-        const region = finallyRegions[finallyRegions.length - 1];
         if (s.label !== undefined) {
           const target = labelTargetOf(s.label);
           if (!target) err(`break to unknown label "${s.label}"`, s.loc);
-          else if (region && target.index < region.labelLen) {
-            err(`labeled break crossing a finally block (frontend must reject)`, s.loc);
-          }
           break;
         }
         if (breakableDepth === 0) err(`break outside a loop or switch`, s.loc);
-        if (region && breakableDepth <= region.breakableDepth) {
-          err(`break crossing a finally block (frontend must reject)`, s.loc);
-        }
         break;
       }
       case "continue": {
-        const region = finallyRegions[finallyRegions.length - 1];
         if (s.label !== undefined) {
           const target = labelTargetOf(s.label);
           if (!target) err(`continue to unknown label "${s.label}"`, s.loc);
-          else if (target.entry.kind !== "loop") {
+          else if (target.kind !== "loop") {
             err(`continue to non-loop label "${s.label}"`, s.loc);
-          } else if (region && target.index < region.labelLen) {
-            err(`labeled continue crossing a finally block (frontend must reject)`, s.loc);
           }
           break;
         }
         if (loopDepth === 0) err(`continue outside a loop`, s.loc);
-        if (region && loopDepth <= region.loopDepth) {
-          err(`continue crossing a finally block (frontend must reject)`, s.loc);
-        }
         break;
       }
       case "return":
-        // Crossing OUT of a try/catch body guarded by a finally is modeled
-        // (the backend's pending-return path); a return inside the finally
-        // BODY itself is not (it would replace a pending completion).
-        if (finallyBlockDepth > 0) {
-          err(`return inside a finally body (frontend must reject)`, s.loc);
-        }
         if (s.value) {
           checkExpr(s.value);
           expectType(s.value, fn.returnType, "return value");

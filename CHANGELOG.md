@@ -76,6 +76,28 @@ All notable changes to scriptc will be documented in this file.
 
 <!-- release:start -->
 
+## 0.1.1
+
+### Fixes
+
+- **Native package releases are more reliable.** Musl LLVM helpers build as portable static executables, downloaded helper artifacts retain executable permissions, and npm publishing reconciles asynchronous staged versions on retry.
+
+<!-- release:end -->
+
+## 0.0.37
+
+### Features
+
+- **Sparse arrays preserve JavaScript missing-value semantics.** Native arrays now distinguish holes from explicit `undefined` across reads, writes, callbacks, searches, sorting, serialization, destructuring, spreads, and nested consumers, with differential coverage across the C and LLVM backends.
+- **Static ESM modules expose import metadata.** `import.meta.url`, `import.meta.filename`, `import.meta.dirname`, and `import.meta.main` lower to module-local constants for static ESM programs, including imported modules and WASI paths.
+- **LLVM native output covers additional host and cross targets.** Matching helpers and runtime packs now support macOS x64, Linux glibc and musl, Windows x64, and WASI alongside macOS arm64.
+- **Native linking is separated from C compilation.** LLVM builds can use a platform linker with program objects and precompiled runtime packs, while explicit C, fallback, and sanitizer builds retain their existing compiler path.
+- **Node.js compatibility has a generated v24 matrix.** Static-native and dynamic-island support are tracked separately in a machine-readable inventory and interactive documentation.
+- **`Math.PI` and `Math.E` lower to constants.** These standard library values now compile statically in programs and library profiles.
+
+### Performance
+
+- **Array sorting uses stable merge sort.** `sort` and `toSorted` preserve stable ties while avoiding quadratic comparator behavior on large inputs.
 ## 0.0.36-rust.0
 
 ### Features
@@ -96,8 +118,6 @@ All notable changes to scriptc will be documented in this file.
 
 - **macOS arm64 executables use release-built runtime packs.** LLVM-tier builds now emit the program object through the bundled helper and link feature-selected, hashed runtime/vendor artifacts without compiling C on the user's machine. Explicit C, LLVM fallback, and sanitizer builds retain the external C-toolchain path.
 - **Builds can stop at typed IR, readable C, or textual LLVM IR.** `scriptc build --emit=ir|c|llvm` writes one primary source artifact with stable default suffixes and requires only Node—no external compiler, archiver, linker, or executable cache. `--emit=exe` remains the default, and executable builds retain the former additive `--emit-ir` flag for one release with a deprecation warning; library mode keeps its additive `--emit-ir` option.
-
-<!-- release:end -->
 
 ## 0.0.35
 

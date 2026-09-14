@@ -429,8 +429,8 @@ export interface AnalyzeOptions {
  * Load → preflight → lowering all ride the ONE tsgo program (program.ts +
  * lowering/ over the ts7 adapter) — the native TypeScript compiler is the
  * only frontend since the phase-4 flip retired the 5.9.3 pipeline
- * (typescript@5.9.3 survives solely as the sanctioned islands: npm.ts's
- * parse scan and lower-comptime's transpileModule). Everything after
+ * (typescript@5.9.3 survives solely behind the source-string parser and
+ * transpilation islands enforced by scripts/test-ts7.mjs). Everything after
  * lowering is IR-world, so analyze() and compile() consume this one
  * Frontend shape. */
 interface Frontend {
@@ -796,7 +796,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
     const lowered = lowerWithFrontier(fe, {
       dynamic: opts.dynamic ?? false,
       coverage: true,
-      statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust",
+      statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust", nativeDenseArrays: (opts.backend ?? "rust") === "rust",
       targetPlatform: buildTargetPlatform(),
       ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
     });
@@ -1224,7 +1224,7 @@ async function compileTracked(
     try {
       lowered = lowerWithFrontier(fe, {
         dynamic: opts.dynamic ?? false,
-        statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust",
+        statefulRegex: (opts.backend ?? "rust") === "rust", nativePromiseViews: (opts.backend ?? "rust") === "rust", nativeDenseArrays: (opts.backend ?? "rust") === "rust",
         targetPlatform: buildPlatform,
         ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
       });

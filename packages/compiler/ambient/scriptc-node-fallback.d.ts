@@ -360,10 +360,11 @@ declare var require: {
 /* setImmediate/clearImmediate — Node's macrotask pair (fires after I/O
  * events of the current loop turn, before timers due later). The handle
  * follows the Timeout pattern: loop-liveness bookkeeping. */
-interface Immediate {
+interface Immediate extends Disposable {
   ref(): Immediate;
   unref(): Immediate;
   hasRef(): boolean;
+  [Symbol.dispose](): void;
 }
 declare function setImmediate(callback: () => void): Immediate;
 /* The trailing-argument form — Node passes the extras to the callback. */
@@ -813,12 +814,13 @@ declare module "timers" {
 /* node:timers/promises — the promisified pair the Node test harness leans
  * on (`await setTimeout(ms)` as a sleep). setTimeout's delay-only form and
  * setImmediate's bare form lower (a void promise the shared timer heap
- * settles); the resolve-value, options (AbortSignal), and setInterval
- * async-iterator forms are declared surface that fences per site. */
+ * settles); setInterval(delay, value) lowers to a typed async iterator.
+ * Resolve values on the one-shot pair and AbortSignal options remain
+ * declared surface that fences per site. */
 declare module "node:timers/promises" {
   export function setTimeout(delay?: number): Promise<void>;
   export function setImmediate(): Promise<void>;
-  export function setInterval(delay?: number, value?: unknown, options?: unknown): unknown;
+  export function setInterval<T = unknown>(delay?: number, value?: T, options?: unknown): AsyncGenerator<T, void, undefined>;
   export const scheduler: {
     wait(delay?: number): Promise<void>;
     yield(): Promise<void>;
@@ -1228,7 +1230,7 @@ declare module "fs/promises" {
     bytesWritten: number;
     buffer: T;
   }
-  export interface FileHandle {
+  export interface FileHandle extends AsyncDisposable {
     readonly fd: number;
     close(): Promise<void>;
     read<T extends Uint8Array>(
@@ -1251,6 +1253,7 @@ declare module "fs/promises" {
     stat(): Promise<import("node:fs").Stats>;
     truncate(len?: number): Promise<void>;
     sync(): Promise<void>;
+    [Symbol.asyncDispose](): Promise<void>;
   }
   export function open(path: string, flags?: string | number, mode?: number): Promise<FileHandle>;
   export function readFile(path: string, encoding: "utf8" | "utf-8"): Promise<string>;
@@ -1655,7 +1658,7 @@ declare module "child_process" {
    * quiescence (SEMANTICS.md documents the divergence). An "error"
    * event with no registered listener prints the error and exits 1,
    * exactly the unhandled-'error' EventEmitter behavior. */
-  export interface ChildProcess {
+  export interface ChildProcess extends Disposable {
     /* The exit listener may also take Node's second parameter — the
      * terminating signal's name, null for a normal exit. */
     on(event: "exit", listener: (code: number | null, signal: string | null) => void): void;
@@ -1683,6 +1686,7 @@ declare module "child_process" {
     readonly killed: boolean;
     kill(signal?: string | number): boolean;
     unref(): void;
+    [Symbol.dispose](): void;
     /* The piped-output streams — non-null exactly when the matching
      * stdio slot was "pipe" (Node's shape). */
     readonly stdout: NodeJS.ReadableStream | null;
@@ -2123,11 +2127,12 @@ declare module "node:querystring" {
  * on("close", cb). An open interface keeps the process alive until
  * close()/EOF, Node's semantics; lines split on \n and \r\n. */
 declare module "readline" {
-  export interface Interface {
+  export interface Interface extends Disposable {
     question(query: string, callback: (answer: string) => void): void;
     close(): void;
     on(event: "close", listener: () => void): void;
     [Symbol.asyncIterator](): AsyncIterableIterator<string>;
+    [Symbol.dispose](): void;
   }
   export function createInterface(options: {
     input: unknown;

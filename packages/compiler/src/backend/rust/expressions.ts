@@ -406,6 +406,9 @@ export class RustExpressionEmitter {
       case "arrayGet":
         if (expr.arr.type.kind !== "array") this.context.unsupported("arrayGet on a non-array", expr.loc);
         return `runtime::array_get(&(${this.emitExpr(expr.arr)}), ${this.emitExpr(expr.index)})`;
+      case "arrayHas": case "arrayState":
+        if (expr.arr.type.kind !== "array") this.context.unsupported(`${expr.kind} on a non-array`, expr.loc);
+        return `runtime::${expr.kind === "arrayHas" ? "array_has" : "array_state"}(&(${this.emitExpr(expr.arr)}), ${this.emitExpr(expr.index)})`;
       case "arrIntrinsic":
         return this.context.emitArrayIntrinsic(expr);
       case "bytesNew": {
