@@ -2843,7 +2843,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
     }
     const valueTag = lowerer.armTag(local.type.unionId, narrowed);
     const undefTag = lowerer.armTag(local.type.unionId, UNDEFINED_T);
-    if (valueTag < 0 || undefTag < 0) throw new InternalCompilerError("runtime-optional local is missing its value or undefined arm");
+    if (valueTag < 0 || undefTag < 0) lowerer.unsupported("SC1090", expr, `a runtime-optional read narrowed to '${lowerer.fmt(narrowed)}', which is not one of its stored '${lowerer.fmt(local.type)}' arms`);
     const def = lowerer.unions.get(local.type.unionId);
     if (!def || def.arms.length !== 2) {
       // The checker may narrow a runtime-optional capture to one arm of a

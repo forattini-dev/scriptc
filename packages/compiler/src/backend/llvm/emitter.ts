@@ -2095,7 +2095,7 @@ class LlEmitter {
           retT: ret,
           nextT: fn.generator.nextT,
         };
-        const resultT = fn.generator.resultType;
+        const resultT = fn.generator.resultType; if (!resultT) throw new LlvmUnsupportedError("asyncGeneratorResultRecord", fn.loc);
         const build = this.genResultThunkFor(genT, resultT);
         settleAsync = `${build}_async`;
         const settleKey = `ags:${typeKey(genT)}`;

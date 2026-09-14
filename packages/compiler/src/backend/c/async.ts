@@ -208,7 +208,7 @@ function emitArgPackAndTrampolinePrologue(
           retT: ret,
           nextT: fn.generator.nextT,
         };
-        const resultT = fn.generator.resultType;
+        const resultT = fn.generator.resultType; if (!resultT) throw new InternalCompilerError("C emitter: async generator without an IteratorResult record (Rust-only shape)");
         const build = genResultThunkFor(emitter, genT, resultT);
         settleAsync = `${build}_async`;
         const settleKey = `async:${typeKey(genT)}`;

@@ -604,7 +604,7 @@ export class CEmitter {
           retT: fn.returnType,
           nextT: fn.generator.nextT,
         },
-        fn.generator.resultType,
+        fn.generator.resultType ?? ((): never => { throw new InternalCompilerError("C emitter: async generator without an IteratorResult record (Rust-only shape)"); })(),
       );
     }
     // Function bodies are emitted first (into this.lines) so the literal

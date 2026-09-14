@@ -43,7 +43,7 @@ export interface IrFunction {
    * sends out, `nextT` what `.next(v)` sends in (the yield expression's
    * result type). `async` alongside this field marks an async generator: its
    * resume methods queue requests and return promises. */
-  generator?: { yieldT: IrType; nextT: IrType; resultType: IrType & { kind: "record" } };
+  generator?: { yieldT: IrType; nextT: IrType; resultType?: IrType & { kind: "record" } };
   body: IrStmt[];
   loc: SrcLoc;
 }

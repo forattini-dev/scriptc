@@ -200,7 +200,7 @@ export interface FnCtx {
   isAsync?: boolean;
   /** Yield is legal here (generator function body): the yield/next value
    * channels the yield lowering types itself against. */
-  generator?: { yieldT: IrType; nextT: IrType; resultType: IrType & { kind: "record" } } | null;
+  generator?: { yieldT: IrType; nextT: IrType; resultType?: IrType & { kind: "record" } } | null;
   /** VARIADIC `arguments` form (rest-marked func type with no declared
    * rest param): the synthetic trailing dyn-array param `arguments`
    * reads resolve to. */

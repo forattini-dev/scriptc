@@ -92,18 +92,17 @@ export interface FnSig {
   isAsync?: boolean;
   /** Generator: the IrFunction's returnType is the TReturn channel; the
    * yield/next channels ride here (IrFunction.generator's exact shape). */
-  generator?: { yieldT: IrType; nextT: IrType; resultType: IrType & { kind: "record" } };
+  generator?: { yieldT: IrType; nextT: IrType; resultType?: IrType & { kind: "record" } };
 }
 
 export function generatorMeta(
   lowerer: Lowerer,
   type: IrType & { kind: "generator" },
 ): NonNullable<IrFunction["generator"]> {
+  // A channel with no legal union arm (an effect-kernel body returning a Map, a function, an engine value) has no
+  // IteratorResult record: the generator still compiles; only backends that materialize the record refuse it.
   const resultType = genResultRecord(type.yieldT, type.retT, lowerer.shapes, lowerer.unions);
-  if (resultType === null) {
-    throw new InternalCompilerError("lowerer bug: mapped generator without an IteratorResult record");
-  }
-  return { yieldT: type.yieldT, nextT: type.nextT, resultType };
+  return { yieldT: type.yieldT, nextT: type.nextT, ...(resultType === null ? {} : { resultType }) };
 }
 
 /** Instantiation cap per generic function: same-key recursion (`len<T>`
