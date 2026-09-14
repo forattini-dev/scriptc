@@ -1,0 +1,45 @@
+{
+  "baseline": "/tmp/scriptc-redcode-typed-rest-20260914a",
+  "change": "Proven undefined filters and effect-preserving nullish comparisons",
+  "compilerHead": "9028f83662446e0a66fd45d82506138a7a76098d",
+  "compilerDirty": true,
+  "GOMEMLIMIT": "4GiB",
+  "consumerHead": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+  "result": {
+    "status": "refused",
+    "seconds": 465.927207265,
+    "memoryPeakBytes": 5283049472,
+    "memoryPeakGiB": 4.920223236083984,
+    "diagnostics": 3072,
+    "beforeDiagnostics": 3078,
+    "removedOccurrences": 7,
+    "addedOccurrences": 1,
+    "sameSourceHashesAndOrder": true,
+    "sourceCount": 1335,
+    "SC0001": 0,
+    "SC9001": 0
+  },
+  "hashCheck": {
+    "compilerChanged": [],
+    "consumerChanged": [],
+    "previousGraphChanged": []
+  },
+  "artifacts": "/tmp/scriptc-redcode-filter-proof-20260914a",
+  "gates": {
+    "sanitized-focused": {
+      "code": 0,
+      "seconds": 92.99130873009562,
+      "log": "/tmp/scriptc-filter-proof-sanitized-focused.log"
+    },
+    "full-plain": {
+      "code": 1,
+      "seconds": 160.4498773738742,
+      "log": "/tmp/scriptc-filter-proof-full-plain.log"
+    },
+    "full-sanitized": {
+      "code": 1,
+      "seconds": 186.3671092572622,
+      "log": "/tmp/scriptc-filter-proof-full-sanitized.log"
+    }
+  }
+}

@@ -9,7 +9,7 @@ import { inferredRegexCaptureReturn } from "./lower-regex-captures.js";
 export { lowerRecordFieldCall } from "./lower-record-field-call.js";
 export { wrappedUndefined } from "./lower-undefined.js";
 import { lowerTypedObjectIteration } from "./lower-object-iteration.js";
-import { provesWrittenNonNullFilter } from "./lower-native-containers.js";
+import { provesWrittenNullishFilter } from "./nullish-filter-proof.js";
 /* Call lowering: the lowerCall dispatch chain, parameter-shape analysis and
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
@@ -6899,23 +6899,12 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
     }
   }
 
-/** NARROWING `a.filter(...)` — the two callback forms whose result the
-   * checker types as a NARROWER array than the receiver:
-   *
-   *   xs.filter((x) => x !== undefined)   // TS-inferred type predicate
-   *   xs.filter(Boolean)                  // BooleanConstructor overload
-   *
-   * Trust discipline: only tests the RUNTIME actually performs may re-tag.
-   * An INFERRED predicate (inline arrow/function expression with no return
-   * annotation — TS 5.5 only infers `x is T` when the body proves it) and
-   * `Boolean` (retained elements are truthy, hence never the undefined/
-   * null arm) both qualify; a HAND-WRITTEN `x is T` annotation is an
-   * unchecked assertion (a lying one would corrupt the extraction) and
-   * stays fenced. The narrowed element must be a SINGLE arm of the
-   * receiver's union — retained elements re-tag through unionNarrow in the
-   * synthesized loop; a multi-arm target would need the union-to-union
-   * re-tag that doesn't exist (fenced with the annotate-the-callback
-   * escape). Null hands non-narrowing filters to the generic HOF path. */
+/** Narrowing filters re-tag only what the runtime predicate proves.
+ * Inline inferred predicates, Boolean, and written predicates with a proven
+ * nullish comparison qualify. An annotation alone cannot justify extraction.
+ * The retained type must be one arm of the source union; multi-arm targets
+ * and unproven callback values remain fenced. Non-narrowing calls fall
+ * through to the generic array HOF lowering. */
   export function lowerFilterNarrowCall(lowerer: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (call.questionDotToken || access.questionDotToken) return null;
@@ -6991,7 +6980,7 @@ export function lowerPromiseMethodCall(lowerer: Lowerer, call: ts.CallExpression
           `(only an inline callback whose predicate the checker inferred can re-tag — ${annotateEscape})`,
       );
     }
-    if (argNode.type && !provesWrittenNonNullFilter(lowerer, argNode, elem, outElem!)) {
+    if (argNode.type && !provesWrittenNullishFilter(lowerer, argNode, elem, outElem!)) {
       lowerer.unsupported(
         "SC1090",
         argNode,

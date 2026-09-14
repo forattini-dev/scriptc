@@ -1,3 +1,4 @@
+import { nullishConstantKind } from "./nullish-filter-proof.js";
 import { functionAbi } from "./function-abi.js";
 import { lowerComputedStringKey } from "./lower-computed-string-key.js";
 import { lowerRegexStateRead, lowerRegexStateAssign, lowerDynamicRegexCapture } from "./lower-regex-state.js";
@@ -2908,31 +2909,28 @@ function runtimeTypeRead(value: IrExpr): IrExpr {
   return value;
 }
 
-/** `x == null` / `x != null` — JS's idiomatic null-OR-undefined test, the
-   * ONE loose comparison with static semantics: `== null` matches exactly
-   * null and undefined (0, "", and false do not). Requires a syntactic
-   * null LITERAL on either side; the other operand's unit arms become a
-   * runtime tag test — one `unionIsTag` when the union has a single unit
-   * arm, a short-circuit pair over both tags otherwise (that shape re-emits
-   * the operand, so only side-effect-free reads compose; anything else
-   * keeps the fence). A unit-literal operand folds (null and undefined are
-   * mutually loose-equal), and a non-nullable operand folds statically —
-   * the same storage-type rule as lowerUnitComparison. Null (fence)
-   * when this isn't a null-literal comparison or the operand has no
-   * lowering here (dyn/jsval/void). */
+/** Equality against a proven null/undefined constant tests both unit arms.
+ * Zero, empty strings, and false do not match. Only an actual constant may
+ * be elided: a shadowed undefined keeps ordinary comparison semantics.
+ * Union operands use tag tests; unsupported representations remain fenced. */
   function lowerLooseNullCompare(lowerer: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc,): IrExpr | null {
     const negated = expr.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken;
     const unwrap = (e: ts.Expression): ts.Expression =>
       ts.isParenthesizedExpression(e) ? unwrap(e.expression) : e;
     const left = unwrap(expr.left);
     const right = unwrap(expr.right);
-    const leftIsNull = left.kind === ts.SyntaxKind.NullKeyword;
-    if (!leftIsNull && right.kind !== ts.SyntaxKind.NullKeyword) return null;
+    const leftIsNull = nullishConstantKind(lowerer, left) !== null;
+    if (!leftIsNull && nullishConstantKind(lowerer, right) === null) return null;
     const otherNode = leftIsNull ? right : left;
     const other = runtimeTypeRead(lowerer.lowerExpr(otherNode));
+    const constantResult = (value: boolean): IrExpr => {
+      const result: IrExpr = { kind: "boolLit", value, type: BOOL, loc };
+      return droppableStatic(other) ? result : { kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: other, loc }], result, type: BOOL, loc };
+    };
     if (isUnitType(other.type)) {
       // `null == null`, `undefined == null`: units are mutually loose-equal.
-      return { kind: "boolLit", value: !negated, type: BOOL, loc };
+      return constantResult(!negated);
     }
     if (other.type.kind === "dyn") {
       // `v != null` on unknown: one dyn kind test covers both units.
@@ -2952,7 +2950,7 @@ function runtimeTypeRead(value: IrExpr): IrExpr {
       const tags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
       if (tags.length === 0) {
         // No unit arms: never null-ish (defensive — the fold below).
-        return { kind: "boolLit", value: negated, type: BOOL, loc };
+        return constantResult(negated);
       }
       const isTag = (tag: number): IrExpr => ({
         kind: "unionIsTag", unionId: ut.unionId, tag, negated, value: other, type: BOOL, loc,
@@ -3013,7 +3011,7 @@ function runtimeTypeRead(value: IrExpr): IrExpr {
     }
     // A non-nullable operand (tsc allows the comparison as a guard):
     // `== null` is statically false, `!= null` statically true.
-    return { kind: "boolLit", value: negated, type: BOOL, loc };
+    return constantResult(negated);
   }
 
 /** Safe to EMIT twice: plain reads with no side effects — local/global

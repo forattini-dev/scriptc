@@ -169,38 +169,6 @@ export function lowerTupleJoinCall(
   return { kind: "call", callee: helper, args: [receiver, separator], type: STRING, loc };
 }
 
-/** Prove the body of a written non-null predicate instead of trusting its
- * `x is T` annotation. A single comparison cannot mutate the captured value. */
-export function provesWrittenNonNullFilter(
-  L: Lowerer,
-  callback: ts.ArrowFunction | ts.FunctionExpression,
-  source: IrType,
-  output: IrType,
-): boolean {
-  if (source.kind !== "union" || callback.parameters.length !== 1 || callback.parameters[0]!.initializer || callback.parameters[0]!.dotDotDotToken) return false;
-  const parameter = callback.parameters[0]!.name;
-  if (!ts.isIdentifier(parameter)) return false;
-  let body: ts.Node = callback.body;
-  if (ts.isBlock(body)) {
-    if (body.statements.length !== 1) return false;
-    const statement = body.statements[0]!;
-    if (!ts.isReturnStatement(statement) || !statement.expression) return false;
-    body = statement.expression;
-  }
-  while (ts.isParenthesizedExpression(body)) body = body.expression;
-  if (!ts.isBinaryExpression(body)) return false;
-  const strict = body.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
-  if (!strict && body.operatorToken.kind !== ts.SyntaxKind.ExclamationEqualsToken) return false;
-  const value = body.left.kind === ts.SyntaxKind.NullKeyword ? body.right : body.left;
-  const excluded = body.left.kind === ts.SyntaxKind.NullKeyword ? body.left : body.right;
-  if (excluded.kind !== ts.SyntaxKind.NullKeyword || !ts.isIdentifier(value)) return false;
-  const symbol = L.checker.getSymbolAtLocation(parameter);
-  if (symbol === undefined || L.checker.getSymbolAtLocation(value) !== symbol) return false;
-  const arms = L.unions.get(source.unionId)?.arms;
-  return arms !== undefined && arms.every((arm) =>
-    typeEquals(arm, output) || arm.kind === "nullT" || (!strict && arm.kind === "undefinedT"));
-}
-
 /** Argument packs snapshot each spread before evaluating the next argument;
  * insertion happens only after every argument has been evaluated. */
 export function lowerArraySpreadInsert(
