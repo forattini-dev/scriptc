@@ -7,14 +7,11 @@ import { delimiter, join } from "node:path";
 import { afterAll, afterEach, expect, test as vitestTest } from "vitest";
 import { ccVersion, compileC, compileLibArchive, implicitDependencyProbeIncludes, runtimeFingerprint, runtimeSrcDir, stageRuntimeObjects, supportedNativeCacheWarmProfiles, warmNativeCaches } from "./native-toolchain.js";
 import { splitLlvmProgram } from "./llvm/split.js";
+import { isolateNativeToolchainEnvironment } from "./native-toolchain.test-support.js";
 
 const scratch: string[] = [];
 const TEST_CACHE_IDENTITY = "cc-cache-tests-v1";
-const originalStableToolchain = process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"];
-// This file is the strict-path contract: its fixtures replace wrappers,
-// headers, SDK selectors, and native inputs in place between invocations.
-// The rest of the immutable differential harness may memoize those probes.
-delete process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"];
+const restoreToolchainEnvironment = isolateNativeToolchainEnvironment();
 const originalTrustedCompilerWrapper = process.env["SCRIPTC_TEST_TRUST_COMPILER_WRAPPER"];
 
 /** The cache suite mutates process-wide compiler state and must stay serial
@@ -82,11 +79,7 @@ const cacheTreeBytes = async (root: string): Promise<number> => {
 
 afterAll(async () => {
   await Promise.all(scratch.map((dir) => rm(dir, { recursive: true, force: true })));
-  if (originalStableToolchain === undefined) {
-    delete process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"];
-  } else {
-    process.env["SCRIPTC_TEST_STABLE_TOOLCHAIN"] = originalStableToolchain;
-  }
+  restoreToolchainEnvironment();
 });
 
 afterEach(() => {

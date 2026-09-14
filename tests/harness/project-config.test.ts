@@ -146,10 +146,10 @@ test.each(sanitize ? ["c", "llvm"] as const : ["rust", "c", "llvm"] as const)("n
   expect(stderr).toBe("");
 });
 
-test("node-types: declared-but-not-lowered surface fences, naming @types/node", async () => {
-  const outDir = outDirFor("node-fenced");
+test.each(sanitize ? ["c", "llvm"] as const : ["rust", "c", "llvm"] as const)("node-types: declared-but-not-lowered surface fences, naming @types/node (%s)", async (backend) => {
+  const outDir = outDirFor(`node-fenced-${backend}`);
   const result = await compile(join(nodeTypesDir, "fenced.ts"), {
-    backend: sanitize ? "c" : "rust",
+    backend,
     outPath: join(outDir, "fenced"),
     outDir,
     sanitize,
@@ -158,6 +158,11 @@ test("node-types: declared-but-not-lowered surface fences, naming @types/node", 
   if (result.ok) return;
   const rendered = renderDiagnostics(result.diagnostics, result.sourceTexts, { color: false })
     .replaceAll(nodeTypesDir + "/", "");
+  // The frontend recognizes bigint for every backend; C/LLVM reject native
+  // BigInt at backend admission. This unsupported Buffer method must still
+  // refuse here, independently of the type of its result.
+  expect(result.diagnostics.some(d => d.code === "SC2020" && d.message.includes("readBigUInt64BE"))).toBe(true);
+  expect(result.diagnostics.some(d => d.code === "SC2001" && d.message.includes("bigint"))).toBe(false);
   await expect(rendered).toMatchFileSnapshot("__snapshots__/node-types-fenced.txt");
 });
 

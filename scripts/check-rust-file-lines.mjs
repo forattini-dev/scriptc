@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // until the entry disappears at 1,200 lines. This is debt tracking, not an
 // exemption from the final rule.
 const legacyOversizedFiles = new Map([
-  ["packages/compiler/src/backend/native-toolchain.test.ts", 3_967],
+  ["packages/compiler/src/backend/native-toolchain.test.ts", 3_960],
   ["packages/compiler/src/backend/native-toolchain.ts", 5_437],
   ["packages/compiler/src/backend/c/async.ts", 1_279],
   ["packages/compiler/src/backend/c/exprs.ts", 7_542],
