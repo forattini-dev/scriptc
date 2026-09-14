@@ -244,8 +244,16 @@ export class Ts7Host {
    * server snapshot, then drop its compiler-owned virtual config. */
   releaseProgram(configPath: string): void {
     if (this.closed) return;
-    this.api.updateSnapshot({ closeProjects: [configPath] }).dispose();
-    this.virtualFiles.delete(tsgoPath(configPath));
+    const snapshot = this.api.updateSnapshot({ closeProjects: [configPath] });
+    try {
+      // The client retains the latest snapshot's source cache for reuse even
+      // after disposal. With no open projects it has no live program to serve;
+      // release that cache while keeping the host reusable for the next load.
+      if (snapshot.getProjects().length === 0) this.api.clearSourceFileCache();
+    } finally {
+      snapshot.dispose();
+      this.virtualFiles.delete(tsgoPath(configPath));
+    }
   }
 
   getTimingInfo(): unknown {
@@ -348,6 +356,8 @@ export class Ts7Program {
     if (this.disposed) return;
     this.disposed = true;
     this.semanticDiagnostics.clear();
+    this.sourceFilesCache = null;
+    this.checkerFacade = null;
     this.snapshot.dispose();
     if (this.sharedHost) this.host.releaseProgram(this.project.configFileName);
     else this.host.close();

@@ -20,9 +20,12 @@ test("disposing a shared-host program unloads its project and preserves live sib
   try {
     const first = host.createProgram([entry], {});
     const sibling = host.createProgram([entry], {});
+    const siblingSource = sibling.getSourceFile(entry);
+    expect(siblingSource).toBeDefined();
     expect(projects()).toEqual([first.project.configFileName, sibling.project.configFileName].sort());
     first.dispose();
     expect(projects()).toEqual([sibling.project.configFileName]);
+    expect(sibling.getSourceFile(entry)).toBe(siblingSource);
     expect(sibling.getSourceFile(entry)?.text).toContain("answer");
     expect(sibling.getSemanticDiagnostics()).toEqual([]);
 

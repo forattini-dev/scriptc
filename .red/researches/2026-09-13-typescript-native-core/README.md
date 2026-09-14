@@ -97,8 +97,34 @@ não são aprovação de publicação nem evidência de conclusão do plano.
   no PATH aprovou o teste COFF, sem mudança no código de produção.
 - Tentativa sanitized com shim foi interrompida deliberadamente após essa
   contraprova, pois mantinha o ambiente já invalidado. Não é resultado terminal
-  da suíte. Gate plain com PATH direto e sem override de loader está rodando;
-  nenhum gate completo verde foi declarado.
+  da suíte. Gate plain com PATH direto e sem override de loader terminou com
+  96 testes aprovados, dois skips e uma falha: SIGBUS do rust-lld no primeiro
+  fixture do contrato Rust de process/path. A suíte de toolchain terminou com
+  63 aprovados e dois skips. Nenhum gate completo verde foi declarado.
+
+O SIGBUS se repetiu no contrato isolado, mas não ao compilar o mesmo Rust para
+`/tmp`. A investigação encontrou `/home` cheio (19 MiB disponíveis), enquanto
+`/tmp` estava em outra partição com 17 GiB livres. A execução instrumentada
+também retornou ENOSPC. Os temporários em `~/.cache/scriptc-test-tmp` ocupavam
+185 GiB. Remover os dois diretórios descartáveis `consolidation-20260910g` e
+`consolidation-20260910h` liberou aproximadamente 42 GiB; o contrato original
+passou então com seus oito fixtures, sem alteração de emissão ou de linker.
+Logs: `/tmp/scriptc-core-process-{recheck,strace,after-space}.log`.
+
+A pedido do mantenedor, foram limpos também os caches Cargo de registry,
+target e runtime Rust em `/home`, além de `/opt/cargo-target` (já quase vazio).
+A limpeza adicional liberou 3,26 GiB em `/home`, preservando fontes,
+configurações, credenciais e toolchains. O runtime terá rebuild frio na próxima
+validação. Registro: `/tmp/scriptc-cargo-cleanup-20260913.json`.
 
 As correções deste checkpoint não mudam a emissão Rust nem o runtime das
 aplicações. A etapa 1 permanece aberta enquanto os gates não terminarem verdes.
+
+### Segundo checkpoint: retenção após descarte no TS7
+
+O teste de coleta com servidor TS7 real reproduziu retenção de ASTs por
+programas já descartados. A correção libera as referências da fachada e, ao
+fechar o último projeto de um host compartilhado, limpa o cache de fontes do
+cliente TS7. Hosts continuam reutilizáveis e fontes de projetos irmãos vivos
+preservam identidade. Evidências e limites do experimento estão em
+[retenção de programas descartados](disposed-program-retention.md).
