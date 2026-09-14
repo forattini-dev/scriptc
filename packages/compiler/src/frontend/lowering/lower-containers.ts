@@ -1074,7 +1074,7 @@ function arraySearchHelper(
  * return gained only undefined. The array state byte carries that value. */
 function callbackArrayElem(lowerer: Lowerer, call: ts.CallExpression, fnRet: IrType): IrType {
   const result = lowerer.mapTypeOf(lowerer.typeOf(call));
-  return result?.kind === "array" && lowerer.runtimeOptionalWidening(fnRet, result.elem)
+  return result?.kind === "array" && !lowerer.nativeDenseArrays && lowerer.runtimeOptionalWidening(fnRet, result.elem) // dense (Rust) arrays keep the callback's own result: no undefined in a non-optional slot
     ? result.elem : fnRet;
 }
 

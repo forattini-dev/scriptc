@@ -689,7 +689,7 @@ class RustStatementEmitter {
     this.context.popIndent();
     this.context.line("};");
     if (stmt.catchBody !== null) pending = this.emitCatch(stmt, pending, fn.returnType);
-    if (stmt.finallyBody !== null) this.emitFinally(stmt.finallyBody);
+    if (stmt.finallyBody !== null) pending = this.emitFinally(stmt, pending, fn.returnType);
     this.emitPendingCompletion(pending);
   }
 
@@ -736,21 +736,38 @@ class RustStatementEmitter {
     return nextPending;
   }
 
-  private emitFinally(statements: readonly IrStmt[]): void {
-    const finalResult = this.context.nextTemporary();
+  /** The finally body as its own completion: a normal finish keeps the pending completion; a return, break, continue,
+   * or throw raised inside it REPLACES the pending one. Resource cleanup (`suppressFinallyErrors`) throwing over a
+   * thrown body completes with a SuppressedError instead. */
+  private emitFinally(stmt: Extract<IrStmt, { kind: "tryCatch" }>, pending: string, returnType: IrType): string {
+    const finalCompletion = this.context.nextTemporary();
     const finalPayload = this.context.nextTemporary();
-    this.context.line(`let ${finalResult} = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
+    const next = this.context.nextTemporary();
+    this.context.line(`let ${finalCompletion} = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {`);
     this.context.pushIndent();
     this.context.completionLoopBoundaries.push(this.context.loopTargets.length);
-    this.emit(statements);
+    this.context.adjustCapturedReturnDepth(1);
+    this.emit(stmt.finallyBody ?? []);
+    this.context.adjustCapturedReturnDepth(-1);
     this.context.completionLoopBoundaries.pop();
+    this.context.line(`runtime::Completion::<${this.context.rustType(returnType, stmt.loc)}>::Normal`);
     this.context.popIndent();
-    this.context.line("}));");
-    this.context.line(`if let Err(${finalPayload}) = ${finalResult} {`);
+    this.context.line("})) {");
     this.context.pushIndent();
-    this.context.line(`runtime::rethrow_caught(runtime::caught_from_panic(${finalPayload}));`);
+    this.context.line("Ok(completion) => completion,");
+    this.context.line(`Err(${finalPayload}) => runtime::Completion::Throw(runtime::caught_from_panic(${finalPayload})),`);
     this.context.popIndent();
-    this.context.line("}");
+    this.context.line("};");
+    this.context.line(`let ${next} = match (${finalCompletion}, ${pending}) {`);
+    this.context.pushIndent();
+    this.context.line("(runtime::Completion::Normal, completion) => completion,");
+    if (stmt.suppressFinallyErrors) {
+      this.context.line("(runtime::Completion::Throw(_), runtime::Completion::Throw(_)) => runtime::Completion::Throw(runtime::suppressed_error_caught()),");
+    }
+    this.context.line("(completion, _) => completion,");
+    this.context.popIndent();
+    this.context.line("};");
+    return next;
   }
 
   private emitPendingCompletion(pending: string): void {

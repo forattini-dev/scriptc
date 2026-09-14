@@ -15,7 +15,7 @@ import { lowerDynamicKeyRead, lowerNativeSymbolKeyRead } from "./lower-dynamic-k
 import { resolvedReturnAssertion } from "./lower-return-assertion.js";
 import { lowerNativeValueProperty } from "./lower-native-value-property.js";
 import { isRegexCaptureRead, narrowRegexCaptureReceiver, regexCaptureConditionalType } from "./lower-regex-captures.js";
-import { denseArrayReadObservesAbsence } from "./lower-dense-array-reads.js";
+import { denseArrayReadObservesAbsence } from "./lower-dense-array-reads.js"; import { runtimeOptionalFalseIds } from "./lower-runtime-optional-branches.js";
 import { regexCaptureArray } from "../../ir/regex-captures.js";
 import { lowerSharedRecordKeyRead, lowerOpenRecordDelete, lowerNativeRecordDynamicEquality, lowerThrowingDynamicValue } from "./lower-open-record.js";
 import { lowerHeterogeneousRecordKeyRead } from "./lower-heterogeneous-record-key.js";
@@ -62,7 +62,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
-import { type FieldTarget, lowerClassLiteralKeyRead, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
+import { type FieldTarget, lowerClassLiteralKeyRead, lowerUnionKeyedRead, lowerUnionValueKeyRead, symbolFieldTarget } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
@@ -2491,11 +2491,11 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         () => lowerArm(expr.whenTrue, ownArrayJoin ?? undefined),
       );
       if (!ctxArray && emptyUntypedArrayArm(expr.whenTrue) && !emptyUntypedArrayArm(expr.whenFalse)) {
-        elseRaw = lowerer.lowerExpr(expr.whenFalse);
+        elseRaw = withRuntimeOptionalNarrowed(lowerer, runtimeOptionalFalseIds(lowerer, expr.condition), () => lowerer.lowerExpr(expr.whenFalse));
         thenRaw = withRuntimeOptionalNarrowed(lowerer, runtimeTrueIds, () => lowerArm(expr.whenTrue, elseRaw.type));
       } else {
         thenRaw = lowerTrueArm();
-        elseRaw = lowerArm(expr.whenFalse, thenRaw.type);
+        elseRaw = withRuntimeOptionalNarrowed(lowerer, runtimeOptionalFalseIds(lowerer, expr.condition), () => lowerArm(expr.whenFalse, thenRaw.type));
       }
       // The ternary's IR type is normally the checker's own: it collapses
       // same-kind literal unions ("a" | "b" → string) and forms tagged
@@ -3753,7 +3753,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
     return lowerer.ensureBool(lowerAbsenceProbe(lowerer, expr) ?? lowerer.lowerExpr(expr), expr);
   }
 
-  function runtimeOptionalLocalOf(lowerer: Lowerer, node: ts.Expression): IrLocal | null {
+  export function runtimeOptionalLocalOf(lowerer: Lowerer, node: ts.Expression): IrLocal | null {
     let expr = node;
     while (ts.isParenthesizedExpression(expr)) expr = expr.expression;
     if (!ts.isIdentifier(expr)) return null;
@@ -7146,7 +7146,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         // the declared-value exit, never a recordKeyGet over a jsval.
         const obj = lowerer.lowerExpr(expr.expression);
         if (obj.type.kind === "jsval") return islandElementRead(lowerer, expr, obj);
-        return lowerer.lowerRecordKeyRead(expr, receiverIr.shapeId, shape);
+        return lowerUnionValueKeyRead(lowerer, expr, obj, foldedStringKeyOf(lowerer, expr.argumentExpression)) ?? lowerer.lowerRecordKeyRead(expr, receiverIr.shapeId, shape);
       }
     }
     // `pkg["k"]` / `scripts[name]` / `scopeMatch[1]` on a dyn receiver (a

@@ -413,6 +413,20 @@ pub fn rethrow_caught(caught: Caught) -> ! {
     std::panic::resume_unwind(Box::new(ScriptThrow))
 }
 
+/// Explicit resource management's error merge: when the guarded body and its
+/// disposal both throw, the completion is a `SuppressedError` (the C lane's
+/// externally visible name and message).
+pub fn suppressed_error_caught() -> Caught {
+    caught_value(JsError {
+        identity: Rc::new(()),
+        name: "SuppressedError".to_owned(),
+        message: "An error was suppressed during disposal".to_owned(),
+        code: None,
+        cause: None,
+        dom: None,
+    })
+}
+
 pub fn caught_is_error(caught: &Caught) -> bool {
     caught.value.is::<JsError>()
 }

@@ -1081,7 +1081,8 @@ export class RustAsyncControlEmitter {
     this.emitAsyncProtectedSequence(stmt.finallyBody, outerLocals, {
       fallthrough: () => this.emitAsyncCompletion(remaining, pending, onComplete),
       returned: (value) => this.emitAsyncCompletion(remaining, { kind: "return", value }, onComplete),
-      thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason }, onComplete),
+      // Resource cleanup throwing over a thrown body completes with a SuppressedError (the sync lane's rule).
+      thrown: (reason) => this.emitAsyncCompletion(remaining, { kind: "throw", reason: stmt.suppressFinallyErrors && pending.kind === "throw" ? "runtime::suppressed_error_caught()" : reason }, onComplete),
     }, stmt.loc);
   }
 

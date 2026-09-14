@@ -361,6 +361,17 @@ export type FieldTarget =
     return L.maybeNarrow(read, expr);
   }
 
+/** `value[key]` where the checker narrowed the receiver to ONE record arm but the value still lowers as its union
+   * (`chosen?.[k]` on `const chosen: A | B | undefined = { ... }`): the union keyed read over the lowered value. */
+  export function lowerUnionValueKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, value: IrExpr, lit: string | null): IrExpr | null {
+    if (value.type.kind !== "union") return null;
+    const key = L.lowerExpr(expr.argumentExpression);
+    if (key.type.kind !== "string") return null;
+    const litKey: IrExpr = lit === null ? key : { kind: "strLit", value: lit, type: STRING, loc: key.loc };
+    const keyed = lowerUnionKeyedRead(L, expr, value.type.unionId, value, litKey, lit);
+    return keyed ? L.maybeNarrow(keyed, expr) : null;
+  }
+
 /** Recognizes `obj.field` as an assignable field target: receiver is a
    * known class instance OR a record, and the member is a field or (class
    * receivers) a declared accessor property. Returns the pieces of a
