@@ -486,7 +486,8 @@ export class RustAsyncControlEmitter {
       this.context.popIndent();
       this.context.line("} else {");
       this.context.pushIndent();
-      this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete));
+      // The body registered its own declarations: the exit path sees only the locals live at loop entry.
+      this.withAsyncLocals(new Set(loopLocals), () => this.withLoopControl(outerLoopControl, () => this.emitAsyncStatements(remaining, onComplete)));
       this.context.popIndent();
       this.context.line("}");
     });

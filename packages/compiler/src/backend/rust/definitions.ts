@@ -1027,10 +1027,11 @@ export class RustDefinitionEmitter {
     }));
     const returnType = this.context.rustType(fn.returnType, fn.loc);
     const generatorType: IrType | null = fn.generator === undefined ? null : {
-      kind: "generator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT,
+      kind: "generator", ...(fn.async ? { async: true as const } : {}), yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT,
     };
-    const emittedReturnType = fn.async ? `runtime::JsPromise<${returnType}>` :
-      generatorType === null ? returnType : this.context.rustType(generatorType, fn.loc);
+    const emittedReturnType = generatorType === null
+      ? (fn.async ? `runtime::JsPromise<${returnType}>` : returnType)
+      : this.context.rustType(generatorType, fn.loc);
     this.context.line(`fn ${mangleFunction(fn.name)}(${params.join(", ")})${emittedReturnType === "()" ? "" : ` -> ${emittedReturnType}`} {`);
     this.context.pushIndent();
     this.context.setCurrentFunction(fn);
@@ -1044,7 +1045,7 @@ export class RustDefinitionEmitter {
         this.context.line(`let ${mangleLocal(param.localId)} = runtime::cell_new(${mangleRawParam(param.localId)});`);
       }
     }
-    if (fn.async) {
+    if (fn.async && fn.generator === undefined) {
       const result = this.context.nextName("sc_async_result");
       const bodyResult = this.context.nextName("sc_async_result");
       const guard = this.context.nextName("sc_async_guard");
@@ -1080,7 +1081,6 @@ export class RustDefinitionEmitter {
       }
       this.context.line(result);
     } else if (fn.generator !== undefined) {
-      if (fn.async) this.context.unsupported(`async generator function '${fn.name}'`, fn.loc);
       emitRustGeneratorBody(fn, this.context);
     } else {
       emitRustSyncModuleBody(fn, this.context);

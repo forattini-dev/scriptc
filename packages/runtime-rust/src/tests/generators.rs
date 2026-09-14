@@ -57,3 +57,59 @@ fn generator_panic_handler_survives_suspension_and_handles_body_throws() {
     }
     assert!(matches!(generator_next(&generator, ()), GeneratorStep::Returned(None)));
 }
+
+#[test]
+fn async_generator_queues_requests_and_settles_them_in_order() {
+    let generator: JsAsyncGenerator<f64, f64, f64> = async_generator_new(|generator, _command| {
+        generator_suspend(&generator, |_generator, command| match command {
+            GeneratorCommand::Next(value) => {
+                GeneratorStep::Returned(Some(async_generator_input::<f64>(value)))
+            }
+            GeneratorCommand::Return(value) => GeneratorStep::Returned(value),
+            GeneratorCommand::Throw(reason) => rethrow_caught(reason),
+        });
+        GeneratorStep::Yielded(AsyncGeneratorYield::Value(1.0))
+    });
+
+    let first = async_generator_next(&generator, 0.0);
+    let second = async_generator_next(&generator, 5.0);
+    let third = async_generator_next(&generator, 9.0);
+
+    assert!(async_generator_ptr_eq(&generator, &generator.clone()));
+    assert!(matches!(promise_poll(&first), Some(Ok(AsyncGeneratorStep::Yielded(1.0)))));
+    assert!(matches!(promise_poll(&second), Some(Ok(AsyncGeneratorStep::Returned(Some(5.0))))));
+    assert!(matches!(promise_poll(&third), Some(Ok(AsyncGeneratorStep::Returned(None)))));
+}
+
+#[test]
+fn async_generator_parks_on_await_and_resumes_with_the_settled_value() {
+    let gate: JsPromise<f64> = promise_new();
+    let awaited = gate.clone();
+    let generator: JsAsyncGenerator<f64, f64, ()> = async_generator_new(move |generator, _command| {
+        generator_suspend(&generator, |generator, command| match command {
+            GeneratorCommand::Next(value) => {
+                let resolved = async_generator_input::<f64>(value);
+                generator_suspend(&generator, |_generator, command| match command {
+                    GeneratorCommand::Next(_) => GeneratorStep::Returned(Some(-1.0)),
+                    GeneratorCommand::Return(value) => GeneratorStep::Returned(value),
+                    GeneratorCommand::Throw(reason) => rethrow_caught(reason),
+                });
+                GeneratorStep::Yielded(AsyncGeneratorYield::Value(resolved * 2.0))
+            }
+            GeneratorCommand::Return(value) => GeneratorStep::Returned(value),
+            GeneratorCommand::Throw(reason) => rethrow_caught(reason),
+        });
+        GeneratorStep::Yielded(async_generator_await(awaited))
+    });
+
+    let first = async_generator_next(&generator, ());
+    let returned = async_generator_return(&generator, Some(8.0));
+    assert!(promise_poll(&first).is_none());
+    assert!(promise_poll(&returned).is_none());
+
+    let _ = promise_fulfill(&gate, 21.0);
+    run_event_loop();
+
+    assert!(matches!(promise_poll(&first), Some(Ok(AsyncGeneratorStep::Yielded(42.0)))));
+    assert!(matches!(promise_poll(&returned), Some(Ok(AsyncGeneratorStep::Returned(Some(8.0))))));
+}

@@ -20,8 +20,10 @@ export interface RustGeneratorBodyContext {
 function containsYield(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) return value.some(containsYield);
-  const node = value as { kind?: unknown };
-  if (node.kind === "yieldExpr") return true;
+  const node = value as { kind?: unknown; fn?: unknown };
+  // Awaits suspend an async-generator body exactly like yields.
+  if (node.kind === "yieldExpr" || node.kind === "awaitExpr" || node.kind === "awaitUnionExpr") return true;
+  if (node.kind === "libCall" && node.fn === "async.awaitDyn") return true;
   return Object.values(value).some(containsYield);
 }
 
@@ -49,21 +51,21 @@ function emitGeneratorValue(
   flow: GeneratorFlow,
   consume: (value: string) => void,
 ): void {
-  if (expr.kind === "yieldExpr") {
-    const yielded = expr.value;
-    if (yielded === null || fn.generator === undefined) {
-      context.unsupported("generator yield without a typed value", expr.loc);
-    }
-    emitGeneratorValue(fn, yielded, context, flow, (yieldedValue) => {
-      const next = context.nextName("sc_generator_next");
-      context.line(`let sc_yielded = ${yieldedValue};`);
+  if (expr.kind === "awaitUnionExpr" || (expr.kind === "libCall" && expr.fn === "async.awaitDyn")) {
+    context.unsupported("awaiting a non-promise union inside an async generator", expr.loc);
+  }
+  if (expr.kind === "awaitExpr") {
+    if (fn.async !== true) context.unsupported("await inside a synchronous generator", expr.loc);
+    emitGeneratorValue(fn, expr.value, context, flow, (promise) => {
+      const resumed = context.nextName("sc_generator_awaited");
+      context.line(`let sc_awaiting = ${promise};`);
       context.line("runtime::generator_suspend(&sc_generator, move |sc_generator, sc_command| {");
       context.pushIndent();
       context.line("match sc_command {");
       context.pushIndent();
-      context.line(`runtime::GeneratorCommand::Next(${next}) => {`);
+      context.line(`runtime::GeneratorCommand::Next(${resumed}) => {`);
       context.pushIndent();
-      consume(expr.type.kind === "void" ? "()" : `${next}.clone()`);
+      consume(`runtime::async_generator_input::<${channelType(expr.type, context, expr.loc)}>(${resumed})`);
       context.popIndent();
       context.line("},");
       context.line("runtime::GeneratorCommand::Return(value) => {");
@@ -80,7 +82,45 @@ function emitGeneratorValue(
       context.line("}");
       context.popIndent();
       context.line("});");
-      context.line("return runtime::GeneratorStep::Yielded(sc_yielded);");
+      context.line("return runtime::GeneratorStep::Yielded(runtime::async_generator_await(sc_awaiting));");
+    });
+    return;
+  }
+  if (expr.kind === "yieldExpr") {
+    const yielded = expr.value;
+    if (yielded === null || fn.generator === undefined) {
+      context.unsupported("generator yield without a typed value", expr.loc);
+    }
+    emitGeneratorValue(fn, yielded, context, flow, (yieldedValue) => {
+      const next = context.nextName("sc_generator_next");
+      context.line(`let sc_yielded = ${yieldedValue};`);
+      context.line("runtime::generator_suspend(&sc_generator, move |sc_generator, sc_command| {");
+      context.pushIndent();
+      context.line("match sc_command {");
+      context.pushIndent();
+      context.line(`runtime::GeneratorCommand::Next(${next}) => {`);
+      context.pushIndent();
+      consume(expr.type.kind === "void" ? (fn.async === true ? `{ let _ = ${next}; () }` : "()")
+        : fn.async === true ? `runtime::async_generator_input::<${channelType(expr.type, context, expr.loc)}>(${next})` : `${next}.clone()`);
+      context.popIndent();
+      context.line("},");
+      context.line("runtime::GeneratorCommand::Return(value) => {");
+      context.pushIndent();
+      flow.emitReturn("value");
+      context.popIndent();
+      context.line("},");
+      context.line("runtime::GeneratorCommand::Throw(reason) => {");
+      context.pushIndent();
+      flow.emitThrow("reason");
+      context.popIndent();
+      context.line("},");
+      context.popIndent();
+      context.line("}");
+      context.popIndent();
+      context.line("});");
+      context.line(fn.async === true
+        ? "return runtime::GeneratorStep::Yielded(runtime::AsyncGeneratorYield::Value(sc_yielded));"
+        : "return runtime::GeneratorStep::Yielded(sc_yielded);");
     });
     return;
   }
@@ -590,7 +630,7 @@ export function emitRustGeneratorBody(fn: IrFunction, context: RustGeneratorBody
   if (fn.generator === undefined) context.unsupported(`non-generator function '${fn.name}'`, fn.loc);
   const channels = [fn.generator.yieldT, fn.returnType, fn.generator.nextT]
     .map((type) => channelType(type, context, fn.loc)).join(", ");
-  context.line(`runtime::generator_new::<${channels}, _>(move |sc_generator, sc_command| {`);
+  context.line(`runtime::${fn.async === true ? "async_generator_new" : "generator_new"}::<${channels}, _>(move |sc_generator, sc_command| {`);
   context.pushIndent();
   context.line("let _ = sc_command;");
   const flow: GeneratorFlow = {
@@ -629,11 +669,15 @@ export function emitRustGeneratorResume(
   context: RustGeneratorResumeContext,
   emitExpr: (value: IrExpr) => string,
 ): string {
-  if (expr.gen.type.kind !== "generator" || expr.type.kind !== "record") {
+  // An async generator's resume answers Promise<IteratorResult>: the same record, built when the request settles.
+  const asyncResume = expr.gen.type.kind === "generator" && expr.gen.type.async === true;
+  const resultType = asyncResume && expr.type.kind === "promise" ? expr.type.inner : expr.type;
+  if (expr.gen.type.kind !== "generator" || resultType.kind !== "record") {
     context.unsupported("generator resume shape", expr.loc);
   }
   const generatorType = expr.gen.type;
-  const shape = context.records.get(expr.type.shapeId);
+  const stepEnum = asyncResume ? "runtime::AsyncGeneratorStep" : "runtime::GeneratorStep";
+  const shape = context.records.get(resultType.shapeId);
   const doneField = shape?.fields.find((field) => field.name === "done");
   const valueField = shape?.fields.find((field) => field.name === "value");
   if (shape === undefined || shape.indexValue !== undefined || doneField?.type.kind !== "bool" ||
@@ -671,11 +715,11 @@ export function emitRustGeneratorResume(
     return `${recordNewName(shape.id)}(${mangleRecordStruct(shape.id)} { ${fields} })`;
   };
   const yielded = generatorType.yieldT.kind === "void"
-    ? "runtime::GeneratorStep::Yielded(_) => unreachable!(\"scriptc invariant: void generator yielded\")"
-    : `runtime::GeneratorStep::Yielded(value) => ${record(false, wrap(generatorType.yieldT, "value"))}`;
+    ? `${stepEnum}::Yielded(_) => unreachable!("scriptc invariant: void generator yielded")`
+    : `${stepEnum}::Yielded(value) => ${record(false, wrap(generatorType.yieldT, "value"))}`;
   const returned = generatorType.retT.kind === "void"
-    ? `runtime::GeneratorStep::Returned(Some(_)) => ${record(true, undefinedValue)}`
-    : `runtime::GeneratorStep::Returned(Some(value)) => ${record(true, wrap(generatorType.retT, "value"))}`;
+    ? `${stepEnum}::Returned(Some(_)) => ${record(true, undefinedValue)}`
+    : `${stepEnum}::Returned(Some(value)) => ${record(true, wrap(generatorType.retT, "value"))}`;
   const generator = context.nextName("sc_generator");
   const argument = context.nextName("sc_generator_arg");
   let argumentExpr: string;
@@ -685,10 +729,13 @@ export function emitRustGeneratorResume(
   else if (generatorType.nextT.kind === "dyn") argumentExpr = `${context.dynTypeName()}::Undefined`;
   else if (generatorType.nextT.kind === "undefinedT" || generatorType.nextT.kind === "void") argumentExpr = "()";
   else context.unsupported("valueless generator next", expr.loc);
+  const prefix = asyncResume ? "async_generator" : "generator";
   const call = expr.mode === "next"
-    ? `runtime::generator_next(&${generator}, ${argument})`
+    ? `runtime::${prefix}_next(&${generator}, ${argument})`
     : expr.mode === "return"
-      ? `runtime::generator_return(&${generator}, ${expr.arg === null ? argument : `Some(${argument})`})`
-      : `runtime::generator_throw(&${generator}, runtime::caught_value(${argument}))`;
-  return `{ let ${generator} = ${emitExpr(expr.gen)}; let ${argument} = ${argumentExpr}; match ${call} { ${yielded}, ${returned}, runtime::GeneratorStep::Returned(None) => ${record(true, undefinedValue)}, } }`;
+      ? `runtime::${prefix}_return(&${generator}, ${expr.arg === null ? argument : `Some(${argument})`})`
+      : `runtime::${prefix}_throw(&${generator}, runtime::caught_value(${argument}))`;
+  const arms = `${yielded}, ${returned}, ${stepEnum}::Returned(None) => ${record(true, undefinedValue)},`;
+  const settle = asyncResume ? `runtime::promise_map(&${call}, move |sc_step| match sc_step { ${arms} })` : `match ${call} { ${arms} }`;
+  return `{ let ${generator} = ${emitExpr(expr.gen)}; let ${argument} = ${argumentExpr}; ${settle} }`;
 }
