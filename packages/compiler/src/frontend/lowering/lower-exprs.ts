@@ -61,7 +61,7 @@ import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
 import { boolLit, numLit, strLit, varRef } from "../../ir/build.js";
 import { lowerIslandCallableRecordCast } from "./lower-island-interface.js";
-import { type FieldTarget, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
+import { type FieldTarget, lowerClassLiteralKeyRead, lowerUnionKeyedRead, symbolFieldTarget } from "./lower-properties.js";
 import { probeLower } from "./lower-probe.js";
 import { recordKeyResultOk } from "./lower-record-key-types.js";
 import { lowerDynamicRequestInstanceOf } from "./lower-instanceof-island.js";
@@ -4494,7 +4494,7 @@ export function lowerOptionalChain(lowerer: Lowerer, expr: ts.CallExpression | t
     // WIDENS to string un-late-binds the property, its type is no literal,
     // and the fence stays.
     if (!pureKeyExpr(lowerer, expr)) return null;
-    return literalKeySpellingOf(lowerer.typeOf(expr));
+    return literalKeySpellingOf(lowerer.typeParamTsResolver(lowerer.typeOf(expr)) ?? lowerer.typeOf(expr)); // `key: K` bound to a literal
   }
 
   /** The property-name spelling of a single-literal checker type: string
@@ -6806,10 +6806,9 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
       if (value.type.kind === "union") {
         const key = lowerer.lowerExpr(expr.argumentExpression);
         if (key.type.kind === "string") {
-          const lit = ts.isStringLiteral(expr.argumentExpression)
-            ? expr.argumentExpression.text
-            : null;
-          const keyed = lowerUnionKeyedRead(lowerer, expr, value.type.unionId, value, key, lit);
+          const lit = foldedStringKeyOf(lowerer, expr.argumentExpression); // a pure ONE-literal key reads that declared field
+          const litKey: IrExpr = lit === null ? key : { kind: "strLit", value: lit, type: STRING, loc: key.loc };
+          const keyed = lowerUnionKeyedRead(lowerer, expr, value.type.unionId, value, litKey, lit);
           if (keyed) return lowerer.maybeNarrow(keyed, expr);
         }
         // `u?.split(":")[0]` — a NUMBER index over an undefined-armed
@@ -6843,6 +6842,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         }
       }
     }
+    if (receiverIr?.kind === "object") { const field = lowerClassLiteralKeyRead(lowerer, expr, receiverIr.className, foldedStringKeyOf(lowerer, expr.argumentExpression)); if (field) return field; }
     if (receiverIr?.kind !== "array") {
       if (receiverIr?.kind === "string") {
         // `s[i]` with a number index reads a UTF-16 code unit — charAt's

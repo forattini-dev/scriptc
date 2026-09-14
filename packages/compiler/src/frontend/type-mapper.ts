@@ -2501,7 +2501,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           }
           return null;
         }
-        byKey.set(typeKey(mapped), mapped);
+        const inner = mapped.kind === "union" ? unions.get(mapped.unionId) : undefined; if (inner && inner.arms.length > 0 && !inner.discriminant) { for (const a of inner.arms) byKey.set(typeKey(a), a); } else byKey.set(typeKey(mapped), mapped); // a symbolic part resolving to a plain union (bound `T[K]`) flattens
       }
       const arms = [...byKey.values()];
       // A single surviving UNIT arm cannot stand alone (degenerate — the

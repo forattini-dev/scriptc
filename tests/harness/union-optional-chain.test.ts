@@ -6,7 +6,7 @@ import { expect, test } from "vitest";
 import { compile, renderDiagnostics } from "@scriptc/compiler";
 import { nodeOracleExecutable } from "./oracle-environment.js";
 
-test.for(["3257-union-optional-chains.ts"])("sub-union optional chain %s retains Node behavior in engine-free Rust", async file => {
+test.for(["3257-union-optional-chains.ts", "3258-union-literal-key-reads.ts"])("sub-union optional chain %s retains Node behavior in engine-free Rust", async file => {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-union-chain-"));
   try {
     const entry = join(import.meta.dirname, "../corpus", file);

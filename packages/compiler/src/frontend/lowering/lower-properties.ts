@@ -279,6 +279,12 @@ export type FieldTarget =
         push(UNDEFINED_T);
         continue;
       }
+      if (arm.kind === "object") {
+        // A class arm answers only a declared field under a literal key.
+        const declared = literalField !== null ? L.classes.get(arm.className)?.fields.get(literalField) : undefined;
+        if (!declared || !pushAnswer(declared)) return null;
+        continue;
+      }
       if (arm.kind !== "record") return null;
       const shape = L.shapes.get(arm.shapeId);
       if (!shape || shape.tuple) return null;
@@ -325,6 +331,11 @@ export type FieldTarget =
         if (!(type.kind === "union" && L.armTag(type.unionId, UNDEFINED_T) >= 0)) return null;
         continue;
       }
+      if (arm.kind === "object") {
+        const declared = literalField !== null ? L.classes.get(arm.className)?.fields.get(literalField) : undefined;
+        if (!declared || !surfaces(declared)) return null;
+        continue;
+      }
       if (arm.kind !== "record") return null;
       const shape = L.shapes.get(arm.shapeId);
       if (!shape) return null;
@@ -338,6 +349,16 @@ export type FieldTarget =
       if (!recordKeyResultOk(L, ovfShape, type)) return null;
     }
     return { kind: "unionKeyGet", unionId, key, value, type, loc: locOf(expr) };
+  }
+
+/** `obj["field"]` on a class instance whose pure key folds to ONE literal
+   * naming a declared data field: the dotted read's twin. Anything else
+   * (accessors, methods, runtime keys) stays with the caller's fences. */
+  export function lowerClassLiteralKeyRead(L: Lowerer, expr: ts.ElementAccessExpression, className: string, lit: string | null): IrExpr | null {
+    const type = lit === null ? undefined : L.classes.get(className)?.fields.get(lit);
+    if (lit === null || type === undefined) return null;
+    const read: IrExpr = { kind: "fieldGet", obj: L.lowerExpr(expr.expression), className, field: lit, type, loc: locOf(expr) };
+    return L.maybeNarrow(read, expr);
   }
 
 /** Recognizes `obj.field` as an assignable field target: receiver is a

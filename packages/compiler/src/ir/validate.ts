@@ -3500,16 +3500,14 @@ function validateFunction(
             }
             return;
           }
-          if (arm.kind !== "record") {
-            err(`unionKeyGet: arm ${i} of ${e.unionId} is ${arm.kind}, not a record`, e.loc);
-            return;
-          }
+          const literal = e.key.kind === "strLit" ? e.key.value : null; // class arms: a declared field under a literal key
+          if (arm.kind === "object") { const f = literal === null ? undefined : classes.get(arm.className)?.fields.find((x) => x.name === literal); if (!f || !surfaces(f.type)) err(`unionKeyGet: class arm ${i} of ${e.unionId} has no field surfacing for the key`, e.loc); return; }
+          if (arm.kind !== "record") { err(`unionKeyGet: arm ${i} of ${e.unionId} is ${arm.kind}, not a record`, e.loc); return; }
           const shape = records.get(arm.shapeId);
           if (!shape) {
             err(`unionKeyGet: arm ${i} of unknown shape ${arm.shapeId}`, e.loc);
             return;
           }
-          const literal = e.key.kind === "strLit" ? e.key.value : null;
           const declared = literal !== null ? shape.fields.find((f) => f.name === literal)?.type : undefined;
           if (declared) {
             if (!surfaces(declared)) {
