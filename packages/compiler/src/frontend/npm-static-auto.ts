@@ -3,10 +3,11 @@
  * frontend fixpoint, from its importing package's own resolution realm.
  * Library mode additionally diagnoses runtime-only packages lacking types;
  * executable auto retains its existing eligibility/fallback policy. */
+import { checkPreflightTypes } from "./preflight-types.js";
 import { registerNpmDeclaration } from "./npm-static-declarations.js";
 import type { NpmStaticStatus } from "../coverage/report.js";
 import type { SrcLoc } from "../ir/ir.js";
-import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./program.js";
+import { canonicalBuiltinModule, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./program.js";
 import { npmStaticIneligibleReason, npmStaticPackageOfPath } from "./npm-static.js";
 import { resolveBareModule } from "./resolve.js";
 import { isRelativeSpecifier } from "./workspace-registry.js";
@@ -152,12 +153,19 @@ export function findSingleNpmSurfaceOffender(
 ): string | null {
   for (const candidate of packages) {
     const retained = [...packages].filter((name) => name !== candidate);
-    const probe = loadProgram(entryPath, { npmStatic: retained, externalTypes });
-    try {
-      if (!checkPreflight(probe).some((d) => d.code === "SC0001")) return candidate;
-    } finally { probe.dispose(); }
+    if (!npmSurfaceHasTypeErrors(entryPath, retained, externalTypes)) return candidate;
   }
   return null;
+}
+
+/** A disposable type query, never a substitute for the final native preflight. */
+export function npmSurfaceHasTypeErrors(
+  entryPath: string, packages: Iterable<string>,
+  externalTypes?: Readonly<Record<string, string>>,
+): boolean {
+  const probe = loadProgram(entryPath, { npmStatic: packages, externalTypes });
+  try { return checkPreflightTypes(probe).some((d) => d.code === "SC0001"); }
+  finally { probe.dispose(); }
 }
 
 /** The opted-in packages a consumer-anchored tsc message NAMES: module

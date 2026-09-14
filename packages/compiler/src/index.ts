@@ -65,7 +65,7 @@ import { provenanceSources } from "./frontend/provenance-registry.js";
 import { clearResolveCaches } from "./frontend/resolve.js";
 import { retryNpmCallbackContext } from "./frontend/npm-static-context.js";
 import { withNpmDeclarationCandidates } from "./frontend/npm-static-declarations.js";
-import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
+import { detectAutoPackages, filterExternalNpmPackages, findSingleNpmSurfaceOffender, npmSurfaceHasTypeErrors, packagesNamedByDiag } from "./frontend/npm-static-auto.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/ffi-manifest.js";
@@ -622,10 +622,7 @@ function runFrontendWithDeclarations(
     const single = findSingleNpmSurfaceOffender(entryPath, effective, externalTypes);
     if (single !== null) dropWithNote(single);
     else for (const p of [...effective]) {
-      const probe = loadProgram(entryPath, { npmStatic: [p], externalTypes });
-      const probeDiags = checkPreflight(probe);
-      probe.dispose();
-      if (probeDiags.some((d) => d.code === "SC0001")) dropWithNote(p);
+      if (npmSurfaceHasTypeErrors(entryPath, [p], externalTypes)) dropWithNote(p);
     }
     load = loadProgram(entryPath, { npmStatic: effective, externalTypes });
     preflight = checkPreflight(load);

@@ -128,3 +128,7 @@ fechar o último projeto de um host compartilhado, limpa o cache de fontes do
 cliente TS7. Hosts continuam reutilizáveis e fontes de projetos irmãos vivos
 preservam identidade. Evidências e limites do experimento estão em
 [retenção de programas descartados](disposed-program-retention.md).
+
+### Terceiro checkpoint: sondagens de tipos
+
+As sondagens descartáveis de atribuição npm agora executam a fase de tipos sem preparar estruturas para lowering. O programa final continua passando pelo preflight completo. O diferencial Rust de dependências transitivas passou, e 82 registros ausentes foram conferidos contra o frontend anterior e acrescentados ao canário. A tentativa g do Redcode ainda terminou por timeout de 600 s, com pico de 6,20 GiB e sem binário. Ver [implementação, validação e limites da medição](type-attribution-probes.md). Os gates completos e as metas de escala continuam abertos.

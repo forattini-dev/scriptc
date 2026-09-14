@@ -11556,6 +11556,551 @@
     "<repo>/tests/corpus/3170-import-meta-dynamic/main.mjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/3171-effect-subpath-imports.ts": {
+   "order": [
+    "<repo>/tests/corpus/3171-effect-subpath-imports.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3172-url-base-resolution.ts": {
+   "order": [
+    "<repo>/tests/corpus/3172-url-base-resolution.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3173-url-object-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/3173-url-object-base.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3174-global-crypto-uuid.ts": {
+   "order": [
+    "<repo>/tests/corpus/3174-global-crypto-uuid.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3175-bun-global-crypto-uuid.ts": {
+   "order": [
+    "<repo>/tests/corpus/3174-global-crypto-uuid.ts",
+    "<repo>/tests/corpus/3175-bun-global-crypto-uuid.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3176-set-copy-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/3176-set-copy-iterable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3177-array-from-collections.ts": {
+   "order": [
+    "<repo>/tests/corpus/3177-array-from-collections.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3178-array-from-live-mapper.ts": {
+   "order": [
+    "<repo>/tests/corpus/3178-array-from-live-mapper.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3179-bun-collection-materialization.ts": {
+   "order": [
+    "<repo>/tests/corpus/3176-set-copy-iterable.ts",
+    "<repo>/tests/corpus/3177-array-from-collections.ts",
+    "<repo>/tests/corpus/3178-array-from-live-mapper.ts",
+    "<repo>/tests/corpus/3179-bun-collection-materialization.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3180-array-from-iteration-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/3180-array-from-iteration-edges.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3181-local-generic-captures.ts": {
+   "order": [
+    "<repo>/tests/corpus/3181-local-generic-captures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3182-local-generic-reassignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/3182-local-generic-reassignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3183-local-generic-in-specializations.ts": {
+   "order": [
+    "<repo>/tests/corpus/3183-local-generic-in-specializations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3184-local-generic-keyof.ts": {
+   "order": [
+    "<repo>/tests/corpus/3184-local-generic-keyof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3185-local-generic-constraints.ts": {
+   "order": [
+    "<repo>/tests/corpus/3185-local-generic-constraints.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3186-local-generic-effect-registry.ts": {
+   "order": [
+    "<repo>/tests/corpus/3186-local-generic-effect-registry.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3187-bun-local-generic-closures.ts": {
+   "order": [
+    "<repo>/tests/corpus/3181-local-generic-captures.ts",
+    "<repo>/tests/corpus/3182-local-generic-reassignment.ts",
+    "<repo>/tests/corpus/3183-local-generic-in-specializations.ts",
+    "<repo>/tests/corpus/3184-local-generic-keyof.ts",
+    "<repo>/tests/corpus/3185-local-generic-constraints.ts",
+    "<repo>/tests/corpus/3186-local-generic-effect-registry.ts",
+    "<repo>/tests/corpus/3187-bun-local-generic-closures.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3188-generator-call-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/3188-generator-call-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3189-local-generic-literal-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/3189-local-generic-literal-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3190-effect-foreach-live-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/3190-effect-foreach-live-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3191-effect-foreach-live-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/3191-effect-foreach-live-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3192-effect-foreach-live-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/3192-effect-foreach-live-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3193-effect-foreach-failure.ts": {
+   "order": [
+    "<repo>/tests/corpus/3193-effect-foreach-failure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3194-effect-foreach-suspension.ts": {
+   "order": [
+    "<repo>/tests/corpus/3194-effect-foreach-suspension.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3195-bun-effect-foreach.ts": {
+   "order": [
+    "<repo>/tests/corpus/3190-effect-foreach-live-array.ts",
+    "<repo>/tests/corpus/3191-effect-foreach-live-map.ts",
+    "<repo>/tests/corpus/3192-effect-foreach-live-set.ts",
+    "<repo>/tests/corpus/3193-effect-foreach-failure.ts",
+    "<repo>/tests/corpus/3194-effect-foreach-suspension.ts",
+    "<repo>/tests/corpus/3195-bun-effect-foreach.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3196-effect-declared-method-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/3196-effect-declared-method-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3197-effect-structural-method-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/3197-effect-structural-method-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3198-effect-mapped-method-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/3198-effect-mapped-method-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3199-bun-effect-method-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/3196-effect-declared-method-types.ts",
+    "<repo>/tests/corpus/3197-effect-structural-method-types.ts",
+    "<repo>/tests/corpus/3198-effect-mapped-method-types.ts",
+    "<repo>/tests/corpus/3199-bun-effect-method-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3200-native-bigint.ts": {
+   "order": [
+    "<repo>/tests/corpus/3200-native-bigint.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3201-native-bigint-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/3201-native-bigint-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3202-native-bigint-size-input.ts": {
+   "order": [
+    "<repo>/tests/corpus/3202-native-bigint-size-input.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3203-native-bigint-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/3203-native-bigint-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3204-native-bigint-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3200-native-bigint.ts",
+    "<repo>/tests/corpus/3201-native-bigint-values.ts",
+    "<repo>/tests/corpus/3202-native-bigint-size-input.ts",
+    "<repo>/tests/corpus/3203-native-bigint-errors.ts",
+    "<repo>/tests/corpus/3204-native-bigint-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3205-native-bigint-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3205-native-bigint-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3206-native-bigint-json-replacer.ts": {
+   "order": [
+    "<repo>/tests/corpus/3206-native-bigint-json-replacer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3207-native-bigint-dynamic-operations.js": {
+   "order": [
+    "<repo>/tests/corpus/3207-native-bigint-dynamic-operations.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3208-native-bigint-dynamic-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3205-native-bigint-unknown.ts",
+    "<repo>/tests/corpus/3206-native-bigint-json-replacer.ts",
+    "<repo>/tests/corpus/3207-native-bigint-dynamic-operations.js",
+    "<repo>/tests/corpus/3208-native-bigint-dynamic-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3209-native-json-replacer-visitation.ts": {
+   "order": [
+    "<repo>/tests/corpus/3209-native-json-replacer-visitation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3210-native-date-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/3210-native-date-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3211-native-date-number-unions.ts": {
+   "order": [
+    "<repo>/tests/corpus/3211-native-date-number-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3212-native-date-shared-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/3212-native-date-shared-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3213-native-date-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3210-native-date-unknown.ts",
+    "<repo>/tests/corpus/3211-native-date-number-unions.ts",
+    "<repo>/tests/corpus/3212-native-date-shared-values.ts",
+    "<repo>/tests/corpus/3216-native-date-numeric.js",
+    "<repo>/tests/corpus/3217-native-date-deep-equality.ts",
+    "<repo>/tests/corpus/3213-native-date-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3214-native-date-effect.ts": {
+   "order": [
+    "<repo>/tests/corpus/3214-native-date-effect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3215-native-date-synthesized-slots.ts": {
+   "order": [
+    "<repo>/tests/corpus/3215-native-date-synthesized-slots.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3216-native-date-numeric.js": {
+   "order": [
+    "<repo>/tests/corpus/3216-native-date-numeric.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3217-native-date-deep-equality.ts": {
+   "order": [
+    "<repo>/tests/corpus/3217-native-date-deep-equality.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3218-effect-optional-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/3218-effect-optional-arguments.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3219-mapped-optional-callable.ts": {
+   "order": [
+    "<repo>/tests/corpus/3219-mapped-optional-callable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3220-effect-optional-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3218-effect-optional-arguments.ts",
+    "<repo>/tests/corpus/3219-mapped-optional-callable.ts",
+    "<repo>/tests/corpus/3220-effect-optional-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3221-effect-error-thunks.ts": {
+   "order": [
+    "<repo>/tests/corpus/3221-effect-error-thunks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3222-effect-structural-tags.ts": {
+   "order": [
+    "<repo>/tests/corpus/3222-effect-structural-tags.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3223-effect-error-thunks-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3221-effect-error-thunks.ts",
+    "<repo>/tests/corpus/3222-effect-structural-tags.ts",
+    "<repo>/tests/corpus/3224-effect-shared-error-tag.ts",
+    "<repo>/tests/corpus/3223-effect-error-thunks-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3224-effect-shared-error-tag.ts": {
+   "order": [
+    "<repo>/tests/corpus/3224-effect-shared-error-tag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3225-effect-file-info.ts": {
+   "order": [
+    "<repo>/tests/corpus/3225-effect-file-info.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3226-effect-file-info-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3225-effect-file-info.ts",
+    "<repo>/tests/corpus/3226-effect-file-info-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3227-native-variadic-cache.ts": {
+   "order": [
+    "<repo>/tests/corpus/3227-native-variadic-cache.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3228-native-variadic-effect-cache.ts": {
+   "order": [
+    "<repo>/tests/corpus/3228-native-variadic-effect-cache.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3229-native-variadic-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/3229-native-variadic-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3230-native-variadic-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3227-native-variadic-cache.ts",
+    "<repo>/tests/corpus/3229-native-variadic-order.ts",
+    "<repo>/tests/corpus/3231-native-variadic-scalar-results.ts",
+    "<repo>/tests/corpus/3230-native-variadic-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3231-native-variadic-scalar-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/3231-native-variadic-scalar-results.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3232-native-kernel-reference-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/3232-native-kernel-reference-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3233-native-effect-reference-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/3233-native-effect-reference-containers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3234-native-effect-reference-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3228-native-variadic-effect-cache.ts",
+    "<repo>/tests/corpus/3232-native-kernel-reference-identity.ts",
+    "<repo>/tests/corpus/3233-native-effect-reference-containers.ts",
+    "<repo>/tests/corpus/3235-native-effect-owned-payload.ts",
+    "<repo>/tests/corpus/3234-native-effect-reference-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3235-native-effect-owned-payload.ts": {
+   "order": [
+    "<repo>/tests/corpus/3235-native-effect-owned-payload.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3236-native-byte-reference-transport.ts": {
+   "order": [
+    "<repo>/tests/corpus/3236-native-byte-reference-transport.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3237-native-byte-reference-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3236-native-byte-reference-transport.ts",
+    "<repo>/tests/corpus/3237-native-byte-reference-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3238-native-keyed-observation.ts": {
+   "order": [
+    "<repo>/tests/corpus/3238-native-keyed-observation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3239-native-keyed-methods.ts": {
+   "order": [
+    "<repo>/tests/corpus/3239-native-keyed-methods.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3240-native-keyed-methods-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3238-native-keyed-observation.ts",
+    "<repo>/tests/corpus/3239-native-keyed-methods.ts",
+    "<repo>/tests/corpus/3241-native-effect-array-covariance.ts",
+    "<repo>/tests/corpus/3242-native-keyed-reference-semantics.ts",
+    "<repo>/tests/corpus/3243-native-byte-record-views.ts",
+    "<repo>/tests/corpus/3240-native-keyed-methods-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3241-native-effect-array-covariance.ts": {
+   "order": [
+    "<repo>/tests/corpus/3241-native-effect-array-covariance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3242-native-keyed-reference-semantics.ts": {
+   "order": [
+    "<repo>/tests/corpus/3242-native-keyed-reference-semantics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3243-native-byte-record-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/3243-native-byte-record-views.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3244-native-symbol-dynamic.ts": {
+   "order": [
+    "<repo>/tests/corpus/3244-native-symbol-dynamic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3245-native-proxy-get.ts": {
+   "order": [
+    "<repo>/tests/corpus/3245-native-proxy-get.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3246-native-service-use.ts": {
+   "order": [
+    "<repo>/tests/corpus/3246-native-service-use.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3247-native-proxy-bun.ts": {
+   "order": [
+    "<repo>/tests/corpus/3244-native-symbol-dynamic.ts",
+    "<repo>/tests/corpus/3245-native-proxy-get.ts",
+    "<repo>/tests/corpus/3246-native-service-use.ts",
+    "<repo>/tests/corpus/3247-native-proxy-bun.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3248-native-symbol-string.ts": {
+   "order": [
+    "<repo>/tests/corpus/3248-native-symbol-string.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3249-native-symbol-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/3249-native-symbol-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3250-native-proxy-method-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/3250-native-proxy-method-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3251-project-ambient-types/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/3251-project-ambient-types/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3252-native-promise-covariance.ts": {
+   "order": [
+    "<repo>/tests/fixtures/promise-covariance/main.ts",
+    "<repo>/tests/corpus/3252-native-promise-covariance.ts"
+   ],
+   "diags": []
   }
  }
 }
