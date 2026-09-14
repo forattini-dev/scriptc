@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
 import { isNodeModulesPath, projectDtsRuntimeSibling } from "./resolve.js";
 import { parseConfigJson } from "./config-json.js";
+import { npmStaticPackageOfPath } from "./npm-static.js";
 
 /** Only configured declaration roots join the checker. A tsconfig's other
  * files are not additional executable entrypoints. Each reached workspace
@@ -56,9 +57,9 @@ export class ProjectDeclarations {
       const declaration = resolve(dirname(config), candidate);
       // A runtime twin must continue through body inference, even when
       // its declaration happens to be included by a broad project glob.
-      if (/\.d\.(?:ts|mts|cts)$/.test(declaration) && projectDtsRuntimeSibling(declaration) === null) {
+      if (/\.d\.(?:ts|mts|cts)$/.test(declaration) && !hasRuntimeTwin(declaration)) {
         this.declarations.add(declaration);
-        if (!isNodeModulesPath(declaration)) this.structural.add(declaration);
+        this.preserveStructuralDeclaration(declaration);
       }
     }
     // Ask the same checker to resolve explicit types/typeRoots, including
@@ -75,9 +76,9 @@ export class ProjectDeclarations {
       }, this.host);
       try {
         for (const sf of program.getSourceFiles()) {
-          if (sf.isDeclarationFile && projectDtsRuntimeSibling(sf.fileName) === null) {
+          if (sf.isDeclarationFile && !hasRuntimeTwin(sf.fileName)) {
             this.declarations.add(sf.fileName);
-            if (!isNodeModulesPath(sf.fileName)) this.structural.add(sf.fileName);
+            this.preserveStructuralDeclaration(sf.fileName);
           }
         }
       } finally { program.dispose(); }
@@ -94,6 +95,28 @@ export class ProjectDeclarations {
       if (ts.sys.fileExists(referencedConfig)) this.collectConfig(referencedConfig);
     }
   }
+
+  private preserveStructuralDeclaration(path: string): void {
+    if (isNodeModulesPath(path)) return;
+    this.structural.add(path);
+    if (npmStaticPackageOfPath(path) === null) return;
+    // Configured workspace declarations are authoring roots, even when
+    // npm-static hides the package's shipped declaration surface. Serve the
+    // exact tracked bytes above that shadow; never revive a runtime twin.
+    const source = ts.sys.readFile(path);
+    if (source !== undefined) this.host.addVirtualFile(path, source);
+  }
+}
+
+function hasRuntimeTwin(path: string): boolean {
+  if (projectDtsRuntimeSibling(path) !== null) return true;
+  if (npmStaticPackageOfPath(path) === null) return false;
+  const match = /\.d\.(ts|mts|cts)$/.exec(path);
+  if (match === null) return false;
+  const base = path.slice(0, -match[0].length);
+  const extensions = match[1] === "mts" ? [".mts", ".mjs"]
+    : match[1] === "cts" ? [".cts", ".cjs"] : [".ts", ".tsx", ".js", ".jsx"];
+  return extensions.some(extension => ts.sys.fileExists(base + extension));
 }
 
 function stringList(value: unknown): string[] | undefined {
