@@ -692,7 +692,9 @@ class RustEmitter {
         else this.usesProcessRejectionEvents = true;
         if (node.fn.endsWith("UncaughtException")) this.usesProcessUncaughtListeners = true;
       }
-      if (node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod")) ||
+      const dynamicStringCoercion = node.kind === "toString" &&
+        (node.operand as { type?: IrType } | undefined)?.type?.kind === "dyn";
+      if (dynamicStringCoercion || node.kind === "dynInvoke" || node.kind === "dynHasKey" || node.kind === "dynScalarEq" || (node.kind === "jsOp" && (node.op === "callMethod" || node.op === "optCallMethod" || node.op === "toStr")) ||
         (node.kind === "libCall" && (node.fn === "fetch.streamNew" || node.fn === "fetch.streamFrom" || node.fn === "dyn.this" || node.fn === "dyn.proxyNew" || node.fn === "json.stringifyReplacer" || node.fn === "dyn.toStringCoerce" || node.fn === "dyn.stringConstructor" || node.fn === "dyn.toNumberCoerce" || node.fn === "dyn.compare" || node.fn === "dyn.defineProps" || node.fn === "dc.tcTraceSync" || node.fn === "dc.tcTraceCallback" || node.fn === "dc.tcTracePromise" || node.fn === "dc.chanRunStores" || node.fn === "als.run" || node.fn === "als.exitRun"))) {
         this.usesDynamicInvoke = true;
       }

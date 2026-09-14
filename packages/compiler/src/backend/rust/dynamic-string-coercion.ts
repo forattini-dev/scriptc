@@ -19,6 +19,9 @@ export function emitRustDynamicStringCoercion(
   boxedShapes: readonly RustClosureShape[],
 ): void {
   const name = context.dynTypeName();
+  // Boxed Errors keep their builtin default conversion, but an ordinary
+  // record cannot acquire Error behavior by spelling the internal marker.
+  const defaultObjectString = 'if sc_dyn_error_instanceof(value, "Error") { sc_dyn_to_string(value) } else { runtime::string("[object Object]") }';
   const callable = boxedShapes
     .map((shape) => `${name}::${context.dynFunctionVariant(shape)}(..)`)
     .join(" | ");
@@ -63,7 +66,7 @@ export function emitRustDynamicStringCoercion(
   context.pushIndent();
   context.line(`if let ${name}::Array(array) = value { return sc_dyn_array_string_coerce_js(array); }`);
   context.line(`let ${name}::Object(object) = value else { return sc_dyn_to_string(value); };`);
-  context.line(`if let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_primitive_coerce_hook(value, &to_string, "toString") { return sc_dyn_to_string(&result); } } else if !sc_dyn_is_null_proto(object) { return runtime::string("[object Object]"); }`);
+  context.line(`if let Some(to_string) = runtime::map_get_by(object, &runtime::string("toString"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_primitive_coerce_hook(value, &to_string, "toString") { return sc_dyn_to_string(&result); } } else if !sc_dyn_is_null_proto(object) { return ${defaultObjectString}; }`);
   context.line("if let Some(value_of) = runtime::map_get_by(object, &runtime::string(\"valueOf\"), |left, right| left.as_ref() == right.as_ref()) { if let Some(result) = sc_dyn_primitive_coerce_hook(value, &value_of, \"valueOf\") { return sc_dyn_to_string(&result); } }");
   context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");
   context.popIndent();
@@ -79,7 +82,7 @@ export function emitRustDynamicStringCoercion(
   context.pushIndent();
   context.line(`if let Some(result) = sc_dyn_primitive_coerce_hook(value, &method, method_name) { return result; }`);
   context.popIndent();
-  context.line(`} else if method_name == "toString" && !sc_dyn_is_null_proto(object) { return ${name}::String(runtime::string("[object Object]")); }`);
+  context.line(`} else if method_name == "toString" && !sc_dyn_is_null_proto(object) { return ${name}::String(${defaultObjectString}); }`);
   context.popIndent();
   context.line("}");
   context.line("runtime::throw_type_error(\"Cannot convert object to primitive value\".to_owned())");

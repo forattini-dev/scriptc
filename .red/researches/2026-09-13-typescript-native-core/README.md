@@ -132,3 +132,13 @@ preservam identidade. Evidências e limites do experimento estão em
 ### Terceiro checkpoint: sondagens de tipos
 
 As sondagens descartáveis de atribuição npm agora executam a fase de tipos sem preparar estruturas para lowering. O programa final continua passando pelo preflight completo. O diferencial Rust de dependências transitivas passou, e 82 registros ausentes foram conferidos contra o frontend anterior e acrescentados ao canário. A tentativa g do Redcode ainda terminou por timeout de 600 s, com pico de 6,20 GiB e sem binário. Ver [implementação, validação e limites da medição](type-attribution-probes.md). Os gates completos e as metas de escala continuam abertos.
+
+### Quarto checkpoint: declarações de workspaces e análise completa do Redcode
+
+O checkpoint d108b1a9 corrige raízes de declaração configuradas que npm-static ocultava do checker. O Redcode original passou a concluir a análise: compile() retornou em 155,15 s com 3.087 diagnósticos, sem SC0001 e sem binário. Pico de 7,00 GiB; a meta de 6 GiB e os gates completos continuam abertos. Os erros de lowering e dependências agora têm uma captura terminal para triagem. Ver [causa, regressões e medições](type-attribution-probes.md#redcode-original-após-a-correção-das-raízes).
+
+### Quinto checkpoint: conversões de erro no backend Rust
+
+String, interpolação e concatenação dinâmica agora preservam a formatação builtin dos erros e respeitam métodos de conversão próprios. Quatro diferenciais focados passaram em plain e na configuração sanitized, exigindo Rust sem engine e sem runtime fences. Ver [causa, testes e limite seguinte de chaves computadas](rust-error-coercion.md). Esse passo corrige o backend e conserva os programas consumidores.
+
+A seleção Rust ampliada terminou com 112 testes aprovados e uma falha preexistente em chaves computadas (corpus 1703). Os gates gerais plain e sanitized encerraram na mesma falha, com 100 e 69 aprovados, respectivamente; ambos continuam vermelhos. A etapa seguinte deve corrigir a conversão de chaves no frontend, preservando símbolos e ordem de avaliação, antes de ampliar bibliotecas.

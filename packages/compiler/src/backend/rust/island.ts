@@ -427,7 +427,7 @@ function emitOperation(
     return `sc_dyn_numeric_unary(&(${emitExpr(argOf(expr, 0, context))}), ${expr.op === "neg"})`;
   }
   if (expr.op === "toStr" && expr.args.length === 1) {
-    return `sc_dyn_to_string(&(${emitExpr(argOf(expr, 0, context))}))`;
+    return `sc_dyn_string_coerce_js(&(${emitExpr(argOf(expr, 0, context))}))`;
   }
   if (expr.op === "typeof" && expr.args.length === 1) {
     const value = context.nextName("sc_island_typeof");
