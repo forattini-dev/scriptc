@@ -33,7 +33,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDirentMethodCall, lowerFileHandleMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerWatcherMethodCall, trapModuleOf } from "./lower-builtins.js";
-import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx } from "./lower-families.js";
+import { lowerEffectCall } from "./lower-effect.js"; import { lowerFamilyCall, lowerFamilyImpl, prepareFamilyInstanceCtx, recordFamilySlot } from "./lower-families.js";
 import { lowerStringConstructor } from "./lower-string-constructor.js";
 import { droppableStatic, lowerAbsenceProbe, lowerPromiseAllTupleCall, lowerPromiseRejectCall, probeLower, templateRawTextOf } from "./lower-exprs.js";
 import { voidTernaryIfStmtOrExprStmt } from "./lower-stmts.js";
@@ -9128,7 +9128,7 @@ export function lowerFunction(lowerer: Lowerer, decl: ts.FunctionDeclaration): I
       }
     }
     const found = objLitGenericFnNodeOf(lowerer, propSym);
-    if (!found) {
+    if (!found && recordFamilySlot(lowerer, access.expression, name)) return null; if (!found) { // a family slot dispatches as a value call
       // Function.prototype.apply/call/bind spelled through a FUNCTION
       // receiver: compiled functions are direct calls with no runtime
       // `this`/arguments object to re-route — name the working spelling

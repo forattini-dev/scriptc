@@ -56,7 +56,7 @@ import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
 import { lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerStaticFieldRead } from "./lower-classes.js";
 import { bindingNeverReassigned, implicitMonoFile, lowerTaggedTemplate, nullishGenericBindingUnitOf, omittedArgFor } from "./lower-calls.js";
-import { mixinFnOfCallee } from "./lower-mixins.js"; import { familyFnNodeOf, lowerFamilyImpl } from "./lower-families.js";
+import { mixinFnOfCallee } from "./lower-mixins.js"; import { familyFnNodeOf, familyFnOfValue, lowerFamilyImpl } from "./lower-families.js";
 import { isConstAssertionTypeNode, isGenericCallableMemberType, isParseArgsDynTypeName, underConstAssertion, unitOnlyUnion } from "../type-mapper.js";
 import { lowerYield } from "./lower-generators.js";
 import { lowerStreamProperty, lowerStreamStateProperty, streamSidesOf } from "./lower-stream.js";
@@ -6499,14 +6499,14 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         while (ts.isParenthesizedExpression(init)) init = init.expression;
         value =
           fenceClosureProbe(lowerer, prop.initializer, fieldType, () => lowerer.lowerExpr(prop.initializer)) ??
-          (fieldType !== undefined && ts.isArrayLiteralExpression(init)
+          (fieldType !== undefined && (ts.isArrayLiteralExpression(init) || fieldType.kind === "genericFunc") // a family slot takes the value as an implementation
             ? lowerer.lowerExprExpecting(prop.initializer, fieldType)
             : lowerer.lowerExpr(prop.initializer));
       } else if (ts.isShorthandPropertyAssignment(prop)) {
-        value = lowerer.lowerShorthandValue(prop);
+        value = fieldType?.kind === "genericFunc" && familyFnOfValue(lowerer, prop.name as ts.Identifier) !== null ? lowerFamilyImpl(lowerer, familyFnOfValue(lowerer, prop.name as ts.Identifier)!, fieldType.familyId) : lowerer.lowerShorthandValue(prop);
       } else if (ts.isMethodDeclaration(prop)) {
-        value =
-          fenceClosureProbe(lowerer, prop, fieldType, () => lowerer.lowerLambda(prop)) ?? lowerer.lowerLambda(prop);
+        value = fieldType?.kind === "genericFunc" ? lowerFamilyImpl(lowerer, prop, fieldType.familyId) // a generic method filling a family slot
+          : fenceClosureProbe(lowerer, prop, fieldType, () => lowerer.lowerLambda(prop)) ?? lowerer.lowerLambda(prop);
       } else {
         lowerer.unsupported("SC1090", prop, `syntax '${ts.SyntaxKind[(prop as ts.Node).kind]}'`);
       }

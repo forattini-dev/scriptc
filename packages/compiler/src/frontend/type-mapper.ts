@@ -9,7 +9,7 @@ import { UnionRegistry } from "./union-registry.js";
 export { UnionRegistry } from "./union-registry.js";
 import { recordUnionDiscriminant } from "./union-discriminants.js";
 import { mapObjectIterationValueAlias } from "./object-iteration-types.js"; import { InternalCompilerError } from "../errors.js";
-import * as ts from "./ts7/adapter.js"; import { isKernelTypeFile, isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf } from "./families.js";
+import * as ts from "./ts7/adapter.js"; import { isKernelTypeFile, isKernelHandleSymbol, isKernelSchemaValueSymbol, kernelServiceIdOf, withoutKernelBrands } from "./kernel.js"; import { SCHEMA_SLOT, decoratedSchemaRecord, isPhantomAnyMember } from "./kernel-types.js"; import { familyIdOf, isFamilySlotMember } from "./families.js";
 import { mapAmbientValueType } from "./ambient-values.js";
 import type { IrRecordShape, IrType } from "../ir/ir.js";
 import { arrayOf, BIGINT, BOOL, bytesOf, canConvertToDyn, CHILD_T, DATE_T, DYN, EFFECT_T, F64, funcOf, isSupportedArrayElem, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/ir.js";
@@ -3429,11 +3429,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       ) {
         continue;
       }
-      // GENERIC-callable members leave the shape (no single closure slot
-      // can hold them — see isGenericCallableMemberType): the shape keeps
-      // its data fields, and calls of the member monomorphize per call
-      // site against the defining object literal's declaration.
-      if (isGenericCallableMemberType(fieldTs, checker)) continue;
+      // GENERIC-callable members: a single-signature one is a closure-FAMILY
+      // slot (lower-families.ts — one body per demanded instantiation); an
+      // overloaded one (or a dynamic build) leaves the shape, and calls
+      // monomorphize against the defining object literal's declaration. OPTIONAL generic members stay out (no slot).
+      if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
       let pt = mapJsArrayField(p, fieldTs, ctx, (type) => mapType(type, ctx)) ?? mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
       // tsgo PANICS computing `readonly []` through the symbol-type query
       // (the TupleType conversion — the facade's panic fence answers
@@ -3738,7 +3738,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
       return null;
     }
     const fieldTs = checker.getTypeOfSymbol(p);
-    if (isGenericCallableMemberType(fieldTs, checker)) continue;
+    if (isGenericCallableMemberType(fieldTs, checker) && (ctx.dynamic || !isFamilySlotMember(checker, widened, p))) continue;
     let pt = mapType(fieldTs, ctx); if (pt === null && !ctx.dynamic && (fieldTs.flags & ts.TypeFlags.Any) !== 0 && isPhantomAnyMember(checker, p)) pt = DYN; // a type-parameter member instantiated at `any` is the checked-dynamic value in a static build (effect's phantom `tag?: T`)
     if (pt?.kind === "void" && isUnitOnlyTsType(fieldTs)) pt = unitOnlyUnion(ctx.unions);
     if (!pt || pt.kind === "void") {

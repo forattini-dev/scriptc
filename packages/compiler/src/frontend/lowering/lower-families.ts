@@ -58,13 +58,40 @@ function buildOf(L: Lowerer, id: string): FamilyBuild {
   return build;
 }
 
-type FamilyFn = ts.ArrowFunction | ts.FunctionExpression | ts.MethodDeclaration;
+type FamilyFn = ts.ArrowFunction | ts.FunctionExpression | ts.MethodDeclaration | ts.FunctionDeclaration;
 
 /** The function expression behind a value (parentheses and casts stripped), when it is one. */
 export function familyFnNodeOf(node: ts.Expression): FamilyFn | null {
   let x: ts.Expression = node;
   while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isTypeAssertion(x)) x = x.expression;
   return ts.isArrowFunction(x) || ts.isFunctionExpression(x) ? x : null;
+}
+
+/** The function node a value fills a family slot with: a function expression, or an identifier (casts stripped,
+ * shorthand and import aliases resolved) naming a generic function DECLARATION with a body — `with: json`. */
+export function familyFnOfValue(L: Lowerer, node: ts.Expression): FamilyFn | null {
+  const fn = familyFnNodeOf(node);
+  if (fn !== null) return fn;
+  let x: ts.Expression = node;
+  while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isTypeAssertion(x)) x = x.expression;
+  if (!ts.isIdentifier(x)) return null;
+  const parent = x.parent;
+  const sym = parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === x
+    ? L.checker.getShorthandAssignmentValueSymbol(parent)
+    : L.checker.getSymbolAtLocation(x);
+  const resolved = sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0 ? L.checker.getAliasedSymbol(sym) : sym;
+  const decl = resolved === undefined ? undefined : L.checker.valueDeclarationOf(resolved);
+  if (decl === undefined) return null;
+  // A non-generic function reaches a generic slot only through an explicit cast (`prepareWith as I["prepare"]`).
+  const cast = x !== node;
+  if (ts.isFunctionDeclaration(decl)) return decl.body !== undefined && ((decl.typeParameters?.length ?? 0) > 0 || cast) ? decl : null;
+  // A module-level `const json = <T>(...) => ...`: its initializer is the implementation.
+  const list = decl.parent;
+  if (!ts.isVariableDeclaration(decl) || decl.initializer === undefined || list === undefined || !ts.isVariableDeclarationList(list) ||
+      (list.flags & ts.NodeFlags.Const) === 0 || list.parent === undefined || !ts.isVariableStatement(list.parent) ||
+      list.parent.parent === undefined || !ts.isSourceFile(list.parent.parent)) return null;
+  const initializer = familyFnNodeOf(decl.initializer);
+  return initializer !== null && ((initializer.typeParameters?.length ?? 0) > 0 || cast) ? initializer : null;
 }
 
 /** An implementation joining a family: the function node lowers per demanded instantiation; its free locals become
@@ -218,6 +245,14 @@ export function prepareFamilyInstanceCtx(L: Lowerer, info: GenericFnInfo, ctx: F
     ctx.localCounters.set(capture.name, Math.max(ctx.localCounters.get(capture.name) ?? 0, counter + 1));
   });
   void L;
+}
+
+/** True when `recv.name` reads a closure-FAMILY slot of the receiver's record shape (a service interface's generic
+ * member): the call then dispatches through the family value instead of a statically resolved declaration. */
+export function recordFamilySlot(L: Lowerer, recv: ts.Expression, name: string): boolean {
+  const t = L.mapTypeOf(L.typeOf(recv));
+  if (t?.kind !== "record") return false;
+  return L.shapes.get(t.shapeId)?.fields.find((f) => f.name === name)?.type.kind === "genericFunc";
 }
 
 /** The module's families: implementations with their capture layouts, instantiations with a body per implementation. */

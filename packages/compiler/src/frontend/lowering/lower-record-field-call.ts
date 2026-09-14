@@ -5,6 +5,7 @@ import { locOf } from "../program.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { probeLower } from "./lower-probe.js";
 import { lowerGenericRecordUnionCall } from "./lower-generic-record-call.js";
+import { lowerFamilyCall } from "./lower-families.js";
 
 /** Invoke a stored record callback using its concrete signature. */
   export function lowerRecordFieldCall(L: Lowerer, call: ts.CallExpression,
@@ -54,6 +55,8 @@ import { lowerGenericRecordUnionCall } from "./lower-generic-record-call.js";
     // reserved %call slot — `colors.blue("x")` where blue also carries
     // `.bold` (the chalk shape).
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
+    // A closure-FAMILY slot (a service interface's generic member): the call is the family's, at this instantiation.
+    if (callee.type.kind === "genericFunc") return lowerFamilyCall(L, call, callee);
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const args = completeFunctionValueArgs(L, call, callee.type);
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };

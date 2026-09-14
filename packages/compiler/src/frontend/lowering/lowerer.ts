@@ -121,7 +121,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, predeclareForwardFnDecl, predeclareForwardVar, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, isParseArgsDynCheckerType, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, voidTernaryIfStmtOrExprStmt, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { FieldTarget, lowerDynObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import type { ExpandoMember } from "./lower-expando.js";
-import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js"; import { familiesIr, familyFnNodeOf, lowerFamilyImpl, noteFamily } from "./lower-families.js";
+import { lowerRecordFieldCall, lowerObjectMethodCall } from "./lower-calls.js"; import { familiesIr, familyFnNodeOf, familyFnOfValue, lowerFamilyImpl, noteFamily } from "./lower-families.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { numLit, varRef } from "../../ir/build.js";
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
@@ -7639,7 +7639,7 @@ export class Lowerer {
    * lowerArrayLiteral documents, for the positions where tsc's contextual
    * API answers nothing (binding-element defaults: `{ json = [] }`) and
    * the literal's own never[] would build the f64 representation. */
-  lowerExprExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr { if (expected?.kind === "genericFunc") { const fn = familyFnNodeOf(node); if (fn !== null) return lowerFamilyImpl(this, fn, expected.familyId); } // a function expression flowing into a generic slot joins THAT slot's family, whether or not it declares type parameters of its own
+  lowerExprExpecting(node: ts.Expression, expected: IrType | undefined): IrExpr { if (expected?.kind === "genericFunc") { const fn = familyFnOfValue(this, node); if (fn !== null) return lowerFamilyImpl(this, fn, expected.familyId, this.checker.getContextualType(node) ?? undefined); } // a function expression flowing into a generic slot joins THAT slot's family, whether or not it declares type parameters of its own
     if (expected?.kind === "array") {
       let x: ts.Expression = node;
       while (ts.isParenthesizedExpression(x)) x = x.expression;
