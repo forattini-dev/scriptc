@@ -2325,7 +2325,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     const params: IrType[] = [];
-    let dynamicRest = false;
+    let dynamicRest = false, typedRest = false;
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       const pType = checker.getTypeOfSymbol(p);
@@ -2339,19 +2339,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         continue;
       }
       if (decl && ts.isParameter(decl) && decl.dotDotDotToken) {
-        // `(...args: never[])` is an uninhabited rest surface: every
-        // type-correct invocation supplies zero arguments. Its runtime ABI
-        // is therefore exactly the fixed zero-slot signature, unlike every
-        // inhabited rest array, which keeps the variadic fence.
+        // never[] has no arguments; open dynamic arrays use boxed thunks.
         if (isNeverArrayRestParameter(checker, p, decl)) continue;
-        // Preserve JS arity by representing the whole
-        // callable at the checked-dynamic boundary. Its typed producer is
-        // boxed with a per-signature thunk and its result is checked at use.
         if (isDynamicArrayRestParameter(checker, p, decl)) {
           dynamicRest = true;
           continue;
         }
-        return null;
+        const array = mapType(pType, ctx);
+        if (array?.kind !== "array") return null;
+        params.push(array);
+        typedRest = true;
+        continue;
       }
       const optional =
         decl !== undefined &&
@@ -2379,7 +2377,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     const ret = retT.flags & ts.TypeFlags.Never ? VOID : mapType(retT, ctx);
     if (!ret) return null;
     if (dynamicRest) return DYN;
-    return funcOf(params, ret);
+    return typedRest ? { kind: "func", params, ret, rest: true, restAbi: "array" } : funcOf(params, ret);
   }
   // Records: object types whose members are all data properties (shorthand
   // methods in type position count — they're func-typed fields) with
@@ -3684,8 +3682,9 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     for (const p of sig.getParameters()) {
       const decl = checker.valueDeclarationOf(p);
       if (decl !== undefined && ts.isParameter(decl) && decl.dotDotDotToken !== undefined) {
-        if (isNeverArrayRestParameter(checker, p, decl)) continue;
-        return `the function shape is supported, but its rest parameter '${p.name}' has no compiled calling convention yet (a compiled signature is fixed-arity)`;
+        const rest = mapType(checker.getTypeOfSymbol(p), ctx);
+        if (isNeverArrayRestParameter(checker, p, decl) || isDynamicArrayRestParameter(checker, p, decl) || rest?.kind === "array") continue;
+        return `the function shape is supported, but its rest parameter '${p.name}' has no supported completed array representation`;
       }
       const pTs = checker.getTypeOfSymbol(p);
       if (!mapType(pTs, ctx)) {

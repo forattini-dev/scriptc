@@ -1,3 +1,4 @@
+import { functionAbi } from "./function-abi.js";
 import { lowerComputedStringKey } from "./lower-computed-string-key.js";
 import { lowerRegexStateRead, lowerRegexStateAssign, lowerDynamicRegexCapture } from "./lower-regex-state.js";
 import { lowerRuntimeKeyIn, lowerTypedRecordIn } from "./lower-record-membership.js";
@@ -1107,12 +1108,7 @@ function lowerExprInner(lowerer: Lowerer, expr: ts.Expression): IrExpr {
         lowerer.noteEdge(sig.name);
         // dynRest slots stay out of the VALUE type's param list (fn.length
         // semantics); the rest marker carries the trailing dyn-array ABI.
-        const funcType: IrType = {
-          kind: "func",
-          params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
-          ret: sig.returnType,
-          ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
-        };
+        const funcType = functionAbi(sig.params, sig.returnType);
         lowerer.requireExactArityValue(expr, expr, sig.params, funcType);
         return { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc };
       }
@@ -6526,12 +6522,7 @@ export function lowerObjectLiteral(lowerer: Lowerer, expr: ts.ObjectLiteralExpre
         (ts.isSourceFile(decl.parent) || lowerer.nsBlocks.get(decl.parent) === "flattened")
       ) {
         lowerer.noteEdge(sig.name);
-        const funcType: IrType = {
-          kind: "func",
-          params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
-          ret: sig.returnType,
-          ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
-        };
+        const funcType = functionAbi(sig.params, sig.returnType);
         lowerer.requireExactArityValue(prop, propName, sig.params, funcType);
         return { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc };
       }

@@ -1,9 +1,9 @@
+import { completeFunctionValueArgs } from "./function-abi.js";
 import * as ts from "../ts7/adapter.js";
 import { DYN, type IrExpr } from "../../ir/ir.js";
 import { locOf } from "../program.js";
 import { dynUndefinedExpr, type Lowerer } from "./lowerer.js";
 import { probeLower } from "./lower-probe.js";
-import { omittedArgFor } from "./lower-calls.js";
 import { lowerGenericRecordUnionCall } from "./lower-generic-record-call.js";
 
 /** Invoke a stored record callback using its concrete signature. */
@@ -55,17 +55,6 @@ import { lowerGenericRecordUnionCall } from "./lower-generic-record-call.js";
     // `.bold` (the chalk shape).
     if (callee.type.kind === "record") callee = L.hybridCallUnwrap(callee);
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
-    const params = callee.type.params;
-    const args = call.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
-    // Optional/defaulted record methods use the same completed ABI as any
-    // other function value: omitted trailing arguments become the slot's
-    // undefined arm before the exact-arity call reaches the backend.
-    for (let i = args.length; i < params.length; i++) {
-      const absent = omittedArgFor(L, params[i]!, locOf(call));
-      if (!absent) {
-        L.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
-      }
-      args.push(absent);
-    }
+    const args = completeFunctionValueArgs(L, call, callee.type);
     return { kind: "callValue", callee, args, type: callee.type.ret, loc: locOf(call) };
   }

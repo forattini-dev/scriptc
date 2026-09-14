@@ -1,3 +1,4 @@
+import { completeFunctionValueArgs, functionAbi } from "./function-abi.js";
 import { lowerSetNew } from "./lower-set-constructor.js";
 import { lowerUrlNew } from "./lower-url.js";
 import { lowerDateNew } from "./lower-date-constructor.js";
@@ -10,7 +11,7 @@ import { InternalCompilerError } from "../../errors.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/ir.js";
-import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
+import { MAX_GENERIC_INSTANCES, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, typeKey } from "../type-mapper.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
@@ -2622,12 +2623,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
     sig: { params: ParamShape[]; ret: IrType }, blame: ts.Expression, loc: SrcLoc): IrExpr {
     const fnName = `%${declarer.def.name}.static:${name}`;
     lowerer.noteEdge(fnName);
-    const funcType: IrType = {
-      kind: "func",
-      params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
-      ret: sig.ret,
-      ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
-    };
+    const funcType = functionAbi(sig.params, sig.ret);
     lowerer.requireExactArityValue(blame, blame, sig.params, funcType);
     return { kind: "closure", fnName, captures: [], type: funcType, loc };
   }
@@ -3115,15 +3111,7 @@ export function collectClassShapeInner(lowerer: Lowerer, decl: ts.ClassLikeDecla
       // call through the value (the ctor-assigned-callback pattern).
       if (found.field.type.kind !== "func") return null;
       const callee: IrExpr = { kind: "varRef", localId: found.field.globalId, type: found.field.type, loc };
-      const params = found.field.type.params;
-      const args = call.arguments.map((a, i) => lowerer.lowerExprExpecting(a, params[i]));
-      for (let i = args.length; i < params.length; i++) {
-        const absent = omittedArgFor(lowerer, params[i]!, loc);
-        if (!absent) {
-          lowerer.unsupported("SC1090", call, "calls omitting a non-optional parameter of the callee's type");
-        }
-        args.push(absent);
-      }
+      const args = completeFunctionValueArgs(lowerer, call, found.field.type);
       return { kind: "callValue", callee, args, type: found.field.type.ret, loc };
     }
     const fnName = `%${found.declarer.def.name}.static:${access.name.text}`;

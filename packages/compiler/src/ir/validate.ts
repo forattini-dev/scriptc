@@ -1777,6 +1777,8 @@ function validateFunction(
   };
 
   function checkExpr(e: IrExpr): void {
+    if (e.type.kind === "func" && e.type.restAbi === "array" &&
+        (e.type.rest !== true || e.type.params.at(-1)?.kind !== "array")) err("typed rest function requires a trailing array ABI slot", e.loc);
     switch (e.kind) {
       case "numLit":
         // ±Infinity and NaN are real literals (the globals
@@ -2791,10 +2793,8 @@ function validateFunction(
         // declared params plus that one must match.
         if (e.type.kind === "func") {
           const wantRet = callSiteReturnType(target);
-          // ISLAND-REST types (restAbi jsval) SPELL their trailing engine
-          // array param — the lifted signature matches directly, no
-          // hidden slot.
-          const hiddenRest = e.type.rest === true && e.type.restAbi !== "jsval";
+          // Both explicit rest ABIs spell their trailing array slot.
+          const hiddenRest = e.type.rest === true && e.type.restAbi === undefined;
           const declared = hiddenRest ? target.params.slice(0, -1) : target.params;
           const restOk =
             !hiddenRest ||

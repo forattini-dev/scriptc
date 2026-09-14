@@ -207,16 +207,12 @@ export type IrType =
    * as a Map VALUE (the per-hostname context cache) like child; fenced out
    * of array elements and JSON like the other opaque handles. */
   | { kind: "secureCtx" }
-  /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
-   * `...args` rest parameter, or a zero-param function body reading
-   * `arguments` — test/common's mustCall wrapper): the lifted function
-   * takes one extra trailing `ScrDyn *` param — a dyn ARRAY carrying the
-   * call's arguments from index params.length on — which the dyn call
-   * thunk builds per call. `params` stays the DECLARED (non-rest) list
-   * (fn.length semantics). Rest-marked values are only ever CALLED
-   * through the dyn boundary (boxed thunks); direct static calls box
-   * first (lower-calls). */
-  | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" }
+  /** Heap, refcounted closure. A rest-marked value with no restAbi hides
+   * one trailing dyn-array slot supplied by its boxed thunk. restAbi jsval
+   * spells an engine-array slot; restAbi array spells a typed array slot.
+   * Typed calls complete that final slot with a fresh argument pack.
+   * The marker distinguishes a variadic call from one taking an array. */
+  | { kind: "func"; params: IrType[]; ret: IrType; rest?: true; restAbi?: "jsval" | "array" }
   | { kind: "object"; className: string } // heap, refcounted class instance
   /** The class STATIC side as a value — `typeof C`, the type of the class
    * name itself and of `new (…) => T` constructor-typed slots. Runtime
@@ -666,7 +662,7 @@ export function typeKey(t: IrType): string {
     case "set":
       return `set<${typeKey(t.elem)}>`; case "genericFunc": return `genericFunc<${t.familyId}>`;
     case "func":
-      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
+      return `func(${[...t.params.map(typeKey), ...(t.rest ? [t.restAbi === "array" ? "...typed[]" : t.restAbi === "jsval" ? "...jsval[]" : "...dyn[]"] : [])].join(",")})=>${typeKey(t.ret)}`;
     case "object":
       return `object:${t.className}`;
     case "classval":
@@ -698,7 +694,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
     return (
       b.kind === "func" &&
       a.params.length === b.params.length &&
-      (a.rest === true) === (b.rest === true) &&
+      (a.rest === true) === (b.rest === true) && a.restAbi === b.restAbi &&
       a.params.every((p, i) => typeEquals(p, b.params[i]!)) &&
       typeEquals(a.ret, b.ret)
     );
@@ -5833,7 +5829,7 @@ export function canBoxFuncIntoDyn(
     // thunk (wrapped cells unwrap by reference, dyn data deep-copies) —
     // the checker-'any' callback params of the routed-dispatch lane
     // (`bag.list.map((x) => ...)` with x typed any).
-    t.params.every((p) => p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion)) &&
+    t.restAbi !== "array" && t.params.every((p) => p.kind === "dyn" || p.kind === "jsval" || canDynCheckTo(p, getRecord, getUnion)) &&
     // A jsval return converts through the by-reference wrap
     // (dynFromJsval — the thunk's result conversion), so engine-returning
     // callbacks box too: the routed-dispatch lane's flatMap shape.

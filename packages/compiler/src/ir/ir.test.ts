@@ -1,3 +1,6 @@
+import { arrayOf, funcOf, typeKey, typeEquals, canBoxFuncIntoDyn, canAdaptDynFuncTo, canMarshalTypedFuncIntoIsland } from "./ir.js";
+import { validateModule } from "./validate.js";
+import { deserializeModule, serializeModule } from "./serialize.js";
 import { describe, expect, test } from "vitest";
 import {
   DYN,
@@ -73,5 +76,43 @@ describe("moduleUsesDynAsync", () => {
     });
     const crossing: IrExpr = { kind: "dynFrom", value: callback, type: DYN, loc };
     expect(moduleUsesDynAsync(moduleWithExpr(crossing))).toBe(true);
+  });
+});
+
+describe("typed rest function ABI", () => {
+  const rest: IrType = { kind: "func", params: [arrayOf(F64)], ret: VOID, rest: true, restAbi: "array" };
+  const fixed = funcOf([arrayOf(F64)], VOID);
+  const dynamic: IrType = { kind: "func", params: [], ret: VOID, rest: true };
+
+  test("typed array, fixed array, and hidden dynamic rest signatures have distinct identities", () => {
+    expect(new Set([rest, fixed, dynamic].map(typeKey)).size).toBe(3);
+    expect(typeEquals(rest, fixed)).toBe(false);
+    expect(typeEquals(rest, dynamic)).toBe(false);
+    expect(typeEquals(rest, structuredClone(rest))).toBe(true);
+  });
+
+  test("unimplemented dynamic and engine adapters refuse typed rest closures", () => {
+    expect(canBoxFuncIntoDyn(rest, () => undefined, () => undefined)).toBe(false);
+    expect(canAdaptDynFuncTo(rest, () => undefined, () => undefined)).toBe(false);
+    expect(canMarshalTypedFuncIntoIsland(rest, () => undefined, () => undefined)).toBe(false);
+    expect(canBoxFuncIntoDyn(fixed, () => undefined, () => undefined)).toBe(true);
+  });
+
+  test("completed closure slots validate and survive serialization", () => {
+    const mod = moduleWithExpr({ kind: "closure", fnName: "consume", captures: [], type: rest, loc });
+    mod.functions.push({ name: "consume", params: [{ localId: "items", name: "items", type: arrayOf(F64) }],
+      locals: [{ id: "items", name: "items", type: arrayOf(F64), mutable: false }], returnType: VOID, body: [], loc });
+    expect(validateModule(mod)).toEqual([]);
+    expect(deserializeModule(serializeModule(mod))).toEqual(mod);
+  });
+
+  test("malformed typed rest signatures are rejected before emission", () => {
+    const invalid: IrType[] = [{ ...rest, params: [] }, { ...rest, params: [F64] },
+      { kind: "func", params: [arrayOf(F64)], ret: VOID, restAbi: "array" }];
+    for (const type of invalid) {
+      const mod = moduleWithExpr({ kind: "closure", fnName: "main", captures: [], type, loc });
+      expect(validateModule(mod).map(e => e.message)).toContain(
+        "in main: typed rest function requires a trailing array ABI slot");
+    }
   });
 });

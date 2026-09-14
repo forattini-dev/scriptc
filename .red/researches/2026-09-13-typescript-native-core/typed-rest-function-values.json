@@ -1,0 +1,30 @@
+{
+  "baseline": "/tmp/scriptc-redcode-depth-isolated-20260914d",
+  "change": "Typed rest function values preserve completed array ABI",
+  "compilerHead": "cc5918706dc78e7bfb0ac07e5e9e91d85a73e062",
+  "compilerDirty": true,
+  "GOMEMLIMIT": "4GiB",
+  "consumerHead": "b8fa0e8e31cd6dac384347f4852fc7b3c8519a86",
+  "result": {
+    "status": "refused",
+    "seconds": 273.77359736899996,
+    "memoryPeakBytes": 5195853824,
+    "memoryPeakGiB": 4.839015960693359,
+    "diagnostics": 3078,
+    "SC0001": 0,
+    "SC9001": 0,
+    "beforeDiagnostics": 3087,
+    "removedLocations": 21,
+    "addedLocations": 12,
+    "beforeRestMentions": 16,
+    "afterRestMentions": 2,
+    "sameSourceHashesAndOrder": true,
+    "sourceCount": 1335
+  },
+  "hashCheck": {
+    "compilerChanged": [],
+    "consumerChanged": [],
+    "previousGraphChanged": []
+  },
+  "artifacts": "/tmp/scriptc-redcode-typed-rest-20260914a"
+}

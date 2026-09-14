@@ -1,3 +1,4 @@
+import { functionAbi } from "./function-abi.js";
 /* Namespace lowering (`namespace N { ... }` / legacy `module N { ... }`).
  *
  * A namespace is a STATIC shape: its members are compile-time-known
@@ -916,12 +917,7 @@ export function moduleNamespaceRecord(
         refuse(name, "is a function with optional, defaulted, or rest parameters (call it directly)");
       }
       lowerer.noteEdge(sig.name);
-      const funcType: IrType = {
-        kind: "func",
-        params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
-        ret: sig.returnType,
-        ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
-      };
+      const funcType = functionAbi(sig.params, sig.returnType);
       fields.push({ name, value: { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc } });
       continue;
     }
