@@ -161,6 +161,7 @@ mod tests {
     include!("tests/support.rs");
     include!("tests/target_config.rs");
     include!("tests/generators.rs");
+    include!("tests/array_holes.rs");
     include!("tests/web_and_platform.rs");
     include!("numeric_ops.test.rs");
     include!("regex.test.rs");

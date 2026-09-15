@@ -242,8 +242,23 @@ where
     fn write_json_object(&self, writer: &mut JsonWriter) {
         writer.begin_array();
         let mut first = true;
-        for (index, value) in self.elements().iter().enumerate() {
-            writer.element(&mut first, index, value);
+        if self.sparse.is_some() && self.view.is_none() {
+            // Holes and present-undefined slots serialize as null, like Node.
+            for index in 0..self.logical_len() {
+                if self.slot_state(index) == ARRAY_VALUE {
+                    writer.element(&mut first, index, &self.elements[index]);
+                } else {
+                    if !first {
+                        writer.output.push(',');
+                    }
+                    first = false;
+                    writer.write_null();
+                }
+            }
+        } else {
+            for (index, value) in self.elements().iter().enumerate() {
+                writer.element(&mut first, index, value);
+            }
         }
         writer.end_array();
     }
@@ -563,6 +578,7 @@ where
             elements: decoded,
             auxiliary: None,
             view: None,
+            sparse: None,
         })
     }
 }

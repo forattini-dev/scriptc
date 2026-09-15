@@ -55,7 +55,9 @@ impl<S: ArrayElement, T: ArrayElement> ArrayView<T> for MappedArray<S, T> {
 
 impl<T: ArrayElement> ArrayData<T> {
     // Borrow ordinary Vec storage; materialize only for bulk readers of a view.
+    #[track_caller]
     fn elements(&self) -> std::borrow::Cow<'_, [T]> {
+        self.require_dense("reading array values");
         match &self.view {
             None => std::borrow::Cow::Borrowed(&self.elements),
             Some(view) => std::borrow::Cow::Owned(
@@ -77,7 +79,7 @@ pub fn array_mapped<S: ArrayElement, T: ArrayElement>(
     source: JsArray<S>, read: fn(S) -> T, write: fn(T) -> S,
 ) -> JsArray<T> {
     Gc::new(ArrayData {
-        elements: Vec::new(), auxiliary: None,
+        elements: Vec::new(), auxiliary: None, sparse: None,
         view: Some(Rc::new(MappedArray { source, read, write })),
     })
 }
